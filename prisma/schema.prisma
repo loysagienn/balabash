@@ -1,0 +1,277 @@
+generator client {
+  provider     = "prisma-client"
+  output       = "../prisma-generated"
+  moduleFormat = "esm"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// Per-consumer read cursor over the event log. A consumer processes events
+// strictly after lastSeq and advances it only after successful handling
+// (at-least-once delivery — handlers must be idempotent).
+model EventConsumer {
+  name      String   @id
+  lastSeq   BigInt   @default(0) @map("last_seq")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("event_consumers")
+}
+
+// Append-only event log — the single source of truth. Rows are immutable:
+// never updated or deleted, all other state is a derivable projection.
+// The envelope is thread-aware (design doc §4.1): threadId is the author's
+// thread, targetThreadId the addressee (strictly one hop up or down the
+// thread tree, validated on append).
+model Event {
+  seq           BigInt @id @default(autoincrement()) // global order + consumer cursor
+  id            String @unique @default(uuid()) // stable reference (refs, delivery idempotency)
+  type          String // canonical type (§4.2) or agent domain type '<agent>.*'
+  actor         String // 'user' | 'system' | 'agent'
+  agentName     String? @map("agent_name") // agent name when actor='agent' (runId is a payload detail)
+  userId        String? @map("user_id") // workspace; null = installation-level event
+  threadId      String? @map("thread_id") // author's thread; null = event outside threads
+  targetThreadId String? @map("target_thread_id") // addressee thread, one hop (§4.3)
+  payload       Json
+  schemaVersion Int    @default(1) @map("schema_version")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([threadId, seq])
+  @@index([targetThreadId, seq])
+  @@index([userId, seq])
+  @@index([type, seq])
+  @@map("events")
+}
+
+// Projection of thread lifecycle events — private memoization of the core
+// threads layer (§5.3). Written synchronously, in the same transaction as the
+// lifecycle event; rebuildable from the log (scripts/rebuild-threads).
+// Never import this model outside src/core.
+model Thread {
+  id       String  @id
+  userId   String  @map("user_id")
+  parentId String? @map("parent_id") // null = the workspace's main thread
+  agent    String
+  title    String?
+  status   String // 'active' | 'completed' | 'failed' | 'cancelled'
+  summary  Json? // terminal summary {text, fileIds?, refs?} for completed threads
+
+  createdSeq  BigInt  @map("created_seq") // seq of thread.started
+  terminalSeq BigInt? @map("terminal_seq") // seq of the terminal event
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([userId, status])
+  @@index([parentId, status])
+  @@index([userId, parentId])
+  @@map("threads")
+}
+
+// A user is a workspace: the isolation and trust boundary, owner of threads,
+// files and connections (§6). The human behind it is not modeled;
+// TELEGRAM_ALLOWED_LOGINS is an activator, not a table.
+model User {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("users")
+}
+
+// Telegram adapter state: a forum group bound 1:1 to a workspace (§6).
+// A group the bot was added to but nobody activated stays unbound and fully
+// ignored — there is no one to attribute events to.
+model TelegramGroup {
+  chatId    BigInt   @id @map("chat_id")
+  userId    String?  @unique @map("user_id")
+  status    String // 'unbound' | 'active'
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("telegram_groups")
+}
+
+// Telegram adapter state: thread ↔ forum topic mapping (§11.2).
+// messageThreadId is null for the General topic (the main thread).
+model TelegramTopic {
+  threadId        String   @id @map("thread_id")
+  chatId          BigInt   @map("chat_id")
+  messageThreadId Int?     @map("message_thread_id")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  @@unique([chatId, messageThreadId])
+  @@map("telegram_topics")
+}
+
+// Telegram adapter state: event → delivered message(s), for at-least-once
+// delivery idempotency and reply material (§11.2).
+model TelegramDelivery {
+  id              String   @id @default(uuid())
+  eventId         String   @map("event_id")
+  chatId          BigInt   @map("chat_id")
+  messageThreadId Int?     @map("message_thread_id")
+  messageId       BigInt   @map("message_id")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  @@index([eventId])
+  @@map("telegram_deliveries")
+}
+
+model Session {
+  id        String    @id @default(uuid())
+  createdAt DateTime  @default(now()) @map("created_at")
+  lastUsed  DateTime? @map("last_used")
+  userAgent String?   @map("user_agent")
+  userId    String?   @map("user_id")
+  language  String?   @map("language")
+  tokenHash String?   @unique @map("token_hash")
+  rotatedAt DateTime? @map("rotated_at")
+
+  @@index([userId])
+  @@index([lastUsed])
+  @@index([createdAt])
+  @@index([rotatedAt])
+  @@index([lastUsed, createdAt])
+  @@map("web_sessions")
+}
+
+// Per-user authorization state for an external MCP server with auth: "user".
+// Secret material (tokens, PKCE verifier) lives only here and never enters the
+// event log — the connection lifecycle is mirrored there as sanitized
+// connection.* events living in the auth thread.
+model Connection {
+  id           String   @id @default(uuid())
+  userId       String   @map("user_id")
+  server       String // mcp-servers config name
+  status       String // 'pending' | 'connected' | 'reauthorization_required'
+  connectNonce String?  @unique @map("connect_nonce") // token of the one-time /connect link
+  pendingState String?  @unique @map("pending_state") // OAuth state of the in-flight flow
+  pending      Json? // in-flight flow data: link expiry, PKCE code verifier
+  tokens       Json? // OAuth tokens as issued by the provider
+  metadata     Json? // non-secret: granted scope, account label
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  @@unique([userId, server])
+  @@map("connections")
+}
+
+// Installation-level OAuth client registrations obtained via Dynamic Client
+// Registration, one per external server. Shared by every user: users differ in
+// their Connection rows, not in the client the installation acts as.
+model OauthClient {
+  server            String   @id
+  clientInformation Json     @map("client_information")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  @@map("oauth_clients")
+}
+
+// One-time operator request for provisioning an installation-level OAuth
+// client for a provider without Dynamic Client Registration. The submitted
+// credentials go directly to OauthClient; only this opaque nonce is exposed
+// in the link handed to the operator.
+model OauthClientRequest {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  server    String
+  nonce     String   @unique
+  expiresAt DateTime @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([userId, server])
+  @@map("oauth_client_requests")
+}
+
+// Installation-level secret injected into one external MCP server config.
+// Keys are scoped by server so capabilities cannot read each other's values.
+model ExternalServerSecret {
+  server    String
+  key       String
+  value     String
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@id([server, key])
+  @@map("external_server_secrets")
+}
+
+// One-time operator request for provisioning every ${secret:NAME} reference
+// used by one external MCP server. Field metadata is non-secret; submitted
+// values go directly to ExternalServerSecret.
+model ExternalServerSecretRequest {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  server    String
+  nonce     String   @unique
+  fields    Json
+  expiresAt DateTime @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([userId, server])
+  @@map("external_server_secret_requests")
+}
+
+// Operational telemetry for LLM API requests, one row per request. Deliberately
+// outside the event log: it describes the machinery (spend, latency, cache
+// behaviour), not domain history. Written fire-and-forget; the service never
+// reads it and a failed insert never affects a turn.
+model LlmRequest {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now()) @map("created_at")
+
+  userId   String  @map("user_id")
+  threadId String? @map("thread_id") // the run's thread this request served
+  provider String // 'openai' | 'anthropic'
+  model    String // model as reported by the response, not the requested alias
+
+  responseId         String? @map("response_id")
+  previousResponseId String? @map("previous_response_id")
+
+  lastSeq   BigInt? @map("last_seq") // lastSeq of the log snapshot this turn was built from
+  iteration Int? // request number within the turn's inner loop (1..N)
+
+  status      String // response status, or 'request_failed' when the call threw
+  error       String?
+  serviceTier String? @map("service_tier")
+  durationMs  Int?    @map("duration_ms")
+
+  // Token counts are nullable, not defaulted to 0: a failed request has no
+  // usage, and "no data" must not skew aggregates as zero.
+  inputTokens      Int? @map("input_tokens")
+  cachedTokens     Int? @map("cached_tokens")
+  cacheWriteTokens Int? @map("cache_write_tokens")
+  outputTokens     Int? @map("output_tokens")
+  reasoningTokens  Int? @map("reasoning_tokens")
+  totalTokens      Int? @map("total_tokens")
+
+  rawUsage Json? @map("raw_usage") // usage + tool_usage exactly as returned by the API
+
+  @@index([userId, createdAt])
+  @@index([threadId, createdAt])
+  @@map("llm_requests")
+}
+
+model File {
+  id               String    @id @default(uuid())
+  bucket           String
+  objectKey        String    @map("object_key")
+  userId           String?   @map("user_id")
+  contentType      String?   @map("content_type")
+  sizeBytes        Int?      @map("size_bytes")
+  etag             String?
+  originalFilename String?   @map("original_filename")
+  scope            String?
+  width            Int?
+  height           Int?
+  uploadedAt       DateTime? @map("uploaded_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  @@unique([bucket, objectKey])
+  @@map("files")
+}

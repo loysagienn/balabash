@@ -1,0 +1,39 @@
+{
+  "name": "balabash-v2",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Thread-based agent system over an append-only event log",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "NODE_ENV=production node ./build/build.js",
+    "start": "NODE_ENV=production node --enable-source-maps --env-file=.env ./dist/app.js",
+    "build-dev": "NODE_ENV=development node ./build/build.js",
+    "start-dev": "NODE_ENV=development nodemon --watch dist --env-file=.env --trace-warnings ./dist/app.js",
+    "dev": "npm run build-dev & npm run start-dev",
+    "build-stand": "NODE_ENV=development node ./build/build-stand.js",
+    "start-stand": "NODE_ENV=development nodemon --watch dist --delay 6 --env-file=.env --trace-warnings ./dist/app.js",
+    "stand": "npm run build-stand & npm run start-stand",
+    "generate": "prisma generate",
+    "rebuild-threads": "node --enable-source-maps --env-file=.env ./dist/rebuild-threads.js",
+    "types": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.1",
+    "@types/pg": "^8.20.0",
+    "esbuild": "^0.28.1",
+    "nodemon": "^3.1.14",
+    "prettier": "^3.9.6",
+    "typescript": "^7.0.2"
+  },
+  "dependencies": {
+    "@prisma/adapter-pg": "^7.9.0",
+    "@prisma/client": "^7.9.0",
+    "dotenv": "^17.4.2",
+    "pg": "^8.22.0",
+    "prisma": "^7.9.0",
+    "zod": "^4.4.3"
+  }
+}
