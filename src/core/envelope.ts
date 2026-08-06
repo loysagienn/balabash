@@ -184,7 +184,14 @@ function validateCanonicalActor(input: AppendInput): void {
   const requiresThread = ['user.message', 'agent.message', THREAD_NOTIFICATION, THREAD_PROGRESS];
   const isToolCall = type.startsWith('tool.call.');
 
-  if ((requiresThread.includes(type) || isToolCall || TERMINAL_TYPES.has(type) || type === THREAD_STARTED || type === THREAD_CANCEL) && !threadId) {
+  if (
+    (requiresThread.includes(type) ||
+      isToolCall ||
+      TERMINAL_TYPES.has(type) ||
+      type === THREAD_STARTED ||
+      type === THREAD_CANCEL) &&
+    !threadId
+  ) {
     throw new AppendError('thread_required', `Event "${type}" requires threadId`);
   }
 }

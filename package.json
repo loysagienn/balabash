@@ -21,6 +21,7 @@
     "types": "tsc --noEmit"
   },
   "devDependencies": {
+    "@types/markdown-it": "^14.1.2",
     "@types/node": "^26.1.1",
     "@types/pg": "^8.20.0",
     "esbuild": "^0.28.1",
@@ -29,9 +30,15 @@
     "typescript": "^7.0.2"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1105.0",
+    "@aws-sdk/s3-request-presigner": "^3.1105.0",
+    "@grammyjs/runner": "^2.0.3",
     "@prisma/adapter-pg": "^7.9.0",
     "@prisma/client": "^7.9.0",
     "dotenv": "^17.4.2",
+    "grammy": "^1.45.1",
+    "markdown-it": "^15.0.0",
+    "openai": "^7.4.0",
     "pg": "^8.22.0",
     "prisma": "^7.9.0",
     "zod": "^4.4.3"

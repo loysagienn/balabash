@@ -12,4 +12,43 @@ export const config = {
   get databaseUrl(): string {
     return requireEnv('DATABASE_URL');
   },
+
+  get telegramBotToken(): string {
+    return requireEnv('TELEGRAM_BOT_TOKEN');
+  },
+
+  // Logins that may activate a workspace with /start. Membership in an
+  // activated group is the trust boundary after that (§6) — this list gates
+  // activation only.
+  get telegramAllowedLogins(): string[] {
+    return requireEnv('TELEGRAM_ALLOWED_LOGINS')
+      .split(',')
+      .map(login => login.trim().toLowerCase())
+      .filter(Boolean);
+  },
+
+  get openaiApiKey(): string {
+    return requireEnv('OPENAI_API_KEY');
+  },
+
+  // The coordinator model — always from config, never hardcoded.
+  get mainOpenaiModel(): string {
+    return requireEnv('MAIN_OPENAI_MODEL');
+  },
+
+  get spacesRegion(): string {
+    return requireEnv('SPACES_REGION');
+  },
+
+  get spacesBucketName(): string {
+    return requireEnv('SPACES_BUCKET_NAME');
+  },
+
+  get spacesAccessKeyId(): string {
+    return requireEnv('SPACES_ACCESS_KEY_ID');
+  },
+
+  get spacesAccessKeySecret(): string {
+    return requireEnv('SPACES_ACCESS_KEY_SECRET');
+  },
 };

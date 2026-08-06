@@ -31,17 +31,35 @@ export async function getEventsAfter(
 type TranscriptOptions = {
   afterSeq?: bigint;
   limit?: number;
+  // Return only the newest `last` events (still oldest-first) — the snapshot
+  // shape run turns are built from.
+  last?: number;
 };
 
 // The thread's transcript. Both sides of every inter-thread fact see it via
 // this formula: the child authored it (threadId), the parent was addressed
 // (targetThreadId) — each fact recorded exactly once.
-export async function getTranscript(threadId: string, { afterSeq, limit }: TranscriptOptions = {}): Promise<Event[]> {
+export async function getTranscript(
+  threadId: string,
+  { afterSeq, limit, last }: TranscriptOptions = {},
+): Promise<Event[]> {
+  const where = {
+    OR: [{ threadId }, { targetThreadId: threadId }],
+    ...(afterSeq !== undefined ? { seq: { gt: afterSeq } } : {}),
+  };
+
+  if (last !== undefined) {
+    const rows = await prisma.event.findMany({
+      where,
+      orderBy: { seq: 'desc' },
+      take: last,
+    });
+
+    return rows.reverse().map(toEvent);
+  }
+
   const rows = await prisma.event.findMany({
-    where: {
-      OR: [{ threadId }, { targetThreadId: threadId }],
-      ...(afterSeq !== undefined ? { seq: { gt: afterSeq } } : {}),
-    },
+    where,
     orderBy: { seq: 'asc' },
     ...(limit !== undefined ? { take: limit } : {}),
   });
