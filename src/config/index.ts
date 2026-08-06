@@ -9,7 +9,7 @@ function requireEnv(name: string): string {
 }
 
 export const config = {
-  get postgresqlUrl(): string {
-    return requireEnv('POSTGRESQL_URL');
+  get databaseUrl(): string {
+    return requireEnv('DATABASE_URL');
   },
 };

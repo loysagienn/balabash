@@ -3,7 +3,7 @@ import { PrismaClient } from '../../prisma-generated/client.ts';
 import type { Prisma } from '../../prisma-generated/client.ts';
 import { config } from '../config/index.ts';
 
-const adapter = new PrismaPg({ connectionString: config.postgresqlUrl });
+const adapter = new PrismaPg({ connectionString: config.databaseUrl });
 
 export const prisma = new PrismaClient({ adapter });
 
