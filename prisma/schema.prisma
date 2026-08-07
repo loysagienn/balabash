@@ -145,6 +145,7 @@ model Session {
 model Connection {
   id           String   @id @default(uuid())
   userId       String   @map("user_id")
+  threadId     String?  @map("thread_id") // thread that initiated the flow; connection.* events are addressed to it
   server       String // mcp-servers config name
   status       String // 'pending' | 'connected' | 'reauthorization_required'
   connectNonce String?  @unique @map("connect_nonce") // token of the one-time /connect link
@@ -178,6 +179,7 @@ model OauthClient {
 model OauthClientRequest {
   id        String   @id @default(uuid())
   userId    String   @map("user_id")
+  threadId  String?  @map("thread_id") // thread that issued the link; oauth_client.provisioned is addressed to it
   server    String
   nonce     String   @unique
   expiresAt DateTime @map("expires_at")
@@ -206,6 +208,7 @@ model ExternalServerSecret {
 model ExternalServerSecretRequest {
   id        String   @id @default(uuid())
   userId    String   @map("user_id")
+  threadId  String?  @map("thread_id") // thread that issued the link; secrets.provisioned is addressed to it
   server    String
   nonce     String   @unique
   fields    Json

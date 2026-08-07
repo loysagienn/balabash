@@ -36,6 +36,17 @@ export const config = {
     return requireEnv('MAIN_OPENAI_MODEL');
   },
 
+  // Public domain of the web surface: one-time provisioning links and the
+  // single OAuth redirect URI (https://<domain>/oauth/callback) are built
+  // from it.
+  get domain(): string {
+    return requireEnv('DOMAIN');
+  },
+
+  get httpPort(): number {
+    return Number(requireEnv('HTTP_PORT'));
+  },
+
   get spacesRegion(): string {
     return requireEnv('SPACES_REGION');
   },

@@ -13,6 +13,8 @@ export const THREAD_CANCELLED = 'thread.cancelled';
 export const THREAD_CANCEL = 'thread.cancel';
 export const THREAD_NOTIFICATION = 'thread.notification';
 export const SYSTEM_EXCEPTION = 'system.exception';
+export const OAUTH_CLIENT_PROVISIONED = 'oauth_client.provisioned';
+export const SECRETS_PROVISIONED = 'secrets.provisioned';
 
 // A thread is terminated by exactly one of these; the first one wins.
 export const TERMINAL_TYPES: ReadonlySet<string> = new Set([THREAD_COMPLETED, THREAD_FAILED, THREAD_CANCELLED]);
@@ -30,8 +32,8 @@ const CANONICAL_TYPES: ReadonlySet<string> = new Set([
   'tool.call.started',
   'tool.call.completed',
   'tool.call.failed',
-  'oauth_client.provisioned',
-  'secrets.provisioned',
+  OAUTH_CLIENT_PROVISIONED,
+  SECRETS_PROVISIONED,
   'capability.reload.requested',
   'capability.reload.completed',
   'capability.reload.failed',

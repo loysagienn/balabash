@@ -9,6 +9,7 @@ import { loadAgents } from './capabilities/agent-catalog.ts';
 import { spawnAgentRun } from './capabilities/agent-runtime.ts';
 import { loadToolServers } from './capabilities/tool-manager.ts';
 import { createCoordinatorRun } from './coordinator/index.ts';
+import { startWebServer } from './web/index.ts';
 import { startThreadRouter } from './runtime/router.ts';
 import { initTelegramBot } from './adapters/telegram/bot.ts';
 import { startTelegramDelivery } from './adapters/telegram/delivery.ts';
@@ -35,6 +36,8 @@ await loadToolServers({
     getDownloadUrl: (fileId, options) => getFileDownloadUrl(fileId, options),
   },
 });
+
+startWebServer();
 
 const bot = await initTelegramBot();
 
