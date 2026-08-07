@@ -19,6 +19,7 @@ const ALLOWED_KEYS = new Set([
   'name',
   'description',
   'icon',
+  'sdk',
   'parameters',
   'tools',
   'events',
@@ -74,14 +75,17 @@ export function validateAgent(module: Record<string, unknown>, filename: string)
     throw new Error(`${filename} agent.icon must be a non-empty string when present`);
   }
 
+  if (candidate.sdk !== 'claude' && candidate.sdk !== 'codex') {
+    throw new Error(`${filename} agent.sdk must be one of claude, codex`);
+  }
+
   if (!isObject(candidate.parameters) || candidate.parameters.type !== 'object') {
     throw new Error(`${filename} agent.parameters must be a JSON Schema object with type "object"`);
   }
 
   const validTools =
     candidate.tools === 'all' ||
-    (Array.isArray(candidate.tools) &&
-      candidate.tools.every(name => typeof name === 'string' && Boolean(name.trim())));
+    (Array.isArray(candidate.tools) && candidate.tools.every(name => typeof name === 'string' && Boolean(name.trim())));
 
   if (!validTools) {
     throw new Error(`${filename} agent.tools must be 'all' or an array of tool-server names`);

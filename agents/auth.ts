@@ -103,6 +103,7 @@ export const agent = {
     'as a separate forum topic where the auth assistant walks the user through one-time secure links; ' +
     'credential values never pass through the chat. It reports back with a summary of what got connected.',
   icon: '🔑',
+  sdk: 'claude',
   parameters: {
     type: 'object',
     properties: {

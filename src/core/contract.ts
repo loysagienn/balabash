@@ -95,6 +95,7 @@ export type AgentDeclaration = {
   name: string; // = spawn function name in the catalog
   description: string;
   icon?: string; // topic emoji
+  sdk: 'claude' | 'codex'; // provider behind ctx.harness.sdkSession()
   parameters: JsonSchema; // spawn input
   tools: 'all' | string[]; // tool-server bundle (§7.4); 'all' excludes consent servers
   events?: AgentEventDecl[]; // domain types '<name>.*'

@@ -26,8 +26,6 @@ type DiscussionInput = {
   context: string | null;
 };
 
-const DISCUSSION_MODEL = 'claude-opus-5';
-
 const SYSTEM_PROMPT = `You are Balabash's discussion partner, talking to the user directly in a dedicated Telegram forum topic.
 
 The main Balabash assistant started this thread for an in-depth discussion of one topic. The first message carries the topic and whatever context the assistant already had; everything after it comes from the user (the workspace may be shared — messages are prefixed with the speaker's name).
@@ -121,6 +119,7 @@ export const agent = {
     'window, has access to Balabash tools, and reports back with a summary when the topic is closed. ' +
     'Requires explicit user consent: propose starting a discussion and call this only after the user agrees.',
   icon: '💬',
+  sdk: 'codex',
   parameters: {
     type: 'object',
     properties: {
@@ -213,9 +212,7 @@ export const agent = {
         }
 
         content.push(
-          info.contentType?.toLowerCase().startsWith('image/')
-            ? { type: 'image', fileId }
-            : { type: 'file', fileId },
+          info.contentType?.toLowerCase().startsWith('image/') ? { type: 'image', fileId } : { type: 'file', fileId },
         );
 
         await ctx.pushEvent('agent.message', { content: content as unknown as JsonValue[] } as JsonObject);
@@ -227,7 +224,6 @@ export const agent = {
     const session = ctx.harness.sdkSession({
       instructions: SYSTEM_PROMPT,
       initialMessage: buildInitialMessage(input),
-      model: DISCUSSION_MODEL,
       extraTools: [endDiscussionTool, sendFileTool],
     });
 

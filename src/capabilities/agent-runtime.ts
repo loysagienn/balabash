@@ -28,6 +28,7 @@ import {
 import { startThread } from '../core/threads.ts';
 import { getUserFile, getFileDownloadUrl } from '../files/index.ts';
 import { createClaudeSession } from '../harness/claude-sdk/sdk-session.ts';
+import { createCodexSession } from '../harness/codex-sdk/sdk-session.ts';
 import type { RoutedRun } from '../runtime/router.ts';
 import { getAgent } from './agent-catalog.ts';
 import { BUILTIN_TOOL_DEFINITIONS, callBuiltinTool, isBuiltinTool } from './builtin-tools.ts';
@@ -254,7 +255,10 @@ export async function spawnAgentRun(thread: Thread, startedEvent: Event): Promis
     },
 
     harness: {
-      sdkSession: options => createClaudeSession(options, { tools, files, cwd: stateDir }),
+      sdkSession: options =>
+        declaration.sdk === 'codex'
+          ? createCodexSession(options, { tools, files, cwd: stateDir })
+          : createClaudeSession(options, { tools, files, cwd: stateDir }),
     },
 
     tools,
