@@ -41,6 +41,7 @@
     "@playwright/mcp": "0.0.78",
     "@prisma/adapter-pg": "^7.9.0",
     "@prisma/client": "^7.9.0",
+    "ajv": "^8.20.0",
     "dotenv": "^17.4.2",
     "grammy": "^1.45.1",
     "koa": "^3.2.1",

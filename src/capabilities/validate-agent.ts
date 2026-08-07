@@ -24,12 +24,17 @@ const ALLOWED_KEYS = new Set([
   'tools',
   'consentTools',
   'consent',
+  'agents',
   'events',
   'headless',
   'notification',
   'resumable',
+  'session',
   'run',
 ]);
+
+const SESSION_KEYS = new Set(['instructions', 'initialMessage', 'model', 'preset', 'cwd']);
+const SESSION_PRESETS = new Set(['bridge-only', 'full']);
 
 export function isObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -108,6 +113,17 @@ export function validateAgent(module: Record<string, unknown>, filename: string)
     throw new Error(`${filename} agent.consent must be a boolean when present`);
   }
 
+  if (candidate.agents !== undefined) {
+    const validAgents =
+      Array.isArray(candidate.agents) &&
+      candidate.agents.every(name => typeof name === 'string' && AGENT_NAME_PATTERN.test(name)) &&
+      new Set(candidate.agents).size === candidate.agents.length;
+
+    if (!validAgents) {
+      throw new Error(`${filename} agent.agents must be an array of unique agent names when present`);
+    }
+  }
+
   if (candidate.events !== undefined) {
     if (!Array.isArray(candidate.events)) {
       throw new Error(`${filename} agent.events must be an array when present`);
@@ -167,8 +183,50 @@ export function validateAgent(module: Record<string, unknown>, filename: string)
     throw new Error(`${filename} agent.resumable must be a boolean when present`);
   }
 
-  if (typeof candidate.run !== 'function') {
+  // Exactly one of the declarative session spec and the imperative run().
+  const hasSession = candidate.session !== undefined;
+  const hasRun = candidate.run !== undefined;
+
+  if (hasSession === hasRun) {
+    throw new Error(`${filename} agent must declare exactly one of "session" and "run"`);
+  }
+
+  if (hasRun && typeof candidate.run !== 'function') {
     throw new Error(`${filename} agent.run must be a function`);
+  }
+
+  if (hasSession) {
+    const session = candidate.session;
+
+    if (!isObject(session)) {
+      throw new Error(`${filename} agent.session must be an object`);
+    }
+
+    const unknownSessionKeys = Object.keys(session).filter(key => !SESSION_KEYS.has(key));
+
+    if (unknownSessionKeys.length) {
+      throw new Error(`${filename} agent.session has unknown keys: ${unknownSessionKeys.join(', ')}`);
+    }
+
+    if (typeof session.instructions !== 'string' || !session.instructions.trim()) {
+      throw new Error(`${filename} agent.session.instructions must be a non-empty string`);
+    }
+
+    if (typeof session.initialMessage !== 'function') {
+      throw new Error(`${filename} agent.session.initialMessage must be a function`);
+    }
+
+    if (session.model !== undefined && (typeof session.model !== 'string' || !session.model.trim())) {
+      throw new Error(`${filename} agent.session.model must be a non-empty string when present`);
+    }
+
+    if (session.preset !== undefined && !SESSION_PRESETS.has(session.preset as string)) {
+      throw new Error(`${filename} agent.session.preset must be one of bridge-only, full`);
+    }
+
+    if (session.cwd !== undefined && (typeof session.cwd !== 'string' || !session.cwd.trim())) {
+      throw new Error(`${filename} agent.session.cwd must be a non-empty string when present`);
+    }
   }
 
   return candidate as unknown as AgentDeclaration;

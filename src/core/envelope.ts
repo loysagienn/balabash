@@ -110,9 +110,13 @@ export const threadStartedPayloadSchema = z.looseObject({
   input: z.unknown().optional(),
 });
 
-// Addressed inter-thread text (§5.1): one hop, parent ↔ child. Today's use is
-// the coordinator forwarding user input into a headless child thread.
-export const threadMessagePayloadSchema = z.looseObject({ text: z.string().min(1) });
+// Addressed inter-thread message (§5.1): one hop, parent ↔ child. Text plus
+// optional file references — files always travel between threads as fileIds
+// into the shared store, never as inline bytes.
+export const threadMessagePayloadSchema = z.looseObject({
+  text: z.string().min(1),
+  fileIds: z.array(z.string()).optional(),
+});
 
 export const threadCompletedPayloadSchema = z.looseObject({ summary: summarySchema });
 export const threadFailedPayloadSchema = z.looseObject({ error: z.string() });

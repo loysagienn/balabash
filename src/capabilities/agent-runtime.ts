@@ -32,17 +32,61 @@ import type { StorageBody } from '../files/storage.ts';
 import { createClaudeSession } from '../harness/claude-sdk/sdk-session.ts';
 import { createCodexSession } from '../harness/codex-sdk/sdk-session.ts';
 import type { RoutedRun } from '../runtime/router.ts';
+import { Ajv, type ValidateFunction } from 'ajv';
 import { getAgent } from './agent-catalog.ts';
 import { BUILTIN_TOOL_DEFINITIONS, callBuiltinTool, isBuiltinTool } from './builtin-tools.ts';
+import { createSessionRun } from './session-run.ts';
 import { callServerTool, getServerToolFunctions, type ToolBundle } from './tool-manager.ts';
 import { validateAgentRun } from './validate-agent.ts';
 
 const AGENT_STATE_ROOT = path.resolve('data', 'agent-state');
 
+// Central spawn-input validation (§7.1): the declaration's `parameters` is
+// the single schema every spawn path answers to — the coordinator's strict
+// function calls and ctx.spawn alike. Compiled validators are cached per
+// agent; the catalog is static, so the cache never invalidates.
+const ajv = new Ajv({ allErrors: true, strictSchema: false });
+const inputValidators = new Map<string, ValidateFunction>();
+
+function validateAgentInput(declarationName: string, parameters: object, input: unknown): JsonObject {
+  let validate = inputValidators.get(declarationName);
+
+  if (!validate) {
+    validate = ajv.compile(parameters);
+    inputValidators.set(declarationName, validate);
+  }
+
+  const candidate = input ?? {};
+
+  if (!validate(candidate)) {
+    const details = (validate.errors ?? [])
+      .map(error => `${error.instancePath || '(root)'} ${error.message ?? 'is invalid'}`)
+      .join('; ');
+
+    throw new Error(`Invalid input for agent "${declarationName}": ${details || 'schema mismatch'}`);
+  }
+
+  if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
+    throw new Error(`Invalid input for agent "${declarationName}": input must be a JSON object`);
+  }
+
+  return candidate as JsonObject;
+}
+
 const NOTIFICATION_RANK: Record<NotificationLevel, number> = { silent: 0, normal: 1, urgent: 2 };
 
 function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+// File references in an outgoing thread.message: deduplicated and checked
+// against the workspace (a foreign or unknown fileId throws).
+async function validateMessageFileIds(userId: string, fileIds: string[] | undefined): Promise<string[]> {
+  const unique = [...new Set((fileIds ?? []).map(id => id.trim()).filter(Boolean))];
+
+  await Promise.all(unique.map(fileId => getUserFile(userId, fileId)));
+
+  return unique;
 }
 
 // An event's level must not exceed the thread's level (§11.3).
@@ -246,6 +290,12 @@ export async function spawnAgentRun(thread: Thread, startedEvent: Event): Promis
     },
 
     spawn: async (childAgentName: string, input: JsonObject, options?: SpawnOptions) => {
+      // Spawning is a declared need (the passport's `agents` list), not an
+      // ambient right: anything not listed rejects.
+      if (!declaration.agents?.includes(childAgentName)) {
+        throw new Error(`Agent "${agentName}" may not spawn "${childAgentName}": it is not in its declaration's agents list`);
+      }
+
       const childDeclaration = getAgent(childAgentName);
 
       if (!childDeclaration) {
@@ -289,8 +339,12 @@ export async function spawnAgentRun(thread: Thread, startedEvent: Event): Promis
     },
 
     // Inter-thread dialogue: one hop is enforced by append — a target that is
-    // neither the parent nor a direct child rejects the call.
-    sendToChild: async (childThreadId: string, text: string) => {
+    // neither the parent nor a direct child rejects the call. File references
+    // are validated against the workspace up front: a dead or foreign fileId
+    // must reject the call, not surface later at the recipient.
+    sendToChild: async (childThreadId: string, text: string, fileIds?: string[]) => {
+      const validFileIds = await validateMessageFileIds(userId, fileIds);
+
       await appendEvent({
         type: THREAD_MESSAGE,
         actor: 'agent',
@@ -298,11 +352,13 @@ export async function spawnAgentRun(thread: Thread, startedEvent: Event): Promis
         userId,
         threadId,
         targetThreadId: childThreadId,
-        payload: { text },
+        payload: { text, ...(validFileIds.length ? { fileIds: validFileIds } : {}) },
       });
     },
 
-    sendToParent: async (text: string) => {
+    sendToParent: async (text: string, fileIds?: string[]) => {
+      const validFileIds = await validateMessageFileIds(userId, fileIds);
+
       await appendEvent({
         type: THREAD_MESSAGE,
         actor: 'agent',
@@ -310,7 +366,7 @@ export async function spawnAgentRun(thread: Thread, startedEvent: Event): Promis
         userId,
         threadId,
         targetThreadId: thread.parentId,
-        payload: { text },
+        payload: { text, ...(validFileIds.length ? { fileIds: validFileIds } : {}) },
       });
     },
 
@@ -326,12 +382,19 @@ export async function spawnAgentRun(thread: Thread, startedEvent: Event): Promis
     stateDir,
   };
 
-  const input = startedEvent.payload.input;
-
   let run;
 
   try {
-    run = validateAgentRun(declaration.run(input, ctx), agentName);
+    const input = validateAgentInput(agentName, declaration.parameters, startedEvent.payload.input);
+
+    // The declarative form is run by the platform's session runner; run() is
+    // the imperative escape hatch (validate-agent guarantees exactly one).
+    run = validateAgentRun(
+      declaration.session
+        ? createSessionRun(declaration, declaration.session, input, ctx)
+        : declaration.run!(input, ctx),
+      agentName,
+    );
   } catch (error) {
     await failThread(getErrorMessage(error));
 

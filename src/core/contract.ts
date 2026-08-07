@@ -91,6 +91,22 @@ export type AgentEventDecl = {
   payloadSchema: JsonSchema;
 };
 
+// The declarative session agent (the preferred form): the whole lifecycle —
+// input validation against `parameters`, the SDK session, rendering of
+// incoming events, channel binding (forum topic vs headless parent dialogue
+// by `headless`), the standard end_thread / send_file verbs, abort — is run
+// by the platform. The agent supplies only data. An agent writes run() only
+// when it needs machinery a declaration cannot express (e.g. the browser's
+// Chromium environment).
+export type SessionAgentSpec = {
+  instructions: string; // the inner session's system prompt
+  // Renders the validated spawn input into the session-opening message.
+  initialMessage(input: JsonObject): string;
+  model?: string; // agent-level choice; omit for the SDK default
+  preset?: 'bridge-only' | 'full'; // see SdkSessionOptions.preset
+  cwd?: string; // session working directory; default — the run's stateDir
+};
+
 export type AgentDeclaration = {
   name: string; // = spawn function name in the catalog
   description: string;
@@ -106,6 +122,13 @@ export type AgentDeclaration = {
   // (e.g. full host access) must not appear as a side effect — only the
   // coordinator spawns it, and only on an explicit user request.
   consent?: boolean;
+  // Sub-agents this agent may spawn (part of the passport: spawning is a
+  // declared need, not an ambient right). ctx.spawn rejects anything not
+  // listed; omitted = spawns nothing. A session agent with a non-empty list
+  // gets the child-operating bridge tools (spawn_agent, send_to_thread,
+  // cancel_thread) — spawning makes it the child's operator. Consent-gated
+  // agents stay coordinator-only regardless of this list.
+  agents?: string[];
   events?: AgentEventDecl[]; // domain types '<name>.*'
   // A headless agent's thread has no user surface (no forum topic): the user
   // is not a participant — the agent talks to its parent via progress/summary
@@ -113,7 +136,9 @@ export type AgentDeclaration = {
   headless?: boolean;
   notification?: NotificationLevel; // policy default (§11.3)
   resumable?: boolean; // reserved: thread resume after restart (§5.5)
-  run(input: unknown, ctx: RunContext): AgentRun;
+  // Exactly one of `session` (declarative, preferred) and `run` (imperative).
+  session?: SessionAgentSpec;
+  run?(input: unknown, ctx: RunContext): AgentRun;
 };
 
 export type AgentRun = {
@@ -143,9 +168,11 @@ export type RunContext = {
 
   // Inter-thread dialogue (thread.message, one hop): drive a child agent with
   // instructions, or answer the parent that drives this run. The counterpart
-  // arrives through accept() as a thread.message event.
-  sendToChild(threadId: string, text: string): Promise<void>;
-  sendToParent(text: string): Promise<void>;
+  // arrives through accept() as a thread.message event. A message is text
+  // plus optional file references (workspace fileIds) — the universal way to
+  // hand a file to the interlocutor; bytes never travel through messages.
+  sendToChild(threadId: string, text: string, fileIds?: string[]): Promise<void>;
+  sendToParent(text: string, fileIds?: string[]): Promise<void>;
 
   harness: HarnessApi; // injected core behaviour — instead of base classes
   tools: ToolsApi; // the bundled tool set; calls are journaled as tool.call.*

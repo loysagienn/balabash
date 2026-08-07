@@ -469,9 +469,16 @@ export const agent = {
 
         if (event.type === 'thread.message') {
           const text = typeof payload.text === 'string' ? payload.text.trim() : '';
+          const fileIds = Array.isArray(payload.fileIds)
+            ? payload.fileIds.filter((id): id is string => typeof id === 'string' && Boolean(id))
+            : [];
+          const parts = [
+            ...(text ? [text] : []),
+            ...fileIds.map(fileId => `[the operator attached a file: fileId=${fileId}]`),
+          ];
 
-          if (text) {
-            sessionPush(text);
+          if (parts.length) {
+            sessionPush(parts.join('\n'));
           }
 
           return;

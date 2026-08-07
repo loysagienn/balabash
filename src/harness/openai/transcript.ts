@@ -204,13 +204,15 @@ const renderers: Record<string, Renderer> = {
       text: payload.text,
     }),
 
-  // Addressed inter-thread text: for an outgoing message targetThreadId names
-  // the child, for an incoming one threadId names the author.
+  // Addressed inter-thread message: for an outgoing message targetThreadId
+  // names the child, for an incoming one threadId names the author. fileIds
+  // are the message's file references — usable wherever fileIds are accepted.
   'thread.message': (payload, event) =>
     omitNullish({
       threadId: event.threadId,
       targetThreadId: event.targetThreadId,
       text: payload.text,
+      fileIds: Array.isArray(payload.fileIds) && payload.fileIds.length ? payload.fileIds : undefined,
       redirectedFromThreadId: payload.redirectedFromThreadId,
     }),
 
