@@ -1,13 +1,13 @@
 // Process entry. Start order (design doc §3): db → files → tombstone of
 // orphaned threads → agent catalog → tool servers → web → telegram → router →
-// consumers. Stage 3 wires: db, tombstone, agent catalog, telegram, router
-// with the coordinator factory and the dynamic-agent spawner, delivery
-// consumer.
+// consumers.
 
 import { prisma } from './db/client.ts';
 import { COORDINATOR_AGENT, tombstoneActiveThreads } from './core/threads.ts';
+import { getFile, getFileDownloadUrl, ingestFile } from './files/index.ts';
 import { loadAgents } from './capabilities/agent-catalog.ts';
 import { spawnAgentRun } from './capabilities/agent-runtime.ts';
+import { loadToolServers } from './capabilities/tool-manager.ts';
 import { createCoordinatorRun } from './coordinator/index.ts';
 import { startThreadRouter } from './runtime/router.ts';
 import { initTelegramBot } from './adapters/telegram/bot.ts';
@@ -25,6 +25,16 @@ if (tombstoned > 0) {
 }
 
 await loadAgents();
+
+// Local tool servers see the global files surface; workspace scoping happens
+// at the calling run (§7.4).
+await loadToolServers({
+  filesApi: {
+    ingest: input => ingestFile(input),
+    get: fileId => getFile(fileId),
+    getDownloadUrl: (fileId, options) => getFileDownloadUrl(fileId, options),
+  },
+});
 
 const bot = await initTelegramBot();
 

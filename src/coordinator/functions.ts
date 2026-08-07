@@ -1,11 +1,12 @@
 // The coordinator's function catalog (§7.3, §8.1): talking to the user, the
-// builtin pull tools (§5.2), and — from stage 3 — the agent spawn functions
-// derived from the dynamic catalog plus cancel_thread. Definitions are part
-// of the prompt-cache head: static with respect to RUN state (spawns do not
-// change them; only a catalog (re)load does, which legitimately resets the
-// head). Synchronous calls are journaled as tool.call.* events in the
-// coordinator's thread; spawns and cancels are async dispatches acknowledged
-// with 'accepted' — their consequences arrive as events (§8.1).
+// builtin pull tools (§5.2), the agent spawn functions derived from the
+// dynamic catalog plus cancel_thread, and — from stage 4 — the tool servers'
+// functions. Definitions are part of the prompt-cache head: static with
+// respect to RUN state (spawns do not change them; a catalog (re)load or a
+// tool server (dis)connecting does, which legitimately resets the head).
+// Synchronous calls are journaled as tool.call.* events in the coordinator's
+// thread; spawns and cancels are async dispatches acknowledged with
+// 'accepted' — their consequences arrive as events (§8.1).
 
 import type { ContentBlock, JsonObject } from '../core/contract.ts';
 import { appendEvent } from '../core/append.ts';
@@ -14,7 +15,17 @@ import { startThread } from '../core/threads.ts';
 import { getUserFile } from '../files/index.ts';
 import { getAgent, getAgents } from '../capabilities/agent-catalog.ts';
 import { BUILTIN_TOOL_DEFINITIONS, callBuiltinTool, isBuiltinTool } from '../capabilities/builtin-tools.ts';
+import {
+  callServerTool,
+  getServerToolFunctions,
+  isServerToolFunction,
+  type ToolBundle,
+} from '../capabilities/tool-manager.ts';
 import type { DispatchResult, FunctionCall, FunctionDefinition } from '../harness/openai/turn.ts';
+
+// The coordinator's bundle (§7.4): every non-consent tool server. Consent
+// servers it needs (request_capability, stage 5) will be named explicitly.
+const COORDINATOR_BUNDLE: ToolBundle = { declared: 'all' };
 
 const STATIC_FUNCTION_DEFINITIONS: FunctionDefinition[] = [
   {
@@ -142,8 +153,40 @@ function getAgentFunctionDefinitions(): FunctionDefinition[] {
   return definitions;
 }
 
-export function getCoordinatorFunctionDefinitions(): FunctionDefinition[] {
-  return [...STATIC_FUNCTION_DEFINITIONS, ...BUILTIN_FUNCTION_DEFINITIONS, ...getAgentFunctionDefinitions()];
+// The tool servers' functions for this user, connecting pending servers
+// first. Non-strict: external MCP schemas are not guaranteed to satisfy the
+// strict subset — the server validates input, errors feed back into the
+// inner loop. A name taken by a static/builtin function or a catalog agent
+// wins over a server tool (dispatch checks in that order).
+async function getServerFunctionDefinitions(userId: string): Promise<FunctionDefinition[]> {
+  const agentNames = new Set(getAgents().map(agent => agent.name));
+  const definitions: FunctionDefinition[] = [];
+
+  for (const fn of await getServerToolFunctions(userId, COORDINATOR_BUNDLE)) {
+    if (RESERVED_FUNCTION_NAMES.has(fn.functionName) || agentNames.has(fn.functionName)) {
+      console.warn(`[coordinator] server tool "${fn.functionName}" is shadowed and not exposed`);
+      continue;
+    }
+
+    definitions.push({
+      type: 'function',
+      name: fn.functionName,
+      description: fn.description,
+      strict: false,
+      parameters: fn.inputSchema,
+    });
+  }
+
+  return definitions;
+}
+
+export async function getCoordinatorFunctionDefinitions(userId: string): Promise<FunctionDefinition[]> {
+  return [
+    ...STATIC_FUNCTION_DEFINITIONS,
+    ...BUILTIN_FUNCTION_DEFINITIONS,
+    ...getAgentFunctionDefinitions(),
+    ...(await getServerFunctionDefinitions(userId)),
+  ];
 }
 
 type DispatchContext = {
@@ -289,19 +332,29 @@ export async function dispatchCoordinatorFunction(call: FunctionCall, ctx: Dispa
     }
   }
 
-  if (isBuiltinTool(call.name)) {
+  // An agent name wins over a same-named server tool — mirroring the
+  // definitions, where the shadowed server tool is not exposed.
+  if (isBuiltinTool(call.name) || (!getAgent(call.name) && isServerToolFunction(COORDINATOR_BUNDLE, call.name))) {
     await journal('tool.call.started', { callId: call.callId, functionName: call.name, input: args });
 
     try {
-      const result = await callBuiltinTool(call.name, args, { userId: ctx.userId });
+      const outcome = isBuiltinTool(call.name)
+        ? {
+            serverName: 'builtin',
+            toolName: call.name,
+            result: await callBuiltinTool(call.name, args, { userId: ctx.userId }),
+          }
+        : await callServerTool(ctx.userId, COORDINATOR_BUNDLE, call.name, args);
 
       await journal('tool.call.completed', {
         callId: call.callId,
         functionName: call.name,
-        result: result as unknown as JsonObject,
+        serverName: outcome.serverName,
+        toolName: outcome.toolName,
+        result: outcome.result as unknown as JsonObject,
       });
 
-      return { kind: 'sync', result };
+      return { kind: 'sync', result: outcome.result };
     } catch (error) {
       const message = getErrorMessage(error);
 

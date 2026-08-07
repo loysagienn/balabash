@@ -59,7 +59,7 @@ export function createCoordinatorRun({ threadId, userId }: { threadId: string; u
     }
 
     const lastSeq = events.at(-1)!.seq;
-    const tools = getCoordinatorFunctionDefinitions();
+    const tools = await getCoordinatorFunctionDefinitions(userId);
     const children = await listThreads(userId, { status: 'active', parentId: threadId });
 
     const prompt = buildTurnPrompt({

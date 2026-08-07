@@ -30,7 +30,8 @@ import { getUserFile, getFileDownloadUrl } from '../files/index.ts';
 import { createSdkSession } from '../harness/claude-sdk/sdk-session.ts';
 import type { RoutedRun } from '../runtime/router.ts';
 import { getAgent } from './agent-catalog.ts';
-import { BUILTIN_TOOL_DEFINITIONS, callBuiltinTool } from './builtin-tools.ts';
+import { BUILTIN_TOOL_DEFINITIONS, callBuiltinTool, isBuiltinTool } from './builtin-tools.ts';
+import { callServerTool, getServerToolFunctions, type ToolBundle } from './tool-manager.ts';
 import { validateAgentRun } from './validate-agent.ts';
 
 const AGENT_STATE_ROOT = path.resolve('data', 'agent-state');
@@ -46,10 +47,20 @@ function clampNotificationLevel(requested: NotificationLevel, threadLevel: Notif
   return NOTIFICATION_RANK[requested] > NOTIFICATION_RANK[threadLevel] ? threadLevel : requested;
 }
 
-// The run's ToolsApi (§7.4): stage 3 bundles are the builtins only — tool
-// servers join at stage 4 through the same interface. Every call is
-// journaled as tool.call.* in the run's thread.
-function createToolsApi({ userId, threadId, agentName }: { userId: string; threadId: string; agentName: string }): ToolsApi {
+// The run's ToolsApi (§7.4): the builtin pull tools plus the agent's bundle
+// of tool servers. Every call is journaled as tool.call.* in the run's
+// thread; the completed payload is the §9 canon.
+function createToolsApi({
+  userId,
+  threadId,
+  agentName,
+  bundle,
+}: {
+  userId: string;
+  threadId: string;
+  agentName: string;
+  bundle: ToolBundle;
+}): ToolsApi {
   const journal = async (type: string, payload: JsonObject) => {
     await appendEvent({
       type,
@@ -62,7 +73,14 @@ function createToolsApi({ userId, threadId, agentName }: { userId: string; threa
   };
 
   return {
-    list: async () => BUILTIN_TOOL_DEFINITIONS,
+    list: async () => [
+      ...BUILTIN_TOOL_DEFINITIONS,
+      ...(await getServerToolFunctions(userId, bundle)).map(fn => ({
+        name: fn.functionName,
+        description: fn.description,
+        inputSchema: fn.inputSchema,
+      })),
+    ],
 
     call: async (name, args): Promise<ToolResult> => {
       const callId = randomUUID();
@@ -70,11 +88,19 @@ function createToolsApi({ userId, threadId, agentName }: { userId: string; threa
       await journal('tool.call.started', { callId, functionName: name, input: args });
 
       try {
-        const result = await callBuiltinTool(name, args, { userId });
+        const outcome = isBuiltinTool(name)
+          ? { serverName: 'builtin', toolName: name, result: await callBuiltinTool(name, args, { userId }) }
+          : await callServerTool(userId, bundle, name, args);
 
-        await journal('tool.call.completed', { callId, functionName: name, result: result as unknown as JsonObject });
+        await journal('tool.call.completed', {
+          callId,
+          functionName: name,
+          serverName: outcome.serverName,
+          toolName: outcome.toolName,
+          result: outcome.result as unknown as JsonObject,
+        });
 
-        return result;
+        return outcome.result;
       } catch (error) {
         const message = getErrorMessage(error);
 
@@ -140,8 +166,19 @@ export async function spawnAgentRun(thread: Thread, startedEvent: Event): Promis
   const threadNotificationLevel =
     (startedEvent.payload.notification as NotificationLevel | undefined) ?? declaration.notification ?? 'normal';
 
+  // The effective bundle (§7.4): the declaration's set, optionally narrowed
+  // by the spawner via thread.started payload. Narrowing cannot widen —
+  // resolution intersects, and 'all' still excludes consent servers.
+  const narrowedTools = Array.isArray(startedEvent.payload.tools)
+    ? startedEvent.payload.tools.filter((name): name is string => typeof name === 'string')
+    : undefined;
+  const bundle: ToolBundle = {
+    declared: declaration.tools,
+    ...(narrowedTools ? { narrowed: narrowedTools } : {}),
+  };
+
   const abortController = new AbortController();
-  const tools = createToolsApi({ userId, threadId, agentName });
+  const tools = createToolsApi({ userId, threadId, agentName, bundle });
   const files = createFilesApi(userId);
 
   const stateDir = path.join(AGENT_STATE_ROOT, agentName, userId);
