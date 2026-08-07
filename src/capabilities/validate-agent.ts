@@ -22,6 +22,8 @@ const ALLOWED_KEYS = new Set([
   'sdk',
   'parameters',
   'tools',
+  'consentTools',
+  'consent',
   'events',
   'notification',
   'resumable',
@@ -89,6 +91,20 @@ export function validateAgent(module: Record<string, unknown>, filename: string)
 
   if (!validTools) {
     throw new Error(`${filename} agent.tools must be 'all' or an array of tool-server names`);
+  }
+
+  if (candidate.consentTools !== undefined) {
+    const validConsentTools =
+      Array.isArray(candidate.consentTools) &&
+      candidate.consentTools.every(name => typeof name === 'string' && Boolean(name.trim()));
+
+    if (!validConsentTools) {
+      throw new Error(`${filename} agent.consentTools must be an array of tool-server names when present`);
+    }
+  }
+
+  if (candidate.consent !== undefined && typeof candidate.consent !== 'boolean') {
+    throw new Error(`${filename} agent.consent must be a boolean when present`);
   }
 
   if (candidate.events !== undefined) {

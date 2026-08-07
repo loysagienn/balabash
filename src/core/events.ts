@@ -28,6 +28,27 @@ export async function getEventsAfter(
   return rows.map(toEvent);
 }
 
+// The newest seq of one event type, log-wide; null when none was ever
+// written. Lets a consumer tell a stale fact from a live one (restart module).
+export async function getLastEventSeq(type: string): Promise<bigint | null> {
+  const row = await prisma.event.findFirst({
+    where: { type },
+    orderBy: { seq: 'desc' },
+    select: { seq: true },
+  });
+
+  return row?.seq ?? null;
+}
+
+// Seconds since the last event was appended, by the database clock; null on
+// an empty log. The restart module's quiet-window buffer reads this.
+export async function getLogQuietSeconds(): Promise<number | null> {
+  const rows = await prisma.$queryRaw<Array<{ quiet: number | null }>>`
+    SELECT EXTRACT(EPOCH FROM (now() - max(created_at)))::float8 AS quiet FROM events`;
+
+  return rows[0]?.quiet ?? null;
+}
+
 type TranscriptOptions = {
   afterSeq?: bigint;
   limit?: number;

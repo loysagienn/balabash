@@ -1,8 +1,10 @@
 // The AgentSdkSession factory (§8.2): the contract shape an agent receives via
-// ctx.harness.sdkSession(). Wraps the raw Claude session and the MCP bridge:
-// only the bridge is exposed to the inner model — no native claude_code
-// tools, no user-scope MCP servers or settings. Prompt cache lives inside
-// the SDK.
+// ctx.harness.sdkSession(). Wraps the raw Claude session and the MCP bridge.
+// In the default bridge-only preset the inner model sees the bridge and
+// nothing else — no native claude_code tools, no user-scope MCP servers or
+// settings. The 'full' preset (the claude engineering agent) keeps the bridge
+// and unlocks the native claude_code toolset plus project settings from cwd.
+// Prompt cache lives inside the SDK.
 //
 // The factory is synchronous per contract while the bridge setup is async:
 // pushes arriving before the session is up are queued, and `turns` awaits
@@ -38,16 +40,19 @@ export function createClaudeSession(options: SdkSessionOptions, deps: SdkSession
       return null;
     }
 
+    const full = options.preset === 'full';
+
     const created = startClaudeSession(options.initialMessage, {
-      cwd: deps.cwd,
+      cwd: options.cwd ?? deps.cwd,
       ...(options.model ? { model: options.model } : {}),
       systemPrompt: options.instructions,
       permissionMode: 'bypassPermissions',
       allowDangerouslySkipPermissions: true,
-      // The inner session gets the Balabash bridge and nothing else.
-      tools: [],
+      // Bridge-only: the inner session gets the Balabash bridge and nothing
+      // else. Full: the native claude_code preset stays on and project-level
+      // settings (CLAUDE.md, .claude/) load from cwd.
+      ...(full ? { settingSources: ['project' as const] } : { tools: [], settingSources: [] }),
       strictMcpConfig: true,
-      settingSources: [],
       mcpServers: { balabash: { type: 'sdk', name: 'balabash', instance: bridge.server } },
     });
 

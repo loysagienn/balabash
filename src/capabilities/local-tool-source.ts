@@ -1,12 +1,9 @@
 // In-process tool servers (§10): tools/*.ts files export start(ctx) which
 // brings up a streamable HTTP MCP endpoint on loopback and returns { config,
-// close }. The files live on the dynamic side of the bundle boundary (§7.1):
-// they are native import()s that must not import runtime values from src/ —
-// core behaviour reaches them through ctx.
+// close }. The modules ship inside the app bundle through the static
+// tools/index.ts — the import() machinery went away with hot-reload — but
+// each module is still validated hard before it is trusted.
 
-import { stat } from 'node:fs/promises';
-import path from 'node:path';
-import { pathToFileURL } from 'node:url';
 import type { FileDescriptor } from '../files/index.ts';
 import type { StorageBody } from '../files/storage.ts';
 import { validateExternalServerConfig, type ExternalServerConfig } from './server-config.ts';
@@ -44,14 +41,12 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
-export async function startLocalToolSource(filepath: string, ctx: LocalToolContext): Promise<LocalToolSource> {
-  const fileStat = await stat(filepath);
-  const moduleUrl = pathToFileURL(filepath);
-
-  moduleUrl.searchParams.set('v', String(fileStat.mtimeMs));
-
-  const module = (await import(moduleUrl.href)) as Record<string, unknown>;
-  const filename = path.basename(filepath);
+export async function startLocalToolSource(
+  serverName: string,
+  module: Record<string, unknown>,
+  ctx: LocalToolContext,
+): Promise<LocalToolSource> {
+  const filename = `${serverName}.ts`;
   const exports = Object.keys(module);
 
   if (exports.length !== 1 || exports[0] !== 'start') {

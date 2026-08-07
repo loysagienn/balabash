@@ -98,6 +98,14 @@ export type AgentDeclaration = {
   sdk: 'claude' | 'codex'; // provider behind ctx.harness.sdkSession()
   parameters: JsonSchema; // spawn input
   tools: 'all' | string[]; // tool-server bundle (§7.4); 'all' excludes consent servers
+  // Consent servers granted on top of `tools` (§7.4): naming one here is the
+  // explicit ask 'all' deliberately does not make. A spawner's narrowing can
+  // still drop them.
+  consentTools?: string[];
+  // A consent-gated agent (§7.4 applied to agents): its capability level
+  // (e.g. full host access) must not appear as a side effect — only the
+  // coordinator spawns it, and only on an explicit user request.
+  consent?: boolean;
   events?: AgentEventDecl[]; // domain types '<name>.*'
   notification?: NotificationLevel; // policy default (§11.3)
   resumable?: boolean; // reserved: thread resume after restart (§5.5)
@@ -155,6 +163,12 @@ export type SdkSessionOptions = {
   initialMessage: string; // the first user message opening the session
   model?: string; // agent-level choice; omit for the SDK default
   extraTools?: SdkBridgeTool[]; // bridge-only tools on top of ctx.tools
+  // 'bridge-only' (default): the inner model sees the Balabash bridge and
+  // nothing else. 'full' unlocks the provider's native tool preset for host
+  // work; interpretation is SDK-specific (claude: the claude_code preset plus
+  // project settings from cwd; codex sessions are full by construction).
+  preset?: 'bridge-only' | 'full';
+  cwd?: string; // session working directory; default — the run's stateDir
 };
 
 // One completed session turn: the final text the inner model produced. A

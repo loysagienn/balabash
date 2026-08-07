@@ -29,6 +29,7 @@ import {
   CONNECTION_REAUTHORIZATION_REQUIRED,
   OAUTH_CLIENT_PROVISIONED,
   SECRETS_PROVISIONED,
+  SYSTEM_RESTART_COMPLETED,
   TERMINAL_TYPES,
   THREAD_CANCEL,
   THREAD_CANCELLED,
@@ -64,6 +65,9 @@ const ROUTED_TYPES = [
   CONNECTION_REAUTHORIZATION_REQUIRED,
   OAUTH_CLIENT_PROVISIONED,
   SECRETS_PROVISIONED,
+  // The fresh process reports a finished restart to the requester thread
+  // (redirected to main when the requester is gone) — wake the addressee.
+  SYSTEM_RESTART_COMPLETED,
 ];
 
 export function startThreadRouter({ createRun, spawnRun }: RouterHooks): Consumer {

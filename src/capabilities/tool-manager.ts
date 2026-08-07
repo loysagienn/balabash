@@ -7,17 +7,12 @@
 // whole system is one process (§2), the runs consume this registry through
 // their bundled ToolsApi.
 
-import path from 'node:path';
 import { UnauthorizedError } from '@modelcontextprotocol/sdk/client/auth.js';
 import type { JsonObject, ToolResult } from '../core/contract.ts';
+import { localToolModules } from '../../tools/index.ts';
 import { connectExternalServer, connectUserServer, type ConnectedServer, type ToolFunction } from './mcp-client.ts';
 import { startLocalToolSource, type LocalToolContext, type LocalToolSource } from './local-tool-source.ts';
-import {
-  getLocalToolPath,
-  readExternalServerConfigs,
-  readLocalToolFilenames,
-  type ExternalServerConfig,
-} from './server-config.ts';
+import { readExternalServerConfigs, type ExternalServerConfig } from './server-config.ts';
 import { resolveExternalServerSecrets } from './server-secrets.ts';
 import { extractErrorText, toCanonicalToolResult } from './result-adapter.ts';
 import { BUILTIN_TOOL_DEFINITIONS } from './builtin-tools.ts';
@@ -93,14 +88,20 @@ export function registerBuiltinToolServer(server: BuiltinToolServer): void {
 
 export type ToolBundle = {
   declared: 'all' | string[];
+  // Consent servers granted on top of `declared` — the explicit naming §7.4
+  // requires (an agent's consentTools, the coordinator's own grants).
+  extra?: string[];
   narrowed?: string[];
 };
 
 function isServerInBundle(bundle: ToolBundle, serverName: string): boolean {
   const consent = consentServers.has(serverName) || Boolean(builtinToolServers.get(serverName)?.consent);
   const declaredOk = bundle.declared === 'all' ? !consent : bundle.declared.includes(serverName);
+  const grantedOk = declaredOk || Boolean(bundle.extra?.includes(serverName));
 
-  return declaredOk && (!bundle.narrowed || bundle.narrowed.includes(serverName));
+  // Narrowing intersects last, so a spawner can drop consent grants too —
+  // narrowing only ever shrinks.
+  return grantedOk && (!bundle.narrowed || bundle.narrowed.includes(serverName));
 }
 
 // ---------------------------------------------------------------------------
@@ -108,7 +109,6 @@ function isServerInBundle(bundle: ToolBundle, serverName: string): boolean {
 
 let servers = new Map<string, ConnectedServer>();
 let localToolSources = new Map<string, LocalToolSource>();
-let localToolContext: LocalToolContext | null = null;
 const consentServers = new Set<string>();
 
 type PendingExternalServer = {
@@ -315,7 +315,6 @@ async function ensurePendingExternalServers(): Promise<void> {
 }
 
 export async function loadToolServers(ctx: LocalToolContext): Promise<void> {
-  localToolContext = ctx;
   const connected = new Map<string, ConnectedServer>();
   const nextUserAuth = new Map<string, UserAuthServer>();
   const nextPending = new Map<string, PendingExternalServer>();
@@ -346,9 +345,8 @@ export async function loadToolServers(ctx: LocalToolContext): Promise<void> {
     discovered.push({ name, config, origin });
   };
 
-  for (const filename of await readLocalToolFilenames()) {
-    const serverName = path.basename(filename, '.ts');
-    const source = await startLocalToolSource(getLocalToolPath(filename), ctx);
+  for (const [serverName, module] of Object.entries(localToolModules)) {
+    const source = await startLocalToolSource(serverName, module, ctx);
 
     nextLocalSources.set(serverName, source);
     addDiscovered(serverName, source.config, 'file');
@@ -587,8 +585,3 @@ export async function callServerTool(
   return { serverName: fn.serverName, toolName: fn.toolName, result };
 }
 
-// Reload entries (stage 5 wires the capability.reload.* consumer): the local
-// context survives loadToolServers for that purpose.
-export function getLocalToolContext(): LocalToolContext | null {
-  return localToolContext;
-}

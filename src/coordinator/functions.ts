@@ -14,6 +14,7 @@ import { THREAD_CANCEL } from '../core/envelope.ts';
 import { startThread } from '../core/threads.ts';
 import { getUserFile } from '../files/index.ts';
 import { getAgent, getAgents } from '../capabilities/agent-catalog.ts';
+import { RESTART_SERVER_NAME } from '../capabilities/restart-tools.ts';
 import { BUILTIN_TOOL_DEFINITIONS, callBuiltinTool, isBuiltinTool } from '../capabilities/builtin-tools.ts';
 import {
   callServerTool,
@@ -23,9 +24,9 @@ import {
 } from '../capabilities/tool-manager.ts';
 import type { DispatchResult, FunctionCall, FunctionDefinition } from '../harness/openai/turn.ts';
 
-// The coordinator's bundle (§7.4): every non-consent tool server. Consent
-// servers it needs (request_capability, stage 5) will be named explicitly.
-const COORDINATOR_BUNDLE: ToolBundle = { declared: 'all' };
+// The coordinator's bundle (§7.4): every non-consent tool server, plus the
+// consent servers it names explicitly — the restart request tool.
+const COORDINATOR_BUNDLE: ToolBundle = { declared: 'all', extra: [RESTART_SERVER_NAME] };
 
 const STATIC_FUNCTION_DEFINITIONS: FunctionDefinition[] = [
   {

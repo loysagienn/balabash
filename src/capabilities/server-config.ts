@@ -1,14 +1,14 @@
-// Tool-server configs (§10): local in-process servers are tools/*.ts files,
-// external MCP servers are mcp-servers/<name>.json (stdio | http), both
-// validated hard. Port of v1 server-config with one v2 addition: the consent
-// flag (§7.4) — a consent server is excluded from the 'all' bundle and only
-// reaches agents that name it explicitly.
+// Tool-server configs (§10): external MCP servers are mcp-servers/<name>.json
+// (stdio | http), validated hard; local in-process servers ship inside the
+// bundle (tools/index.ts) and reuse the same config validation. Port of v1
+// server-config with one v2 addition: the consent flag (§7.4) — a consent
+// server is excluded from the 'all' bundle and only reaches agents that name
+// it explicitly.
 
 import { readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { getSecretReferenceNames } from './server-secrets.ts';
 
-const toolsDirectory = path.resolve('tools');
 const externalServersDirectory = path.resolve('mcp-servers');
 
 export type ExternalServerConfig =
@@ -50,27 +50,6 @@ function isObject(value: unknown): value is Record<string, unknown> {
 
 function isMissingDirectoryError(error: unknown): boolean {
   return isObject(error) && error.code === 'ENOENT';
-}
-
-export function getLocalToolPath(filename: string): string {
-  return path.join(toolsDirectory, filename);
-}
-
-export async function readLocalToolFilenames(): Promise<string[]> {
-  try {
-    const entries = await readdir(toolsDirectory, { withFileTypes: true });
-
-    return entries
-      .filter(entry => entry.isFile() && entry.name.endsWith('.ts'))
-      .map(entry => entry.name)
-      .sort();
-  } catch (error) {
-    if (isMissingDirectoryError(error)) {
-      return [];
-    }
-
-    throw error;
-  }
 }
 
 export function validateExternalServerConfig(raw: unknown, source: string): ExternalServerConfig {

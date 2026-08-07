@@ -10,6 +10,7 @@ import { getTranscript } from '../core/events.ts';
 import { SYSTEM_EXCEPTION } from '../core/envelope.ts';
 import { listThreads } from '../core/threads.ts';
 import { config } from '../config/index.ts';
+import { getPendingRestart } from '../runtime/restart.ts';
 import { buildTurnPrompt } from '../harness/openai/prompt-builder.ts';
 import { startLlmRequestMetrics } from '../harness/openai/llm-metrics.ts';
 import { runTurn } from '../harness/openai/turn.ts';
@@ -24,6 +25,15 @@ export type CoordinatorRun = {
   accept: (event: Event) => void;
 };
 
+// Coordinator turns in flight, process-wide — the restart module's busy
+// check: a wake increments synchronously (accept → loop before the first
+// await), so "no turn and 20s of log quiet" cannot race a fresh wake.
+let activeTurns = 0;
+
+export function hasActiveCoordinatorTurns(): boolean {
+  return activeTurns > 0;
+}
+
 // The volatile counterpart of the static head: the authoritative current
 // time and the active child threads, rendered fresh every turn into the
 // prompt's uncached tail (§8.1). Current run state lives here, not in the
@@ -31,6 +41,13 @@ export type CoordinatorRun = {
 // children only: grandchildren are invisible by construction (§5.2).
 function buildStatusText(children: Thread[]): string {
   const lines = [`[status — authoritative, overrides the transcript]`, `time: ${new Date().toISOString()}`];
+  const pendingRestart = getPendingRestart();
+
+  if (pendingRestart) {
+    lines.push(
+      `restart pending: requested ${pendingRestart.requestedAt.toISOString()} (${pendingRestart.reason}) — happens once every child thread is closed and the log goes quiet; avoid starting new threads`,
+    );
+  }
 
   if (children.length) {
     lines.push('active child threads:');
@@ -98,6 +115,7 @@ export function createCoordinatorRun({ threadId, userId }: { threadId: string; u
 
   const loop = async (): Promise<void> => {
     running = true;
+    activeTurns += 1;
 
     try {
       while (wakePending) {
@@ -126,6 +144,7 @@ export function createCoordinatorRun({ threadId, userId }: { threadId: string; u
       }
     } finally {
       running = false;
+      activeTurns -= 1;
     }
   };
 
