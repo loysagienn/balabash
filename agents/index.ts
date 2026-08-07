@@ -6,6 +6,7 @@
 // (validate-agent), so each entry is the raw module namespace, not a trusted
 // AgentDeclaration.
 
+import * as architect from './architect.ts';
 import * as auth from './auth.ts';
 import * as browser from './browser.ts';
 import * as claude from './claude.ts';
@@ -13,6 +14,7 @@ import * as codex from './codex.ts';
 import * as discussion from './discussion.ts';
 
 export const agentModules: Record<string, Record<string, unknown>> = {
+  architect,
   auth,
   browser,
   claude,
