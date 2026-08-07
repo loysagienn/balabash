@@ -80,7 +80,7 @@ export async function connectUserServer(server: UserAuthServer, userId: string):
 
   return {
     name: server.name,
-    origin: 'external',
+    origin: server.origin,
     client,
     close: () => client.close(),
     functions: await listServerFunctions(server.name, client),

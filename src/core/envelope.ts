@@ -11,6 +11,7 @@ export const THREAD_COMPLETED = 'thread.completed';
 export const THREAD_FAILED = 'thread.failed';
 export const THREAD_CANCELLED = 'thread.cancelled';
 export const THREAD_CANCEL = 'thread.cancel';
+export const THREAD_MESSAGE = 'thread.message';
 export const THREAD_NOTIFICATION = 'thread.notification';
 export const SYSTEM_EXCEPTION = 'system.exception';
 export const SYSTEM_RESTART_REQUESTED = 'system.restart.requested';
@@ -33,6 +34,7 @@ const CANONICAL_TYPES: ReadonlySet<string> = new Set([
   THREAD_FAILED,
   THREAD_CANCELLED,
   THREAD_CANCEL,
+  THREAD_MESSAGE,
   THREAD_NOTIFICATION,
   'tool.call.started',
   'tool.call.completed',
@@ -108,6 +110,10 @@ export const threadStartedPayloadSchema = z.looseObject({
   input: z.unknown().optional(),
 });
 
+// Addressed inter-thread text (§5.1): one hop, parent ↔ child. Today's use is
+// the coordinator forwarding user input into a headless child thread.
+export const threadMessagePayloadSchema = z.looseObject({ text: z.string().min(1) });
+
 export const threadCompletedPayloadSchema = z.looseObject({ summary: summarySchema });
 export const threadFailedPayloadSchema = z.looseObject({ error: z.string() });
 export const threadCancelledPayloadSchema = z.looseObject({ reason: z.string() });
@@ -118,6 +124,7 @@ export const threadNotificationPayloadSchema = z.looseObject({
 
 const LIFECYCLE_PAYLOAD_SCHEMAS: Record<string, z.ZodType> = {
   [THREAD_STARTED]: threadStartedPayloadSchema,
+  [THREAD_MESSAGE]: threadMessagePayloadSchema,
   [THREAD_COMPLETED]: threadCompletedPayloadSchema,
   [THREAD_FAILED]: threadFailedPayloadSchema,
   [THREAD_CANCELLED]: threadCancelledPayloadSchema,
@@ -189,7 +196,7 @@ function validateCanonicalActor(input: AppendInput): void {
     throw new AppendError('actor_mismatch', `agent.message requires actor 'agent'`);
   }
 
-  const requiresThread = ['user.message', 'agent.message', THREAD_NOTIFICATION, THREAD_PROGRESS];
+  const requiresThread = ['user.message', 'agent.message', THREAD_NOTIFICATION, THREAD_PROGRESS, THREAD_MESSAGE];
   const isToolCall = type.startsWith('tool.call.');
 
   if (
@@ -201,6 +208,12 @@ function validateCanonicalActor(input: AppendInput): void {
     !threadId
   ) {
     throw new AppendError('thread_required', `Event "${type}" requires threadId`);
+  }
+
+  // An inter-thread message without an addressee is meaningless; the one-hop
+  // rule (append) then holds it to parent ↔ direct child.
+  if (type === THREAD_MESSAGE && !input.targetThreadId) {
+    throw new AppendError('target_required', 'thread.message requires targetThreadId');
   }
 }
 

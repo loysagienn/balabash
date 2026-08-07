@@ -25,6 +25,7 @@ const ALLOWED_KEYS = new Set([
   'consentTools',
   'consent',
   'events',
+  'headless',
   'notification',
   'resumable',
   'run',
@@ -152,6 +153,10 @@ export function validateAgent(module: Record<string, unknown>, filename: string)
 
       eventTypes.add(event.type);
     }
+  }
+
+  if (candidate.headless !== undefined && typeof candidate.headless !== 'boolean') {
+    throw new Error(`${filename} agent.headless must be a boolean when present`);
   }
 
   if (candidate.notification !== undefined && !NOTIFICATION_LEVELS.has(candidate.notification as string)) {

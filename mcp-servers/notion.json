@@ -1,0 +1,6 @@
+{
+  "transport": "http",
+  "url": "https://mcp.notion.com/mcp",
+  "auth": "user",
+  "description": "Notion workspace access via Notion's official hosted MCP server: search, read, create and update pages, databases and comments. Each user authorizes their own Notion account; on first use, start the authorization flow to get a consent link where the user picks the workspace and pages to share."
+}

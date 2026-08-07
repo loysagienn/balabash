@@ -33,6 +33,7 @@ import {
   TERMINAL_TYPES,
   THREAD_CANCEL,
   THREAD_CANCELLED,
+  THREAD_MESSAGE,
   THREAD_PROGRESS,
   THREAD_STARTED,
 } from '../core/envelope.ts';
@@ -55,6 +56,7 @@ const ROUTED_TYPES = [
   'user.message',
   THREAD_STARTED,
   THREAD_CANCEL,
+  THREAD_MESSAGE,
   THREAD_PROGRESS,
   ...TERMINAL_TYPES,
   // Integration outcomes (stage 4): thread-addressed facts from the web

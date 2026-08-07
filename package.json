@@ -38,6 +38,7 @@
     "@grammyjs/runner": "^2.0.3",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@openai/codex-sdk": "^0.147.0",
+    "@playwright/mcp": "0.0.78",
     "@prisma/adapter-pg": "^7.9.0",
     "@prisma/client": "^7.9.0",
     "dotenv": "^17.4.2",
@@ -46,6 +47,7 @@
     "markdown-it": "^15.0.0",
     "openai": "^7.4.0",
     "pg": "^8.22.0",
+    "playwright": "1.62.0-alpha-1783623505000",
     "prisma": "^7.9.0",
     "zod": "^4.4.3"
   }

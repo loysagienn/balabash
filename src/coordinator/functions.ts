@@ -10,7 +10,7 @@
 
 import type { ContentBlock, JsonObject } from '../core/contract.ts';
 import { appendEvent } from '../core/append.ts';
-import { THREAD_CANCEL } from '../core/envelope.ts';
+import { THREAD_CANCEL, THREAD_MESSAGE } from '../core/envelope.ts';
 import { startThread } from '../core/threads.ts';
 import { getUserFile } from '../files/index.ts';
 import { getAgent, getAgents } from '../capabilities/agent-catalog.ts';
@@ -62,6 +62,28 @@ const STATIC_FUNCTION_DEFINITIONS: FunctionDefinition[] = [
       type: 'object',
       properties: {},
       required: [],
+      additionalProperties: false,
+    },
+  },
+  {
+    type: 'function',
+    name: 'send_to_thread',
+    description:
+      'Send a text message into an active child thread — the way to talk to a headless agent (one without a forum topic), e.g. to forward the user’s reply to its question. For agents with a topic the user talks there directly; use this only when relaying is genuinely needed.',
+    strict: true,
+    parameters: {
+      type: 'object',
+      properties: {
+        threadId: {
+          type: 'string',
+          description: 'The child thread to message, as shown in thread.started or the active-threads status.',
+        },
+        text: {
+          type: 'string',
+          description: 'The message text delivered to the child agent.',
+        },
+      },
+      required: ['threadId', 'text'],
       additionalProperties: false,
     },
   },
@@ -251,7 +273,7 @@ async function executeSendMessage(args: JsonObject, ctx: DispatchContext): Promi
 async function executeSpawn(agentName: string, args: JsonObject, ctx: DispatchContext): Promise<void> {
   const { thread_title: threadTitle, ...input } = args;
   const title = typeof threadTitle === 'string' && threadTitle.trim() ? threadTitle.trim() : agentName;
-  const icon = getAgent(agentName)?.icon;
+  const declaration = getAgent(agentName);
 
   await startThread({
     userId: ctx.userId,
@@ -259,9 +281,32 @@ async function executeSpawn(agentName: string, args: JsonObject, ctx: DispatchCo
     agent: agentName,
     title,
     input,
-    icon,
+    icon: declaration?.icon,
+    headless: declaration?.headless,
     actor: 'agent',
     agentName: 'coordinator',
+  });
+}
+
+async function executeSendToThread(args: JsonObject, ctx: DispatchContext): Promise<void> {
+  const threadId = typeof args.threadId === 'string' ? args.threadId.trim() : '';
+  const text = typeof args.text === 'string' ? args.text.trim() : '';
+
+  if (!threadId || !text) {
+    throw new Error('send_to_thread requires threadId and non-empty text');
+  }
+
+  // One-hop is validated by append: only a direct child can be addressed. A
+  // child that terminated in between redirects back to the main thread, so
+  // the fact is journaled rather than lost.
+  await appendEvent({
+    type: THREAD_MESSAGE,
+    actor: 'agent',
+    agentName: 'coordinator',
+    userId: ctx.userId,
+    threadId: ctx.threadId,
+    targetThreadId: threadId,
+    payload: { text },
   });
 }
 
@@ -316,6 +361,16 @@ export async function dispatchCoordinatorFunction(call: FunctionCall, ctx: Dispa
   if (call.name === 'send_message') {
     try {
       await executeSendMessage(args, ctx);
+
+      return { kind: 'async' };
+    } catch (error) {
+      return { kind: 'rejected', error: getErrorMessage(error) };
+    }
+  }
+
+  if (call.name === 'send_to_thread') {
+    try {
+      await executeSendToThread(args, ctx);
 
       return { kind: 'async' };
     } catch (error) {

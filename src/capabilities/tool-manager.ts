@@ -31,6 +31,7 @@ const RESERVED_FUNCTION_NAMES = new Set([
   ...BUILTIN_TOOL_DEFINITIONS.map(tool => tool.name),
   'send_message',
   'do_nothing',
+  'send_to_thread',
   'cancel_thread',
 ]);
 
@@ -127,6 +128,9 @@ let pendingExternalServers = new Map<string, PendingExternalServer>();
 // clients are created lazily once a user's connection row says "connected".
 export type UserAuthServer = {
   name: string;
+  // 'file' = an in-process tool server (tools/*.ts) with per-user auth: its
+  // calls still carry the caller's identity in _meta, like any local server.
+  origin: ConnectedServer['origin'];
   url: string;
   description: string;
   clientRegistration: 'dynamic' | 'manual';
@@ -256,9 +260,14 @@ function assertNoFunctionCollisions(connectedServers: ReadonlyMap<string, Connec
   }
 }
 
-function toUserAuthServer(serverName: string, config: ExternalServerConfig & { transport: 'http' }): UserAuthServer {
+function toUserAuthServer(
+  serverName: string,
+  config: ExternalServerConfig & { transport: 'http' },
+  origin: ConnectedServer['origin'],
+): UserAuthServer {
   return {
     name: serverName,
+    origin,
     url: config.url,
     description: config.description?.trim() || serverName,
     clientRegistration: config.clientRegistration === 'manual' ? 'manual' : 'dynamic',
@@ -358,7 +367,7 @@ export async function loadToolServers(ctx: LocalToolContext): Promise<void> {
 
   for (const { name: serverName, config, origin } of discovered) {
     if (config.transport === 'http' && config.auth === 'user') {
-      nextUserAuth.set(serverName, toUserAuthServer(serverName, config));
+      nextUserAuth.set(serverName, toUserAuthServer(serverName, config, origin));
       continue;
     }
 
@@ -554,7 +563,12 @@ export async function callServerTool(
   let raw: Record<string, unknown>;
 
   try {
-    raw = (await server.client.callTool({ name: fn.toolName, arguments: args }, undefined, {
+    // Local (in-process) servers receive the calling run's identity in _meta:
+    // a file ingested by a local tool must land in the caller's workspace, not
+    // as an ownerless row. External servers never see workspace internals.
+    const meta = server.origin === 'file' ? { _meta: { balabash: { userId, threadId: ctx.threadId } } } : {};
+
+    raw = (await server.client.callTool({ name: fn.toolName, arguments: args, ...meta }, undefined, {
       timeout: TOOL_CALL_TIMEOUT_MS,
       resetTimeoutOnProgress: true,
     })) as Record<string, unknown>;
