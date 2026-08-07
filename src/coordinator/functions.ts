@@ -8,7 +8,7 @@
 import type { ContentBlock, Event, JsonObject, JsonValue, ToolResult } from '../core/contract.ts';
 import { appendEvent } from '../core/append.ts';
 import { getUserEvent } from '../core/events.ts';
-import { getFile } from '../files/index.ts';
+import { getUserFile } from '../files/index.ts';
 import type { DispatchResult, FunctionCall, FunctionDefinition } from '../harness/openai/turn.ts';
 
 export const COORDINATOR_FUNCTION_DEFINITIONS: FunctionDefinition[] = [
@@ -137,14 +137,16 @@ async function executeGetEvent(args: JsonObject, ctx: DispatchContext): Promise<
   return { content: [], structuredContent: eventToJson(event) };
 }
 
-async function executeGetFile(args: JsonObject): Promise<ToolResult> {
+async function executeGetFile(args: JsonObject, ctx: DispatchContext): Promise<ToolResult> {
   const fileId = typeof args.fileId === 'string' ? args.fileId.trim() : '';
 
   if (!fileId) {
     throw new Error('get_file requires fileId');
   }
 
-  const file = await getFile(fileId);
+  // Scoped to the workspace: a model-supplied fileId must not reach across
+  // the user boundary.
+  const file = await getUserFile(ctx.userId, fileId);
   const isImage = Boolean(file.contentType?.toLowerCase().startsWith('image/'));
 
   // Metadata goes into structuredContent; the content itself is a canonical
@@ -180,9 +182,9 @@ async function executeSendMessage(args: JsonObject, ctx: DispatchContext): Promi
   }
 
   for (const fileId of fileIds) {
-    // Validation up front: a dead fileId must reject the call, not surface
-    // later as a failed delivery.
-    const file = await getFile(fileId);
+    // Validation up front — scoped to the workspace: a dead or foreign
+    // fileId must reject the call, not surface later as a failed delivery.
+    const file = await getUserFile(ctx.userId, fileId);
 
     content.push(
       file.contentType?.toLowerCase().startsWith('image/') ? { type: 'image', fileId } : { type: 'file', fileId },
@@ -239,7 +241,7 @@ export async function dispatchCoordinatorFunction(call: FunctionCall, ctx: Dispa
       await journal('tool.call.started', { callId: call.callId, functionName: call.name, input: args });
 
       try {
-        const result = call.name === 'get_event' ? await executeGetEvent(args, ctx) : await executeGetFile(args);
+        const result = call.name === 'get_event' ? await executeGetEvent(args, ctx) : await executeGetFile(args, ctx);
 
         await journal('tool.call.completed', {
           callId: call.callId,

@@ -166,6 +166,19 @@ export async function getFile(fileId: string): Promise<FileDescriptor> {
   return toFileDescriptor(await requireFile(fileId));
 }
 
+// Workspace-scoped lookup for model-supplied file ids (§6): a fileId coming
+// from an LLM call must not cross the user boundary, and the existence of a
+// foreign file is not leaked — same error as a missing one.
+export async function getUserFile(userId: string, fileId: string): Promise<FileDescriptor> {
+  const file = await requireFile(fileId);
+
+  if (file.userId !== userId) {
+    throw new Error(`File "${fileId}" not found`);
+  }
+
+  return toFileDescriptor(file);
+}
+
 export async function getFileDownloadUrl(fileId: string, options: DownloadUrlOptions = {}) {
   const file = await requireFile(fileId);
 
