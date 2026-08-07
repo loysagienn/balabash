@@ -45,6 +45,9 @@ export function createClaudeSession(options: SdkSessionOptions, deps: SdkSession
     const created = startClaudeSession(options.initialMessage, {
       cwd: options.cwd ?? deps.cwd,
       ...(options.model ? { model: options.model } : {}),
+      // Reasoning effort; the platform default is explicit rather than
+      // trusting the SDK default to stay 'high'.
+      effort: options.effort ?? 'high',
       systemPrompt: options.instructions,
       permissionMode: 'bypassPermissions',
       allowDangerouslySkipPermissions: true,

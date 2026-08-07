@@ -83,6 +83,10 @@ export type ToolResult = {
 // ---------------------------------------------------------------------------
 // Agent declaration (§7.1)
 
+// Reasoning effort of the inner model (the Claude Agent SDK scale; the codex
+// SDK ignores it). 'high' is the platform default.
+export type EffortLevel = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+
 // Machine-readable domain event declared by an agent: types '<agent>.*',
 // the first segment must equal the agent's name.
 export type AgentEventDecl = {
@@ -103,6 +107,7 @@ export type SessionAgentSpec = {
   // Renders the validated spawn input into the session-opening message.
   initialMessage(input: JsonObject): string;
   model?: string; // agent-level choice; omit for the SDK default
+  effort?: EffortLevel; // reasoning effort; default 'high' (claude SDK only)
   preset?: 'bridge-only' | 'full'; // see SdkSessionOptions.preset
   cwd?: string; // session working directory; default — the run's stateDir
 };
@@ -199,6 +204,7 @@ export type SdkSessionOptions = {
   instructions: string; // the inner session's system prompt
   initialMessage: string; // the first user message opening the session
   model?: string; // agent-level choice; omit for the SDK default
+  effort?: EffortLevel; // reasoning effort; default 'high' (claude SDK only)
   extraTools?: SdkBridgeTool[]; // bridge-only tools on top of ctx.tools
   // 'bridge-only' (default): the inner model sees the Balabash bridge and
   // nothing else. 'full' unlocks the provider's native tool preset for host

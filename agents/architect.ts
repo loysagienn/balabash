@@ -76,6 +76,8 @@ export const agent = {
   session: {
     instructions: SYSTEM_PROMPT,
     model: ARCHITECT_MODEL,
+    // The architect's whole value is depth of reasoning — the only agent on max.
+    effort: 'max',
     preset: 'full',
     cwd: REPO_ROOT,
     initialMessage: (input: JsonObject) => `Subject of the architectural work: ${typeof input.subject === 'string' ? input.subject.trim() : ''}

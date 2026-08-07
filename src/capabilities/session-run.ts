@@ -330,6 +330,7 @@ export function createSessionRun(
     instructions: spec.instructions,
     initialMessage: spec.initialMessage(input),
     ...(spec.model ? { model: spec.model } : {}),
+    ...(spec.effort ? { effort: spec.effort } : {}),
     ...(spec.preset ? { preset: spec.preset } : {}),
     ...(spec.cwd ? { cwd: spec.cwd } : {}),
     extraTools: [

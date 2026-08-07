@@ -33,7 +33,8 @@ const ALLOWED_KEYS = new Set([
   'run',
 ]);
 
-const SESSION_KEYS = new Set(['instructions', 'initialMessage', 'model', 'preset', 'cwd']);
+const SESSION_KEYS = new Set(['instructions', 'initialMessage', 'model', 'effort', 'preset', 'cwd']);
+const SESSION_EFFORTS = new Set(['low', 'medium', 'high', 'xhigh', 'max']);
 const SESSION_PRESETS = new Set(['bridge-only', 'full']);
 
 export function isObject(value: unknown): value is Record<string, unknown> {
@@ -218,6 +219,10 @@ export function validateAgent(module: Record<string, unknown>, filename: string)
 
     if (session.model !== undefined && (typeof session.model !== 'string' || !session.model.trim())) {
       throw new Error(`${filename} agent.session.model must be a non-empty string when present`);
+    }
+
+    if (session.effort !== undefined && !SESSION_EFFORTS.has(session.effort as string)) {
+      throw new Error(`${filename} agent.session.effort must be one of low, medium, high, xhigh, max`);
     }
 
     if (session.preset !== undefined && !SESSION_PRESETS.has(session.preset as string)) {
