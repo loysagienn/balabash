@@ -11,7 +11,7 @@ import { config } from '../../config/index.ts';
 import { prisma } from '../../db/client.ts';
 import { appendEvent } from '../../core/append.ts';
 import { SYSTEM_EXCEPTION } from '../../core/envelope.ts';
-import type { ContentBlock, JsonObject, JsonValue } from '../../core/contract.ts';
+import type { ContentBlock, JsonObject } from '../../core/contract.ts';
 import { ensureMainThread, getMainThread } from '../../core/threads.ts';
 import { ingestFile, type FileDescriptor } from '../../files/index.ts';
 
@@ -298,7 +298,7 @@ export async function initTelegramBot() {
       threadId,
       payload: {
         text,
-        ...(blocks.length ? { blocks: blocks as unknown as JsonValue, files: fileMetas } : {}),
+        ...(blocks.length ? { blocks, files: fileMetas } : {}),
         identity: identityOf(from),
       },
     });

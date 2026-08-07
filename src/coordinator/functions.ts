@@ -5,7 +5,7 @@
 // canonical result {content, structuredContent?} goes to the log as-is, the
 // provider conversion happens in the harness.
 
-import type { ContentBlock, Event, JsonObject, JsonValue, ToolResult } from '../core/contract.ts';
+import type { ContentBlock, Event, JsonObject, ToolResult } from '../core/contract.ts';
 import { appendEvent } from '../core/append.ts';
 import { getUserEvent } from '../core/events.ts';
 import { getUserFile } from '../files/index.ts';
@@ -197,7 +197,7 @@ async function executeSendMessage(args: JsonObject, ctx: DispatchContext): Promi
     agentName: 'coordinator',
     userId: ctx.userId,
     threadId: ctx.threadId,
-    payload: { content: content as unknown as JsonValue },
+    payload: { content },
   });
 }
 
@@ -246,7 +246,7 @@ export async function dispatchCoordinatorFunction(call: FunctionCall, ctx: Dispa
         await journal('tool.call.completed', {
           callId: call.callId,
           functionName: call.name,
-          result: result as unknown as JsonValue as JsonObject,
+          result,
         });
 
         return { kind: 'sync', result };
