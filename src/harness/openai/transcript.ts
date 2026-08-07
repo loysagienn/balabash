@@ -204,6 +204,16 @@ const renderers: Record<string, Renderer> = {
       text: payload.text,
     }),
 
+  // Addressed inter-thread text: for an outgoing message targetThreadId names
+  // the child, for an incoming one threadId names the author.
+  'thread.message': (payload, event) =>
+    omitNullish({
+      threadId: event.threadId,
+      targetThreadId: event.targetThreadId,
+      text: payload.text,
+      redirectedFromThreadId: payload.redirectedFromThreadId,
+    }),
+
   'thread.completed': (payload, event) =>
     omitNullish({
       threadId: event.threadId,

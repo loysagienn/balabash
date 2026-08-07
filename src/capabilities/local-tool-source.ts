@@ -14,11 +14,14 @@ export type LocalToolSource = {
 };
 
 // The files surface handed to a local tool (tools/AGENTS.md): stored files by
-// opaque fileId plus ingest for new ones. Global, not workspace-scoped — a
-// local tool serves every workspace; scoping happens at the calling run.
+// opaque fileId plus ingest for new ones. The API itself is global — a local
+// tool serves every workspace — so ingest takes the calling run's userId,
+// which every call receives in the MCP request _meta (extra._meta.balabash):
+// a file stored without it is ownerless and undeliverable to the user.
 export type LocalToolFilesApi = {
   ingest: (input: {
     body: StorageBody;
+    userId?: string | null;
     originalFilename?: string | null;
     contentType?: string | null;
     sizeBytes?: number | null;

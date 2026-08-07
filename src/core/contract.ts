@@ -107,6 +107,10 @@ export type AgentDeclaration = {
   // coordinator spawns it, and only on an explicit user request.
   consent?: boolean;
   events?: AgentEventDecl[]; // domain types '<name>.*'
+  // A headless agent's thread has no user surface (no forum topic): the user
+  // is not a participant — the agent talks to its parent via progress/summary
+  // and receives forwarded input as thread.message.
+  headless?: boolean;
   notification?: NotificationLevel; // policy default (§11.3)
   resumable?: boolean; // reserved: thread resume after restart (§5.5)
   run(input: unknown, ctx: RunContext): AgentRun;
@@ -136,6 +140,12 @@ export type RunContext = {
 
   spawn(agentName: string, input: JsonObject, options?: SpawnOptions): Promise<{ threadId: string }>;
   cancelChild(threadId: string, reason: string): Promise<void>;
+
+  // Inter-thread dialogue (thread.message, one hop): drive a child agent with
+  // instructions, or answer the parent that drives this run. The counterpart
+  // arrives through accept() as a thread.message event.
+  sendToChild(threadId: string, text: string): Promise<void>;
+  sendToParent(text: string): Promise<void>;
 
   harness: HarnessApi; // injected core behaviour — instead of base classes
   tools: ToolsApi; // the bundled tool set; calls are journaled as tool.call.*
@@ -210,8 +220,18 @@ export type FileInfo = {
   sizeBytes: number | null;
 };
 
+export type IngestFileInput = {
+  body: NodeJS.ReadableStream | Uint8Array | string;
+  filename?: string | null;
+  contentType?: string | null;
+  sizeBytes?: number | null;
+};
+
 export type FilesApi = {
   // Workspace-scoped: a fileId from outside the user boundary reads as missing.
   getInfo(fileId: string): Promise<FileInfo>;
   getDownloadUrl(fileId: string, filename?: string): Promise<string>;
+  // Store new content in the run's workspace (the file's userId is the run's
+  // user). The storage scope is the agent's name.
+  ingest(input: IngestFileInput): Promise<FileInfo>;
 };

@@ -22,11 +22,13 @@ import {
   THREAD_CANCEL,
   THREAD_COMPLETED,
   THREAD_FAILED,
+  THREAD_MESSAGE,
   THREAD_NOTIFICATION,
   THREAD_PROGRESS,
 } from '../core/envelope.ts';
 import { startThread } from '../core/threads.ts';
-import { getUserFile, getFileDownloadUrl } from '../files/index.ts';
+import { getUserFile, getFileDownloadUrl, ingestFile } from '../files/index.ts';
+import type { StorageBody } from '../files/storage.ts';
 import { createClaudeSession } from '../harness/claude-sdk/sdk-session.ts';
 import { createCodexSession } from '../harness/codex-sdk/sdk-session.ts';
 import type { RoutedRun } from '../runtime/router.ts';
@@ -113,7 +115,7 @@ function createToolsApi({
   };
 }
 
-function createFilesApi(userId: string): FilesApi {
+function createFilesApi(userId: string, agentName: string): FilesApi {
   return {
     getInfo: async fileId => {
       const file = await getUserFile(userId, fileId);
@@ -133,6 +135,29 @@ function createFilesApi(userId: string): FilesApi {
       const { url } = await getFileDownloadUrl(fileId);
 
       return url;
+    },
+
+    // Workspace-scoped by construction: the stored file belongs to the run's
+    // user, so it is deliverable through every user-scoped path (ctx.files,
+    // get_file, send_message fileIds).
+    ingest: async input => {
+      const file = await ingestFile({
+        // The contract's NodeJS.ReadableStream is a stream.Readable at
+        // runtime; the storage layer types are narrower than the interface.
+        body: input.body as StorageBody,
+        originalFilename: input.filename ?? null,
+        contentType: input.contentType ?? null,
+        sizeBytes: input.sizeBytes ?? null,
+        scope: agentName,
+        userId,
+      });
+
+      return {
+        fileId: file.id,
+        filename: file.originalFilename,
+        contentType: file.contentType,
+        sizeBytes: file.sizeBytes,
+      };
     },
   };
 }
@@ -181,7 +206,7 @@ export async function spawnAgentRun(thread: Thread, startedEvent: Event): Promis
 
   const abortController = new AbortController();
   const tools = createToolsApi({ userId, threadId, agentName, bundle });
-  const files = createFilesApi(userId);
+  const files = createFilesApi(userId, agentName);
 
   const stateDir = path.join(AGENT_STATE_ROOT, agentName, userId);
 
@@ -243,6 +268,7 @@ export async function spawnAgentRun(thread: Thread, startedEvent: Event): Promis
         notification: options?.notification,
         tools: options?.tools,
         icon: childDeclaration.icon,
+        headless: childDeclaration.headless,
         actor: 'agent',
         agentName,
       });
@@ -259,6 +285,32 @@ export async function spawnAgentRun(thread: Thread, startedEvent: Event): Promis
         threadId,
         targetThreadId: childThreadId,
         payload: { reason },
+      });
+    },
+
+    // Inter-thread dialogue: one hop is enforced by append — a target that is
+    // neither the parent nor a direct child rejects the call.
+    sendToChild: async (childThreadId: string, text: string) => {
+      await appendEvent({
+        type: THREAD_MESSAGE,
+        actor: 'agent',
+        agentName,
+        userId,
+        threadId,
+        targetThreadId: childThreadId,
+        payload: { text },
+      });
+    },
+
+    sendToParent: async (text: string) => {
+      await appendEvent({
+        type: THREAD_MESSAGE,
+        actor: 'agent',
+        agentName,
+        userId,
+        threadId,
+        targetThreadId: thread.parentId,
+        payload: { text },
       });
     },
 

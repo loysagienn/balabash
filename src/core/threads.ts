@@ -150,6 +150,10 @@ type StartThreadInput = {
   // The spawned agent's topic emoji (§11.2): adapters know only core, so the
   // surface hint travels in the event, not in the catalog.
   icon?: string;
+  // Headless thread (§11.2): no user surface — adapters create no topic. Like
+  // icon, the hint comes from the spawned agent's declaration and travels in
+  // the event.
+  headless?: boolean;
   actor: 'system' | 'agent';
   agentName?: string; // the SPAWNING agent, not the spawned one
 };
@@ -176,6 +180,10 @@ export async function startThread(options: StartThreadInput): Promise<Thread> {
 
   if (options.icon !== undefined) {
     payload.icon = options.icon;
+  }
+
+  if (options.headless !== undefined) {
+    payload.headless = options.headless;
   }
 
   await appendEvent({
