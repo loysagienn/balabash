@@ -36,6 +36,7 @@
     "@aws-sdk/s3-request-presigner": "^3.1105.0",
     "@grammyjs/runner": "^2.0.3",
     "@modelcontextprotocol/sdk": "^1.30.0",
+    "@openai/codex-sdk": "^0.147.0",
     "@prisma/adapter-pg": "^7.9.0",
     "@prisma/client": "^7.9.0",
     "dotenv": "^17.4.2",

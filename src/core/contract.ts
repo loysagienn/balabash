@@ -162,7 +162,7 @@ export type SdkTurn = {
   text: string;
 };
 
-export type SdkSession = {
+export type AgentSdkSession = {
   // Enqueue the next user message; throws after close().
   push(text: string): void;
   // Completed turns, in order; ends after close(), throws on turn failure.
@@ -174,7 +174,7 @@ export type SdkSession = {
 };
 
 export type HarnessApi = {
-  sdkSession(options: SdkSessionOptions): SdkSession;
+  sdkSession(options: SdkSessionOptions): AgentSdkSession;
 };
 
 export type ToolDefinition = {
