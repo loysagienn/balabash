@@ -1,4 +1,4 @@
-// The SdkSession factory (§8.2): the contract shape an agent receives via
+// The AgentSdkSession factory (§8.2): the contract shape an agent receives via
 // ctx.harness.sdkSession(). Wraps the raw Claude session and the MCP bridge:
 // only the bridge is exposed to the inner model — no native claude_code
 // tools, no user-scope MCP servers or settings. Prompt cache lives inside
@@ -8,7 +8,7 @@
 // pushes arriving before the session is up are queued, and `turns` awaits
 // the setup before iterating.
 
-import type { SdkSession, SdkSessionOptions, SdkTurn, FilesApi, ToolsApi } from '../../core/contract.ts';
+import type { AgentSdkSession, SdkSessionOptions, SdkTurn, FilesApi, ToolsApi } from '../../core/contract.ts';
 import { startClaudeSession } from './session.ts';
 import type { ClaudeSession } from './session.ts';
 import { createBridgeServer } from './bridge.ts';
@@ -21,7 +21,7 @@ export type SdkSessionDeps = {
   cwd: string;
 };
 
-export function createSdkSession(options: SdkSessionOptions, deps: SdkSessionDeps): SdkSession {
+export function createClaudeSession(options: SdkSessionOptions, deps: SdkSessionDeps): AgentSdkSession {
   let closed = false;
   let session: ClaudeSession | null = null;
   let bridge: BridgeServer | null = null;

@@ -95,6 +95,7 @@ export type AgentDeclaration = {
   name: string; // = spawn function name in the catalog
   description: string;
   icon?: string; // topic emoji
+  sdk: 'claude' | 'codex'; // provider behind ctx.harness.sdkSession()
   parameters: JsonSchema; // spawn input
   tools: 'all' | string[]; // tool-server bundle (§7.4); 'all' excludes consent servers
   events?: AgentEventDecl[]; // domain types '<name>.*'
@@ -162,7 +163,7 @@ export type SdkTurn = {
   text: string;
 };
 
-export type SdkSession = {
+export type AgentSdkSession = {
   // Enqueue the next user message; throws after close().
   push(text: string): void;
   // Completed turns, in order; ends after close(), throws on turn failure.
@@ -174,7 +175,7 @@ export type SdkSession = {
 };
 
 export type HarnessApi = {
-  sdkSession(options: SdkSessionOptions): SdkSession;
+  sdkSession(options: SdkSessionOptions): AgentSdkSession;
 };
 
 export type ToolDefinition = {
