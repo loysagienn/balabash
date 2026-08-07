@@ -131,6 +131,14 @@ type StartThreadInput = {
   agent: string;
   title?: string;
   input?: unknown;
+  // Spawn-time policy riding in the payload (§7.4, §11.3): the notification
+  // level of the thread and the narrowed tool bundle. The projection does not
+  // store them — consumers read them from the thread.started event.
+  notification?: string;
+  tools?: string[];
+  // The spawned agent's topic emoji (§11.2): adapters know only core, so the
+  // surface hint travels in the event, not in the catalog.
+  icon?: string;
   actor: 'system' | 'agent';
   agentName?: string; // the SPAWNING agent, not the spawned one
 };
@@ -145,6 +153,18 @@ export async function startThread(options: StartThreadInput): Promise<Thread> {
 
   if (options.input !== undefined) {
     payload.input = options.input as JsonValue;
+  }
+
+  if (options.notification !== undefined) {
+    payload.notification = options.notification;
+  }
+
+  if (options.tools !== undefined) {
+    payload.tools = options.tools;
+  }
+
+  if (options.icon !== undefined) {
+    payload.icon = options.icon;
   }
 
   await appendEvent({

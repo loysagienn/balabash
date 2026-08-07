@@ -1,0 +1,264 @@
+// Dynamic agent runs (§7): builds the RunContext and turns an
+// AgentDeclaration into a RoutedRun for the thread router. Core behaviour is
+// injected through ctx (§7.1) — the agent module never imports runtime
+// values from the bundle.
+
+import { randomUUID } from 'node:crypto';
+import { mkdir } from 'node:fs/promises';
+import path from 'node:path';
+import type {
+  Event,
+  FilesApi,
+  JsonObject,
+  NotificationLevel,
+  RunContext,
+  SpawnOptions,
+  Thread,
+  ToolResult,
+  ToolsApi,
+} from '../core/contract.ts';
+import { appendEvent } from '../core/append.ts';
+import {
+  THREAD_CANCEL,
+  THREAD_COMPLETED,
+  THREAD_FAILED,
+  THREAD_NOTIFICATION,
+  THREAD_PROGRESS,
+} from '../core/envelope.ts';
+import { startThread } from '../core/threads.ts';
+import { getUserFile, getFileDownloadUrl } from '../files/index.ts';
+import { createSdkSession } from '../harness/claude-sdk/sdk-session.ts';
+import type { RoutedRun } from '../runtime/router.ts';
+import { getAgent } from './agent-catalog.ts';
+import { BUILTIN_TOOL_DEFINITIONS, callBuiltinTool } from './builtin-tools.ts';
+import { validateAgentRun } from './validate-agent.ts';
+
+const AGENT_STATE_ROOT = path.resolve('data', 'agent-state');
+
+const NOTIFICATION_RANK: Record<NotificationLevel, number> = { silent: 0, normal: 1, urgent: 2 };
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+// An event's level must not exceed the thread's level (§11.3).
+function clampNotificationLevel(requested: NotificationLevel, threadLevel: NotificationLevel): NotificationLevel {
+  return NOTIFICATION_RANK[requested] > NOTIFICATION_RANK[threadLevel] ? threadLevel : requested;
+}
+
+// The run's ToolsApi (§7.4): stage 3 bundles are the builtins only — tool
+// servers join at stage 4 through the same interface. Every call is
+// journaled as tool.call.* in the run's thread.
+function createToolsApi({ userId, threadId, agentName }: { userId: string; threadId: string; agentName: string }): ToolsApi {
+  const journal = async (type: string, payload: JsonObject) => {
+    await appendEvent({
+      type,
+      actor: 'agent',
+      agentName,
+      userId,
+      threadId,
+      payload,
+    });
+  };
+
+  return {
+    list: async () => BUILTIN_TOOL_DEFINITIONS,
+
+    call: async (name, args): Promise<ToolResult> => {
+      const callId = randomUUID();
+
+      await journal('tool.call.started', { callId, functionName: name, input: args });
+
+      try {
+        const result = await callBuiltinTool(name, args, { userId });
+
+        await journal('tool.call.completed', { callId, functionName: name, result: result as unknown as JsonObject });
+
+        return result;
+      } catch (error) {
+        const message = getErrorMessage(error);
+
+        await journal('tool.call.failed', { callId, functionName: name, error: message });
+
+        throw new Error(message);
+      }
+    },
+  };
+}
+
+function createFilesApi(userId: string): FilesApi {
+  return {
+    getInfo: async fileId => {
+      const file = await getUserFile(userId, fileId);
+
+      return {
+        fileId: file.id,
+        filename: file.originalFilename,
+        contentType: file.contentType,
+        sizeBytes: file.sizeBytes,
+      };
+    },
+
+    getDownloadUrl: async fileId => {
+      // Scope check first: the presigned URL layer itself is workspace-blind.
+      await getUserFile(userId, fileId);
+
+      const { url } = await getFileDownloadUrl(fileId);
+
+      return url;
+    },
+  };
+}
+
+// Spawns the run for a freshly started child thread (router hook). Returns
+// null when the run cannot start; the failure is journaled as the thread's
+// terminal, so the parent learns about it the ordinary way.
+export async function spawnAgentRun(thread: Thread, startedEvent: Event): Promise<RoutedRun | null> {
+  const failThread = async (error: string) => {
+    await appendEvent({
+      type: THREAD_FAILED,
+      actor: 'system',
+      userId: thread.userId,
+      threadId: thread.id,
+      payload: { error },
+    }).catch(appendError => {
+      console.error(`[agent-run:${thread.id}] failed to journal spawn failure:`, appendError);
+    });
+  };
+
+  const declaration = getAgent(thread.agent);
+
+  if (!declaration) {
+    await failThread(`Unknown agent "${thread.agent}"`);
+
+    return null;
+  }
+
+  const { userId } = thread;
+  const threadId = thread.id;
+  const agentName = declaration.name;
+  const threadNotificationLevel =
+    (startedEvent.payload.notification as NotificationLevel | undefined) ?? declaration.notification ?? 'normal';
+
+  const abortController = new AbortController();
+  const tools = createToolsApi({ userId, threadId, agentName });
+  const files = createFilesApi(userId);
+
+  const stateDir = path.join(AGENT_STATE_ROOT, agentName, userId);
+
+  await mkdir(stateDir, { recursive: true });
+
+  const pushEvent = async (type: string, payload: JsonObject) => {
+    await appendEvent({
+      type,
+      actor: 'agent',
+      agentName,
+      userId,
+      threadId,
+      payload,
+    });
+  };
+
+  const ctx: RunContext = {
+    threadId,
+    userId,
+    signal: abortController.signal,
+
+    pushEvent,
+
+    progress: async text => {
+      await pushEvent(THREAD_PROGRESS, { text });
+    },
+
+    complete: async summary => {
+      await pushEvent(THREAD_COMPLETED, { summary: summary as unknown as JsonObject });
+    },
+
+    notify: async (level, text) => {
+      await pushEvent(THREAD_NOTIFICATION, {
+        level: clampNotificationLevel(level, threadNotificationLevel),
+        text,
+      });
+    },
+
+    spawn: async (childAgentName: string, input: JsonObject, options?: SpawnOptions) => {
+      const childDeclaration = getAgent(childAgentName);
+
+      if (!childDeclaration) {
+        throw new Error(`Unknown agent "${childAgentName}"`);
+      }
+
+      const child = await startThread({
+        userId,
+        parentThreadId: threadId,
+        agent: childAgentName,
+        title: options?.title,
+        input,
+        notification: options?.notification,
+        tools: options?.tools,
+        icon: childDeclaration.icon,
+        actor: 'agent',
+        agentName,
+      });
+
+      return { threadId: child.id };
+    },
+
+    cancelChild: async (childThreadId: string, reason: string) => {
+      await appendEvent({
+        type: THREAD_CANCEL,
+        actor: 'agent',
+        agentName,
+        userId,
+        threadId,
+        targetThreadId: childThreadId,
+        payload: { reason },
+      });
+    },
+
+    harness: {
+      sdkSession: options => createSdkSession(options, { tools, files, cwd: stateDir }),
+    },
+
+    tools,
+    files,
+    stateDir,
+  };
+
+  const input = startedEvent.payload.input;
+
+  let run;
+
+  try {
+    run = validateAgentRun(declaration.run(input, ctx), agentName);
+  } catch (error) {
+    await failThread(getErrorMessage(error));
+
+    return null;
+  }
+
+  // Self-termination: a proper agent writes its terminal via ctx.complete()
+  // before finishing (or was cancelled — the terminal is already there). A
+  // run that just ends, or dies, terminates the thread as failed; the append
+  // is a no-op when a terminal already won (§4.3).
+  run.finished.then(
+    () => failThread('Run ended without a terminal'),
+    error => failThread(getErrorMessage(error)),
+  );
+
+  console.log(`[agent-run:${threadId}] started agent "${agentName}"`);
+
+  return {
+    accept: event => {
+      try {
+        run.accept(event);
+      } catch (error) {
+        console.error(`[agent-run:${threadId}] accept failed:`, error);
+      }
+    },
+
+    abort: reason => {
+      abortController.abort(reason);
+    },
+  };
+}

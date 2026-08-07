@@ -109,6 +109,7 @@ export type AgentRun = {
 };
 
 export type SpawnOptions = {
+  title?: string; // thread title — the surface shows it (forum topic name)
   tools?: string[]; // narrow the child's bundle; widening is not possible
   notification?: NotificationLevel;
 };
@@ -134,18 +135,42 @@ export type RunContext = {
 };
 
 // ---------------------------------------------------------------------------
-// Injected core APIs. Shapes are finalized at their stages (harness — stage 3,
-// tools/files — stages 2/4); kept minimal here so the contract compiles from
-// day one without committing to details ahead of time.
+// Injected core APIs. The SDK session shape is finalized at stage 3; the
+// tool-server bundle joins ToolsApi at stage 4.
+
+// A bridge-only tool the agent adds on top of its ToolsApi bundle (e.g. the
+// discussion's end_discussion). Lives only inside the session's MCP bridge:
+// it is not journaled as tool.call.* — the agent reflects its consequences
+// into the log itself (complete(), pushEvent()).
+export type SdkBridgeTool = {
+  name: string;
+  description: string;
+  inputSchema: JsonSchema;
+  handler(args: JsonObject): Promise<string | ContentBlock[]>;
+};
 
 export type SdkSessionOptions = {
-  instructions?: string;
-  model?: string;
-  tools?: 'all' | string[];
-} & JsonObject;
+  instructions: string; // the inner session's system prompt
+  initialMessage: string; // the first user message opening the session
+  model?: string; // agent-level choice; omit for the SDK default
+  extraTools?: SdkBridgeTool[]; // bridge-only tools on top of ctx.tools
+};
+
+// One completed session turn: the final text the inner model produced. A
+// failed turn ends the iteration with a thrown error.
+export type SdkTurn = {
+  text: string;
+};
 
 export type SdkSession = {
-  close(): Promise<void>;
+  // Enqueue the next user message; throws after close().
+  push(text: string): void;
+  // Completed turns, in order; ends after close(), throws on turn failure.
+  turns: AsyncIterable<SdkTurn>;
+  // Re-diff the bridge against ctx.tools after a catalog change; never rejects.
+  syncTools(): Promise<void>;
+  // End the input queue and the underlying session. Idempotent.
+  close(): void;
 };
 
 export type HarnessApi = {
@@ -163,6 +188,15 @@ export type ToolsApi = {
   call(name: string, args: JsonObject): Promise<ToolResult>;
 };
 
+export type FileInfo = {
+  fileId: string;
+  filename: string | null;
+  contentType: string | null;
+  sizeBytes: number | null;
+};
+
 export type FilesApi = {
+  // Workspace-scoped: a fileId from outside the user boundary reads as missing.
+  getInfo(fileId: string): Promise<FileInfo>;
   getDownloadUrl(fileId: string, filename?: string): Promise<string>;
 };

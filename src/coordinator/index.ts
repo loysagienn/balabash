@@ -4,16 +4,17 @@
 // wake signal, each turn is built from a fresh transcript snapshot, so any
 // number of pending wakes collapse into one turn.
 
-import type { Event } from '../core/contract.ts';
+import type { Event, Thread } from '../core/contract.ts';
 import { appendEvent } from '../core/append.ts';
 import { getTranscript } from '../core/events.ts';
 import { SYSTEM_EXCEPTION } from '../core/envelope.ts';
+import { listThreads } from '../core/threads.ts';
 import { config } from '../config/index.ts';
 import { buildTurnPrompt } from '../harness/openai/prompt-builder.ts';
 import { startLlmRequestMetrics } from '../harness/openai/llm-metrics.ts';
 import { runTurn } from '../harness/openai/turn.ts';
 import { COORDINATOR_INSTRUCTIONS } from './instructions.ts';
-import { COORDINATOR_FUNCTION_DEFINITIONS, dispatchCoordinatorFunction } from './functions.ts';
+import { getCoordinatorFunctionDefinitions, dispatchCoordinatorFunction } from './functions.ts';
 
 // Raw snapshot window, taken with a margin: the transcript builder selects
 // from it by char budget, so the effective depth per event class differs.
@@ -24,10 +25,26 @@ export type CoordinatorRun = {
 };
 
 // The volatile counterpart of the static head: the authoritative current
-// time, rendered fresh every turn into the prompt's uncached tail. Active
-// children join here at stage 3.
-function buildStatusText(): string {
-  return `[status — authoritative, overrides the transcript]\ntime: ${new Date().toISOString()}`;
+// time and the active child threads, rendered fresh every turn into the
+// prompt's uncached tail (§8.1). Current run state lives here, not in the
+// function definitions — spawns must not reset the cache head. Direct
+// children only: grandchildren are invisible by construction (§5.2).
+function buildStatusText(children: Thread[]): string {
+  const lines = [`[status — authoritative, overrides the transcript]`, `time: ${new Date().toISOString()}`];
+
+  if (children.length) {
+    lines.push('active child threads:');
+
+    for (const child of children) {
+      lines.push(
+        `- threadId=${child.id} agent=${child.agent}${child.title ? ` title=${JSON.stringify(child.title)}` : ''} started=${child.createdAt.toISOString()}`,
+      );
+    }
+  } else {
+    lines.push('active child threads: (none)');
+  }
+
+  return lines.join('\n');
 }
 
 export function createCoordinatorRun({ threadId, userId }: { threadId: string; userId: string }): CoordinatorRun {
@@ -42,6 +59,8 @@ export function createCoordinatorRun({ threadId, userId }: { threadId: string; u
     }
 
     const lastSeq = events.at(-1)!.seq;
+    const tools = getCoordinatorFunctionDefinitions();
+    const children = await listThreads(userId, { status: 'active', parentId: threadId });
 
     const prompt = buildTurnPrompt({
       threadId,
@@ -50,8 +69,8 @@ export function createCoordinatorRun({ threadId, userId }: { threadId: string; u
       snapshotFull: events.length >= HISTORY_LIMIT,
       model: config.mainOpenaiModel,
       instructions: COORDINATOR_INSTRUCTIONS,
-      tools: COORDINATOR_FUNCTION_DEFINITIONS,
-      statusText: buildStatusText(),
+      tools,
+      statusText: buildStatusText(children),
     });
 
     // The new events rendered to nothing — the model has nothing to react
@@ -70,7 +89,7 @@ export function createCoordinatorRun({ threadId, userId }: { threadId: string; u
     await runTurn({
       model: config.mainOpenaiModel,
       instructions: COORDINATOR_INSTRUCTIONS,
-      tools: COORDINATOR_FUNCTION_DEFINITIONS,
+      tools,
       prompt,
       metrics,
       dispatch: call => dispatchCoordinatorFunction(call, { userId, threadId }),

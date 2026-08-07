@@ -186,6 +186,50 @@ const renderers: Record<string, Renderer> = {
     error: payload.error,
   }),
 
+  // Thread lifecycle (§5.1) as seen from a parent's transcript: the child's
+  // threadId comes from the envelope — the model needs it for cancel_thread
+  // and get_thread. Inputs and summaries stay whole; the decay/truncation
+  // machinery bounds them like everything else.
+  'thread.started': (payload, event) =>
+    omitNullish({
+      threadId: event.threadId,
+      agent: payload.agent,
+      title: payload.title,
+      input: payload.input,
+    }),
+
+  'thread.progress': (payload, event) =>
+    omitNullish({
+      threadId: event.threadId,
+      text: payload.text,
+    }),
+
+  'thread.completed': (payload, event) =>
+    omitNullish({
+      threadId: event.threadId,
+      summary: payload.summary,
+    }),
+
+  'thread.failed': (payload, event) =>
+    omitNullish({
+      threadId: event.threadId,
+      error: payload.error,
+      redirectedFromThreadId: payload.redirectedFromThreadId,
+    }),
+
+  'thread.cancelled': (payload, event) =>
+    omitNullish({
+      threadId: event.threadId,
+      reason: payload.reason,
+      requestedBy: payload.requestedBy,
+    }),
+
+  'thread.cancel': (payload, event) =>
+    omitNullish({
+      targetThreadId: event.targetThreadId,
+      reason: payload.reason,
+    }),
+
   'thread.notification': payload => ({
     level: payload.level,
     text: payload.text,

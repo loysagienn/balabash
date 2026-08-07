@@ -10,9 +10,9 @@ import { Readable } from 'node:stream';
 import { config } from '../../config/index.ts';
 import { prisma } from '../../db/client.ts';
 import { appendEvent } from '../../core/append.ts';
-import { SYSTEM_EXCEPTION } from '../../core/envelope.ts';
+import { SYSTEM_EXCEPTION, THREAD_CANCEL } from '../../core/envelope.ts';
 import type { ContentBlock, JsonObject } from '../../core/contract.ts';
-import { ensureMainThread, getMainThread } from '../../core/threads.ts';
+import { ensureMainThread, getMainThread, getThread } from '../../core/threads.ts';
 import { ingestFile, type FileDescriptor } from '../../files/index.ts';
 
 const TELEGRAM_DOWNLOAD_LIMIT_BYTES = 20 * 1024 * 1024;
@@ -165,6 +165,63 @@ export async function initTelegramBot() {
         : '\n\nСовет: включи в группе режим тем (Topics) и дай мне право Manage topics — треды агентов будут открываться отдельными топиками.';
 
     await ctx.reply(`Воркспейс активирован. Пиши в General — это главный тред.${forumHint}`);
+  });
+
+  // Mechanical thread cancellation by the user (§11.2): /cancel inside a
+  // topic writes thread.cancel without negotiating with the agent. The
+  // feedback is the closure flow itself — the runtime writes the terminal,
+  // the delivery consumer posts it and closes the topic.
+  bot.command('cancel', async ctx => {
+    const chat = ctx.chat;
+
+    if (chat.type !== 'group' && chat.type !== 'supergroup') {
+      return;
+    }
+
+    const group = await getBoundGroup(chat.id);
+
+    if (!group || !ctx.from || ctx.from.is_bot) {
+      return;
+    }
+
+    const messageThreadId = ctx.message?.is_topic_message ? ctx.message.message_thread_id : undefined;
+
+    if (messageThreadId === undefined) {
+      await ctx.reply('Отменять нечего: /cancel работает в топике треда.');
+
+      return;
+    }
+
+    const topic = await prisma.telegramTopic.findUnique({
+      where: { chatId_messageThreadId: { chatId: BigInt(chat.id), messageThreadId } },
+    });
+
+    if (!topic) {
+      return;
+    }
+
+    const thread = await getThread(topic.threadId);
+
+    if (!thread || !thread.parentId) {
+      return;
+    }
+
+    if (thread.status !== 'active') {
+      await ctx.reply('Тред уже завершён.');
+
+      return;
+    }
+
+    // Author of the command is the parent thread (one hop down); the human
+    // identity rides in the payload.
+    await appendEvent({
+      type: THREAD_CANCEL,
+      actor: 'user',
+      userId: group.userId,
+      threadId: thread.parentId,
+      targetThreadId: thread.id,
+      payload: { reason: 'cancelled_by_user', identity: identityOf(ctx.from) },
+    });
   });
 
   // group → supergroup conversion changes the chat id (it happens when topics
