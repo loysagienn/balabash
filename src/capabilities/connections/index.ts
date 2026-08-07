@@ -16,16 +16,17 @@ import { auth } from '@modelcontextprotocol/sdk/client/auth.js';
 import { prisma } from '../../db/client.ts';
 import type { JsonObject } from '../../core/contract.ts';
 import { appendEvent } from '../../core/append.ts';
-import { OAUTH_CLIENT_PROVISIONED } from '../../core/envelope.ts';
+import {
+  CONNECTION_COMPLETED,
+  CONNECTION_FAILED,
+  CONNECTION_REAUTHORIZATION_REQUIRED,
+  OAUTH_CLIENT_PROVISIONED,
+} from '../../core/envelope.ts';
 import { config } from '../../config/index.ts';
 import { dropUserClient, getUserAuthServer, type UserAuthServer } from '../tool-manager.ts';
 import { createInteractiveAuthProvider } from './oauth-provider.ts';
 
 export { createTransportAuthProvider } from './oauth-provider.ts';
-
-export const CONNECTION_COMPLETED = 'connection.completed';
-export const CONNECTION_FAILED = 'connection.failed';
-export const CONNECTION_REAUTHORIZATION_REQUIRED = 'connection.reauthorization_required';
 
 // The link survives Telegram preview fetches and stray clicks: it stays valid
 // until this TTL or a completed authorization, whichever comes first. Each

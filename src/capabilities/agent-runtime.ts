@@ -90,7 +90,7 @@ function createToolsApi({
       try {
         const outcome = isBuiltinTool(name)
           ? { serverName: 'builtin', toolName: name, result: await callBuiltinTool(name, args, { userId }) }
-          : await callServerTool(userId, bundle, name, args);
+          : await callServerTool({ userId, threadId }, bundle, name, args);
 
         await journal('tool.call.completed', {
           callId,

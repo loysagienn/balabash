@@ -7,7 +7,8 @@ import { COORDINATOR_AGENT, tombstoneActiveThreads } from './core/threads.ts';
 import { getFile, getFileDownloadUrl, ingestFile } from './files/index.ts';
 import { loadAgents } from './capabilities/agent-catalog.ts';
 import { spawnAgentRun } from './capabilities/agent-runtime.ts';
-import { loadToolServers } from './capabilities/tool-manager.ts';
+import { createAuthToolServer } from './capabilities/auth-tools.ts';
+import { loadToolServers, registerBuiltinToolServer } from './capabilities/tool-manager.ts';
 import { createCoordinatorRun } from './coordinator/index.ts';
 import { startWebServer } from './web/index.ts';
 import { startThreadRouter } from './runtime/router.ts';
@@ -26,6 +27,9 @@ if (tombstoned > 0) {
 }
 
 await loadAgents();
+
+// The auth tools are a consent server (§7.4): only the auth agent names it.
+registerBuiltinToolServer(createAuthToolServer());
 
 // Local tool servers see the global files surface; workspace scoping happens
 // at the calling run (§7.4).

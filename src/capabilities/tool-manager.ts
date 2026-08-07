@@ -40,7 +40,50 @@ const RESERVED_FUNCTION_NAMES = new Set([
 ]);
 
 export function isReservedFunctionName(functionName: string): boolean {
-  return RESERVED_FUNCTION_NAMES.has(functionName);
+  if (RESERVED_FUNCTION_NAMES.has(functionName)) {
+    return true;
+  }
+
+  for (const server of builtinToolServers.values()) {
+    if (server.functionNames.includes(functionName)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+// ---------------------------------------------------------------------------
+// Builtin tool servers: in-src capabilities behind the same server/bundle
+// surface as MCP servers — today the auth tools (§7.4 consent), stage 5 adds
+// request_capability. Calls receive the calling run's identity: the issued
+// links и events are thread-addressed.
+
+export type BuiltinServerCallContext = {
+  userId: string;
+  threadId: string;
+};
+
+export type BuiltinToolServer = {
+  name: string;
+  // A consent server never rides into a bundle through 'all' — only agents
+  // naming it explicitly get it (§7.4).
+  consent: boolean;
+  // Static function namespace: lookup and collision checks stay synchronous;
+  // getFunctions may expose a state-dependent subset with live descriptions.
+  functionNames: string[];
+  getFunctions(userId: string): Promise<ToolFunction[]>;
+  call(toolName: string, args: JsonObject, ctx: BuiltinServerCallContext): Promise<ToolResult>;
+};
+
+const builtinToolServers = new Map<string, BuiltinToolServer>();
+
+export function registerBuiltinToolServer(server: BuiltinToolServer): void {
+  if (!SERVER_NAME_PATTERN.test(server.name)) {
+    throw new Error(`Tool server name "${server.name}" must match ${SERVER_NAME_PATTERN}`);
+  }
+
+  builtinToolServers.set(server.name, server);
 }
 
 // ---------------------------------------------------------------------------
@@ -54,7 +97,8 @@ export type ToolBundle = {
 };
 
 function isServerInBundle(bundle: ToolBundle, serverName: string): boolean {
-  const declaredOk = bundle.declared === 'all' ? !consentServers.has(serverName) : bundle.declared.includes(serverName);
+  const consent = consentServers.has(serverName) || Boolean(builtinToolServers.get(serverName)?.consent);
+  const declaredOk = bundle.declared === 'all' ? !consent : bundle.declared.includes(serverName);
 
   return declaredOk && (!bundle.narrowed || bundle.narrowed.includes(serverName));
 }
@@ -444,19 +488,37 @@ function getToolFunctionEntry(userId: string, bundle: ToolBundle, functionName: 
   return null;
 }
 
-export function isServerToolFunction(userId: string, bundle: ToolBundle, functionName: string): boolean {
-  return Boolean(getToolFunctionEntry(userId, bundle, functionName));
+function getBuiltinServerForFunction(bundle: ToolBundle, functionName: string): BuiltinToolServer | null {
+  for (const server of builtinToolServers.values()) {
+    if (isServerInBundle(bundle, server.name) && server.functionNames.includes(functionName)) {
+      return server;
+    }
+  }
+
+  return null;
 }
 
-// The functions of the bundle's servers — global plus this user's authorized
-// ones — connecting pending and per-user servers first.
+export function isServerToolFunction(userId: string, bundle: ToolBundle, functionName: string): boolean {
+  return Boolean(getBuiltinServerForFunction(bundle, functionName) || getToolFunctionEntry(userId, bundle, functionName));
+}
+
+// The functions of the bundle's servers — global, this user's authorized
+// ones, and builtin servers — connecting pending and per-user servers first.
 export async function getServerToolFunctions(userId: string, bundle: ToolBundle): Promise<ToolFunction[]> {
   await ensurePendingExternalServers();
   await ensureUserServers(userId);
 
-  return [...servers.values(), ...(userServers.get(userId)?.values() ?? [])]
+  const functions = [...servers.values(), ...(userServers.get(userId)?.values() ?? [])]
     .filter(server => isServerInBundle(bundle, server.name))
     .flatMap(server => server.functions);
+
+  for (const server of builtinToolServers.values()) {
+    if (isServerInBundle(bundle, server.name)) {
+      functions.push(...(await server.getFunctions(userId)));
+    }
+  }
+
+  return functions;
 }
 
 export type ServerToolOutcome = {
@@ -466,11 +528,23 @@ export type ServerToolOutcome = {
 };
 
 export async function callServerTool(
-  userId: string,
+  ctx: BuiltinServerCallContext,
   bundle: ToolBundle,
   functionName: string,
   args: JsonObject,
 ): Promise<ServerToolOutcome> {
+  const { userId } = ctx;
+
+  const builtinServer = getBuiltinServerForFunction(bundle, functionName);
+
+  if (builtinServer) {
+    return {
+      serverName: builtinServer.name,
+      toolName: functionName,
+      result: await builtinServer.call(functionName, args, ctx),
+    };
+  }
+
   const entry = getToolFunctionEntry(userId, bundle, functionName);
 
   if (!entry) {

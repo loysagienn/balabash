@@ -24,6 +24,11 @@ import { appendEvent } from '../core/append.ts';
 import { startConsumer } from '../core/consumers.ts';
 import type { Consumer } from '../core/consumers.ts';
 import {
+  CONNECTION_COMPLETED,
+  CONNECTION_FAILED,
+  CONNECTION_REAUTHORIZATION_REQUIRED,
+  OAUTH_CLIENT_PROVISIONED,
+  SECRETS_PROVISIONED,
   TERMINAL_TYPES,
   THREAD_CANCEL,
   THREAD_CANCELLED,
@@ -45,7 +50,21 @@ type RouterHooks = {
   spawnRun(thread: Thread, startedEvent: Event): Promise<RoutedRun | null>;
 };
 
-const ROUTED_TYPES = ['user.message', THREAD_STARTED, THREAD_CANCEL, THREAD_PROGRESS, ...TERMINAL_TYPES];
+const ROUTED_TYPES = [
+  'user.message',
+  THREAD_STARTED,
+  THREAD_CANCEL,
+  THREAD_PROGRESS,
+  ...TERMINAL_TYPES,
+  // Integration outcomes (stage 4): thread-addressed facts from the web
+  // callbacks and detectors — delivered to the addressee like any other
+  // addressed event (already redirected to main when the addressee died).
+  CONNECTION_COMPLETED,
+  CONNECTION_FAILED,
+  CONNECTION_REAUTHORIZATION_REQUIRED,
+  OAUTH_CLIENT_PROVISIONED,
+  SECRETS_PROVISIONED,
+];
 
 export function startThreadRouter({ createRun, spawnRun }: RouterHooks): Consumer {
   // Wake the run owning threadId, lazily rising it when the hook allows.

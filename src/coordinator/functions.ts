@@ -347,7 +347,7 @@ export async function dispatchCoordinatorFunction(call: FunctionCall, ctx: Dispa
             toolName: call.name,
             result: await callBuiltinTool(call.name, args, { userId: ctx.userId }),
           }
-        : await callServerTool(ctx.userId, COORDINATOR_BUNDLE, call.name, args);
+        : await callServerTool({ userId: ctx.userId, threadId: ctx.threadId }, COORDINATOR_BUNDLE, call.name, args);
 
       await journal('tool.call.completed', {
         callId: call.callId,

@@ -15,6 +15,9 @@ export const THREAD_NOTIFICATION = 'thread.notification';
 export const SYSTEM_EXCEPTION = 'system.exception';
 export const OAUTH_CLIENT_PROVISIONED = 'oauth_client.provisioned';
 export const SECRETS_PROVISIONED = 'secrets.provisioned';
+export const CONNECTION_COMPLETED = 'connection.completed';
+export const CONNECTION_FAILED = 'connection.failed';
+export const CONNECTION_REAUTHORIZATION_REQUIRED = 'connection.reauthorization_required';
 
 // A thread is terminated by exactly one of these; the first one wins.
 export const TERMINAL_TYPES: ReadonlySet<string> = new Set([THREAD_COMPLETED, THREAD_FAILED, THREAD_CANCELLED]);
