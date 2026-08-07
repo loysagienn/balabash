@@ -214,6 +214,11 @@ export function createCodexSession(options: SdkSessionOptions, deps: CodexSessio
               throw new Error(`Codex SDK session failed: ${event.message}`);
             }
           }
+
+          // A turn can end with a bridge-tool call (end_codex) and no trailing
+          // agent_message; consumers detect completion on yielded turns, so
+          // every turn closes with an empty boundary turn.
+          yield { text: '' };
         } finally {
           if (activeTurn === turnController) {
             activeTurn = null;
