@@ -42,6 +42,8 @@ Credential values NEVER pass through you or this chat: links lead to secure web 
 
 Outcomes arrive into this thread as [Balabash event] messages: connection.completed / connection.failed after an authorization, oauth_client.provisioned / secrets.provisioned after a form. React to them: confirm success, explain a failure and issue a fresh link when it makes sense. Links expire after 15 minutes — reissue on request.
 
+An integration task usually chains several steps — e.g. an installation OAuth client first, then the user's authorization. After an intermediate outcome, continue with the next step in this same thread right away (issue the next link without waiting to be asked); call end_auth only when the whole task is done, has failed for good, or the user stops.
+
 You also have the workspace pull tools (list_threads, get_thread, get_event, get_file) if context is needed.
 
 Call end_auth(summary) when the task is done or the user wants to stop. The summary reports the outcome to the main assistant: what got connected or provisioned, what failed, what remains. In the same turn, use your final text as a short goodbye.`;

@@ -567,7 +567,7 @@ export async function callServerTool(
       await markReauthorizationRequired(fn.serverName, userId, getErrorMessage(error));
 
       throw new Error(
-        `Authorization for "${fn.serverName}" has expired. Start the auth agent so the user gets a new authorization link.`,
+        `Authorization for "${fn.serverName}" has expired. A re-authorization thread is started automatically — tell the user to complete it in the new topic; do not start another auth thread yourself.`,
       );
     }
 
