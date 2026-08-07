@@ -173,26 +173,27 @@ export function createCodexSession(options: SdkSessionOptions, deps: CodexSessio
 
   async function* turns(): AsyncGenerator<SdkTurn> {
     const bridge = await startBridgeHttpServer(deps, options.extraTools);
-    const codex = new Codex({
-      config: {
-        mcp_servers: {
-          balabash: {
-            url: bridge.url,
-            required: true,
-            default_tools_approval_mode: 'approve',
-          },
-        },
-      },
-    });
-    const thread = codex.startThread({
-      ...(options.model ? { model: options.model } : {}),
-      workingDirectory: deps.cwd,
-      skipGitRepoCheck: true,
-      sandboxMode: 'workspace-write',
-      approvalPolicy: 'never',
-    });
 
     try {
+      const codex = new Codex({
+        config: {
+          mcp_servers: {
+            balabash: {
+              url: bridge.url,
+              required: true,
+              default_tools_approval_mode: 'approve',
+            },
+          },
+        },
+      });
+      const thread = codex.startThread({
+        ...(options.model ? { model: options.model } : {}),
+        workingDirectory: deps.cwd,
+        skipGitRepoCheck: true,
+        sandboxMode: 'workspace-write',
+        approvalPolicy: 'never',
+      });
+
       for await (const input of queue.iterable) {
         if (closed) {
           return;
