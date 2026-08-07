@@ -2,13 +2,15 @@
 // external MCP servers (mcp-servers/*.json) behind one registry. Servers with
 // unresolved ${secret:NAME} references wait in pending and reconnect when the
 // secrets are provisioned; servers with auth: "user" are registered without a
-// global connection — per-user clients join at the connections step of
-// stage 4. Module-level state is deliberate: the whole system is one process
-// (§2), the runs consume this registry through their bundled ToolsApi.
+// global connection — per-user clients are created lazily once the user's
+// connection row says "connected". Module-level state is deliberate: the
+// whole system is one process (§2), the runs consume this registry through
+// their bundled ToolsApi.
 
 import path from 'node:path';
+import { UnauthorizedError } from '@modelcontextprotocol/sdk/client/auth.js';
 import type { JsonObject, ToolResult } from '../core/contract.ts';
-import { connectExternalServer, type ConnectedServer, type ToolFunction } from './mcp-client.ts';
+import { connectExternalServer, connectUserServer, type ConnectedServer, type ToolFunction } from './mcp-client.ts';
 import { startLocalToolSource, type LocalToolContext, type LocalToolSource } from './local-tool-source.ts';
 import {
   getLocalToolPath,
@@ -19,6 +21,7 @@ import {
 import { resolveExternalServerSecrets } from './server-secrets.ts';
 import { extractErrorText, toCanonicalToolResult } from './result-adapter.ts';
 import { BUILTIN_TOOL_DEFINITIONS } from './builtin-tools.ts';
+import { listUserConnections, markReauthorizationRequired } from './connections/index.ts';
 
 // MCP SDK defaults to 60s per request; deep-research-style tools legitimately
 // run for minutes. Progress notifications reset the clock when a server sends
@@ -88,6 +91,7 @@ export type UserAuthServer = {
 };
 
 const userAuthServers = new Map<string, UserAuthServer>();
+const userServers = new Map<string, Map<string, ConnectedServer>>();
 
 export function getUserAuthServer(serverName: string): UserAuthServer | null {
   return userAuthServers.get(serverName) ?? null;
@@ -95,6 +99,71 @@ export function getUserAuthServer(serverName: string): UserAuthServer | null {
 
 export function listUserAuthServers(): UserAuthServer[] {
   return [...userAuthServers.values()].sort((a, b) => a.name.localeCompare(b.name));
+}
+
+export function dropUserClient(serverName: string, userId: string): void {
+  const clients = userServers.get(userId);
+  const client = clients?.get(serverName);
+
+  if (!clients || !client) {
+    return;
+  }
+
+  clients.delete(serverName);
+  void client.close().catch(() => {});
+}
+
+// Lazily connects the user's authorized servers before tool definitions are
+// handed out. A failed refresh downgrades the connection to
+// reauthorization_required; transient errors are logged and retried on the
+// next turn.
+async function ensureUserServers(userId: string): Promise<void> {
+  if (!userAuthServers.size) {
+    return;
+  }
+
+  const rows = await listUserConnections(userId);
+  const connectedNames = new Set(rows.filter(row => row.status === 'connected').map(row => row.server));
+
+  for (const server of userAuthServers.values()) {
+    if (userServers.get(userId)?.has(server.name) || !connectedNames.has(server.name)) {
+      continue;
+    }
+
+    try {
+      const connected = await connectUserServer(server, userId);
+      const taken = new Set(
+        [...servers.values(), ...(userServers.get(userId)?.values() ?? [])].flatMap(existing =>
+          existing.functions.map(fn => fn.functionName),
+        ),
+      );
+      const collisions = connected.functions.filter(
+        toolFunction => taken.has(toolFunction.functionName) || isReservedFunctionName(toolFunction.functionName),
+      );
+
+      if (collisions.length) {
+        console.warn(
+          `[tools] "${server.name}" for user ${userId}: dropped colliding tools ${collisions.map(fn => fn.functionName).join(', ')}`,
+        );
+        connected.functions = connected.functions.filter(fn => !collisions.includes(fn));
+      }
+
+      const clients = userServers.get(userId) ?? new Map<string, ConnectedServer>();
+
+      clients.set(server.name, connected);
+      userServers.set(userId, clients);
+
+      console.log(
+        `[tools] connected "${server.name}" for user ${userId}; tools: ${connected.functions.map(fn => fn.functionName).join(', ') || '(none)'}`,
+      );
+    } catch (error) {
+      if (error instanceof UnauthorizedError) {
+        await markReauthorizationRequired(server.name, userId, getErrorMessage(error));
+      } else {
+        console.error(`[tools] failed to connect "${server.name}" for user ${userId}:`, error);
+      }
+    }
+  }
 }
 
 // Pending secret targets for the auth agent: which servers wait for which
@@ -309,6 +378,14 @@ export async function loadToolServers(ctx: LocalToolContext): Promise<void> {
     void source.close().catch(() => {});
   }
 
+  // Configs changed wholesale — per-user clients reconnect lazily.
+  for (const clients of userServers.values()) {
+    for (const client of clients.values()) {
+      void client.close().catch(() => {});
+    }
+  }
+  userServers.clear();
+
   const functionNames = [...connected.values()].flatMap(server => server.functions.map(fn => fn.functionName));
 
   console.log(
@@ -336,9 +413,10 @@ export async function loadToolServers(ctx: LocalToolContext): Promise<void> {
 type ToolFunctionEntry = {
   fn: ToolFunction;
   server: ConnectedServer;
+  scope: 'global' | 'user';
 };
 
-function getToolFunctionEntry(bundle: ToolBundle, functionName: string): ToolFunctionEntry | null {
+function getToolFunctionEntry(userId: string, bundle: ToolBundle, functionName: string): ToolFunctionEntry | null {
   for (const server of servers.values()) {
     if (!isServerInBundle(bundle, server.name)) {
       continue;
@@ -347,24 +425,36 @@ function getToolFunctionEntry(bundle: ToolBundle, functionName: string): ToolFun
     const fn = server.functions.find(candidate => candidate.functionName === functionName);
 
     if (fn) {
-      return { fn, server };
+      return { fn, server, scope: 'global' };
+    }
+  }
+
+  for (const server of userServers.get(userId)?.values() ?? []) {
+    if (!isServerInBundle(bundle, server.name)) {
+      continue;
+    }
+
+    const fn = server.functions.find(candidate => candidate.functionName === functionName);
+
+    if (fn) {
+      return { fn, server, scope: 'user' };
     }
   }
 
   return null;
 }
 
-export function isServerToolFunction(bundle: ToolBundle, functionName: string): boolean {
-  return Boolean(getToolFunctionEntry(bundle, functionName));
+export function isServerToolFunction(userId: string, bundle: ToolBundle, functionName: string): boolean {
+  return Boolean(getToolFunctionEntry(userId, bundle, functionName));
 }
 
-// The functions of the bundle's servers, connecting pending servers first.
-// userId is part of the surface for the per-user servers joining later in
-// stage 4.
-export async function getServerToolFunctions(_userId: string, bundle: ToolBundle): Promise<ToolFunction[]> {
+// The functions of the bundle's servers — global plus this user's authorized
+// ones — connecting pending and per-user servers first.
+export async function getServerToolFunctions(userId: string, bundle: ToolBundle): Promise<ToolFunction[]> {
   await ensurePendingExternalServers();
+  await ensureUserServers(userId);
 
-  return [...servers.values()]
+  return [...servers.values(), ...(userServers.get(userId)?.values() ?? [])]
     .filter(server => isServerInBundle(bundle, server.name))
     .flatMap(server => server.functions);
 }
@@ -381,18 +471,34 @@ export async function callServerTool(
   functionName: string,
   args: JsonObject,
 ): Promise<ServerToolOutcome> {
-  const entry = getToolFunctionEntry(bundle, functionName);
+  const entry = getToolFunctionEntry(userId, bundle, functionName);
 
   if (!entry) {
     throw new Error(`Unknown tool "${functionName}"`);
   }
 
-  const { fn, server } = entry;
+  const { fn, server, scope } = entry;
 
-  const raw = (await server.client.callTool({ name: fn.toolName, arguments: args }, undefined, {
-    timeout: TOOL_CALL_TIMEOUT_MS,
-    resetTimeoutOnProgress: true,
-  })) as Record<string, unknown>;
+  let raw: Record<string, unknown>;
+
+  try {
+    raw = (await server.client.callTool({ name: fn.toolName, arguments: args }, undefined, {
+      timeout: TOOL_CALL_TIMEOUT_MS,
+      resetTimeoutOnProgress: true,
+    })) as Record<string, unknown>;
+  } catch (error) {
+    // Tokens can die between the connect at turn start and the call itself.
+    if (scope === 'user' && error instanceof UnauthorizedError) {
+      dropUserClient(fn.serverName, userId);
+      await markReauthorizationRequired(fn.serverName, userId, getErrorMessage(error));
+
+      throw new Error(
+        `Authorization for "${fn.serverName}" has expired. Start the auth agent so the user gets a new authorization link.`,
+      );
+    }
+
+    throw error;
+  }
 
   if (raw.isError) {
     throw new Error(extractErrorText(raw));

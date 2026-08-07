@@ -334,7 +334,10 @@ export async function dispatchCoordinatorFunction(call: FunctionCall, ctx: Dispa
 
   // An agent name wins over a same-named server tool — mirroring the
   // definitions, where the shadowed server tool is not exposed.
-  if (isBuiltinTool(call.name) || (!getAgent(call.name) && isServerToolFunction(COORDINATOR_BUNDLE, call.name))) {
+  if (
+    isBuiltinTool(call.name) ||
+    (!getAgent(call.name) && isServerToolFunction(ctx.userId, COORDINATOR_BUNDLE, call.name))
+  ) {
     await journal('tool.call.started', { callId: call.callId, functionName: call.name, input: args });
 
     try {

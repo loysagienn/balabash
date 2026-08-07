@@ -1,11 +1,12 @@
-// MCP client connections for tool servers (§10): stdio | http transports.
-// Per-user OAuth transports (auth: "user") join at the connections step of
-// stage 4 through connectUserServer.
+// MCP client connections for tool servers (§10): stdio | http transports,
+// plus per-user OAuth transports for servers with auth: "user".
 
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { createTransportAuthProvider } from './connections/oauth-provider.ts';
 import type { ExternalServerConfig } from './server-config.ts';
+import type { UserAuthServer } from './tool-manager.ts';
 
 const CLIENT_INFO = { name: 'balabash', version: '2.0.0' };
 
@@ -63,5 +64,25 @@ export async function connectExternalServer(
     client,
     close: () => client.close(),
     functions: await listServerFunctions(serverName, client),
+  };
+}
+
+// Connects one user's account of an auth: "user" server: the transport auth
+// provider serves that user's stored tokens and refreshes them; an
+// UnauthorizedError here means the user must re-authorize.
+export async function connectUserServer(server: UserAuthServer, userId: string): Promise<ConnectedServer> {
+  const transport = new StreamableHTTPClientTransport(new URL(server.url), {
+    authProvider: createTransportAuthProvider(server.name, userId),
+  });
+  const client = new Client(CLIENT_INFO);
+
+  await client.connect(transport);
+
+  return {
+    name: server.name,
+    origin: 'external',
+    client,
+    close: () => client.close(),
+    functions: await listServerFunctions(server.name, client),
   };
 }
