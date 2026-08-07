@@ -365,9 +365,19 @@ export async function initTelegramBot() {
     console.error('Telegram bot error:', error.error || error);
   });
 
-  run(bot);
+  const runner = run(bot);
 
   console.log('[telegram] bot is running');
 
-  return bot;
+  return {
+    bot,
+    // Graceful stop for the restart flow: stops fetching, finishes in-flight
+    // updates and confirms the offset, so nothing is redelivered after the
+    // relaunch.
+    stop: async () => {
+      if (runner.isRunning()) {
+        await runner.stop();
+      }
+    },
+  };
 }

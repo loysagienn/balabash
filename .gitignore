@@ -1,5 +1,7 @@
 node_modules
 dist
+dist-booting
+dist-last-good
 .env
 .DS_Store
 prisma-generated

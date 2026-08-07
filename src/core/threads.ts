@@ -59,6 +59,17 @@ export async function listThreads(
   return rows.map(toThread);
 }
 
+// Every active non-main thread across all workspaces — the restart module's
+// safe-window check (a pending restart waits until this list is empty).
+export async function listActiveChildThreads(): Promise<Thread[]> {
+  const rows = await prisma.thread.findMany({
+    where: { status: 'active', parentId: { not: null } },
+    orderBy: { createdSeq: 'asc' },
+  });
+
+  return rows.map(toThread);
+}
+
 // The workspace's main thread: the only thread without a parent (§5.5).
 export async function getMainThread(userId: string, db: DbClient = prisma): Promise<Thread | null> {
   const row = await db.thread.findFirst({ where: { userId, parentId: null } });

@@ -13,6 +13,8 @@ export const THREAD_CANCELLED = 'thread.cancelled';
 export const THREAD_CANCEL = 'thread.cancel';
 export const THREAD_NOTIFICATION = 'thread.notification';
 export const SYSTEM_EXCEPTION = 'system.exception';
+export const SYSTEM_RESTART_REQUESTED = 'system.restart.requested';
+export const SYSTEM_RESTART_COMPLETED = 'system.restart.completed';
 export const OAUTH_CLIENT_PROVISIONED = 'oauth_client.provisioned';
 export const SECRETS_PROVISIONED = 'secrets.provisioned';
 export const CONNECTION_COMPLETED = 'connection.completed';
@@ -37,10 +39,11 @@ const CANONICAL_TYPES: ReadonlySet<string> = new Set([
   'tool.call.failed',
   OAUTH_CLIENT_PROVISIONED,
   SECRETS_PROVISIONED,
-  'capability.reload.requested',
-  'capability.reload.completed',
-  'capability.reload.failed',
   SYSTEM_EXCEPTION,
+  // Restart-based self-extension: a request written by the restart consent
+  // tool, and the completion the fresh process reports to the requester.
+  SYSTEM_RESTART_REQUESTED,
+  SYSTEM_RESTART_COMPLETED,
 ]);
 
 // Sanitized integration lifecycle events (connection.connected, …) form an

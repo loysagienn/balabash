@@ -175,6 +175,7 @@ export async function spawnAgentRun(thread: Thread, startedEvent: Event): Promis
     : undefined;
   const bundle: ToolBundle = {
     declared: declaration.tools,
+    ...(declaration.consentTools ? { extra: declaration.consentTools } : {}),
     ...(narrowedTools ? { narrowed: narrowedTools } : {}),
   };
 
@@ -224,6 +225,13 @@ export async function spawnAgentRun(thread: Thread, startedEvent: Event): Promis
 
       if (!childDeclaration) {
         throw new Error(`Unknown agent "${childAgentName}"`);
+      }
+
+      // Consent-gated agents (§7.4): their capability level must not appear
+      // as a side effect of another agent's plan — only the coordinator
+      // starts them, on an explicit user request.
+      if (childDeclaration.consent) {
+        throw new Error(`Agent "${childAgentName}" is consent-gated: only the coordinator starts it, on an explicit user request`);
       }
 
       const child = await startThread({

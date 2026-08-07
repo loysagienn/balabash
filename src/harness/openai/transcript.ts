@@ -241,6 +241,26 @@ const renderers: Record<string, Renderer> = {
       eventType: payload.eventType,
       consumerName: payload.consumerName,
     }),
+
+  // Restart lifecycle: the request in the requester's transcript, the
+  // completion delivered by the fresh process (redirected to main when the
+  // requester thread already finished).
+  'system.restart.requested': payload =>
+    omitNullish({
+      reason: payload.reason,
+      force: payload.force,
+      requestedBy: payload.requestedBy,
+    }),
+
+  'system.restart.completed': payload =>
+    omitNullish({
+      requestSeq: payload.requestSeq,
+      reason: payload.reason,
+      rolledBack: payload.rolledBack,
+      rollbackReason: payload.rollbackReason,
+      migrationsFailed: payload.migrationsFailed,
+      redirectedFromThreadId: payload.redirectedFromThreadId,
+    }),
 };
 
 type RenderedEvent = {
