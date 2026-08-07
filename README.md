@@ -8,16 +8,20 @@ append-only логом событий в Postgres; каждый ран влад�
 
 ## Состояние
 
-Этап 3 из 6 (§14 дизайн-дока): дочерние треды. Поверх ядра (этап 1: конверт
-с осью тредов, append API с одним хопом/redirect'ом/каскадом, синхронная
-проекция `threads`, консьюмеры) и главного треда end-to-end (этап 2:
-TG-адаптер, координатор на OpenAI Responses с append-only prompt cache)
-теперь есть: каталог динамических агентов (`agents/*.ts`, нативный import с
-валидацией), спавн из координатора, Claude Agent SDK harness с in-process
-MCP-мостом, агент `discussion`, форум-топики как поверхность дочерних тредов
-(создание/закрытие с summary), `/cancel`, notification-уровни, builtin-тулы
-`list_threads`/`get_thread`. Дальше — этап 4: интеграции (внешние MCP,
-секреты, OAuth, auth-агент).
+Этап 4 из 6 (§14 дизайн-дока): интеграции. Поверх ядра (этап 1), главного
+треда end-to-end (этап 2) и дочерних тредов (этап 3) теперь есть: менеджер
+tool-серверов — локальные in-process серверы `tools/*.ts` (current_datetime,
+download_file, files, gmail, web_fetch) и внешние MCP из `mcp-servers/*.json`
+(stdio | http), `${secret:NAME}`-секреты с pending до провижининга,
+комплектация бандлов (`tools: 'all' | имена`, consent-серверы только по
+явному имени); web-поверхность (Koa) с одноразовыми формами секретов и
+OAuth-клиентов и OAuth-флоу (`/connect/<server>` → `/oauth/callback`,
+discovery + DCR + PKCE, refresh, per-user клиенты); auth-агент в своём треде
+с consent-сервером `auth`; reauth-детектор (протухший токен → auth-тред +
+notification). Санированные события `connection.*` / `secrets.provisioned` /
+`oauth_client.provisioned` адресуются треду-инициатору, redirect в главный
+тред при его смерти. Дальше — этап 5: саморасширение (request_capability,
+hot-reload).
 
 ## Запуск
 

@@ -8,6 +8,7 @@ import { getFile, getFileDownloadUrl, ingestFile } from './files/index.ts';
 import { loadAgents } from './capabilities/agent-catalog.ts';
 import { spawnAgentRun } from './capabilities/agent-runtime.ts';
 import { createAuthToolServer } from './capabilities/auth-tools.ts';
+import { startReauthDetector } from './capabilities/reauth-detector.ts';
 import { loadToolServers, registerBuiltinToolServer } from './capabilities/tool-manager.ts';
 import { createCoordinatorRun } from './coordinator/index.ts';
 import { startWebServer } from './web/index.ts';
@@ -67,5 +68,7 @@ startThreadRouter({
 });
 
 startTelegramDelivery({ bot });
+
+startReauthDetector();
 
 console.log('[app] balabash-v2 is running');
