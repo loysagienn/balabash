@@ -1,14 +1,6 @@
-// Discussion agent (v2): an in-depth discussion of one topic in its own
-// thread — the user talks to it directly in the thread's forum topic. The
-// dialog runs in a long-lived Claude Agent SDK session (billed to the
-// operator's subscription, with its own context management) obtained from
-// ctx.harness; Balabash tools reach the session through the harness's MCP
-// bridge. The final text of each session turn goes to the thread as an
-// agent.message; the inner model ends the thread with the end_discussion
-// bridge tool, whose summary becomes the thread's terminal summary.
-//
-// Only types cross the core boundary (§7.1): this module has no runtime
-// imports from src/ — core behaviour is injected through ctx.
+// Codex agent: a general-purpose OpenAI Codex session in its own thread. It
+// keeps Codex's built-in tool set intact and adds the run's Balabash MCP bundle
+// plus bridge-only lifecycle/file-delivery tools.
 
 import type {
   AgentDeclaration,
@@ -21,52 +13,49 @@ import type {
   SdkBridgeTool,
 } from '../src/core/contract.ts';
 
-type DiscussionInput = {
-  topic: string;
+type CodexInput = {
+  task: string;
   context: string | null;
 };
 
-const DISCUSSION_MODEL = 'claude-opus-5';
+const SYSTEM_PROMPT = `You are OpenAI Codex working inside Balabash, talking to the user directly in a dedicated Telegram forum topic.
 
-const SYSTEM_PROMPT = `You are Balabash's discussion partner, talking to the user directly in a dedicated Telegram forum topic.
+The main Balabash assistant started this thread for a task. The first message carries the task and any context already known; everything after it comes from the user (the workspace may be shared — messages are prefixed with the speaker's name).
 
-The main Balabash assistant started this thread for an in-depth discussion of one topic. The first message carries the topic and whatever context the assistant already had; everything after it comes from the user (the workspace may be shared — messages are prefixed with the speaker's name).
+How your output reaches the user: every completed agent message is sent into the topic. Reply in the user's language. Use only the simple Markdown subset Telegram renders: **bold**, *italic*, \`code\`, fenced code blocks, links, blockquotes, simple lists. No tables or HTML. Never end a turn with empty final text.
 
-How your output reaches the user: the final text of each of your turns is sent into the topic as a message. Keep it conversational and in the user's language. Use only the simple Markdown subset Telegram renders: **bold**, *italic*, \`code\`, fenced code blocks, links, blockquotes, simple lists. No tables, no HTML, no images. Never end a turn with empty final text — every turn must reply to the user.
+Your normal Codex tools remain available. You also have Balabash MCP tools, which are loaded lazily. At the start of the session, search the full runtime tool catalog for mcp__balabash__* so they are available before you need them.
 
-You have Balabash's tools: the workspace event log (list_threads, get_thread, get_event) and stored files (get_file). Use them when they genuinely serve the discussion; this is a conversation, not a research pipeline.
-
-Special tools:
+Special Balabash tools:
 - send_file_to_user delivers a stored Balabash file into the topic.
-- end_discussion(summary) closes this thread and reports back to the main assistant. Call it when the topic is closed or the user asks to stop. Write the summary for the main assistant: theses, decisions, positions, open threads — it is the only compressed record of this discussion. In the same turn, use your final text as a short goodbye to the user.
+- end_codex(summary) closes this thread and reports the result to the main assistant. Call it when the task is complete, cannot continue, or the user asks to stop. The summary must state what was done, the outcome, files or refs produced, and anything that remains. In the same turn, use your final text as a short handoff to the user.
 
-Stay on the discussion's topic. If the user clearly switches to unrelated tasks or asks for the main assistant, wrap up and call end_discussion.`;
+Stay with the assigned task. If the user clearly switches to an unrelated task or asks for the main assistant, wrap up and call end_codex.`;
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
-function parseInput(input: unknown): DiscussionInput {
-  if (!isObject(input) || typeof input.topic !== 'string' || !input.topic.trim()) {
-    throw new Error('discussion requires a non-empty topic');
+function parseInput(input: unknown): CodexInput {
+  if (!isObject(input) || typeof input.task !== 'string' || !input.task.trim()) {
+    throw new Error('codex requires a non-empty task');
   }
 
   return {
-    topic: input.topic.trim(),
+    task: input.task.trim(),
     context: typeof input.context === 'string' && input.context.trim() ? input.context.trim() : null,
   };
 }
 
-function buildInitialMessage(input: DiscussionInput): string {
-  return `Discussion topic: ${input.topic}
+function buildInitialMessage(input: CodexInput): string {
+  return `Task from the main assistant: ${input.task}
 
 Context from the main assistant:
-${input.context ?? '(none — the topic starts fresh)'}
+${input.context ?? '(none — start from the task itself)'}
 
-Open the discussion: greet the user briefly and engage with the topic.`;
+Start working on the task and keep the user informed in this topic.`;
 }
 
-// "Who speaks" prefix for the inner session: the workspace is multi-voice.
 function speakerOf(payload: Record<string, unknown>): string | null {
   const identity = isObject(payload.identity) ? payload.identity : {};
   const name = [identity.firstName, identity.lastName]
@@ -104,39 +93,33 @@ function describeUserMessage(payload: Record<string, unknown>): string {
   return parts.join('\n');
 }
 
-// Events fanned into the run besides the conversation: lifecycle of this
-// thread's own children, redirected facts, future domain events.
 function describeEvent(event: Event): string {
   return `[Balabash event]\ntype: ${event.type}\npayload: ${JSON.stringify(event.payload)}`;
 }
 
 export const agent = {
-  name: 'discussion',
+  name: 'codex',
   description:
-    'Start a dedicated discussion thread for one substantial topic. Use it when the user wants to engage ' +
-    'with a subject in depth — thinking through a decision, designing something, studying a subject, ' +
-    'preparing for an interview, extended brainstorming — and the exchange is likely to span many messages ' +
-    'and benefit from holding the full discussion context. The thread opens as a separate forum topic where ' +
-    'the user talks to the discussion partner directly; it keeps the entire discussion in its own context ' +
-    'window, has access to Balabash tools, and reports back with a summary when the topic is closed. ' +
-    'Requires explicit user consent: propose starting a discussion and call this only after the user agrees.',
-  icon: '💬',
-  sdk: 'claude',
+    'Start a dedicated OpenAI Codex thread for a substantial task that benefits from an autonomous agent, ' +
+    'its built-in local workspace tools, or an extended multi-turn execution context. The user talks to Codex ' +
+    'directly in a separate forum topic; Codex also receives the full Balabash tool bundle and reports a summary ' +
+    'back when the task ends.',
+  icon: '🤖',
+  sdk: 'codex',
   parameters: {
     type: 'object',
     properties: {
-      topic: {
+      task: {
         type: 'string',
-        description: 'One focused subject for the discussion, as the user framed it.',
+        description: 'The concrete task for Codex to perform.',
       },
       context: {
         type: ['string', 'null'],
         description:
-          'Everything already established that the discussion should start from: the goal, constraints, ' +
-          'positions already voiced, relevant fileIds or event seqs. Null when the topic starts fresh.',
+          'Everything already known that Codex should start from: goals, constraints, decisions, fileIds or event refs. Null when no extra context is needed.',
       },
     },
-    required: ['topic', 'context'],
+    required: ['task', 'context'],
     additionalProperties: false,
   },
   tools: 'all',
@@ -144,7 +127,6 @@ export const agent = {
 
   run(rawInput: unknown, ctx: RunContext): AgentRun {
     const input = parseInput(rawInput);
-
     let endSummary: string | null = null;
     let settled = false;
     let resolveFinished: () => void;
@@ -155,19 +137,16 @@ export const agent = {
       rejectFinished = reject;
     });
 
-    const endDiscussionTool: SdkBridgeTool = {
-      name: 'end_discussion',
+    const endCodexTool: SdkBridgeTool = {
+      name: 'end_codex',
       description:
-        'End the discussion and hand the conversation back to the main assistant. ' +
-        'Call it when the topic is exhausted or the user wants to wrap up.',
+        'End this Codex task and report back to the main assistant. Call it when the task is complete, cannot continue, or the user wants to stop.',
       inputSchema: {
         type: 'object',
         properties: {
           summary: {
             type: 'string',
-            description:
-              'The record of this discussion for the main assistant: theses, decisions made, ' +
-              'positions taken, open threads. It is the only compressed trace the discussion leaves.',
+            description: 'What was done, the outcome, files or refs produced, and anything that remains.',
           },
         },
         required: ['summary'],
@@ -177,12 +156,12 @@ export const agent = {
         const summary = typeof args.summary === 'string' ? args.summary.trim() : '';
 
         if (!summary) {
-          throw new Error('end_discussion requires a non-empty summary');
+          throw new Error('end_codex requires a non-empty summary');
         }
 
         endSummary = summary;
 
-        return 'accepted — finish this turn with a short goodbye';
+        return 'accepted — finish this turn with a short handoff';
       },
     };
 
@@ -226,8 +205,7 @@ export const agent = {
     const session = ctx.harness.sdkSession({
       instructions: SYSTEM_PROMPT,
       initialMessage: buildInitialMessage(input),
-      model: DISCUSSION_MODEL,
-      extraTools: [endDiscussionTool, sendFileTool],
+      extraTools: [endCodexTool, sendFileTool],
     });
 
     const stop = (error?: unknown) => {
@@ -245,8 +223,6 @@ export const agent = {
       }
     };
 
-    // External cancellation (/cancel, cancel_thread, cascade): the terminal
-    // is already written; just shut the session down.
     ctx.signal.addEventListener('abort', () => stop(), { once: true });
 
     void (async () => {
@@ -270,9 +246,7 @@ export const agent = {
           }
         }
 
-        // The stream only ends after close(); reaching here without one is
-        // an inner-session failure.
-        stop(settled ? undefined : new Error('Discussion session ended before end_discussion was called'));
+        stop(settled ? undefined : new Error('Codex session ended before end_codex was called'));
       } catch (error) {
         stop(error);
       }
@@ -296,10 +270,6 @@ export const agent = {
           return;
         }
 
-        // Any other delivered event may have changed the tool catalog (an
-        // integration connected — stage 4); refresh the bridge before the
-        // model reads about it. When nothing changed the sync is a no-op
-        // diff; syncTools never rejects.
         void session.syncTools().then(() => {
           if (!settled) {
             session.push(describeEvent(event));
