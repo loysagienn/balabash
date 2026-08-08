@@ -12,6 +12,7 @@ import * as browser from './browser.ts';
 import * as claude from './claude.ts';
 import * as codex from './codex.ts';
 import * as discussion from './discussion.ts';
+import * as manager from './manager.ts';
 
 export const agentModules: Record<string, Record<string, unknown>> = {
   architect,
@@ -20,4 +21,5 @@ export const agentModules: Record<string, Record<string, unknown>> = {
   claude,
   codex,
   discussion,
+  manager,
 };
