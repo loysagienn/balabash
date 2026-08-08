@@ -41,8 +41,6 @@ const PLAYWRIGHT_CALL_TIMEOUT_MS = 5 * 60_000;
 
 type BrowserInput = {
   task: string;
-  startUrl: string | null;
-  constraints: string | null;
 };
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -54,11 +52,7 @@ function parseInput(input: unknown): BrowserInput {
     throw new Error('browser requires a non-empty task');
   }
 
-  return {
-    task: input.task.trim(),
-    startUrl: typeof input.startUrl === 'string' && input.startUrl.trim() ? input.startUrl.trim() : null,
-    constraints: typeof input.constraints === 'string' && input.constraints.trim() ? input.constraints.trim() : null,
-  };
+  return { task: input.task.trim() };
 }
 
 // ---------------------------------------------------------------------------
@@ -128,17 +122,7 @@ function buildInstructions(): string {
 }
 
 function buildInitialMessage(input: BrowserInput): string {
-  const parts = [`Task: ${input.task}`];
-
-  if (input.startUrl) {
-    parts.push(`Start URL: ${input.startUrl}`);
-  }
-
-  if (input.constraints) {
-    parts.push(`Constraints: ${input.constraints}`);
-  }
-
-  return parts.join('\n');
+  return `Task: ${input.task}`;
 }
 
 function describeEvent(event: Event): string {
@@ -202,6 +186,21 @@ async function convertPlaywrightResult(
   return blocks.length ? blocks : [{ type: 'text', text: '(empty result)' }];
 }
 
+// browser_take_screenshot only includes the image in its result when no
+// `filename` is passed — and the image in the result is what gets ingested
+// into workspace files (the local outputDir is disposable). Hide the
+// parameter from the model entirely so every screenshot yields a fileId.
+function sanitizeToolSchema(toolName: string, schema: Record<string, unknown>): Record<string, unknown> {
+  if (toolName !== 'browser_take_screenshot' || !isObject(schema.properties)) {
+    return schema;
+  }
+
+  const { filename: _dropped, ...properties } = schema.properties;
+  const required = Array.isArray(schema.required) ? schema.required.filter(name => name !== 'filename') : undefined;
+
+  return { ...schema, properties, ...(required ? { required } : {}) };
+}
+
 async function createPlaywrightBridgeTools(
   playwrightClient: Client,
   ctx: RunContext,
@@ -211,8 +210,15 @@ async function createPlaywrightBridgeTools(
   return tools.map(tool => ({
     name: tool.name,
     description: tool.description ?? tool.name,
-    inputSchema: (tool.inputSchema as Record<string, unknown>) ?? { type: 'object', properties: {} },
+    inputSchema: sanitizeToolSchema(
+      tool.name,
+      (tool.inputSchema as Record<string, unknown>) ?? { type: 'object', properties: {} },
+    ),
     handler: async (args: JsonObject) => {
+      if (tool.name === 'browser_take_screenshot') {
+        delete args.filename;
+      }
+
       const raw = (await playwrightClient.callTool({ name: tool.name, arguments: args }, undefined, {
         timeout: PLAYWRIGHT_CALL_TIMEOUT_MS,
         resetTimeoutOnProgress: true,
@@ -242,18 +248,11 @@ export const agent = {
     properties: {
       task: {
         type: 'string',
-        description: 'The concrete browsing task to perform, in full detail.',
-      },
-      startUrl: {
-        type: ['string', 'null'],
-        description: 'The URL to open first, or null when the agent should decide.',
-      },
-      constraints: {
-        type: ['string', 'null'],
-        description: 'Hard constraints (what not to do, limits, credentials policy), or null.',
+        description:
+          'The concrete browsing task to perform, in full detail — including where to start and any constraints (what not to do, limits, credentials policy).',
       },
     },
-    required: ['task', 'startUrl', 'constraints'],
+    required: ['task'],
     additionalProperties: false,
   },
   tools: [],

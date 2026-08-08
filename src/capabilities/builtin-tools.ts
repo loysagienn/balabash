@@ -1,7 +1,8 @@
 // Builtin pull tools (§5.2): deep read access without a rights model, scoped
-// to the workspace — list_threads (list + summaries), get_thread (transcript),
-// get_event (one event in full), get_file (contents into model context).
-// Layered reading mirrors the summarization: summaries first, the full
+// to the workspace — list_threads (the list, no summaries), get_thread (one
+// thread + summary), get_thread_events (the transcript), get_event (one event
+// in full), get_file (contents into model context). Layered reading mirrors
+// the summarization: the list first, a summary on request, the full
 // transcript on demand. One implementation serves both the coordinator's
 // function catalog and the ToolsApi handed to dynamic agents.
 
@@ -47,7 +48,8 @@ export const BUILTIN_TOOL_DEFINITIONS: ToolDefinition[] = [
   {
     name: 'list_threads',
     description:
-      'List the workspace threads: agent, title, status and the summary each completed thread left. Start here when past or parallel work matters; get_thread reads a full transcript.',
+      'List the workspace threads: agent, title, status and timestamps (no summaries). Start here when past or ' +
+      'parallel work matters; get_thread reads one thread with its summary, get_thread_events its full transcript.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -56,15 +58,46 @@ export const BUILTIN_TOOL_DEFINITIONS: ToolDefinition[] = [
           enum: ['active', 'completed', 'failed', 'cancelled', null],
           description: 'Only threads with this status, or null for all.',
         },
+        createdAtGte: {
+          type: ['string', 'null'],
+          description: 'Only threads started at or after this ISO 8601 time, or null.',
+        },
+        createdAtLte: {
+          type: ['string', 'null'],
+          description: 'Only threads started at or before this ISO 8601 time, or null.',
+        },
+        limit: {
+          type: ['integer', 'null'],
+          description: 'Return at most this many threads, keeping the newest matches (default 100).',
+        },
       },
-      required: ['status'],
+      required: ['status', 'createdAtGte', 'createdAtLte', 'limit'],
       additionalProperties: false,
     },
   },
   {
     name: 'get_thread',
     description:
-      'Read one thread of this workspace: its metadata and transcript (the events it authored plus the events addressed to it). Long transcripts return the newest part; use get_event for anything truncated.',
+      'Read one thread of this workspace: the same fields as list_threads plus the summary the thread left. ' +
+      'For the detailed course of the thread use get_thread_events.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        threadId: {
+          type: 'string',
+          description: 'The thread id, e.g. from list_threads or a thread.started event.',
+        },
+      },
+      required: ['threadId'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'get_thread_events',
+    description:
+      'Read the transcript of one thread: the events it authored plus the events addressed to it, newest part ' +
+      'for long threads. Heavy output — use only when the detailed course of the thread really matters; ' +
+      'otherwise get_thread (metadata + summary) is enough. Use get_event for anything truncated.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -103,6 +136,8 @@ function eventToJson(event: Event): JsonObject {
   };
 }
 
+// The list view: everything but the summary — summaries grow with history
+// and are read per thread via get_thread.
 function threadToJson(thread: Thread): JsonObject {
   return {
     threadId: thread.id,
@@ -110,7 +145,6 @@ function threadToJson(thread: Thread): JsonObject {
     agent: thread.agent,
     title: thread.title,
     status: thread.status,
-    summary: (thread.summary as JsonObject | null) ?? null,
     createdAt: thread.createdAt.toISOString(),
     updatedAt: thread.updatedAt.toISOString(),
   };
@@ -160,6 +194,22 @@ async function executeGetFile(args: JsonObject, ctx: BuiltinToolContext): Promis
   };
 }
 
+function parseDateArg(name: string, value: unknown): Date | undefined {
+  if (value === null || value === undefined) {
+    return undefined;
+  }
+
+  const date = typeof value === 'string' ? new Date(value) : null;
+
+  if (!date || Number.isNaN(date.getTime())) {
+    throw new Error(`list_threads: ${name} must be an ISO 8601 date-time string`);
+  }
+
+  return date;
+}
+
+const LIST_THREADS_LIMIT_MAX = 1000;
+
 async function executeListThreads(args: JsonObject, ctx: BuiltinToolContext): Promise<ToolResult> {
   const status = typeof args.status === 'string' ? args.status : undefined;
 
@@ -167,38 +217,74 @@ async function executeListThreads(args: JsonObject, ctx: BuiltinToolContext): Pr
     throw new Error(`list_threads: unknown status "${status}"`);
   }
 
+  const createdAtGte = parseDateArg('createdAtGte', args.createdAtGte);
+  const createdAtLte = parseDateArg('createdAtLte', args.createdAtLte);
+
+  let limit: number | undefined;
+
+  if (args.limit !== null && args.limit !== undefined) {
+    if (typeof args.limit !== 'number' || !Number.isInteger(args.limit) || args.limit < 1) {
+      throw new Error('list_threads: limit must be a positive integer');
+    }
+
+    limit = Math.min(args.limit, LIST_THREADS_LIMIT_MAX);
+  }
+
   const threads = await listThreads(ctx.userId, {
     ...(status !== undefined ? { status: status as Thread['status'] } : {}),
+    ...(createdAtGte !== undefined ? { createdAtGte } : {}),
+    ...(createdAtLte !== undefined ? { createdAtLte } : {}),
+    ...(limit !== undefined ? { limit } : {}),
   });
 
   return { content: [], structuredContent: { threads: threads.map(threadToJson) } };
 }
 
-async function executeGetThread(args: JsonObject, ctx: BuiltinToolContext): Promise<ToolResult> {
-  const threadId = typeof args.threadId === 'string' ? args.threadId.trim() : '';
+// Same error as a missing thread: existence outside the workspace is not
+// leaked.
+async function getWorkspaceThread(threadId: string, ctx: BuiltinToolContext): Promise<Thread> {
+  const thread = threadId ? await getThread(threadId) : null;
 
-  if (!threadId) {
-    throw new Error('get_thread requires threadId');
-  }
-
-  const thread = await getThread(threadId);
-
-  // Same error as a missing thread: existence outside the workspace is not
-  // leaked.
   if (!thread || thread.userId !== ctx.userId) {
     throw new Error(`Thread "${threadId}" not found in this workspace`);
   }
 
-  const events = await getTranscript(threadId, { last: GET_THREAD_HISTORY_LIMIT });
-  const transcript = buildTranscript(events);
+  return thread;
+}
+
+async function executeGetThread(args: JsonObject, ctx: BuiltinToolContext): Promise<ToolResult> {
+  const threadId = typeof args.threadId === 'string' ? args.threadId.trim() : '';
+  const thread = await getWorkspaceThread(threadId, ctx);
 
   return {
-    content: transcript.text ? [{ type: 'text', text: transcript.text }] : [],
+    content: [],
     structuredContent: {
-      thread: threadToJson(thread),
-      transcriptTruncated: transcript.dropped || events.length >= GET_THREAD_HISTORY_LIMIT,
+      thread: {
+        ...threadToJson(thread),
+        summary: (thread.summary as JsonObject | null) ?? null,
+      },
     },
   };
+}
+
+// The transcript goes out as a plain text block, without structuredContent:
+// per the MCP spec a structuredContent result is expected to mirror into
+// content, so clients (the Claude Agent SDK among them) may show the model
+// structuredContent alone — a split result would lose the transcript.
+async function executeGetThreadEvents(args: JsonObject, ctx: BuiltinToolContext): Promise<ToolResult> {
+  const threadId = typeof args.threadId === 'string' ? args.threadId.trim() : '';
+  const thread = await getWorkspaceThread(threadId, ctx);
+
+  const events = await getTranscript(thread.id, { last: GET_THREAD_HISTORY_LIMIT });
+  const transcript = buildTranscript(events);
+  const truncated = transcript.dropped || events.length >= GET_THREAD_HISTORY_LIMIT;
+
+  const parts = [
+    ...(truncated ? ['(transcript truncated: only the newest part is shown; use get_event(seq) for older events)'] : []),
+    ...(transcript.text ? [transcript.text] : ['(no events)']),
+  ];
+
+  return { content: [{ type: 'text', text: parts.join('\n') }] };
 }
 
 const executors: Record<string, (args: JsonObject, ctx: BuiltinToolContext) => Promise<ToolResult>> = {
@@ -206,6 +292,7 @@ const executors: Record<string, (args: JsonObject, ctx: BuiltinToolContext) => P
   get_file: executeGetFile,
   list_threads: executeListThreads,
   get_thread: executeGetThread,
+  get_thread_events: executeGetThreadEvents,
 };
 
 export function isBuiltinTool(name: string): boolean {

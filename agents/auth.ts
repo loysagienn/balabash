@@ -28,7 +28,7 @@ Outcomes arrive into this thread as [Balabash event] messages: connection.comple
 
 An integration task usually chains several steps — e.g. an installation OAuth client first, then the user's authorization. After an intermediate outcome, continue with the next step in this same thread right away (issue the next link without waiting to be asked); call end_thread only when the whole task is done, has failed for good, or the user stops.
 
-You also have the workspace pull tools (list_threads, get_thread, get_event, get_file) if context is needed.
+You also have the workspace pull tools (list_threads, get_thread, get_thread_events, get_event, get_file) if context is needed.
 
 Call end_thread(summary) when the task is done or the user wants to stop. The summary reports the outcome to the main assistant: what got connected or provisioned, what failed, what remains. In the same turn, use your final text as a short goodbye.`;
 

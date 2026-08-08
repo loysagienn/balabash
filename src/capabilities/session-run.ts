@@ -206,8 +206,9 @@ function createChildTools(
     name: 'spawn_agent',
     description:
       `Spawn a sub-agent in a child thread and become its operator. Allowed agents: ${allowedAgents.join(', ')}. ` +
-      'The call returns the child threadId. The child replies arrive as messages labeled with that threadId; ' +
-      'drive it step by step with send_to_thread, and cancel it with cancel_thread when it is no longer needed.',
+      'The call returns the child threadId. The child works asynchronously: its replies arrive on their own as ' +
+      'messages labeled with that threadId — end your turn and wait for them. Drive it step by step with ' +
+      'send_to_thread, and cancel it with cancel_thread when it is no longer needed.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -231,7 +232,10 @@ function createChildTools(
 
       childThreadIds.add(child.threadId);
 
-      return `spawned — child threadId: ${child.threadId}; its replies arrive as messages labeled with this id`;
+      return (
+        `spawned — child threadId: ${child.threadId}; its replies arrive on their own as messages labeled ` +
+        'with this id. End your turn and wait.'
+      );
     },
   };
 
@@ -267,7 +271,10 @@ function createChildTools(
 
       await ctx.sendToChild(threadId, text, fileIds.length ? fileIds : undefined);
 
-      return 'sent';
+      return (
+        "sent — the child's reply will arrive on its own as a new message in this session. " +
+        'End your turn and wait for it.'
+      );
     },
   };
 

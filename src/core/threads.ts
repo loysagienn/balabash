@@ -39,24 +39,36 @@ export async function getThread(id: string): Promise<Thread | null> {
 type ListThreadsOptions = {
   status?: ThreadStatus;
   parentId?: string | null;
+  createdAtGte?: Date;
+  createdAtLte?: Date;
   limit?: number;
 };
 
 export async function listThreads(
   userId: string,
-  { status, parentId, limit = 100 }: ListThreadsOptions = {},
+  { status, parentId, createdAtGte, createdAtLte, limit = 100 }: ListThreadsOptions = {},
 ): Promise<Thread[]> {
+  // The limit keeps the newest matching threads (the useful end of a growing
+  // workspace); the result is returned in creation order regardless.
   const rows = await prisma.thread.findMany({
     where: {
       userId,
       ...(status !== undefined ? { status } : {}),
       ...(parentId !== undefined ? { parentId } : {}),
+      ...(createdAtGte !== undefined || createdAtLte !== undefined
+        ? {
+            createdAt: {
+              ...(createdAtGte !== undefined ? { gte: createdAtGte } : {}),
+              ...(createdAtLte !== undefined ? { lte: createdAtLte } : {}),
+            },
+          }
+        : {}),
     },
-    orderBy: { createdSeq: 'asc' },
+    orderBy: { createdSeq: 'desc' },
     take: limit,
   });
 
-  return rows.map(toThread);
+  return rows.reverse().map(toThread);
 }
 
 // Every active non-main thread across all workspaces — the restart module's
