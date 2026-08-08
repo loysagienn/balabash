@@ -47,6 +47,12 @@ export const config = {
     return Number(requireEnv('HTTP_PORT'));
   },
 
+  // IANA timezone the schedule module evaluates cron expressions in. One-shot
+  // triggers (at) are absolute instants and do not depend on it.
+  get scheduleTimezone(): string {
+    return process.env.SCHEDULE_TIMEZONE || 'Asia/Jerusalem';
+  },
+
   get spacesRegion(): string {
     return requireEnv('SPACES_REGION');
   },

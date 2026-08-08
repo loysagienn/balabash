@@ -21,6 +21,7 @@ export const SECRETS_PROVISIONED = 'secrets.provisioned';
 export const CONNECTION_COMPLETED = 'connection.completed';
 export const CONNECTION_FAILED = 'connection.failed';
 export const CONNECTION_REAUTHORIZATION_REQUIRED = 'connection.reauthorization_required';
+export const SCHEDULE_FIRED = 'schedule.fired';
 
 // A thread is terminated by exactly one of these; the first one wins.
 export const TERMINAL_TYPES: ReadonlySet<string> = new Set([THREAD_COMPLETED, THREAD_FAILED, THREAD_CANCELLED]);
@@ -46,6 +47,10 @@ const CANONICAL_TYPES: ReadonlySet<string> = new Set([
   // tool, and the completion the fresh process reports to the requester.
   SYSTEM_RESTART_REQUESTED,
   SYSTEM_RESTART_COMPLETED,
+  // A scheduled task firing: written by the schedule heart (actor system,
+  // no author thread) and addressed to the workspace's main thread — the
+  // coordinator interprets the content.
+  SCHEDULE_FIRED,
 ]);
 
 // Sanitized integration lifecycle events (connection.connected, …) form an
@@ -64,6 +69,7 @@ export const RESERVED_DOMAINS: ReadonlySet<string> = new Set([
   'capability',
   'oauth_client',
   'secrets',
+  'schedule',
 ]);
 
 const DOMAIN_TYPE_RE = /^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$/;

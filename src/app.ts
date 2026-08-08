@@ -16,6 +16,9 @@ import { createAuthToolServer } from './capabilities/auth-tools.ts';
 import { createRestartToolServer } from './capabilities/restart-tools.ts';
 import { startReauthDetector } from './capabilities/reauth-detector.ts';
 import { loadToolServers, registerBuiltinToolServer } from './capabilities/tool-manager.ts';
+import { loadTasks } from './schedule/catalog.ts';
+import { startScheduleHeart } from './schedule/heart.ts';
+import { createScheduleToolServer } from './schedule/tools.ts';
 import { createCoordinatorRun, hasActiveCoordinatorTurns } from './coordinator/index.ts';
 import { startWebServer } from './web/index.ts';
 import { startThreadRouter } from './runtime/router.ts';
@@ -63,11 +66,20 @@ if (tombstoned > 0) {
 
 loadAgents();
 
+// Scheduled-task bodies ship in the bundle like agents; a broken module fails
+// the boot atomically (the supervisor rolls back to the last good bundle).
+loadTasks();
+
 // Consent servers (§7.4): only agents naming them explicitly get them — the
 // auth tools for the auth agent, the restart request for the coordinator and
 // the claude engineering agent.
 registerBuiltinToolServer(createAuthToolServer());
 registerBuiltinToolServer(createRestartToolServer());
+
+// The schedule registry tools are NOT consent-gated: any agent may register,
+// list, cancel or manually run a scheduled task; the audit is the tool.call.*
+// journal in the calling agent's thread.
+registerBuiltinToolServer(createScheduleToolServer());
 
 // Local tool servers see the global files surface; workspace scoping happens
 // at the calling run (§7.4).
@@ -111,6 +123,10 @@ consumers.push(
 consumers.push(startTelegramDelivery({ bot }));
 
 consumers.push(startReauthDetector());
+
+// The schedule heart: boot sweep of sleeping code tasks, then the timer that
+// fires due triggers. Not a log consumer, but it stops like one.
+consumers.push(startScheduleHeart());
 
 // Every boot satisfies the restart requests recorded before it — report the
 // completions (with the supervisor's rollback marker and a migration

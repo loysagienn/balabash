@@ -264,6 +264,15 @@ const renderers: Record<string, Renderer> = {
       requestedBy: payload.requestedBy,
     }),
 
+  // A scheduled task firing (schedule heart → main thread): slug names the
+  // registered task, note is a note-task's data. A code task may push extra
+  // payload fields of its own — they ride along after the known ones.
+  'schedule.fired': payload => {
+    const { slug, name, note, ...rest } = payload;
+
+    return omitNullish({ slug, name, note, ...rest });
+  },
+
   'system.restart.completed': payload =>
     omitNullish({
       requestSeq: payload.requestSeq,

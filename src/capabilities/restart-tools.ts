@@ -48,7 +48,7 @@ const REQUEST_RESTART_FUNCTION: ToolFunction = {
 // Newest mtime across the source tree, to warn when dist/ predates the last
 // edit — the restart would boot the previous bundle. A convention nudge, not
 // a gate: the agent owns building (§14 regламент).
-const WATCHED_SOURCES = ['src', 'agents', 'tools', 'build', 'prisma', 'mcp-servers', 'package.json', 'supervisor.js'];
+const WATCHED_SOURCES = ['src', 'agents', 'tools', 'tasks', 'build', 'prisma', 'mcp-servers', 'package.json', 'supervisor.js'];
 
 async function newestMtimeMs(target: string): Promise<number> {
   let stats;

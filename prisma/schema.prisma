@@ -259,6 +259,32 @@ model LlmRequest {
   @@map("llm_requests")
 }
 
+// Durable registry of named scheduled tasks — the schedule module's organ of
+// initiative. The trigger is an optional slot: cron (recurring, alarm-clock
+// semantics — a missed moment is skipped, the next one counts from "now") or
+// at (one-shot, "not before T" — fired once and the row is deleted); a task
+// with neither is a stored procedure started manually via run_task. kind
+// 'note' carries data that fires as a schedule.fired event into the main
+// thread; kind 'code' names a run(ctx) body in the static tasks/ catalog (a
+// row without a body in the current process sleeps until a rebuild+restart).
+// Runs leave no rows behind — a task's only memory is the events it pushes.
+model ScheduledTask {
+  id          String    @id @default(uuid())
+  slug        String    @unique
+  userId      String    @map("user_id")
+  name        String
+  description String?
+  kind        String // 'note' | 'code'
+  cron        String? // cron expression, evaluated in config.scheduleTimezone
+  at          DateTime? // one-shot "not before T"; consumed on fire
+  note        String? // the payload of a 'note' task; ignored for 'code'
+  createdBy   String?   @map("created_by") // agent that registered the task
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  @@index([userId])
+  @@map("scheduled_tasks")
+}
+
 model File {
   id               String    @id @default(uuid())
   bucket           String

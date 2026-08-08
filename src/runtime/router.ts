@@ -28,6 +28,7 @@ import {
   CONNECTION_FAILED,
   CONNECTION_REAUTHORIZATION_REQUIRED,
   OAUTH_CLIENT_PROVISIONED,
+  SCHEDULE_FIRED,
   SECRETS_PROVISIONED,
   SYSTEM_RESTART_COMPLETED,
   TERMINAL_TYPES,
@@ -70,6 +71,9 @@ const ROUTED_TYPES = [
   // The fresh process reports a finished restart to the requester thread
   // (redirected to main when the requester is gone) — wake the addressee.
   SYSTEM_RESTART_COMPLETED,
+  // A scheduled task fired into the main thread — wake the coordinator so it
+  // interprets the note (or a code task's pushed payload) right away.
+  SCHEDULE_FIRED,
 ];
 
 export function startThreadRouter({ createRun, spawnRun }: RouterHooks): Consumer {
