@@ -55,14 +55,40 @@ async function toModelContent(block: ContentBlock): Promise<ModelContentPart> {
   }
 }
 
+// get_file returns structuredContent only ({..., contentType, url}); the
+// harness recognizes it by the tool name and feeds the presigned URL to the
+// model so the file content actually enters context.
+function fileResultToModelPart(result: ToolResult): ModelContentPart | null {
+  const structured = result.structuredContent;
+  const url = typeof structured?.url === 'string' ? structured.url : null;
+
+  if (!url) {
+    return null;
+  }
+
+  const contentType = typeof structured?.contentType === 'string' ? structured.contentType : '';
+
+  return contentType.toLowerCase().startsWith('image/')
+    ? { type: 'input_image', image_url: url, detail: 'auto' }
+    : { type: 'input_file', file_url: url, detail: 'auto' };
+}
+
 // Renders a canonical tool result for a function_call_output. Pure text
 // results collapse into a single string; anything with binary content stays
 // a content array so images actually enter the model context.
-export async function toolResultToModelOutput(result: ToolResult): Promise<ModelOutput> {
+export async function toolResultToModelOutput(result: ToolResult, functionName?: string): Promise<ModelOutput> {
   const parts: ModelContentPart[] = [];
 
   if (result.structuredContent !== undefined) {
     parts.push({ type: 'input_text', text: JSON.stringify(result.structuredContent) });
+  }
+
+  if (functionName === 'get_file') {
+    const filePart = fileResultToModelPart(result);
+
+    if (filePart) {
+      parts.push(filePart);
+    }
   }
 
   for (const block of result.content) {

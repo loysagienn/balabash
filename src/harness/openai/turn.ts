@@ -102,7 +102,7 @@ export async function runTurn({
           outputs.push({
             type: 'function_call_output',
             call_id: functionCall.call_id,
-            output: await toolResultToModelOutput(outcome.result),
+            output: await toolResultToModelOutput(outcome.result, functionCall.name),
           });
           break;
 

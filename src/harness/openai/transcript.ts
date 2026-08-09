@@ -169,13 +169,22 @@ const renderers: Record<string, Renderer> = {
   // payload: { callId, functionName, serverName?, toolName?, result }. The
   // canonical result {content, structuredContent?} is compacted: structured
   // content as structure, text blocks inline, binary blocks as refs.
+  // A get_file result carries a presigned url that expires within minutes —
+  // it is dropped from the transcript (call get_file again for a fresh one).
   'tool.call.completed': payload => {
     const result = asObject(payload.result);
     const { text, files } = renderContentBlocks(result.content);
+    let structured = result.structuredContent;
+
+    if (payload.functionName === 'get_file' && structured && typeof structured === 'object' && !Array.isArray(structured)) {
+      const { url: _url, ...rest } = structured as JsonObject;
+
+      structured = rest;
+    }
 
     return omitNullish({
       functionName: payload.functionName,
-      structured: result.structuredContent,
+      structured,
       text,
       files: files.length ? files : undefined,
     });

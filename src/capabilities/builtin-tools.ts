@@ -9,7 +9,7 @@
 import type { Event, JsonObject, Thread, ToolDefinition, ToolResult } from '../core/contract.ts';
 import { getTranscript, getUserEvent } from '../core/events.ts';
 import { getThread, listThreads } from '../core/threads.ts';
-import { getUserFile } from '../files/index.ts';
+import { getFileDownloadUrl, getUserFile } from '../files/index.ts';
 import { buildTranscript } from '../harness/openai/transcript.ts';
 
 export const BUILTIN_TOOL_DEFINITIONS: ToolDefinition[] = [
@@ -32,7 +32,7 @@ export const BUILTIN_TOOL_DEFINITIONS: ToolDefinition[] = [
   {
     name: 'get_file',
     description:
-      'Load a stored file into model context. Call only when the file contents are needed; the transcript already contains its fileId and metadata.',
+      'Read a stored file: its metadata plus a presigned, time-limited download URL. Use the URL to share the file or to download it when the contents are needed; the transcript already contains the fileId and metadata.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -176,13 +176,15 @@ async function executeGetFile(args: JsonObject, ctx: BuiltinToolContext): Promis
   // Scoped to the workspace: a model-supplied fileId must not reach across
   // the user boundary.
   const file = await getUserFile(ctx.userId, fileId);
-  const isImage = Boolean(file.contentType?.toLowerCase().startsWith('image/'));
+  const { url } = await getFileDownloadUrl(fileId);
 
-  // Metadata goes into structuredContent; the content itself is a canonical
-  // block — the harness materializes the presigned URL when the model needs
-  // the bytes (§9).
+  // structuredContent only (our tools return no content blocks): metadata
+  // plus a presigned URL. The OpenAI harness recognizes the result by the
+  // tool name and feeds the URL to the model as input_image/input_file;
+  // SDK sessions download the URL themselves when the contents matter.
+  // The transcript renders this result without the url — it expires.
   return {
-    content: [isImage ? { type: 'image', fileId } : { type: 'file', fileId }],
+    content: [],
     structuredContent: {
       fileId: file.id,
       filename: file.originalFilename,
@@ -190,6 +192,7 @@ async function executeGetFile(args: JsonObject, ctx: BuiltinToolContext): Promis
       sizeBytes: file.sizeBytes,
       width: file.width,
       height: file.height,
+      url,
     },
   };
 }
