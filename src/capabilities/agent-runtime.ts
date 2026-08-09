@@ -36,6 +36,7 @@ import { Ajv, type ValidateFunction } from 'ajv';
 import { getAgent } from './agent-catalog.ts';
 import { BUILTIN_TOOL_DEFINITIONS, callBuiltinTool, isBuiltinTool } from './builtin-tools.ts';
 import { createSessionRun } from './session-run.ts';
+import { callToolJournaled } from './tool-journal.ts';
 import { callServerTool, getServerToolFunctions, type ToolBundle } from './tool-manager.ts';
 import { validateAgentRun } from './validate-agent.ts';
 
@@ -95,8 +96,8 @@ function clampNotificationLevel(requested: NotificationLevel, threadLevel: Notif
 }
 
 // The run's ToolsApi (§7.4): the builtin pull tools plus the agent's bundle
-// of tool servers. Every call is journaled as tool.call.* in the run's
-// thread; the completed payload is the §9 canon.
+// of tool servers. Every call goes through the one tool.call.* journaling
+// point; the completed payload is the verbatim result (§9).
 function createToolsApi({
   userId,
   threadId,
@@ -108,17 +109,6 @@ function createToolsApi({
   agentName: string;
   bundle: ToolBundle;
 }): ToolsApi {
-  const journal = async (type: string, payload: JsonObject) => {
-    await appendEvent({
-      type,
-      actor: 'agent',
-      agentName,
-      userId,
-      threadId,
-      payload,
-    });
-  };
-
   return {
     list: async () => [
       ...BUILTIN_TOOL_DEFINITIONS,
@@ -130,47 +120,25 @@ function createToolsApi({
     ],
 
     call: async (name, args): Promise<ToolResult> => {
-      const callId = randomUUID();
+      const outcome = await callToolJournaled({ userId, threadId, agentName }, randomUUID(), name, args, () =>
+        isBuiltinTool(name)
+          ? callBuiltinTool(name, args, { userId }).then(result => ({
+              serverName: 'builtin',
+              toolName: name,
+              result,
+            }))
+          : callServerTool({ userId, threadId }, bundle, name, args),
+      );
 
-      await journal('tool.call.started', { callId, functionName: name, input: args });
-
-      try {
-        const outcome = isBuiltinTool(name)
-          ? { serverName: 'builtin', toolName: name, result: await callBuiltinTool(name, args, { userId }) }
-          : await callServerTool({ userId, threadId }, bundle, name, args);
-
-        await journal('tool.call.completed', {
-          callId,
-          functionName: name,
-          serverName: outcome.serverName,
-          toolName: outcome.toolName,
-          result: outcome.result as unknown as JsonObject,
-        });
-
-        return outcome.result;
-      } catch (error) {
-        const message = getErrorMessage(error);
-
-        await journal('tool.call.failed', { callId, functionName: name, error: message });
-
-        throw new Error(message);
-      }
+      return outcome.result;
     },
   };
 }
 
 function createFilesApi(userId: string, agentName: string): FilesApi {
   return {
-    getInfo: async fileId => {
-      const file = await getUserFile(userId, fileId);
-
-      return {
-        fileId: file.id,
-        filename: file.originalFilename,
-        contentType: file.contentType,
-        sizeBytes: file.sizeBytes,
-      };
-    },
+    // The one FileRef (§9): the files layer already returns it verbatim.
+    getInfo: async fileId => getUserFile(userId, fileId),
 
     getDownloadUrl: async fileId => {
       // Scope check first: the presigned URL layer itself is workspace-blind.
@@ -184,8 +152,8 @@ function createFilesApi(userId: string, agentName: string): FilesApi {
     // Workspace-scoped by construction: the stored file belongs to the run's
     // user, so it is deliverable through every user-scoped path (ctx.files,
     // get_file, send_message fileIds).
-    ingest: async input => {
-      const file = await ingestFile({
+    ingest: async input =>
+      ingestFile({
         // The contract's NodeJS.ReadableStream is a stream.Readable at
         // runtime; the storage layer types are narrower than the interface.
         body: input.body as StorageBody,
@@ -194,15 +162,7 @@ function createFilesApi(userId: string, agentName: string): FilesApi {
         sizeBytes: input.sizeBytes ?? null,
         scope: agentName,
         userId,
-      });
-
-      return {
-        fileId: file.id,
-        filename: file.originalFilename,
-        contentType: file.contentType,
-        sizeBytes: file.sizeBytes,
-      };
-    },
+      }),
   };
 }
 
@@ -373,8 +333,8 @@ export async function spawnAgentRun(thread: Thread, startedEvent: Event): Promis
     harness: {
       sdkSession: options =>
         declaration.sdk === 'codex'
-          ? createCodexSession(options, { tools, files, cwd: stateDir })
-          : createClaudeSession(options, { tools, files, cwd: stateDir }),
+          ? createCodexSession(options, { tools, cwd: stateDir })
+          : createClaudeSession(options, { tools, cwd: stateDir }),
     },
 
     tools,

@@ -4,6 +4,7 @@ import { BlockList, isIP } from 'node:net';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { z } from 'zod';
+import { ToolError, toErrorResult, toStructuredResult } from '../src/capabilities/tool-result.ts';
 
 const DEFAULT_TIMEOUT_SECONDS = 30;
 const MIN_TIMEOUT_SECONDS = 1;
@@ -473,22 +474,13 @@ function createMcpServer() {
               : 'Size unknown (no Content-Length header).');
         }
 
-        // structuredContent: the result reaches the event log and the model
-        // as structure, not a JSON string.
-        return {
-          content: [],
-          structuredContent: result,
-        };
+        // Structured only (§9): the result reaches the event log and the
+        // model as structure, not a JSON string.
+        return toStructuredResult(result);
       } catch (error) {
-        const message =
-          error instanceof WebFetchError
-            ? `[${error.kind}] ${error.message}`
-            : `[unexpected_error] ${error instanceof Error ? error.message : String(error)}`;
-
-        return {
-          content: [{ type: 'text' as const, text: message }],
-          isError: true,
-        };
+        return toErrorResult(
+          error instanceof WebFetchError ? new ToolError(error.message, { kind: error.kind }) : error,
+        );
       }
     },
   );

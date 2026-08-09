@@ -8,13 +8,13 @@
 // their bundled ToolsApi.
 
 import { UnauthorizedError } from '@modelcontextprotocol/sdk/client/auth.js';
-import type { JsonObject, ToolResult } from '../core/contract.ts';
+import type { JsonObject, JsonValue, ToolResult } from '../core/contract.ts';
 import { localToolModules } from '../../tools/index.ts';
 import { connectExternalServer, connectUserServer, type ConnectedServer, type ToolFunction } from './mcp-client.ts';
 import { startLocalToolSource, type LocalToolContext, type LocalToolSource } from './local-tool-source.ts';
 import { readExternalServerConfigs, type ExternalServerConfig } from './server-config.ts';
 import { resolveExternalServerSecrets } from './server-secrets.ts';
-import { extractErrorText, toCanonicalToolResult } from './result-adapter.ts';
+import { runToolHandler } from './tool-result.ts';
 import { BUILTIN_TOOL_DEFINITIONS } from './builtin-tools.ts';
 import { listUserConnections, markReauthorizationRequired } from './connections/index.ts';
 
@@ -69,7 +69,9 @@ export type BuiltinToolServer = {
   // getFunctions may expose a state-dependent subset with live descriptions.
   functionNames: string[];
   getFunctions(userId: string): Promise<ToolFunction[]>;
-  call(toolName: string, args: JsonObject, ctx: BuiltinServerCallContext): Promise<ToolResult>;
+  // Birth contract (§9): the tool returns data or throws; the platform
+  // wrapper (runToolHandler) shapes the structured result at the call site.
+  call(toolName: string, args: JsonObject, ctx: BuiltinServerCallContext): Promise<JsonValue>;
 };
 
 const builtinToolServers = new Map<string, BuiltinToolServer>();
@@ -548,7 +550,7 @@ export async function callServerTool(
     return {
       serverName: builtinServer.name,
       toolName: functionName,
-      result: await builtinServer.call(functionName, args, ctx),
+      result: await runToolHandler(() => builtinServer.call(functionName, args, ctx)),
     };
   }
 
@@ -586,16 +588,10 @@ export async function callServerTool(
     throw error;
   }
 
-  if (raw.isError) {
-    throw new Error(extractErrorText(raw));
-  }
-
-  const result = await toCanonicalToolResult(raw, {
-    userId,
-    serverName: fn.serverName,
-    toolName: fn.toolName,
-  });
-
-  return { serverName: fn.serverName, toolName: fn.toolName, result };
+  // Verbatim record (§4.3): the raw MCP answer exactly as the server
+  // produced it — isError included ("the tool answered, albeit with an
+  // error"). Only breakage of the call itself (transport, auth, unknown
+  // tool) throws — journaled as tool.call.failed by the caller.
+  return { serverName: fn.serverName, toolName: fn.toolName, result: raw as ToolResult };
 }
 

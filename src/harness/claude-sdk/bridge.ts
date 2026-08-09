@@ -1,23 +1,15 @@
 // In-process MCP bridge (§8.2): exposes the run's ToolsApi bundle plus the
-// agent's bridge-only tools to the inner SDK session. Port of the v1
-// discussion bridge with the conversion simplified under the canon (§9):
-// canonical ContentBlocks map straight to MCP content, file references are
-// materialized from files on demand — the v1 MCP→OpenAI→MCP round-trip is
-// gone.
+// agent's bridge-only tools to the inner SDK session. The bridge is a
+// pass-through, not a projection (§9): a live tool result goes to the inner
+// session exactly as the server produced it — raw MCP content, base64 and
+// isError included, nothing re-encoded or padded. Bridge-only tools follow
+// the birth contract (data or throw) and are shaped by the platform wrapper.
 
 import { McpServer, type RegisteredTool } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
-import type {
-  ContentBlock,
-  FilesApi,
-  JsonObject,
-  SdkBridgeTool,
-  ToolDefinition,
-  ToolResult,
-  ToolsApi,
-} from '../../core/contract.ts';
-
-type McpContent = { type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string };
+import type { JsonObject, SdkBridgeTool, ToolDefinition, ToolsApi } from '../../core/contract.ts';
+import { runToolHandler, toErrorResult } from '../../capabilities/tool-result.ts';
 
 function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -25,82 +17,6 @@ function getErrorMessage(error: unknown): string {
 
 function inputSchema(parameters: Record<string, unknown>) {
   return z.fromJSONSchema(parameters as never);
-}
-
-// Images are inlined as base64 for the inner model; other binary refs become
-// text references with a presigned URL the model can relay. Materialization
-// is lazy by construction: it happens only when a tool result actually
-// reaches the session.
-const IMAGE_INLINE_LIMIT_BYTES = 5 * 1024 * 1024;
-
-async function blockToMcpContent(block: ContentBlock, files: FilesApi): Promise<McpContent> {
-  switch (block.type) {
-    case 'text':
-      return { type: 'text', text: block.text };
-
-    case 'image': {
-      try {
-        const info = await files.getInfo(block.fileId);
-
-        if (info.sizeBytes !== null && info.sizeBytes > IMAGE_INLINE_LIMIT_BYTES) {
-          throw new Error(`image is too large to inline (${info.sizeBytes} bytes)`);
-        }
-
-        const url = await files.getDownloadUrl(block.fileId);
-        const response = await fetch(url);
-
-        if (!response.ok) {
-          throw new Error(`download failed: HTTP ${response.status}`);
-        }
-
-        const data = Buffer.from(await response.arrayBuffer()).toString('base64');
-
-        return { type: 'image', data, mimeType: info.contentType ?? 'image/png' };
-      } catch (error) {
-        return { type: 'text', text: `[image fileId=${block.fileId}: ${getErrorMessage(error)}]` };
-      }
-    }
-
-    case 'file': {
-      try {
-        const info = await files.getInfo(block.fileId);
-        const url = await files.getDownloadUrl(block.fileId);
-
-        return {
-          type: 'text',
-          text: `[file${info.filename ? ` ${info.filename}` : ''} fileId=${block.fileId}] ${url}`,
-        };
-      } catch (error) {
-        return { type: 'text', text: `[file fileId=${block.fileId}: ${getErrorMessage(error)}]` };
-      }
-    }
-
-    case 'resource_link':
-      return { type: 'text', text: `[${block.name ?? 'resource'}] ${block.uri}` };
-  }
-}
-
-async function toMcpResult(result: ToolResult, files: FilesApi) {
-  const content = await Promise.all(result.content.map(block => blockToMcpContent(block, files)));
-
-  if (!content.length && !result.structuredContent) {
-    content.push({ type: 'text', text: '(empty result)' });
-  }
-
-  return {
-    content,
-    ...(result.structuredContent ? { structuredContent: result.structuredContent } : {}),
-  };
-}
-
-async function bridgeOutputToMcpContent(output: string | ContentBlock[], files: FilesApi): Promise<McpContent[]> {
-  if (typeof output === 'string') {
-    return [{ type: 'text', text: output || '(empty result)' }];
-  }
-
-  const content = await Promise.all(output.map(block => blockToMcpContent(block, files)));
-
-  return content.length ? content : [{ type: 'text', text: '(empty result)' }];
 }
 
 type BridgeEntry = {
@@ -120,11 +36,10 @@ export type BridgeServer = {
 
 type BridgeOptions = {
   tools: ToolsApi;
-  files: FilesApi;
   extraTools: SdkBridgeTool[];
 };
 
-export async function createBridgeServer({ tools, files, extraTools }: BridgeOptions): Promise<BridgeServer> {
+export async function createBridgeServer({ tools, extraTools }: BridgeOptions): Promise<BridgeServer> {
   const server = new McpServer({ name: 'balabash', version: '2.0.0' }, { capabilities: { tools: {} } });
   const entries = new Map<string, BridgeEntry>();
   const extraNames = new Set(extraTools.map(tool => tool.name));
@@ -137,38 +52,32 @@ export async function createBridgeServer({ tools, files, extraTools }: BridgeOpt
     }
   };
 
-  const run = async (action: () => Promise<{ content: McpContent[]; structuredContent?: JsonObject }>) => {
-    try {
-      return await action();
-    } catch (error) {
-      return {
-        content: [{ type: 'text' as const, text: `Error: ${getErrorMessage(error)}` }],
-        isError: true,
-      };
-    }
-  };
-
   // Bridge-only tools are fixed for the session's lifetime and shadow
-  // same-named catalog tools.
+  // same-named catalog tools. Their handlers follow the birth contract (data
+  // or throw); the platform wrapper shapes the structured result, errors
+  // included.
   for (const tool of extraTools) {
     server.registerTool(
       tool.name,
       { description: tool.description, inputSchema: inputSchema(tool.inputSchema) },
-      args =>
-        run(async () => ({
-          content: await bridgeOutputToMcpContent(await tool.handler(args as JsonObject), files),
-        })),
+      args => runToolHandler(() => tool.handler(args as JsonObject)),
     );
   }
 
   // Handlers dispatch by name at call time, so a definition update between
-  // syncs keeps working without re-registration.
+  // syncs keeps working without re-registration. Pass-through: the live
+  // result goes to the inner session as-is; breakage of the call itself
+  // becomes the same structured error convert.
   const callBridgeTool = async (name: string, args: JsonObject) => {
     if (!entries.has(name)) {
       throw new Error(`Tool "${name}" is no longer available`);
     }
 
-    return toMcpResult(await tools.call(name, args), files);
+    const result = await tools.call(name, args);
+
+    // The cast is the pass-through: the verbatim result crosses into the MCP
+    // SDK's stricter static shape unchanged.
+    return { ...result, content: result.content ?? [] } as CallToolResult;
   };
 
   const listDesired = async (): Promise<Map<string, ToolDefinition>> => {
@@ -228,7 +137,7 @@ export async function createBridgeServer({ tools, files, extraTools }: BridgeOpt
         const registered = server.registerTool(
           name,
           { description: next.description, inputSchema: inputSchema(next.inputSchema) },
-          args => run(() => callBridgeTool(name, args as JsonObject)),
+          args => callBridgeTool(name, args as JsonObject).catch(error => toErrorResult(error)),
         );
 
         entries.set(name, { definition: next, registered });

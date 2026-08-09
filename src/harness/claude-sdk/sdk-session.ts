@@ -10,7 +10,7 @@
 // pushes arriving before the session is up are queued, and `turns` awaits
 // the setup before iterating.
 
-import type { AgentSdkSession, SdkSessionOptions, SdkTurn, FilesApi, ToolsApi } from '../../core/contract.ts';
+import type { AgentSdkSession, SdkSessionOptions, SdkTurn, ToolsApi } from '../../core/contract.ts';
 import { startClaudeSession } from './session.ts';
 import type { ClaudeSession } from './session.ts';
 import { createBridgeServer } from './bridge.ts';
@@ -18,7 +18,6 @@ import type { BridgeServer } from './bridge.ts';
 
 export type SdkSessionDeps = {
   tools: ToolsApi;
-  files: FilesApi;
   // Working directory of the inner session — the run's persistent stateDir.
   cwd: string;
 };
@@ -32,7 +31,6 @@ export function createClaudeSession(options: SdkSessionOptions, deps: SdkSession
   const setup: Promise<ClaudeSession | null> = (async () => {
     bridge = await createBridgeServer({
       tools: deps.tools,
-      files: deps.files,
       extraTools: options.extraTools ?? [],
     });
 

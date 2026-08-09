@@ -16,6 +16,7 @@ import { getUserFile } from '../files/index.ts';
 import { getAgent, getAgents } from '../capabilities/agent-catalog.ts';
 import { RESTART_SERVER_NAME } from '../capabilities/restart-tools.ts';
 import { BUILTIN_TOOL_DEFINITIONS, callBuiltinTool, isBuiltinTool } from '../capabilities/builtin-tools.ts';
+import { callToolJournaled } from '../capabilities/tool-journal.ts';
 import {
   callServerTool,
   getServerToolFunctions,
@@ -335,17 +336,6 @@ async function executeCancelThread(args: JsonObject, ctx: DispatchContext): Prom
 // Dispatches one function call from the model, journaling synchronous tool
 // calls as tool.call.* in the coordinator's thread.
 export async function dispatchCoordinatorFunction(call: FunctionCall, ctx: DispatchContext): Promise<DispatchResult> {
-  const journal = async (type: string, payload: JsonObject) => {
-    await appendEvent({
-      type,
-      actor: 'agent',
-      agentName: 'coordinator',
-      userId: ctx.userId,
-      threadId: ctx.threadId,
-      payload,
-    });
-  };
-
   let args: JsonObject;
 
   try {
@@ -394,32 +384,25 @@ export async function dispatchCoordinatorFunction(call: FunctionCall, ctx: Dispa
     isBuiltinTool(call.name) ||
     (!getAgent(call.name) && isServerToolFunction(ctx.userId, COORDINATOR_BUNDLE, call.name))
   ) {
-    await journal('tool.call.started', { callId: call.callId, functionName: call.name, input: args });
-
     try {
-      const outcome = isBuiltinTool(call.name)
-        ? {
-            serverName: 'builtin',
-            toolName: call.name,
-            result: await callBuiltinTool(call.name, args, { userId: ctx.userId }),
-          }
-        : await callServerTool({ userId: ctx.userId, threadId: ctx.threadId }, COORDINATOR_BUNDLE, call.name, args);
-
-      await journal('tool.call.completed', {
-        callId: call.callId,
-        functionName: call.name,
-        serverName: outcome.serverName,
-        toolName: outcome.toolName,
-        result: outcome.result as unknown as JsonObject,
-      });
+      const outcome = await callToolJournaled(
+        { userId: ctx.userId, threadId: ctx.threadId, agentName: 'coordinator' },
+        call.callId,
+        call.name,
+        args,
+        () =>
+          isBuiltinTool(call.name)
+            ? callBuiltinTool(call.name, args, { userId: ctx.userId }).then(result => ({
+                serverName: 'builtin',
+                toolName: call.name,
+                result,
+              }))
+            : callServerTool({ userId: ctx.userId, threadId: ctx.threadId }, COORDINATOR_BUNDLE, call.name, args),
+      );
 
       return { kind: 'sync', result: outcome.result };
     } catch (error) {
-      const message = getErrorMessage(error);
-
-      await journal('tool.call.failed', { callId: call.callId, functionName: call.name, error: message });
-
-      return { kind: 'rejected', error: message };
+      return { kind: 'rejected', error: getErrorMessage(error) };
     }
   }
 

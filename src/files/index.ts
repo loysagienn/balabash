@@ -5,6 +5,7 @@
 import crypto from 'node:crypto';
 import path from 'node:path';
 import { prisma } from '../db/client.ts';
+import type { FileRef } from '../core/contract.ts';
 import type { FileModel } from '../../prisma-generated/models.ts';
 import {
   deleteStorageObject,
@@ -84,25 +85,22 @@ const buildObjectKey = (scope?: string | null, originalFilename?: string | null)
   return normalizeObjectKey(`${prefix}${extension}`);
 };
 
-export type FileDescriptor = {
-  id: string;
-  originalFilename: string | null;
-  contentType: string | null;
-  sizeBytes: number | null;
-  width: number | null;
-  height: number | null;
-  uploadedAt: Date | null;
-};
-
-function toFileDescriptor(file: FileModel): FileDescriptor {
+// The one FileRef of the platform (§9, core/contract.ts): the model's fields
+// without bucket/objectKey, dates as ISO strings.
+function toFileRef(file: FileModel): FileRef {
   return {
     id: file.id,
-    originalFilename: file.originalFilename,
+    userId: file.userId,
     contentType: file.contentType,
     sizeBytes: file.sizeBytes,
+    etag: file.etag,
+    originalFilename: file.originalFilename,
+    scope: file.scope,
     width: file.width,
     height: file.height,
-    uploadedAt: file.uploadedAt,
+    uploadedAt: file.uploadedAt?.toISOString() ?? null,
+    createdAt: file.createdAt.toISOString(),
+    updatedAt: file.updatedAt.toISOString(),
   };
 }
 
@@ -130,7 +128,7 @@ export async function ingestFile({
   width,
   height,
   cacheControl,
-}: IngestFileInput): Promise<FileDescriptor> {
+}: IngestFileInput): Promise<FileRef> {
   const bucket = getStorageBucket();
   const objectKey = buildObjectKey(scope, originalFilename);
 
@@ -159,24 +157,24 @@ export async function ingestFile({
     },
   });
 
-  return toFileDescriptor(fileRecord);
+  return toFileRef(fileRecord);
 }
 
-export async function getFile(fileId: string): Promise<FileDescriptor> {
-  return toFileDescriptor(await requireFile(fileId));
+export async function getFile(fileId: string): Promise<FileRef> {
+  return toFileRef(await requireFile(fileId));
 }
 
 // Workspace-scoped lookup for model-supplied file ids (§6): a fileId coming
 // from an LLM call must not cross the user boundary, and the existence of a
 // foreign file is not leaked — same error as a missing one.
-export async function getUserFile(userId: string, fileId: string): Promise<FileDescriptor> {
+export async function getUserFile(userId: string, fileId: string): Promise<FileRef> {
   const file = await requireFile(fileId);
 
   if (file.userId !== userId) {
     throw new Error(`File "${fileId}" not found`);
   }
 
-  return toFileDescriptor(file);
+  return toFileRef(file);
 }
 
 export async function getFileDownloadUrl(fileId: string, options: DownloadUrlOptions = {}) {

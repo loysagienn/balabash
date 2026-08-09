@@ -2,6 +2,7 @@ import http from 'node:http';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { z } from 'zod';
+import { toErrorResult, toStructuredResult } from '../src/capabilities/tool-result.ts';
 
 function createMcpServer() {
   const server = new McpServer({ name: 'current_datetime', version: '1.0.0' });
@@ -28,17 +29,9 @@ function createMcpServer() {
           timeZone,
         }).format(new Date());
 
-        return { content: [{ type: 'text' as const, text: `${text} (${timeZone})` }] };
+        return toStructuredResult(`${text} (${timeZone})`);
       } catch {
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: `Unknown timezone "${timeZone}". Use an IANA name like "Europe/Moscow".`,
-            },
-          ],
-          isError: true,
-        };
+        return toErrorResult(new Error(`Unknown timezone "${timeZone}". Use an IANA name like "Europe/Moscow".`));
       }
     },
   );

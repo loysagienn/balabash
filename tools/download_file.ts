@@ -5,6 +5,8 @@ import { BlockList, isIP } from 'node:net';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { z } from 'zod';
+import { ToolError, toErrorResult, toStructuredResult } from '../src/capabilities/tool-result.ts';
+import type { FileRef } from '../src/core/contract.ts';
 
 const DEFAULT_TIMEOUT_SECONDS = 60;
 const MIN_TIMEOUT_SECONDS = 1;
@@ -58,15 +60,7 @@ type ToolFilesApi = {
     scope?: string | null;
     width?: number | null;
     height?: number | null;
-  }) => Promise<{
-    id: string;
-    originalFilename: string | null;
-    contentType: string | null;
-    sizeBytes: number | null;
-    width: number | null;
-    height: number | null;
-    uploadedAt: Date | null;
-  }>;
+  }) => Promise<FileRef>;
 };
 
 // The calling run's identity rides in the MCP request _meta (set by the tool
@@ -563,9 +557,10 @@ function createMcpServer(filesApi: ToolFilesApi) {
     'download_file',
     {
       description:
-        'Download a file from a public http(s) URL into Balabash file storage and return its descriptor ' +
-        '(fileId, filename, contentType, sizeBytes). Use when a remote file (document, image, archive, media) ' +
-        'must be stored for later use. To read page or API content, use web_fetch instead.',
+        'Download a file from a public http(s) URL into Balabash file storage and return its FileRef ' +
+        '(id, originalFilename, contentType, sizeBytes, …). The id is a Balabash fileId. Use when a remote ' +
+        'file (document, image, archive, media) must be stored for later use. To read page or API content, ' +
+        'use web_fetch instead.',
       inputSchema: {
         url: z.string().describe('Absolute http:// or https:// URL of the file to download.'),
         timeout_seconds: z
@@ -624,29 +619,12 @@ function createMcpServer(filesApi: ToolFilesApi) {
           );
         }
 
-        const result = {
-          fileId: stored.id,
-          filename: stored.originalFilename,
-          contentType: stored.contentType,
-          sizeBytes: stored.sizeBytes ?? outcome.sizeBytes,
-        };
-
-        // structuredContent: the result reaches the event log and the model
-        // as structure, not a JSON string.
-        return {
-          content: [],
-          structuredContent: result,
-        };
+        // The one FileRef (§9), verbatim from the files layer.
+        return toStructuredResult(stored);
       } catch (error) {
-        const message =
-          error instanceof DownloadError
-            ? `[${error.kind}] ${error.message}`
-            : `[unexpected_error] ${error instanceof Error ? error.message : String(error)}`;
-
-        return {
-          content: [{ type: 'text' as const, text: message }],
-          isError: true,
-        };
+        return toErrorResult(
+          error instanceof DownloadError ? new ToolError(error.message, { kind: error.kind }) : error,
+        );
       }
     },
   );

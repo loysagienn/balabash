@@ -7,7 +7,7 @@
 
 import { stat, readdir } from 'node:fs/promises';
 import path from 'node:path';
-import type { JsonObject, ToolResult } from '../core/contract.ts';
+import type { JsonObject } from '../core/contract.ts';
 import { appendEvent } from '../core/append.ts';
 import { SYSTEM_RESTART_REQUESTED } from '../core/envelope.ts';
 import { getThread } from '../core/threads.ts';
@@ -88,7 +88,7 @@ async function getStaleBuildWarning(): Promise<string | null> {
   return null;
 }
 
-async function requestRestart(args: JsonObject, ctx: BuiltinServerCallContext): Promise<ToolResult> {
+async function requestRestart(args: JsonObject, ctx: BuiltinServerCallContext): Promise<string> {
   const reason = typeof args.reason === 'string' ? args.reason.trim() : '';
 
   if (!reason) {
@@ -119,7 +119,7 @@ async function requestRestart(args: JsonObject, ctx: BuiltinServerCallContext): 
     ...(staleWarning ? [staleWarning] : []),
   ];
 
-  return { content: [{ type: 'text', text: lines.join('\n') }] };
+  return lines.join('\n');
 }
 
 export function createRestartToolServer(): BuiltinToolServer {

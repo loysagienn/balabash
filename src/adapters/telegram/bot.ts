@@ -11,9 +11,9 @@ import { config } from '../../config/index.ts';
 import { prisma } from '../../db/client.ts';
 import { appendEvent } from '../../core/append.ts';
 import { SYSTEM_EXCEPTION, THREAD_CANCEL } from '../../core/envelope.ts';
-import type { ContentBlock, JsonObject } from '../../core/contract.ts';
+import type { ContentBlock, FileRef, JsonObject } from '../../core/contract.ts';
 import { ensureMainThread, getMainThread, getThread } from '../../core/threads.ts';
-import { ingestFile, type FileDescriptor } from '../../files/index.ts';
+import { ingestFile } from '../../files/index.ts';
 
 const TELEGRAM_DOWNLOAD_LIMIT_BYTES = 20 * 1024 * 1024;
 
@@ -269,7 +269,7 @@ export async function initTelegramBot() {
     const fileMetas: JsonObject[] = [];
 
     if (telegramFile) {
-      let file: FileDescriptor;
+      let file: FileRef;
 
       try {
         if (typeof telegramFile.file_size === 'number' && telegramFile.file_size > TELEGRAM_DOWNLOAD_LIMIT_BYTES) {

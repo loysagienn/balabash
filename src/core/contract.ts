@@ -66,8 +66,9 @@ export type Thread = {
 export type NotificationLevel = 'silent' | 'normal' | 'urgent';
 
 // ---------------------------------------------------------------------------
-// Content (§9): canonical MCP-like blocks. Binary content never lives in the
-// log — it is materialized into files on append, blocks carry fileId refs.
+// Content (§9): canonical blocks of agent messages (agent.message payloads,
+// send_message, send_file) — binary content by fileId reference. A different
+// subject from tool results below.
 
 export type ContentBlock =
   | { type: 'text'; text: string }
@@ -75,9 +76,27 @@ export type ContentBlock =
   | { type: 'file'; fileId: string }
   | { type: 'resource_link'; uri: string; name?: string; mimeType?: string; size?: number };
 
+// ---------------------------------------------------------------------------
+// Tool results (§9): the record is verbatim — a result is the raw MCP answer
+// exactly as the server produced it, binary payloads (base64) included.
+// Every transformation happens at read time, per projection, under the
+// strict rule: structuredContent is primary; content is read only when
+// structuredContent is absent.
+
+export type ToolResultContentBlock =
+  | { type: 'text'; text: string }
+  | { type: 'image'; data: string; mimeType: string }
+  | { type: 'audio'; data: string; mimeType: string }
+  | { type: 'resource_link'; uri: string; name?: string; mimeType?: string; size?: number }
+  | { type: 'resource'; resource: { uri?: string; mimeType?: string; text?: string; blob?: string } };
+
 export type ToolResult = {
-  content: ContentBlock[];
+  content?: ToolResultContentBlock[];
   structuredContent?: JsonObject;
+  // "The tool answered, albeit with an error" — verbatim from the server; a
+  // structured error result is still a result. Breakage of the call itself
+  // (transport, unknown tool) is a thrown error instead.
+  isError?: boolean;
 };
 
 // ---------------------------------------------------------------------------
@@ -197,7 +216,11 @@ export type SdkBridgeTool = {
   name: string;
   description: string;
   inputSchema: JsonSchema;
-  handler(args: JsonObject): Promise<string | ContentBlock[]>;
+  // Birth contract (§9), same as every tool of ours: return data or throw.
+  // The bridge shapes the structured result (object → structuredContent,
+  // primitive/array → {result}, throw → {error: {message, details?}} +
+  // isError). No content blocks, no bytes.
+  handler(args: JsonObject): Promise<JsonValue>;
 };
 
 export type SdkSessionOptions = {
@@ -246,11 +269,25 @@ export type ToolsApi = {
   call(name: string, args: JsonObject): Promise<ToolResult>;
 };
 
-export type FileInfo = {
-  fileId: string;
-  filename: string | null;
+// The platform's one file reference (§9): the File model's fields without
+// the storage internals (bucket/objectKey), dates as ISO 8601 strings — the
+// shape is JSON-ready and identical in every tool result of ours. `url` is
+// the only ephemeral field: a presigned, time-limited download URL a
+// producer adds deliberately (e.g. get_file); the transcript strips it.
+export type FileRef = {
+  id: string;
+  userId: string | null;
   contentType: string | null;
   sizeBytes: number | null;
+  etag: string | null;
+  originalFilename: string | null;
+  scope: string | null;
+  width: number | null;
+  height: number | null;
+  uploadedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  url?: string;
 };
 
 export type IngestFileInput = {
@@ -262,9 +299,9 @@ export type IngestFileInput = {
 
 export type FilesApi = {
   // Workspace-scoped: a fileId from outside the user boundary reads as missing.
-  getInfo(fileId: string): Promise<FileInfo>;
+  getInfo(fileId: string): Promise<FileRef>;
   getDownloadUrl(fileId: string, filename?: string): Promise<string>;
   // Store new content in the run's workspace (the file's userId is the run's
   // user). The storage scope is the agent's name.
-  ingest(input: IngestFileInput): Promise<FileInfo>;
+  ingest(input: IngestFileInput): Promise<FileRef>;
 };

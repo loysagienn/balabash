@@ -5,7 +5,7 @@
 // travel out-of-band through the web forms, and the outcomes come back as
 // thread-addressed connection.* / *.provisioned events.
 
-import type { JsonObject, ToolResult } from '../core/contract.ts';
+import type { JsonObject } from '../core/contract.ts';
 import type { ToolFunction } from './mcp-client.ts';
 import type { BuiltinServerCallContext, BuiltinToolServer, UserAuthServer } from './tool-manager.ts';
 import { listExternalSecretTargets, listUserAuthServers } from './tool-manager.ts';
@@ -148,10 +148,6 @@ function requestExternalSecretsFunction(): ToolFunction | null {
   );
 }
 
-function textResult(text: string): ToolResult {
-  return { content: [{ type: 'text', text }] };
-}
-
 function requireServerArg(args: JsonObject): string {
   const server = typeof args.server === 'string' ? args.server.trim() : '';
 
@@ -188,25 +184,19 @@ export function createAuthToolServer(): BuiltinToolServer {
       if (toolName === REQUEST_AUTHORIZATION_FUNCTION_NAME) {
         const url = await requestAuthorization(ctx.userId, ctx.threadId, server);
 
-        return textResult(
-          `One-time authorization link for "${server}" (valid 15 minutes): ${url}\nSend it to the user and wait — a connection.completed event arrives in this thread when they finish, connection.failed on error.`,
-        );
+        return `One-time authorization link for "${server}" (valid 15 minutes): ${url}\nSend it to the user and wait — a connection.completed event arrives in this thread when they finish, connection.failed on error.`;
       }
 
       if (toolName === REQUEST_OAUTH_CLIENT_FUNCTION_NAME) {
         const url = await requestOauthClientCredentials(ctx.userId, ctx.threadId, server);
 
-        return textResult(
-          `One-time operator link for the installation OAuth client of "${server}" (valid 15 minutes): ${url}\nSend it to the user and wait — an oauth_client.provisioned event arrives in this thread when the client is saved.`,
-        );
+        return `One-time operator link for the installation OAuth client of "${server}" (valid 15 minutes): ${url}\nSend it to the user and wait — an oauth_client.provisioned event arrives in this thread when the client is saved.`;
       }
 
       if (toolName === REQUEST_EXTERNAL_SERVER_CREDENTIALS_FUNCTION_NAME) {
         const url = await requestExternalServerCredentials(ctx.userId, ctx.threadId, server);
 
-        return textResult(
-          `One-time operator link for the installation credentials of "${server}" (valid 15 minutes): ${url}\nSend it to the user and wait — a secrets.provisioned event arrives in this thread when the values are saved.`,
-        );
+        return `One-time operator link for the installation credentials of "${server}" (valid 15 minutes): ${url}\nSend it to the user and wait — a secrets.provisioned event arrives in this thread when the values are saved.`;
       }
 
       throw new Error(`Unknown auth tool "${toolName}"`);

@@ -7,12 +7,11 @@ import http from 'node:http';
 import type { IncomingMessage } from 'node:http';
 import { Codex } from '@openai/codex-sdk';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import type { AgentSdkSession, FilesApi, SdkSessionOptions, SdkTurn, ToolsApi } from '../../core/contract.ts';
+import type { AgentSdkSession, SdkSessionOptions, SdkTurn, ToolsApi } from '../../core/contract.ts';
 import { createBridgeServer } from '../claude-sdk/bridge.ts';
 
 export type CodexSessionDeps = {
   tools: ToolsApi;
-  files: FilesApi;
   cwd: string;
 };
 
@@ -108,7 +107,6 @@ async function startBridgeHttpServer(deps: CodexSessionDeps, extraTools: SdkSess
     try {
       bridge = await createBridgeServer({
         tools: deps.tools,
-        files: deps.files,
         extraTools: extraTools ?? [],
       });
       const body = await readJsonBody(request);

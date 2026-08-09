@@ -4,7 +4,7 @@
 // tools/index.ts — the import() machinery went away with hot-reload — but
 // each module is still validated hard before it is trusted.
 
-import type { FileDescriptor } from '../files/index.ts';
+import type { FileRef } from '../core/contract.ts';
 import type { StorageBody } from '../files/storage.ts';
 import { validateExternalServerConfig, type ExternalServerConfig } from './server-config.ts';
 
@@ -28,8 +28,8 @@ export type LocalToolFilesApi = {
     scope?: string | null;
     width?: number | null;
     height?: number | null;
-  }) => Promise<FileDescriptor>;
-  get: (fileId: string) => Promise<FileDescriptor>;
+  }) => Promise<FileRef>;
+  get: (fileId: string) => Promise<FileRef>;
   getDownloadUrl: (
     fileId: string,
     options?: { expiresInSeconds?: number },

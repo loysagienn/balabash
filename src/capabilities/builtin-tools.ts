@@ -6,11 +6,12 @@
 // transcript on demand. One implementation serves both the coordinator's
 // function catalog and the ToolsApi handed to dynamic agents.
 
-import type { Event, JsonObject, Thread, ToolDefinition, ToolResult } from '../core/contract.ts';
+import type { Event, JsonObject, JsonValue, Thread, ToolDefinition, ToolResult } from '../core/contract.ts';
 import { getTranscript, getUserEvent } from '../core/events.ts';
 import { getThread, listThreads } from '../core/threads.ts';
 import { getFileDownloadUrl, getUserFile } from '../files/index.ts';
 import { buildTranscript } from '../harness/openai/transcript.ts';
+import { runToolHandler } from './tool-result.ts';
 
 export const BUILTIN_TOOL_DEFINITIONS: ToolDefinition[] = [
   {
@@ -150,7 +151,7 @@ function threadToJson(thread: Thread): JsonObject {
   };
 }
 
-async function executeGetEvent(args: JsonObject, ctx: BuiltinToolContext): Promise<ToolResult> {
+async function executeGetEvent(args: JsonObject, ctx: BuiltinToolContext): Promise<JsonValue> {
   const seq = typeof args.seq === 'number' && Number.isInteger(args.seq) ? BigInt(args.seq) : null;
 
   if (seq === null) {
@@ -163,10 +164,10 @@ async function executeGetEvent(args: JsonObject, ctx: BuiltinToolContext): Promi
     throw new Error(`Event seq=${args.seq} not found in this workspace`);
   }
 
-  return { content: [], structuredContent: eventToJson(event) };
+  return eventToJson(event);
 }
 
-async function executeGetFile(args: JsonObject, ctx: BuiltinToolContext): Promise<ToolResult> {
+async function executeGetFile(args: JsonObject, ctx: BuiltinToolContext): Promise<JsonValue> {
   const fileId = typeof args.fileId === 'string' ? args.fileId.trim() : '';
 
   if (!fileId) {
@@ -178,23 +179,12 @@ async function executeGetFile(args: JsonObject, ctx: BuiltinToolContext): Promis
   const file = await getUserFile(ctx.userId, fileId);
   const { url } = await getFileDownloadUrl(fileId);
 
-  // structuredContent only (our tools return no content blocks): metadata
-  // plus a presigned URL. The OpenAI harness recognizes the result by the
-  // tool name and feeds the URL to the model as input_image/input_file;
-  // SDK sessions download the URL themselves when the contents matter.
-  // The transcript renders this result without the url — it expires.
-  return {
-    content: [],
-    structuredContent: {
-      fileId: file.id,
-      filename: file.originalFilename,
-      contentType: file.contentType,
-      sizeBytes: file.sizeBytes,
-      width: file.width,
-      height: file.height,
-      url,
-    },
-  };
+  // The one FileRef (§9) plus its ephemeral url. The OpenAI harness
+  // recognizes the result by the tool name and feeds the URL to the model as
+  // input_image/input_file; SDK sessions download the URL themselves when
+  // the contents matter. The transcript renders this result without the url
+  // — it expires.
+  return { ...file, url };
 }
 
 function parseDateArg(name: string, value: unknown): Date | undefined {
@@ -213,7 +203,7 @@ function parseDateArg(name: string, value: unknown): Date | undefined {
 
 const LIST_THREADS_LIMIT_MAX = 1000;
 
-async function executeListThreads(args: JsonObject, ctx: BuiltinToolContext): Promise<ToolResult> {
+async function executeListThreads(args: JsonObject, ctx: BuiltinToolContext): Promise<JsonValue> {
   const status = typeof args.status === 'string' ? args.status : undefined;
 
   if (status !== undefined && !['active', 'completed', 'failed', 'cancelled'].includes(status)) {
@@ -240,7 +230,7 @@ async function executeListThreads(args: JsonObject, ctx: BuiltinToolContext): Pr
     ...(limit !== undefined ? { limit } : {}),
   });
 
-  return { content: [], structuredContent: { threads: threads.map(threadToJson) } };
+  return { threads: threads.map(threadToJson) };
 }
 
 // Same error as a missing thread: existence outside the workspace is not
@@ -255,26 +245,23 @@ async function getWorkspaceThread(threadId: string, ctx: BuiltinToolContext): Pr
   return thread;
 }
 
-async function executeGetThread(args: JsonObject, ctx: BuiltinToolContext): Promise<ToolResult> {
+async function executeGetThread(args: JsonObject, ctx: BuiltinToolContext): Promise<JsonValue> {
   const threadId = typeof args.threadId === 'string' ? args.threadId.trim() : '';
   const thread = await getWorkspaceThread(threadId, ctx);
 
   return {
-    content: [],
-    structuredContent: {
-      thread: {
-        ...threadToJson(thread),
-        summary: (thread.summary as JsonObject | null) ?? null,
-      },
+    thread: {
+      ...threadToJson(thread),
+      summary: (thread.summary as JsonObject | null) ?? null,
     },
   };
 }
 
-// The transcript goes out as a plain text block, without structuredContent:
-// per the MCP spec a structuredContent result is expected to mirror into
-// content, so clients (the Claude Agent SDK among them) may show the model
-// structuredContent alone — a split result would lose the transcript.
-async function executeGetThreadEvents(args: JsonObject, ctx: BuiltinToolContext): Promise<ToolResult> {
+// The transcript is one string; the birth wrapper ships it as
+// {result: string}. structuredContent alone is enough: the model-side
+// consumers read structuredContent first and ignore content (verified for
+// the Claude SDK and codex).
+async function executeGetThreadEvents(args: JsonObject, ctx: BuiltinToolContext): Promise<JsonValue> {
   const threadId = typeof args.threadId === 'string' ? args.threadId.trim() : '';
   const thread = await getWorkspaceThread(threadId, ctx);
 
@@ -287,10 +274,10 @@ async function executeGetThreadEvents(args: JsonObject, ctx: BuiltinToolContext)
     ...(transcript.text ? [transcript.text] : ['(no events)']),
   ];
 
-  return { content: [{ type: 'text', text: parts.join('\n') }] };
+  return parts.join('\n');
 }
 
-const executors: Record<string, (args: JsonObject, ctx: BuiltinToolContext) => Promise<ToolResult>> = {
+const executors: Record<string, (args: JsonObject, ctx: BuiltinToolContext) => Promise<JsonValue>> = {
   get_event: executeGetEvent,
   get_file: executeGetFile,
   list_threads: executeListThreads,
@@ -305,9 +292,11 @@ export function isBuiltinTool(name: string): boolean {
 export async function callBuiltinTool(name: string, args: JsonObject, ctx: BuiltinToolContext): Promise<ToolResult> {
   const executor = executors[name];
 
+  // An unknown tool is breakage of the call itself, not a tool answer — it
+  // stays a throw (journaled as tool.call.failed).
   if (!executor) {
     throw new Error(`Unknown builtin tool "${name}"`);
   }
 
-  return executor(args, ctx);
+  return runToolHandler(() => executor(args, ctx));
 }

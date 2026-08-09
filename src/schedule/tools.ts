@@ -5,7 +5,7 @@
 // scheduler agent's job. The audit of who registered what is free: these
 // calls are journaled as tool.call.* in the calling agent's thread.
 
-import type { JsonObject, ToolResult } from '../core/contract.ts';
+import type { JsonObject } from '../core/contract.ts';
 import { getThread } from '../core/threads.ts';
 import { prisma } from '../db/client.ts';
 import { config } from '../config/index.ts';
@@ -118,10 +118,6 @@ const FUNCTIONS: ToolFunction[] = [
   },
 ];
 
-function text(value: string): ToolResult {
-  return { content: [{ type: 'text', text: value }] };
-}
-
 function requireSlug(args: JsonObject): string {
   const slug = typeof args.slug === 'string' ? args.slug.trim() : '';
 
@@ -150,7 +146,7 @@ function isSleeping(task: ScheduledTaskModel): boolean {
   return task.kind === 'code' && !getTaskBody(task.slug);
 }
 
-async function createTask(args: JsonObject, ctx: BuiltinServerCallContext): Promise<ToolResult> {
+async function createTask(args: JsonObject, ctx: BuiltinServerCallContext): Promise<string> {
   const slug = requireSlug(args);
 
   if (!SLUG_PATTERN.test(slug) || slug.length > SLUG_MAX_LENGTH) {
@@ -254,17 +250,17 @@ async function createTask(args: JsonObject, ctx: BuiltinServerCallContext): Prom
     }
   }
 
-  return text(lines.join('\n'));
+  return lines.join('\n');
 }
 
-async function listTasks(ctx: BuiltinServerCallContext): Promise<ToolResult> {
+async function listTasks(ctx: BuiltinServerCallContext): Promise<string> {
   const tasks = await prisma.scheduledTask.findMany({
     where: { userId: ctx.userId },
     orderBy: { createdAt: 'asc' },
   });
 
   if (!tasks.length) {
-    return text('No scheduled tasks registered.');
+    return 'No scheduled tasks registered.';
   }
 
   const lines = tasks.map(task => {
@@ -282,10 +278,10 @@ async function listTasks(ctx: BuiltinServerCallContext): Promise<ToolResult> {
     ].join('\n');
   });
 
-  return text(lines.join('\n'));
+  return lines.join('\n');
 }
 
-async function cancelTask(args: JsonObject, ctx: BuiltinServerCallContext): Promise<ToolResult> {
+async function cancelTask(args: JsonObject, ctx: BuiltinServerCallContext): Promise<string> {
   const slug = requireSlug(args);
   const { count } = await prisma.scheduledTask.deleteMany({ where: { slug, userId: ctx.userId } });
 
@@ -293,10 +289,10 @@ async function cancelTask(args: JsonObject, ctx: BuiltinServerCallContext): Prom
     throw new Error(`no task with slug "${slug}" in this workspace`);
   }
 
-  return text(`Task "${slug}" deleted; its trigger is disarmed.`);
+  return `Task "${slug}" deleted; its trigger is disarmed.`;
 }
 
-async function runTask(args: JsonObject, ctx: BuiltinServerCallContext): Promise<ToolResult> {
+async function runTask(args: JsonObject, ctx: BuiltinServerCallContext): Promise<string> {
   const slug = requireSlug(args);
   const task = await prisma.scheduledTask.findFirst({ where: { slug, userId: ctx.userId } });
 
@@ -315,13 +311,11 @@ async function runTask(args: JsonObject, ctx: BuiltinServerCallContext): Promise
 
   switch (outcome.kind) {
     case 'fired':
-      return text(
-        task.kind === 'note'
-          ? `Task "${slug}" fired — the note landed in the main thread.`
-          : `Task "${slug}" started. It runs asynchronously; it reports only through the events it pushes (or a system.exception on failure). The schedule is untouched.`,
-      );
+      return task.kind === 'note'
+        ? `Task "${slug}" fired — the note landed in the main thread.`
+        : `Task "${slug}" started. It runs asynchronously; it reports only through the events it pushes (or a system.exception on failure). The schedule is untouched.`;
     case 'already_running':
-      return text(`Task "${slug}" is already running — this manual run is skipped.`);
+      return `Task "${slug}" is already running — this manual run is skipped.`;
     case 'no_main_thread':
       throw new Error(`workspace has no main thread to fire into`);
     case 'sleeping':

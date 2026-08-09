@@ -16,6 +16,8 @@ import http from 'node:http';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { z } from 'zod';
+import { toErrorResult, toStructuredResult } from '../src/capabilities/tool-result.ts';
+import type { FileRef } from '../src/core/contract.ts';
 
 type ToolFilesApi = {
   ingest: (input: {
@@ -24,12 +26,7 @@ type ToolFilesApi = {
     originalFilename?: string | null;
     contentType?: string | null;
     sizeBytes?: number | null;
-  }) => Promise<{
-    id: string;
-    originalFilename: string | null;
-    contentType: string | null;
-    sizeBytes: number | null;
-  }>;
+  }) => Promise<FileRef>;
 };
 
 // The calling run's identity rides in the MCP request _meta (set by the tool
@@ -375,38 +372,6 @@ async function buildOutgoingResource(
 // MCP server (one instance per request, bound to that request's token)
 // ---------------------------------------------------------------------------
 
-type ToolResult = {
-  content: Array<{ type: 'text'; text: string }>;
-  structuredContent?: Record<string, unknown>;
-  isError?: boolean;
-};
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-}
-
-// Objects go out via structuredContent — they reach the event log and the
-// model as structure, not a JSON string. Per the MCP spec structuredContent
-// must be an object, so arrays and primitives stay text.
-function textResult(value: unknown): ToolResult {
-  if (typeof value === 'string') {
-    return { content: [{ type: 'text', text: value }] };
-  }
-
-  if (isPlainObject(value)) {
-    return { content: [], structuredContent: value };
-  }
-
-  return { content: [{ type: 'text', text: JSON.stringify(value, null, 1) }] };
-}
-
-function errorResult(error: unknown): ToolResult {
-  return {
-    content: [{ type: 'text', text: error instanceof Error ? error.message : String(error) }],
-    isError: true,
-  };
-}
-
 const composeInputShape = {
   to: z.array(z.string()).min(1).describe('Recipient email addresses, e.g. ["anna@example.com"].'),
   cc: z.array(z.string()).nullable().optional().describe('CC addresses. Omit or pass null for none.'),
@@ -482,14 +447,14 @@ function createMcpServer(accessToken: string, filesApi: ToolFilesApi): McpServer
           }),
         );
 
-        return textResult({
+        return toStructuredResult({
           query,
           result_size_estimate: list.resultSizeEstimate ?? null,
           next_page_token: list.nextPageToken ?? null,
           messages,
         });
       } catch (error) {
-        return errorResult(error);
+        return toErrorResult(error);
       }
     },
   );
@@ -510,9 +475,9 @@ function createMcpServer(accessToken: string, filesApi: ToolFilesApi): McpServer
           `/messages/${encodeURIComponent(message_id)}?format=full`,
         )) as GmailMessage;
 
-        return textResult(parseMessage(message, MESSAGE_BODY_LIMIT));
+        return toStructuredResult(parseMessage(message, MESSAGE_BODY_LIMIT));
       } catch (error) {
-        return errorResult(error);
+        return toErrorResult(error);
       }
     },
   );
@@ -532,14 +497,14 @@ function createMcpServer(accessToken: string, filesApi: ToolFilesApi): McpServer
         const all = Array.isArray(thread.messages) ? (thread.messages as GmailMessage[]) : [];
         const shown = all.slice(-THREAD_MESSAGE_LIMIT);
 
-        return textResult({
+        return toStructuredResult({
           thread_id,
           message_count: all.length,
           omitted_older_messages: all.length - shown.length,
           messages: shown.map(message => parseMessage(message, THREAD_MESSAGE_BODY_LIMIT)),
         });
       } catch (error) {
-        return errorResult(error);
+        return toErrorResult(error);
       }
     },
   );
@@ -548,7 +513,7 @@ function createMcpServer(accessToken: string, filesApi: ToolFilesApi): McpServer
     'gmail_get_attachment',
     {
       description:
-        'Download one attachment of a Gmail message into Balabash file storage and return its fileId. Call it only when the attachment contents are actually needed — the attachment list of gmail_get_message already shows filenames and sizes. The returned fileId can be passed to get_file or sent to the user with send_file_to_user.',
+        'Download one attachment of a Gmail message into Balabash file storage and return its FileRef (id, originalFilename, contentType, sizeBytes, …). Call it only when the attachment contents are actually needed — the attachment list of gmail_get_message already shows filenames and sizes. The returned id is a Balabash fileId: pass it to get_file or send it to the user with send_file_to_user.',
       inputSchema: {
         message_id: z.string().describe('Gmail message ID the attachment belongs to.'),
         filename: z
@@ -620,14 +585,10 @@ function createMcpServer(accessToken: string, filesApi: ToolFilesApi): McpServer
           sizeBytes: body.length,
         });
 
-        return textResult({
-          file_id: file.id,
-          filename: file.originalFilename,
-          content_type: file.contentType,
-          size_bytes: file.sizeBytes,
-        });
+        // The one FileRef (§9), verbatim from the files layer.
+        return toStructuredResult(file);
       } catch (error) {
-        return errorResult(error);
+        return toErrorResult(error);
       }
     },
   );
@@ -648,13 +609,13 @@ function createMcpServer(accessToken: string, filesApi: ToolFilesApi): McpServer
         });
         const message = (draft.message ?? {}) as GmailMessage;
 
-        return textResult({
+        return toStructuredResult({
           draft_id: draft.id ?? null,
           message_id: message.id ?? null,
           thread_id: message.threadId ?? null,
         });
       } catch (error) {
-        return errorResult(error);
+        return toErrorResult(error);
       }
     },
   );
@@ -696,9 +657,9 @@ function createMcpServer(accessToken: string, filesApi: ToolFilesApi): McpServer
           }),
         );
 
-        return textResult({ drafts });
+        return toStructuredResult({ drafts });
       } catch (error) {
-        return errorResult(error);
+        return toErrorResult(error);
       }
     },
   );
@@ -722,13 +683,13 @@ function createMcpServer(accessToken: string, filesApi: ToolFilesApi): McpServer
         });
         const message = (draft.message ?? {}) as GmailMessage;
 
-        return textResult({
+        return toStructuredResult({
           draft_id: draft.id ?? null,
           message_id: message.id ?? null,
           thread_id: message.threadId ?? null,
         });
       } catch (error) {
-        return errorResult(error);
+        return toErrorResult(error);
       }
     },
   );
@@ -749,9 +710,9 @@ function createMcpServer(accessToken: string, filesApi: ToolFilesApi): McpServer
           body: { id: draft_id },
         })) as GmailMessage;
 
-        return textResult({ sent: true, message_id: sent.id ?? null, thread_id: sent.threadId ?? null });
+        return toStructuredResult({ sent: true, message_id: sent.id ?? null, thread_id: sent.threadId ?? null });
       } catch (error) {
-        return errorResult(error);
+        return toErrorResult(error);
       }
     },
   );
@@ -771,9 +732,9 @@ function createMcpServer(accessToken: string, filesApi: ToolFilesApi): McpServer
           body: resource,
         })) as GmailMessage;
 
-        return textResult({ sent: true, message_id: sent.id ?? null, thread_id: sent.threadId ?? null });
+        return toStructuredResult({ sent: true, message_id: sent.id ?? null, thread_id: sent.threadId ?? null });
       } catch (error) {
-        return errorResult(error);
+        return toErrorResult(error);
       }
     },
   );

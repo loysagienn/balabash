@@ -118,7 +118,8 @@ function renderIdentity(identity: unknown): string | null {
   return name || username;
 }
 
-// Content blocks (§9) rendered compactly: text inline, binary refs by fileId.
+// agent.message content blocks (§9 canon — a different subject from tool
+// results) rendered compactly: text inline, binary refs by fileId.
 function renderContentBlocks(content: unknown): { text: string | null; files: unknown[] } {
   const blocks = Array.isArray(content) ? content : [];
   const textParts: string[] = [];
@@ -137,6 +138,83 @@ function renderContentBlocks(content: unknown): { text: string | null; files: un
   }
 
   return { text: textParts.length ? textParts.join('\n') : null, files };
+}
+
+// The general FileRef.url rule of this projection: a presigned url expires
+// within minutes, so wherever a FileRef appears in a tool result it is
+// rendered without its url (call get_file again for a fresh one). A FileRef
+// is detected structurally: id + originalFilename + contentType + url.
+function stripFileRefUrls(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(item => stripFileRefUrls(item));
+  }
+
+  if (!value || typeof value !== 'object') {
+    return value;
+  }
+
+  const object = value as JsonObject;
+  const isFileRef =
+    typeof object.id === 'string' &&
+    typeof object.url === 'string' &&
+    'originalFilename' in object &&
+    'contentType' in object;
+
+  const entries = Object.entries(object)
+    .filter(([key]) => !(isFileRef && key === 'url'))
+    .map(([key, item]) => [key, stripFileRefUrls(item)]);
+
+  return Object.fromEntries(entries);
+}
+
+// Raw MCP content blocks of a structuredContent-less result, compacted for
+// the transcript: text inline, binary payloads as markers without the bytes
+// (the full event stays in the log behind get_event(seq)). The renderer
+// knows ONLY the raw MCP form — canonical fileId blocks of old history are
+// not supported and degrade to bare markers.
+function renderRawContentBlocks(content: unknown): { text: string | null; blocks: unknown[] } {
+  const items = Array.isArray(content) ? content : [];
+  const textParts: string[] = [];
+  const blocks: unknown[] = [];
+
+  for (const item of items) {
+    const object = asObject(item);
+
+    if (object.type === 'text' && typeof object.text === 'string') {
+      textParts.push(object.text);
+    } else if (object.type === 'image' || object.type === 'audio') {
+      blocks.push(
+        omitNullish({
+          type: object.type,
+          mimeType: object.mimeType,
+          ...(typeof object.data === 'string' ? { base64Length: object.data.length } : {}),
+        }),
+      );
+    } else if (object.type === 'resource_link') {
+      blocks.push(
+        omitNullish({ type: object.type, uri: object.uri, name: object.name, mimeType: object.mimeType, size: object.size }),
+      );
+    } else if (object.type === 'resource') {
+      const resource = asObject(object.resource);
+
+      if (typeof resource.text === 'string') {
+        textParts.push(resource.text);
+      } else {
+        blocks.push(
+          omitNullish({
+            type: object.type,
+            uri: resource.uri,
+            mimeType: resource.mimeType,
+            ...(typeof resource.blob === 'string' ? { base64Length: resource.blob.length } : {}),
+          }),
+        );
+      }
+    } else {
+      blocks.push(omitNullish({ type: object.type ?? 'unknown' }));
+    }
+  }
+
+  return { text: textParts.length ? textParts.join('\n') : null, blocks };
 }
 
 const renderers: Record<string, Renderer> = {
@@ -167,26 +245,28 @@ const renderers: Record<string, Renderer> = {
   }),
 
   // payload: { callId, functionName, serverName?, toolName?, result }. The
-  // canonical result {content, structuredContent?} is compacted: structured
-  // content as structure, text blocks inline, binary blocks as refs.
-  // A get_file result carries a presigned url that expires within minutes —
-  // it is dropped from the transcript (call get_file again for a fresh one).
+  // strict reading rule (§9): structuredContent is primary — when present
+  // the content blocks are not read at all; without it the raw MCP blocks
+  // are compacted. FileRef urls are stripped by the general projection rule.
   'tool.call.completed': payload => {
     const result = asObject(payload.result);
-    const { text, files } = renderContentBlocks(result.content);
-    let structured = result.structuredContent;
+    const isError = result.isError === true ? true : undefined;
 
-    if (payload.functionName === 'get_file' && structured && typeof structured === 'object' && !Array.isArray(structured)) {
-      const { url: _url, ...rest } = structured as JsonObject;
-
-      structured = rest;
+    if (result.structuredContent !== undefined) {
+      return omitNullish({
+        functionName: payload.functionName,
+        isError,
+        structured: stripFileRefUrls(result.structuredContent),
+      });
     }
+
+    const { text, blocks } = renderRawContentBlocks(result.content);
 
     return omitNullish({
       functionName: payload.functionName,
-      structured,
+      isError,
       text,
-      files: files.length ? files : undefined,
+      blocks: blocks.length ? blocks : undefined,
     });
   },
 

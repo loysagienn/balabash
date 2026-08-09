@@ -28,7 +28,6 @@ import type {
   AgentDeclaration,
   AgentRun,
   AgentSdkSession,
-  ContentBlock,
   Event,
   JsonObject,
   RunContext,
@@ -142,12 +141,12 @@ function extensionOf(mimeType: string): string {
   return 'png';
 }
 
-async function convertPlaywrightResult(
-  raw: Record<string, unknown>,
-  ctx: RunContext,
-): Promise<ContentBlock[]> {
+// Birth contract (§9): data or throw. Text blocks join into one string;
+// images are ingested into file storage and referenced by fileId (the inner
+// model works from the textual page snapshots — it does not see the pixels).
+async function convertPlaywrightResult(raw: Record<string, unknown>, ctx: RunContext): Promise<string> {
   const content = Array.isArray(raw.content) ? raw.content : [];
-  const blocks: ContentBlock[] = [];
+  const lines: string[] = [];
 
   for (const item of content) {
     if (!isObject(item)) {
@@ -155,7 +154,7 @@ async function convertPlaywrightResult(
     }
 
     if (item.type === 'text' && typeof item.text === 'string') {
-      blocks.push({ type: 'text', text: item.text });
+      lines.push(item.text);
       continue;
     }
 
@@ -169,21 +168,17 @@ async function convertPlaywrightResult(
         sizeBytes: body.length,
       });
 
-      blocks.push({ type: 'text', text: `[image stored as fileId=${stored.fileId}]` });
-      blocks.push({ type: 'image', fileId: stored.fileId });
+      lines.push(`[image stored as fileId=${stored.id}]`);
     }
   }
 
-  if (raw.isError) {
-    const text = blocks
-      .map(block => (block.type === 'text' ? block.text : ''))
-      .filter(Boolean)
-      .join('\n');
+  const text = lines.join('\n');
 
+  if (raw.isError) {
     throw new Error(text || 'Browser tool call failed');
   }
 
-  return blocks.length ? blocks : [{ type: 'text', text: '(empty result)' }];
+  return text;
 }
 
 // browser_take_screenshot only includes the image in its result when no

@@ -172,7 +172,7 @@ function createSendFileTool(ctx: RunContext, headless: boolean): SdkBridgeTool {
       const caption = typeof args.caption === 'string' && args.caption.trim() ? args.caption.trim() : null;
 
       if (headless) {
-        await ctx.sendToParent(caption ?? `[file] ${info.filename ?? fileId}`, [fileId]);
+        await ctx.sendToParent(caption ?? `[file] ${info.originalFilename ?? fileId}`, [fileId]);
 
         return 'file sent to the operator';
       }
