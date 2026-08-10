@@ -61,6 +61,20 @@ function isSessionExpired(session: SessionModel): boolean {
   return Date.now() - referenceTime.getTime() > SESSION_COOKIE_MAX_AGE_MS;
 }
 
+// Balabash v1 set this cookie with Domain=.<host>. A browser that still
+// holds that legacy cookie sends BOTH values under the same name, the stale
+// one first — shadowing every fresh host-only session. Expire the legacy
+// domain cookie explicitly; the host-only clear cannot reach it.
+function clearLegacySessionCookie(ctx: Context): void {
+  ctx.cookies.set(SESSION_ID_COOKIE_NAME, null, {
+    domain: `.${ctx.hostname}`,
+    sameSite: COOKIE_OPTIONS.sameSite,
+    httpOnly: COOKIE_OPTIONS.httpOnly,
+    secure: COOKIE_OPTIONS.secure,
+    path: COOKIE_OPTIONS.path,
+  });
+}
+
 function clearSessionCookie(ctx: Context): void {
   ctx.cookies.set(SESSION_ID_COOKIE_NAME, null, {
     sameSite: COOKIE_OPTIONS.sameSite,
@@ -68,6 +82,37 @@ function clearSessionCookie(ctx: Context): void {
     secure: COOKIE_OPTIONS.secure,
     path: COOKIE_OPTIONS.path,
   });
+  clearLegacySessionCookie(ctx);
+}
+
+// ctx.cookies.get returns only the FIRST value when duplicate cookies share
+// the name (host-only + legacy domain cookie), so read them all by hand.
+function getSessionCookieValues(ctx: Context): string[] {
+  const header = ctx.headers.cookie;
+
+  if (!header) {
+    return [];
+  }
+
+  const values: string[] = [];
+
+  for (const part of header.split(';')) {
+    const eq = part.indexOf('=');
+
+    if (eq === -1) {
+      continue;
+    }
+
+    if (part.slice(0, eq).trim() === SESSION_ID_COOKIE_NAME) {
+      const value = part.slice(eq + 1).trim();
+
+      if (value) {
+        values.push(value);
+      }
+    }
+  }
+
+  return values;
 }
 
 async function rotateSessionToken(ctx: Context, session: SessionModel): Promise<SessionModel> {
@@ -90,13 +135,27 @@ async function rotateSessionToken(ctx: Context, session: SessionModel): Promise<
  * Handles token rotation and the rate-limited lastUsed touch on the way.
  */
 export async function getSession(ctx: Context): Promise<SessionModel | null> {
-  const cookieToken = ctx.cookies.get(SESSION_ID_COOKIE_NAME);
+  const cookieTokens = getSessionCookieValues(ctx);
 
-  if (!cookieToken) {
+  if (cookieTokens.length === 0) {
     return null;
   }
 
-  const session = await prisma.session.findUnique({ where: { tokenHash: hashSessionToken(cookieToken) } });
+  // Duplicate values mean the legacy v1 domain cookie is still around —
+  // expire it, then keep serving whichever value matches a live session.
+  if (cookieTokens.length > 1) {
+    clearLegacySessionCookie(ctx);
+  }
+
+  let session: SessionModel | null = null;
+
+  for (const cookieToken of cookieTokens) {
+    session = await prisma.session.findUnique({ where: { tokenHash: hashSessionToken(cookieToken) } });
+
+    if (session) {
+      break;
+    }
+  }
 
   if (!session) {
     clearSessionCookie(ctx);
@@ -143,6 +202,9 @@ export async function createUserSession(ctx: Context, userId: string): Promise<S
   });
 
   ctx.cookies.set(SESSION_ID_COOKIE_NAME, token, COOKIE_OPTIONS);
+  // The login response also kills the legacy v1 domain cookie, so the fresh
+  // host-only session is never shadowed by a stale value.
+  clearLegacySessionCookie(ctx);
 
   return session;
 }
