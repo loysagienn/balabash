@@ -1,7 +1,7 @@
 // The coordinator's function catalog (§7.3, §8.1): talking to the user, the
-// builtin pull tools (§5.2), the agent spawn functions derived from the
-// dynamic catalog plus cancel_thread, and — from stage 4 — the tool servers'
-// functions. Definitions are part of the prompt-cache head: static with
+// agent spawn functions derived from the dynamic catalog plus cancel_thread,
+// and — from stage 4 — the tool servers' functions (including the builtin
+// 'files'/'events' pull-tool servers, §5.2). Definitions are part of the prompt-cache head: static with
 // respect to RUN state (spawns do not change them; a catalog (re)load or a
 // tool server (dis)connecting does, which legitimately resets the head).
 // Synchronous calls are journaled as tool.call.* events in the coordinator's
@@ -15,7 +15,6 @@ import { startThread } from '../core/threads.ts';
 import { getUserFile } from '../files/index.ts';
 import { getAgent, getAgents } from '../capabilities/agent-catalog.ts';
 import { RESTART_SERVER_NAME } from '../capabilities/restart-tools.ts';
-import { BUILTIN_TOOL_DEFINITIONS, callBuiltinTool, isBuiltinTool } from '../capabilities/builtin-tools.ts';
 import { callToolJournaled } from '../capabilities/tool-journal.ts';
 import {
   callServerTool,
@@ -112,18 +111,9 @@ const STATIC_FUNCTION_DEFINITIONS: FunctionDefinition[] = [
   },
 ];
 
-// Builtin pull tools become strict function definitions as-is.
-const BUILTIN_FUNCTION_DEFINITIONS: FunctionDefinition[] = BUILTIN_TOOL_DEFINITIONS.map(tool => ({
-  type: 'function',
-  name: tool.name,
-  description: tool.description,
-  strict: true,
-  parameters: tool.inputSchema as Record<string, unknown>,
-}));
-
-const RESERVED_FUNCTION_NAMES = new Set(
-  [...STATIC_FUNCTION_DEFINITIONS, ...BUILTIN_FUNCTION_DEFINITIONS].map(definition => definition.name),
-);
+// The builtin pull tools ('files', 'events') arrive through the server
+// bundle like every other tool server — no separate definition path.
+const RESERVED_FUNCTION_NAMES = new Set(STATIC_FUNCTION_DEFINITIONS.map(definition => definition.name));
 
 function isObjectValue(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -207,7 +197,6 @@ async function getServerFunctionDefinitions(userId: string): Promise<FunctionDef
 export async function getCoordinatorFunctionDefinitions(userId: string): Promise<FunctionDefinition[]> {
   return [
     ...STATIC_FUNCTION_DEFINITIONS,
-    ...BUILTIN_FUNCTION_DEFINITIONS,
     ...getAgentFunctionDefinitions(),
     ...(await getServerFunctionDefinitions(userId)),
   ];
@@ -380,24 +369,14 @@ export async function dispatchCoordinatorFunction(call: FunctionCall, ctx: Dispa
 
   // An agent name wins over a same-named server tool — mirroring the
   // definitions, where the shadowed server tool is not exposed.
-  if (
-    isBuiltinTool(call.name) ||
-    (!getAgent(call.name) && isServerToolFunction(ctx.userId, COORDINATOR_BUNDLE, call.name))
-  ) {
+  if (!getAgent(call.name) && isServerToolFunction(ctx.userId, COORDINATOR_BUNDLE, call.name)) {
     try {
       const outcome = await callToolJournaled(
         { userId: ctx.userId, threadId: ctx.threadId, agentName: 'coordinator' },
         call.callId,
         call.name,
         args,
-        () =>
-          isBuiltinTool(call.name)
-            ? callBuiltinTool(call.name, args, { userId: ctx.userId }).then(result => ({
-                serverName: 'builtin',
-                toolName: call.name,
-                result,
-              }))
-            : callServerTool({ userId: ctx.userId, threadId: ctx.threadId }, COORDINATOR_BUNDLE, call.name, args),
+        () => callServerTool({ userId: ctx.userId, threadId: ctx.threadId }, COORDINATOR_BUNDLE, call.name, args),
       );
 
       return { kind: 'sync', result: outcome.result };

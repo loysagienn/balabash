@@ -13,6 +13,7 @@ import { getFile, getFileDownloadUrl, ingestFile } from './files/index.ts';
 import { loadAgents } from './capabilities/agent-catalog.ts';
 import { spawnAgentRun } from './capabilities/agent-runtime.ts';
 import { createAuthToolServer } from './capabilities/auth-tools.ts';
+import { createEventsToolServer, createFilesToolServer } from './capabilities/builtin-tools.ts';
 import { createRestartToolServer } from './capabilities/restart-tools.ts';
 import { startReauthDetector } from './capabilities/reauth-detector.ts';
 import { loadToolServers, registerBuiltinToolServer } from './capabilities/tool-manager.ts';
@@ -75,6 +76,12 @@ loadTasks();
 // the claude engineering agent.
 registerBuiltinToolServer(createAuthToolServer());
 registerBuiltinToolServer(createRestartToolServer());
+
+// The workspace pull tools (§5.2), split into two non-consent servers:
+// 'files' (get_file) and 'events' (the thread/event log). 'all' bundles
+// both; agents with an explicit tool list opt in per server.
+registerBuiltinToolServer(createFilesToolServer());
+registerBuiltinToolServer(createEventsToolServer());
 
 // The schedule registry tools are NOT consent-gated: any agent may register,
 // list, cancel or manually run a scheduled task; the audit is the tool.call.*

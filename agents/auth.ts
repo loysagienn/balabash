@@ -55,7 +55,7 @@ export const agent = {
     required: ['task'],
     additionalProperties: false,
   },
-  tools: ['auth'],
+  tools: ['auth', 'files', 'events'],
   notification: 'normal',
 
   session: {

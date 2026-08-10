@@ -1,35 +1,25 @@
 // Builtin pull tools (§5.2): deep read access without a rights model, scoped
-// to the workspace — list_threads (the list, no summaries), get_thread (one
-// thread + summary), get_thread_events (the transcript), get_event (one event
-// in full), get_file (contents into model context). Layered reading mirrors
-// the summarization: the list first, a summary on request, the full
-// transcript on demand. One implementation serves both the coordinator's
-// function catalog and the ToolsApi handed to dynamic agents.
+// to the workspace. Two builtin tool servers behind the same server/bundle
+// surface as everything else (§7.4): 'files' — get_file (a stored file's
+// metadata plus a presigned URL); 'events' — list_threads (the list, no
+// summaries), get_thread (one thread + summary), get_thread_events (the
+// transcript), get_event (one event in full). Layered reading mirrors the
+// summarization: the list first, a summary on request, the full transcript
+// on demand. Neither server is consent-gated: 'all' bundles both; agents
+// with an explicit tool list name them per server.
 
-import type { Event, JsonObject, JsonValue, Thread, ToolDefinition, ToolResult } from '../core/contract.ts';
+import type { Event, JsonObject, JsonValue, Thread, ToolDefinition } from '../core/contract.ts';
 import { getTranscript, getUserEvent } from '../core/events.ts';
 import { getThread, listThreads } from '../core/threads.ts';
 import { getFileDownloadUrl, getUserFile } from '../files/index.ts';
 import { buildTranscript } from '../harness/openai/transcript.ts';
-import { runToolHandler } from './tool-result.ts';
+import type { ToolFunction } from './mcp-client.ts';
+import type { BuiltinToolServer } from './tool-manager.ts';
 
-export const BUILTIN_TOOL_DEFINITIONS: ToolDefinition[] = [
-  {
-    name: 'get_event',
-    description:
-      'Load one event from the workspace log in full by its seq. Use it to recover content the transcript view truncated or omitted.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        seq: {
-          type: 'integer',
-          description: 'The seq of the event, as shown in the transcript.',
-        },
-      },
-      required: ['seq'],
-      additionalProperties: false,
-    },
-  },
+export const FILES_SERVER_NAME = 'files';
+export const EVENTS_SERVER_NAME = 'events';
+
+const FILES_TOOL_DEFINITIONS: ToolDefinition[] = [
   {
     name: 'get_file',
     description:
@@ -43,6 +33,25 @@ export const BUILTIN_TOOL_DEFINITIONS: ToolDefinition[] = [
         },
       },
       required: ['fileId'],
+      additionalProperties: false,
+    },
+  },
+];
+
+const EVENTS_TOOL_DEFINITIONS: ToolDefinition[] = [
+  {
+    name: 'get_event',
+    description:
+      'Load one event from the workspace log in full by its seq. Use it to recover content the transcript view truncated or omitted.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        seq: {
+          type: 'integer',
+          description: 'The seq of the event, as shown in the transcript.',
+        },
+      },
+      required: ['seq'],
       additionalProperties: false,
     },
   },
@@ -277,26 +286,54 @@ async function executeGetThreadEvents(args: JsonObject, ctx: BuiltinToolContext)
   return parts.join('\n');
 }
 
-const executors: Record<string, (args: JsonObject, ctx: BuiltinToolContext) => Promise<JsonValue>> = {
-  get_event: executeGetEvent,
-  get_file: executeGetFile,
-  list_threads: executeListThreads,
-  get_thread: executeGetThread,
-  get_thread_events: executeGetThreadEvents,
-};
+// One builtin tool server: static ToolFunction list, executor dispatch. The
+// birth contract (§9) lives at the call site — callServerTool wraps the call
+// in runToolHandler; here an executor returns data or throws.
+function createPullToolServer(
+  serverName: string,
+  definitions: ToolDefinition[],
+  executors: Record<string, (args: JsonObject, ctx: BuiltinToolContext) => Promise<JsonValue>>,
+): BuiltinToolServer {
+  const functions: ToolFunction[] = definitions.map(tool => ({
+    functionName: tool.name,
+    serverName,
+    toolName: tool.name,
+    description: tool.description,
+    inputSchema: tool.inputSchema as Record<string, unknown>,
+  }));
 
-export function isBuiltinTool(name: string): boolean {
-  return name in executors;
+  return {
+    name: serverName,
+    consent: false,
+    functionNames: definitions.map(tool => tool.name),
+
+    getFunctions: async () => functions,
+
+    call: async (toolName, args, ctx) => {
+      const executor = executors[toolName];
+
+      // An unknown tool is breakage of the call itself, not a tool answer —
+      // it stays a throw (journaled as tool.call.failed).
+      if (!executor) {
+        throw new Error(`Unknown ${serverName} tool "${toolName}"`);
+      }
+
+      return executor(args, { userId: ctx.userId });
+    },
+  };
 }
 
-export async function callBuiltinTool(name: string, args: JsonObject, ctx: BuiltinToolContext): Promise<ToolResult> {
-  const executor = executors[name];
+export function createFilesToolServer(): BuiltinToolServer {
+  return createPullToolServer(FILES_SERVER_NAME, FILES_TOOL_DEFINITIONS, {
+    get_file: executeGetFile,
+  });
+}
 
-  // An unknown tool is breakage of the call itself, not a tool answer — it
-  // stays a throw (journaled as tool.call.failed).
-  if (!executor) {
-    throw new Error(`Unknown builtin tool "${name}"`);
-  }
-
-  return runToolHandler(() => executor(args, ctx));
+export function createEventsToolServer(): BuiltinToolServer {
+  return createPullToolServer(EVENTS_SERVER_NAME, EVENTS_TOOL_DEFINITIONS, {
+    get_event: executeGetEvent,
+    list_threads: executeListThreads,
+    get_thread: executeGetThread,
+    get_thread_events: executeGetThreadEvents,
+  });
 }

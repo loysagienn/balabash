@@ -34,7 +34,6 @@ import { createCodexSession } from '../harness/codex-sdk/sdk-session.ts';
 import type { RoutedRun } from '../runtime/router.ts';
 import { Ajv, type ValidateFunction } from 'ajv';
 import { getAgent } from './agent-catalog.ts';
-import { BUILTIN_TOOL_DEFINITIONS, callBuiltinTool, isBuiltinTool } from './builtin-tools.ts';
 import { createSessionRun } from './session-run.ts';
 import { callToolJournaled } from './tool-journal.ts';
 import { callServerTool, getServerToolFunctions, type ToolBundle } from './tool-manager.ts';
@@ -95,9 +94,10 @@ function clampNotificationLevel(requested: NotificationLevel, threadLevel: Notif
   return NOTIFICATION_RANK[requested] > NOTIFICATION_RANK[threadLevel] ? threadLevel : requested;
 }
 
-// The run's ToolsApi (§7.4): the builtin pull tools plus the agent's bundle
-// of tool servers. Every call goes through the one tool.call.* journaling
-// point; the completed payload is the verbatim result (§9).
+// The run's ToolsApi (§7.4): the agent's bundle of tool servers (builtin
+// servers like 'files'/'events' included through the same bundle machinery).
+// Every call goes through the one tool.call.* journaling point; the
+// completed payload is the verbatim result (§9).
 function createToolsApi({
   userId,
   threadId,
@@ -110,24 +110,16 @@ function createToolsApi({
   bundle: ToolBundle;
 }): ToolsApi {
   return {
-    list: async () => [
-      ...BUILTIN_TOOL_DEFINITIONS,
-      ...(await getServerToolFunctions(userId, bundle)).map(fn => ({
+    list: async () =>
+      (await getServerToolFunctions(userId, bundle)).map(fn => ({
         name: fn.functionName,
         description: fn.description,
         inputSchema: fn.inputSchema,
       })),
-    ],
 
     call: async (name, args): Promise<ToolResult> => {
       const outcome = await callToolJournaled({ userId, threadId, agentName }, randomUUID(), name, args, () =>
-        isBuiltinTool(name)
-          ? callBuiltinTool(name, args, { userId }).then(result => ({
-              serverName: 'builtin',
-              toolName: name,
-              result,
-            }))
-          : callServerTool({ userId, threadId }, bundle, name, args),
+        callServerTool({ userId, threadId }, bundle, name, args),
       );
 
       return outcome.result;

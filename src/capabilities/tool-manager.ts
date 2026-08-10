@@ -15,7 +15,6 @@ import { startLocalToolSource, type LocalToolContext, type LocalToolSource } fro
 import { readExternalServerConfigs, type ExternalServerConfig } from './server-config.ts';
 import { resolveExternalServerSecrets } from './server-secrets.ts';
 import { runToolHandler } from './tool-result.ts';
-import { BUILTIN_TOOL_DEFINITIONS } from './builtin-tools.ts';
 import { listUserConnections, markReauthorizationRequired } from './connections/index.ts';
 
 // MCP SDK defaults to 60s per request; deep-research-style tools legitimately
@@ -25,15 +24,10 @@ const TOOL_CALL_TIMEOUT_MS = 10 * 60_000;
 
 export const SERVER_NAME_PATTERN = /^[a-z][a-z0-9_]*$/;
 
-// Names a server tool must not take: the builtin pull tools and the
-// coordinator's static functions share the same flat function namespace.
-const RESERVED_FUNCTION_NAMES = new Set([
-  ...BUILTIN_TOOL_DEFINITIONS.map(tool => tool.name),
-  'send_message',
-  'do_nothing',
-  'send_to_thread',
-  'cancel_thread',
-]);
+// Names a server tool must not take: the coordinator's static functions
+// share the same flat function namespace (the builtin pull tools are covered
+// by the builtin-server functionNames check below).
+const RESERVED_FUNCTION_NAMES = new Set(['send_message', 'do_nothing', 'send_to_thread', 'cancel_thread']);
 
 export function isReservedFunctionName(functionName: string): boolean {
   if (RESERVED_FUNCTION_NAMES.has(functionName)) {

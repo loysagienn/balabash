@@ -10,15 +10,15 @@ import type { JsonObject, ToolsApi } from '../core/contract.ts';
 import { appendEvent } from '../core/append.ts';
 import { SCHEDULE_FIRED, SYSTEM_EXCEPTION } from '../core/envelope.ts';
 import { getMainThread } from '../core/threads.ts';
-import { BUILTIN_TOOL_DEFINITIONS, callBuiltinTool, isBuiltinTool } from '../capabilities/builtin-tools.ts';
 import { callServerTool, getServerToolFunctions, type ToolBundle } from '../capabilities/tool-manager.ts';
 import type { ScheduledTaskModel } from '../../prisma-generated/models.ts';
 import { getTaskBody } from './catalog.ts';
 import type { TaskContext } from './contract.ts';
 
 // A task's tool bundle: every non-consent server ('all' excludes consent by
-// construction) plus the builtin pull tools. Calls are NOT journaled as
-// tool.call.* — the envelope requires an author thread and a task has none.
+// construction; the builtin 'files'/'events' pull-tool servers ride along).
+// Calls are NOT journaled as tool.call.* — the envelope requires an author
+// thread and a task has none.
 const TASK_BUNDLE: ToolBundle = { declared: 'all' };
 
 function getErrorMessage(error: unknown): string {
@@ -39,20 +39,14 @@ export function isTaskRunning(slug: string): boolean {
 // place a thread-less actor can honestly point at.
 function createTaskToolsApi(userId: string, mainThreadId: string): ToolsApi {
   return {
-    list: async () => [
-      ...BUILTIN_TOOL_DEFINITIONS,
-      ...(await getServerToolFunctions(userId, TASK_BUNDLE)).map(fn => ({
+    list: async () =>
+      (await getServerToolFunctions(userId, TASK_BUNDLE)).map(fn => ({
         name: fn.functionName,
         description: fn.description,
         inputSchema: fn.inputSchema,
       })),
-    ],
 
     call: async (name, args) => {
-      if (isBuiltinTool(name)) {
-        return callBuiltinTool(name, args, { userId });
-      }
-
       const outcome = await callServerTool({ userId, threadId: mainThreadId }, TASK_BUNDLE, name, args);
 
       return outcome.result;
