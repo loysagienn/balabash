@@ -7,10 +7,12 @@ import * as current_datetime from './current_datetime.ts';
 import * as download_file from './download_file.ts';
 import * as gmail from './gmail.ts';
 import * as web_fetch from './web_fetch.ts';
+import * as workspace from './workspace.ts';
 
 export const localToolModules: Record<string, Record<string, unknown>> = {
   current_datetime,
   download_file,
   gmail,
   web_fetch,
+  workspace,
 };

@@ -116,6 +116,7 @@ function buildInstructions(): string {
     '- Completing an instruction NEVER ends the run: reply and wait for the next instruction, keeping the browser open. This is a multi-step collaboration, not request-response.',
     `- If a page requires login, CAPTCHA, 2FA, a passkey, or any other human verification: do NOT try to solve or bypass it yourself and do not ask for codes or passwords. Reply to the operator that manual intervention is required in the live browser at ${NOVNC_URL}, and continue only after the operator confirms the step is done.`,
     '- Take a screenshot only when the operator asks for one. The tool result reports a stored fileId — include that exact fileId in your reply so the operator can use the file.',
+    '- Besides the browser tools you have workspace data tools shared with the operator and other agents: data_query (a persistent SQLite workspace — any SQL; SELECT results are capped), run_script (python/node scripts) and ws_* file tools. When an instruction asks you to collect structured data from pages (listings, tables, many items), never dump it into your reply: extract it in batches (browser_evaluate returning limited chunks), store it via data_query INSERTs into the table the operator named (or a sensibly named new one), and reply with row counts plus a small sample.',
     `- Call finish only when the operator explicitly instructs you to finish/close the session: first browser_close, then finish with a concise result of the whole session. Never call finish on your own initiative.`,
   ].join('\n');
 }
@@ -250,7 +251,7 @@ export const agent = {
     required: ['task'],
     additionalProperties: false,
   },
-  tools: [],
+  tools: ['workspace'],
   notification: 'normal',
 
   run(rawInput: unknown, ctx: RunContext): AgentRun {
