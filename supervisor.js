@@ -154,9 +154,57 @@ function start() {
   });
 }
 
+// ---------------------------------------------------------------------------
+// The web runner: a second, independent aide (web-runner.js drives the
+// Next.js process in src/web). It takes no part in the exit-code protocol above
+// — it just runs, relaunches on crash with backoff, and dies with the
+// supervisor. Absent web-runner.js → the core runs alone, as before.
+
+const WEB_RUNNER = path.join(ROOT, 'web-runner.js');
+let webRunner = null;
+let webRunnerBackoffMs = 1000;
+
+function startWebRunner() {
+  if (stopping || !fs.existsSync(WEB_RUNNER)) {
+    return;
+  }
+
+  const startedAt = Date.now();
+
+  webRunner = spawn(process.execPath, ['--env-file=.env', WEB_RUNNER], {
+    cwd: ROOT,
+    stdio: 'inherit',
+    env: process.env,
+  });
+
+  webRunner.on('exit', (code, signal) => {
+    webRunner = null;
+
+    if (stopping) {
+      return;
+    }
+
+    webRunnerBackoffMs = Date.now() - startedAt > HEALTHY_AFTER_MS ? 1000 : Math.min(MAX_BACKOFF_MS, webRunnerBackoffMs * 2);
+    log(`web-runner exited (code=${code}, signal=${signal}); relaunching in ${webRunnerBackoffMs}ms`);
+    setTimeout(startWebRunner, webRunnerBackoffMs);
+  });
+}
+
+// Wherever the supervisor exits (clean stop, crash paths), the aide must not
+// outlive it.
+process.on('exit', () => {
+  if (webRunner) {
+    webRunner.kill('SIGTERM');
+  }
+});
+
 for (const signal of ['SIGINT', 'SIGTERM']) {
   process.on(signal, () => {
     stopping = true;
+
+    if (webRunner) {
+      webRunner.kill(signal);
+    }
 
     if (child) {
       child.kill(signal);
@@ -168,3 +216,4 @@ for (const signal of ['SIGINT', 'SIGTERM']) {
 
 log('starting dist/app.js');
 start();
+startWebRunner();

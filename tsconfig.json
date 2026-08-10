@@ -15,5 +15,8 @@
     "forceConsistentCasingInFileNames": true,
     "noEmit": true
   },
-  "include": ["src/**/*", "agents/**/*", "tools/**/*", "tasks/**/*", "scripts/**/*", "prisma-generated/**/*", "prisma.config.ts"]
+  "include": ["src/**/*", "agents/**/*", "tools/**/*", "tasks/**/*", "scripts/**/*", "prisma-generated/**/*", "prisma.config.ts"],
+  // src/web is the Next.js client app: its own sub-project with its own
+  // tsconfig (DOM libs, jsx) — the core typecheck must not touch it.
+  "exclude": ["node_modules", "src/web"]
 }

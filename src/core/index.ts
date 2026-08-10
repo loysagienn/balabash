@@ -24,7 +24,7 @@ export {
 } from './envelope.ts';
 export type { AppendInput } from './envelope.ts';
 
-export { getEventsAfter, getTranscript, getUserEvent, getUserEvents } from './events.ts';
+export { getEventsAfter, getTranscript, getUserEvent, getUserEvents, listThreadEvents } from './events.ts';
 
 export { startConsumer } from './consumers.ts';
 export type { Consumer } from './consumers.ts';
@@ -41,4 +41,4 @@ export {
   rebuildThreadsProjection,
 } from './threads.ts';
 
-export { stringifyJson, parseJson, prepareObject, restoreObject } from './serialize-json.ts';
+export { stringifyJson, parseJson, prepareObject, restoreObject } from '../utils/serialize-json.ts';

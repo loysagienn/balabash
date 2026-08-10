@@ -11,7 +11,6 @@ import { SECRETS_PROVISIONED } from '../core/envelope.ts';
 import { config } from '../config/index.ts';
 import { listExternalSecretTargets, type ExternalSecretTarget } from './tool-manager.ts';
 
-const LINK_TTL_MS = 15 * 60 * 1000;
 const SECRET_KEY_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 export type ExternalServerSecretField = {
@@ -55,8 +54,12 @@ function parseFields(value: unknown): ExternalServerSecretField[] {
   });
 }
 
-// Issues a one-time link for the operator. threadId is the issuing thread
-// (the auth agent's): the provisioning event is addressed to it.
+// Records a pending request and returns the operator's link into the web
+// interface. The page behind it lives behind the SESSION — the request id in
+// the URL is an address, not a credential; ownership is checked at the API
+// edge. The request lives until fulfilled or replaced — no TTL. threadId is
+// the issuing thread (the auth agent's): the provisioning event is addressed
+// to it.
 export async function requestExternalServerCredentials(
   userId: string,
   threadId: string,
@@ -68,58 +71,55 @@ export async function requestExternalServerCredentials(
     throw new Error(`External server "${serverName}" is not awaiting installation credentials`);
   }
 
-  const nonce = randomToken();
   const fields = toFields(target);
+  // nonce/expiresAt are vestigial: the session flow never reads them. They
+  // stay written (columns are required) until a later cleanup migration
+  // drops them once no running code references them.
+  const vestigial = { nonce: randomToken(), expiresAt: new Date() };
 
-  await prisma.externalServerSecretRequest.upsert({
+  const row = await prisma.externalServerSecretRequest.upsert({
     where: { userId_server: { userId, server: target.name } },
-    create: {
-      userId,
-      threadId,
-      server: target.name,
-      nonce,
-      fields,
-      expiresAt: new Date(Date.now() + LINK_TTL_MS),
-    },
-    update: { threadId, nonce, fields, expiresAt: new Date(Date.now() + LINK_TTL_MS) },
+    create: { userId, threadId, server: target.name, fields, ...vestigial },
+    update: { threadId, fields, ...vestigial },
   });
 
-  return `https://${config.domain}/external-server-credentials/${target.name}?nonce=${nonce}`;
+  return `https://${config.domain}/secrets/${row.id}`;
 }
 
 export type ExternalServerSecretRequestView = {
+  id: string;
   server: string;
-  nonce: string;
   fields: ExternalServerSecretField[];
 };
 
+// The request as the web window may see it: field METADATA only, never
+// values. userId comes from the session; a foreign or missing request is the
+// caller's 404. The live tool-manager is deliberately not consulted here —
+// the row itself is the source of truth until fulfilled.
 export async function getExternalServerSecretRequest(
-  serverName: string,
-  nonce: string,
-): Promise<ExternalServerSecretRequestView> {
-  if (!getTarget(serverName) || !nonce) {
-    throw new Error('External server credential link is malformed');
+  userId: string,
+  requestId: string,
+): Promise<ExternalServerSecretRequestView | null> {
+  const row = await prisma.externalServerSecretRequest.findUnique({ where: { id: requestId } });
+
+  if (!row || row.userId !== userId) {
+    return null;
   }
 
-  const row = await prisma.externalServerSecretRequest.findUnique({ where: { nonce } });
-
-  if (!row || row.server !== serverName) {
-    throw new Error('External server credential link is invalid or already used');
-  }
-
-  if (row.expiresAt.getTime() < Date.now()) {
-    throw new Error('External server credential link has expired — ask for a new one in the chat');
-  }
-
-  return { server: row.server, nonce: row.nonce, fields: parseFields(row.fields) };
+  return { id: row.id, server: row.server, fields: parseFields(row.fields) };
 }
 
 export async function provisionExternalServerSecrets(
-  serverName: string,
-  nonce: string,
+  userId: string,
+  requestId: string,
   values: Record<string, string>,
 ): Promise<void> {
-  const request = await getExternalServerSecretRequest(serverName, nonce);
+  const request = await getExternalServerSecretRequest(userId, requestId);
+
+  if (!request) {
+    throw new Error('The credential request does not exist or is already fulfilled');
+  }
+
   const expected = new Set(request.fields.map(field => field.key));
   const normalized: Record<string, string> = {};
 
@@ -142,10 +142,10 @@ export async function provisionExternalServerSecrets(
   // the state is still consistent: the manager reconnects the server on the
   // next secretVersion check regardless of the event.
   const consumed = await prisma.$transaction(async tx => {
-    const row = await tx.externalServerSecretRequest.findUnique({ where: { nonce: request.nonce } });
+    const row = await tx.externalServerSecretRequest.findUnique({ where: { id: request.id } });
 
-    if (!row) {
-      throw new Error('External server credential link is invalid or already used');
+    if (!row || row.userId !== userId) {
+      throw new Error('The credential request does not exist or is already fulfilled');
     }
 
     await tx.externalServerSecretRequest.delete({ where: { id: row.id } });

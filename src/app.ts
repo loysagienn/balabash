@@ -20,7 +20,7 @@ import { loadTasks } from './schedule/catalog.ts';
 import { startScheduleHeart } from './schedule/heart.ts';
 import { createScheduleToolServer } from './schedule/tools.ts';
 import { createCoordinatorRun, hasActiveCoordinatorTurns } from './coordinator/index.ts';
-import { startWebServer } from './web/index.ts';
+import { startWebServer } from './api/index.ts';
 import { startThreadRouter } from './runtime/router.ts';
 import { RESTART_EXIT_CODE, completePendingRestarts, startRestartModule } from './runtime/restart.ts';
 import { initTelegramBot } from './adapters/telegram/bot.ts';

@@ -1,0 +1,169 @@
+.main {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 32px 20px;
+}
+
+.back {
+  display: inline-block;
+  margin-bottom: 16px;
+  color: var(--text-dim);
+  font-size: 14px;
+}
+
+.back:hover {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.header {
+  margin-bottom: 24px;
+}
+
+.title {
+  margin: 0 0 8px;
+  font-size: 20px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.agent {
+  color: var(--accent);
+  font-size: 13px;
+  font-family: ui-monospace, monospace;
+}
+
+.status {
+  font-size: 12px;
+  border-radius: 999px;
+  padding: 2px 10px;
+  white-space: nowrap;
+}
+
+.status_active {
+  background: rgba(78, 161, 255, 0.15);
+  color: var(--accent);
+}
+
+.status_completed {
+  background: rgba(94, 210, 140, 0.12);
+  color: #5ed28c;
+}
+
+.status_failed {
+  background: rgba(255, 107, 107, 0.12);
+  color: var(--danger);
+}
+
+.status_cancelled {
+  background: rgba(139, 152, 169, 0.12);
+  color: var(--text-dim);
+}
+
+.time {
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.events {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.event {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 14px;
+}
+
+.eventHeader {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.seq {
+  color: var(--text-dim);
+  font-size: 12px;
+  font-family: ui-monospace, monospace;
+}
+
+.type {
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+  font-family: ui-monospace, monospace;
+}
+
+.actor {
+  color: var(--accent);
+  font-size: 12px;
+  font-family: ui-monospace, monospace;
+}
+
+.target {
+  color: var(--text-dim);
+  font-size: 12px;
+  font-family: ui-monospace, monospace;
+}
+
+.eventHeader .time {
+  margin-left: auto;
+}
+
+.payload {
+  margin: 0;
+  padding: 10px;
+  background: var(--bg);
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 12px;
+  font-family: ui-monospace, monospace;
+  line-height: 1.45;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.more {
+  display: block;
+  margin: 20px auto 0;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 8px 20px;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.more:hover {
+  border-color: var(--accent);
+}
+
+.more:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.dim {
+  color: var(--text-dim);
+}
+
+.error {
+  color: var(--danger);
+}

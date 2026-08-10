@@ -6,3 +6,8 @@ dist-last-good
 .DS_Store
 prisma-generated
 data
+src/web/.next
+src/web/.next-build
+src/web/.swc
+src/web/next-env.d.ts
+*.tsbuildinfo

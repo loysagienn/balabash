@@ -14,6 +14,7 @@ import { SYSTEM_EXCEPTION, THREAD_CANCEL } from '../../core/envelope.ts';
 import type { ContentBlock, FileRef, JsonObject } from '../../core/contract.ts';
 import { ensureMainThread, getMainThread, getThread } from '../../core/threads.ts';
 import { ingestFile } from '../../files/index.ts';
+import { createAuthCode } from '../../api/auth-codes.ts';
 
 const TELEGRAM_DOWNLOAD_LIMIT_BYTES = 20 * 1024 * 1024;
 
@@ -222,6 +223,33 @@ export async function initTelegramBot() {
       targetThreadId: thread.id,
       payload: { reason: 'cancelled_by_user', identity: identityOf(ctx.from) },
     });
+  });
+
+  // One-time login code for the web interface (§ web). The reply goes
+  // straight back to the chat and DELIBERATELY bypasses the event journal:
+  // the code must never appear in events the assistant or the web window can
+  // read. Group membership is the trust boundary — anyone in the workspace
+  // group may log into its web view.
+  bot.command('auth_code', async ctx => {
+    const chat = ctx.chat;
+
+    if (chat.type !== 'group' && chat.type !== 'supergroup') {
+      return;
+    }
+
+    const group = await getBoundGroup(chat.id);
+
+    if (!group || !ctx.from || ctx.from.is_bot) {
+      return;
+    }
+
+    const code = createAuthCode(group.userId);
+    const messageThreadId = ctx.message?.is_topic_message ? ctx.message.message_thread_id : undefined;
+
+    await ctx.reply(
+      `Код для входа в веб: ${code}\nОдноразовый, действует 10 минут.\nhttps://${config.domain}/login`,
+      messageThreadId === undefined ? undefined : { message_thread_id: messageThreadId },
+    );
   });
 
   // group → supergroup conversion changes the chat id (it happens when topics

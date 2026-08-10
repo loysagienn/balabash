@@ -6,6 +6,7 @@
 import Koa from 'koa';
 import { config } from '../config/index.ts';
 import { connect } from './connect.ts';
+import { createApiMiddleware } from './api.ts';
 
 export function startWebServer(): void {
   const app = new Koa();
@@ -13,7 +14,10 @@ export function startWebServer(): void {
   // Behind the TLS-terminating proxy: trust X-Forwarded-* for protocol/ip.
   app.proxy = true;
 
+  // Nonce/state-authenticated surfaces first (one-time links, OAuth
+  // redirects), then the session-gated /api namespace.
   app.use(connect);
+  app.use(createApiMiddleware());
 
   app.use(ctx => {
     ctx.status = 404;

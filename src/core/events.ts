@@ -88,6 +88,32 @@ export async function getTranscript(
   return rows.map(toEvent);
 }
 
+type ListThreadEventsOptions = {
+  afterSeq?: bigint;
+  limit?: number;
+};
+
+// The web window's feed: the same WHERE as the transcript formula (authored
+// in the thread OR addressed to it, global seq order), but the events come
+// WHOLE — payload as stored, nothing prepared or trimmed for a model
+// context. Cursor-paginated by seq, oldest first: pass the last seen seq as
+// afterSeq to continue.
+export async function listThreadEvents(
+  threadId: string,
+  { afterSeq, limit = 100 }: ListThreadEventsOptions = {},
+): Promise<Event[]> {
+  const rows = await prisma.event.findMany({
+    where: {
+      OR: [{ threadId }, { targetThreadId: threadId }],
+      ...(afterSeq !== undefined ? { seq: { gt: afterSeq } } : {}),
+    },
+    orderBy: { seq: 'asc' },
+    take: limit,
+  });
+
+  return rows.map(toEvent);
+}
+
 // Recall for the pull tools (§5.2): one event by global seq, visible only
 // inside its own workspace.
 export async function getUserEvent(userId: string, seq: bigint): Promise<Event | null> {

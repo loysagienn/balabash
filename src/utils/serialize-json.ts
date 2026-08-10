@@ -1,6 +1,10 @@
 // JSON transport between server and browser: wraps values JSON can't carry
 // (bigint, Date) into {_$_type, _$_value} markers on stringify and restores
 // them on parse. Port of v1 utils/serialize-json, typed for strict mode.
+//
+// Lives in src/utils: ISOLATED modules only — no imports from the core tree
+// or node builtins. Everything here must stay importable from anywhere,
+// including the web/ Next.js client bundle.
 
 const TYPE = '_$_type';
 const VALUE = '_$_value';

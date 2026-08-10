@@ -47,6 +47,12 @@ export const config = {
     return Number(requireEnv('HTTP_PORT'));
   },
 
+  // Pepper mixed into web-session token hashes: a DB leak alone is not
+  // enough to forge a session cookie.
+  get sessionPepper(): string {
+    return requireEnv('SESSION_PEPPER');
+  },
+
   // IANA timezone the schedule module evaluates cron expressions in. One-shot
   // triggers (at) are absolute instants and do not depend on it.
   get scheduleTimezone(): string {

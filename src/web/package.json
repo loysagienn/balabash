@@ -1,0 +1,21 @@
+{
+  "name": "balabash-web",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Balabash web interface: a standalone Next.js process talking to the core only over /api",
+  "scripts": {
+    "dev": "next dev -p 3041",
+    "build": "next build",
+    "start": "next start -p 3041"
+  },
+  "dependencies": {
+    "@tanstack/react-query": "^5.90.0",
+    "@types/node": "^26.1.1",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "next": "^16.1.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "typescript": "^5.9.0"
+  }
+}

@@ -32,7 +32,6 @@ export { createTransportAuthProvider } from './oauth-provider.ts';
 // until this TTL or a completed authorization, whichever comes first. Each
 // click just restarts the flow with a fresh OAuth state.
 const CONNECT_LINK_TTL_MS = 15 * 60 * 1000;
-const OAUTH_CLIENT_LINK_TTL_MS = 15 * 60 * 1000;
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -113,8 +112,11 @@ export async function requestAuthorization(userId: string, threadId: string, ser
   return `https://${config.domain}/connect/${server.name}?nonce=${connectNonce}`;
 }
 
-// Issues an operator-only link for storing a manual installation OAuth client
-// directly in the database. Submitted values never enter the event log.
+// Records a pending request for a manual installation OAuth client and
+// returns the operator's link into the web interface (session-gated page;
+// the id is an address, not a credential — ownership is checked at the API
+// edge). No TTL: the request lives until fulfilled or replaced. Submitted
+// values never enter the event log.
 export async function requestOauthClientCredentials(
   userId: string,
   threadId: string,
@@ -126,50 +128,48 @@ export async function requestOauthClientCredentials(
     throw new Error(`Integration "${server.name}" uses Dynamic Client Registration`);
   }
 
-  const nonce = randomToken();
-  const expiresAt = new Date(Date.now() + OAUTH_CLIENT_LINK_TTL_MS);
+  // nonce/expiresAt are vestigial: the session flow never reads them. They
+  // stay written (columns are required) until a later cleanup migration.
+  const vestigial = { nonce: randomToken(), expiresAt: new Date() };
 
-  await prisma.oauthClientRequest.upsert({
+  const row = await prisma.oauthClientRequest.upsert({
     where: { userId_server: { userId, server: server.name } },
-    create: { userId, threadId, server: server.name, nonce, expiresAt },
-    update: { threadId, nonce, expiresAt },
+    create: { userId, threadId, server: server.name, ...vestigial },
+    update: { threadId, ...vestigial },
   });
 
-  return `https://${config.domain}/oauth-client/${server.name}?nonce=${nonce}`;
+  return `https://${config.domain}/secrets/${row.id}`;
 }
 
 export type OauthClientRequestView = {
+  id: string;
   server: string;
-  nonce: string;
 };
 
-export async function getOauthClientRequest(serverName: string, nonce: string): Promise<OauthClientRequestView> {
-  const server = getServer(serverName);
+// Metadata only, session-derived userId; foreign or missing → null (the
+// caller's 404). The server config is deliberately not consulted here.
+export async function getOauthClientRequest(userId: string, requestId: string): Promise<OauthClientRequestView | null> {
+  const row = await prisma.oauthClientRequest.findUnique({ where: { id: requestId } });
 
-  if (server.clientRegistration !== 'manual' || !nonce) {
-    throw new Error('OAuth client provisioning link is malformed');
+  if (!row || row.userId !== userId) {
+    return null;
   }
 
-  const row = await prisma.oauthClientRequest.findUnique({ where: { nonce } });
-
-  if (!row || row.server !== server.name) {
-    throw new Error('OAuth client provisioning link is invalid or already used');
-  }
-
-  if (row.expiresAt.getTime() < Date.now()) {
-    throw new Error('OAuth client provisioning link has expired — ask for a new one in the chat');
-  }
-
-  return { server: row.server, nonce: row.nonce };
+  return { id: row.id, server: row.server };
 }
 
 export async function provisionOauthClient(
-  serverName: string,
-  nonce: string,
+  userId: string,
+  requestId: string,
   clientId: string,
   clientSecret: string,
 ): Promise<void> {
-  const request = await getOauthClientRequest(serverName, nonce);
+  const request = await getOauthClientRequest(userId, requestId);
+
+  if (!request) {
+    throw new Error('The OAuth client request does not exist or is already fulfilled');
+  }
+
   const normalizedClientId = clientId.trim();
   const normalizedClientSecret = clientSecret.trim();
 
@@ -179,10 +179,10 @@ export async function provisionOauthClient(
 
   // Consume atomically: the request row dies with the client landing.
   const consumed = await prisma.$transaction(async tx => {
-    const row = await tx.oauthClientRequest.findUnique({ where: { nonce: request.nonce } });
+    const row = await tx.oauthClientRequest.findUnique({ where: { id: request.id } });
 
-    if (!row) {
-      throw new Error('OAuth client provisioning link is invalid or already used');
+    if (!row || row.userId !== userId) {
+      throw new Error('The OAuth client request does not exist or is already fulfilled');
     }
 
     await tx.oauthClientRequest.delete({ where: { id: row.id } });
