@@ -18,6 +18,29 @@
   font-weight: 600;
 }
 
+.headerActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.coordinator {
+  display: inline-block;
+  background: transparent;
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  border-radius: 8px;
+  padding: 6px 14px;
+  font-size: 14px;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.coordinator:hover {
+  background: rgba(78, 161, 255, 0.12);
+  text-decoration: none;
+}
+
 .logout {
   background: transparent;
   border: 1px solid var(--border);

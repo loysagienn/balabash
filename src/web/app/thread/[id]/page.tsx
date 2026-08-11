@@ -1,9 +1,9 @@
 'use client';
 
-// The thread page: the full event feed of one thread, oldest first, whole
-// events with the payload as honest raw JSON. «Показать ещё» continues by
-// the seq cursor. Ownership is the server's business: a foreign or missing
-// id is the same 404.
+// The thread page: the full event feed of one thread, newest first, whole
+// events with the payload as honest raw JSON. «Показать ещё» continues into
+// older events by the seq cursor. Ownership is the server's business: a
+// foreign or missing id is the same 404.
 
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import Link from 'next/link';
@@ -47,9 +47,11 @@ export default function ThreadPage() {
     queryKey: ['thread-events', threadId],
     queryFn: ({ pageParam }) =>
       apiFetch<ThreadEventsResponse>(
-        `/api/threads/${threadId}/events?limit=${EVENTS_PAGE_SIZE}${pageParam ? `&after=${pageParam}` : ''}`,
+        `/api/threads/${threadId}/events?limit=${EVENTS_PAGE_SIZE}${pageParam ? `&before=${pageParam}` : ''}`,
       ),
     initialPageParam: '',
+    // nextCursor = seq of the oldest event on a full page; the server's
+    // strict `before` guarantees no duplicates even for equal timestamps.
     getNextPageParam: lastPage => (lastPage.nextCursor !== null ? String(lastPage.nextCursor) : null),
   });
 

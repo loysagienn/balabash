@@ -1,16 +1,16 @@
 'use client';
 
 // The workspace window, page one: the thread list. Newest first, filtered by
-// status, paginated by createdAt cursor («показать ещё» loads older ones).
+// status, cursor-paginated by createdSeq («показать ещё» loads older ones).
 
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { apiFetch } from '../lib/api';
 import { useAuthRedirect } from '../lib/auth-gate';
 import { STATUS_LABELS, formatDateTime } from '../lib/format';
-import type { LogoutResponse, MeResponse, Thread, ThreadStatus, ThreadsResponse } from '../../api/contract.ts';
+import type { LogoutResponse, MeResponse, ThreadStatus, ThreadsResponse } from '../../api/contract.ts';
 import styles from './page.module.css';
 
 const PAGE_SIZE = 50;
@@ -19,22 +19,18 @@ type StatusFilter = ThreadStatus | 'all';
 
 const FILTERS: StatusFilter[] = ['all', 'active', 'completed', 'failed', 'cancelled'];
 
-async function fetchThreads(status: StatusFilter, createdAtLte: string | null): Promise<Thread[]> {
+async function fetchThreads(status: StatusFilter, before: string | null): Promise<ThreadsResponse> {
   const params = new URLSearchParams({ limit: String(PAGE_SIZE) });
 
   if (status !== 'all') {
     params.set('status', status);
   }
 
-  if (createdAtLte !== null) {
-    params.set('createdAtLte', createdAtLte);
+  if (before !== null) {
+    params.set('before', before);
   }
 
-  const { threads } = await apiFetch<ThreadsResponse>(`/api/threads?${params}`);
-
-  // The API returns the newest window in creation order; the list shows
-  // newest first.
-  return threads.slice().reverse();
+  return apiFetch<ThreadsResponse>(`/api/threads?${params}`);
 }
 
 export default function HomePage() {
@@ -51,10 +47,9 @@ export default function HomePage() {
     queryKey: ['threads', filter],
     queryFn: ({ pageParam }) => fetchThreads(filter, pageParam),
     initialPageParam: null as string | null,
-    // A full page continues from its oldest thread's createdAt (inclusive on
-    // the server; the flatten below dedups the boundary thread by id).
-    getNextPageParam: lastPage =>
-      lastPage.length === PAGE_SIZE ? lastPage[lastPage.length - 1]!.createdAt.toISOString() : null,
+    // The server's cursor (createdSeq of the oldest returned thread) is
+    // strict, so pages never overlap — no client-side dedup needed.
+    getNextPageParam: lastPage => (lastPage.nextCursor !== null ? String(lastPage.nextCursor) : null),
   });
 
   const unauthorized = useAuthRedirect(me.error, threads.error);
@@ -67,21 +62,7 @@ export default function HomePage() {
     },
   });
 
-  const rows = useMemo(() => {
-    const seen = new Set<string>();
-    const result: Thread[] = [];
-
-    for (const page of threads.data?.pages ?? []) {
-      for (const thread of page) {
-        if (!seen.has(thread.id)) {
-          seen.add(thread.id);
-          result.push(thread);
-        }
-      }
-    }
-
-    return result;
-  }, [threads.data]);
+  const rows = threads.data?.pages.flatMap(page => page.threads) ?? [];
 
   if (unauthorized || me.isPending) {
     return (
@@ -95,14 +76,21 @@ export default function HomePage() {
     <main className={styles.main}>
       <header className={styles.header}>
         <h1 className={styles.title}>{me.data?.workspaceName ?? 'Balabash'}</h1>
-        <button
-          className={styles.logout}
-          type="button"
-          disabled={logout.isPending}
-          onClick={() => logout.mutate()}
-        >
-          Выйти
-        </button>
+        <div className={styles.headerActions}>
+          {me.data?.mainThreadId ? (
+            <Link className={styles.coordinator} href={`/thread/${me.data.mainThreadId}`}>
+              Координатор
+            </Link>
+          ) : null}
+          <button
+            className={styles.logout}
+            type="button"
+            disabled={logout.isPending}
+            onClick={() => logout.mutate()}
+          >
+            Выйти
+          </button>
+        </div>
       </header>
 
       <div className={styles.filters}>

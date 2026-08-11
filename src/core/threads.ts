@@ -41,20 +41,29 @@ type ListThreadsOptions = {
   parentId?: string | null;
   createdAtGte?: Date;
   createdAtLte?: Date;
+  // Cursor for newest-first pagination: only threads with
+  // createdSeq < beforeCreatedSeq. createdSeq is unique (the global seq of
+  // thread.started), so equal createdAt timestamps page deterministically.
+  beforeCreatedSeq?: bigint;
   limit?: number;
+  // 'asc' (default) keeps the historical shape: the newest matching window
+  // returned in creation order. 'desc' returns newest first — the web
+  // window's feed order.
+  order?: 'asc' | 'desc';
 };
 
 export async function listThreads(
   userId: string,
-  { status, parentId, createdAtGte, createdAtLte, limit = 100 }: ListThreadsOptions = {},
+  { status, parentId, createdAtGte, createdAtLte, beforeCreatedSeq, limit = 100, order = 'asc' }: ListThreadsOptions = {},
 ): Promise<Thread[]> {
   // The limit keeps the newest matching threads (the useful end of a growing
-  // workspace); the result is returned in creation order regardless.
+  // workspace) regardless of the output order.
   const rows = await prisma.thread.findMany({
     where: {
       userId,
       ...(status !== undefined ? { status } : {}),
       ...(parentId !== undefined ? { parentId } : {}),
+      ...(beforeCreatedSeq !== undefined ? { createdSeq: { lt: beforeCreatedSeq } } : {}),
       ...(createdAtGte !== undefined || createdAtLte !== undefined
         ? {
             createdAt: {
@@ -68,7 +77,11 @@ export async function listThreads(
     take: limit,
   });
 
-  return rows.reverse().map(toThread);
+  if (order === 'asc') {
+    rows.reverse();
+  }
+
+  return rows.map(toThread);
 }
 
 // Every active non-main thread across all workspaces — the restart module's

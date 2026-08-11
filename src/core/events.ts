@@ -89,25 +89,27 @@ export async function getTranscript(
 }
 
 type ListThreadEventsOptions = {
-  afterSeq?: bigint;
+  beforeSeq?: bigint;
   limit?: number;
 };
 
 // The web window's feed: the same WHERE as the transcript formula (authored
-// in the thread OR addressed to it, global seq order), but the events come
-// WHOLE — payload as stored, nothing prepared or trimmed for a model
-// context. Cursor-paginated by seq, oldest first: pass the last seen seq as
-// afterSeq to continue.
+// in the thread OR addressed to it), but the events come WHOLE — payload as
+// stored, nothing prepared or trimmed for a model context. Newest first,
+// cursor-paginated by the global seq: pass the smallest seen seq as
+// beforeSeq to continue into older events. seq is unique and follows insert
+// order, so equal createdAt timestamps still page deterministically — no
+// duplicates, no gaps at page boundaries.
 export async function listThreadEvents(
   threadId: string,
-  { afterSeq, limit = 100 }: ListThreadEventsOptions = {},
+  { beforeSeq, limit = 100 }: ListThreadEventsOptions = {},
 ): Promise<Event[]> {
   const rows = await prisma.event.findMany({
     where: {
       OR: [{ threadId }, { targetThreadId: threadId }],
-      ...(afterSeq !== undefined ? { seq: { gt: afterSeq } } : {}),
+      ...(beforeSeq !== undefined ? { seq: { lt: beforeSeq } } : {}),
     },
-    orderBy: { seq: 'asc' },
+    orderBy: { seq: 'desc' },
     take: limit,
   });
 

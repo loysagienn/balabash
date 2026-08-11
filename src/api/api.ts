@@ -11,7 +11,7 @@ import type { Context, Next } from 'koa';
 import { prisma } from '../db/client.ts';
 import { config } from '../config/index.ts';
 import { parseJson, prepareObject } from '../utils/serialize-json.ts';
-import { getThread, listThreads } from '../core/threads.ts';
+import { getMainThread, getThread, listThreads } from '../core/threads.ts';
 import { listThreadEvents } from '../core/events.ts';
 import type { Thread, ThreadStatus } from '../core/contract.ts';
 import { getExternalServerSecretRequest, provisionExternalServerSecrets } from '../capabilities/external-secrets.ts';
@@ -174,16 +174,17 @@ router.post('/auth', async ctx => {
 
   await createUserSession(ctx, userId);
 
-  const response: MeResponse = { userId, workspaceName: await getWorkspaceName(userId) };
-
-  ctx.body = prepareObject(response);
+  ctx.body = prepareObject(await buildMeResponse(userId));
 });
 
-router.get('/me', requireSession, async ctx => {
-  const userId = ctx.state.userId as string;
-  const response: MeResponse = { userId, workspaceName: await getWorkspaceName(userId) };
+async function buildMeResponse(userId: string): Promise<MeResponse> {
+  const [workspaceName, mainThread] = await Promise.all([getWorkspaceName(userId), getMainThread(userId)]);
 
-  ctx.body = prepareObject(response);
+  return { userId, workspaceName, mainThreadId: mainThread?.id ?? null };
+}
+
+router.get('/me', requireSession, async ctx => {
+  ctx.body = prepareObject(await buildMeResponse(ctx.state.userId as string));
 });
 
 router.post('/logout', requireSession, async ctx => {
@@ -218,6 +219,14 @@ router.get('/threads', requireSession, async ctx => {
     return;
   }
 
+  const before = queryValue(ctx.query.before);
+
+  if (before !== undefined && !/^\d+$/.test(before)) {
+    sendError(ctx, 400, 'bad_request', 'before must be a decimal thread createdSeq cursor');
+
+    return;
+  }
+
   const limit = parseLimitParam(queryValue(ctx.query.limit));
 
   if (limit === null) {
@@ -226,16 +235,23 @@ router.get('/threads', requireSession, async ctx => {
     return;
   }
 
+  // Newest first, cursor by createdSeq: unique per thread, so equal
+  // createdAt timestamps cannot duplicate or skip rows across pages.
   const threads = await listThreads(userId, {
     ...(status !== undefined ? { status: status as ThreadStatus } : {}),
     // The literal "null" selects root threads (no parent).
     ...(parentId !== undefined ? { parentId: parentId === 'null' ? null : parentId } : {}),
     ...(createdAtGte !== undefined ? { createdAtGte } : {}),
     ...(createdAtLte !== undefined ? { createdAtLte } : {}),
+    ...(before !== undefined ? { beforeCreatedSeq: BigInt(before) } : {}),
     limit,
+    order: 'desc',
   });
 
-  const response: ThreadsResponse = { threads };
+  const response: ThreadsResponse = {
+    threads,
+    nextCursor: threads.length === limit ? threads[threads.length - 1]!.createdSeq : null,
+  };
 
   ctx.body = prepareObject(response);
 });
@@ -259,10 +275,10 @@ router.get('/threads/:id/events', requireSession, async ctx => {
     return;
   }
 
-  const after = queryValue(ctx.query.after);
+  const before = queryValue(ctx.query.before);
 
-  if (after !== undefined && !/^\d+$/.test(after)) {
-    sendError(ctx, 400, 'bad_request', 'after must be a decimal event seq');
+  if (before !== undefined && !/^\d+$/.test(before)) {
+    sendError(ctx, 400, 'bad_request', 'before must be a decimal event seq cursor');
 
     return;
   }
@@ -275,8 +291,10 @@ router.get('/threads/:id/events', requireSession, async ctx => {
     return;
   }
 
+  // Newest first, cursor by the global seq: unique and insert-ordered, so
+  // events sharing a createdAt timestamp page deterministically.
   const events = await listThreadEvents(thread.id, {
-    ...(after !== undefined ? { afterSeq: BigInt(after) } : {}),
+    ...(before !== undefined ? { beforeSeq: BigInt(before) } : {}),
     limit,
   });
 
