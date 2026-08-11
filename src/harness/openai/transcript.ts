@@ -1,8 +1,8 @@
 // The transcript: turns a slice of the event log into the coordinator prompt.
-// Port of v1 runner/transcript with v2 renderers: canonical thread-aware
-// types, "who speaks" from the envelope actor and the identity in payload.
-// The send-pair collapse and agentRunId machinery of v1 are gone by
-// construction (design doc §1).
+// Port of the legacy runner/transcript with new renderers: canonical
+// thread-aware types, "who speaks" from the envelope actor and the identity
+// in payload. The send-pair collapse and agentRunId machinery of the legacy
+// version are gone by construction (design doc §1).
 //
 // Principles: events are never merged into one entry, only skipped whole;
 // length is bounded by two mechanisms — a per-string limit decaying with

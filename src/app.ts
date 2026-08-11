@@ -53,7 +53,7 @@ try {
 }
 
 await prisma.$queryRaw`SELECT 1`;
-console.log('[app] balabash-v2: database reachable');
+console.log('[app] balabash: database reachable');
 
 // Runs live only in memory: threads orphaned by the previous process death
 // are cancelled before anything can address them (§5.5). A planned restart
@@ -147,7 +147,7 @@ consumers.push(
   }),
 );
 
-console.log('[app] balabash-v2 is running');
+console.log('[app] balabash is running');
 
 // ---------------------------------------------------------------------------
 // Shutdown: stop taking input (telegram polling confirms its offset), stop

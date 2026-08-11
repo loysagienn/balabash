@@ -1,5 +1,5 @@
 {
-  "name": "balabash-v2",
+  "name": "balabash",
   "version": "0.1.0",
   "private": true,
   "description": "Thread-based agent system over an append-only event log",

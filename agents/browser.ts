@@ -1,5 +1,6 @@
 // Browser agent: a real Chromium session driven by an inner Claude model
-// through Playwright MCP. Port of the v1 agent onto the v2 thread model.
+// through Playwright MCP. Port of the legacy (pre-thread) agent onto the
+// thread model.
 //
 // The agent is a sub-agent for OTHER agents: its operator is the parent
 // thread (the coordinator or any agent that spawned it), never the user —

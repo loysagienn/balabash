@@ -1,5 +1,6 @@
-// Hard validation of a dynamic agent module against the v2 contract (§7.1) —
-// adaptation of v1 validate-agent for the AgentDeclaration shape: flat object,
+// Hard validation of a dynamic agent module against the agent contract (§7.1)
+// — adaptation of the legacy validate-agent for the AgentDeclaration shape:
+// flat object,
 // tools bundle, domain events '<name>.*', no acceptsEvents/exclusive/
 // triggersMainModel (gone by construction, design doc §1).
 

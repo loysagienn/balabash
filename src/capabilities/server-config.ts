@@ -1,7 +1,7 @@
 // Tool-server configs (§10): external MCP servers are mcp-servers/<name>.json
 // (stdio | http), validated hard; local in-process servers ship inside the
-// bundle (tools/index.ts) and reuse the same config validation. Port of v1
-// server-config with one v2 addition: the consent flag (§7.4) — a consent
+// bundle (tools/index.ts) and reuse the same config validation. Port of the
+// legacy server-config with one addition: the consent flag (§7.4) — a consent
 // server is excluded from the 'all' bundle and only reaches agents that name
 // it explicitly.
 

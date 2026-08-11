@@ -1,4 +1,4 @@
-// Discussion agent (v2): an in-depth discussion of one topic in its own
+// Discussion agent: an in-depth discussion of one topic in its own
 // thread — the user talks to it directly in the thread's forum topic. Fully
 // declarative: the platform's session runner drives the SDK session, the
 // channel binding and the base verbs (end_thread, send_file).

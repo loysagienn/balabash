@@ -1,4 +1,4 @@
-// Manager agent (v2): a general-purpose task thread — the user talks to it
+// Manager agent: a general-purpose task thread — the user talks to it
 // directly in its own topic and hands it everyday tasks; it acts through the
 // Balabash tool bundle (bridge-only, no native host tools) and can spawn the
 // browser sub-agent for operating real websites. Fully declarative: the
