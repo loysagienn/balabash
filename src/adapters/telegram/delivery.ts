@@ -129,12 +129,13 @@ export function startTelegramDelivery({ bot }: { bot: Bot }): Consumer {
       return;
     }
 
+    // The topic name is the clean thread title — no agent icon prefix: the
+    // title names the work, not the executor.
     const title = typeof event.payload.title === 'string' && event.payload.title ? event.payload.title : 'thread';
-    const icon = typeof event.payload.icon === 'string' && event.payload.icon ? `${event.payload.icon} ` : '';
     const chatId = Number(group.chatId);
 
     try {
-      const topic = await bot.api.createForumTopic(chatId, `${icon}${title}`.slice(0, 128));
+      const topic = await bot.api.createForumTopic(chatId, title.slice(0, 128));
 
       await prisma.telegramTopic.create({
         data: {
@@ -179,6 +180,19 @@ export function startTelegramDelivery({ bot }: { bot: Bot }): Consumer {
     }
 
     const target: DeliveryTarget = { chatId: topic.chatId, messageThreadId: topic.messageThreadId };
+
+    // The one-time title correction (§ three-level self-description): a
+    // completed thread renames its topic to the final title before the
+    // summary lands and the topic closes. Best-effort, like the close below.
+    if (event.type === 'thread.completed' && typeof event.payload.title === 'string' && event.payload.title.trim()) {
+      try {
+        await bot.api.editForumTopic(Number(target.chatId), topic.messageThreadId, {
+          name: event.payload.title.trim().slice(0, 128),
+        });
+      } catch (error) {
+        console.error(`[telegram-delivery] failed to rename topic ${topic.messageThreadId}:`, error);
+      }
+    }
 
     let text: string;
     let fileIds: string[] = [];

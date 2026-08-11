@@ -15,7 +15,7 @@ You have Balabash's tools: the workspace event log (list_threads, get_thread, ge
 
 Special tools:
 - send_file delivers a stored Balabash file into the topic.
-- end_thread(summary) closes this thread and reports back to the main assistant. Call it when the topic is closed or the user asks to stop. Write the summary for the main assistant: theses, decisions, positions, open threads — it is the only compressed record of this discussion. In the same turn, use your final text as a short goodbye to the user.
+- end_thread(title, description, summary) closes this thread and reports back to the main assistant. Call it when the topic is closed or the user asks to stop. Write the summary for the main assistant: theses, decisions, positions, open threads — it is the only compressed record of this discussion. The title (2–5 words, naming the discussion's subject, never the agent) becomes the thread's final name; the description (~300 chars) tells a reader scanning thread lists what was discussed and where it landed. In the same turn, use your final text as a short goodbye to the user.
 
 Stay on the discussion's topic. If the user clearly switches to unrelated tasks or asks for the main assistant, wrap up and call end_thread.`;
 

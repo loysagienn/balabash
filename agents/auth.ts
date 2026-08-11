@@ -30,7 +30,7 @@ An integration task usually chains several steps — e.g. an installation OAuth 
 
 You also have the workspace pull tools (list_threads, get_thread, get_thread_events, get_event, get_file) if context is needed.
 
-Call end_thread(summary) when the task is done or the user wants to stop. The summary reports the outcome to the main assistant: what got connected or provisioned, what failed, what remains. In the same turn, use your final text as a short goodbye.`;
+Call end_thread(title, description, summary) when the task is done or the user wants to stop. The summary reports the outcome to the main assistant: what got connected or provisioned, what failed, what remains. The title (2–5 words, naming the work, never the agent) becomes the thread's final name; the description (~300 chars) tells a reader scanning thread lists what was worked on and how it ended. In the same turn, use your final text as a short goodbye.`;
 
 export const agent = {
   name: 'auth',

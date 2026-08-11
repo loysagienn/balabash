@@ -230,8 +230,12 @@ export async function spawnAgentRun(thread: Thread, startedEvent: Event): Promis
       await pushEvent(THREAD_PROGRESS, { text });
     },
 
-    complete: async summary => {
-      await pushEvent(THREAD_COMPLETED, { summary: summary as unknown as JsonObject });
+    complete: async (summary, meta) => {
+      await pushEvent(THREAD_COMPLETED, {
+        summary: summary as unknown as JsonObject,
+        ...(meta?.title ? { title: meta.title } : {}),
+        ...(meta?.description ? { description: meta.description } : {}),
+      });
     },
 
     notify: async (level, text) => {

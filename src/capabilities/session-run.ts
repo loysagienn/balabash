@@ -102,7 +102,18 @@ function describeEvent(event: Event): string {
 // ---------------------------------------------------------------------------
 // The standard base verbs (§7.1 base kit): every session agent gets them.
 
-type EndState = { summary: ThreadSummary | null };
+// The thread's retrospective self-description (three levels, one author, one
+// moment): title — the one-time correction of the start-time guess;
+// description — "is this the thread I'm looking for" without the full report;
+// summary — the full handoff. Optional at the envelope, required here: the
+// strictness lives at the edge, where the author is the thread itself.
+type EndResult = {
+  title: string;
+  description: string;
+  summary: ThreadSummary;
+};
+
+type EndState = { result: EndResult | null };
 
 function createEndThreadTool(end: EndState): SdkBridgeTool {
   return {
@@ -113,6 +124,20 @@ function createEndThreadTool(end: EndState): SdkBridgeTool {
     inputSchema: {
       type: 'object',
       properties: {
+        title: {
+          type: 'string',
+          description:
+            'Final thread title: 2–5 words naming the work done, in the language of the thread. Name the ' +
+            'task, never the executor or agent. It replaces the start-time title in thread lists and the ' +
+            'forum topic name.',
+        },
+        description: {
+          type: 'string',
+          description:
+            'About 300 characters (soft limit): what was worked on and how it ended — enough for a reader ' +
+            'scanning threads to tell whether this is the one they are looking for, without opening the ' +
+            'full summary.',
+        },
         summary: {
           type: 'string',
           description:
@@ -125,21 +150,27 @@ function createEndThreadTool(end: EndState): SdkBridgeTool {
           description: 'Stored fileIds that belong with the report, or null.',
         },
       },
-      required: ['summary', 'fileIds'],
+      required: ['title', 'description', 'summary', 'fileIds'],
       additionalProperties: false,
     },
     handler: async args => {
+      const title = typeof args.title === 'string' ? args.title.trim() : '';
+      const description = typeof args.description === 'string' ? args.description.trim() : '';
       const summary = typeof args.summary === 'string' ? args.summary.trim() : '';
 
-      if (!summary) {
-        throw new Error('end_thread requires a non-empty summary');
+      if (!title || !description || !summary) {
+        throw new Error('end_thread requires non-empty title, description and summary');
       }
 
       const fileIds = Array.isArray(args.fileIds)
         ? args.fileIds.filter((id): id is string => typeof id === 'string' && Boolean(id.trim()))
         : [];
 
-      end.summary = { text: summary, ...(fileIds.length ? { fileIds } : {}) };
+      end.result = {
+        title,
+        description,
+        summary: { text: summary, ...(fileIds.length ? { fileIds } : {}) },
+      };
 
       return 'accepted — finish this turn with a short final text';
     },
@@ -213,7 +244,12 @@ function createChildTools(
       type: 'object',
       properties: {
         agent: { type: 'string', description: `The agent to spawn: one of ${allowedAgents.join(', ')}.` },
-        title: { type: 'string', description: 'Short human-readable title for the child thread.' },
+        title: {
+          type: 'string',
+          description:
+            'Short human-readable title for the child thread. Name the task itself, never the agent or ' +
+            'executor: no "agent: …"-style prefixes.',
+        },
         input: { type: 'object', description: "The spawn input matching the agent's input schema." },
       },
       required: ['agent', 'title', 'input'],
@@ -323,7 +359,7 @@ export function createSessionRun(
   // the dialogue (a thread.message whose author is not the parent).
   const childThreadIds = new Set<string>();
 
-  const end: EndState = { summary: null };
+  const end: EndState = { result: null };
   let settled = false;
   let resolveFinished: () => void;
   let rejectFinished: (error: unknown) => void;
@@ -391,12 +427,15 @@ export function createSessionRun(
         // On end_thread the summary carries the report to the operator; the
         // final text is the goodbye — meaningful in a topic (the user reads
         // it), redundant in a headless thread (the parent gets the summary).
-        if (turn.text && !(headless && end.summary !== null)) {
+        if (turn.text && !(headless && end.result !== null)) {
           await deliverTurnText(turn.text);
         }
 
-        if (end.summary !== null) {
-          await ctx.complete(end.summary);
+        if (end.result !== null) {
+          await ctx.complete(end.result.summary, {
+            title: end.result.title,
+            description: end.result.description,
+          });
           stop();
 
           return;

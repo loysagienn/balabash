@@ -186,20 +186,38 @@ async function appendTerminal(tx: Tx, input: AppendInput): Promise<AppendResult>
 
   const event = await createEvent(tx, { ...input, targetThreadId: thread.parentId });
 
-  const summary = input.type === THREAD_COMPLETED ? (input.payload.summary as Prisma.InputJsonValue) : undefined;
-
   await tx.thread.update({
     where: { id: threadId },
     data: {
       status: input.type.slice('thread.'.length), // completed | failed | cancelled
       terminalSeq: event.seq,
-      ...(summary !== undefined ? { summary } : {}),
+      ...(input.type === THREAD_COMPLETED ? completionProjectionData(input.payload) : {}),
     },
   });
 
   await cascadeCancel(tx, thread, threadId);
 
   return { written: true, event };
+}
+
+// Projection fields a thread.completed carries besides the terminal itself:
+// the summary, the retrospective description, and the one-time title
+// correction (the event stays the immutable fact — thread.started keeps the
+// starting title forever; the row is a projection of the current state).
+// Shared by the live append and the replay fold (threads.ts).
+export function completionProjectionData(payload: JsonObject): {
+  summary?: Prisma.InputJsonValue;
+  title?: string;
+  description?: string;
+} {
+  const title = typeof payload.title === 'string' && payload.title.trim() ? payload.title.trim() : undefined;
+  const description = typeof payload.description === 'string' ? payload.description : undefined;
+
+  return {
+    ...(payload.summary !== undefined ? { summary: payload.summary as Prisma.InputJsonValue } : {}),
+    ...(title !== undefined ? { title } : {}),
+    ...(description !== undefined ? { description } : {}),
+  };
 }
 
 // A thread does not outlive its parent: mark every active descendant

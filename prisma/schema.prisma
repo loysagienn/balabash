@@ -55,6 +55,9 @@ model Thread {
   parentId String? @map("parent_id") // null = the workspace's main thread
   agent    String
   title    String?
+  // Retrospective self-description (~300 chars) written by the thread's own
+  // thread.completed; stays null for threads terminated from outside.
+  description String?
   status   String // 'active' | 'completed' | 'failed' | 'cancelled'
   summary  Json? // terminal summary {text, fileIds?, refs?} for completed threads
 

@@ -137,7 +137,8 @@ function addThreadTitleToSchema(parameters: Record<string, unknown>): Record<str
       thread_title: {
         type: 'string',
         description:
-          'Short human-readable title for the new thread, in the user’s language — it becomes the forum topic name.',
+          'Short human-readable title for the new thread, in the user’s language — it becomes the forum ' +
+          'topic name. Name the task itself, never the agent or executor: no "agent: …"-style prefixes.',
       },
     },
     required: [...new Set([...required, 'thread_title'])],

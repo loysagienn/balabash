@@ -58,8 +58,10 @@ const EVENTS_TOOL_DEFINITIONS: ToolDefinition[] = [
   {
     name: 'list_threads',
     description:
-      'List the workspace threads: agent, title, status and timestamps (no summaries). Start here when past or ' +
-      'parallel work matters; get_thread reads one thread with its summary, get_thread_events its full transcript.',
+      'List the workspace threads: agent, title, short description and status (no summaries). A completed ' +
+      'thread describes itself: the description (~300 chars) says what it worked on and how it ended — often ' +
+      'enough to tell whether a thread is the one you need. Start here when past or parallel work matters; ' +
+      'get_thread reads one thread with its summary, get_thread_events its full transcript.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -88,8 +90,8 @@ const EVENTS_TOOL_DEFINITIONS: ToolDefinition[] = [
   {
     name: 'get_thread',
     description:
-      'Read one thread of this workspace: the same fields as list_threads plus the summary the thread left. ' +
-      'For the detailed course of the thread use get_thread_events.',
+      'Read one thread of this workspace: the same fields as list_threads (title, description, status) plus ' +
+      'the full summary the thread left. For the detailed course of the thread use get_thread_events.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -147,13 +149,15 @@ function eventToJson(event: Event): JsonObject {
 }
 
 // The list view: everything but the summary — summaries grow with history
-// and are read per thread via get_thread.
+// and are read per thread via get_thread. The description (~300 chars, from
+// the thread's own completion) is short enough to ride the list.
 function threadToJson(thread: Thread): JsonObject {
   return {
     threadId: thread.id,
     parentThreadId: thread.parentId,
     agent: thread.agent,
     title: thread.title,
+    description: thread.description,
     status: thread.status,
     createdAt: thread.createdAt.toISOString(),
     updatedAt: thread.updatedAt.toISOString(),

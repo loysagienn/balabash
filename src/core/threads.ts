@@ -8,7 +8,7 @@ import { prisma } from '../db/client.ts';
 import type { DbClient } from '../db/client.ts';
 import type { JsonObject, JsonValue, Thread, ThreadStatus, ThreadSummary } from './contract.ts';
 import type { ThreadModel as ThreadRow } from '../../prisma-generated/models.ts';
-import { appendEvent } from './append.ts';
+import { appendEvent, completionProjectionData } from './append.ts';
 import type { AppendResult } from './append.ts';
 import { AppendError, TERMINAL_TYPES, THREAD_CANCELLED, THREAD_STARTED, toEvent } from './envelope.ts';
 
@@ -21,6 +21,7 @@ function toThread(row: ThreadRow): Thread {
     parentId: row.parentId,
     agent: row.agent,
     title: row.title,
+    description: row.description,
     status: row.status as ThreadStatus,
     summary: row.summary as ThreadSummary | null,
     createdSeq: row.createdSeq,
@@ -111,7 +112,7 @@ export async function activeSubtree(threadId: string): Promise<Thread[]> {
       UNION ALL
       SELECT t.id FROM threads t JOIN subtree s ON t.parent_id = s.id
     )
-    SELECT id, user_id AS "userId", parent_id AS "parentId", agent, title, status, summary,
+    SELECT id, user_id AS "userId", parent_id AS "parentId", agent, title, description, status, summary,
            created_seq AS "createdSeq", terminal_seq AS "terminalSeq",
            created_at AS "createdAt", updated_at AS "updatedAt"
     FROM threads
@@ -311,7 +312,7 @@ export async function rebuildThreadsProjection(): Promise<{ threads: number; ter
             data: {
               status: event.type.slice('thread.'.length),
               terminalSeq: event.seq,
-              ...(event.type === 'thread.completed' ? { summary: event.payload.summary as never } : {}),
+              ...(event.type === 'thread.completed' ? completionProjectionData(event.payload) : {}),
             },
           });
           stats.terminals += 1;

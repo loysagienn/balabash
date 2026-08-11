@@ -124,7 +124,15 @@ export const threadMessagePayloadSchema = z.looseObject({
   fileIds: z.array(z.string()).optional(),
 });
 
-export const threadCompletedPayloadSchema = z.looseObject({ summary: summarySchema });
+// A completed thread describes itself retrospectively: the corrected title
+// (2–5 words naming the work) and a ~300-char description ride the terminal
+// alongside the full summary. Optional at the envelope — the core stays
+// tolerant to log history; strictness lives at the end_thread tool edge.
+export const threadCompletedPayloadSchema = z.looseObject({
+  summary: summarySchema,
+  title: z.string().optional(),
+  description: z.string().optional(),
+});
 export const threadFailedPayloadSchema = z.looseObject({ error: z.string() });
 export const threadCancelledPayloadSchema = z.looseObject({ reason: z.string() });
 export const threadNotificationPayloadSchema = z.looseObject({

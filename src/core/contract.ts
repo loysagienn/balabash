@@ -55,6 +55,9 @@ export type Thread = {
   parentId: string | null; // null = the workspace's main thread
   agent: string;
   title: string | null;
+  // Retrospective self-description (~300 chars) from the thread's own
+  // thread.completed; null for threads terminated from outside.
+  description: string | null;
   status: ThreadStatus;
   summary: ThreadSummary | null;
   createdSeq: bigint;
@@ -184,7 +187,10 @@ export type RunContext = {
   // Canonical events on the run's behalf + declared domain events.
   pushEvent(type: string, payload: JsonObject): Promise<void>;
   progress(text: string): Promise<void>; // thread.progress → parent
-  complete(summary: ThreadSummary): Promise<void>; // thread.completed → parent
+  // thread.completed → parent. The optional retrospective self-description
+  // (title: 2–5 words naming the work; description: ~300 chars) rides the
+  // terminal payload and updates the thread row.
+  complete(summary: ThreadSummary, meta?: { title?: string; description?: string }): Promise<void>;
   notify(level: NotificationLevel, text: string): Promise<void>; // thread.notification, gated by policy
 
   spawn(agentName: string, input: JsonObject, options?: SpawnOptions): Promise<{ threadId: string }>;
