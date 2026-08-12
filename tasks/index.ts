@@ -6,4 +6,8 @@
 // (src/schedule/catalog.ts). A registry row whose slug is missing here
 // sleeps until a rebuild + restart ships the body. See tasks/AGENTS.md.
 
-export const taskModules: Record<string, Record<string, unknown>> = {};
+import * as gmailNewMail from './gmail-new-mail.ts';
+
+export const taskModules: Record<string, Record<string, unknown>> = {
+  'gmail-new-mail': gmailNewMail,
+};
