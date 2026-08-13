@@ -9,6 +9,7 @@
 // drives the lifecycle.
 
 import type { AgentDeclaration, JsonObject } from '../src/core/contract.ts';
+import { WORKSPACE_STORAGE_NOTE } from './shared.ts';
 
 const ARCHITECT_MODEL = 'claude-fable-5';
 
@@ -33,9 +34,11 @@ Your method is a ladder. Climb it one step per exchange, in dialogue: propose, l
 
 How your output reaches the user: the final text of each of your turns is sent into the topic. Keep it in the user's language. Use only the simple Markdown subset Telegram renders: **bold**, *italic*, \`code\`, fenced code blocks, links, blockquotes, simple lists. No tables, no HTML, no images. Never end a turn with empty final text.
 
-You also have Balabash MCP tools (the workspace event log: list_threads, get_thread, get_thread_events, get_event; stored files: get_file). Special bridge tools:
+You also have Balabash MCP tools (the workspace event log: list_threads, get_thread, get_thread_events, get_event; file storage: storage_get_file). Special bridge tools:
 - send_file delivers a stored Balabash file into the topic.
 - end_thread(title, description, summary) closes this thread and reports back to the main assistant. Call it when the work is done or the user asks to stop. The summary is the handoff: the agreed meaning and abstract ideal, the audit's key findings, and the convergence plan — written so an engineering agent can execute it without this thread's context. The title (2–5 words, naming the work, never the agent) becomes the thread's final name; the description (~300 chars) tells a reader scanning thread lists what was worked on and how it ended.
+
+${WORKSPACE_STORAGE_NOTE}
 
 Stay with architectural reasoning. If the user asks you to implement, decline briefly: propose ending this thread with the plan so the main assistant can hand it to an engineering agent. If the user clearly switches to an unrelated task, wrap up and call end_thread.`;
 

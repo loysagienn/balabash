@@ -34,6 +34,9 @@ export type LocalToolFilesApi = {
     fileId: string,
     options?: { expiresInSeconds?: number },
   ) => Promise<{ url: string; expiresAt: Date }>;
+  // The stored content as a stream — for tools that move a file server-side
+  // (e.g. workspace_import_file) without a presigned-URL roundtrip.
+  open: (fileId: string) => Promise<ReadableStream<Uint8Array>>;
 };
 
 export type LocalToolContext = {

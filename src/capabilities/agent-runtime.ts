@@ -95,7 +95,7 @@ function clampNotificationLevel(requested: NotificationLevel, threadLevel: Notif
 }
 
 // The run's ToolsApi (§7.4): the agent's bundle of tool servers (builtin
-// servers like 'files'/'events' included through the same bundle machinery).
+// servers like 'storage'/'events' included through the same bundle machinery).
 // Every call goes through the one tool.call.* journaling point; the
 // completed payload is the verbatim result (§9).
 function createToolsApi({
@@ -143,7 +143,7 @@ function createFilesApi(userId: string, agentName: string): FilesApi {
 
     // Workspace-scoped by construction: the stored file belongs to the run's
     // user, so it is deliverable through every user-scoped path (ctx.files,
-    // get_file, send_message fileIds).
+    // storage_get_file, send_message fileIds).
     ingest: async input =>
       ingestFile({
         // The contract's NodeJS.ReadableStream is a stream.Readable at

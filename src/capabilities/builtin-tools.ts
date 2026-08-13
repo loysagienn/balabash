@@ -1,8 +1,8 @@
 // Builtin pull tools (§5.2): deep read access without a rights model, scoped
 // to the workspace. Two builtin tool servers behind the same server/bundle
-// surface as everything else (§7.4): 'files' — get_file (a stored file's
-// metadata plus a presigned URL); 'events' — list_threads (the list, no
-// summaries), get_thread (one thread + summary), get_thread_events (the
+// surface as everything else (§7.4): 'storage' — storage_get_file (a stored
+// file's metadata plus a presigned URL); 'events' — list_threads (the list,
+// no summaries), get_thread (one thread + summary), get_thread_events (the
 // transcript), get_event (one event in full). Layered reading mirrors the
 // summarization: the list first, a summary on request, the full transcript
 // on demand. Neither server is consent-gated: 'all' bundles both; agents
@@ -16,14 +16,18 @@ import { buildTranscript } from '../harness/openai/transcript.ts';
 import type { ToolFunction } from './mcp-client.ts';
 import type { BuiltinToolServer } from './tool-manager.ts';
 
-export const FILES_SERVER_NAME = 'files';
+export const STORAGE_SERVER_NAME = 'storage';
 export const EVENTS_SERVER_NAME = 'events';
 
-const FILES_TOOL_DEFINITIONS: ToolDefinition[] = [
+const STORAGE_TOOL_DEFINITIONS: ToolDefinition[] = [
   {
-    name: 'get_file',
+    name: 'storage_get_file',
     description:
-      'Read a stored file: its metadata plus a presigned, time-limited download URL. Use the URL to share the file or to download it when the contents are needed; the transcript already contains the fileId and metadata.',
+      'Read a file from Balabash file storage (the fileId-addressed store behind send_file, end_thread and ' +
+      'message attachments): its metadata plus a presigned, time-limited download URL. Use the URL to share ' +
+      'the file or to download it when the contents are needed; the transcript already contains the fileId ' +
+      'and metadata. To process a stored file with workspace tools or scripts, prefer workspace_import_file ' +
+      'where available.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -184,7 +188,7 @@ async function executeGetFile(args: JsonObject, ctx: BuiltinToolContext): Promis
   const fileId = typeof args.fileId === 'string' ? args.fileId.trim() : '';
 
   if (!fileId) {
-    throw new Error('get_file requires fileId');
+    throw new Error('storage_get_file requires fileId');
   }
 
   // Scoped to the workspace: a model-supplied fileId must not reach across
@@ -327,9 +331,9 @@ function createPullToolServer(
   };
 }
 
-export function createFilesToolServer(): BuiltinToolServer {
-  return createPullToolServer(FILES_SERVER_NAME, FILES_TOOL_DEFINITIONS, {
-    get_file: executeGetFile,
+export function createStorageToolServer(): BuiltinToolServer {
+  return createPullToolServer(STORAGE_SERVER_NAME, STORAGE_TOOL_DEFINITIONS, {
+    storage_get_file: executeGetFile,
   });
 }
 

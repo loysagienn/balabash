@@ -409,7 +409,7 @@ function createMcpServer() {
       description:
         'Fetch a public http(s) URL with GET and return the response: status, headers, and body text ' +
         '(metadata only for binary content). Use whenever you need to read a web page, call an API, ' +
-        'or inspect an HTTP response. To store a remote file instead of reading it, use download_file.',
+        'or inspect an HTTP response. To store a remote file instead of reading it, use storage_download_file.',
       inputSchema: {
         url: z.string().describe('Absolute http:// or https:// URL to fetch.'),
         timeout_seconds: z

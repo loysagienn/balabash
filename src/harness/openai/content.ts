@@ -7,8 +7,8 @@
 // old events may render poorly or drop out).
 //
 // On top of the rule sits a small "tool × projection" registry: per-tool
-// extras for this projection (get_file feeds its presigned url into context
-// as the actual image/file).
+// extras for this projection (storage_get_file feeds its presigned url into
+// context as the actual image/file).
 
 import type { JsonObject, ToolResult } from '../../core/contract.ts';
 
@@ -83,12 +83,12 @@ function rawBlockToModelContent(rawBlock: unknown): ModelContentPart {
 }
 
 // The "tool × projection" registry for this projection: extras appended
-// after the structured JSON. get_file returns the one FileRef plus its
-// ephemeral presigned url — the url enters context as the actual content.
+// after the structured JSON. storage_get_file returns the one FileRef plus
+// its ephemeral presigned url — the url enters context as the actual content.
 type ProjectionExtra = (structured: JsonObject) => ModelContentPart | null;
 
 const contextExtras: Record<string, ProjectionExtra> = {
-  get_file: structured => {
+  storage_get_file: structured => {
     const url = typeof structured.url === 'string' ? structured.url : null;
 
     if (!url) {

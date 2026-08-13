@@ -57,7 +57,7 @@ function describeUserMessage(payload: Record<string, unknown>): string {
     parts.push(
       `[the user sent a file: fileId=${typeof meta.fileId === 'string' ? meta.fileId : 'unknown'}${
         typeof meta.originalFilename === 'string' ? `, name=${meta.originalFilename}` : ''
-      }${typeof meta.contentType === 'string' ? `, type=${meta.contentType}` : ''}]\nUse the get_file tool for its metadata and a download URL; fetch the URL when the contents are needed.`,
+      }${typeof meta.contentType === 'string' ? `, type=${meta.contentType}` : ''}]\nUse the storage_get_file tool for its metadata and a download URL; fetch the URL when the contents are needed.`,
     );
   }
 

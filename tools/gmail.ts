@@ -513,7 +513,7 @@ function createMcpServer(accessToken: string, filesApi: ToolFilesApi): McpServer
     'gmail_get_attachment',
     {
       description:
-        'Download one attachment of a Gmail message into Balabash file storage and return its FileRef (id, originalFilename, contentType, sizeBytes, …). Call it only when the attachment contents are actually needed — the attachment list of gmail_get_message already shows filenames and sizes. The returned id is a Balabash fileId: pass it to get_file or send it to the user with send_file_to_user.',
+        'Download one attachment of a Gmail message into Balabash file storage and return its FileRef (id, originalFilename, contentType, sizeBytes, …). Call it only when the attachment contents are actually needed — the attachment list of gmail_get_message already shows filenames and sizes. The returned id is a Balabash fileId: pass it to storage_get_file, send it to the user with send_file, or attach it via fileIds arguments.',
       inputSchema: {
         message_id: z.string().describe('Gmail message ID the attachment belongs to.'),
         filename: z

@@ -4,15 +4,15 @@
 // startLocalToolSource at boot.
 
 import * as current_datetime from './current_datetime.ts';
-import * as download_file from './download_file.ts';
 import * as gmail from './gmail.ts';
+import * as storage_download_file from './storage_download_file.ts';
 import * as web_fetch from './web_fetch.ts';
 import * as workspace from './workspace.ts';
 
 export const localToolModules: Record<string, Record<string, unknown>> = {
   current_datetime,
-  download_file,
   gmail,
+  storage_download_file,
   web_fetch,
   workspace,
 };

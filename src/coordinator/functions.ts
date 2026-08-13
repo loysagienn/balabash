@@ -1,7 +1,7 @@
 // The coordinator's function catalog (§7.3, §8.1): talking to the user, the
 // agent spawn functions derived from the dynamic catalog plus cancel_thread,
 // and — from stage 4 — the tool servers' functions (including the builtin
-// 'files'/'events' pull-tool servers, §5.2). Definitions are part of the prompt-cache head: static with
+// 'storage'/'events' pull-tool servers, §5.2). Definitions are part of the prompt-cache head: static with
 // respect to RUN state (spawns do not change them; a catalog (re)load or a
 // tool server (dis)connecting does, which legitimately resets the head).
 // Synchronous calls are journaled as tool.call.* events in the coordinator's
@@ -111,7 +111,7 @@ const STATIC_FUNCTION_DEFINITIONS: FunctionDefinition[] = [
   },
 ];
 
-// The builtin pull tools ('files', 'events') arrive through the server
+// The builtin pull tools ('storage', 'events') arrive through the server
 // bundle like every other tool server — no separate definition path.
 const RESERVED_FUNCTION_NAMES = new Set(STATIC_FUNCTION_DEFINITIONS.map(definition => definition.name));
 

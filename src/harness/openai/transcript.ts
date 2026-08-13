@@ -142,7 +142,7 @@ function renderContentBlocks(content: unknown): { text: string | null; files: un
 
 // The general FileRef.url rule of this projection: a presigned url expires
 // within minutes, so wherever a FileRef appears in a tool result it is
-// rendered without its url (call get_file again for a fresh one). A FileRef
+// rendered without its url (call storage_get_file again for a fresh one). A FileRef
 // is detected structurally: id + originalFilename + contentType + url.
 function stripFileRefUrls(value: unknown): unknown {
   if (Array.isArray(value)) {

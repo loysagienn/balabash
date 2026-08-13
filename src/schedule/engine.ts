@@ -16,7 +16,7 @@ import { getTaskBody } from './catalog.ts';
 import type { TaskContext } from './contract.ts';
 
 // A task's tool bundle: every non-consent server ('all' excludes consent by
-// construction; the builtin 'files'/'events' pull-tool servers ride along).
+// construction; the builtin 'storage'/'events' pull-tool servers ride along).
 // Calls are NOT journaled as tool.call.* — the envelope requires an author
 // thread and a task has none.
 const TASK_BUNDLE: ToolBundle = { declared: 'all' };

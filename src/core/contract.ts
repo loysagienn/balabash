@@ -279,7 +279,7 @@ export type ToolsApi = {
 // the storage internals (bucket/objectKey), dates as ISO 8601 strings — the
 // shape is JSON-ready and identical in every tool result of ours. `url` is
 // the only ephemeral field: a presigned, time-limited download URL a
-// producer adds deliberately (e.g. get_file); the transcript strips it.
+// producer adds deliberately (e.g. storage_get_file); the transcript strips it.
 export type FileRef = {
   id: string;
   userId: string | null;

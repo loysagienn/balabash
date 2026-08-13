@@ -9,18 +9,25 @@
 //   data/workspace/<userId>/tmp/              — transient inline-script files
 //
 // Tools: data_query (any SQL, capped results), run_script (python/node child
-// process), ws_write_file / ws_read_file / ws_get_file / ws_list_files /
-// ws_delete_file (file area with title/description metadata kept in the DB).
+// process), workspace_write_file / workspace_read_file / workspace_get_file /
+// workspace_list_files / workspace_delete_file (file area with
+// title/description metadata kept in the DB), and the bridge to Balabash
+// file storage: workspace_export_file (file area -> storage, returns a
+// fileId) and workspace_import_file (storage -> file area).
 
 import http from 'node:http';
 import path from 'node:path';
 import fs from 'node:fs/promises';
+import { createReadStream, createWriteStream } from 'node:fs';
+import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import { spawn } from 'node:child_process';
 import { DatabaseSync } from 'node:sqlite';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { z } from 'zod';
 import { ToolError, toErrorResult, toStructuredResult } from '../src/capabilities/tool-result.ts';
+import type { LocalToolFilesApi } from '../src/capabilities/local-tool-source.ts';
 
 const WORKSPACE_ROOT = path.resolve('data', 'workspace');
 
@@ -340,7 +347,7 @@ async function runQuery(workspace: Workspace, sql: string): Promise<Record<strin
 // MCP server.
 // ---------------------------------------------------------------------------
 
-function createMcpServer() {
+function createMcpServer(filesApi: LocalToolFilesApi) {
   const server = new McpServer({ name: 'workspace', version: '1.0.0' });
 
   server.registerTool(
@@ -372,12 +379,12 @@ function createMcpServer() {
     {
       description:
         'Execute a Python or Node script on the host (stdlib only, no third-party packages). The script runs ' +
-        'with the workspace file area as its working directory (relative paths = ws_* paths) and can reach ' +
+        'with the workspace file area as its working directory (relative paths = workspace_* paths) and can reach ' +
         'the workspace SQLite database at the path in the WORKSPACE_DB env variable. Network access is available. ' +
         'Use scripts for everything mechanical over data: downloading with pagination, parsing, bulk transforms, ' +
         'file generation. THE IRON RULE: results belong in tables or files — print only a short summary ' +
         '(counts, sample) to stdout, never the data itself. Pass either inline code or the path of a saved ' +
-        'script (save reusable scripts with ws_write_file under scripts/ and document their argv in the ' +
+        'script (save reusable scripts with workspace_write_file under scripts/ and document their argv in the ' +
         'description). Large inputs go into files, not argv. Node scripts passed as inline code run as ES ' +
         `modules (use import, top-level await is fine). Stdout/stderr are capped at ${SCRIPT_OUTPUT_MAX_CHARS} chars each.`,
       inputSchema: {
@@ -436,7 +443,7 @@ function createMcpServer() {
 
           const stats = await fs.stat(scriptPath).catch(() => null);
           if (!stats?.isFile()) {
-            throw new ToolError(`No script at "${relPath}" in the workspace file area. Check ws_list_files.`);
+            throw new ToolError(`No script at "${relPath}" in the workspace file area. Check workspace_list_files.`);
           }
         }
 
@@ -470,10 +477,11 @@ function createMcpServer() {
   );
 
   server.registerTool(
-    'ws_write_file',
+    'workspace_write_file',
     {
       description:
-        'Create or update a file in the workspace file area (shared across your sessions). Pass content to ' +
+        'Create or update a text (UTF-8) file in the workspace file area (shared across your sessions; for ' +
+        'binary content use workspace_import_file or run_script). Pass content to ' +
         'write the file (parent directories are created); pass content=null to update only the title/description ' +
         'of an existing file. Omitted (null) title/description keep their previous values. Group files into ' +
         'per-task directories (e.g. "tgden/channels.csv", "scripts/fetch_tgden.py"). Always set a title and a ' +
@@ -525,7 +533,7 @@ function createMcpServer() {
   );
 
   server.registerTool(
-    'ws_read_file',
+    'workspace_read_file',
     {
       description:
         `Read a text file from the workspace file area. Content is capped at ${READ_MAX_CHARS} characters ` +
@@ -543,7 +551,7 @@ function createMcpServer() {
 
         const stats = await fs.stat(absPath).catch(() => null);
         if (!stats?.isFile()) {
-          throw new ToolError(`No file at "${relPath}" in the workspace file area. Check ws_list_files.`);
+          throw new ToolError(`No file at "${relPath}" in the workspace file area. Check workspace_list_files.`);
         }
 
         const handle = await fs.open(absPath, 'r');
@@ -571,7 +579,7 @@ function createMcpServer() {
   );
 
   server.registerTool(
-    'ws_get_file',
+    'workspace_get_file',
     {
       description: 'Get metadata (size, modified time, title, description) of one workspace file without reading its content.',
       inputSchema: {
@@ -586,7 +594,7 @@ function createMcpServer() {
 
         const stats = await fs.stat(absPath).catch(() => null);
         if (!stats?.isFile()) {
-          throw new ToolError(`No file at "${relPath}" in the workspace file area. Check ws_list_files.`);
+          throw new ToolError(`No file at "${relPath}" in the workspace file area. Check workspace_list_files.`);
         }
 
         const meta = withDb(workspace.dbPath, db => readMeta(db, relPath));
@@ -605,7 +613,7 @@ function createMcpServer() {
   );
 
   server.registerTool(
-    'ws_list_files',
+    'workspace_list_files',
     {
       description:
         'List one directory of the workspace file area (non-recursive): subdirectories plus files with their ' +
@@ -691,7 +699,7 @@ function createMcpServer() {
   );
 
   server.registerTool(
-    'ws_delete_file',
+    'workspace_delete_file',
     {
       description: 'Delete one file from the workspace file area (directories cannot be deleted with this tool).',
       inputSchema: {
@@ -730,7 +738,167 @@ function createMcpServer() {
     },
   );
 
+  server.registerTool(
+    'workspace_export_file',
+    {
+      description:
+        'Upload a file from the workspace file area into Balabash file storage and return its FileRef — the ' +
+        'id is a fileId, the address every storage-side consumer understands (send_file, end_thread fileIds, ' +
+        'message attachments, storage_get_file). This is the way a file produced in the workspace reaches ' +
+        'the user. Binary-safe: the content is streamed server-side, never through the model context.',
+      inputSchema: {
+        path: z.string().describe('Relative path of the file inside the workspace file area.'),
+        filename: z
+          .string()
+          .nullable()
+          .describe('Filename the stored file (and the user) will see. Null = the last segment of path.'),
+        content_type: z
+          .string()
+          .nullable()
+          .describe('MIME type of the file. Null = guessed from the file extension.'),
+      },
+    },
+    async ({ path: rawPath, filename, content_type }, extra) => {
+      try {
+        const userId = callerUserId(extra);
+        const workspace = await ensureWorkspace(userId);
+        const relPath = sanitizeRelPath(rawPath);
+        const absPath = path.join(workspace.filesDir, relPath);
+
+        const stats = await fs.stat(absPath).catch(() => null);
+        if (!stats?.isFile()) {
+          throw new ToolError(`No file at "${relPath}" in the workspace file area. Check workspace_list_files.`);
+        }
+
+        const originalFilename = filename?.trim() || relPath.split('/').pop() || relPath;
+        const contentType = content_type?.trim() || guessContentType(originalFilename);
+
+        const stored = await filesApi.ingest({
+          body: createReadStream(absPath),
+          userId,
+          originalFilename,
+          contentType,
+          sizeBytes: stats.size,
+          scope: 'workspace',
+        });
+
+        // The one FileRef (§9), verbatim from the files layer.
+        return toStructuredResult(stored);
+      } catch (error) {
+        return toErrorResult(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    'workspace_import_file',
+    {
+      description:
+        'Download a stored Balabash file (by fileId) into the workspace file area, so scripts and the ' +
+        'workspace_* tools can work with its content. The reverse of workspace_export_file, and the way to ' +
+        'bring binary content into the workspace (workspace_write_file is text-only). The content is ' +
+        'streamed server-side, never through the model context.',
+      inputSchema: {
+        fileId: z.string().describe('The Balabash fileId to import (from an event or a tool result).'),
+        path: z
+          .string()
+          .nullable()
+          .describe(
+            'Destination relative path inside the workspace file area (an existing file is overwritten). ' +
+              'Null = "imports/<original filename>".',
+          ),
+      },
+    },
+    async ({ fileId: rawFileId, path: rawPath }, extra) => {
+      try {
+        const userId = callerUserId(extra);
+        const workspace = await ensureWorkspace(userId);
+        const fileId = rawFileId.trim();
+
+        if (!fileId) {
+          throw new ToolError('workspace_import_file requires fileId.');
+        }
+
+        // Workspace boundary: a foreign file reads as missing, same as an
+        // unknown id — existence outside the workspace is not leaked.
+        const file = await filesApi.get(fileId).catch(() => null);
+        if (!file || file.userId !== userId) {
+          throw new ToolError(`File "${fileId}" not found.`);
+        }
+
+        const relPath = rawPath !== null ? sanitizeRelPath(rawPath) : defaultImportPath(fileId, file.originalFilename);
+        const absPath = path.join(workspace.filesDir, relPath);
+
+        const content = await filesApi.open(fileId);
+
+        await fs.mkdir(path.dirname(absPath), { recursive: true });
+        await pipeline(Readable.fromWeb(content as Parameters<typeof Readable.fromWeb>[0]), createWriteStream(absPath));
+
+        const stats = await fs.stat(absPath);
+
+        return toStructuredResult({
+          path: relPath,
+          sizeBytes: stats.size,
+          contentType: file.contentType,
+          fileId,
+        });
+      } catch (error) {
+        return toErrorResult(error);
+      }
+    },
+  );
+
   return server;
+}
+
+// ---------------------------------------------------------------------------
+// Bridge helpers: content-type guessing for exports, destination naming for
+// imports.
+// ---------------------------------------------------------------------------
+
+const CONTENT_TYPES_BY_EXTENSION: Record<string, string> = {
+  '.txt': 'text/plain',
+  '.md': 'text/markdown',
+  '.csv': 'text/csv',
+  '.tsv': 'text/tab-separated-values',
+  '.json': 'application/json',
+  '.html': 'text/html',
+  '.xml': 'application/xml',
+  '.pdf': 'application/pdf',
+  '.zip': 'application/zip',
+  '.gz': 'application/gzip',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.svg': 'image/svg+xml',
+  '.mp3': 'audio/mpeg',
+  '.ogg': 'audio/ogg',
+  '.mp4': 'video/mp4',
+  '.webm': 'video/webm',
+};
+
+function guessContentType(filename: string): string {
+  const extension = path.extname(filename).toLowerCase();
+
+  return CONTENT_TYPES_BY_EXTENSION[extension] ?? 'application/octet-stream';
+}
+
+// "imports/<original filename>" when the stored name survives path
+// sanitization; the fileId otherwise.
+function defaultImportPath(fileId: string, originalFilename: string | null): string {
+  const basename = originalFilename?.split(/[/\\]/).pop()?.trim();
+
+  if (basename) {
+    try {
+      return sanitizeRelPath(`imports/${basename}`);
+    } catch {
+      // Fall through to the fileId-based name.
+    }
+  }
+
+  return `imports/${fileId}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -749,7 +917,7 @@ async function readJsonBody(request: http.IncomingMessage): Promise<unknown> {
   return body ? JSON.parse(body) : undefined;
 }
 
-export async function start(_ctx: { filesApi: unknown }) {
+export async function start(ctx: { filesApi: LocalToolFilesApi }) {
   const httpServer = http.createServer(async (request, response) => {
     if (request.url !== '/mcp' || request.method !== 'POST') {
       response.writeHead(405, { 'content-type': 'application/json' });
@@ -763,7 +931,7 @@ export async function start(_ctx: { filesApi: unknown }) {
       return;
     }
 
-    const server = createMcpServer();
+    const server = createMcpServer(ctx.filesApi);
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
 
     try {

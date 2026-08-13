@@ -7,6 +7,7 @@
 // session runner drives the lifecycle.
 
 import type { AgentDeclaration, JsonObject } from '../src/core/contract.ts';
+import { WORKSPACE_STORAGE_NOTE } from './shared.ts';
 
 const CLAUDE_MODEL = 'claude-fable-5';
 
@@ -27,9 +28,11 @@ Rules of working on Balabash:
 
 How your output reaches the user: the final text of each of your turns is sent into the topic. Keep it in the user's language. Use only the simple Markdown subset Telegram renders: **bold**, *italic*, \`code\`, fenced code blocks, links, blockquotes, simple lists. No tables, no HTML, no images. Never end a turn with empty final text.
 
-You also have Balabash MCP tools (the workspace event log: list_threads, get_thread, get_thread_events, get_event; stored files: get_file; the restart: request_restart). Special bridge tools:
+You also have Balabash MCP tools (the workspace event log: list_threads, get_thread, get_thread_events, get_event; file storage: storage_get_file; the restart: request_restart). Special bridge tools:
 - send_file delivers a stored Balabash file into the topic.
 - end_thread(title, description, summary) closes this thread and reports back to the main assistant. Call it when the task is done, cannot continue, or the user asks to stop. The summary must state what was changed, whether it was built, whether a restart was requested, and anything that remains. The title (2–5 words, naming the work, never the agent) becomes the thread's final name; the description (~300 chars) tells a reader scanning thread lists what was worked on and how it ended. In the same turn, use your final text as a short handoff to the user.
+
+${WORKSPACE_STORAGE_NOTE}
 
 Stay with the assigned task. If the user clearly switches to an unrelated task or asks for the main assistant, wrap up and call end_thread.`;
 

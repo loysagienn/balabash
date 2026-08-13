@@ -551,16 +551,18 @@ async function downloadWithPolicy(
 // ---------------------------------------------------------------------------
 
 function createMcpServer(filesApi: ToolFilesApi) {
-  const server = new McpServer({ name: 'download_file', version: '1.0.0' });
+  const server = new McpServer({ name: 'storage_download_file', version: '1.0.0' });
 
   server.registerTool(
-    'download_file',
+    'storage_download_file',
     {
       description:
         'Download a file from a public http(s) URL into Balabash file storage and return its FileRef ' +
-        '(id, originalFilename, contentType, sizeBytes, …). The id is a Balabash fileId. Use when a remote ' +
-        'file (document, image, archive, media) must be stored for later use. To read page or API content, ' +
-        'use web_fetch instead.',
+        '(id, originalFilename, contentType, sizeBytes, …). The id is a Balabash fileId — the address ' +
+        'storage-side consumers understand (send_file, end_thread fileIds, storage_get_file). Use when a ' +
+        'remote file (document, image, archive, media) must be stored for later use. To read page or API ' +
+        'content, use web_fetch instead; for a file already in the workspace file area, use ' +
+        'workspace_export_file.',
       inputSchema: {
         url: z.string().describe('Absolute http:// or https:// URL of the file to download.'),
         timeout_seconds: z
