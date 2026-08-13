@@ -131,7 +131,11 @@ export type SessionAgentSpec = {
   model?: string; // agent-level choice; omit for the SDK default
   effort?: EffortLevel; // reasoning effort; default 'high' (claude SDK only)
   preset?: 'bridge-only' | 'full'; // see SdkSessionOptions.preset
-  cwd?: string; // session working directory; default — the run's stateDir
+  // Session working directory; default — the run's stateDir. A function form
+  // resolves per run from the calling user's id (e.g. a per-user workbench
+  // under data/workspace/<userId>/...); the resolved directory is created
+  // before the session starts.
+  cwd?: string | ((userId: string) => string);
 };
 
 export type AgentDeclaration = {

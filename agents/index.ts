@@ -13,6 +13,7 @@ import * as claude from './claude.ts';
 import * as codex from './codex.ts';
 import * as discussion from './discussion.ts';
 import * as manager from './manager.ts';
+import * as power_point from './power_point.ts';
 import * as scheduler from './scheduler.ts';
 
 export const agentModules: Record<string, Record<string, unknown>> = {
@@ -23,5 +24,6 @@ export const agentModules: Record<string, Record<string, unknown>> = {
   codex,
   discussion,
   manager,
+  power_point,
   scheduler,
 };

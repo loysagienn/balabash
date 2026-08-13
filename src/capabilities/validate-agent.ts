@@ -230,8 +230,13 @@ export function validateAgent(module: Record<string, unknown>, filename: string)
       throw new Error(`${filename} agent.session.preset must be one of bridge-only, full`);
     }
 
-    if (session.cwd !== undefined && (typeof session.cwd !== 'string' || !session.cwd.trim())) {
-      throw new Error(`${filename} agent.session.cwd must be a non-empty string when present`);
+    const validCwd =
+      session.cwd === undefined ||
+      typeof session.cwd === 'function' ||
+      (typeof session.cwd === 'string' && Boolean(session.cwd.trim()));
+
+    if (!validCwd) {
+      throw new Error(`${filename} agent.session.cwd must be a non-empty string or a (userId) => string function`);
     }
   }
 

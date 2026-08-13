@@ -6,6 +6,7 @@
 // dialogue), the standard base verbs (end_thread, send_file), abort handling
 // and tool-catalog resyncs.
 
+import { mkdirSync } from 'node:fs';
 import type {
   AgentDeclaration,
   AgentRun,
@@ -369,13 +370,23 @@ export function createSessionRun(
     rejectFinished = reject;
   });
 
+  // Resolve the session working directory: a function form is per-user (e.g.
+  // a workbench under data/workspace/<userId>/...) and is resolved here, at
+  // run start. The resolved directory must exist before the SDK session
+  // starts in it.
+  const cwd = typeof spec.cwd === 'function' ? spec.cwd(ctx.userId) : spec.cwd;
+
+  if (cwd) {
+    mkdirSync(cwd, { recursive: true });
+  }
+
   const session = ctx.harness.sdkSession({
     instructions: spec.instructions,
     initialMessage: spec.initialMessage(input),
     ...(spec.model ? { model: spec.model } : {}),
     ...(spec.effort ? { effort: spec.effort } : {}),
     ...(spec.preset ? { preset: spec.preset } : {}),
-    ...(spec.cwd ? { cwd: spec.cwd } : {}),
+    ...(cwd ? { cwd } : {}),
     extraTools: [
       createEndThreadTool(end),
       createSendFileTool(ctx, headless),
