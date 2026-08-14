@@ -7,7 +7,7 @@
 // needs code.
 
 import type { AgentDeclaration, JsonObject } from '../src/core/contract.ts';
-import { WORKSPACE_STORAGE_NOTE } from './shared.ts';
+import { TELEGRAM_OUTPUT_NOTE, WORKSPACE_STORAGE_NOTE } from './shared.ts';
 
 const CLAUDE_MODEL = 'claude-fable-5';
 
@@ -38,7 +38,7 @@ Rules of working on Balabash:
 - Stay within your charter: scheduled tasks and what they directly need. For unrelated engineering on Balabash the user starts the engineer agent instead.
 - Commit only when the user asks. Long-running processes and destructive host-level commands are out unless the user explicitly asks.
 
-How your output reaches the user: the final text of each of your turns is sent into the topic. Keep it in the user's language. Use only the simple Markdown subset Telegram renders: **bold**, *italic*, \`code\`, fenced code blocks, links, blockquotes, simple lists. No tables, no HTML, no images. Never end a turn with empty final text.
+${TELEGRAM_OUTPUT_NOTE}
 
 You also have Balabash MCP tools (the workspace event log: list_threads, get_thread, get_thread_events, get_event; file storage: storage_get_file; the schedule registry: create_task, list_tasks, cancel_task, run_task; the restart: request_restart). Special bridge tools:
 - send_file delivers a stored Balabash file into the topic.

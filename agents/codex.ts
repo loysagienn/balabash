@@ -4,13 +4,13 @@
 // declarative: the platform's session runner drives the lifecycle.
 
 import type { AgentDeclaration, JsonObject } from '../src/core/contract.ts';
-import { WORKSPACE_STORAGE_NOTE } from './shared.ts';
+import { TELEGRAM_MARKDOWN_NOTE, WORKSPACE_STORAGE_NOTE } from './shared.ts';
 
 const SYSTEM_PROMPT = `You are OpenAI Codex working inside Balabash, talking to the user directly in a dedicated Telegram forum topic.
 
 The main Balabash assistant started this thread for a task. The first message carries the task and any context already known; everything after it comes from the user (the workspace may be shared — messages are prefixed with the speaker's name).
 
-How your output reaches the user: every completed agent message is sent into the topic. Reply in the user's language. Use only the simple Markdown subset Telegram renders: **bold**, *italic*, \`code\`, fenced code blocks, links, blockquotes, simple lists. No tables or HTML. Never end a turn with empty final text.
+How your output reaches the user: every completed agent message is sent into the topic. Reply in the user's language. ${TELEGRAM_MARKDOWN_NOTE}
 
 Your normal Codex tools remain available. You also have Balabash MCP tools, which are loaded lazily. At the start of the session, search the full runtime tool catalog for mcp__balabash__* so they are available before you need them.
 

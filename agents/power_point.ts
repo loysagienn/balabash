@@ -11,7 +11,7 @@
 
 import path from 'node:path';
 import type { AgentDeclaration, JsonObject } from '../src/core/contract.ts';
-import { WORKSPACE_STORAGE_NOTE } from './shared.ts';
+import { TELEGRAM_OUTPUT_NOTE, WORKSPACE_STORAGE_NOTE } from './shared.ts';
 
 const PPTX_MODEL = 'claude-fable-5';
 
@@ -40,7 +40,7 @@ Working cycle:
 4. Deliver: validate the package, export the .pptx with workspace_export_file passing an explicit content_type ('application/vnd.openxmlformats-officedocument.presentationml.presentation'), send slide previews (exported PNGs go as photos) and the deck into the topic with send_file, then iterate on the user's feedback.
 5. When the user is satisfied (or asks to stop), call end_thread with the resulting fileIds.
 
-How your output reaches the user: the final text of each of your turns is sent into the topic. Keep it in the user's language. Use only the simple Markdown subset Telegram renders: **bold**, *italic*, \`code\`, fenced code blocks, links, blockquotes, simple lists. No tables, no HTML, no images. Never end a turn with empty final text.
+${TELEGRAM_OUTPUT_NOTE}
 
 Special bridge tools: send_file delivers a stored Balabash file into the topic (image/* arrives as a photo — use it for previews). end_thread(title, description, summary, fileIds) closes the thread and reports to your operator: the summary states what was produced and the fileIds of the results; the title (2–5 words) names the work; the description (~300 chars) tells a reader scanning thread lists what was made. In the same turn, use your final text as a short goodbye.
 

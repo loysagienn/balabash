@@ -9,13 +9,15 @@
 
 import path from 'node:path';
 import type { AgentDeclaration, JsonObject } from '../src/core/contract.ts';
-import { WORKSPACE_STORAGE_NOTE } from './shared.ts';
+import { TELEGRAM_OUTPUT_NOTE, WORKSPACE_STORAGE_NOTE } from './shared.ts';
 
 // The app process always starts in the repository root (§12), so the
 // workspace file area resolves from cwd — same base as tools/workspace.ts.
 const WORKSPACE_ROOT = path.resolve('data', 'workspace');
 
-const SYSTEM_PROMPT = `You are Balabash's manager: take the user's tasks and get them done with the tools available.
+const SYSTEM_PROMPT = `You are Balabash's manager: take the user's tasks and get them done with the tools available. You talk to the user directly in a dedicated Telegram forum topic.
+
+${TELEGRAM_OUTPUT_NOTE}
 
 Your working directory is the user's workspace file area — your workbench. Work inside it; do not touch the Balabash repository or anything else on the host.
 Path map: \`./x\` for your native tools is the same file as \`x\` for the workspace_* tools — both address paths from the workbench root.

@@ -7,7 +7,7 @@
 // session runner drives the lifecycle.
 
 import type { AgentDeclaration, JsonObject } from '../src/core/contract.ts';
-import { WORKSPACE_STORAGE_NOTE } from './shared.ts';
+import { TELEGRAM_OUTPUT_NOTE, WORKSPACE_STORAGE_NOTE } from './shared.ts';
 
 const CLAUDE_MODEL = 'claude-fable-5';
 
@@ -26,7 +26,7 @@ Rules of working on Balabash:
 - Database schema changes ride the same restart: edit prisma/schema.prisma, author an SQL migration into prisma/migrations/<timestamp>_<name>/migration.sql (\`npx prisma migrate diff --from-url "$DATABASE_URL" --to-schema-datamodel prisma/schema.prisma --script\`), and let the boot-time \`prisma migrate deploy\` apply it — never apply schema changes to the live database by hand, never edit an already-applied migration. Migrations must be additive and backward-compatible (new tables, new nullable columns); renames and drops go into a later change once no running code references them. A migration that fails to apply does not stop the boot — it is journaled (migrationsFailed on system.restart.completed) and blocks later migrations until fixed and resolved with \`prisma migrate resolve --rolled-back <name>\`. \`npm run build\` regenerates the Prisma client.
 - Commit only when the user asks. Long-running processes and destructive host-level commands are out unless the user explicitly asks.
 
-How your output reaches the user: the final text of each of your turns is sent into the topic. Keep it in the user's language. Use only the simple Markdown subset Telegram renders: **bold**, *italic*, \`code\`, fenced code blocks, links, blockquotes, simple lists. No tables, no HTML, no images. Never end a turn with empty final text.
+${TELEGRAM_OUTPUT_NOTE}
 
 You also have Balabash MCP tools (the workspace event log: list_threads, get_thread, get_thread_events, get_event; file storage: storage_get_file; the restart: request_restart). Special bridge tools:
 - send_file delivers a stored Balabash file into the topic.

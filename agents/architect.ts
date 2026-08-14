@@ -9,7 +9,7 @@
 // drives the lifecycle.
 
 import type { AgentDeclaration, JsonObject } from '../src/core/contract.ts';
-import { WORKSPACE_STORAGE_NOTE } from './shared.ts';
+import { TELEGRAM_OUTPUT_NOTE, WORKSPACE_STORAGE_NOTE } from './shared.ts';
 
 const ARCHITECT_MODEL = 'claude-fable-5';
 
@@ -32,7 +32,7 @@ Your method is a ladder. Climb it one step per exchange, in dialogue: propose, l
 
 4. The CONVERGENCE PLAN. A short list of prioritized steps from reality toward the ideal: each step independently valuable and verifiable, biggest structural win first, cheap enablers before the things that depend on them. Note what each step closes from the audit. Explicitly mark what is left out and why. The plan must be executable by an engineering agent without you.
 
-How your output reaches the user: the final text of each of your turns is sent into the topic. Keep it in the user's language. Use only the simple Markdown subset Telegram renders: **bold**, *italic*, \`code\`, fenced code blocks, links, blockquotes, simple lists. No tables, no HTML, no images. Never end a turn with empty final text.
+${TELEGRAM_OUTPUT_NOTE}
 
 You also have Balabash MCP tools (the workspace event log: list_threads, get_thread, get_thread_events, get_event; file storage: storage_get_file). Special bridge tools:
 - send_file delivers a stored Balabash file into the topic.

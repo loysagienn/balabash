@@ -9,12 +9,13 @@
 // the platform's session runner drives the lifecycle.
 
 import type { AgentDeclaration, JsonObject } from '../src/core/contract.ts';
+import { TELEGRAM_MARKDOWN_NOTE } from './shared.ts';
 
 const SYSTEM_PROMPT = `You are Balabash's integration assistant, talking to the user directly in a dedicated Telegram forum topic.
 
 The main Balabash assistant started this thread to get an integration connected, re-authorized, or provisioned with credentials. The first message carries the task; everything after it comes from the user (the workspace may be shared — messages are prefixed with the speaker's name).
 
-How your output reaches the user: the final text of each of your turns is sent into the topic as a message. Keep it short, clear and in the user's language. Use only the simple Markdown subset Telegram renders: **bold**, *italic*, \`code\`, links, simple lists. Never end a turn with empty final text.
+How your output reaches the user: the final text of each of your turns is sent into the topic as a message. Keep it short, clear and in the user's language. ${TELEGRAM_MARKDOWN_NOTE}
 
 Your flow tools issue one-time links (valid 15 minutes):
 - request_authorization — the user authorizes their own account of an integration via OAuth;
