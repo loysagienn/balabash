@@ -3,7 +3,7 @@
 A self-hosted personal AI assistant that lives in a Telegram group — built as a team of
 agents working over a single append-only event log.
 
-You talk to it like you talk to people: the coordinator answers in the General topic,
+You talk to it like you talk to people: the secretary answers in the General topic,
 and every substantial task gets its own specialist agent in its own forum topic. When a
 task is done, the topic is renamed after the work, closed with a summary, and becomes
 part of a readable archive. Under the hood, everything — every message, tool call,
@@ -17,10 +17,10 @@ the group becomes a shared workspace: everyone in the group talks to the same as
 and every message carries the speaker's identity into the agents' context — the system
 is multi-voice by design.
 
-- **General topic** — the coordinator: a fast dispatcher that answers directly, uses
+- **General topic** — the secretary: a fast dispatcher that answers directly, uses
   tools, and delegates real work to specialist agents.
 - **One forum topic per task** — each spawned agent gets its own topic; you talk to the
-  specialist directly, without the coordinator relaying. When the thread ends, the topic
+  specialist directly, without the secretary relaying. When the thread ends, the topic
   is renamed to describe the work, a summary (with any result files) is posted, and the
   topic is closed. Closed topics are the archive.
 - **Files flow both ways** — send documents and photos into any topic; agents send back
@@ -33,21 +33,20 @@ is multi-voice by design.
 
 | Agent | What it does |
 |---|---|
-| **coordinator** | Owns the main thread. Dispatches, answers quick questions, operates tools, spawns everyone else. |
+| **secretary** | Owns the main thread. Dispatches, answers quick questions, operates tools, spawns everyone else. |
 | 🎩 **manager** | General-purpose task executor working through the connected integrations; can drive the browser. |
-| 💬 **discussion** | Holds one substantial topic in its own context window across many messages. |
 | **browser** | A real Chromium session driven via Playwright — a headless sub-agent operated by other agents. Runs headful on a virtual display, so you can watch it (and take over for logins or CAPTCHAs) through VNC. |
 | 🔑 **auth** | Connects and re-authorizes integrations. Only ever sends links — credential values never pass through it. |
 | ⏰ **scheduler** | Engineers scheduled code tasks: writes the task body, registers it, rebuilds, requests a restart. |
-| 🛠 **claude** | Balabash's own engineer — edits the system's source code in a live session, builds, and requests a restart of itself. |
+| 🛠 **engineer** | Balabash's own engineer — edits the system's source code in a live session, builds, and requests a restart of itself. |
 | 📐 **architect** | Design analysis and audits at maximum reasoning effort; advises, never implements. |
 | 🤖 **codex** | An autonomous OpenAI Codex session with the full Balabash toolset. |
 
-Agents that can change the system (claude, scheduler, architect) are **consent-gated**:
-no agent can spawn them as a side effect of its plan — only the coordinator starts them,
+Agents that can change the system (engineer, scheduler, architect) are **consent-gated**:
+no agent can spawn them as a side effect of its plan — only the secretary starts them,
 on an explicit user request, and that rule is enforced in code, not in prompts.
 
-Three model vendors run side by side behind one session contract: the coordinator runs
+Three model vendors run side by side behind one session contract: the secretary runs
 on an OpenAI model, most agents on Claude (via the Claude Agent SDK), and the codex
 agent on OpenAI Codex. An agent picks its backend with a one-line declaration.
 
@@ -72,11 +71,11 @@ short summaries.
 **Scheduling — the organ of initiative.** A durable registry of named tasks: recurring
 (cron, alarm-clock semantics), one-shot ("not before T", consumed by firing), or
 trigger-less stored procedures. A task is either a **note** — fired into the main thread
-for the coordinator to interpret ("remind me", "check X every morning") — or **code** —
+for the secretary to interpret ("remind me", "check X every morning") — or **code** —
 a TypeScript body shipped in the repo and written by the scheduler agent. Every agent
 can operate the registry; the event log is the audit trail.
 
-**Self-extension.** The claude agent works in the Balabash repository itself, with the
+**Self-extension.** The engineer agent works in the Balabash repository itself, with the
 running system as its subject. A restart is a first-class event: it is *requested* into
 the log, then waits for a structurally safe window — no active task threads, no turn in
 flight, a quiet log — before the process exits and the supervisor relaunches it. If a

@@ -262,7 +262,7 @@ export async function spawnAgentRun(thread: Thread, startedEvent: Event): Promis
       // as a side effect of another agent's plan — only the coordinator
       // starts them, on an explicit user request.
       if (childDeclaration.consent) {
-        throw new Error(`Agent "${childAgentName}" is consent-gated: only the coordinator starts it, on an explicit user request`);
+        throw new Error(`Agent "${childAgentName}" is consent-gated: only the secretary starts it, on an explicit user request`);
       }
 
       const child = await startThread({

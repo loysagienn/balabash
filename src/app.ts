@@ -33,7 +33,7 @@ import { startTelegramDelivery } from './adapters/telegram/delivery.ts';
 // a loud journal instead of exiting: a broken migration file lives in the
 // repo, not in dist/, so a crash-exit would loop forever and no bundle
 // rollback could cure it. The additive-only migration discipline lives in
-// the claude agent's rules; the error reaches the user through
+// the engineer agent's rules; the error reaches the user through
 // completePendingRestarts and system.exception.
 let migrationsError: string | null = null;
 
@@ -73,7 +73,7 @@ loadTasks();
 
 // Consent servers (§7.4): only agents naming them explicitly get them — the
 // auth tools for the auth agent, the restart request for the coordinator and
-// the claude engineering agent.
+// the engineer agent.
 registerBuiltinToolServer(createAuthToolServer());
 registerBuiltinToolServer(createRestartToolServer());
 

@@ -2,7 +2,7 @@
 // ctx.harness.sdkSession(). Wraps the raw Claude session and the MCP bridge.
 // In the default bridge-only preset the inner model sees the bridge and
 // nothing else — no native claude_code tools, no user-scope MCP servers or
-// settings. The 'full' preset (the claude engineering agent) keeps the bridge
+// settings. The 'full' preset (the engineer agent) keeps the bridge
 // and unlocks the native claude_code toolset plus project settings from cwd.
 // Prompt cache lives inside the SDK.
 //

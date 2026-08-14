@@ -1,5 +1,5 @@
 // Static local tool-server index: the servers ship inside the app bundle —
-// adding one is adding its module here (the claude agent does it itself).
+// adding one is adding its module here (the engineer agent does it itself).
 // Each module still must export only start(ctx); validation happens in
 // startLocalToolSource at boot.
 

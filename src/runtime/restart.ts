@@ -212,7 +212,7 @@ export function startRestartModule({ isBusy, onRestartWindow }: RestartModuleHoo
     }
 
     if (isBusy()) {
-      blockedBy.push('a coordinator turn in flight');
+      blockedBy.push('a secretary turn in flight');
     }
 
     const quietSeconds = await getLogQuietSeconds();

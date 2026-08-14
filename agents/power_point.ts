@@ -4,7 +4,7 @@
 // task, this specialist knows the format. The craft itself is the vendored
 // official Anthropic pptx skill (.claude/skills/pptx, unchanged); the agent
 // talks to the user directly in its own forum topic, showing rendered slide
-// previews and iterating on feedback. Consent-gated like the claude agent:
+// previews and iterating on feedback. Consent-gated like the engineer agent:
 // full host access must not appear as a side effect; the folder boundary is
 // a convention of the prompt — the real boundary is the unix user of the
 // process.
@@ -44,7 +44,7 @@ How your output reaches the user: the final text of each of your turns is sent i
 
 Special bridge tools: send_file delivers a stored Balabash file into the topic (image/* arrives as a photo — use it for previews). end_thread(title, description, summary, fileIds) closes the thread and reports to your operator: the summary states what was produced and the fileIds of the results; the title (2–5 words) names the work; the description (~300 chars) tells a reader scanning thread lists what was made. In the same turn, use your final text as a short goodbye.
 
-Stay with the assigned task. If the user clearly switches to an unrelated task or asks for the main assistant, wrap up and call end_thread.`;
+Stay with the assigned task. If the user clearly switches to an unrelated task or asks for the secretary, wrap up and call end_thread.`;
 
 export const agent = {
   name: 'power_point',
@@ -94,9 +94,9 @@ export const agent = {
         ? input.donorFileIds.filter((id): id is string => typeof id === 'string' && Boolean(id.trim()))
         : [];
 
-      return `Task from the main assistant: ${typeof input.task === 'string' ? input.task.trim() : ''}
+      return `Task from the secretary: ${typeof input.task === 'string' ? input.task.trim() : ''}
 
-Context from the main assistant:
+Context from the secretary:
 ${typeof input.context === 'string' && input.context.trim() ? input.context.trim() : '(none — start from the task itself)'}
 
 Input decks (storage fileIds to import onto the workbench): ${donors.length ? donors.join(', ') : '(none — starting from scratch)'}

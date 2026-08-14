@@ -32,7 +32,7 @@ const FUNCTIONS: ToolFunction[] = [
     toolName: 'create_task',
     description:
       'Register a named scheduled task. kind "note": at the trigger moment the note falls into the main ' +
-      'thread as a schedule.fired event and the coordinator interprets it — use this for reminders and ' +
+      'thread as a schedule.fired event and the secretary interprets it — use this for reminders and ' +
       'recurring instructions. kind "code": the trigger runs the run(ctx) body registered under the same ' +
       'slug in the repository tasks/ catalog (the scheduler agent ships bodies; until the body is built ' +
       'and the app restarted the task SLEEPS — no errors, no runs; note is IGNORED for kind code). ' +
@@ -50,7 +50,7 @@ const FUNCTIONS: ToolFunction[] = [
         },
         name: { type: 'string', description: 'Short human-readable name.' },
         description: { type: ['string', 'null'], description: 'What the task is for, or null.' },
-        kind: { type: 'string', enum: ['note', 'code'], description: 'note = data interpreted by the coordinator; code = run(ctx) body from tasks/.' },
+        kind: { type: 'string', enum: ['note', 'code'], description: 'note = data interpreted by the secretary; code = run(ctx) body from tasks/.' },
         cron: {
           type: ['string', 'null'],
           description: `Cron expression (e.g. "0 9 * * *"), evaluated in the "${config.scheduleTimezone}" timezone. Null unless the task is recurring. Mutually exclusive with "at".`,
@@ -175,7 +175,7 @@ async function createTask(args: JsonObject, ctx: BuiltinServerCallContext): Prom
   }
 
   if (kind === 'note' && !note) {
-    throw new Error('kind "note" requires a non-empty note — it is the content the coordinator will act on');
+    throw new Error('kind "note" requires a non-empty note — it is the content the secretary will act on');
   }
 
   let firstFire: Date | null = null;

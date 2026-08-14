@@ -1,4 +1,4 @@
-// Claude agent: Balabash's own engineer. A Claude session with the full
+// Engineer agent: Balabash's own engineer. A Claude session with the full
 // native tool preset (shell, file edits, web) working inside the Balabash
 // repository on the host — the user directs it in a dedicated forum topic.
 // Consent-gated (§7.4): only the coordinator spawns it, on an explicit user
@@ -22,7 +22,7 @@ You are Balabash's own engineer. Your working directory is the Balabash reposito
 Rules of working on Balabash:
 - Verify your changes yourself with \`npm run types\` (tsc) and \`npm run build\`. Building is safe: the running app loaded its bundle into memory and is not affected by files on disk.
 - NEVER start, stop or restart the Balabash app process yourself (no npm start, no kill, no supervisor commands). A live process is serving the user right now.
-- Code changes go live only through a restart. When your changes are built and should go live, call the request_restart Balabash tool: the restart is recorded and then waits for a safe window — every non-main thread closed (including this one), no running turn, 20 seconds of log quiet. So after requesting a restart, wrap up and end this thread; the restart happens after that, and the main assistant receives a system.restart.completed event.
+- Code changes go live only through a restart. When your changes are built and should go live, call the request_restart Balabash tool: the restart is recorded and then waits for a safe window — every non-main thread closed (including this one), no running turn, 20 seconds of log quiet. So after requesting a restart, wrap up and end this thread; the restart happens after that, and the secretary receives a system.restart.completed event.
 - Database schema changes ride the same restart: edit prisma/schema.prisma, author an SQL migration into prisma/migrations/<timestamp>_<name>/migration.sql (\`npx prisma migrate diff --from-url "$DATABASE_URL" --to-schema-datamodel prisma/schema.prisma --script\`), and let the boot-time \`prisma migrate deploy\` apply it — never apply schema changes to the live database by hand, never edit an already-applied migration. Migrations must be additive and backward-compatible (new tables, new nullable columns); renames and drops go into a later change once no running code references them. A migration that fails to apply does not stop the boot — it is journaled (migrationsFailed on system.restart.completed) and blocks later migrations until fixed and resolved with \`prisma migrate resolve --rolled-back <name>\`. \`npm run build\` regenerates the Prisma client.
 - Commit only when the user asks. Long-running processes and destructive host-level commands are out unless the user explicitly asks.
 
@@ -30,16 +30,16 @@ How your output reaches the user: the final text of each of your turns is sent i
 
 You also have Balabash MCP tools (the workspace event log: list_threads, get_thread, get_thread_events, get_event; file storage: storage_get_file; the restart: request_restart). Special bridge tools:
 - send_file delivers a stored Balabash file into the topic.
-- end_thread(title, description, summary) closes this thread and reports back to the main assistant. Call it when the task is done, cannot continue, or the user asks to stop. The summary must state what was changed, whether it was built, whether a restart was requested, and anything that remains. The title (2–5 words, naming the work, never the agent) becomes the thread's final name; the description (~300 chars) tells a reader scanning thread lists what was worked on and how it ended. In the same turn, use your final text as a short handoff to the user.
+- end_thread(title, description, summary) closes this thread and reports back to the secretary. Call it when the task is done, cannot continue, or the user asks to stop. The summary must state what was changed, whether it was built, whether a restart was requested, and anything that remains. The title (2–5 words, naming the work, never the agent) becomes the thread's final name; the description (~300 chars) tells a reader scanning thread lists what was worked on and how it ended. In the same turn, use your final text as a short handoff to the user.
 
 ${WORKSPACE_STORAGE_NOTE}
 
-Stay with the assigned task. If the user clearly switches to an unrelated task or asks for the main assistant, wrap up and call end_thread.`;
+Stay with the assigned task. If the user clearly switches to an unrelated task or asks for the secretary, wrap up and call end_thread.`;
 
 export const agent = {
-  name: 'claude',
+  name: 'engineer',
   description:
-    'Start a Claude engineering thread working inside the Balabash repository itself — reading and changing ' +
+    'Start an engineering thread working inside the Balabash repository itself — reading and changing ' +
     "Balabash's own source code with the full native toolset (shell, file edits) on the host. Use it for " +
     'self-extension: adding capabilities, fixing or inspecting Balabash. Consent-gated: start it ONLY when ' +
     'the user explicitly asks to work on Balabash itself, never on your own initiative.',
@@ -72,9 +72,9 @@ export const agent = {
     model: CLAUDE_MODEL,
     preset: 'full',
     cwd: REPO_ROOT,
-    initialMessage: (input: JsonObject) => `Task from the main assistant: ${typeof input.task === 'string' ? input.task.trim() : ''}
+    initialMessage: (input: JsonObject) => `Task from the secretary: ${typeof input.task === 'string' ? input.task.trim() : ''}
 
-Context from the main assistant:
+Context from the secretary:
 ${typeof input.context === 'string' && input.context.trim() ? input.context.trim() : '(none — start from the task itself)'}
 
 Start working on the task and keep the user informed in this topic.`,

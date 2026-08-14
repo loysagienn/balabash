@@ -1,7 +1,7 @@
 // The restart tool server (§7.4 consent): request_restart records a
 // system.restart.requested event; the restart module then waits for the safe
 // window and exits into the supervisor. A consent server — 'all' never
-// includes it; the coordinator and the claude engineering agent name it
+// includes it; the coordinator and the engineer agent name it
 // explicitly. The tool changes nothing by itself: the event is the request,
 // the log is the audit trail.
 

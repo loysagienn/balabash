@@ -57,7 +57,7 @@ export const agent = {
 
       return `${task ? `Task: ${task}` : 'No task was given upfront — greet the user and ask what they need.'}
 
-Context from the main assistant:
+Context from the secretary:
 ${context ?? '(none)'}`;
     },
   },

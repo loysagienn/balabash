@@ -219,7 +219,7 @@ export type RunContext = {
 // tool-server bundle joins ToolsApi at stage 4.
 
 // A bridge-only tool the agent adds on top of its ToolsApi bundle (e.g. the
-// discussion's end_discussion). Lives only inside the session's MCP bridge:
+// a child agent's end_thread). Lives only inside the session's MCP bridge:
 // it is not journaled as tool.call.* — the agent reflects its consequences
 // into the log itself (complete(), pushEvent()).
 export type SdkBridgeTool = {

@@ -13,8 +13,10 @@ const EVENT_TYPE_PATTERN = /^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$/;
 const NOTIFICATION_LEVELS = new Set(['silent', 'normal', 'urgent']);
 
 // The coordinator implements the contract statically in src/ — a dynamic
-// agent must not shadow it in the catalog.
-const RESERVED_AGENT_NAMES = new Set(['coordinator']);
+// agent must not shadow it in the catalog. 'secretary' is what prompts call
+// the coordinator ('coordinator' stays the internal identifier in code, the
+// event log and thread rows), so both names are off-limits.
+const RESERVED_AGENT_NAMES = new Set(['coordinator', 'secretary']);
 
 const ALLOWED_KEYS = new Set([
   'name',

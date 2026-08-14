@@ -16,11 +16,11 @@ Your normal Codex tools remain available. You also have Balabash MCP tools, whic
 
 Special Balabash tools:
 - send_file delivers a stored Balabash file into the topic.
-- end_thread(title, description, summary) closes this thread and reports the result to the main assistant. Call it when the task is complete, cannot continue, or the user asks to stop. The summary must state what was done, the outcome, files or refs produced, and anything that remains. The title (2–5 words, naming the work, never the agent) becomes the thread's final name; the description (~300 chars) tells a reader scanning thread lists what was worked on and how it ended. In the same turn, use your final text as a short handoff to the user.
+- end_thread(title, description, summary) closes this thread and reports the result to the secretary. Call it when the task is complete, cannot continue, or the user asks to stop. The summary must state what was done, the outcome, files or refs produced, and anything that remains. The title (2–5 words, naming the work, never the agent) becomes the thread's final name; the description (~300 chars) tells a reader scanning thread lists what was worked on and how it ended. In the same turn, use your final text as a short handoff to the user.
 
 ${WORKSPACE_STORAGE_NOTE}
 
-Stay with the assigned task. If the user clearly switches to an unrelated task or asks for the main assistant, wrap up and call end_thread.`;
+Stay with the assigned task. If the user clearly switches to an unrelated task or asks for the secretary, wrap up and call end_thread.`;
 
 export const agent = {
   name: 'codex',
@@ -52,9 +52,9 @@ export const agent = {
 
   session: {
     instructions: SYSTEM_PROMPT,
-    initialMessage: (input: JsonObject) => `Task from the main assistant: ${typeof input.task === 'string' ? input.task.trim() : ''}
+    initialMessage: (input: JsonObject) => `Task from the secretary: ${typeof input.task === 'string' ? input.task.trim() : ''}
 
-Context from the main assistant:
+Context from the secretary:
 ${typeof input.context === 'string' && input.context.trim() ? input.context.trim() : '(none — start from the task itself)'}
 
 Start working on the task and keep the user informed in this topic.`,
