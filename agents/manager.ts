@@ -1,14 +1,26 @@
 // Manager agent: a general-purpose task thread — the user talks to it
 // directly in its own topic and hands it everyday tasks; it acts through the
-// Balabash tool bundle (bridge-only, no native host tools) and can spawn the
-// browser sub-agent for operating real websites. Fully declarative: the
-// platform's session runner drives the SDK session, the channel binding and
-// the base verbs (end_thread, send_file, spawn_agent).
+// Balabash tool bundle plus the full native tool preset working on the
+// per-user workbench (the workspace file area itself is its cwd, like the
+// power_point agent), and can spawn the browser sub-agent for operating real
+// websites. Fully declarative: the platform's session runner drives the SDK
+// session, the channel binding and the base verbs (end_thread, send_file,
+// spawn_agent).
 
+import path from 'node:path';
 import type { AgentDeclaration, JsonObject } from '../src/core/contract.ts';
 import { WORKSPACE_STORAGE_NOTE } from './shared.ts';
 
+// The app process always starts in the repository root (§12), so the
+// workspace file area resolves from cwd — same base as tools/workspace.ts.
+const WORKSPACE_ROOT = path.resolve('data', 'workspace');
+const SKILLS_DIR = path.resolve('.claude', 'skills');
+
 const SYSTEM_PROMPT = `You are Balabash's manager: take the user's tasks and get them done with the tools available.
+
+You have the full native toolset (Bash, Read, Write, …), and your working directory is the user's workspace file area — your workbench. Work inside it; do not touch the Balabash repository or anything else on the host. Path map: \`./x\` for your native tools is the same file as \`x\` for the workspace_* tools — both address paths from the workbench root.
+
+Office files are a native craft here: for Word (.docx) and Excel (.xlsx) work, follow the vendored Anthropic skills — read ${SKILLS_DIR}/docx/SKILL.md or ${SKILLS_DIR}/xlsx/SKILL.md and follow it; their scripts live next to each SKILL.md. Host prerequisites (LibreOffice, pandoc, poppler, python and node libs) are provisioned.
 
 You have a persistent data workbench, shared across all your sessions for this user:
 - data_query — a workspace SQLite database (tables = datasets). Any SQL; inspect what exists via sqlite_master. SELECT results are capped, so query narrow slices or aggregates, never whole tables.
@@ -51,6 +63,8 @@ export const agent = {
   session: {
     instructions: SYSTEM_PROMPT,
     model: 'claude-opus-5',
+    preset: 'full',
+    cwd: (userId: string) => path.join(WORKSPACE_ROOT, userId, 'files'),
     initialMessage: (input: JsonObject) => {
       const task = typeof input.task === 'string' && input.task.trim() ? input.task.trim() : null;
       const context = typeof input.context === 'string' && input.context.trim() ? input.context.trim() : null;

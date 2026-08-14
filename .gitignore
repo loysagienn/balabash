@@ -11,3 +11,4 @@ src/web/.next-build
 src/web/.swc
 src/web/next-env.d.ts
 *.tsbuildinfo
+__pycache__/
