@@ -28,8 +28,9 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { z } from 'zod';
 import { ToolError, toErrorResult, toStructuredResult } from '../src/capabilities/tool-result.ts';
 import type { LocalToolFilesApi } from '../src/capabilities/local-tool-source.ts';
+import { workspaceRoot } from '../src/workspace/layout.ts';
 
-const WORKSPACE_ROOT = path.resolve('data', 'workspace');
+const WORKSPACE_ROOT = workspaceRoot();
 
 // data_query result caps: the query result is the model's window into the
 // data — it must stay a window, not a firehose.

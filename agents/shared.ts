@@ -15,6 +15,17 @@ export const TELEGRAM_OUTPUT_NOTE =
   'How your output reaches the user: the final text of each of your turns is sent into the topic. ' +
   `Keep it in the user's language. ${TELEGRAM_MARKDOWN_NOTE}`;
 
+// Projects — the passive libraries in the workspace file area. One canonical
+// block for every workbench agent: how to recognize project work, read the
+// library before working, and keep it current after.
+export const PROJECTS_NOTE =
+  "The user's projects — named long-lived work contexts — are visible via projects_list: each is a folder " +
+  'in the workspace file area (named by its slug, projects_get shows it) with AGENTS.md as the entry point. ' +
+  "When your work concerns a project, read its AGENTS.md BEFORE starting and keep the project's files and " +
+  'AGENTS.md current as you go. When finishing a thread that touched a project, update it: at minimum a ' +
+  '"touch" via projects_update (a call with only the id bumps its recency), and refresh the description ' +
+  'when its topic drifted.';
+
 // The two file areas and the bridge between them — one consistent line for
 // every agent whose tool bundle includes the workspace server.
 export const WORKSPACE_STORAGE_NOTE =

@@ -288,6 +288,31 @@ model ScheduledTask {
   @@map("scheduled_tasks")
 }
 
+// Registry of projects — named long-lived work contexts, passive libraries
+// the user and agents return to across many threads. The row holds ONLY the
+// identity: title + description (the "scent" agents match a conversation
+// against) and the slug naming the project's folder in the workspace file
+// area (<filesDir>/<slug>, AGENTS.md as the entry point). All knowledge
+// lives in the folder, never in columns here. Nothing is ever deleted:
+// archiving flips the flag, the folder stays put; the slug is fixed at
+// creation and survives renames. updatedAt means "when work last touched
+// the project" and drives sorting (the @updatedAt bump on rename/archive is
+// an accepted blur).
+model Project {
+  id          String   @id @default(uuid())
+  userId      String   @map("user_id")
+  title       String
+  slug        String
+  description String
+  archived    Boolean  @default(false)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@unique([userId, title])
+  @@unique([userId, slug])
+  @@map("projects")
+}
+
 model File {
   id               String    @id @default(uuid())
   bucket           String

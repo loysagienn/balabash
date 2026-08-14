@@ -11,13 +11,11 @@
 
 import path from 'node:path';
 import type { AgentDeclaration, JsonObject } from '../src/core/contract.ts';
-import { TELEGRAM_OUTPUT_NOTE, WORKSPACE_STORAGE_NOTE } from './shared.ts';
+import { workspaceFilesDir } from '../src/workspace/layout.ts';
+import { PROJECTS_NOTE, TELEGRAM_OUTPUT_NOTE, WORKSPACE_STORAGE_NOTE } from './shared.ts';
 
 const PPTX_MODEL = 'claude-fable-5';
 
-// The app process always starts in the repository root (§12), so the
-// workspace file area resolves from cwd — same base as tools/workspace.ts.
-const WORKSPACE_ROOT = path.resolve('data', 'workspace');
 const SKILL_DIR = path.resolve('.claude', 'skills', 'pptx');
 
 const SYSTEM_PROMPT = `You are the presentation specialist of Balabash, a personal self-hosted assistant. You work in a dedicated Telegram forum topic, talking to the user directly. Your craft is PowerPoint files (.pptx) as editable documents: you read them, create them from scratch, edit existing decks, build new decks in the design of a donor deck, and render slides to images so both you and the user can SEE the result.
@@ -25,6 +23,8 @@ const SYSTEM_PROMPT = `You are the presentation specialist of Balabash, a person
 Your workbench is your working directory: the user's workspace file area, data/workspace/<userId>/files (you are already there — use relative paths). Work ONLY inside this folder: it is your entire world. Do not touch the Balabash repository, its code, or anything else on the host — full host access is a technical given, not an invitation.
 
 Path map: the same files are visible two ways, under the same relative paths. \`./x\` for your native tools (Bash, Read, Write; cwd is the workbench) is \`x\` for the workspace_* tools, which address paths from the same file area root. ${WORKSPACE_STORAGE_NOTE}
+
+${PROJECTS_NOTE}
 
 The craft — how to actually manipulate pptx files — is the official Anthropic pptx skill. Invoke Skill('pptx') and follow it; it knows the workflows (create via pptxgenjs, edit via unzip → XML surgery → rezip, read via markitdown, thumbnails, validation) and the pitfalls. If the Skill tool does not list pptx, read ${SKILL_DIR}/SKILL.md and follow it directly; its scripts live in ${SKILL_DIR}/scripts. Host prerequisites (LibreOffice, poppler, fonts, python libs, pptxgenjs) are provisioned.
 
@@ -88,7 +88,7 @@ export const agent = {
     instructions: SYSTEM_PROMPT,
     model: PPTX_MODEL,
     preset: 'full',
-    cwd: (userId: string) => path.join(WORKSPACE_ROOT, userId, 'files'),
+    cwd: (userId: string) => workspaceFilesDir(userId),
     initialMessage: (input: JsonObject) => {
       const donors = Array.isArray(input.donorFileIds)
         ? input.donorFileIds.filter((id): id is string => typeof id === 'string' && Boolean(id.trim()))

@@ -20,6 +20,7 @@ import { loadToolServers, registerBuiltinToolServer } from './capabilities/tool-
 import { loadTasks } from './schedule/catalog.ts';
 import { startScheduleHeart } from './schedule/heart.ts';
 import { createScheduleToolServer } from './schedule/tools.ts';
+import { createProjectsToolServer } from './projects/tools.ts';
 import { createCoordinatorRun, hasActiveCoordinatorTurns } from './coordinator/index.ts';
 import { startWebServer } from './api/index.ts';
 import { startThreadRouter } from './runtime/router.ts';
@@ -87,6 +88,11 @@ registerBuiltinToolServer(createEventsToolServer());
 // list, cancel or manually run a scheduled task; the audit is the tool.call.*
 // journal in the calling agent's thread.
 registerBuiltinToolServer(createScheduleToolServer());
+
+// The project registry tools (passive libraries: identity in the db, the
+// knowledge in a workspace folder) — non-consent, like schedule: any agent
+// may list, read and maintain projects; the audit is the tool.call.* journal.
+registerBuiltinToolServer(createProjectsToolServer());
 
 // Local tool servers see the global files surface; workspace scoping happens
 // at the calling run (§7.4).

@@ -10,6 +10,8 @@ import { getTranscript } from '../core/events.ts';
 import { SYSTEM_EXCEPTION } from '../core/envelope.ts';
 import { listThreads } from '../core/threads.ts';
 import { config } from '../config/index.ts';
+import { listProjects } from '../projects/store.ts';
+import type { ProjectModel } from '../projects/store.ts';
 import { getPendingRestart } from '../runtime/restart.ts';
 import { buildTurnPrompt } from '../harness/openai/prompt-builder.ts';
 import { startLlmRequestMetrics } from '../harness/openai/llm-metrics.ts';
@@ -39,7 +41,7 @@ export function hasActiveCoordinatorTurns(): boolean {
 // prompt's uncached tail (§8.1). Current run state lives here, not in the
 // function definitions — spawns must not reset the cache head. Direct
 // children only: grandchildren are invisible by construction (§5.2).
-function buildStatusText(children: Thread[]): string {
+function buildStatusText(children: Thread[], projects: ProjectModel[]): string {
   const lines = [`[status — authoritative, overrides the transcript]`, `time: ${new Date().toISOString()}`];
   const pendingRestart = getPendingRestart();
 
@@ -61,6 +63,19 @@ function buildStatusText(children: Thread[]): string {
     lines.push('active child threads: (none)');
   }
 
+  // The live projects, most recently touched first — the showcase the
+  // secretary matches conversations against (archived ones stay behind
+  // projects_list).
+  if (projects.length) {
+    lines.push('projects:');
+
+    for (const project of projects) {
+      lines.push(`- slug=${project.slug} title=${JSON.stringify(project.title)} description=${JSON.stringify(project.description)}`);
+    }
+  } else {
+    lines.push('projects: (none)');
+  }
+
   return lines.join('\n');
 }
 
@@ -78,6 +93,7 @@ export function createCoordinatorRun({ threadId, userId }: { threadId: string; u
     const lastSeq = events.at(-1)!.seq;
     const tools = await getCoordinatorFunctionDefinitions(userId);
     const children = await listThreads(userId, { status: 'active', parentId: threadId });
+    const projects = await listProjects(userId, { archived: false });
 
     const prompt = buildTurnPrompt({
       threadId,
@@ -87,7 +103,7 @@ export function createCoordinatorRun({ threadId, userId }: { threadId: string; u
       model: config.mainOpenaiModel,
       instructions: COORDINATOR_INSTRUCTIONS,
       tools,
-      statusText: buildStatusText(children),
+      statusText: buildStatusText(children, projects),
     });
 
     // The new events rendered to nothing — the model has nothing to react

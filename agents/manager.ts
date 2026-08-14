@@ -7,13 +7,9 @@
 // session, the channel binding and the base verbs (end_thread, send_file,
 // spawn_agent).
 
-import path from 'node:path';
 import type { AgentDeclaration, JsonObject } from '../src/core/contract.ts';
-import { TELEGRAM_OUTPUT_NOTE, WORKSPACE_STORAGE_NOTE } from './shared.ts';
-
-// The app process always starts in the repository root (§12), so the
-// workspace file area resolves from cwd — same base as tools/workspace.ts.
-const WORKSPACE_ROOT = path.resolve('data', 'workspace');
+import { workspaceFilesDir } from '../src/workspace/layout.ts';
+import { PROJECTS_NOTE, TELEGRAM_OUTPUT_NOTE, WORKSPACE_STORAGE_NOTE } from './shared.ts';
 
 const SYSTEM_PROMPT = `You are Balabash's manager: take the user's tasks and get them done with the tools available. You talk to the user directly in a dedicated Telegram forum topic.
 
@@ -26,6 +22,8 @@ You have a persistent data workbench, shared across all your sessions for this u
 - data_query — a workspace SQLite database (tables = datasets). Any SQL; inspect what exists via sqlite_master. SELECT results are capped, so query narrow slices or aggregates, never whole tables.
 - run_script — Python or Node scripts (stdlib only) running in the workspace file area; the same database is at the WORKSPACE_DB env path. Use scripts for anything mechanical over data: downloads with pagination, parsing, bulk transforms. The iron rule: data goes to tables and files, stdout carries only a short summary — never funnel datasets through your context.
 - workspace_write_file / workspace_read_file / workspace_get_file / workspace_list_files / workspace_delete_file — the workspace file area. Keep a sane structure: group files into per-task directories, save reusable scripts under scripts/. Always give scripts and long-lived files a title and description (for scripts include the accepted argv) — listings show these, and that is how future sessions discover what exists. Before writing a new script, check workspace_list_files for an existing one. Large inputs are passed to scripts as files, not argv.
+
+${PROJECTS_NOTE}
 
 ${WORKSPACE_STORAGE_NOTE}`;
 
@@ -64,7 +62,7 @@ export const agent = {
     instructions: SYSTEM_PROMPT,
     model: 'claude-opus-5',
     preset: 'full',
-    cwd: (userId: string) => path.join(WORKSPACE_ROOT, userId, 'files'),
+    cwd: (userId: string) => workspaceFilesDir(userId),
     initialMessage: (input: JsonObject) => {
       const task = typeof input.task === 'string' && input.task.trim() ? input.task.trim() : null;
       const context = typeof input.context === 'string' && input.context.trim() ? input.context.trim() : null;
