@@ -8,6 +8,8 @@
 // live topic already shows the work through agent.message — progress feeds
 // the parent's context and thread lists, not the chat (§11.2).
 
+import { Readable } from 'node:stream';
+import { InputFile } from 'grammy';
 import type { Bot } from 'grammy';
 import { prisma } from '../../db/client.ts';
 import { startConsumer } from '../../core/consumers.ts';
@@ -15,7 +17,7 @@ import type { Consumer } from '../../core/consumers.ts';
 import type { ContentBlock, Event, ThreadSummary } from '../../core/contract.ts';
 import { TERMINAL_TYPES, THREAD_NOTIFICATION, THREAD_STARTED } from '../../core/envelope.ts';
 import { getThread } from '../../core/threads.ts';
-import { getFileDownloadUrl } from '../../files/index.ts';
+import { getFile, getFileDownloadUrl, openFileContent } from '../../files/index.ts';
 import { formatTelegramMarkdown, TELEGRAM_MESSAGE_LIMIT } from './format.ts';
 
 type DeliveryTarget = {
@@ -73,6 +75,49 @@ function contentBlocks(event: Event): ContentBlock[] {
 
 function threadOptionsOf(target: DeliveryTarget): { message_thread_id?: number } {
   return target.messageThreadId !== null ? { message_thread_id: target.messageThreadId } : {};
+}
+
+// Telegram Bot API fetches a sendDocument URL itself only for a narrow set of
+// content types (GIF, PDF, ZIP; images work as well) — anything else, e.g. a
+// .pptx, fails with 400 "failed to get HTTP URL content". Those types are
+// uploaded directly as a multipart request instead.
+const URL_SENDABLE_TYPES = new Set(['application/pdf', 'application/zip', 'image/gif']);
+
+function isUrlSendable(contentType: string | null): boolean {
+  return contentType !== null && (contentType.startsWith('image/') || URL_SENDABLE_TYPES.has(contentType));
+}
+
+// Extension fallback for files ingested without an original filename, so the
+// multipart upload still carries a name Telegram can map to the right type.
+const EXTENSION_BY_TYPE: Record<string, string> = {
+  'application/pdf': '.pdf',
+  'application/zip': '.zip',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation': '.pptx',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': '.docx',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': '.xlsx',
+  'text/plain': '.txt',
+  'text/csv': '.csv',
+  'text/html': '.html',
+  'application/json': '.json',
+};
+
+// Resolves what to hand to sendDocument: a presigned URL for the types
+// Telegram fetches itself, a streamed multipart upload (with the original
+// filename preserved) for everything else.
+async function documentInput(fileId: string): Promise<string | InputFile> {
+  const file = await getFile(fileId);
+
+  if (isUrlSendable(file.contentType)) {
+    const { url } = await getFileDownloadUrl(fileId);
+
+    return url;
+  }
+
+  const filename =
+    file.originalFilename ?? `file-${fileId}${(file.contentType && EXTENSION_BY_TYPE[file.contentType]) ?? ''}`;
+
+  // The supplier form lets grammY re-open the stream if it retries the request.
+  return new InputFile(async () => Readable.fromWeb(await openFileContent(fileId)), filename);
 }
 
 // Deep link into a topic of a private supergroup: t.me/c/<internal id>/<topic>.
@@ -214,9 +259,7 @@ export function startTelegramDelivery({ bot }: { bot: Bot }): Consumer {
 
     for (const fileId of fileIds) {
       try {
-        const { url } = await getFileDownloadUrl(fileId);
-
-        await bot.api.sendDocument(Number(target.chatId), url, threadOptionsOf(target));
+        await bot.api.sendDocument(Number(target.chatId), await documentInput(fileId), threadOptionsOf(target));
       } catch (error) {
         console.error(`[telegram-delivery] failed to send summary file ${fileId}:`, error);
       }
@@ -333,8 +376,11 @@ export function startTelegramDelivery({ bot }: { bot: Bot }): Consumer {
       let firstMessageId = text ? await sendText(target, text) : null;
 
       for (const block of fileBlocks) {
-        const { url } = await getFileDownloadUrl(block.fileId);
-        const sent = await bot.api.sendDocument(Number(target.chatId), url, threadOptionsOf(target));
+        const sent = await bot.api.sendDocument(
+          Number(target.chatId),
+          await documentInput(block.fileId),
+          threadOptionsOf(target),
+        );
 
         firstMessageId ??= sent.message_id;
       }
