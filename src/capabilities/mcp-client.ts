@@ -5,7 +5,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { createTransportAuthProvider } from './connections/oauth-provider.ts';
-import type { ExternalServerConfig } from './server-config.ts';
+import type { ExternalServerConfig, ToolOverride } from './server-config.ts';
 import type { UserAuthServer } from './tool-manager.ts';
 
 const CLIENT_INFO = { name: 'balabash', version: '2.0.0' };
@@ -27,16 +27,22 @@ export type ConnectedServer = {
   functions: ToolFunction[];
 };
 
-async function listServerFunctions(serverName: string, client: Client): Promise<ToolFunction[]> {
+async function listServerFunctions(
+  serverName: string,
+  client: Client,
+  toolOverrides?: Record<string, ToolOverride>,
+): Promise<ToolFunction[]> {
   const { tools } = await client.listTools();
 
-  return tools.map(tool => ({
-    functionName: tool.name,
-    serverName,
-    toolName: tool.name,
-    description: tool.description ?? tool.name,
-    inputSchema: (tool.inputSchema as Record<string, unknown>) ?? { type: 'object', properties: {} },
-  }));
+  return tools
+    .filter(tool => !toolOverrides?.[tool.name]?.disabled)
+    .map(tool => ({
+      functionName: tool.name,
+      serverName,
+      toolName: tool.name,
+      description: toolOverrides?.[tool.name]?.description ?? tool.description ?? tool.name,
+      inputSchema: (tool.inputSchema as Record<string, unknown>) ?? { type: 'object', properties: {} },
+    }));
 }
 
 export async function connectExternalServer(
@@ -63,7 +69,7 @@ export async function connectExternalServer(
     origin: 'external',
     client,
     close: () => client.close(),
-    functions: await listServerFunctions(serverName, client),
+    functions: await listServerFunctions(serverName, client, config.toolOverrides),
   };
 }
 
@@ -83,6 +89,6 @@ export async function connectUserServer(server: UserAuthServer, userId: string):
     origin: server.origin,
     client,
     close: () => client.close(),
-    functions: await listServerFunctions(server.name, client),
+    functions: await listServerFunctions(server.name, client, server.toolOverrides),
   };
 }

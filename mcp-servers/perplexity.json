@@ -1,5 +1,19 @@
 {
   "transport": "http",
   "url": "https://api.perplexity.ai/mcp",
-  "headers": { "Authorization": "Bearer ${secret:PERPLEXITY_API_KEY}" }
+  "headers": { "Authorization": "Bearer ${secret:PERPLEXITY_API_KEY}" },
+  "toolOverrides": {
+    "perplexity_search": {
+      "description": "Web search returning a ranked list of results with titles, URLs, snippets, and dates — no LLM synthesis, cheap and fast. This is the DEFAULT tool for researching any topic: run several searches with different queries, read the snippets, fetch promising pages with web_fetch, and do the analysis yourself. Supports recency filters and domain restrictions. Prefer this over perplexity_ask/reason/research unless the user explicitly asked for a Perplexity-generated answer or deep research."
+    },
+    "perplexity_ask": {
+      "description": "Answer a question using web-grounded AI (Perplexity Agent API, fast preset): a synthesized text response with numbered citations. Costs Perplexity LLM tokens — for topic research prefer perplexity_search plus your own analysis. Use when a single quick synthesized answer to a narrow factual question is genuinely more efficient than searching and reading yourself. Supports recency filters, domain restrictions, and search context size."
+    },
+    "perplexity_reason": {
+      "description": "Analyze a question using step-by-step reasoning with web grounding (Perplexity Agent API, medium preset): a reasoned response with numbered citations. Costs more Perplexity LLM tokens than perplexity_ask. Rarely the right choice: you can reason over perplexity_search results yourself. Use only when delegating both the web search and the reasoning to Perplexity is explicitly desired. Supports recency filters, domain restrictions, and search context size."
+    },
+    "perplexity_research": {
+      "description": "Deep multi-source research (Perplexity Agent API, high preset): a long synthesized report with numbered citations. EXPENSIVE (the dominant cost of the Perplexity account) and slow (can take minutes) — it is essentially perplexity_search results passed through Perplexity's own LLM analysis, which you can do yourself. Do NOT use for ordinary topic research; use perplexity_search and analyze the results instead. Reach for this only when the user explicitly asks for a Perplexity deep-research report."
+    }
+  }
 }

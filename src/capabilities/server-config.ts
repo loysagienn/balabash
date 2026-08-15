@@ -11,6 +11,16 @@ import { getSecretReferenceNames } from './server-secrets.ts';
 
 const externalServersDirectory = path.resolve('mcp-servers');
 
+// Per-tool adjustments applied on top of what the server advertises via
+// listTools(): replace a description (the server's own wording may steer the
+// model toward expensive tools) or hide a tool entirely. Keys are tool names
+// as the server reports them; unknown keys are ignored silently — servers may
+// change their tool set between connections.
+export type ToolOverride = {
+  description?: string;
+  disabled?: boolean;
+};
+
 export type ExternalServerConfig =
   | {
       transport: 'stdio';
@@ -18,6 +28,7 @@ export type ExternalServerConfig =
       args?: string[];
       env?: Record<string, string>;
       consent?: boolean;
+      toolOverrides?: Record<string, ToolOverride>;
     }
   | {
       transport: 'http';
@@ -42,6 +53,7 @@ export type ExternalServerConfig =
       scope?: string;
       authorizationParams?: Record<string, string>;
       consent?: boolean;
+      toolOverrides?: Record<string, ToolOverride>;
     };
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -59,6 +71,35 @@ export function validateExternalServerConfig(raw: unknown, source: string): Exte
 
   if (raw.consent !== undefined && typeof raw.consent !== 'boolean') {
     throw new Error(`${source}: "consent" must be a boolean`);
+  }
+
+  if (raw.toolOverrides !== undefined) {
+    if (!isObject(raw.toolOverrides)) {
+      throw new Error(`${source}: "toolOverrides" must be an object keyed by tool name`);
+    }
+
+    for (const [toolName, override] of Object.entries(raw.toolOverrides)) {
+      if (!isObject(override)) {
+        throw new Error(`${source}: "toolOverrides.${toolName}" must be an object`);
+      }
+
+      if (override.description !== undefined && (typeof override.description !== 'string' || !override.description.trim())) {
+        throw new Error(`${source}: "toolOverrides.${toolName}.description" must be a non-empty string`);
+      }
+
+      if (override.disabled !== undefined && typeof override.disabled !== 'boolean') {
+        throw new Error(`${source}: "toolOverrides.${toolName}.disabled" must be a boolean`);
+      }
+
+      const knownKeys = ['description', 'disabled'];
+      const unknownKeys = Object.keys(override).filter(key => !knownKeys.includes(key));
+
+      if (unknownKeys.length) {
+        throw new Error(
+          `${source}: "toolOverrides.${toolName}" has unknown keys: ${unknownKeys.map(key => `"${key}"`).join(', ')}`,
+        );
+      }
+    }
   }
 
   if (raw.transport === 'stdio') {

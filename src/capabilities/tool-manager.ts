@@ -12,7 +12,7 @@ import type { JsonObject, JsonValue, ToolResult } from '../core/contract.ts';
 import { localToolModules } from '../../tools/index.ts';
 import { connectExternalServer, connectUserServer, type ConnectedServer, type ToolFunction } from './mcp-client.ts';
 import { startLocalToolSource, type LocalToolContext, type LocalToolSource } from './local-tool-source.ts';
-import { readExternalServerConfigs, type ExternalServerConfig } from './server-config.ts';
+import { readExternalServerConfigs, type ExternalServerConfig, type ToolOverride } from './server-config.ts';
 import { resolveExternalServerSecrets } from './server-secrets.ts';
 import { runToolHandler } from './tool-result.ts';
 import { listUserConnections, markReauthorizationRequired } from './connections/index.ts';
@@ -132,6 +132,7 @@ export type UserAuthServer = {
   clientRegistration: 'dynamic' | 'manual';
   scope: string | null;
   authorizationParams: Record<string, string> | null;
+  toolOverrides: Record<string, ToolOverride> | undefined;
 };
 
 const userAuthServers = new Map<string, UserAuthServer>();
@@ -269,6 +270,7 @@ function toUserAuthServer(
     clientRegistration: config.clientRegistration === 'manual' ? 'manual' : 'dynamic',
     scope: config.scope ?? null,
     authorizationParams: config.authorizationParams ?? null,
+    toolOverrides: config.toolOverrides,
   };
 }
 
