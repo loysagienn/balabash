@@ -7,6 +7,12 @@
 // and tool-catalog resyncs.
 
 import { mkdirSync } from 'node:fs';
+import { THREAD_NAMING_NOTE } from '../../agents/world/index.ts';
+import {
+  CANCEL_REASON_PARAM_DESCRIPTION,
+  CANCEL_THREAD_DESCRIPTION,
+  SEND_TO_THREAD_DESCRIPTION,
+} from './thread-verbs.ts';
 import type {
   AgentDeclaration,
   AgentRun,
@@ -18,6 +24,7 @@ import type {
   SdkBridgeTool,
   SessionAgentSpec,
   ThreadSummary,
+  ToolDefinition,
 } from '../core/contract.ts';
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -69,8 +76,9 @@ function describeUserMessage(payload: Record<string, unknown>): string {
 // parent it is the operator speaking (labeled in a topic thread, where the
 // operator is distinct from the user; plain in a headless thread, where the
 // operator's instructions are the only dialogue); from a spawned child it is
-// the child's reply, labeled with the child's threadId.
-function describeThreadMessage(
+// the child's reply, labeled with the child's threadId. Exported for
+// imperative run() agents (browser) — one rendering, not a clone.
+export function describeThreadMessage(
   event: Event,
   headless: boolean,
   childThreadIds: ReadonlySet<string>,
@@ -95,9 +103,28 @@ function describeThreadMessage(
 }
 
 // Events fanned into the run besides the dialogue: lifecycle of this thread's
-// own children, redirected facts, domain events.
-function describeEvent(event: Event): string {
+// own children, redirected facts, domain events. Exported for imperative
+// run() agents (browser) — one rendering, not a clone.
+export function describeEvent(event: Event): string {
   return `[Balabash event]\ntype: ${event.type}\npayload: ${JSON.stringify(event.payload)}`;
+}
+
+// ---------------------------------------------------------------------------
+// The default session-opening message: the one platform template rendering
+// the standard task/context spawn input. A declaration provides its own
+// initialMessage only for a genuinely different shape (extra inputs, a
+// different opening move).
+
+export function buildDefaultInitialMessage(input: JsonObject): string {
+  const task = typeof input.task === 'string' ? input.task.trim() : '';
+  const context = typeof input.context === 'string' && input.context.trim() ? input.context.trim() : null;
+
+  return `Task from your operator: ${task}
+
+Context from your operator:
+${context ?? '(none — start from the task itself)'}
+
+Start working on the task and keep the user informed in this topic.`;
 }
 
 // ---------------------------------------------------------------------------
@@ -128,9 +155,8 @@ function createEndThreadTool(end: EndState): SdkBridgeTool {
         title: {
           type: 'string',
           description:
-            'Final thread title: 2–5 words naming the work done, in the language of the thread. Name the ' +
-            'task, never the executor or agent. It replaces the start-time title in thread lists and the ' +
-            'forum topic name.',
+            `Final thread title: 2–5 words naming the work done, in the language of the thread. ${THREAD_NAMING_NOTE} ` +
+            'It replaces the start-time title in thread lists and the forum topic name.',
         },
         description: {
           type: 'string',
@@ -183,7 +209,8 @@ function createSendFileTool(ctx: RunContext, headless: boolean): SdkBridgeTool {
     name: 'send_file',
     description: headless
       ? 'Send a stored Balabash file to your operator, by fileId.'
-      : 'Send a stored Balabash file into the topic as a document, by fileId.',
+      : 'Send a stored Balabash file into the topic, by fileId: an image/* file arrives as a photo, ' +
+        'anything else as a document.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -247,9 +274,7 @@ function createChildTools(
         agent: { type: 'string', description: `The agent to spawn: one of ${allowedAgents.join(', ')}.` },
         title: {
           type: 'string',
-          description:
-            'Short human-readable title for the child thread. Name the task itself, never the agent or ' +
-            'executor: no "agent: …"-style prefixes.',
+          description: `Short human-readable title for the child thread. ${THREAD_NAMING_NOTE}`,
         },
         input: { type: 'object', description: "The spawn input matching the agent's input schema." },
       },
@@ -278,9 +303,7 @@ function createChildTools(
 
   const sendToThreadTool: SdkBridgeTool = {
     name: 'send_to_thread',
-    description:
-      'Send a message into a child thread you spawned — the way to drive the sub-agent: instructions, ' +
-      'follow-ups, answers to its questions. Optionally attach stored files by fileId.',
+    description: `${SEND_TO_THREAD_DESCRIPTION} Optionally attach stored files by fileId.`,
     inputSchema: {
       type: 'object',
       properties: {
@@ -317,13 +340,12 @@ function createChildTools(
 
   const cancelThreadTool: SdkBridgeTool = {
     name: 'cancel_thread',
-    description:
-      'Cancel a child thread you spawned — work that is no longer needed or a sub-agent stuck without progress.',
+    description: CANCEL_THREAD_DESCRIPTION,
     inputSchema: {
       type: 'object',
       properties: {
         threadId: { type: 'string', description: 'The child threadId to cancel.' },
-        reason: { type: ['string', 'null'], description: 'A concise reason, or null.' },
+        reason: { type: ['string', 'null'], description: CANCEL_REASON_PARAM_DESCRIPTION },
       },
       required: ['threadId', 'reason'],
       additionalProperties: false,
@@ -347,6 +369,29 @@ function createChildTools(
 }
 
 // ---------------------------------------------------------------------------
+
+// The base verbs as a given declaration's session sees them — the same
+// factories that build the live tools, run with inert state, mapped to bare
+// definitions. For offline rendering (scripts/render-context.ts): the
+// showcase must show the real texts, not a retelling.
+export function describeSessionBridgeTools(declaration: AgentDeclaration): ToolDefinition[] {
+  const headless = declaration.headless === true;
+  const allowedAgents = declaration.agents ?? [];
+  // Handlers of the built tools are never called here.
+  const inertCtx = null as unknown as RunContext;
+
+  const tools: SdkBridgeTool[] = [
+    createEndThreadTool({ result: null }),
+    createSendFileTool(inertCtx, headless),
+    ...(allowedAgents.length ? createChildTools(inertCtx, allowedAgents, new Set()) : []),
+  ];
+
+  return tools.map(tool => ({
+    name: tool.name,
+    description: tool.description,
+    inputSchema: tool.inputSchema,
+  }));
+}
 
 export function createSessionRun(
   declaration: AgentDeclaration,
@@ -382,7 +427,7 @@ export function createSessionRun(
 
   const session = ctx.harness.sdkSession({
     instructions: spec.instructions,
-    initialMessage: spec.initialMessage(input),
+    initialMessage: spec.initialMessage ? spec.initialMessage(input) : buildDefaultInitialMessage(input),
     ...(spec.model ? { model: spec.model } : {}),
     ...(spec.effort ? { effort: spec.effort } : {}),
     ...(spec.preset ? { preset: spec.preset } : {}),

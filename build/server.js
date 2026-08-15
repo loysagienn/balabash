@@ -9,6 +9,7 @@ function getOptions(NODE_ENV, APP_VERSION) {
     entryPoints: {
       app: './src/app.ts',
       'rebuild-threads': './scripts/rebuild-threads.ts',
+      'render-context': './scripts/render-context.ts',
     },
     bundle: true,
     outdir: './dist',

@@ -216,8 +216,8 @@ export function validateAgent(module: Record<string, unknown>, filename: string)
       throw new Error(`${filename} agent.session.instructions must be a non-empty string`);
     }
 
-    if (typeof session.initialMessage !== 'function') {
-      throw new Error(`${filename} agent.session.initialMessage must be a function`);
+    if (session.initialMessage !== undefined && typeof session.initialMessage !== 'function') {
+      throw new Error(`${filename} agent.session.initialMessage must be a function when present`);
     }
 
     if (session.model !== undefined && (typeof session.model !== 'string' || !session.model.trim())) {

@@ -34,7 +34,8 @@ import type {
   RunContext,
   SdkBridgeTool,
 } from '../src/core/contract.ts';
-import { WORKSPACE_STORAGE_NOTE } from './shared.ts';
+import { describeEvent, describeThreadMessage } from '../src/capabilities/session-run.ts';
+import { WORKSPACE_STORAGE_NOTE } from './world/index.ts';
 
 const NOVNC_URL = 'https://novnc.loysagienn.com/vnc.html';
 
@@ -117,20 +118,16 @@ function buildInstructions(): string {
     '- The final text of each of your turns IS your reply to the operator. Make it a concise, factual report of the outcome and the current page state (what is visible, what actions are available). Never narrate low-level machinery: snapshots, selectors, click coordinates, retries, DOM details stay in this thread.',
     '- Completing an instruction NEVER ends the run: reply and wait for the next instruction, keeping the browser open. This is a multi-step collaboration, not request-response.',
     `- If a page requires login, CAPTCHA, 2FA, a passkey, or any other human verification: do NOT try to solve or bypass it yourself and do not ask for codes or passwords. Reply to the operator that manual intervention is required in the live browser at ${NOVNC_URL}, and continue only after the operator confirms the step is done.`,
-    '- Take a screenshot only when the operator asks for one. The tool result reports a stored fileId — include that exact fileId in your reply so the operator can use the file.',
-    '- Besides the browser tools you have workspace data tools shared with the operator and other agents: data_query (a persistent SQLite workspace — any SQL; SELECT results are capped), run_script (python/node scripts) and the workspace_* file tools. When an instruction asks you to collect structured data from pages (listings, tables, many items), never dump it into your reply: extract it in batches (browser_evaluate returning limited chunks), store it via data_query INSERTs into the table the operator named (or a sensibly named new one), and reply with row counts plus a small sample.',
+    '- Take a screenshot only when the operator asks for one. Its result reports a stored fileId — include that exact fileId in your reply so the operator can use the file.',
+    '- When an instruction asks you to collect structured data from pages (listings, tables, many items), never dump it into your reply: extract it in batches (page evaluation returning limited chunks), store it into the workspace database — into the table the operator named, or a sensibly named new one — and reply with row counts plus a small sample. The workspace data tools are shared with the operator and other agents.',
     WORKSPACE_STORAGE_NOTE,
-    "- You also have Notion tools (notion-search, notion-fetch, notion-create-pages, notion-update-page, ...) for the user's Notion workspace. Use them only when the operator's instruction calls for reading from or writing to Notion; page edits go through these tools, not through driving notion.so in the browser.",
-    `- Call finish only when the operator explicitly instructs you to finish/close the session: first browser_close, then finish with a concise result of the whole session. Never call finish on your own initiative.`,
+    "- Reading from or writing to the user's Notion workspace goes through the dedicated Notion tools, and only when the operator's instruction calls for it — never by driving notion.so in the browser.",
+    '- End the session only when the operator explicitly instructs you to finish: close the browser, then report a concise result of the whole session. Never finish on your own initiative.',
   ].join('\n');
 }
 
 function buildInitialMessage(input: BrowserInput): string {
   return `Task: ${input.task}`;
-}
-
-function describeEvent(event: Event): string {
-  return `[Balabash event]\ntype: ${event.type}\npayload: ${JSON.stringify(event.payload)}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -464,20 +461,13 @@ export const agent = {
           return;
         }
 
-        const payload = isObject(event.payload) ? event.payload : {};
-
         if (event.type === 'thread.message') {
-          const text = typeof payload.text === 'string' ? payload.text.trim() : '';
-          const fileIds = Array.isArray(payload.fileIds)
-            ? payload.fileIds.filter((id): id is string => typeof id === 'string' && Boolean(id))
-            : [];
-          const parts = [
-            ...(text ? [text] : []),
-            ...fileIds.map(fileId => `[the operator attached a file: fileId=${fileId}]`),
-          ];
+          // The platform rendering, headless mode: the operator's text plain,
+          // attachments as fileId markers (the browser spawns no children).
+          const text = describeThreadMessage(event, true, new Set());
 
-          if (parts.length) {
-            sessionPush(parts.join('\n'));
+          if (text) {
+            sessionPush(text);
           }
 
           return;

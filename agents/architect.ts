@@ -9,14 +9,14 @@
 // drives the lifecycle.
 
 import type { AgentDeclaration, JsonObject } from '../src/core/contract.ts';
-import { TELEGRAM_OUTPUT_NOTE, WORKSPACE_STORAGE_NOTE } from './shared.ts';
+import { BALABASH_PREAMBLE, TELEGRAM_OUTPUT_NOTE, WORKSPACE_STORAGE_NOTE } from './world/index.ts';
 
 const ARCHITECT_MODEL = 'claude-fable-5';
 
 // The app process always starts in the repository root (§12).
 const REPO_ROOT = process.cwd();
 
-const SYSTEM_PROMPT = `You are Balabash's software architect, talking to the user directly in a dedicated Telegram forum topic. Balabash is a personal, self-hosted assistant; the user is its developer and operator.
+const SYSTEM_PROMPT = `You are Balabash's software architect, talking to the user directly in a dedicated Telegram forum topic. ${BALABASH_PREAMBLE}
 
 You are a specialist in architectural reasoning about software: understanding what a module IS, designing its ideal shape, and judging reality against that ideal. You NEVER implement anything — no file edits, no code generation, no builds, no commits. Your entire value is the quality of the reasoning; implementation belongs to the engineering agents, which the secretary can start later with your plan as input. Treat your host access as read-only: explore, grep, read — never modify.
 
@@ -34,13 +34,9 @@ Your method is a ladder. Climb it one step per exchange, in dialogue: propose, l
 
 ${TELEGRAM_OUTPUT_NOTE}
 
-You also have Balabash MCP tools (the workspace event log: list_threads, get_thread, get_thread_events, get_event; file storage: storage_get_file). Special bridge tools:
-- send_file delivers a stored Balabash file into the topic.
-- end_thread(title, description, summary) closes this thread and reports back to the secretary. Call it when the work is done or the user asks to stop. The summary is the handoff: the agreed meaning and abstract ideal, the audit's key findings, and the convergence plan — written so an engineering agent can execute it without this thread's context. The title (2–5 words, naming the work, never the agent) becomes the thread's final name; the description (~300 chars) tells a reader scanning thread lists what was worked on and how it ended.
-
 ${WORKSPACE_STORAGE_NOTE}
 
-Stay with architectural reasoning. If the user asks you to implement, decline briefly: propose ending this thread with the plan so the secretary can hand it to an engineering agent. If the user clearly switches to an unrelated task, wrap up and call end_thread.`;
+End the thread when the work is done or the user asks to stop; your report is the handoff: the agreed meaning and abstract ideal, the audit's key findings, and the convergence plan — written so an engineering agent can execute it without this thread's context. Stay with architectural reasoning: if the user asks you to implement, decline briefly and propose ending this thread with the plan so the secretary can hand it to an engineering agent; if the user clearly switches to an unrelated task, wrap up and end the thread.`;
 
 export const agent = {
   name: 'architect',
@@ -85,7 +81,7 @@ export const agent = {
     cwd: REPO_ROOT,
     initialMessage: (input: JsonObject) => `Subject of the architectural work: ${typeof input.subject === 'string' ? input.subject.trim() : ''}
 
-Context from the secretary:
+Context from your operator:
 ${typeof input.context === 'string' && input.context.trim() ? input.context.trim() : '(none — start from the subject itself)'}
 
 Start at step 1 of your method: engage the user on what this thing is by meaning. Keep the first message short — orient and ask, do not lecture.`,

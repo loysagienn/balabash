@@ -41,7 +41,8 @@ export function hasActiveCoordinatorTurns(): boolean {
 // prompt's uncached tail (§8.1). Current run state lives here, not in the
 // function definitions — spawns must not reset the cache head. Direct
 // children only: grandchildren are invisible by construction (§5.2).
-function buildStatusText(children: Thread[], projects: ProjectModel[]): string {
+// Exported for offline rendering (scripts/render-context.ts).
+export function buildStatusText(children: Thread[], projects: ProjectModel[]): string {
   const lines = [`[status — authoritative, overrides the transcript]`, `time: ${new Date().toISOString()}`];
   const pendingRestart = getPendingRestart();
 

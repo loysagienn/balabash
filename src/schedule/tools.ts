@@ -39,8 +39,9 @@ const FUNCTIONS: ToolFunction[] = [
       'The trigger is optional: cron (recurring; evaluated in the ' +
       `"${config.scheduleTimezone}" timezone; alarm-clock semantics — a moment missed while the app was ` +
       'down is skipped) or at (one-shot, "not before this instant"; a past instant fires immediately; ' +
-      'firing consumes the task). With neither the task is a stored procedure started only via run_task. ' +
-      'This call only writes the registry — it never spawns agents or runs anything.',
+      'firing consumes the task). No retries, no catch-up, no pause/resume. With neither trigger the task ' +
+      'is a stored procedure started only via run_task. This call only writes the registry — it never ' +
+      'spawns agents or runs anything.',
     inputSchema: {
       type: 'object',
       properties: {

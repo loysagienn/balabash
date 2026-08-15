@@ -9,6 +9,12 @@
 // 'accepted' — their consequences arrive as events (§8.1).
 
 import type { ContentBlock, JsonObject } from '../core/contract.ts';
+import { TELEGRAM_MARKDOWN_NOTE, THREAD_NAMING_NOTE } from '../../agents/world/index.ts';
+import {
+  CANCEL_REASON_PARAM_DESCRIPTION,
+  CANCEL_THREAD_DESCRIPTION,
+  SEND_TO_THREAD_DESCRIPTION,
+} from '../capabilities/thread-verbs.ts';
 import { appendEvent } from '../core/append.ts';
 import { THREAD_CANCEL, THREAD_MESSAGE } from '../core/envelope.ts';
 import { startThread } from '../core/threads.ts';
@@ -39,8 +45,7 @@ const STATIC_FUNCTION_DEFINITIONS: FunctionDefinition[] = [
       properties: {
         text: {
           type: 'string',
-          description:
-            'The complete text to send. Use the supported Markdown subset: **bold**, *italic*, ~~strikethrough~~, `inline code`, fenced code blocks, [links](https://example.com), blockquotes, headings, and simple lists. Do not use HTML, tables, Markdown images, task lists, or deeply nested structures.',
+          description: `The complete text to send. ${TELEGRAM_MARKDOWN_NOTE}`,
         },
         fileIds: {
           type: ['array', 'null'],
@@ -69,7 +74,9 @@ const STATIC_FUNCTION_DEFINITIONS: FunctionDefinition[] = [
     type: 'function',
     name: 'send_to_thread',
     description:
-      'Send a text message into an active child thread — the way to talk to a headless agent (one without a forum topic), e.g. to forward the user’s reply to its question. For agents with a topic the user talks there directly; use this only when relaying is genuinely needed.',
+      `${SEND_TO_THREAD_DESCRIPTION} For a headless agent (one without a forum topic) this is the only ` +
+      'channel; for agents with a topic the user talks there directly — use this only when relaying is ' +
+      'genuinely needed.',
     strict: true,
     parameters: {
       type: 'object',
@@ -90,8 +97,7 @@ const STATIC_FUNCTION_DEFINITIONS: FunctionDefinition[] = [
   {
     type: 'function',
     name: 'cancel_thread',
-    description:
-      'Cancel an active child thread — e.g. work the user asked to stop, or a run stuck without progress. The thread is closed as cancelled; its agent stops.',
+    description: CANCEL_THREAD_DESCRIPTION,
     strict: true,
     parameters: {
       type: 'object',
@@ -102,7 +108,7 @@ const STATIC_FUNCTION_DEFINITIONS: FunctionDefinition[] = [
         },
         reason: {
           type: ['string', 'null'],
-          description: 'A concise reason, or null when there is none.',
+          description: CANCEL_REASON_PARAM_DESCRIPTION,
         },
       },
       required: ['threadId', 'reason'],
@@ -138,7 +144,7 @@ function addThreadTitleToSchema(parameters: Record<string, unknown>): Record<str
         type: 'string',
         description:
           'Short human-readable title for the new thread, in the user’s language — it becomes the forum ' +
-          'topic name. Name the task itself, never the agent or executor: no "agent: …"-style prefixes.',
+          `topic name. ${THREAD_NAMING_NOTE}`,
       },
     },
     required: [...new Set([...required, 'thread_title'])],

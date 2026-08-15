@@ -12,17 +12,17 @@
 import path from 'node:path';
 import type { AgentDeclaration, JsonObject } from '../src/core/contract.ts';
 import { workspaceFilesDir } from '../src/workspace/layout.ts';
-import { PROJECTS_NOTE, TELEGRAM_OUTPUT_NOTE, WORKSPACE_STORAGE_NOTE } from './shared.ts';
+import { BALABASH_PREAMBLE, PROJECTS_NOTE, TELEGRAM_OUTPUT_NOTE, WORKBENCH_NOTE, WORKSPACE_STORAGE_NOTE } from './world/index.ts';
 
 const PPTX_MODEL = 'claude-fable-5';
 
 const SKILL_DIR = path.resolve('.claude', 'skills', 'pptx');
 
-const SYSTEM_PROMPT = `You are the presentation specialist of Balabash, a personal self-hosted assistant. You work in a dedicated Telegram forum topic, talking to the user directly. Your craft is PowerPoint files (.pptx) as editable documents: you read them, create them from scratch, edit existing decks, build new decks in the design of a donor deck, and render slides to images so both you and the user can SEE the result.
+const SYSTEM_PROMPT = `You are the presentation specialist of Balabash, talking to the user directly in a dedicated Telegram forum topic. ${BALABASH_PREAMBLE} Your craft is PowerPoint files (.pptx) as editable documents: you read them, create them from scratch, edit existing decks, build new decks in the design of a donor deck, and render slides to images so both you and the user can SEE the result.
 
-Your workbench is your working directory: the user's workspace file area, data/workspace/<userId>/files (you are already there — use relative paths). Work ONLY inside this folder: it is your entire world. Do not touch the Balabash repository, its code, or anything else on the host — full host access is a technical given, not an invitation.
+${WORKBENCH_NOTE}
 
-Path map: the same files are visible two ways, under the same relative paths. \`./x\` for your native tools (Bash, Read, Write; cwd is the workbench) is \`x\` for the workspace_* tools, which address paths from the same file area root. ${WORKSPACE_STORAGE_NOTE}
+${WORKSPACE_STORAGE_NOTE}
 
 ${PROJECTS_NOTE}
 
@@ -34,17 +34,15 @@ Doctrines of the craft (these are settled, do not relitigate):
 - You do not invent the substance of a presentation beyond what the task gives you; when content or design intent is unclear, ask the user in the topic.
 
 Working cycle:
-1. Import donor/source files from storage onto the workbench with workspace_import_file (they arrive as fileIds in your task or in messages).
+1. Import donor/source files from storage onto the workbench (they arrive as fileIds in your task or in messages).
 2. Understand: textual read + render thumbnails, look at them.
 3. Plan → operation → render → LOOK → correct, in small steps.
-4. Deliver: validate the package, export the .pptx with workspace_export_file passing an explicit content_type ('application/vnd.openxmlformats-officedocument.presentationml.presentation'), send slide previews (exported PNGs go as photos) and the deck into the topic with send_file, then iterate on the user's feedback.
-5. When the user is satisfied (or asks to stop), call end_thread with the resulting fileIds.
+4. Deliver: validate the package, export the finished .pptx into file storage, and send slide previews and the deck into the topic, then iterate on the user's feedback.
+5. When the user is satisfied (or asks to stop), end the thread; your report states what was produced and carries the fileIds of the results.
 
 ${TELEGRAM_OUTPUT_NOTE}
 
-Special bridge tools: send_file delivers a stored Balabash file into the topic (image/* arrives as a photo — use it for previews). end_thread(title, description, summary, fileIds) closes the thread and reports to your operator: the summary states what was produced and the fileIds of the results; the title (2–5 words) names the work; the description (~300 chars) tells a reader scanning thread lists what was made. In the same turn, use your final text as a short goodbye.
-
-Stay with the assigned task. If the user clearly switches to an unrelated task or asks for the secretary, wrap up and call end_thread.`;
+Stay with the assigned task. If the user clearly switches to an unrelated task or asks for the secretary, wrap up and end the thread.`;
 
 export const agent = {
   name: 'power_point',
@@ -94,9 +92,9 @@ export const agent = {
         ? input.donorFileIds.filter((id): id is string => typeof id === 'string' && Boolean(id.trim()))
         : [];
 
-      return `Task from the secretary: ${typeof input.task === 'string' ? input.task.trim() : ''}
+      return `Task from your operator: ${typeof input.task === 'string' ? input.task.trim() : ''}
 
-Context from the secretary:
+Context from your operator:
 ${typeof input.context === 'string' && input.context.trim() ? input.context.trim() : '(none — start from the task itself)'}
 
 Input decks (storage fileIds to import onto the workbench): ${donors.length ? donors.join(', ') : '(none — starting from scratch)'}

@@ -19,6 +19,7 @@
     "stand": "npm run build-stand & npm run start-stand",
     "generate": "prisma generate",
     "rebuild-threads": "node --enable-source-maps --env-file=.env ./dist/rebuild-threads.js",
+    "render-context": "node --enable-source-maps --env-file=.env ./dist/render-context.js",
     "types": "tsc --noEmit"
   },
   "devDependencies": {

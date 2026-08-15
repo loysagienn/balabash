@@ -127,7 +127,10 @@ export type AgentEventDecl = {
 export type SessionAgentSpec = {
   instructions: string; // the inner session's system prompt
   // Renders the validated spawn input into the session-opening message.
-  initialMessage(input: JsonObject): string;
+  // Optional: the platform default (session-run) renders the standard
+  // "Task from your operator / Context" template from input.task and
+  // input.context; declare it only for a genuinely different shape.
+  initialMessage?(input: JsonObject): string;
   model?: string; // agent-level choice; omit for the SDK default
   effort?: EffortLevel; // reasoning effort; default 'high' (claude SDK only)
   preset?: 'bridge-only' | 'full'; // see SdkSessionOptions.preset
