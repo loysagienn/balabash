@@ -65,7 +65,7 @@ const FUNCTIONS: ToolFunction[] = [
     description:
       'Create a project: a registry record plus its folder <slug>/ in the workspace file area. The slug ' +
       `names the folder and is FIXED FOREVER (renaming the title never moves the folder): ${String(SLUG_PATTERN)}, ` +
-      `at most ${SLUG_MAX_LENGTH} chars — transliterate a non-latin title yourself. If the folder already ` +
+      `at most ${SLUG_MAX_LENGTH} chars. If the folder already ` +
       'exists it is ADOPTED as the project library (adopted: true in the result); a fresh AGENTS.md entry ' +
       'point is written only when the folder has none. The description is required — it is how agents and ' +
       'the secretary match a conversation to the project, so make it a dense ~300-char scent of the topic.',
