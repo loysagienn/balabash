@@ -16,7 +16,7 @@ const MAX_MAX_CONTENT_BYTES = 1_000_000;
 
 const MAX_REDIRECTS = 5;
 
-const USER_AGENT = 'Balabash-WebFetch/1.0 (+https://github.com/; MCP tool)';
+const USER_AGENT = 'Balabash-HttpGet/1.0 (+https://github.com/; MCP tool)';
 
 type ErrorKind =
   | 'invalid_url'
@@ -29,7 +29,7 @@ type ErrorKind =
   | 'redirect_error'
   | 'too_many_redirects';
 
-class WebFetchError extends Error {
+class HttpGetError extends Error {
   kind: ErrorKind;
 
   constructor(kind: ErrorKind, message: string) {
@@ -92,18 +92,18 @@ function parseTargetUrl(rawUrl: string): URL {
   try {
     url = new URL(rawUrl);
   } catch {
-    throw new WebFetchError('invalid_url', `Not a valid absolute URL: "${rawUrl}".`);
+    throw new HttpGetError('invalid_url', `Not a valid absolute URL: "${rawUrl}".`);
   }
 
   if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-    throw new WebFetchError(
+    throw new HttpGetError(
       'unsupported_protocol',
       `Unsupported protocol "${url.protocol}"; only http: and https: URLs can be fetched.`,
     );
   }
 
   if (url.username || url.password) {
-    throw new WebFetchError(
+    throw new HttpGetError(
       'invalid_url',
       'URLs with embedded credentials (user:password@host) are not allowed.',
     );
@@ -122,7 +122,7 @@ async function assertPublicTarget(url: URL): Promise<void> {
 
   if (isIP(hostname)) {
     if (isBlockedAddress(hostname)) {
-      throw new WebFetchError(
+      throw new HttpGetError(
         'blocked_address',
         `Address ${hostname} is a private/internal address; fetching it is blocked to prevent SSRF.`,
       );
@@ -136,7 +136,7 @@ async function assertPublicTarget(url: URL): Promise<void> {
     addresses = await lookup(hostname, { all: true, verbatim: true });
   } catch (error) {
     const code = (error as NodeJS.ErrnoException)?.code;
-    throw new WebFetchError(
+    throw new HttpGetError(
       'dns_error',
       code === 'ENOTFOUND'
         ? `DNS lookup failed: host "${hostname}" not found.`
@@ -145,12 +145,12 @@ async function assertPublicTarget(url: URL): Promise<void> {
   }
 
   if (addresses.length === 0) {
-    throw new WebFetchError('dns_error', `DNS lookup for "${hostname}" returned no addresses.`);
+    throw new HttpGetError('dns_error', `DNS lookup for "${hostname}" returned no addresses.`);
   }
 
   for (const { address } of addresses) {
     if (isBlockedAddress(address)) {
-      throw new WebFetchError(
+      throw new HttpGetError(
         'blocked_address',
         `Host "${hostname}" resolves to ${address}, a private/internal address; fetching it is blocked to prevent SSRF.`,
       );
@@ -227,18 +227,18 @@ function headersToObject(headers: Headers): Record<string, string> {
   return result;
 }
 
-function mapFetchError(error: unknown, url: URL, timedOut: () => boolean): WebFetchError {
-  if (error instanceof WebFetchError) return error;
+function mapFetchError(error: unknown, url: URL, timedOut: () => boolean): HttpGetError {
+  if (error instanceof HttpGetError) return error;
 
   if (timedOut()) {
-    return new WebFetchError('timeout', `Request to ${url} timed out.`);
+    return new HttpGetError('timeout', `Request to ${url} timed out.`);
   }
 
   const cause = (error as { cause?: NodeJS.ErrnoException })?.cause;
   const code = cause?.code ?? (error as NodeJS.ErrnoException)?.code;
 
   if (code && /CERT|TLS|SSL|HANDSHAKE/i.test(code)) {
-    return new WebFetchError('tls_error', `TLS error while connecting to ${url.host}: ${code}.`);
+    return new HttpGetError('tls_error', `TLS error while connecting to ${url.host}: ${code}.`);
   }
 
   const detail =
@@ -246,7 +246,7 @@ function mapFetchError(error: unknown, url: URL, timedOut: () => boolean): WebFe
     (cause instanceof Error ? cause.message : undefined) ??
     (error instanceof Error ? error.message : String(error));
 
-  return new WebFetchError('network_error', `Network error while fetching ${url}: ${detail}.`);
+  return new HttpGetError('network_error', `Network error while fetching ${url}: ${detail}.`);
 }
 
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
@@ -280,7 +280,7 @@ async function fetchWithPolicy(rawUrl: string, timeoutMs: number, maxBytes: numb
     for (let hop = 0; ; hop += 1) {
       await assertPublicTarget(currentUrl);
 
-      if (timedOut) throw new WebFetchError('timeout', `Request to ${requestedUrl} timed out.`);
+      if (timedOut) throw new HttpGetError('timeout', `Request to ${requestedUrl} timed out.`);
 
       let response: Response;
       try {
@@ -303,7 +303,7 @@ async function fetchWithPolicy(rawUrl: string, timeoutMs: number, maxBytes: numb
         await response.body?.cancel().catch(() => {});
 
         if (!location) {
-          throw new WebFetchError(
+          throw new HttpGetError(
             'redirect_error',
             `Redirect (${response.status}) from ${currentUrl} has no Location header.`,
           );
@@ -313,14 +313,14 @@ async function fetchWithPolicy(rawUrl: string, timeoutMs: number, maxBytes: numb
         try {
           nextUrl = new URL(location, currentUrl);
         } catch {
-          throw new WebFetchError(
+          throw new HttpGetError(
             'redirect_error',
             `Redirect from ${currentUrl} points to an invalid Location: "${location}".`,
           );
         }
 
         if (nextUrl.protocol !== 'http:' && nextUrl.protocol !== 'https:') {
-          throw new WebFetchError(
+          throw new HttpGetError(
             'redirect_error',
             `Redirect from ${currentUrl} points to unsupported protocol "${nextUrl.protocol}".`,
           );
@@ -329,7 +329,7 @@ async function fetchWithPolicy(rawUrl: string, timeoutMs: number, maxBytes: numb
         redirectChain.push({ url: currentUrl.toString(), status: response.status, location: nextUrl.toString() });
 
         if (hop + 1 > MAX_REDIRECTS) {
-          throw new WebFetchError(
+          throw new HttpGetError(
             'too_many_redirects',
             `Stopped after ${MAX_REDIRECTS} redirects; last target was ${nextUrl}. ` +
               `Chain: ${redirectChain.map(entry => entry.url).join(' -> ')} -> ${nextUrl}`,
@@ -368,9 +368,9 @@ async function fetchWithPolicy(rawUrl: string, timeoutMs: number, maxBytes: numb
           }
         } catch (error) {
           if (timedOut) {
-            throw new WebFetchError('timeout', `Request to ${requestedUrl} timed out while reading the response body.`);
+            throw new HttpGetError('timeout', `Request to ${requestedUrl} timed out while reading the response body.`);
           }
-          throw new WebFetchError(
+          throw new HttpGetError(
             'network_error',
             `Connection failed while reading the response body from ${currentUrl}: ${
               error instanceof Error ? error.message : String(error)
@@ -401,15 +401,17 @@ async function fetchWithPolicy(rawUrl: string, timeoutMs: number, maxBytes: numb
 // ---------------------------------------------------------------------------
 
 function createMcpServer() {
-  const server = new McpServer({ name: 'web_fetch', version: '1.0.0' });
+  const server = new McpServer({ name: 'http_get', version: '1.0.0' });
 
   server.registerTool(
-    'web_fetch',
+    'http_get',
     {
       description:
-        'Fetch a public http(s) URL with GET and return the response: status, headers, and body text ' +
-        '(metadata only for binary content). Use whenever you need to read a web page, call an API, ' +
-        'or inspect an HTTP response. To store a remote file instead of reading it, use storage_download_file.',
+        'Perform a raw HTTP GET against a public http(s) URL and return the response as-is: status, ' +
+        'headers, and body text (metadata only for binary content). Intended primarily for API calls ' +
+        '(JSON/XML endpoints, feeds) and for inspecting raw responses, headers, and redirects. For reading ' +
+        'web pages prefer dedicated web-fetch tools that convert HTML to readable text — this tool returns ' +
+        'raw HTML. To store a remote file instead of reading it, use storage_download_file.',
       inputSchema: {
         url: z.string().describe('Absolute http:// or https:// URL to fetch.'),
         timeout_seconds: z
@@ -479,7 +481,7 @@ function createMcpServer() {
         return toStructuredResult(result);
       } catch (error) {
         return toErrorResult(
-          error instanceof WebFetchError ? new ToolError(error.message, { kind: error.kind }) : error,
+          error instanceof HttpGetError ? new ToolError(error.message, { kind: error.kind }) : error,
         );
       }
     },

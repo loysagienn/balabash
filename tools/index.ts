@@ -5,14 +5,14 @@
 
 import * as current_datetime from './current_datetime.ts';
 import * as gmail from './gmail.ts';
+import * as http_get from './http_get.ts';
 import * as storage_download_file from './storage_download_file.ts';
-import * as web_fetch from './web_fetch.ts';
 import * as workspace from './workspace.ts';
 
 export const localToolModules: Record<string, Record<string, unknown>> = {
   current_datetime,
   gmail,
+  http_get,
   storage_download_file,
-  web_fetch,
   workspace,
 };

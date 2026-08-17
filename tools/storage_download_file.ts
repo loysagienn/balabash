@@ -78,7 +78,7 @@ function callerUserId(extra: { _meta?: Record<string, unknown> }): string | null
 
 // ---------------------------------------------------------------------------
 // SSRF protection: block requests that resolve to private, loopback,
-// link-local, or otherwise non-public addresses. Mirrors tools/web_fetch.ts.
+// link-local, or otherwise non-public addresses. Mirrors tools/http_get.ts.
 // ---------------------------------------------------------------------------
 
 const blockedAddresses = new BlockList();
@@ -149,7 +149,7 @@ function parseTargetUrl(rawUrl: string): URL {
 /**
  * Validates that the URL's host resolves only to public addresses. Re-run for
  * every redirect hop. (A small DNS TOCTOU/rebinding window remains — the same
- * accepted limitation as tools/web_fetch.ts.)
+ * accepted limitation as tools/http_get.ts.)
  */
 async function assertPublicTarget(url: URL): Promise<void> {
   const hostname = url.hostname.replace(/^\[|\]$/g, ''); // strip IPv6 brackets
@@ -560,8 +560,8 @@ function createMcpServer(filesApi: ToolFilesApi) {
         'Download a file from a public http(s) URL into Balabash file storage and return its FileRef ' +
         '(id, originalFilename, contentType, sizeBytes, …). The id is a Balabash fileId — the address ' +
         'storage-side consumers understand (send_file, end_thread fileIds, storage_get_file). Use when a ' +
-        'remote file (document, image, archive, media) must be stored for later use. To read page or API ' +
-        'content, use web_fetch instead; for a file already in the workspace file area, use ' +
+        'remote file (document, image, archive, media) must be stored for later use. To read raw API ' +
+        'content, use http_get instead; for a file already in the workspace file area, use ' +
         'workspace_export_file.',
       inputSchema: {
         url: z.string().describe('Absolute http:// or https:// URL of the file to download.'),
