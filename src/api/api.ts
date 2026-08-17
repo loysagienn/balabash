@@ -5,6 +5,7 @@
 // ({error: {code, message}}), and an unmatched /api path answers JSON 404
 // instead of falling through to other middleware.
 
+import { createReadStream } from 'node:fs';
 import Router from '@koa/router';
 import { Api } from 'grammy';
 import type { Context, Next } from 'koa';
@@ -14,11 +15,13 @@ import { parseJson, prepareObject } from '../utils/serialize-json.ts';
 import { getMainThread, getThread, listThreads } from '../core/threads.ts';
 import { listThreadEvents } from '../core/events.ts';
 import type { Thread, ThreadStatus } from '../core/contract.ts';
+import { WorkspacePathError, listDir, resolveFilePath, sanitizeRelPath, statFile } from '../workspace/files.ts';
 import { getExternalServerSecretRequest, provisionExternalServerSecrets } from '../capabilities/external-secrets.ts';
 import { getOauthClientRequest, provisionOauthClient } from '../capabilities/connections/index.ts';
 import { consumeAuthCode } from './auth-codes.ts';
 import { createUserSession, destroySession, getSession } from './session.ts';
 import type {
+  LlmRequestsResponse,
   LogoutResponse,
   MeResponse,
   ProvisionSecretsResponse,
@@ -27,6 +30,7 @@ import type {
   ThreadEventsResponse,
   ThreadResponse,
   ThreadsResponse,
+  WorkspaceNodeResponse,
 } from './contract.ts';
 
 function sendError(ctx: Context, status: number, code: string, message: string): void {
@@ -304,6 +308,141 @@ router.get('/threads/:id/events', requireSession, async ctx => {
   };
 
   ctx.body = prepareObject(response);
+});
+
+// --------------------------------------------------------------------------
+// LLM request telemetry (read-only): raw rows for the /llm-usage chart.
+// The api layer reads the table directly — llm_requests is deliberately
+// outside the event log and has no core facade; this endpoint is its only
+// reader. rawUsage stays server-side (bulky and unneeded for the chart).
+
+router.get('/llm-requests', requireSession, async ctx => {
+  const userId = ctx.state.userId as string;
+
+  const limit = parseLimitParam(queryValue(ctx.query.limit));
+
+  if (limit === null) {
+    sendError(ctx, 400, 'bad_request', `limit must be an integer between 1 and ${LIST_LIMIT_MAX}`);
+
+    return;
+  }
+
+  // Newest N, then reversed: the client draws oldest-first, left to right.
+  const rows = await prisma.llmRequest.findMany({
+    where: { userId },
+    orderBy: { createdAt: 'desc' },
+    take: limit,
+    omit: { userId: true, rawUsage: true },
+  });
+
+  const response: LlmRequestsResponse = { requests: rows.reverse() };
+
+  ctx.body = prepareObject(response);
+});
+
+// --------------------------------------------------------------------------
+// The workspace file area (read-only): the user's window into
+// data/workspace/<userId>/files, scoped by the session's userId. The path
+// boundary is the file-area core's sanitizeRelPath — a rejected path is a
+// 400, a missing one a 404. Metadata travels as JSON; raw bytes stream
+// separately with an honest content-type.
+
+// undefined = absent/empty (the file-area root); a WorkspacePathError from
+// sanitization becomes the 400.
+function parseWorkspacePath(ctx: Context): string | null {
+  const raw = queryValue(ctx.query.path);
+
+  if (raw === undefined) {
+    return '';
+  }
+
+  try {
+    return sanitizeRelPath(raw);
+  } catch (error) {
+    sendError(ctx, 400, 'bad_request', error instanceof WorkspacePathError ? error.message : 'Invalid path');
+
+    return null;
+  }
+}
+
+router.get('/workspace/node', requireSession, async ctx => {
+  const userId = ctx.state.userId as string;
+  const relPath = parseWorkspacePath(ctx);
+
+  if (relPath === null) {
+    return;
+  }
+
+  // A directory answers first (the root always does, even unprovisioned —
+  // an empty area, not an error); otherwise the path may name a file.
+  const listing = await listDir(userId, relPath);
+
+  if (listing) {
+    const response: WorkspaceNodeResponse = {
+      kind: 'dir',
+      path: relPath,
+      directories: listing.directories,
+      files: listing.files,
+    };
+
+    ctx.body = prepareObject(response);
+
+    return;
+  }
+
+  const file = await statFile(userId, relPath);
+
+  if (!file) {
+    sendError(ctx, 404, 'not_found', 'No such path in the workspace file area');
+
+    return;
+  }
+
+  const response: WorkspaceNodeResponse = { kind: 'file', path: relPath, file };
+
+  ctx.body = prepareObject(response);
+});
+
+// RFC 6266: an ASCII fallback in filename=, the real name in filename*.
+function inlineDisposition(filename: string): string {
+  const fallback = filename.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '_');
+
+  return `inline; filename="${fallback}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
+}
+
+router.get('/workspace/raw', requireSession, async ctx => {
+  const userId = ctx.state.userId as string;
+  const relPath = parseWorkspacePath(ctx);
+
+  if (relPath === null) {
+    return;
+  }
+
+  if (relPath === '') {
+    sendError(ctx, 400, 'bad_request', 'path must name a file in the workspace file area');
+
+    return;
+  }
+
+  const file = await statFile(userId, relPath);
+
+  if (!file) {
+    sendError(ctx, 404, 'not_found', 'No such file in the workspace file area');
+
+    return;
+  }
+
+  // Raw bytes, no JSON envelope: the content-type is the honest guess from
+  // the extension (a future <img src> works for free), text declares utf-8.
+  const filename = relPath.split('/').pop() as string;
+
+  ctx.set('content-type', file.mediaType.startsWith('text/') ? `${file.mediaType}; charset=utf-8` : file.mediaType);
+  ctx.set('content-disposition', inlineDisposition(filename));
+  ctx.body = createReadStream(resolveFilePath(userId, relPath));
+
+  if (file.sizeBytes !== null) {
+    ctx.length = file.sizeBytes;
+  }
 });
 
 // --------------------------------------------------------------------------

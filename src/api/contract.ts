@@ -83,6 +83,76 @@ export type ThreadEventsResponse = {
 };
 
 // ---------------------------------------------------------------------------
+// The workspace file area (read-only): the user's window into
+// data/workspace/<userId>/files. GET /api/workspace/node?path=<rel> answers
+// with a polymorphic node — a directory listing or one file's metadata — so
+// a deep link learns what it points at in one request. Raw content streams
+// separately: GET /api/workspace/raw?path=<rel> (bytes + honest content-type,
+// no JSON envelope — not described here).
+
+export type WorkspaceFileMeta = {
+  // Relative path inside the file area — the shared currency of the API,
+  // the tools and the URLs.
+  path: string;
+  // Null only when the file vanished between listing and stat.
+  sizeBytes: number | null;
+  modifiedAt: string | null; // ISO date-time
+  // Agent-written annotations from the workspace database.
+  title: string | null;
+  description: string | null;
+  // Guessed from the extension; drives the client's viewer registry.
+  mediaType: string;
+};
+
+export type WorkspaceNodeResponse =
+  | {
+      kind: 'dir';
+      // '' is the file-area root; a missing root answers as an empty dir.
+      path: string;
+      directories: string[];
+      files: WorkspaceFileMeta[];
+    }
+  | {
+      kind: 'file';
+      path: string;
+      file: WorkspaceFileMeta;
+    };
+
+// ---------------------------------------------------------------------------
+// LLM request telemetry (read-only): the llm_requests table minus rawUsage,
+// scoped to the session's userId. Serves the /llm-usage chart — the raw
+// last-N series, no server-side aggregation. Token counts are null (not 0)
+// when a request failed before returning usage.
+
+export type LlmRequestItem = {
+  id: string;
+  createdAt: Date;
+  threadId: string | null;
+  provider: string;
+  model: string;
+  responseId: string | null;
+  previousResponseId: string | null;
+  lastSeq: bigint | null;
+  iteration: number | null;
+  status: string;
+  error: string | null;
+  serviceTier: string | null;
+  durationMs: number | null;
+  inputTokens: number | null;
+  cachedTokens: number | null;
+  cacheWriteTokens: number | null;
+  outputTokens: number | null;
+  reasoningTokens: number | null;
+  totalTokens: number | null;
+};
+
+// GET /api/llm-requests?limit=N — the newest N rows, returned oldest-first
+// so the client draws left to right without re-sorting.
+export type LlmRequestsResponse = {
+  requests: LlmRequestItem[];
+};
+
+// ---------------------------------------------------------------------------
 // Secret provisioning (the trusted window): the API exposes field METADATA
 // only — submitted values go straight to storage and never come back, not in
 // responses, not in events, not in logs.

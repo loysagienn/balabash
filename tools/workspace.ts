@@ -22,13 +22,21 @@ import { createReadStream, createWriteStream } from 'node:fs';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { spawn } from 'node:child_process';
-import { DatabaseSync } from 'node:sqlite';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { z } from 'zod';
 import { ToolError, toErrorResult, toStructuredResult } from '../src/capabilities/tool-result.ts';
 import type { LocalToolFilesApi } from '../src/capabilities/local-tool-source.ts';
 import { workspaceRoot } from '../src/workspace/layout.ts';
+import {
+  guessContentType,
+  listDir,
+  readMeta,
+  sanitizeRelPath,
+  statFile,
+  withDb,
+  type FileMeta,
+} from '../src/workspace/files.ts';
 
 const WORKSPACE_ROOT = workspaceRoot();
 
@@ -45,7 +53,6 @@ const SCRIPT_MAX_TIMEOUT_SECONDS = 540;
 const SCRIPT_OUTPUT_MAX_CHARS = 20_000;
 
 const READ_MAX_CHARS = 50_000;
-const MAX_REL_PATH_LENGTH = 300;
 
 const USER_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 
@@ -105,54 +112,12 @@ async function ensureWorkspace(userId: string): Promise<Workspace> {
   return workspace;
 }
 
-// Short-lived in-process handle for the tiny metadata operations. Bulk SQL
-// (data_query) runs in a child process instead — DatabaseSync is synchronous
-// and must not block the single app process on a heavy query.
-function withDb<T>(dbPath: string, fn: (db: DatabaseSync) => T): T {
-  const db = new DatabaseSync(dbPath);
-
-  try {
-    db.exec('PRAGMA busy_timeout = 5000');
-    return fn(db);
-  } finally {
-    db.close();
-  }
-}
-
-/**
- * Validates a model-supplied path as relative-inside-the-file-area: no
- * absolute paths, no "..", normalized "/" separators.
- */
-function sanitizeRelPath(raw: string, label = 'path'): string {
-  const value = raw.trim().replace(/\\/g, '/').replace(/^\.\//, '');
-
-  if (!value) {
-    throw new ToolError(`The ${label} must be a non-empty relative path.`);
-  }
-
-  if (value.length > MAX_REL_PATH_LENGTH) {
-    throw new ToolError(`The ${label} is longer than ${MAX_REL_PATH_LENGTH} characters.`);
-  }
-
-  if (value.startsWith('/') || /^[A-Za-z]:/.test(value)) {
-    throw new ToolError(`The ${label} must be relative to the workspace file area, not absolute: "${raw}".`);
-  }
-
-  const segments = value.split('/');
-
-  if (segments.some(segment => !segment || segment === '.' || segment === '..')) {
-    throw new ToolError(`The ${label} must not contain "..", "." or empty segments: "${raw}".`);
-  }
-
-  return segments.join('/');
-}
-
 // ---------------------------------------------------------------------------
 // File metadata (title/description) in the _files table of workspace.sqlite.
-// Filesystem is the source of truth for existence; _files only annotates.
+// The path boundary (sanitizeRelPath), the read primitives and the db handle
+// live in the file-area core (src/workspace/files.ts) — shared with the web
+// API. The write side (upsertMeta) stays here: annotating is tool semantics.
 // ---------------------------------------------------------------------------
-
-type FileMeta = { title: string | null; description: string | null };
 
 function upsertMeta(dbPath: string, relPath: string, title: string | null, description: string | null): FileMeta {
   return withDb(dbPath, db => {
@@ -166,14 +131,6 @@ function upsertMeta(dbPath: string, relPath: string, title: string | null, descr
 
     return readMeta(db, relPath);
   });
-}
-
-function readMeta(db: DatabaseSync, relPath: string): FileMeta {
-  const row = db.prepare('SELECT title, description FROM _files WHERE path = ?').get(relPath) as
-    | { title: string | null; description: string | null }
-    | undefined;
-
-  return { title: row?.title ?? null, description: row?.description ?? null };
 }
 
 // ---------------------------------------------------------------------------
@@ -589,23 +546,21 @@ function createMcpServer(filesApi: LocalToolFilesApi) {
     },
     async ({ path: rawPath }, extra) => {
       try {
-        const workspace = await ensureWorkspace(callerUserId(extra));
+        const userId = callerUserId(extra);
+        await ensureWorkspace(userId);
         const relPath = sanitizeRelPath(rawPath);
-        const absPath = path.join(workspace.filesDir, relPath);
 
-        const stats = await fs.stat(absPath).catch(() => null);
-        if (!stats?.isFile()) {
+        const node = await statFile(userId, relPath);
+        if (!node) {
           throw new ToolError(`No file at "${relPath}" in the workspace file area. Check workspace_list_files.`);
         }
 
-        const meta = withDb(workspace.dbPath, db => readMeta(db, relPath));
-
         return toStructuredResult({
-          path: relPath,
-          sizeBytes: stats.size,
-          modifiedAt: stats.mtime.toISOString(),
-          title: meta.title,
-          description: meta.description,
+          path: node.path,
+          sizeBytes: node.sizeBytes,
+          modifiedAt: node.modifiedAt,
+          title: node.title,
+          description: node.description,
         });
       } catch (error) {
         return toErrorResult(error);
@@ -626,73 +581,29 @@ function createMcpServer(filesApi: LocalToolFilesApi) {
     },
     async ({ path: rawPath }, extra) => {
       try {
-        const workspace = await ensureWorkspace(callerUserId(extra));
+        const userId = callerUserId(extra);
+        await ensureWorkspace(userId);
         const relDir = rawPath === null ? '' : sanitizeRelPath(rawPath, 'directory path');
-        const absDir = relDir ? path.join(workspace.filesDir, relDir) : workspace.filesDir;
 
-        let entries;
-        try {
-          entries = await fs.readdir(absDir, { withFileTypes: true });
-        } catch {
+        // The core's listing (shared with the web API) also prunes orphaned
+        // _files rows of this directory — the filesystem is the source of truth.
+        const listing = await listDir(userId, relDir);
+        if (!listing) {
           throw new ToolError(`No directory "${relDir || '.'}" in the workspace file area.`);
         }
 
-        const directories: string[] = [];
-        const files: Array<Record<string, unknown>> = [];
-        const presentNames = new Set<string>();
-
-        const metaByPath = withDb(workspace.dbPath, db => {
-          const map = new Map<string, FileMeta>();
-          const rows = db.prepare('SELECT path, title, description FROM _files').all() as Array<{
-            path: string;
-            title: string | null;
-            description: string | null;
-          }>;
-          for (const row of rows) {
-            map.set(row.path, { title: row.title, description: row.description });
-          }
-          return map;
+        return toStructuredResult({
+          path: relDir || '.',
+          directories: listing.directories,
+          // The tool's wire shape predates mediaType — kept as-is.
+          files: listing.files.map(({ path: filePath, sizeBytes, modifiedAt, title, description }) => ({
+            path: filePath,
+            sizeBytes,
+            modifiedAt,
+            title,
+            description,
+          })),
         });
-
-        for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
-          if (entry.isDirectory()) {
-            directories.push(entry.name);
-            continue;
-          }
-
-          if (!entry.isFile()) continue;
-
-          presentNames.add(entry.name);
-          const relPath = relDir ? `${relDir}/${entry.name}` : entry.name;
-          const stats = await fs.stat(path.join(absDir, entry.name)).catch(() => null);
-          const meta = metaByPath.get(relPath);
-
-          files.push({
-            path: relPath,
-            sizeBytes: stats?.size ?? null,
-            modifiedAt: stats?.mtime.toISOString() ?? null,
-            title: meta?.title ?? null,
-            description: meta?.description ?? null,
-          });
-        }
-
-        // The filesystem is the source of truth: metadata rows whose files in
-        // this directory are gone (deleted by a script) are pruned on sight.
-        const stale = [...metaByPath.keys()].filter(metaPath => {
-          const slash = metaPath.lastIndexOf('/');
-          const parent = slash === -1 ? '' : metaPath.slice(0, slash);
-          const name = slash === -1 ? metaPath : metaPath.slice(slash + 1);
-          return parent === relDir && !presentNames.has(name);
-        });
-
-        if (stale.length) {
-          withDb(workspace.dbPath, db => {
-            const remove = db.prepare('DELETE FROM _files WHERE path = ?');
-            for (const metaPath of stale) remove.run(metaPath);
-          });
-        }
-
-        return toStructuredResult({ path: relDir || '.', directories, files });
       } catch (error) {
         return toErrorResult(error);
       }
@@ -853,41 +764,9 @@ function createMcpServer(filesApi: LocalToolFilesApi) {
 }
 
 // ---------------------------------------------------------------------------
-// Bridge helpers: content-type guessing for exports, destination naming for
-// imports.
+// Bridge helpers: destination naming for imports (content-type guessing comes
+// from the file-area core).
 // ---------------------------------------------------------------------------
-
-const CONTENT_TYPES_BY_EXTENSION: Record<string, string> = {
-  '.txt': 'text/plain',
-  '.md': 'text/markdown',
-  '.csv': 'text/csv',
-  '.tsv': 'text/tab-separated-values',
-  '.json': 'application/json',
-  '.html': 'text/html',
-  '.xml': 'application/xml',
-  '.pdf': 'application/pdf',
-  '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-  '.potx': 'application/vnd.openxmlformats-officedocument.presentationml.template',
-  '.ppsx': 'application/vnd.openxmlformats-officedocument.presentationml.slideshow',
-  '.zip': 'application/zip',
-  '.gz': 'application/gzip',
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.gif': 'image/gif',
-  '.webp': 'image/webp',
-  '.svg': 'image/svg+xml',
-  '.mp3': 'audio/mpeg',
-  '.ogg': 'audio/ogg',
-  '.mp4': 'video/mp4',
-  '.webm': 'video/webm',
-};
-
-function guessContentType(filename: string): string {
-  const extension = path.extname(filename).toLowerCase();
-
-  return CONTENT_TYPES_BY_EXTENSION[extension] ?? 'application/octet-stream';
-}
 
 // "imports/<original filename>" when the stored name survives path
 // sanitization; the fileId otherwise.

@@ -18,3 +18,7 @@ export function workspaceRoot(): string {
 export function workspaceFilesDir(userId: string): string {
   return path.join(workspaceRoot(), userId, 'files');
 }
+
+export function workspaceDbPath(userId: string): string {
+  return path.join(workspaceRoot(), userId, 'workspace.sqlite');
+}

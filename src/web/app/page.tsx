@@ -77,6 +77,12 @@ export default function HomePage() {
       <header className={styles.header}>
         <h1 className={styles.title}>{me.data?.workspaceName ?? 'Balabash'}</h1>
         <div className={styles.headerActions}>
+          <Link className={styles.coordinator} href="/workspace">
+            Файлы
+          </Link>
+          <Link className={styles.coordinator} href="/llm-usage">
+            LLM
+          </Link>
           {me.data?.mainThreadId ? (
             <Link className={styles.coordinator} href={`/thread/${me.data.mainThreadId}`}>
               Координатор

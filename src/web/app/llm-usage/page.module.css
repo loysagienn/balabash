@@ -1,0 +1,139 @@
+.main {
+  max-width: 1000px;
+  margin: 0 auto;
+  padding: 32px 20px;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.title {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 600;
+}
+
+.back {
+  display: inline-block;
+  background: transparent;
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  border-radius: 8px;
+  padding: 6px 14px;
+  font-size: 14px;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.back:hover {
+  background: rgba(78, 161, 255, 0.12);
+  text-decoration: none;
+}
+
+.hint {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin: 6px 0 0;
+}
+
+/* The chart is fixed-width (960px SVG); narrow screens scroll it. */
+.chartScroll {
+  overflow-x: auto;
+}
+
+.chart {
+  position: relative;
+  width: 960px;
+}
+
+.panelHeader {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin: 16px 0 4px;
+}
+
+.panelTitle {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.legendItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.legendChip {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+}
+
+.tooltip {
+  position: absolute;
+  top: 36px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.45);
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--text);
+  pointer-events: none;
+  z-index: 1;
+}
+
+.tooltipRow {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.tooltipLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-dim);
+  min-width: 130px;
+  flex-shrink: 0;
+}
+
+.tooltipChip {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.tooltipValue {
+  word-break: break-all;
+  font-variant-numeric: tabular-nums;
+}
+
+.tooltipError {
+  color: var(--danger);
+}
+
+.tooltipDivider {
+  border-top: 1px solid var(--border);
+  margin: 6px 0;
+}
+
+.dim {
+  color: var(--text-dim);
+  margin-top: 20px;
+}
+
+.error {
+  color: var(--danger);
+  margin-top: 20px;
+}
