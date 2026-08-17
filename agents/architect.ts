@@ -7,7 +7,7 @@
 // access (read-oriented by convention). Fully declarative: the platform's session runner
 // drives the lifecycle.
 
-import type { AgentDeclaration, JsonObject } from '../src/core/contract.ts';
+import type { AgentDeclaration } from '../src/core/contract.ts';
 import { BALABASH_PREAMBLE, TELEGRAM_OUTPUT_NOTE, WORKSPACE_STORAGE_NOTE } from './world/index.ts';
 
 const ARCHITECT_MODEL = 'claude-fable-5';
@@ -47,25 +47,6 @@ export const agent = {
     'summary is a plan to hand to an engineering agent (e.g. engineer).',
   icon: '📐',
   sdk: 'claude',
-  parameters: {
-    type: 'object',
-    properties: {
-      subject: {
-        type: 'string',
-        description:
-          'The subject of the architectural work: the module, system or idea to reason about, as the user ' +
-          'framed it — including whether it already exists or is to be designed from scratch.',
-      },
-      context: {
-        type: ['string', 'null'],
-        description:
-          'Everything already known that the reasoning should start from: goals, constraints, positions ' +
-          'already voiced, relevant paths, fileIds or event refs. Null when starting fresh.',
-      },
-    },
-    required: ['subject', 'context'],
-    additionalProperties: false,
-  },
   tools: [
     'current_datetime',
     'events',
@@ -88,10 +69,8 @@ export const agent = {
     effort: 'max',
     preset: 'full',
     cwd: REPO_ROOT,
-    initialMessage: (input: JsonObject) => `Subject of the architectural work: ${typeof input.subject === 'string' ? input.subject.trim() : ''}
-
-Context from your operator:
-${typeof input.context === 'string' && input.context.trim() ? input.context.trim() : '(none — start from the subject itself)'}
+    initialMessage: (prompt: string) => `Subject of the architectural work:
+${prompt}
 
 Start at step 1 of your method: engage the user on what this thing is by meaning. Keep the first message short — orient and ask, do not lecture.`,
   },

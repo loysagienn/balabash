@@ -32,7 +32,6 @@ import type { StorageBody } from '../files/storage.ts';
 import { createClaudeSession } from '../harness/claude-sdk/sdk-session.ts';
 import { createCodexSession } from '../harness/codex-sdk/sdk-session.ts';
 import type { RoutedRun } from '../runtime/router.ts';
-import { Ajv, type ValidateFunction } from 'ajv';
 import { getAgent } from './agent-catalog.ts';
 import { createSessionRun } from './session-run.ts';
 import { callToolJournaled } from './tool-journal.ts';
@@ -41,36 +40,15 @@ import { validateAgentRun } from './validate-agent.ts';
 
 const AGENT_STATE_ROOT = path.resolve('data', 'agent-state');
 
-// Central spawn-input validation: the declaration's `parameters` is
-// the single schema every spawn path answers to — the coordinator's strict
-// function calls and ctx.spawn alike. Compiled validators are cached per
-// agent; the catalog is static, so the cache never invalidates.
-const ajv = new Ajv({ allErrors: true, strictSchema: false });
-const inputValidators = new Map<string, ValidateFunction>();
-
-function validateAgentInput(declarationName: string, parameters: object, input: unknown): JsonObject {
-  let validate = inputValidators.get(declarationName);
-
-  if (!validate) {
-    validate = ajv.compile(parameters);
-    inputValidators.set(declarationName, validate);
+// Central spawn-input validation: every agent takes the same input — one
+// non-empty text prompt. Every spawn path answers to this check — the
+// coordinator's function calls and ctx.spawn alike.
+function validateAgentInput(declarationName: string, input: unknown): string {
+  if (typeof input !== 'string' || !input.trim()) {
+    throw new Error(`Invalid input for agent "${declarationName}": the spawn input must be a non-empty prompt string`);
   }
 
-  const candidate = input ?? {};
-
-  if (!validate(candidate)) {
-    const details = (validate.errors ?? [])
-      .map(error => `${error.instancePath || '(root)'} ${error.message ?? 'is invalid'}`)
-      .join('; ');
-
-    throw new Error(`Invalid input for agent "${declarationName}": ${details || 'schema mismatch'}`);
-  }
-
-  if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
-    throw new Error(`Invalid input for agent "${declarationName}": input must be a JSON object`);
-  }
-
-  return candidate as JsonObject;
+  return input.trim();
 }
 
 const NOTIFICATION_RANK: Record<NotificationLevel, number> = { silent: 0, normal: 1, urgent: 2 };
@@ -244,7 +222,7 @@ export async function spawnAgentRun(thread: Thread, startedEvent: Event): Promis
       });
     },
 
-    spawn: async (childAgentName: string, input: JsonObject, options?: SpawnOptions) => {
+    spawn: async (childAgentName: string, prompt: string, options?: SpawnOptions) => {
       // Spawning is a declared need (the passport's `agents` list), not an
       // ambient right: anything not listed rejects.
       if (!declaration.agents?.includes(childAgentName)) {
@@ -262,7 +240,7 @@ export async function spawnAgentRun(thread: Thread, startedEvent: Event): Promis
         parentThreadId: threadId,
         agent: childAgentName,
         title: options?.title,
-        input,
+        input: validateAgentInput(childAgentName, prompt),
         notification: options?.notification,
         tools: options?.tools,
         icon: childDeclaration.icon,
@@ -333,14 +311,14 @@ export async function spawnAgentRun(thread: Thread, startedEvent: Event): Promis
   let run;
 
   try {
-    const input = validateAgentInput(agentName, declaration.parameters, startedEvent.payload.input);
+    const prompt = validateAgentInput(agentName, startedEvent.payload.input);
 
     // The declarative form is run by the platform's session runner; run() is
     // the imperative escape hatch (validate-agent guarantees exactly one).
     run = validateAgentRun(
       declaration.session
-        ? createSessionRun(declaration, declaration.session, input, ctx)
-        : declaration.run!(input, ctx),
+        ? createSessionRun(declaration, declaration.session, prompt, ctx)
+        : declaration.run!(prompt, ctx),
       agentName,
     );
   } catch (error) {

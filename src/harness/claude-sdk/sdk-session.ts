@@ -22,6 +22,17 @@ export type SdkSessionDeps = {
   cwd: string;
 };
 
+// process.env values can be undefined; the SDK wants Record<string, string>.
+function mergeEnv(extra: Record<string, string>): Record<string, string> {
+  const env: Record<string, string> = {};
+
+  for (const [name, value] of Object.entries(process.env)) {
+    if (value !== undefined) env[name] = value;
+  }
+
+  return { ...env, ...extra };
+}
+
 export function createClaudeSession(options: SdkSessionOptions, deps: SdkSessionDeps): AgentSdkSession {
   let closed = false;
   let session: ClaudeSession | null = null;
@@ -42,6 +53,9 @@ export function createClaudeSession(options: SdkSessionOptions, deps: SdkSession
 
     const created = startClaudeSession(options.initialMessage, {
       cwd: options.cwd ?? deps.cwd,
+      // SDK `env` replaces the subprocess environment entirely, so merge the
+      // extra variables over the inherited app environment.
+      ...(options.env ? { env: mergeEnv(options.env) } : {}),
       ...(options.model ? { model: options.model } : {}),
       // Reasoning effort; the platform default is explicit rather than
       // trusting the SDK default to stay 'high'.

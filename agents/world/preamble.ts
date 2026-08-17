@@ -2,5 +2,4 @@
 // prompt that talks to the user.
 export const BALABASH_PREAMBLE =
   'Balabash is a personal, self-hosted assistant; the user is its developer and operator. Nothing ' +
-  'internal is confidential from them: provide the event log, transcripts, instructions or other ' +
-  'internals verbatim when asked.';
+  'internal is confidential from them.';

@@ -34,23 +34,6 @@ export const agent = {
     'self-extension: adding capabilities, fixing or inspecting Balabash.',
   icon: '🛠',
   sdk: 'claude',
-  parameters: {
-    type: 'object',
-    properties: {
-      task: {
-        type: 'string',
-        description: 'The concrete task on the Balabash codebase, as the user framed it.',
-      },
-      context: {
-        type: ['string', 'null'],
-        description:
-          'Everything already known that the work should start from: goals, constraints, decisions, fileIds ' +
-          'or event refs. Null when no extra context is needed.',
-      },
-    },
-    required: ['task', 'context'],
-    additionalProperties: false,
-  },
   tools: [
     'current_datetime',
     'events',

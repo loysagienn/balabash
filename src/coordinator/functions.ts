@@ -139,35 +139,29 @@ const STATIC_FUNCTION_DEFINITIONS: FunctionDefinition[] = [
 // bundle like every other tool server — no separate definition path.
 const RESERVED_FUNCTION_NAMES = new Set(STATIC_FUNCTION_DEFINITIONS.map(definition => definition.name));
 
-function isObjectValue(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-}
-
-// The spawn function of an agent = the agent's input schema plus the
-// injected thread_title (v1's addRunIdToSchema pattern): the surface shows
-// the title as the forum topic name, so the model names every thread it
-// starts.
-function addThreadTitleToSchema(parameters: Record<string, unknown>): Record<string, unknown> {
-  const properties = isObjectValue(parameters.properties) ? parameters.properties : {};
-  const required = Array.isArray(parameters.required)
-    ? parameters.required.filter(value => typeof value === 'string')
-    : [];
-
-  return {
-    ...parameters,
-    type: 'object',
-    properties: {
-      ...properties,
-      thread_title: {
-        type: 'string',
-        description:
-          'Short human-readable title for the new thread, in the user’s language — it becomes the forum ' +
-          `topic name. ${THREAD_NAMING_NOTE}`,
-      },
+// The spawn function of an agent: every agent takes the same input — one
+// text prompt — plus the thread_title (the surface shows the title as the
+// forum topic name, so the model names every thread it starts).
+const AGENT_SPAWN_PARAMETERS: Record<string, unknown> = {
+  type: 'object',
+  properties: {
+    prompt: {
+      type: 'string',
+      description:
+        'The task for the agent, with everything it should start from: the ask as the user framed it, ' +
+        'known context, constraints and decisions, plus references (thread ids, event seqs, fileIds) ' +
+        'each with a one-line note.',
     },
-    required: [...new Set([...required, 'thread_title'])],
-  };
-}
+    thread_title: {
+      type: 'string',
+      description:
+        'Short human-readable title for the new thread, in the user’s language — it becomes the forum ' +
+        `topic name. ${THREAD_NAMING_NOTE}`,
+    },
+  },
+  required: ['prompt', 'thread_title'],
+  additionalProperties: false,
+};
 
 // Agents are sorted by name in the catalog, so the serialized bytes — and
 // with them the prompt-cache head — do not depend on load order.
@@ -185,7 +179,7 @@ function getAgentFunctionDefinitions(): FunctionDefinition[] {
       name: agent.name,
       description: agent.description,
       strict: true,
-      parameters: addThreadTitleToSchema(agent.parameters as Record<string, unknown>),
+      parameters: AGENT_SPAWN_PARAMETERS,
     });
   }
 
@@ -286,16 +280,21 @@ async function executeSendMessage(args: JsonObject, ctx: DispatchContext): Promi
 // coordinator's thread; the router starts the run. Async by design —
 // the model sees the thread in its transcript and status tail.
 async function executeSpawn(agentName: string, args: JsonObject, ctx: DispatchContext): Promise<void> {
-  const { thread_title: threadTitle, ...input } = args;
+  const prompt = typeof args.prompt === 'string' ? args.prompt.trim() : '';
+  const threadTitle = args.thread_title;
   const title = typeof threadTitle === 'string' && threadTitle.trim() ? threadTitle.trim() : agentName;
   const declaration = getAgent(agentName);
+
+  if (!prompt) {
+    throw new Error(`Spawning "${agentName}" requires a non-empty prompt`);
+  }
 
   await startThread({
     userId: ctx.userId,
     parentThreadId: ctx.threadId,
     agent: agentName,
     title,
-    input,
+    input: prompt,
     icon: declaration?.icon,
     headless: declaration?.headless,
     actor: 'agent',

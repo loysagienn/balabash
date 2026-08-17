@@ -22,14 +22,14 @@
 
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import type { AgentDeclaration, JsonObject, ToolDefinition } from '../src/core/contract.ts';
+import type { AgentDeclaration, ToolDefinition } from '../src/core/contract.ts';
 import { prisma } from '../src/db/client.ts';
 import { getFile, getFileDownloadUrl, ingestFile, openFileContent } from '../src/files/index.ts';
 import { getAgents, loadAgents } from '../src/capabilities/agent-catalog.ts';
 import { createAuthToolServer } from '../src/capabilities/auth-tools.ts';
 import { createEventsToolServer, createStorageToolServer } from '../src/capabilities/builtin-tools.ts';
 import { createRestartToolServer } from '../src/capabilities/restart-tools.ts';
-import { buildDefaultInitialMessage, describeSessionBridgeTools } from '../src/capabilities/session-run.ts';
+import { describeSessionBridgeTools } from '../src/capabilities/session-run.ts';
 import {
   getServerToolFunctions,
   loadToolServers,
@@ -45,32 +45,10 @@ import { getCoordinatorFunctionDefinitions } from '../src/coordinator/functions.
 const OUT_DIR = path.resolve('data', 'showcase');
 
 // ---------------------------------------------------------------------------
-// Sample input for initialMessage templates: a placeholder per schema
-// property, so the rendered first message shows the template's real shape.
+// Placeholder for initialMessage templates: every agent's spawn input is one
+// text prompt, so one placeholder shows any template's real shape.
 
-function sampleInput(parameters: Record<string, unknown>): JsonObject {
-  const properties =
-    parameters.properties && typeof parameters.properties === 'object' && !Array.isArray(parameters.properties)
-      ? (parameters.properties as Record<string, Record<string, unknown>>)
-      : {};
-  const input: JsonObject = {};
-
-  for (const [name, schema] of Object.entries(properties)) {
-    const types = Array.isArray(schema.type) ? schema.type : [schema.type];
-
-    if (types.includes('string')) {
-      input[name] = `<${name}>`;
-    } else if (types.includes('array')) {
-      input[name] = [`<${name}>`];
-    } else if (types.includes('object')) {
-      input[name] = {};
-    } else {
-      input[name] = null;
-    }
-  }
-
-  return input;
-}
+const SAMPLE_PROMPT = '<prompt>';
 
 // ---------------------------------------------------------------------------
 // Rendering
@@ -128,22 +106,19 @@ async function renderAgent(declaration: AgentDeclaration, userId: string): Promi
   ].join('\n');
 
   const spawnSurface = renderSection(
-    'Spawn surface (what the spawner reads: agent.description + input schema)',
-    `${declaration.description}\n\n\`\`\`json\n${JSON.stringify(declaration.parameters, null, 2)}\n\`\`\``,
+    'Spawn surface (what the spawner reads: agent.description; the input is one text prompt)',
+    declaration.description,
   );
 
   const sections: string[] = [header, spawnSurface];
 
   if (declaration.session) {
     sections.push(renderSection('System prompt (session.instructions)', declaration.session.instructions));
-    const placeholder = sampleInput(declaration.parameters as Record<string, unknown>);
 
     sections.push(
       renderSection(
-        `Initial message (${declaration.session.initialMessage ? 'declaration template' : 'platform default template'}, rendered with placeholder input)`,
-        declaration.session.initialMessage
-          ? declaration.session.initialMessage(placeholder)
-          : buildDefaultInitialMessage(placeholder),
+        `Initial message (${declaration.session.initialMessage ? 'declaration template' : 'platform default: the prompt verbatim'}, rendered with a placeholder prompt)`,
+        declaration.session.initialMessage ? declaration.session.initialMessage(SAMPLE_PROMPT) : SAMPLE_PROMPT,
       ),
     );
     sections.push(

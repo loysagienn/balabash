@@ -132,8 +132,7 @@ function createMcpServer(filesApi: LocalToolFilesApi) {
         "multi-statement scripts are allowed for non-SELECT SQL. Inspect existing tables via SELECT name, sql FROM sqlite_master. SELECT results are capped at " +
         `${QUERY_MAX_ROWS} rows / ~${QUERY_MAX_BYTES / 1000}KB (a truncated flag is set) — query narrow slices ` +
         'or aggregates, never whole tables. For bulk loading or transforms that SQL cannot express, use a ' +
-        'script: it reaches this same database via the path in the WORKSPACE_DB env variable (run_script sets ' +
-        'it; with native shell access, the database file lives next to the workspace file area).',
+        'script: it reaches this same database via the path in the WORKSPACE_DB env variable.',
       inputSchema: {
         sql: z.string().describe('The SQL to execute.'),
       },

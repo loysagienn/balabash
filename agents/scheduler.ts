@@ -40,23 +40,6 @@ export const agent = {
     'kind "note".',
   icon: '⏰',
   sdk: 'claude',
-  parameters: {
-    type: 'object',
-    properties: {
-      task: {
-        type: 'string',
-        description: 'What the scheduled task should do and when, as the user framed it.',
-      },
-      context: {
-        type: ['string', 'null'],
-        description:
-          'Everything already known that the work should start from: goals, constraints, decisions, fileIds ' +
-          'or event refs. Null when no extra context is needed.',
-      },
-    },
-    required: ['task', 'context'],
-    additionalProperties: false,
-  },
   tools: [
     'current_datetime',
     'events',

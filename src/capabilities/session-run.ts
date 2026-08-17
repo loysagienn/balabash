@@ -8,6 +8,7 @@
 
 import { mkdirSync } from 'node:fs';
 import { THREAD_NAMING_NOTE } from '../../agents/world/index.ts';
+import { workspaceDbPath } from '../workspace/layout.ts';
 import {
   CANCEL_REASON_PARAM_DESCRIPTION,
   CANCEL_THREAD_DESCRIPTION,
@@ -110,24 +111,6 @@ export function describeEvent(event: Event): string {
 }
 
 // ---------------------------------------------------------------------------
-// The default session-opening message: the one platform template rendering
-// the standard task/context spawn input. A declaration provides its own
-// initialMessage only for a genuinely different shape (extra inputs, a
-// different opening move).
-
-export function buildDefaultInitialMessage(input: JsonObject): string {
-  const task = typeof input.task === 'string' ? input.task.trim() : '';
-  const context = typeof input.context === 'string' && input.context.trim() ? input.context.trim() : null;
-
-  return `Task from your operator: ${task}
-
-Context from your operator:
-${context ?? '(none — start from the task itself)'}
-
-Start working on the task and keep the user informed in this topic.`;
-}
-
-// ---------------------------------------------------------------------------
 // The standard base verbs (§7.1 base kit): every session agent gets them.
 
 // The thread's retrospective self-description (three levels, one author, one
@@ -209,8 +192,7 @@ function createSendFileTool(ctx: RunContext, headless: boolean): SdkBridgeTool {
     name: 'send_file',
     description: headless
       ? 'Send a stored Balabash file to your operator, by fileId.'
-      : 'Send a stored Balabash file into the topic, by fileId: an image/* file arrives as a photo, ' +
-        'anything else as a document.',
+      : 'Send a stored Balabash file into the topic, by fileId.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -265,9 +247,10 @@ function createChildTools(
     name: 'spawn_agent',
     description:
       `Spawn a sub-agent in a child thread and become its operator. Allowed agents: ${allowedAgents.join(', ')}. ` +
-      'The call returns the child threadId. The child works asynchronously: its replies arrive on their own as ' +
-      'messages labeled with that threadId — end your turn and wait for them. Drive it step by step with ' +
-      'send_to_thread, and cancel it with cancel_thread when it is no longer needed.',
+      'The call returns the child threadId, and the sub-agent starts working asynchronously. From then on you ' +
+      'exchange messages: send it messages with send_to_thread, and its replies reach you automatically as ' +
+      'incoming messages labeled with its threadId — end your turn to let them arrive. Cancel the child with ' +
+      'cancel_thread when it is no longer needed.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -276,21 +259,30 @@ function createChildTools(
           type: 'string',
           description: `Short human-readable title for the child thread. ${THREAD_NAMING_NOTE}`,
         },
-        input: { type: 'object', description: "The spawn input matching the agent's input schema." },
+        prompt: {
+          type: 'string',
+          description:
+            'The task for the agent, with everything it should start from: the ask, known context, ' +
+            'constraints, and references (thread ids, event seqs, fileIds) each with a one-line note.',
+        },
       },
-      required: ['agent', 'title', 'input'],
+      required: ['agent', 'title', 'prompt'],
       additionalProperties: false,
     },
     handler: async args => {
       const agentName = typeof args.agent === 'string' ? args.agent.trim() : '';
       const title = typeof args.title === 'string' && args.title.trim() ? args.title.trim() : undefined;
-      const input = isObject(args.input) ? (args.input as JsonObject) : {};
+      const prompt = typeof args.prompt === 'string' ? args.prompt.trim() : '';
 
       if (!agentName) {
         throw new Error('spawn_agent requires agent');
       }
 
-      const child = await ctx.spawn(agentName, input, title ? { title } : undefined);
+      if (!prompt) {
+        throw new Error('spawn_agent requires a non-empty prompt');
+      }
+
+      const child = await ctx.spawn(agentName, prompt, title ? { title } : undefined);
 
       childThreadIds.add(child.threadId);
 
@@ -396,7 +388,7 @@ export function describeSessionBridgeTools(declaration: AgentDeclaration): ToolD
 export function createSessionRun(
   declaration: AgentDeclaration,
   spec: SessionAgentSpec,
-  input: JsonObject,
+  prompt: string,
   ctx: RunContext,
 ): AgentRun {
   const headless = declaration.headless === true;
@@ -427,11 +419,16 @@ export function createSessionRun(
 
   const session = ctx.harness.sdkSession({
     instructions: spec.instructions,
-    initialMessage: spec.initialMessage ? spec.initialMessage(input) : buildDefaultInitialMessage(input),
+    // The platform default session-opening message is the spawn prompt
+    // verbatim; a declaration overrides it only for a different opening move.
+    initialMessage: spec.initialMessage ? spec.initialMessage(prompt) : prompt,
     ...(spec.model ? { model: spec.model } : {}),
     ...(spec.effort ? { effort: spec.effort } : {}),
     ...(spec.preset ? { preset: spec.preset } : {}),
     ...(cwd ? { cwd } : {}),
+    // Scripts run from the session reach the workspace database the same way
+    // run_script children do: via the WORKSPACE_DB env variable.
+    env: { WORKSPACE_DB: workspaceDbPath(ctx.userId) },
     extraTools: [
       createEndThreadTool(end),
       createSendFileTool(ctx, headless),

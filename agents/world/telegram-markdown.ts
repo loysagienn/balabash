@@ -7,6 +7,6 @@
 // description stating the subset must import this constant — the renderer is
 // the truth, this text is its one mirror.
 export const TELEGRAM_MARKDOWN_NOTE =
-  'Use only the Markdown subset Telegram renders: **bold**, *italic*, ~~strikethrough~~, `code`, fenced ' +
+  'Use only this Markdown subset: **bold**, *italic*, ~~strikethrough~~, `code`, fenced ' +
   'code blocks, [links](https://example.com), blockquotes, headings, simple lists. No tables, no HTML, ' +
   'no Markdown images, no task lists, no deeply nested structures.';

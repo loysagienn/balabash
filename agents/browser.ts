@@ -41,20 +41,8 @@ const NOVNC_URL = 'https://novnc.loysagienn.com/vnc.html';
 
 const PLAYWRIGHT_CALL_TIMEOUT_MS = 5 * 60_000;
 
-type BrowserInput = {
-  task: string;
-};
-
 function isObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-}
-
-function parseInput(input: unknown): BrowserInput {
-  if (!isObject(input) || typeof input.task !== 'string' || !input.task.trim()) {
-    throw new Error('browser requires a non-empty task');
-  }
-
-  return { task: input.task.trim() };
 }
 
 // ---------------------------------------------------------------------------
@@ -126,8 +114,8 @@ function buildInstructions(): string {
   ].join('\n');
 }
 
-function buildInitialMessage(input: BrowserInput): string {
-  return `Task: ${input.task}`;
+function buildInitialMessage(prompt: string): string {
+  return `Task: ${prompt}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -240,24 +228,10 @@ export const agent = {
     'yourself or pass the request on.',
   sdk: 'claude',
   headless: true,
-  parameters: {
-    type: 'object',
-    properties: {
-      task: {
-        type: 'string',
-        description:
-          'The concrete browsing task to perform, in full detail — including where to start and any constraints (what not to do, limits, credentials policy).',
-      },
-    },
-    required: ['task'],
-    additionalProperties: false,
-  },
   tools: ['workspace', 'workspace_files', 'notion', 'storage'],
   notification: 'normal',
 
-  run(rawInput: unknown, ctx: RunContext): AgentRun {
-    const input = parseInput(rawInput);
-
+  run(prompt: string, ctx: RunContext): AgentRun {
     let settled = false;
     let endSummary: { text: string; fileIds?: string[] } | null = null;
     let resolveFinished: () => void;
@@ -382,7 +356,7 @@ export const agent = {
 
         const session = ctx.harness.sdkSession({
           instructions: `${SYSTEM_PROMPT}\n\n${buildInstructions()}`,
-          initialMessage: buildInitialMessage(input),
+          initialMessage: buildInitialMessage(prompt),
           model: 'claude-opus-5',
           extraTools: [...playwrightTools, finishTool],
         });

@@ -164,6 +164,17 @@ function initialInput(options: SdkSessionOptions): string {
   return `${options.instructions}\n\n---\n\n${options.initialMessage}`;
 }
 
+// process.env values can be undefined; the SDK wants Record<string, string>.
+function mergeEnv(extra: Record<string, string>): Record<string, string> {
+  const env: Record<string, string> = {};
+
+  for (const [name, value] of Object.entries(process.env)) {
+    if (value !== undefined) env[name] = value;
+  }
+
+  return { ...env, ...extra };
+}
+
 export function createCodexSession(options: SdkSessionOptions, deps: CodexSessionDeps): AgentSdkSession {
   const queue = createInputQueue(initialInput(options));
   let closed = false;
@@ -174,6 +185,9 @@ export function createCodexSession(options: SdkSessionOptions, deps: CodexSessio
 
     try {
       const codex = new Codex({
+        // SDK `env` replaces the subprocess environment entirely, so merge the
+        // extra variables over the inherited app environment.
+        ...(options.env ? { env: mergeEnv(options.env) } : {}),
         config: {
           mcp_servers: {
             balabash: {

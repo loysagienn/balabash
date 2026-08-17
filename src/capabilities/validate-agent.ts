@@ -22,7 +22,6 @@ const ALLOWED_KEYS = new Set([
   'description',
   'icon',
   'sdk',
-  'parameters',
   'tools',
   'agents',
   'events',
@@ -86,10 +85,6 @@ export function validateAgent(module: Record<string, unknown>, filename: string)
 
   if (candidate.sdk !== 'claude' && candidate.sdk !== 'codex') {
     throw new Error(`${filename} agent.sdk must be one of claude, codex`);
-  }
-
-  if (!isObject(candidate.parameters) || candidate.parameters.type !== 'object') {
-    throw new Error(`${filename} agent.parameters must be a JSON Schema object with type "object"`);
   }
 
   const validTools =

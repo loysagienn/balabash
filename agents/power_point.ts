@@ -9,7 +9,7 @@
 // process.
 
 import path from 'node:path';
-import type { AgentDeclaration, JsonObject } from '../src/core/contract.ts';
+import type { AgentDeclaration } from '../src/core/contract.ts';
 import { workspaceFilesDir } from '../src/workspace/layout.ts';
 import { BALABASH_PREAMBLE, PROJECTS_NOTE, TELEGRAM_OUTPUT_NOTE, WORKBENCH_NOTE, WORKSPACE_STORAGE_NOTE } from './world/index.ts';
 
@@ -53,30 +53,6 @@ export const agent = {
     'fileIds of any donor or source decks.',
   icon: '📽',
   sdk: 'claude',
-  parameters: {
-    type: 'object',
-    properties: {
-      task: {
-        type: 'string',
-        description: 'The concrete presentation task, as the user framed it.',
-      },
-      context: {
-        type: ['string', 'null'],
-        description:
-          'Everything known that the work should start from: the content or outline, design wishes, ' +
-          'constraints, decisions. Null when no extra context is needed.',
-      },
-      donorFileIds: {
-        type: ['array', 'null'],
-        items: { type: 'string' },
-        description:
-          'Storage fileIds of input decks: the presentation to edit, or donor decks whose design/content ' +
-          'the work starts from. Null when starting from scratch.',
-      },
-    },
-    required: ['task', 'context', 'donorFileIds'],
-    additionalProperties: false,
-  },
   tools: [
     'current_datetime',
     'events',
@@ -97,19 +73,5 @@ export const agent = {
     model: PPTX_MODEL,
     preset: 'full',
     cwd: (userId: string) => workspaceFilesDir(userId),
-    initialMessage: (input: JsonObject) => {
-      const donors = Array.isArray(input.donorFileIds)
-        ? input.donorFileIds.filter((id): id is string => typeof id === 'string' && Boolean(id.trim()))
-        : [];
-
-      return `Task from your operator: ${typeof input.task === 'string' ? input.task.trim() : ''}
-
-Context from your operator:
-${typeof input.context === 'string' && input.context.trim() ? input.context.trim() : '(none — start from the task itself)'}
-
-Input decks (storage fileIds to import onto the workbench): ${donors.length ? donors.join(', ') : '(none — starting from scratch)'}
-
-Start working on the task and keep the user informed in this topic.`;
-    },
   },
 } satisfies AgentDeclaration;

@@ -8,7 +8,7 @@
 // thread-addressed connection.* / *.provisioned events. Fully declarative:
 // the platform's session runner drives the lifecycle.
 
-import type { AgentDeclaration, JsonObject } from '../src/core/contract.ts';
+import type { AgentDeclaration } from '../src/core/contract.ts';
 import { BALABASH_PREAMBLE, TELEGRAM_OUTPUT_NOTE, THREAD_DIALOGUE_NOTE } from './world/index.ts';
 
 const SYSTEM_PROMPT = `You are Balabash's integration assistant, talking to the user directly in a dedicated Telegram forum topic. ${BALABASH_PREAMBLE}
@@ -35,27 +35,14 @@ export const agent = {
     'credential values never pass through the chat. It reports back with a summary of what got connected.',
   icon: '🔑',
   sdk: 'claude',
-  parameters: {
-    type: 'object',
-    properties: {
-      task: {
-        type: 'string',
-        description:
-          'What must be connected or provisioned and why, as concretely as known: the integration name, ' +
-          'whether it is a first connection or a re-authorization, and any relevant context from the user.',
-      },
-    },
-    required: ['task'],
-    additionalProperties: false,
-  },
   tools: ['auth', 'storage', 'events'],
   notification: 'normal',
 
   session: {
     instructions: SYSTEM_PROMPT,
     model: 'claude-opus-5',
-    initialMessage: (input: JsonObject) => `Integration task from your operator:
-${typeof input.task === 'string' ? input.task.trim() : ''}
+    initialMessage: (prompt: string) => `Integration task from your operator:
+${prompt}
 
 Start: check your tools' descriptions for the integrations they currently list, explain the next step to the user briefly, and issue the right link.`,
   },

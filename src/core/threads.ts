@@ -167,7 +167,8 @@ type StartThreadInput = {
   parentThreadId: string;
   agent: string;
   title?: string;
-  input?: unknown;
+  // The spawn prompt — every agent's input is one text prompt.
+  input?: string;
   // Spawn-time policy riding in the payload (§7.4, §11.3): the notification
   // level of the thread and the narrowed tool bundle. The projection does not
   // store them — consumers read them from the thread.started event.
@@ -193,7 +194,7 @@ export async function startThread(options: StartThreadInput): Promise<Thread> {
   }
 
   if (options.input !== undefined) {
-    payload.input = options.input as JsonValue;
+    payload.input = options.input;
   }
 
   if (options.notification !== undefined) {

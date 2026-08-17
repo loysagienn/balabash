@@ -55,9 +55,7 @@ export function startReauthDetector(): Consumer {
         parentThreadId: main.id,
         agent: AUTH_AGENT,
         title: `Re-authorize ${server}`,
-        input: {
-          task: `Authorization for the "${server}" integration has expired${error ? ` (${error})` : ''}. Walk the user through re-authorizing it.`,
-        },
+        input: `Authorization for the "${server}" integration has expired${error ? ` (${error})` : ''}. Walk the user through re-authorizing it.`,
         icon: declaration.icon,
         actor: 'system',
       });

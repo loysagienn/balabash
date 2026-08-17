@@ -22,11 +22,9 @@ const STORAGE_TOOL_DEFINITIONS: ToolDefinition[] = [
   {
     name: 'storage_get_file',
     description:
-      'Read a file from Balabash file storage (the fileId-addressed store behind send_file, end_thread and ' +
-      'message attachments): its metadata plus a presigned, time-limited download URL. Use the URL to share ' +
-      'the file or to download it when the contents are needed; the transcript already contains the fileId ' +
-      'and metadata. To process a stored file with workspace tools or scripts, prefer workspace_import_file ' +
-      'where available.',
+      'Read a file from Balabash file storage: its metadata plus a presigned, time-limited download URL. ' +
+      'Use the URL to share the file or to download it when the contents are needed. To process a stored ' +
+      'file with workspace tools or scripts, prefer workspace_import_file where available.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -61,10 +59,9 @@ const EVENTS_TOOL_DEFINITIONS: ToolDefinition[] = [
   {
     name: 'list_threads',
     description:
-      'List the workspace threads: agent, title, short description and status (no summaries). A completed ' +
-      'thread describes itself: the description (~300 chars) says what it worked on and how it ended — often ' +
-      'enough to tell whether a thread is the one you need. Start here when past or parallel work matters; ' +
-      'get_thread reads one thread with its summary, get_thread_events its full transcript.',
+      'List the workspace threads. Each entry carries the agent, title, status and a short description. ' +
+      'Descriptions appear only on completed threads. For more depth, get_thread reads one thread with its ' +
+      'summary and get_thread_events returns its full transcript.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -93,8 +90,8 @@ const EVENTS_TOOL_DEFINITIONS: ToolDefinition[] = [
   {
     name: 'get_thread',
     description:
-      'Read one thread of this workspace: the same fields as list_threads (title, description, status) plus ' +
-      'the full summary the thread left. For the detailed course of the thread use get_thread_events.',
+      'Read one thread of this workspace: the agent, title, status and short description, plus the full ' +
+      'summary the thread left. For the detailed course of the thread use get_thread_events.',
     inputSchema: {
       type: 'object',
       properties: {

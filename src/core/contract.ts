@@ -118,19 +118,18 @@ export type AgentEventDecl = {
 };
 
 // The declarative session agent (the preferred form): the whole lifecycle —
-// input validation against `parameters`, the SDK session, rendering of
-// incoming events, channel binding (forum topic vs headless parent dialogue
-// by `headless`), the standard end_thread / send_file verbs, abort — is run
-// by the platform. The agent supplies only data. An agent writes run() only
-// when it needs machinery a declaration cannot express (e.g. the browser's
-// Chromium environment).
+// spawn-prompt validation, the SDK session, rendering of incoming events,
+// channel binding (forum topic vs headless parent dialogue by `headless`),
+// the standard end_thread / send_file verbs, abort — is run by the platform.
+// The agent supplies only data. An agent writes run() only when it needs
+// machinery a declaration cannot express (e.g. the browser's Chromium
+// environment).
 export type SessionAgentSpec = {
   instructions: string; // the inner session's system prompt
-  // Renders the validated spawn input into the session-opening message.
-  // Optional: the platform default (session-run) renders the standard
-  // "Task from your operator / Context" template from input.task and
-  // input.context; declare it only for a genuinely different shape.
-  initialMessage?(input: JsonObject): string;
+  // Renders the spawn prompt into the session-opening message. Optional: the
+  // platform default is the prompt verbatim; declare it only for a genuinely
+  // different opening move.
+  initialMessage?(prompt: string): string;
   model?: string; // agent-level choice; omit for the SDK default
   effort?: EffortLevel; // reasoning effort; default 'high' (claude SDK only)
   preset?: 'bridge-only' | 'full'; // see SdkSessionOptions.preset
@@ -146,7 +145,8 @@ export type AgentDeclaration = {
   description: string;
   icon?: string; // topic emoji
   sdk: 'claude' | 'codex'; // provider behind ctx.harness.sdkSession()
-  parameters: JsonSchema; // spawn input
+  // Spawn input is the same for every agent: one non-empty text prompt — the
+  // task plus everything it should start from. No per-agent schema.
   // The agent's tool passport: the tool-server names it gets, listed
   // explicitly — no server reaches an agent that did not name it. A spawner's
   // narrowing can still shrink the list.
@@ -166,7 +166,7 @@ export type AgentDeclaration = {
   resumable?: boolean; // reserved: thread resume after restart
   // Exactly one of `session` (declarative, preferred) and `run` (imperative).
   session?: SessionAgentSpec;
-  run?(input: unknown, ctx: RunContext): AgentRun;
+  run?(prompt: string, ctx: RunContext): AgentRun;
 };
 
 export type AgentRun = {
@@ -194,7 +194,7 @@ export type RunContext = {
   complete(summary: ThreadSummary, meta?: { title?: string; description?: string }): Promise<void>;
   notify(level: NotificationLevel, text: string): Promise<void>; // thread.notification, gated by policy
 
-  spawn(agentName: string, input: JsonObject, options?: SpawnOptions): Promise<{ threadId: string }>;
+  spawn(agentName: string, prompt: string, options?: SpawnOptions): Promise<{ threadId: string }>;
   cancelChild(threadId: string, reason: string): Promise<void>;
 
   // Inter-thread dialogue (thread.message, one hop): drive a child agent with
@@ -242,6 +242,9 @@ export type SdkSessionOptions = {
   // project settings from cwd; codex sessions are full by construction).
   preset?: 'bridge-only' | 'full';
   cwd?: string; // session working directory; default — the run's stateDir
+  // Extra environment variables for the session process, merged over the app
+  // process environment (e.g. WORKSPACE_DB — the workspace database path).
+  env?: Record<string, string>;
 };
 
 // One completed session turn: the final text the inner model produced. A
