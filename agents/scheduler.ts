@@ -2,7 +2,7 @@
 // session with the full native tool preset working inside the Balabash
 // repository — like the engineer agent, but its charter is creating and
 // maintaining scheduled tasks: run(ctx) bodies in tasks/, their registry rows
-// (create_task), rebuild and restart. Consent-gated (§7.4): full host access;
+// (create_task), rebuild and restart. Full host access;
 // the coordinator spawns it when the user asks for a scheduled task that
 // needs code.
 
@@ -11,7 +11,7 @@ import { BALABASH_PREAMBLE, REPO_RULES_NOTE, TELEGRAM_OUTPUT_NOTE, WORKSPACE_STO
 
 const CLAUDE_MODEL = 'claude-fable-5';
 
-// The app process always starts in the repository root (§12), so cwd IS the
+// The app process always starts in the repository root, so cwd IS the
 // repo — no configuration needed.
 const REPO_ROOT = process.cwd();
 
@@ -37,8 +37,7 @@ export const agent = {
     'Start a scheduler engineering thread: creates and maintains scheduled tasks that need CODE — writes a ' +
     'run(ctx) body into the Balabash tasks/ catalog, registers it (create_task kind "code"), rebuilds and ' +
     'requests a restart. Simple reminder-style tasks need no agent: register them yourself with create_task ' +
-    'kind "note". Consent-gated: start it ONLY when the user explicitly asks for a scheduled task that ' +
-    'requires code, never on your own initiative.',
+    'kind "note".',
   icon: '⏰',
   sdk: 'claude',
   parameters: {
@@ -58,9 +57,20 @@ export const agent = {
     required: ['task', 'context'],
     additionalProperties: false,
   },
-  tools: 'all',
-  consentTools: ['restart'],
-  consent: true,
+  tools: [
+    'current_datetime',
+    'events',
+    'gmail',
+    'http_get',
+    'notion',
+    'perplexity',
+    'projects',
+    'restart',
+    'schedule',
+    'storage',
+    'storage_download_file',
+    'workspace',
+  ],
   notification: 'normal',
 
   session: {

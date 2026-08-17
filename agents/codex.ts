@@ -45,7 +45,19 @@ export const agent = {
     required: ['task', 'context'],
     additionalProperties: false,
   },
-  tools: 'all',
+  tools: [
+    'current_datetime',
+    'events',
+    'gmail',
+    'http_get',
+    'notion',
+    'perplexity',
+    'projects',
+    'schedule',
+    'storage',
+    'storage_download_file',
+    'workspace',
+  ],
   notification: 'normal',
 
   session: {

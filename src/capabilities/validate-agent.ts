@@ -1,8 +1,7 @@
-// Hard validation of a dynamic agent module against the agent contract (§7.1)
+// Hard validation of a dynamic agent module against the agent contract
 // — adaptation of the legacy validate-agent for the AgentDeclaration shape:
-// flat object,
-// tools bundle, domain events '<name>.*', no acceptsEvents/exclusive/
-// triggersMainModel (gone by construction, design doc §1).
+// flat object, explicit tools list, domain events '<name>.*', no
+// acceptsEvents/exclusive/triggersMainModel (gone by construction).
 
 import path from 'node:path';
 import type { AgentDeclaration, AgentRun } from '../core/contract.ts';
@@ -25,8 +24,6 @@ const ALLOWED_KEYS = new Set([
   'sdk',
   'parameters',
   'tools',
-  'consentTools',
-  'consent',
   'agents',
   'events',
   'headless',
@@ -74,7 +71,7 @@ export function validateAgent(module: Record<string, unknown>, filename: string)
   }
 
   // The agent name doubles as its domain-event prefix, so it must not collide
-  // with the canonical vocabulary (§4.2).
+  // with the canonical vocabulary.
   if (RESERVED_DOMAINS.has(candidate.name) || RESERVED_AGENT_NAMES.has(candidate.name)) {
     throw new Error(`${filename} agent.name "${candidate.name}" is reserved`);
   }
@@ -96,25 +93,10 @@ export function validateAgent(module: Record<string, unknown>, filename: string)
   }
 
   const validTools =
-    candidate.tools === 'all' ||
-    (Array.isArray(candidate.tools) && candidate.tools.every(name => typeof name === 'string' && Boolean(name.trim())));
+    Array.isArray(candidate.tools) && candidate.tools.every(name => typeof name === 'string' && Boolean(name.trim()));
 
   if (!validTools) {
-    throw new Error(`${filename} agent.tools must be 'all' or an array of tool-server names`);
-  }
-
-  if (candidate.consentTools !== undefined) {
-    const validConsentTools =
-      Array.isArray(candidate.consentTools) &&
-      candidate.consentTools.every(name => typeof name === 'string' && Boolean(name.trim()));
-
-    if (!validConsentTools) {
-      throw new Error(`${filename} agent.consentTools must be an array of tool-server names when present`);
-    }
-  }
-
-  if (candidate.consent !== undefined && typeof candidate.consent !== 'boolean') {
-    throw new Error(`${filename} agent.consent must be a boolean when present`);
+    throw new Error(`${filename} agent.tools must be an array of tool-server names`);
   }
 
   if (candidate.agents !== undefined) {

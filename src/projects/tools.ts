@@ -1,5 +1,5 @@
-// The projects tool server — a builtin, NON-consent server: it rides into
-// every 'all' bundle, so the coordinator and any workbench agent can see and
+// The projects tool server — a builtin server every agent bundle lists, so
+// the coordinator and any workbench agent can see and
 // maintain the project registry. A project is a passive library: a named
 // long-lived work context owned by the user — identity in the registry
 // (title + description + slug), knowledge in its folder in the workspace
@@ -359,7 +359,6 @@ async function executeUnarchive(args: JsonObject, ctx: BuiltinServerCallContext)
 export function createProjectsToolServer(): BuiltinToolServer {
   return {
     name: PROJECTS_SERVER_NAME,
-    consent: false,
     functionNames: FUNCTIONS.map(fn => fn.functionName),
 
     getFunctions: async () => FUNCTIONS,

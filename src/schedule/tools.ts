@@ -1,5 +1,5 @@
-// The schedule tool server — a builtin, NON-consent server: it rides into
-// every 'all' bundle, so any agent (and the coordinator) can register, list,
+// The schedule tool server — a builtin server every agent bundle lists, so
+// any agent (and the coordinator) can register, list,
 // cancel and manually run scheduled tasks. Pure registry operations:
 // create_task never spawns anything — orchestrating a code task's body is the
 // scheduler agent's job. The audit of who registered what is free: these
@@ -327,7 +327,6 @@ async function runTask(args: JsonObject, ctx: BuiltinServerCallContext): Promise
 export function createScheduleToolServer(): BuiltinToolServer {
   return {
     name: SCHEDULE_SERVER_NAME,
-    consent: false,
     functionNames: FUNCTIONS.map(fn => fn.functionName),
 
     getFunctions: async () => FUNCTIONS,

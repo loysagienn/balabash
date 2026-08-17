@@ -4,8 +4,7 @@
 // task, this specialist knows the format. The craft itself is the vendored
 // official Anthropic pptx skill (.claude/skills/pptx, unchanged); the agent
 // talks to the user directly in its own forum topic, showing rendered slide
-// previews and iterating on feedback. Consent-gated like the engineer agent:
-// full host access must not appear as a side effect; the folder boundary is
+// previews and iterating on feedback. The folder boundary is
 // a convention of the prompt — the real boundary is the unix user of the
 // process.
 
@@ -51,7 +50,7 @@ export const agent = {
     'scratch, edit an existing one, build a new deck in the design of a donor deck, or read/show a deck as ' +
     'rendered slides. It works in its own topic, shows slide previews and iterates with the user directly. ' +
     'Spawn it for any task about pptx presentations; pass the task, all known content/context, and the ' +
-    'fileIds of any donor or source decks. Consent-gated: start it only on an explicit user request.',
+    'fileIds of any donor or source decks.',
   icon: '📽',
   sdk: 'claude',
   parameters: {
@@ -78,8 +77,19 @@ export const agent = {
     required: ['task', 'context', 'donorFileIds'],
     additionalProperties: false,
   },
-  tools: 'all',
-  consent: true,
+  tools: [
+    'current_datetime',
+    'events',
+    'gmail',
+    'http_get',
+    'notion',
+    'perplexity',
+    'projects',
+    'schedule',
+    'storage',
+    'storage_download_file',
+    'workspace',
+  ],
   notification: 'normal',
 
   session: {

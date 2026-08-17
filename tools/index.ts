@@ -8,6 +8,7 @@ import * as gmail from './gmail.ts';
 import * as http_get from './http_get.ts';
 import * as storage_download_file from './storage_download_file.ts';
 import * as workspace from './workspace.ts';
+import * as workspace_files from './workspace_files.ts';
 
 export const localToolModules: Record<string, Record<string, unknown>> = {
   current_datetime,
@@ -15,4 +16,5 @@ export const localToolModules: Record<string, Record<string, unknown>> = {
   http_get,
   storage_download_file,
   workspace,
+  workspace_files,
 };

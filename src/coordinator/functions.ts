@@ -1,12 +1,12 @@
-// The coordinator's function catalog (§7.3, §8.1): talking to the user, the
+// The coordinator's function catalog: talking to the user, the
 // agent spawn functions derived from the dynamic catalog plus cancel_thread,
 // and — from stage 4 — the tool servers' functions (including the builtin
-// 'storage'/'events' pull-tool servers, §5.2). Definitions are part of the prompt-cache head: static with
+// 'storage'/'events' pull-tool servers). Definitions are part of the prompt-cache head: static with
 // respect to RUN state (spawns do not change them; a catalog (re)load or a
 // tool server (dis)connecting does, which legitimately resets the head).
 // Synchronous calls are journaled as tool.call.* events in the coordinator's
 // thread; spawns and cancels are async dispatches acknowledged with
-// 'accepted' — their consequences arrive as events (§8.1).
+// 'accepted' — their consequences arrive as events.
 
 import type { ContentBlock, JsonObject } from '../core/contract.ts';
 import { TELEGRAM_MARKDOWN_NOTE, THREAD_NAMING_NOTE } from '../../agents/world/index.ts';
@@ -30,9 +30,27 @@ import {
 } from '../capabilities/tool-manager.ts';
 import type { DispatchResult, FunctionCall, FunctionDefinition } from '../harness/openai/turn.ts';
 
-// The coordinator's bundle (§7.4): every non-consent tool server, plus the
-// consent servers it names explicitly — the restart request tool.
-const COORDINATOR_BUNDLE: ToolBundle = { declared: 'all', extra: [RESTART_SERVER_NAME] };
+// The coordinator's tool passport, listed explicitly like every agent's: the
+// coordinator has no native file tools, so the workspace_files hands ride
+// along; restart is the deliberately granted dangerous capability. A new
+// tool server reaches the coordinator only by being added here.
+const COORDINATOR_BUNDLE: ToolBundle = {
+  declared: [
+    'current_datetime',
+    'events',
+    'gmail',
+    'http_get',
+    'notion',
+    'perplexity',
+    'projects',
+    'schedule',
+    'storage',
+    'storage_download_file',
+    'workspace',
+    'workspace_files',
+    RESTART_SERVER_NAME,
+  ],
+};
 
 const STATIC_FUNCTION_DEFINITIONS: FunctionDefinition[] = [
   {
@@ -265,7 +283,7 @@ async function executeSendMessage(args: JsonObject, ctx: DispatchContext): Promi
 }
 
 // Spawn a child thread for a catalog agent: thread.started addressed to the
-// coordinator's thread; the router starts the run. Async by design (§8.1) —
+// coordinator's thread; the router starts the run. Async by design —
 // the model sees the thread in its transcript and status tail.
 async function executeSpawn(agentName: string, args: JsonObject, ctx: DispatchContext): Promise<void> {
   const { thread_title: threadTitle, ...input } = args;

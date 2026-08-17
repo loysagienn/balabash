@@ -1,7 +1,7 @@
-// The auth agent's tool server (§7.4 consent, §10): issuing one-time links
+// The auth agent's tool server: issuing one-time links
 // for per-user OAuth authorization, manual installation OAuth clients and
-// installation secrets. A consent server — 'all' never includes it; only the
-// auth agent names it. The tools return links and instructions; the values
+// installation secrets. Only the auth agent lists it in its tool bundle.
+// The tools return links and instructions; the values
 // travel out-of-band through the web forms, and the outcomes come back as
 // thread-addressed connection.* / *.provisioned events.
 
@@ -161,7 +161,6 @@ function requireServerArg(args: JsonObject): string {
 export function createAuthToolServer(): BuiltinToolServer {
   return {
     name: AUTH_SERVER_NAME,
-    consent: true,
     functionNames: [
       REQUEST_AUTHORIZATION_FUNCTION_NAME,
       REQUEST_OAUTH_CLIENT_FUNCTION_NAME,

@@ -1,8 +1,8 @@
-// Auth agent (§10): connecting integrations in its own thread. The
+// Auth agent: connecting integrations in its own thread. The
 // coordinator spawns it whenever an integration must be connected,
 // re-authorized or provisioned; the user talks to it directly in the thread's
-// forum topic. It is the only agent bundled with the consent 'auth' tool
-// server (§7.4): one-time links for per-user OAuth, manual OAuth clients and
+// forum topic. It is the only agent whose bundle lists the 'auth' tool
+// server: one-time links for per-user OAuth, manual OAuth clients and
 // installation secrets. Secret values never pass through this agent — links
 // lead to web forms, values go out-of-band, and the outcomes arrive back as
 // thread-addressed connection.* / *.provisioned events. Fully declarative:

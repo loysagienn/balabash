@@ -1,6 +1,6 @@
-// Dynamic agent runs (§7): builds the RunContext and turns an
+// Dynamic agent runs: builds the RunContext and turns an
 // AgentDeclaration into a RoutedRun for the thread router. Core behaviour is
-// injected through ctx (§7.1) — the agent module never imports runtime
+// injected through ctx — the agent module never imports runtime
 // values from the bundle.
 
 import { randomUUID } from 'node:crypto';
@@ -41,7 +41,7 @@ import { validateAgentRun } from './validate-agent.ts';
 
 const AGENT_STATE_ROOT = path.resolve('data', 'agent-state');
 
-// Central spawn-input validation (§7.1): the declaration's `parameters` is
+// Central spawn-input validation: the declaration's `parameters` is
 // the single schema every spawn path answers to — the coordinator's strict
 // function calls and ctx.spawn alike. Compiled validators are cached per
 // agent; the catalog is static, so the cache never invalidates.
@@ -89,15 +89,15 @@ async function validateMessageFileIds(userId: string, fileIds: string[] | undefi
   return unique;
 }
 
-// An event's level must not exceed the thread's level (§11.3).
+// An event's level must not exceed the thread's level.
 function clampNotificationLevel(requested: NotificationLevel, threadLevel: NotificationLevel): NotificationLevel {
   return NOTIFICATION_RANK[requested] > NOTIFICATION_RANK[threadLevel] ? threadLevel : requested;
 }
 
-// The run's ToolsApi (§7.4): the agent's bundle of tool servers (builtin
+// The run's ToolsApi: the agent's bundle of tool servers (builtin
 // servers like 'storage'/'events' included through the same bundle machinery).
 // Every call goes through the one tool.call.* journaling point; the
-// completed payload is the verbatim result (§9).
+// completed payload is the verbatim result.
 function createToolsApi({
   userId,
   threadId,
@@ -129,7 +129,7 @@ function createToolsApi({
 
 function createFilesApi(userId: string, agentName: string): FilesApi {
   return {
-    // The one FileRef (§9): the files layer already returns it verbatim.
+    // The one FileRef: the files layer already returns it verbatim.
     getInfo: async fileId => getUserFile(userId, fileId),
 
     getDownloadUrl: async fileId => {
@@ -188,15 +188,14 @@ export async function spawnAgentRun(thread: Thread, startedEvent: Event): Promis
   const threadNotificationLevel =
     (startedEvent.payload.notification as NotificationLevel | undefined) ?? declaration.notification ?? 'normal';
 
-  // The effective bundle (§7.4): the declaration's set, optionally narrowed
-  // by the spawner via thread.started payload. Narrowing cannot widen —
-  // resolution intersects, and 'all' still excludes consent servers.
+  // The effective bundle: the declaration's explicit server list, optionally
+  // narrowed by the spawner via thread.started payload. Narrowing cannot
+  // widen — resolution intersects.
   const narrowedTools = Array.isArray(startedEvent.payload.tools)
     ? startedEvent.payload.tools.filter((name): name is string => typeof name === 'string')
     : undefined;
   const bundle: ToolBundle = {
     declared: declaration.tools,
-    ...(declaration.consentTools ? { extra: declaration.consentTools } : {}),
     ...(narrowedTools ? { narrowed: narrowedTools } : {}),
   };
 
@@ -256,13 +255,6 @@ export async function spawnAgentRun(thread: Thread, startedEvent: Event): Promis
 
       if (!childDeclaration) {
         throw new Error(`Unknown agent "${childAgentName}"`);
-      }
-
-      // Consent-gated agents (§7.4): their capability level must not appear
-      // as a side effect of another agent's plan — only the coordinator
-      // starts them, on an explicit user request.
-      if (childDeclaration.consent) {
-        throw new Error(`Agent "${childAgentName}" is consent-gated: only the secretary starts it, on an explicit user request`);
       }
 
       const child = await startThread({
@@ -360,7 +352,7 @@ export async function spawnAgentRun(thread: Thread, startedEvent: Event): Promis
   // Self-termination: a proper agent writes its terminal via ctx.complete()
   // before finishing (or was cancelled — the terminal is already there). A
   // run that just ends, or dies, terminates the thread as failed; the append
-  // is a no-op when a terminal already won (§4.3).
+  // is a no-op when a terminal already won.
   run.finished.then(
     () => failThread('Run ended without a terminal'),
     error => failThread(getErrorMessage(error)),

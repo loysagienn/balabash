@@ -1,15 +1,17 @@
 // The core of the workspace FILE AREA: the one place that owns the path
-// boundary, the content-type table and the read-side primitives over
-// data/workspace/<userId>/files. Both consumers go through here — the
-// workbench tools (tools/workspace.ts) and the web API (/api/workspace/*) —
-// so the boundary check exists exactly once. The currency is a relative path
-// inside the file area; the userId comes from the caller's identity (MCP
-// _meta / web session), never from model- or user-supplied parameters.
+// boundary, the content-type table and the primitives over
+// data/workspace/<userId>/files. All consumers go through here — the
+// workbench tool servers (tools/workspace.ts, tools/workspace_files.ts) and
+// the web API (/api/workspace/*) — so the boundary check exists exactly once.
+// The currency is a relative path inside the file area; the userId comes from
+// the caller's identity (MCP _meta / web session), never from model- or
+// user-supplied parameters.
 //
 // Reads NEVER provision: no mkdir, and workspace.sqlite is only opened when
 // it already exists (DatabaseSync creates the database on open — on a read
 // path that would be a write). A missing database means empty metadata.
-// Write-side provisioning (ensureWorkspace) stays with the tools.
+// Write-side provisioning is explicit: ensureFilesDb here owns the _files
+// DDL; directory provisioning (ensureWorkspace) stays with the tools.
 
 import path from 'node:path';
 import fs from 'node:fs/promises';
@@ -115,12 +117,51 @@ export function withDb<T>(dbPath: string, fn: (db: DatabaseSync) => T): T {
   }
 }
 
+// Write-side provisioning of the metadata database: creates workspace.sqlite
+// (DatabaseSync creates on open) with the _files table. The one owner of the
+// _files DDL — the workbench tools and the annotation indexer both call this
+// before their first write. WAL lets tool calls and script children
+// read/write concurrently.
+export function ensureFilesDb(dbPath: string): void {
+  withDb(dbPath, db => {
+    db.exec('PRAGMA journal_mode = WAL');
+    db.exec(
+      'CREATE TABLE IF NOT EXISTS _files (' +
+        'path TEXT PRIMARY KEY, title TEXT, description TEXT, updated_at TEXT NOT NULL)',
+    );
+  });
+}
+
 export function readMeta(db: DatabaseSync, relPath: string): FileMeta {
   const row = db.prepare('SELECT title, description FROM _files WHERE path = ?').get(relPath) as
     | { title: string | null; description: string | null }
     | undefined;
 
   return { title: row?.title ?? null, description: row?.description ?? null };
+}
+
+// The one write primitive of the metadata: annotating a file. A null keeps
+// the existing value (COALESCE) — callers update title and description
+// independently. Deliberately the only write in this otherwise read-side
+// module; the caller is responsible for the database existing (the tools'
+// ensureWorkspace provisions it).
+export function upsertMeta(
+  dbPath: string,
+  relPath: string,
+  title: string | null,
+  description: string | null,
+): FileMeta {
+  return withDb(dbPath, db => {
+    db.prepare(
+      "INSERT INTO _files (path, title, description, updated_at) VALUES (?, ?, ?, datetime('now')) " +
+        'ON CONFLICT(path) DO UPDATE SET ' +
+        'title = COALESCE(excluded.title, _files.title), ' +
+        'description = COALESCE(excluded.description, _files.description), ' +
+        'updated_at = excluded.updated_at',
+    ).run(relPath, title, description);
+
+    return readMeta(db, relPath);
+  });
 }
 
 // The read-side door to the metadata: opens the database only when the file
@@ -149,6 +190,30 @@ function readMetaMap(db: DatabaseSync): Map<string, FileMeta> {
   }
 
   return map;
+}
+
+// Annotation freshness index for the background indexer: every _files row's
+// updated_at as a UTC Date, keyed by path. Empty when the database does not
+// exist yet (a read never provisions).
+export async function readAnnotationTimes(userId: string): Promise<Map<string, Date>> {
+  return withExistingDb(userId, new Map<string, Date>(), db => {
+    const map = new Map<string, Date>();
+    const rows = db.prepare('SELECT path, updated_at FROM _files').all() as Array<{
+      path: string;
+      updated_at: string;
+    }>;
+
+    for (const row of rows) {
+      // sqlite datetime('now') stores 'YYYY-MM-DD HH:MM:SS' in UTC.
+      const parsed = new Date(`${row.updated_at.replace(' ', 'T')}Z`);
+
+      if (!Number.isNaN(parsed.getTime())) {
+        map.set(row.path, parsed);
+      }
+    }
+
+    return map;
+  });
 }
 
 // ---------------------------------------------------------------------------

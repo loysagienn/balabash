@@ -4,7 +4,7 @@
 //
 // The agent is a sub-agent for OTHER agents: its operator is the parent
 // thread (the coordinator or any agent that spawned it), never the user —
-// it knows nothing about the user. The thread is headless (§11.2): no forum
+// it knows nothing about the user. The thread is headless: no forum
 // topic. The dialogue is symmetric thread.message events: the operator sends
 // instructions (sendToChild / send_to_thread), the browser executes and
 // replies with its turn's final text (sendToParent). All the Playwright
@@ -143,7 +143,7 @@ function extensionOf(mimeType: string): string {
   return 'png';
 }
 
-// Birth contract (§9): data or throw. Text blocks join into one string;
+// Birth contract: data or throw. Text blocks join into one string;
 // images are ingested into file storage and referenced by fileId (the inner
 // model works from the textual page snapshots — it does not see the pixels).
 async function convertPlaywrightResult(raw: Record<string, unknown>, ctx: RunContext): Promise<string> {
@@ -252,7 +252,7 @@ export const agent = {
     required: ['task'],
     additionalProperties: false,
   },
-  tools: ['workspace', 'notion', 'storage'],
+  tools: ['workspace', 'workspace_files', 'notion', 'storage'],
   notification: 'normal',
 
   run(rawInput: unknown, ctx: RunContext): AgentRun {

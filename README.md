@@ -42,10 +42,6 @@ is multi-voice by design.
 | 📐 **architect** | Design analysis and audits at maximum reasoning effort; advises, never implements. |
 | 🤖 **codex** | An autonomous OpenAI Codex session with the full Balabash toolset. |
 
-Agents that can change the system (engineer, scheduler, architect) are **consent-gated**:
-no agent can spawn them as a side effect of its plan — only the secretary starts them,
-on an explicit user request, and that rule is enforced in code, not in prompts.
-
 Three model vendors run side by side behind one session contract: the secretary runs
 on an OpenAI model, most agents on Claude (via the Claude Agent SDK), and the codex
 agent on OpenAI Codex. An agent picks its backend with a one-line declaration.
@@ -94,10 +90,11 @@ thread's raw event feed — every event, payload included, exactly as stored.
   OAuth tokens live in one table and nowhere else.
 - **Re-authorization is automatic.** When a token expires, a detector opens an auth
   thread and notifies you — one active auth thread per workspace, no flooding.
-- **Consent is structural.** Sensitive tool servers (auth, restart) are excluded from
-  the default bundle and reach only agents that name them explicitly; consent-gated
-  agents cannot be spawned by other agents. A spawner may narrow a child's tool bundle,
-  and narrowing only ever shrinks.
+- **Every grant is explicit.** Each agent declares the exact list of tool servers it
+  gets — nothing rides in by default, and sensitive servers (auth, restart) reach only
+  the agents that list them. A spawner may narrow a child's tool bundle, and narrowing
+  only ever shrinks. Spawning is a declared right too: an agent can start only the
+  sub-agents named in its declaration.
 - **Workspace isolation is enforced at every model-facing edge.** A file or thread id
   from another workspace yields the same "not found" as a missing one — existence is
   never leaked. Caller identity comes from the platform, never from model-visible
@@ -125,8 +122,8 @@ event log; each run owns a thread — its context and its visibility boundary.**
 - **Runs are ephemeral; the log is durable.** In-memory runs are never persisted; on
   boot, orphaned threads are tombstoned and events addressed to dead threads are
   redirected to the main thread so no fact is lost.
-- **Agents are declarations.** An agent is a small module declaring its SDK, tools,
-  spawn rights, and consent requirements; the platform supplies the session lifecycle,
+- **Agents are declarations.** An agent is a small module declaring its SDK, tools
+  and spawn rights; the platform supplies the session lifecycle,
   the event-to-message rendering, live tool-catalog sync, and the standard verbs
   (`end_thread`, `send_file`, spawning). An imperative `run()` exists as the escape
   hatch (the browser agent uses it).

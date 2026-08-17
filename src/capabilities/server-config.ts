@@ -1,9 +1,6 @@
-// Tool-server configs (§10): external MCP servers are mcp-servers/<name>.json
+// Tool-server configs: external MCP servers are mcp-servers/<name>.json
 // (stdio | http), validated hard; local in-process servers ship inside the
-// bundle (tools/index.ts) and reuse the same config validation. Port of the
-// legacy server-config with one addition: the consent flag (§7.4) — a consent
-// server is excluded from the 'all' bundle and only reaches agents that name
-// it explicitly.
+// bundle (tools/index.ts) and reuse the same config validation.
 
 import { readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
@@ -27,7 +24,6 @@ export type ExternalServerConfig =
       command: string;
       args?: string[];
       env?: Record<string, string>;
-      consent?: boolean;
       toolOverrides?: Record<string, ToolOverride>;
     }
   | {
@@ -39,7 +35,7 @@ export type ExternalServerConfig =
       headers?: Record<string, string>;
       // "user": the server is OAuth-protected per the MCP authorization spec.
       // It is registered without connecting; every user authorizes their own
-      // account (auth agent, §10), and its tools are exposed per user.
+      // account (auth agent), and its tools are exposed per user.
       // description is required in that mode — it is all the model sees
       // before the first connection.
       auth?: 'user';
@@ -52,7 +48,6 @@ export type ExternalServerConfig =
       // non-secret, versioned capability configuration.
       scope?: string;
       authorizationParams?: Record<string, string>;
-      consent?: boolean;
       toolOverrides?: Record<string, ToolOverride>;
     };
 
@@ -67,10 +62,6 @@ function isMissingDirectoryError(error: unknown): boolean {
 export function validateExternalServerConfig(raw: unknown, source: string): ExternalServerConfig {
   if (!isObject(raw)) {
     throw new Error(`${source} must contain a JSON object`);
-  }
-
-  if (raw.consent !== undefined && typeof raw.consent !== 'boolean') {
-    throw new Error(`${source}: "consent" must be a boolean`);
   }
 
   if (raw.toolOverrides !== undefined) {

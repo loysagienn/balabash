@@ -1,9 +1,9 @@
-// The restart tool server (§7.4 consent): request_restart records a
+// The restart tool server: request_restart records a
 // system.restart.requested event; the restart module then waits for the safe
-// window and exits into the supervisor. A consent server — 'all' never
-// includes it; the coordinator and the engineer agent name it
-// explicitly. The tool changes nothing by itself: the event is the request,
-// the log is the audit trail.
+// window and exits into the supervisor. A dangerous capability — only the
+// coordinator and the repo-owning agents (engineer, scheduler) list it in
+// their tool bundles. The tool changes nothing by itself: the event is the
+// request, the log is the audit trail.
 
 import { stat, readdir } from 'node:fs/promises';
 import path from 'node:path';
@@ -47,7 +47,7 @@ const REQUEST_RESTART_FUNCTION: ToolFunction = {
 
 // Newest mtime across the source tree, to warn when dist/ predates the last
 // edit — the restart would boot the previous bundle. A convention nudge, not
-// a gate: the agent owns building (§14 regламент).
+// a gate: the agent owns building.
 const WATCHED_SOURCES = ['src', 'agents', 'tools', 'tasks', 'build', 'prisma', 'mcp-servers', 'package.json', 'supervisor.js'];
 
 async function newestMtimeMs(target: string): Promise<number> {
@@ -125,7 +125,6 @@ async function requestRestart(args: JsonObject, ctx: BuiltinServerCallContext): 
 export function createRestartToolServer(): BuiltinToolServer {
   return {
     name: RESTART_SERVER_NAME,
-    consent: true,
     functionNames: [REQUEST_RESTART_FUNCTION_NAME],
 
     getFunctions: async () => [REQUEST_RESTART_FUNCTION],

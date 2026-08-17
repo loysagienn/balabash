@@ -1,9 +1,9 @@
-// Per-user authorization for external MCP servers with auth: "user" (§10).
+// Per-user authorization for external MCP servers with auth: "user".
 //
 // A capability config registers the server once for everyone; each user then
 // connects their own account through a one-time link issued by the auth
 // agent. The pieces:
-// - requestAuthorization issues the link (auth-agent tool, §7.4 consent);
+// - requestAuthorization issues the link (auth-agent tool);
 // - GET /connect/<server>?nonce=… runs OAuth discovery (plus DCR when the
 //   provider supports it) and redirects to the consent page;
 // - GET /oauth/callback exchanges the code for tokens.

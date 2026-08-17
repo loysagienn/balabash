@@ -3,9 +3,8 @@
 // produced the agent-model refactoring of 2026-08: meaning first, then the
 // abstract ideal derived from meaning (not from code), then an honest audit
 // of the implementation against that ideal, then a prioritized convergence
-// plan handed off to an engineering agent. Consent-gated (§7.4): full host
-// access (read-oriented by convention), so only the coordinator spawns it on
-// an explicit user request. Fully declarative: the platform's session runner
+// plan handed off to an engineering agent. Full host
+// access (read-oriented by convention). Fully declarative: the platform's session runner
 // drives the lifecycle.
 
 import type { AgentDeclaration, JsonObject } from '../src/core/contract.ts';
@@ -13,7 +12,7 @@ import { BALABASH_PREAMBLE, TELEGRAM_OUTPUT_NOTE, WORKSPACE_STORAGE_NOTE } from 
 
 const ARCHITECT_MODEL = 'claude-fable-5';
 
-// The app process always starts in the repository root (§12).
+// The app process always starts in the repository root.
 const REPO_ROOT = process.cwd();
 
 const SYSTEM_PROMPT = `You are Balabash's software architect, talking to the user directly in a dedicated Telegram forum topic. ${BALABASH_PREAMBLE}
@@ -45,8 +44,7 @@ export const agent = {
     'existing. In dialogue with the user it formulates what the thing is by meaning, designs its abstract ' +
     'ideal (contract, interface, building blocks) without binding to any implementation, then audits the ' +
     'real code against that ideal and produces a prioritized convergence plan. It never implements — its ' +
-    'summary is a plan to hand to an engineering agent (e.g. engineer). Consent-gated: start it ONLY when the ' +
-    'user explicitly asks for architectural analysis or design, never on your own initiative.',
+    'summary is a plan to hand to an engineering agent (e.g. engineer).',
   icon: '📐',
   sdk: 'claude',
   parameters: {
@@ -68,8 +66,19 @@ export const agent = {
     required: ['subject', 'context'],
     additionalProperties: false,
   },
-  tools: 'all',
-  consent: true,
+  tools: [
+    'current_datetime',
+    'events',
+    'gmail',
+    'http_get',
+    'notion',
+    'perplexity',
+    'projects',
+    'schedule',
+    'storage',
+    'storage_download_file',
+    'workspace',
+  ],
   notification: 'normal',
 
   session: {

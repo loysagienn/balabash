@@ -15,11 +15,26 @@ import type { ScheduledTaskModel } from '../../prisma-generated/models.ts';
 import { getTaskBody } from './catalog.ts';
 import type { TaskContext } from './contract.ts';
 
-// A task's tool bundle: every non-consent server ('all' excludes consent by
-// construction; the builtin 'storage'/'events' pull-tool servers ride along).
-// Calls are NOT journaled as tool.call.* — the envelope requires an author
-// thread and a task has none.
-const TASK_BUNDLE: ToolBundle = { declared: 'all' };
+// A task's tool passport, listed explicitly like every agent's: tasks run
+// with no native tools at all, so the workspace_files hands ride along;
+// restart and auth are deliberately absent. Calls are NOT journaled as
+// tool.call.* — the envelope requires an author thread and a task has none.
+const TASK_BUNDLE: ToolBundle = {
+  declared: [
+    'current_datetime',
+    'events',
+    'gmail',
+    'http_get',
+    'notion',
+    'perplexity',
+    'projects',
+    'schedule',
+    'storage',
+    'storage_download_file',
+    'workspace',
+    'workspace_files',
+  ],
+};
 
 function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);

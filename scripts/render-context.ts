@@ -113,16 +113,14 @@ async function renderBundleTools(userId: string, bundle: ToolBundle): Promise<st
 async function renderAgent(declaration: AgentDeclaration, userId: string): Promise<string> {
   const bundle: ToolBundle = {
     declared: declaration.tools,
-    ...(declaration.consentTools ? { extra: declaration.consentTools } : {}),
   };
 
   const header = [
     `# Agent: ${declaration.name}`,
     '',
     `- sdk: ${declaration.sdk}`,
-    `- tools bundle: ${declaration.tools === 'all' ? "'all' (every non-consent server)" : JSON.stringify(declaration.tools)}${declaration.consentTools ? ` + consent: ${JSON.stringify(declaration.consentTools)}` : ''}`,
+    `- tools bundle: ${JSON.stringify(declaration.tools)}`,
     ...(declaration.agents?.length ? [`- spawnable sub-agents: ${declaration.agents.join(', ')}`] : []),
-    ...(declaration.consent ? ['- consent-gated: spawned only by the secretary on an explicit user request'] : []),
     ...(declaration.headless ? ['- headless: no forum topic, talks only to its operator'] : []),
     ...(declaration.session?.model ? [`- model: ${declaration.session.model}`] : []),
     ...(declaration.session?.effort ? [`- effort: ${declaration.session.effort}`] : []),

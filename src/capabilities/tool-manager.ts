@@ -1,10 +1,10 @@
-// Tool-server manager (§10): local in-process servers (tools/*.ts) and
+// Tool-server manager: local in-process servers (tools/*.ts) and
 // external MCP servers (mcp-servers/*.json) behind one registry. Servers with
 // unresolved ${secret:NAME} references wait in pending and reconnect when the
 // secrets are provisioned; servers with auth: "user" are registered without a
 // global connection — per-user clients are created lazily once the user's
 // connection row says "connected". Module-level state is deliberate: the
-// whole system is one process (§2), the runs consume this registry through
+// whole system is one process, the runs consume this registry through
 // their bundled ToolsApi.
 
 import { UnauthorizedError } from '@modelcontextprotocol/sdk/client/auth.js';
@@ -45,9 +45,8 @@ export function isReservedFunctionName(functionName: string): boolean {
 
 // ---------------------------------------------------------------------------
 // Builtin tool servers: in-src capabilities behind the same server/bundle
-// surface as MCP servers — today the auth tools (§7.4 consent), stage 5 adds
-// request_capability. Calls receive the calling run's identity: the issued
-// links и events are thread-addressed.
+// surface as MCP servers. Calls receive the calling run's identity: the
+// issued links and events are thread-addressed.
 
 export type BuiltinServerCallContext = {
   userId: string;
@@ -56,14 +55,11 @@ export type BuiltinServerCallContext = {
 
 export type BuiltinToolServer = {
   name: string;
-  // A consent server never rides into a bundle through 'all' — only agents
-  // naming it explicitly get it (§7.4).
-  consent: boolean;
   // Static function namespace: lookup and collision checks stay synchronous;
   // getFunctions may expose a state-dependent subset with live descriptions.
   functionNames: string[];
   getFunctions(userId: string): Promise<ToolFunction[]>;
-  // Birth contract (§9): the tool returns data or throws; the platform
+  // Birth contract: the tool returns data or throws; the platform
   // wrapper (runToolHandler) shapes the structured result at the call site.
   call(toolName: string, args: JsonObject, ctx: BuiltinServerCallContext): Promise<JsonValue>;
 };
@@ -79,26 +75,18 @@ export function registerBuiltinToolServer(server: BuiltinToolServer): void {
 }
 
 // ---------------------------------------------------------------------------
-// Bundles (§7.4): granularity is a whole tool server. 'all' excludes consent
-// servers — they only reach agents that name them explicitly; a spawner may
-// narrow the declared bundle but never widen it.
+// Bundles: granularity is a whole tool server, and every grant is explicit —
+// a server reaches only the bundles that name it. A spawner may narrow the
+// declared bundle but never widen it.
 
 export type ToolBundle = {
-  declared: 'all' | string[];
-  // Consent servers granted on top of `declared` — the explicit naming §7.4
-  // requires (an agent's consentTools, the coordinator's own grants).
-  extra?: string[];
+  declared: string[];
   narrowed?: string[];
 };
 
 function isServerInBundle(bundle: ToolBundle, serverName: string): boolean {
-  const consent = consentServers.has(serverName) || Boolean(builtinToolServers.get(serverName)?.consent);
-  const declaredOk = bundle.declared === 'all' ? !consent : bundle.declared.includes(serverName);
-  const grantedOk = declaredOk || Boolean(bundle.extra?.includes(serverName));
-
-  // Narrowing intersects last, so a spawner can drop consent grants too —
-  // narrowing only ever shrinks.
-  return grantedOk && (!bundle.narrowed || bundle.narrowed.includes(serverName));
+  // Narrowing intersects — it only ever shrinks.
+  return bundle.declared.includes(serverName) && (!bundle.narrowed || bundle.narrowed.includes(serverName));
 }
 
 // ---------------------------------------------------------------------------
@@ -106,7 +94,6 @@ function isServerInBundle(bundle: ToolBundle, serverName: string): boolean {
 
 let servers = new Map<string, ConnectedServer>();
 let localToolSources = new Map<string, LocalToolSource>();
-const consentServers = new Set<string>();
 
 type PendingExternalServer = {
   name: string;
@@ -326,7 +313,6 @@ export async function loadToolServers(ctx: LocalToolContext): Promise<void> {
   const nextUserAuth = new Map<string, UserAuthServer>();
   const nextPending = new Map<string, PendingExternalServer>();
   const nextLocalSources = new Map<string, LocalToolSource>();
-  const nextConsent = new Set<string>();
   const discovered: Array<{
     name: string;
     config: ExternalServerConfig;
@@ -344,10 +330,6 @@ export async function loadToolServers(ctx: LocalToolContext): Promise<void> {
     }
 
     names.add(name);
-
-    if (config.consent) {
-      nextConsent.add(name);
-    }
 
     discovered.push({ name, config, origin });
   };
@@ -407,12 +389,6 @@ export async function loadToolServers(ctx: LocalToolContext): Promise<void> {
   servers = connected;
   localToolSources = nextLocalSources;
   pendingExternalServers = nextPending;
-
-  consentServers.clear();
-
-  for (const name of nextConsent) {
-    consentServers.add(name);
-  }
 
   userAuthServers.clear();
 
@@ -584,7 +560,7 @@ export async function callServerTool(
     throw error;
   }
 
-  // Verbatim record (§4.3): the raw MCP answer exactly as the server
+  // Verbatim record: the raw MCP answer exactly as the server
   // produced it — isError included ("the tool answered, albeit with an
   // error"). Only breakage of the call itself (transport, auth, unknown
   // tool) throws — journaled as tool.call.failed by the caller.

@@ -36,6 +36,13 @@ export const config = {
     return requireEnv('MAIN_OPENAI_MODEL');
   },
 
+  // The cheap model of the workspace annotation indexer (title/description
+  // of workspace files). Optional with a default: the indexer is background
+  // hygiene, its absence from env must not block a boot.
+  get indexerOpenaiModel(): string {
+    return process.env.INDEXER_OPENAI_MODEL || 'gpt-5.6-luna';
+  },
+
   // Public domain of the web surface: one-time provisioning links and the
   // single OAuth redirect URI (https://<domain>/oauth/callback) are built
   // from it.

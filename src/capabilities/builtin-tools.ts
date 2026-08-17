@@ -1,12 +1,11 @@
-// Builtin pull tools (§5.2): deep read access without a rights model, scoped
+// Builtin pull tools: deep read access without a rights model, scoped
 // to the workspace. Two builtin tool servers behind the same server/bundle
-// surface as everything else (§7.4): 'storage' — storage_get_file (a stored
+// surface as everything else: 'storage' — storage_get_file (a stored
 // file's metadata plus a presigned URL); 'events' — list_threads (the list,
 // no summaries), get_thread (one thread + summary), get_thread_events (the
 // transcript), get_event (one event in full). Layered reading mirrors the
 // summarization: the list first, a summary on request, the full transcript
-// on demand. Neither server is consent-gated: 'all' bundles both; agents
-// with an explicit tool list name them per server.
+// on demand. Agents name them per server in their tool lists.
 
 import type { Event, JsonObject, JsonValue, Thread, ToolDefinition } from '../core/contract.ts';
 import { getTranscript, getUserEvent } from '../core/events.ts';
@@ -196,7 +195,7 @@ async function executeGetFile(args: JsonObject, ctx: BuiltinToolContext): Promis
   const file = await getUserFile(ctx.userId, fileId);
   const { url } = await getFileDownloadUrl(fileId);
 
-  // The one FileRef (§9) plus its ephemeral url. The OpenAI harness
+  // The one FileRef plus its ephemeral url. The OpenAI harness
   // recognizes the result by the tool name and feeds the URL to the model as
   // input_image/input_file; SDK sessions download the URL themselves when
   // the contents matter. The transcript renders this result without the url
@@ -295,7 +294,7 @@ async function executeGetThreadEvents(args: JsonObject, ctx: BuiltinToolContext)
 }
 
 // One builtin tool server: static ToolFunction list, executor dispatch. The
-// birth contract (§9) lives at the call site — callServerTool wraps the call
+// birth contract lives at the call site — callServerTool wraps the call
 // in runToolHandler; here an executor returns data or throws.
 function createPullToolServer(
   serverName: string,
@@ -312,7 +311,6 @@ function createPullToolServer(
 
   return {
     name: serverName,
-    consent: false,
     functionNames: definitions.map(tool => tool.name),
 
     getFunctions: async () => functions,

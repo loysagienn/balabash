@@ -1,8 +1,7 @@
 // Engineer agent: Balabash's own engineer. A Claude session with the full
 // native tool preset (shell, file edits, web) working inside the Balabash
 // repository on the host — the user directs it in a dedicated forum topic.
-// Consent-gated (§7.4): only the coordinator spawns it, on an explicit user
-// request; the repo path in the prompt is a convention — the real boundary is
+// The repo path in the prompt is a convention — the real boundary is
 // the unix user the process runs as. Fully declarative: the platform's
 // session runner drives the lifecycle.
 
@@ -11,7 +10,7 @@ import { BALABASH_PREAMBLE, REPO_RULES_NOTE, TELEGRAM_OUTPUT_NOTE, WORKSPACE_STO
 
 const CLAUDE_MODEL = 'claude-fable-5';
 
-// The app process always starts in the repository root (§12), so cwd IS the
+// The app process always starts in the repository root, so cwd IS the
 // repo — no configuration needed.
 const REPO_ROOT = process.cwd();
 
@@ -32,8 +31,7 @@ export const agent = {
   description:
     'Start an engineering thread working inside the Balabash repository itself — reading and changing ' +
     "Balabash's own source code with the full native toolset (shell, file edits) on the host. Use it for " +
-    'self-extension: adding capabilities, fixing or inspecting Balabash. Consent-gated: start it ONLY when ' +
-    'the user explicitly asks to work on Balabash itself, never on your own initiative.',
+    'self-extension: adding capabilities, fixing or inspecting Balabash.',
   icon: '🛠',
   sdk: 'claude',
   parameters: {
@@ -53,9 +51,20 @@ export const agent = {
     required: ['task', 'context'],
     additionalProperties: false,
   },
-  tools: 'all',
-  consentTools: ['restart'],
-  consent: true,
+  tools: [
+    'current_datetime',
+    'events',
+    'gmail',
+    'http_get',
+    'notion',
+    'perplexity',
+    'projects',
+    'restart',
+    'schedule',
+    'storage',
+    'storage_download_file',
+    'workspace',
+  ],
   notification: 'normal',
 
   session: {

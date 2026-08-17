@@ -43,8 +43,8 @@ const CANONICAL_TYPES: ReadonlySet<string> = new Set([
   OAUTH_CLIENT_PROVISIONED,
   SECRETS_PROVISIONED,
   SYSTEM_EXCEPTION,
-  // Restart-based self-extension: a request written by the restart consent
-  // tool, and the completion the fresh process reports to the requester.
+  // Restart-based self-extension: a request written by the restart tool,
+  // and the completion the fresh process reports to the requester.
   SYSTEM_RESTART_REQUESTED,
   SYSTEM_RESTART_COMPLETED,
   // A scheduled task firing: written by the schedule heart (actor system,

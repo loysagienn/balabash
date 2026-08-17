@@ -18,9 +18,9 @@ export type TaskContext = {
   // The app's database client (src/db/client.ts) — full access, the task is
   // trusted code shipped in the bundle.
   prisma: PrismaClient;
-  // The workspace's tool surface: builtin pull tools plus every non-consent
-  // tool server, resolved for the task's user. Calls are NOT journaled as
-  // tool.call.* — a task has no thread to journal into.
+  // The workspace's tool surface: the task bundle's tool servers (see
+  // TASK_BUNDLE in engine.ts), resolved for the task's user. Calls are NOT
+  // journaled as tool.call.* — a task has no thread to journal into.
   tools: ToolsApi;
 };
 

@@ -1,4 +1,4 @@
-// Process entry. Start order (design doc §3): db → files → tombstone of
+// Process entry. Start order (design doc): db → files → tombstone of
 // orphaned threads → agent catalog → tool servers → web → telegram → router →
 // consumers → restart module. The process runs under supervisor.js: a clean
 // exit with RESTART_EXIT_CODE relaunches it, exit 0 stops the pair.
@@ -19,6 +19,7 @@ import { startReauthDetector } from './capabilities/reauth-detector.ts';
 import { loadToolServers, registerBuiltinToolServer } from './capabilities/tool-manager.ts';
 import { loadTasks } from './schedule/catalog.ts';
 import { startScheduleHeart } from './schedule/heart.ts';
+import { startWorkspaceIndexer } from './workspace/indexer.ts';
 import { createScheduleToolServer } from './schedule/tools.ts';
 import { createProjectsToolServer } from './projects/tools.ts';
 import { createCoordinatorRun, hasActiveCoordinatorTurns } from './coordinator/index.ts';
@@ -57,7 +58,7 @@ await prisma.$queryRaw`SELECT 1`;
 console.log('[app] balabash: database reachable');
 
 // Runs live only in memory: threads orphaned by the previous process death
-// are cancelled before anything can address them (§5.5). A planned restart
+// are cancelled before anything can address them. A planned restart
 // leaves nothing to tombstone — the safe window required every child thread
 // to finish first.
 const tombstoned = await tombstoneActiveThreads('process_restart');
@@ -72,30 +73,30 @@ loadAgents();
 // the boot atomically (the supervisor rolls back to the last good bundle).
 loadTasks();
 
-// Consent servers (§7.4): only agents naming them explicitly get them — the
-// auth tools for the auth agent, the restart request for the coordinator and
-// the engineer agent.
+// Dangerous-capability servers, granted only where deliberately listed: the
+// auth tools to the auth agent, the restart request to the coordinator and
+// the repo-owning agents (engineer, scheduler).
 registerBuiltinToolServer(createAuthToolServer());
 registerBuiltinToolServer(createRestartToolServer());
 
-// The workspace pull tools (§5.2), split into two non-consent servers:
-// 'storage' (storage_get_file) and 'events' (the thread/event log). 'all'
-// bundles both; agents with an explicit tool list opt in per server.
+// The workspace pull tools, split into two servers: 'storage'
+// (storage_get_file) and 'events' (the thread/event log). Agents opt in per
+// server in their tool lists.
 registerBuiltinToolServer(createStorageToolServer());
 registerBuiltinToolServer(createEventsToolServer());
 
-// The schedule registry tools are NOT consent-gated: any agent may register,
+// The schedule registry tools: any agent listing the server may register,
 // list, cancel or manually run a scheduled task; the audit is the tool.call.*
 // journal in the calling agent's thread.
 registerBuiltinToolServer(createScheduleToolServer());
 
 // The project registry tools (passive libraries: identity in the db, the
-// knowledge in a workspace folder) — non-consent, like schedule: any agent
-// may list, read and maintain projects; the audit is the tool.call.* journal.
+// knowledge in a workspace folder) — like schedule: any agent listing the
+// server may list, read and maintain projects; the audit is the tool.call.* journal.
 registerBuiltinToolServer(createProjectsToolServer());
 
 // Local tool servers see the global files surface; workspace scoping happens
-// at the calling run (§7.4).
+// at the calling run.
 await loadToolServers({
   filesApi: {
     ingest: input => ingestFile(input),
@@ -115,7 +116,7 @@ consumers.push(
   startThreadRouter({
     // Lazy rise is for main threads only: dynamic runs are created explicitly
     // on thread.started, and an active child without a run in memory is
-    // resume territory — deliberately deferred (§5.5).
+    // resume territory — deliberately deferred.
     createRun: thread => {
       if (thread.parentId !== null || thread.agent !== COORDINATOR_AGENT) {
         return null;
@@ -141,6 +142,11 @@ consumers.push(startReauthDetector());
 // The schedule heart: boot sweep of sleeping code tasks, then the timer that
 // fires due triggers. Not a log consumer, but it stops like one.
 consumers.push(startScheduleHeart());
+
+// The workspace annotation indexer: background hygiene giving workspace
+// files titles/descriptions when their writers left none. Not a log
+// consumer, but it stops like one.
+consumers.push(startWorkspaceIndexer());
 
 // Every boot satisfies the restart requests recorded before it — report the
 // completions (with the supervisor's rollback marker and a migration

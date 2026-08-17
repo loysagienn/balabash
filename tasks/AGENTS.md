@@ -26,9 +26,10 @@ fires; a file here says WHAT it does. The slug joins the two.
   coordinator. Keep payloads compact; push nothing when there is nothing to
   say.
 - `ctx.prisma` — the app's database client (src/db/client.ts).
-- `ctx.tools` — the workspace tool surface for the task's user: builtin pull
-  tools plus every non-consent tool server; `call(name, args)`. These calls
-  are NOT journaled as tool.call.* (a task has no thread).
+- `ctx.tools` — the workspace tool surface for the task's user: the task
+  bundle's tool servers (TASK_BUNDLE in src/schedule/engine.ts);
+  `call(name, args)`. These calls are NOT journaled as tool.call.* (a task
+  has no thread).
 
 ## Execution semantics
 
