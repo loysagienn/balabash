@@ -11,6 +11,7 @@ import * as auth from './auth.ts';
 import * as browser from './browser.ts';
 import * as codex from './codex.ts';
 import * as engineer from './engineer.ts';
+import * as gardener from './gardener.ts';
 import * as manager from './manager.ts';
 import * as power_point from './power_point.ts';
 import * as scheduler from './scheduler.ts';
@@ -21,6 +22,7 @@ export const agentModules: Record<string, Record<string, unknown>> = {
   browser,
   codex,
   engineer,
+  gardener,
   manager,
   power_point,
   scheduler,

@@ -243,26 +243,24 @@ async function executeCreate(args: JsonObject, ctx: BuiltinServerCallContext): P
   // mkdir recursive doubles as lazy provisioning of the file area itself.
   await fs.mkdir(dir, { recursive: true });
 
-  // The entry point, only when the folder has none — an adopted folder's
-  // existing AGENTS.md is someone's work and is never overwritten.
-  const agentsMd = path.join(dir, 'AGENTS.md');
-  const hasAgentsMd = await fs.stat(agentsMd).then(
-    stat => stat.isFile(),
-    () => false,
-  );
-
-  if (!hasAgentsMd) {
-    await fs.writeFile(
-      agentsMd,
-      `# ${title}\n\n${description}\n\n## Working notes\n\n(Filled in as the work goes — keep this file the current entry point: what lives where in this folder, decisions made, how to continue.)\n`,
-      { flag: 'wx' },
-    ).catch((error: NodeJS.ErrnoException) => {
-      // A concurrent writer beat us to it — their AGENTS.md wins.
+  // The library anatomy (the law in agents/gardener.ts), seeded only where
+  // the folder has none — an adopted folder's existing files are someone's
+  // work and are never overwritten.
+  const seed = async (name: string, content: string) => {
+    await fs.writeFile(path.join(dir, name), content, { flag: 'wx' }).catch((error: NodeJS.ErrnoException) => {
+      // A concurrent writer beat us to it — their file wins.
       if (error.code !== 'EEXIST') {
         throw error;
       }
     });
-  }
+  };
+
+  await seed(
+    'AGENTS.md',
+    `# ${title}\n\n${description}\n\n## Map\n\n- inbox.md — append anything new worth keeping: results, decisions, learned facts; dated, with the "why". A gardener agent consolidates later.\n- journal.md — dated history of the project, maintained by the gardener.\n\n(Keep this file the entry point: the map of the folder plus the project's identity and stable frame.)\n`,
+  );
+  await seed('inbox.md', '# Inbox\n\nAppend new material here freely — dated, with the "why". Drained by the gardener.\n');
+  await seed('journal.md', '# Journal\n\nDated events and decisions, newest first. Written by the gardener.\n');
 
   let project: ProjectModel;
 
