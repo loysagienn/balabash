@@ -10,7 +10,8 @@ export const PROJECTS_WORLD_NOTE =
 
 export const PROJECTS_NOTE =
   `${PROJECTS_WORLD_NOTE} The registry is visible via projects_list (projects_get shows one project with ` +
-  "its folder). When your work concerns a project, read its AGENTS.md BEFORE starting and keep the project's " +
-  'files and AGENTS.md current as you go. When finishing a thread that touched a project, update it: at ' +
-  'minimum a "touch" via projects_update (a call with only the id bumps its recency), and refresh the ' +
-  'description when its topic drifted.';
+  'its folder). When your work concerns a project, read its AGENTS.md BEFORE starting. Anything new worth ' +
+  "keeping — results, decisions, learned facts — APPEND to the project's inbox.md, dated, with the \"why\"; " +
+  "do not rewrite the project's settled files unless the task itself asks for it — a dedicated gardener " +
+  'agent consolidates later. When finishing a thread that touched a project, touch it via projects_update ' +
+  '(a call with only the id bumps its recency); refresh the description when its topic drifted.';
