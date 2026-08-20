@@ -2,7 +2,8 @@
 // native tool preset (shell, file edits, web) working inside the Balabash
 // repository on the host — the user directs it in a dedicated forum topic.
 // The repo path in the prompt is a convention — the real boundary is
-// the unix user the process runs as. Fully declarative: the platform's
+// the unix user the process runs as. Can spawn the browser sub-agent for
+// operating real websites. Fully declarative: the platform's
 // session runner drives the lifecycle.
 
 import type { AgentDeclaration } from '../src/core/contract.ts';
@@ -48,6 +49,7 @@ export const agent = {
     'storage_download_file',
     'workspace',
   ],
+  agents: ['browser'],
   notification: 'normal',
 
   session: {

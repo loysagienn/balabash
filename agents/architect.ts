@@ -4,7 +4,8 @@
 // abstract ideal derived from meaning (not from code), then an honest audit
 // of the implementation against that ideal, then a prioritized convergence
 // plan handed off to an engineering agent. Full host
-// access (read-oriented by convention). Fully declarative: the platform's session runner
+// access (read-oriented by convention); can spawn the browser sub-agent for
+// operating real websites. Fully declarative: the platform's session runner
 // drives the lifecycle.
 
 import type { AgentDeclaration } from '../src/core/contract.ts';
@@ -60,6 +61,7 @@ export const agent = {
     'storage_download_file',
     'workspace',
   ],
+  agents: ['browser'],
   notification: 'normal',
 
   session: {
