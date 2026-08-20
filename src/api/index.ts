@@ -6,7 +6,7 @@
 import Koa from 'koa';
 import { config } from '../config/index.ts';
 import { connect } from './connect.ts';
-import { createApiMiddleware } from './api.ts';
+import { createApiMiddleware, createFilesMiddleware } from './api.ts';
 
 export function startWebServer(): void {
   const app = new Koa();
@@ -15,8 +15,10 @@ export function startWebServer(): void {
   app.proxy = true;
 
   // Nonce/state-authenticated surfaces first (one-time links, OAuth
-  // redirects), then the session-gated /api namespace.
+  // redirects), then the session-gated byte surface /files and the
+  // session-gated /api namespace.
   app.use(connect);
+  app.use(createFilesMiddleware());
   app.use(createApiMiddleware());
 
   app.use(ctx => {

@@ -403,27 +403,55 @@ router.get('/workspace/node', requireSession, async ctx => {
   ctx.body = prepareObject(response);
 });
 
+// --------------------------------------------------------------------------
+// The root byte surface: GET /files/*path streams one workspace file — the
+// raw twin of the /workspace/:path page (same session gate, strictly
+// read-only). Inline by default (viewers fetch here), ?download=1 flips to
+// attachment. The path lives in the URL — not in a query parameter — so that
+// a future index.html-with-assets folder can resolve its relative links by
+// the URL alone.
+
 // RFC 6266: an ASCII fallback in filename=, the real name in filename*.
-function inlineDisposition(filename: string): string {
+function contentDisposition(filename: string, { attachment }: { attachment: boolean }): string {
   const fallback = filename.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '_');
 
-  return `inline; filename="${fallback}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
+  return `${attachment ? 'attachment' : 'inline'}; filename="${fallback}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
 }
 
-router.get('/workspace/raw', requireSession, async ctx => {
+const filesRouter = new Router();
+
+// A bare /files (and /files/ — the trailing slash is optional) names no file.
+filesRouter.get('/files', requireSession, ctx => {
+  sendError(ctx, 400, 'bad_request', 'The URL must name a file in the workspace file area');
+});
+
+filesRouter.get('/files/*path', requireSession, async ctx => {
   const userId = ctx.state.userId as string;
-  const relPath = parseWorkspacePath(ctx);
 
-  if (relPath === null) {
+  // Decode the wildcard tail from the raw URL ourselves: the router's own
+  // decoding keeps a broken percent-escape silently, we answer 400 instead.
+  const rawTail = ctx.path.slice('/files/'.length);
+  let decoded: string;
+
+  try {
+    decoded = rawTail.split('/').map(decodeURIComponent).join('/');
+  } catch {
+    sendError(ctx, 400, 'bad_request', 'Malformed percent-encoding in the path');
+
     return;
   }
 
-  if (relPath === '') {
-    sendError(ctx, 400, 'bad_request', 'path must name a file in the workspace file area');
+  let relPath: string;
+
+  try {
+    relPath = sanitizeRelPath(decoded);
+  } catch (error) {
+    sendError(ctx, 400, 'bad_request', error instanceof WorkspacePathError ? error.message : 'Invalid path');
 
     return;
   }
 
+  // statFile answers null for missing paths AND directories — both are 404.
   const file = await statFile(userId, relPath);
 
   if (!file) {
@@ -435,15 +463,41 @@ router.get('/workspace/raw', requireSession, async ctx => {
   // Raw bytes, no JSON envelope: the content-type is the honest guess from
   // the extension (a future <img src> works for free), text declares utf-8.
   const filename = relPath.split('/').pop() as string;
+  const attachment = queryValue(ctx.query.download) !== undefined;
 
   ctx.set('content-type', file.mediaType.startsWith('text/') ? `${file.mediaType}; charset=utf-8` : file.mediaType);
-  ctx.set('content-disposition', inlineDisposition(filename));
+  ctx.set('content-disposition', contentDisposition(filename, { attachment }));
   ctx.body = createReadStream(resolveFilePath(userId, relPath));
 
   if (file.sizeBytes !== null) {
     ctx.length = file.sizeBytes;
   }
 });
+
+export function createFilesMiddleware(): (ctx: Context, next: Next) => Promise<void> {
+  const routes = filesRouter.routes() as unknown as (ctx: Context, next: () => Promise<void>) => Promise<void>;
+
+  return async (ctx, next) => {
+    if (ctx.path !== '/files' && !ctx.path.startsWith('/files/')) {
+      await next();
+
+      return;
+    }
+
+    try {
+      await routes(ctx, async () => {});
+    } catch (error) {
+      console.error('[files] unhandled error:', error);
+      sendError(ctx, 500, 'internal_error', 'Internal error');
+
+      return;
+    }
+
+    if (ctx.status === 404 && ctx.body === undefined) {
+      sendError(ctx, 404, 'not_found', `No such endpoint: ${ctx.method} ${ctx.path}`);
+    }
+  };
+}
 
 // --------------------------------------------------------------------------
 // Secret provisioning: the trusted window (§2 ставка 4). The GET exposes

@@ -66,6 +66,44 @@
   text-decoration: none;
 }
 
+/* A file row is the <li> itself: the navigation link stretches, the download
+   icon sits at the edge — a nested <a> inside <Link> would be invalid HTML. */
+.fileRow {
+  flex-wrap: nowrap;
+  align-items: center;
+  padding-right: 8px;
+}
+
+.rowLink {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 12px;
+  flex: 1;
+  min-width: 0;
+  color: var(--text);
+  text-decoration: none;
+}
+
+.rowLink:hover {
+  text-decoration: none;
+}
+
+.rowDownload {
+  flex-shrink: 0;
+  padding: 4px 8px;
+  border-radius: 6px;
+  color: var(--text-dim);
+  font-size: 15px;
+  text-decoration: none;
+}
+
+.rowDownload:hover {
+  color: var(--accent);
+  background: var(--bg);
+  text-decoration: none;
+}
+
 .icon {
   color: var(--text-dim);
   font-size: 14px;
@@ -131,6 +169,21 @@
   color: var(--accent);
   font-size: 12px;
   font-family: ui-monospace, monospace;
+}
+
+.download {
+  margin-left: auto;
+  padding: 4px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--accent);
+  font-size: 13px;
+  text-decoration: none;
+}
+
+.download:hover {
+  border-color: var(--accent);
+  text-decoration: none;
 }
 
 .card {

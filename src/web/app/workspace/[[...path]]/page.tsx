@@ -33,6 +33,15 @@ function workspaceHref(relPath: string): string {
   return relPath ? `/workspace/${relPath.split('/').map(encodeURIComponent).join('/')}` : '/workspace';
 }
 
+// The raw twin of workspaceHref: /files/<path> streams the bytes (inline);
+// {download: true} makes the browser save the file. Always plain hrefs —
+// downloading is the browser's job, never fetch+blob.
+function filesHref(relPath: string, options?: { download?: boolean }): string {
+  const base = `/files/${relPath.split('/').map(encodeURIComponent).join('/')}`;
+
+  return options?.download ? `${base}?download=1` : base;
+}
+
 function formatSize(bytes: number | null): string {
   if (bytes === null) {
     return '—';
@@ -108,8 +117,10 @@ function DirListing({ relPath, directories, files }: { relPath: string; director
         </li>
       ))}
       {files.map(file => (
-        <li key={`file:${file.path}`}>
-          <Link className={styles.row} href={workspaceHref(file.path)}>
+        // Nested <a> is invalid HTML, so the bordered row is the <li> itself:
+        // the navigation link and the download icon sit side by side in it.
+        <li key={`file:${file.path}`} className={`${styles.row} ${styles.fileRow}`}>
+          <Link className={styles.rowLink} href={workspaceHref(file.path)}>
             <span className={styles.icon}>📄</span>
             <span className={styles.name}>{baseName(file.path)}</span>
             {file.title ? <span className={styles.fileTitle}>{file.title}</span> : null}
@@ -119,6 +130,14 @@ function DirListing({ relPath, directories, files }: { relPath: string; director
             </span>
             {file.description ? <span className={styles.description}>{file.description}</span> : null}
           </Link>
+          <a
+            className={styles.rowDownload}
+            href={filesHref(file.path, { download: true })}
+            title="Скачать"
+            aria-label={`Скачать ${baseName(file.path)}`}
+          >
+            ⬇
+          </a>
         </li>
       ))}
     </ul>
@@ -137,10 +156,10 @@ function pickViewer(file: WorkspaceFileMeta): 'markdown' | null {
 
 function MarkdownViewer({ relPath }: { relPath: string }) {
   const raw = useQuery({
-    queryKey: ['workspace-raw', relPath],
+    queryKey: ['workspace-file', relPath],
     queryFn: async () => {
       // Plain fetch, not apiFetch: the body is raw text, not a JSON envelope.
-      const response = await fetch(`/api/workspace/raw?path=${encodeURIComponent(relPath)}`, {
+      const response = await fetch(filesHref(relPath), {
         credentials: 'same-origin',
       });
 
@@ -181,6 +200,9 @@ function FileView({ file }: { file: WorkspaceFileMeta }) {
           <span className={styles.mediaType}>{file.mediaType}</span>
           <span className={styles.size}>{formatSize(file.sizeBytes)}</span>
           {file.modifiedAt ? <span className={styles.time}>{formatDateTime(new Date(file.modifiedAt))}</span> : null}
+          <a className={styles.download} href={filesHref(file.path, { download: true })}>
+            Скачать
+          </a>
         </div>
         {file.description ? <p className={styles.description}>{file.description}</p> : null}
       </header>

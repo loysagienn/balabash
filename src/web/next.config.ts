@@ -1,9 +1,9 @@
 import path from 'node:path';
 import type { NextConfig } from 'next';
 
-// In production nginx routes /api/ to the core process (port 3040) before a
-// request ever reaches Next; this rewrite only serves direct access to the
-// Next port — dev runs and smoke tests without nginx in front.
+// In production nginx routes /api/ and /files/ to the core process (port
+// 3040) before a request ever reaches Next; these rewrites only serve direct
+// access to the Next port — dev runs and smoke tests without nginx in front.
 const CORE_HTTP_PORT = process.env.HTTP_PORT || '3040';
 
 const nextConfig: NextConfig = {
@@ -26,6 +26,10 @@ const nextConfig: NextConfig = {
       {
         source: '/api/:path*',
         destination: `http://127.0.0.1:${CORE_HTTP_PORT}/api/:path*`,
+      },
+      {
+        source: '/files/:path*',
+        destination: `http://127.0.0.1:${CORE_HTTP_PORT}/files/:path*`,
       },
     ];
   },

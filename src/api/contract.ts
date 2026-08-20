@@ -87,8 +87,9 @@ export type ThreadEventsResponse = {
 // data/workspace/<userId>/files. GET /api/workspace/node?path=<rel> answers
 // with a polymorphic node — a directory listing or one file's metadata — so
 // a deep link learns what it points at in one request. Raw content streams
-// separately: GET /api/workspace/raw?path=<rel> (bytes + honest content-type,
-// no JSON envelope — not described here).
+// from the root namespace instead: GET /files/<rel> (bytes + honest
+// content-type, no JSON envelope — not described here). Inline by default,
+// ?download=1 answers as an attachment.
 
 export type WorkspaceFileMeta = {
   // Relative path inside the file area — the shared currency of the API,
