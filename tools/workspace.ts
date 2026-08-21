@@ -23,7 +23,8 @@ import { z } from 'zod';
 import { ToolError, toErrorResult, toStructuredResult } from '../src/capabilities/tool-result.ts';
 import type { LocalToolFilesApi } from '../src/capabilities/local-tool-source.ts';
 import { guessContentType, sanitizeRelPath } from '../src/workspace/files.ts';
-import { callerUserId, childEnv, ensureWorkspace, runChild, serveMcp, type Workspace } from './workspace_shared.ts';
+import { queryInChild } from '../src/workspace/child.ts';
+import { callerUserId, ensureWorkspace, serveMcp, type Workspace } from './workspace_shared.ts';
 
 // data_query result caps: the query result is the model's window into the
 // data — it must stay a window, not a firehose.
@@ -32,88 +33,33 @@ const QUERY_MAX_BYTES = 50_000;
 const QUERY_TIMEOUT_MS = 60_000;
 
 // ---------------------------------------------------------------------------
-// data_query: any SQL against workspace.sqlite, executed in a node child.
-// A row-returning statement (SELECT/RETURNING/PRAGMA) streams rows up to the
-// caps; anything else runs through exec() (multi-statement scripts work) and
-// reports the change count.
+// data_query: any SQL against workspace.sqlite, executed in a node child
+// (the shared runner in src/workspace/child.ts). A row-returning statement
+// (SELECT/RETURNING/PRAGMA) streams rows up to the caps; anything else runs
+// through exec() (multi-statement scripts work) and reports the change count.
 // ---------------------------------------------------------------------------
 
-// Plain CommonJS source for `node -e`; the SQL arrives via argv, caps via env.
-const QUERY_RUNNER = `
-const { DatabaseSync } = require('node:sqlite');
-const sql = process.argv[1];
-const maxRows = Number(process.env.QUERY_MAX_ROWS);
-const maxBytes = Number(process.env.QUERY_MAX_BYTES);
-try {
-  const db = new DatabaseSync(process.env.WORKSPACE_DB);
-  db.exec('PRAGMA busy_timeout = 5000');
-  const stmt = db.prepare(sql);
-  if (stmt.columns().length > 0) {
-    const rows = [];
-    let bytes = 2;
-    let truncated = false;
-    for (const row of stmt.iterate()) {
-      if (rows.length >= maxRows) { truncated = true; break; }
-      const clean = {};
-      for (const key of Object.keys(row)) {
-        const value = row[key];
-        if (value instanceof Uint8Array) clean[key] = '<blob ' + value.byteLength + ' bytes>';
-        else if (typeof value === 'bigint') clean[key] = Number(value);
-        else clean[key] = value;
-      }
-      const encoded = JSON.stringify(clean);
-      if (rows.length > 0 && bytes + encoded.length > maxBytes) { truncated = true; break; }
-      rows.push(clean);
-      bytes += encoded.length + 1;
-    }
-    const out = { rows, rowCount: rows.length, truncated };
-    if (truncated) out.note = 'Result truncated (caps: ' + maxRows + ' rows / ~' + maxBytes + ' bytes). Narrow with WHERE/LIMIT/OFFSET or aggregate.';
-    process.stdout.write(JSON.stringify(out));
-  } else {
-    const before = db.prepare('SELECT total_changes() AS c').get().c;
-    db.exec(sql);
-    const after = db.prepare('SELECT total_changes() AS c').get().c;
-    process.stdout.write(JSON.stringify({ ok: true, changes: after - before }));
-  }
-} catch (error) {
-  process.stdout.write(JSON.stringify({ sqlError: String((error && error.message) || error) }));
-  process.exitCode = 3;
-}
-`;
-
 async function runQuery(workspace: Workspace, sql: string): Promise<Record<string, unknown>> {
-  const outcome = await runChild(process.execPath, ['-e', QUERY_RUNNER, sql], {
-    cwd: workspace.filesDir,
-    env: childEnv(workspace.dbPath, {
-      QUERY_MAX_ROWS: String(QUERY_MAX_ROWS),
-      QUERY_MAX_BYTES: String(QUERY_MAX_BYTES),
-    }),
+  const outcome = await queryInChild(workspace.dbPath, workspace.filesDir, sql, {
+    maxRows: QUERY_MAX_ROWS,
+    maxBytes: QUERY_MAX_BYTES,
     timeoutMs: QUERY_TIMEOUT_MS,
-    // The runner emits at most ~maxBytes of rows plus envelope; leave headroom.
-    maxOutputChars: QUERY_MAX_BYTES * 4,
   });
 
-  if (outcome.timedOut) {
-    throw new ToolError(`SQL query timed out after ${QUERY_TIMEOUT_MS / 1000}s and was killed.`, {
-      kind: 'timeout',
-    });
+  switch (outcome.status) {
+    case 'ok':
+      return outcome.result;
+    case 'timeout':
+      throw new ToolError(`SQL query timed out after ${QUERY_TIMEOUT_MS / 1000}s and was killed.`, {
+        kind: 'timeout',
+      });
+    case 'sql_error':
+      throw new ToolError(outcome.message, { kind: 'sql_error' });
+    case 'failed':
+      throw new ToolError(
+        `SQL executor failed (exit code ${outcome.exitCode}): ${outcome.stderr.slice(0, 500) || 'no output'}`,
+      );
   }
-
-  let parsed: Record<string, unknown>;
-
-  try {
-    parsed = JSON.parse(outcome.stdout) as Record<string, unknown>;
-  } catch {
-    throw new ToolError(
-      `SQL executor failed (exit code ${outcome.exitCode}): ${outcome.stderr.slice(0, 500) || 'no output'}`,
-    );
-  }
-
-  if (typeof parsed.sqlError === 'string') {
-    throw new ToolError(parsed.sqlError, { kind: 'sql_error' });
-  }
-
-  return parsed;
 }
 
 // ---------------------------------------------------------------------------

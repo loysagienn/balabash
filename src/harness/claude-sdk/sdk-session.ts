@@ -10,6 +10,7 @@
 // pushes arriving before the session is up are queued, and `turns` awaits
 // the setup before iterating.
 
+import path from 'node:path';
 import type { AgentSdkSession, SdkSessionOptions, SdkTurn, ToolsApi } from '../../core/contract.ts';
 import { startClaudeSession } from './session.ts';
 import type { ClaudeSession } from './session.ts';
@@ -65,8 +66,17 @@ export function createClaudeSession(options: SdkSessionOptions, deps: SdkSession
       allowDangerouslySkipPermissions: true,
       // Bridge-only: the inner session gets the Balabash bridge and nothing
       // else. Full: the native claude_code preset stays on and project-level
-      // settings (CLAUDE.md, .claude/) load from cwd.
-      ...(full ? { settingSources: ['project' as const] } : { tools: [], settingSources: [] }),
+      // settings (CLAUDE.md, .claude/) load from cwd — plus the repo's
+      // platform plugin (skills like balabash:app-builder): workbench agents
+      // run with cwd in the workspace file area, where repo skills are
+      // invisible, so the plugin path delivers them (design №15 of /apps).
+      // skipMcpDiscovery: the MCP surface stays owned by the Balabash bridge.
+      ...(full
+        ? {
+            settingSources: ['project' as const],
+            plugins: [{ type: 'local' as const, path: path.resolve('plugins', 'balabash'), skipMcpDiscovery: true }],
+          }
+        : { tools: [], settingSources: [] }),
       strictMcpConfig: true,
       mcpServers: { balabash: { type: 'sdk', name: 'balabash', instance: bridge.server } },
     });

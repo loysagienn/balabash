@@ -54,6 +54,21 @@ export const config = {
     return Number(requireEnv('HTTP_PORT'));
   },
 
+  // The apps execution domain (balabash.app): the host the core branches on
+  // to serve the /apps runtime. Optional — without it the apps surface does
+  // not exist at all.
+  get appsDomain(): string | null {
+    return process.env.APPS_DOMAIN?.trim().toLowerCase() || null;
+  },
+
+  // Secret of the stateless apps cookie (HMAC over {userId, exp, kind});
+  // deliberately its OWN secret — the cookie is never interchangeable with
+  // session machinery even if one of the secrets leaks. Read lazily: only
+  // the apps surfaces touch it, a boot without APPS_DOMAIN never needs it.
+  get appsCookieSecret(): string {
+    return requireEnv('APPS_COOKIE_SECRET');
+  },
+
   // Pepper mixed into web-session token hashes: a DB leak alone is not
   // enough to forge a session cookie.
   get sessionPepper(): string {

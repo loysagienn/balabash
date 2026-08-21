@@ -1,0 +1,13 @@
+{
+  "name": "Template App",
+  "description": "Starter mini-app: copy this folder, rename, and edit. Shows local state plus a data call that works with zero setup.",
+  "entry": "index.tsx",
+  "styles": ["styles.css"],
+  "api": {
+    "listTables": {
+      "params": {},
+      "statement": "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE '\\_%' ESCAPE '\\' ORDER BY name",
+      "kind": "all"
+    }
+  }
+}
