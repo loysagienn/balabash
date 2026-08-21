@@ -3,6 +3,7 @@
 // Each module still must export only start(ctx); validation happens in
 // startLocalToolSource at boot.
 
+import * as apps from './apps.ts';
 import * as current_datetime from './current_datetime.ts';
 import * as gmail from './gmail.ts';
 import * as http_get from './http_get.ts';
@@ -11,6 +12,7 @@ import * as workspace from './workspace.ts';
 import * as workspace_files from './workspace_files.ts';
 
 export const localToolModules: Record<string, Record<string, unknown>> = {
+  apps,
   current_datetime,
   gmail,
   http_get,

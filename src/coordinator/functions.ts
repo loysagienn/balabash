@@ -36,6 +36,7 @@ import type { DispatchResult, FunctionCall, FunctionDefinition } from '../harnes
 // tool server reaches the coordinator only by being added here.
 const COORDINATOR_BUNDLE: ToolBundle = {
   declared: [
+    'apps',
     'current_datetime',
     'events',
     'gmail',

@@ -1,17 +1,22 @@
 // Shared plumbing of the two workspace tool servers (workspace.ts and
-// workspace_files.ts): caller identity, lazy workspace provisioning, child
-// process execution and the streamable HTTP endpoint scaffolding. Not a tool
-// server itself — deliberately not listed in tools/index.ts.
+// workspace_files.ts): caller identity, lazy workspace provisioning, the
+// streamable HTTP endpoint scaffolding, and the re-exported child execution
+// machinery (owned by src/workspace/child.ts). Not a tool server itself —
+// deliberately not listed in tools/index.ts.
 
 import http from 'node:http';
 import path from 'node:path';
 import fs from 'node:fs/promises';
-import { spawn } from 'node:child_process';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { ToolError } from '../src/capabilities/tool-result.ts';
 import { ensureFilesDb } from '../src/workspace/files.ts';
 import { workspaceRoot } from '../src/workspace/layout.ts';
+
+// Child execution moved to the workspace core (src/workspace/child.ts) so the
+// apps data gateway reuses the same machinery; re-exported here because the
+// tool servers reach shared plumbing through this module.
+export { childEnv, runChild, type ChildOutcome } from '../src/workspace/child.ts';
 
 const WORKSPACE_ROOT = workspaceRoot();
 
@@ -64,89 +69,6 @@ export async function ensureWorkspace(userId: string): Promise<Workspace> {
   ensureFilesDb(workspace.dbPath);
 
   return workspace;
-}
-
-// ---------------------------------------------------------------------------
-// Child processes: data_query and run_script execute in spawned processes —
-// kill-on-timeout works and the app's event loop stays free.
-// ---------------------------------------------------------------------------
-
-// The child sees a minimal environment, not the app's secrets.
-export function childEnv(dbPath: string, extra: Record<string, string> = {}): Record<string, string> {
-  const env: Record<string, string> = {};
-
-  for (const name of ['PATH', 'HOME', 'LANG', 'LC_ALL', 'TZ', 'TMPDIR']) {
-    const value = process.env[name];
-    if (value) env[name] = value;
-  }
-
-  return { ...env, WORKSPACE_DB: dbPath, ...extra };
-}
-
-export type ChildOutcome = {
-  exitCode: number | null;
-  timedOut: boolean;
-  durationMs: number;
-  stdout: string;
-  stdoutTruncated: boolean;
-  stderr: string;
-  stderrTruncated: boolean;
-};
-
-export function runChild(
-  command: string,
-  args: string[],
-  options: { cwd: string; env: Record<string, string>; timeoutMs: number; maxOutputChars: number },
-): Promise<ChildOutcome> {
-  return new Promise((resolve, reject) => {
-    const startedAt = Date.now();
-    const child = spawn(command, args, {
-      cwd: options.cwd,
-      env: options.env,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-
-    let timedOut = false;
-    const timer = setTimeout(() => {
-      timedOut = true;
-      child.kill('SIGKILL');
-    }, options.timeoutMs);
-
-    const buffers = { stdout: '', stderr: '' };
-    const truncated = { stdout: false, stderr: false };
-
-    // Keep consuming (so the pipe never backpressures the child), but stop
-    // buffering past the cap.
-    const collect = (stream: 'stdout' | 'stderr') => (chunk: Buffer) => {
-      if (truncated[stream]) return;
-      buffers[stream] += chunk.toString('utf8');
-      if (buffers[stream].length > options.maxOutputChars) {
-        buffers[stream] = buffers[stream].slice(0, options.maxOutputChars);
-        truncated[stream] = true;
-      }
-    };
-
-    child.stdout.on('data', collect('stdout'));
-    child.stderr.on('data', collect('stderr'));
-
-    child.once('error', error => {
-      clearTimeout(timer);
-      reject(error);
-    });
-
-    child.once('close', exitCode => {
-      clearTimeout(timer);
-      resolve({
-        exitCode,
-        timedOut,
-        durationMs: Date.now() - startedAt,
-        stdout: buffers.stdout,
-        stdoutTruncated: truncated.stdout,
-        stderr: buffers.stderr,
-        stderrTruncated: truncated.stderr,
-      });
-    });
-  });
 }
 
 // ---------------------------------------------------------------------------

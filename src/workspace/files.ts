@@ -71,6 +71,8 @@ export const CONTENT_TYPES_BY_EXTENSION: Record<string, string> = {
   '.tsv': 'text/tab-separated-values',
   '.json': 'application/json',
   '.html': 'text/html',
+  '.css': 'text/css',
+  '.js': 'text/javascript',
   '.xml': 'application/xml',
   '.pdf': 'application/pdf',
   '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',

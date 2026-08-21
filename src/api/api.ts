@@ -18,9 +18,12 @@ import type { Thread, ThreadStatus } from '../core/contract.ts';
 import { WorkspacePathError, listDir, resolveFilePath, sanitizeRelPath, statFile } from '../workspace/files.ts';
 import { getExternalServerSecretRequest, provisionExternalServerSecrets } from '../capabilities/external-secrets.ts';
 import { getOauthClientRequest, provisionOauthClient } from '../capabilities/connections/index.ts';
+import { AppManagementError, listApps, publishApp, unpublishApp } from '../apps/management.ts';
 import { consumeAuthCode } from './auth-codes.ts';
 import { createUserSession, destroySession, getSession } from './session.ts';
 import type {
+  AppsResponse,
+  PublicationResponse,
   LlmRequestsResponse,
   LogoutResponse,
   MeResponse,
@@ -308,6 +311,46 @@ router.get('/threads/:id/events', requireSession, async ctx => {
   };
 
   ctx.body = prepareObject(response);
+});
+
+// --------------------------------------------------------------------------
+// Apps platform: publication management (step 4). The session is the only
+// authorization; a rejected call (bad path/slug, broken manifest, taken
+// slug) is an AppManagementError → 400 with the reason. This is the owner
+// edge — the public edge on the apps domain never shows these details.
+
+router.get('/apps', requireSession, async ctx => {
+  const response: AppsResponse = { apps: await listApps(ctx.state.userId as string) };
+
+  ctx.body = prepareObject(response);
+});
+
+async function handleManagementCall(ctx: Context, call: () => Promise<PublicationResponse>): Promise<void> {
+  try {
+    const response = await call();
+
+    ctx.body = prepareObject(response);
+  } catch (error) {
+    if (error instanceof AppManagementError) {
+      sendError(ctx, 400, 'bad_request', error.message);
+
+      return;
+    }
+
+    throw error;
+  }
+}
+
+router.post('/apps/publish', requireSession, async ctx => {
+  const body = await readJsonBody(ctx);
+
+  await handleManagementCall(ctx, () => publishApp(ctx.state.userId as string, body.path, body.slug));
+});
+
+router.post('/apps/unpublish', requireSession, async ctx => {
+  const body = await readJsonBody(ctx);
+
+  await handleManagementCall(ctx, () => unpublishApp(ctx.state.userId as string, body.path, body.slug));
 });
 
 // --------------------------------------------------------------------------

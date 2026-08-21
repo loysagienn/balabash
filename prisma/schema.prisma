@@ -313,6 +313,23 @@ model Project {
   @@map("projects")
 }
 
+// Registry of app publications (apps platform, design №9): the ONLY fact
+// postgres holds about an app. Existence is the folder in the workspace file
+// area; this row merely makes it reachable at https://<appsDomain>/<slug>
+// without authorization. Folder gone → the public URL is an honest 404;
+// unpublish deletes the row. One publication per app folder: changing the
+// slug is unpublish + publish.
+model AppPublication {
+  id        String   @id @default(uuid())
+  slug      String   @unique // [a-z0-9-], reserved names rejected at publish
+  userId    String   @map("user_id")
+  path      String // workspace-relative path of the app folder
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([userId, path])
+  @@map("app_publications")
+}
+
 model File {
   id               String    @id @default(uuid())
   bucket           String

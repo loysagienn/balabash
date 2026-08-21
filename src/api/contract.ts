@@ -187,3 +187,34 @@ export type ProvisionSecretsRequest = {
 export type ProvisionSecretsResponse = {
   ok: true;
 };
+
+// --------------------------------------------------------------------------
+// Apps platform: publication management (GET /api/apps, POST
+// /api/apps/publish, POST /api/apps/unpublish).
+
+export type AppListingView = {
+  path: string;
+  name: string | null;
+  description: string | null;
+  manifestError: string | null;
+  slug: string | null;
+};
+
+export type AppsResponse = {
+  apps: AppListingView[];
+};
+
+export type PublishAppRequest = {
+  path: string;
+  slug: string;
+};
+
+export type UnpublishAppRequest = {
+  path?: string;
+  slug?: string;
+};
+
+export type PublicationResponse = {
+  slug: string;
+  path: string;
+};
