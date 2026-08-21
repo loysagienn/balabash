@@ -14,6 +14,7 @@ export const VENDOR_MODULES: Record<string, string> = {
   'react/jsx-runtime': 'react-jsx-runtime.js',
   'react-dom': 'react-dom.js',
   'react-dom/client': 'react-dom-client.js',
+  '@tanstack/react-query': 'tanstack-react-query.js',
   'balabash/data': 'balabash-data.js',
 };
 

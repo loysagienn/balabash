@@ -44,6 +44,7 @@ const VENDOR_PACKAGES = [
   { file: 'react-jsx-runtime.js', pkg: 'react/jsx-runtime', ns: 'jsxRuntime' },
   { file: 'react-dom.js', pkg: 'react-dom', ns: 'reactDom' },
   { file: 'react-dom-client.js', pkg: 'react-dom/client', ns: 'reactDomClient' },
+  { file: 'tanstack-react-query.js', pkg: '@tanstack/react-query', ns: 'tanstackReactQuery' },
 ];
 
 async function buildAppsVendor(NODE_ENV, APP_VERSION) {

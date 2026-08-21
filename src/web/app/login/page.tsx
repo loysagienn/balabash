@@ -21,7 +21,18 @@ function LoginForm() {
     mutationFn: (body: AuthRequest) => apiFetch<MeResponse>('/api/auth', { method: 'POST', body }),
     onSuccess: me => {
       queryClient.setQueryData(['me'], me);
-      router.replace(sanitizeNextPath(searchParams.get('next')));
+
+      const next = sanitizeNextPath(searchParams.get('next'));
+
+      // /apps/* lives outside the Next app (Koa handoff to the apps domain).
+      // A client-side router.replace would RSC-fetch it, hit the cross-origin
+      // 302 to balabash.app/auth, fail on CORS and burn a one-time handoff
+      // token before falling back to a full navigation — so go hard right away.
+      if (next === '/apps' || next.startsWith('/apps/')) {
+        window.location.assign(next);
+      } else {
+        router.replace(next);
+      }
     },
   });
 
