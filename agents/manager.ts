@@ -44,6 +44,7 @@ export const agent = {
     'storage',
     'storage_download_file',
     'workspace',
+    'yandex_ads',
   ],
   agents: ['browser'],
   notification: 'normal',

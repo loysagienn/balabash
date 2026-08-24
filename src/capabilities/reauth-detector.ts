@@ -49,13 +49,20 @@ export function startReauthDetector(): Consumer {
 
       const server = typeof event.payload.server === 'string' ? event.payload.server : 'unknown';
       const error = typeof event.payload.error === 'string' ? event.payload.error : '';
+      const account = typeof event.payload.account === 'string' ? event.payload.account : null;
+      const name = typeof event.payload.name === 'string' ? event.payload.name : null;
+      const identity = typeof event.payload.identity === 'string' ? event.payload.identity : null;
+
+      // The sickness is addressed: name the account, not just the service.
+      const who = name && name !== server ? `${server} / "${name}"${identity ? ` <${identity}>` : ''}` : server;
+      const accountHint = account ? ` Pass account: "${account}" when issuing the link.` : '';
 
       const thread = await startThread({
         userId,
         parentThreadId: main.id,
         agent: AUTH_AGENT,
-        title: `Re-authorize ${server}`,
-        input: `Authorization for the "${server}" integration has expired${error ? ` (${error})` : ''}. Walk the user through re-authorizing it.`,
+        title: `Re-authorize ${who}`,
+        input: `Authorization for ${who} (the "${server}" integration${account ? `, account "${account}"` : ''}) has expired${error ? ` (${error})` : ''}. Walk the user through re-authorizing it.${accountHint}`,
         icon: declaration.icon,
         actor: 'system',
       });
@@ -67,7 +74,7 @@ export function startReauthDetector(): Consumer {
         threadId: thread.id,
         payload: {
           level: 'normal',
-          text: `Authorization for "${server}" has expired — re-authorize it in the new topic.`,
+          text: `Authorization for ${who} has expired — re-authorize it in the new topic.`,
         },
       });
     },

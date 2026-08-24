@@ -108,10 +108,10 @@ export function createInteractiveAuthProvider(
 }
 
 // Used by background MCP transports. It serves stored tokens and saves
-// refreshes, but deliberately refuses to start an interactive flow.
-export function createTransportAuthProvider(serverName: string, userId: string): OAuthClientProvider {
-  const getConnection = () =>
-    prisma.connection.findUnique({ where: { userId_server: { userId, server: serverName } } });
+// refreshes, but deliberately refuses to start an interactive flow. Addressed
+// by connection row id: one provider serves exactly one account's tokens.
+export function createTransportAuthProvider(connection: { id: string; server: string }): OAuthClientProvider {
+  const getConnection = () => prisma.connection.findUnique({ where: { id: connection.id } });
 
   return {
     get redirectUrl() {
@@ -121,8 +121,8 @@ export function createTransportAuthProvider(serverName: string, userId: string):
       return clientMetadata();
     },
     state: () => crypto.randomBytes(24).toString('base64url'),
-    clientInformation: () => loadClientInformation(serverName),
-    saveClientInformation: info => saveClientInformation(serverName, info),
+    clientInformation: () => loadClientInformation(connection.server),
+    saveClientInformation: info => saveClientInformation(connection.server, info),
     tokens: async () => {
       const connection = await getConnection();
 

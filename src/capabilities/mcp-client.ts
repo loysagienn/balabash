@@ -22,6 +22,10 @@ export type ToolFunction = {
 export type ConnectedServer = {
   name: string;
   origin: 'file' | 'external';
+  // Connection row id and account slug backing this client — present on
+  // user-auth servers only.
+  connectionId?: string;
+  accountKey?: string;
   client: Client;
   close: () => Promise<void>;
   functions: ToolFunction[];
@@ -73,12 +77,15 @@ export async function connectExternalServer(
   };
 }
 
-// Connects one user's account of an auth: "user" server: the transport auth
-// provider serves that user's stored tokens and refreshes them; an
-// UnauthorizedError here means the user must re-authorize.
-export async function connectUserServer(server: UserAuthServer, userId: string): Promise<ConnectedServer> {
+// Connects one account of an auth: "user" server, addressed by its connection
+// row: the transport auth provider serves that row's stored tokens and
+// refreshes them; an UnauthorizedError here means the user must re-authorize.
+export async function connectUserServer(
+  server: UserAuthServer,
+  connection: { id: string; server: string; accountKey: string },
+): Promise<ConnectedServer> {
   const transport = new StreamableHTTPClientTransport(new URL(server.url), {
-    authProvider: createTransportAuthProvider(server.name, userId),
+    authProvider: createTransportAuthProvider(connection),
   });
   const client = new Client(CLIENT_INFO);
 
@@ -87,6 +94,8 @@ export async function connectUserServer(server: UserAuthServer, userId: string):
   return {
     name: server.name,
     origin: server.origin,
+    connectionId: connection.id,
+    accountKey: connection.accountKey,
     client,
     close: () => client.close(),
     functions: await listServerFunctions(server.name, client, server.toolOverrides),

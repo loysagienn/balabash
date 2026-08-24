@@ -150,16 +150,23 @@ model Connection {
   userId       String   @map("user_id")
   threadId     String?  @map("thread_id") // thread that initiated the flow; connection.* events are addressed to it
   server       String // mcp-servers config name
+  accountKey   String   @map("account_key") // immutable mnemonic slug — the account's address within (user, server)
+  displayName  String   @map("display_name") // renameable human-readable label
   status       String // 'pending' | 'connected' | 'reauthorization_required'
+  identityId   String?  @map("identity_id") // machine part of the provider identity (identity probe result)
+  identity     Json? // full identity probe answer (human-readable part included)
   connectNonce String?  @unique @map("connect_nonce") // token of the one-time /connect link
   pendingState String?  @unique @map("pending_state") // OAuth state of the in-flight flow
   pending      Json? // in-flight flow data: link expiry, PKCE code verifier
   tokens       Json? // OAuth tokens as issued by the provider
-  metadata     Json? // non-secret: granted scope, account label
+  metadata     Json? // non-secret: granted scope
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
 
-  @@unique([userId, server])
+  @@unique([userId, server, accountKey])
+  // Twin guard: one row per provider identity within (user, server). Postgres
+  // treats NULLs as distinct — identity-less rows never conflict.
+  @@unique([userId, server, identityId])
   @@map("connections")
 }
 
