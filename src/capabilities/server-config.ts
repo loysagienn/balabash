@@ -18,6 +18,22 @@ export type ToolOverride = {
   disabled?: boolean;
 };
 
+// Identity probe of a user-auth server: the provider's own answer to "who is
+// authorized here", fetched by the platform with a fresh access token right
+// after authorization. The service declares where to ask and which response
+// fields carry the stable machine id and the human-readable label; declaring
+// a probe is the precondition for holding multiple accounts of the service.
+export type IdentityProbeConfig = {
+  // GET endpoint answering with JSON describing the authorized account.
+  url: string;
+  // Top-level response field with the stable account id (machine part).
+  idField: string;
+  // Top-level response field with the display label (login/email); optional.
+  labelField?: string;
+  // Authorization header scheme; providers differ (Yandex wants "OAuth").
+  authScheme?: 'Bearer' | 'OAuth';
+};
+
 export type ExternalServerConfig =
   | {
       transport: 'stdio';
@@ -48,6 +64,9 @@ export type ExternalServerConfig =
       // non-secret, versioned capability configuration.
       scope?: string;
       authorizationParams?: Record<string, string>;
+      // Identity probe — required for the service to hold more than one
+      // connected account per user (the multiplicity gate).
+      identityProbe?: IdentityProbeConfig;
       toolOverrides?: Record<string, ToolOverride>;
     };
 
@@ -163,7 +182,38 @@ export function validateExternalServerConfig(raw: unknown, source: string): Exte
     throw new Error(`${source}: "authorizationParams" must be an object with string values`);
   }
 
-  const userAuthorizationKeys = ['clientRegistration', 'scope', 'authorizationParams'] as const;
+  if (raw.identityProbe !== undefined) {
+    if (!isObject(raw.identityProbe)) {
+      throw new Error(`${source}: "identityProbe" must be an object`);
+    }
+
+    const probe = raw.identityProbe;
+
+    if (typeof probe.url !== 'string' || !probe.url) {
+      throw new Error(`${source}: "identityProbe.url" must be a non-empty string`);
+    }
+
+    if (typeof probe.idField !== 'string' || !probe.idField) {
+      throw new Error(`${source}: "identityProbe.idField" must be a non-empty string`);
+    }
+
+    if (probe.labelField !== undefined && (typeof probe.labelField !== 'string' || !probe.labelField)) {
+      throw new Error(`${source}: "identityProbe.labelField" must be a non-empty string`);
+    }
+
+    if (probe.authScheme !== undefined && probe.authScheme !== 'Bearer' && probe.authScheme !== 'OAuth') {
+      throw new Error(`${source}: "identityProbe.authScheme" must be "Bearer" or "OAuth"`);
+    }
+
+    const knownKeys = ['url', 'idField', 'labelField', 'authScheme'];
+    const unknownKeys = Object.keys(probe).filter(key => !knownKeys.includes(key));
+
+    if (unknownKeys.length) {
+      throw new Error(`${source}: "identityProbe" has unknown keys: ${unknownKeys.map(key => `"${key}"`).join(', ')}`);
+    }
+  }
+
+  const userAuthorizationKeys = ['clientRegistration', 'scope', 'authorizationParams', 'identityProbe'] as const;
 
   if (raw.auth !== 'user' && userAuthorizationKeys.some(key => raw[key] !== undefined)) {
     throw new Error(`${source}: ${userAuthorizationKeys.map(key => `"${key}"`).join(', ')} require "auth": "user"`);

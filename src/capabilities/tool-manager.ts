@@ -12,10 +12,16 @@ import type { JsonObject, JsonValue, ToolResult } from '../core/contract.ts';
 import { localToolModules } from '../../tools/index.ts';
 import { connectExternalServer, connectUserServer, type ConnectedServer, type ToolFunction } from './mcp-client.ts';
 import { startLocalToolSource, type LocalToolContext, type LocalToolSource } from './local-tool-source.ts';
-import { readExternalServerConfigs, type ExternalServerConfig, type ToolOverride } from './server-config.ts';
+import {
+  readExternalServerConfigs,
+  type ExternalServerConfig,
+  type IdentityProbeConfig,
+  type ToolOverride,
+} from './server-config.ts';
 import { resolveExternalServerSecrets } from './server-secrets.ts';
 import { runToolHandler } from './tool-result.ts';
 import { listUserConnections, markReauthorizationRequired } from './connections/index.ts';
+import { backfillConnectionIdentity, identityLabel } from './connections/identity.ts';
 
 // MCP SDK defaults to 60s per request; deep-research-style tools legitimately
 // run for minutes. Progress notifications reset the clock when a server sends
@@ -23,6 +29,17 @@ import { listUserConnections, markReauthorizationRequired } from './connections/
 const TOOL_CALL_TIMEOUT_MS = 10 * 60_000;
 
 export const SERVER_NAME_PATTERN = /^[a-z][a-z0-9_]*$/;
+
+// The platform-owned account parameter injected into every tool of a
+// user-auth server: the model addresses one connected account per call, the
+// platform resolves the slug to a client and strips the parameter before the
+// call crosses the module boundary. The name is reserved — a user-auth server
+// must not declare it itself.
+export const ACCOUNT_PARAMETER = 'account';
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
 
 // Names a server tool must not take: the coordinator's static functions
 // share the same flat function namespace (the builtin pull tools are covered
@@ -119,11 +136,26 @@ export type UserAuthServer = {
   clientRegistration: 'dynamic' | 'manual';
   scope: string | null;
   authorizationParams: Record<string, string> | null;
+  // Declared identity probe — the precondition for multiple accounts.
+  identityProbe: IdentityProbeConfig | null;
   toolOverrides: Record<string, ToolOverride> | undefined;
 };
 
 const userAuthServers = new Map<string, UserAuthServer>();
-const userServers = new Map<string, Map<string, ConnectedServer>>();
+
+// Per-user clients: userId → server name → accountKey → client. Accounts of
+// one server share a single function set — the canonical list lives on the
+// first live client of the group (see ensureUserServers).
+type UserServerAccounts = Map<string, ConnectedServer>;
+
+const userServers = new Map<string, Map<string, UserServerAccounts>>();
+
+// The canonical client of a server group: the one whose function list is the
+// group's exposed set. Map iteration order is insertion order, so this is the
+// first live account.
+function canonicalClient(accounts: UserServerAccounts): ConnectedServer | null {
+  return accounts.values().next().value ?? null;
+}
 
 export function getUserAuthServer(serverName: string): UserAuthServer | null {
   return userAuthServers.get(serverName) ?? null;
@@ -133,69 +165,194 @@ export function listUserAuthServers(): UserAuthServer[] {
   return [...userAuthServers.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
-export function dropUserClient(serverName: string, userId: string): void {
-  const clients = userServers.get(userId);
-  const client = clients?.get(serverName);
+export function dropUserClient(serverName: string, userId: string, accountKey: string): void {
+  const groups = userServers.get(userId);
+  const accounts = groups?.get(serverName);
+  const client = accounts?.get(accountKey);
 
-  if (!clients || !client) {
+  if (!groups || !accounts || !client) {
     return;
   }
 
-  clients.delete(serverName);
+  accounts.delete(accountKey);
+
+  if (!accounts.size) {
+    groups.delete(serverName);
+  }
+
   void client.close().catch(() => {});
 }
 
+type ConnectionRow = Awaited<ReturnType<typeof listUserConnections>>[number];
+
 // Lazily connects the user's authorized servers before tool definitions are
-// handed out. A failed refresh downgrades the connection to
-// reauthorization_required; transient errors are logged and retried on the
-// next turn.
-async function ensureUserServers(userId: string): Promise<void> {
+// handed out, and returns the user's connection rows for the account surface.
+// A failed refresh downgrades the connection to reauthorization_required;
+// transient errors are logged and retried on the next turn.
+async function ensureUserServers(userId: string): Promise<ConnectionRow[]> {
   if (!userAuthServers.size) {
-    return;
+    return [];
   }
 
   const rows = await listUserConnections(userId);
-  const connectedNames = new Set(rows.filter(row => row.status === 'connected').map(row => row.server));
 
   for (const server of userAuthServers.values()) {
-    if (userServers.get(userId)?.has(server.name) || !connectedNames.has(server.name)) {
-      continue;
-    }
+    const connectedRows = rows.filter(row => row.server === server.name && row.status === 'connected');
 
-    try {
-      const connected = await connectUserServer(server, userId);
-      const taken = new Set(
-        [...servers.values(), ...(userServers.get(userId)?.values() ?? [])].flatMap(existing =>
-          existing.functions.map(fn => fn.functionName),
-        ),
-      );
-      const collisions = connected.functions.filter(
-        toolFunction => taken.has(toolFunction.functionName) || isReservedFunctionName(toolFunction.functionName),
-      );
-
-      if (collisions.length) {
-        console.warn(
-          `[tools] "${server.name}" for user ${userId}: dropped colliding tools ${collisions.map(fn => fn.functionName).join(', ')}`,
-        );
-        connected.functions = connected.functions.filter(fn => !collisions.includes(fn));
+    for (const row of connectedRows) {
+      if (userServers.get(userId)?.get(server.name)?.has(row.accountKey)) {
+        continue;
       }
 
-      const clients = userServers.get(userId) ?? new Map<string, ConnectedServer>();
+      try {
+        const connected = await connectUserServer(server, row);
 
-      clients.set(server.name, connected);
-      userServers.set(userId, clients);
+        // The account parameter is platform-owned: a server declaring it
+        // itself would clash with the injected one.
+        const reserving = connected.functions.filter(fn =>
+          isObject(fn.inputSchema.properties) ? ACCOUNT_PARAMETER in fn.inputSchema.properties : false,
+        );
 
-      console.log(
-        `[tools] connected "${server.name}" for user ${userId}; tools: ${connected.functions.map(fn => fn.functionName).join(', ') || '(none)'}`,
-      );
-    } catch (error) {
-      if (error instanceof UnauthorizedError) {
-        await markReauthorizationRequired(server.name, userId, getErrorMessage(error));
-      } else {
-        console.error(`[tools] failed to connect "${server.name}" for user ${userId}:`, error);
+        if (reserving.length) {
+          void connected.close().catch(() => {});
+          throw new Error(
+            `tools ${reserving.map(fn => fn.functionName).join(', ')} declare the platform-reserved "${ACCOUNT_PARAMETER}" parameter`,
+          );
+        }
+
+        const groups = userServers.get(userId) ?? new Map<string, UserServerAccounts>();
+        const accounts = groups.get(server.name) ?? new Map<string, ConnectedServer>();
+
+        // Concurrent turns can race to connect the same account across the
+        // await above — the loser closes its client instead of leaking it.
+        if (accounts.has(row.accountKey)) {
+          void connected.close().catch(() => {});
+          continue;
+        }
+
+        // Every account's function list is pruned against other servers and
+        // reserved names (siblings of the same server are one function set by
+        // design, not collisions) — so canonical rotation after a drop never
+        // exposes an unpruned list.
+        const siblingFunctions = [...groups.entries()]
+          .filter(([name]) => name !== server.name)
+          .map(([, group]) => canonicalClient(group))
+          .filter((client): client is ConnectedServer => Boolean(client))
+          .flatMap(client => client.functions.map(fn => fn.functionName));
+        const taken = new Set([
+          ...[...servers.values()].flatMap(existing => existing.functions.map(fn => fn.functionName)),
+          ...siblingFunctions,
+        ]);
+        const collisions = connected.functions.filter(
+          toolFunction => taken.has(toolFunction.functionName) || isReservedFunctionName(toolFunction.functionName),
+        );
+
+        if (collisions.length) {
+          console.warn(
+            `[tools] "${server.name}" (${row.accountKey}) for user ${userId}: dropped colliding tools ${collisions.map(fn => fn.functionName).join(', ')}`,
+          );
+          connected.functions = connected.functions.filter(fn => !collisions.includes(fn));
+        }
+
+        accounts.set(row.accountKey, connected);
+        groups.set(server.name, accounts);
+        userServers.set(userId, groups);
+
+        console.log(
+          `[tools] connected "${server.name}" (${row.accountKey}) for user ${userId}; tools: ${connected.functions.map(fn => fn.functionName).join(', ') || '(none)'}`,
+        );
+
+        // Lazy identity backfill: a pre-multi-account row just proved its
+        // tokens work — record who the provider says it is, so the twin
+        // guard and the account surface see it. Off the hot path: the turn
+        // does not wait for the provider round-trip.
+        if (server.identityProbe && !row.identityId) {
+          void backfillConnectionIdentity(server.identityProbe, row.id)
+            .then(backfill => {
+              if (!backfill.ok) {
+                console.warn(
+                  `[tools] identity backfill for "${server.name}" (${row.accountKey}) of user ${userId} failed: ${backfill.reason}`,
+                );
+              }
+            })
+            .catch(() => {});
+        }
+      } catch (error) {
+        if (error instanceof UnauthorizedError) {
+          console.warn(
+            `[tools] "${server.name}" (${row.accountKey}) for user ${userId} is unauthorized — marked for re-authorization`,
+          );
+          await markReauthorizationRequired(row.id, getErrorMessage(error));
+        } else {
+          console.error(`[tools] failed to connect "${server.name}" (${row.accountKey}) for user ${userId}:`, error);
+        }
       }
     }
   }
+
+  return rows;
+}
+
+// One account, described for the model: slug first (the address), then the
+// human name, identity and status.
+function describeAccount(row: ConnectionRow): string {
+  const label = identityLabel(row.identity);
+
+  return `${row.accountKey} — "${row.displayName}"${label ? ` (${label})` : ''}, ${row.status}`;
+}
+
+// The teaching error for a missing or unknown account slug: it names every
+// account of the server — address, name, identity, status — so the model can
+// correct itself or surface the choice to the user. A connected account whose
+// client was dropped mid-turn is called out as such instead of reading as a
+// contradiction ("unknown" yet listed as connected).
+async function accountSelectionError(
+  serverName: string,
+  userId: string,
+  passed: unknown,
+  liveSlugs: ReadonlySet<string>,
+): Promise<string> {
+  const rows = (await listUserConnections(userId)).filter(row => row.server === serverName);
+  const described =
+    rows
+      .map(row => {
+        const base = describeAccount(row);
+
+        return row.status === 'connected' && !liveSlugs.has(row.accountKey)
+          ? `${base} — client not live right now, retry on the next turn`
+          : base;
+      })
+      .join('; ') || '(none)';
+  const intro =
+    typeof passed === 'string'
+      ? `Unknown account "${passed}" for "${serverName}".`
+      : `Tools of "${serverName}" require the "${ACCOUNT_PARAMETER}" parameter naming the account to act as.`;
+
+  return `${intro} Accounts of "${serverName}": ${described}`;
+}
+
+// Injects the platform account parameter into one tool schema: an enum of the
+// live account slugs, so an invalid address is rejected by the schema itself.
+function withAccountParameter(fn: ToolFunction, slugs: string[], described: string[]): ToolFunction {
+  const schema = fn.inputSchema;
+  const properties = isObject(schema.properties) ? schema.properties : {};
+  const required = Array.isArray(schema.required) ? schema.required : [];
+
+  return {
+    ...fn,
+    inputSchema: {
+      ...schema,
+      properties: {
+        ...properties,
+        [ACCOUNT_PARAMETER]: {
+          type: 'string',
+          enum: slugs,
+          description: `The connected account to act as: ${described.join('; ')}`,
+        },
+      },
+      required: [...required, ACCOUNT_PARAMETER],
+    },
+  };
 }
 
 // Pending secret targets for the auth agent: which servers wait for which
@@ -257,6 +414,7 @@ function toUserAuthServer(
     clientRegistration: config.clientRegistration === 'manual' ? 'manual' : 'dynamic',
     scope: config.scope ?? null,
     authorizationParams: config.authorizationParams ?? null,
+    identityProbe: config.identityProbe ?? null,
     toolOverrides: config.toolOverrides,
   };
 }
@@ -404,9 +562,11 @@ export async function loadToolServers(ctx: LocalToolContext): Promise<void> {
   }
 
   // Configs changed wholesale — per-user clients reconnect lazily.
-  for (const clients of userServers.values()) {
-    for (const client of clients.values()) {
-      void client.close().catch(() => {});
+  for (const groups of userServers.values()) {
+    for (const accounts of groups.values()) {
+      for (const client of accounts.values()) {
+        void client.close().catch(() => {});
+      }
     }
   }
   userServers.clear();
@@ -437,7 +597,10 @@ export async function loadToolServers(ctx: LocalToolContext): Promise<void> {
 
 type ToolFunctionEntry = {
   fn: ToolFunction;
+  // Global: the server itself. User: the group's canonical client — the call
+  // site picks the actual account client from `accounts`.
   server: ConnectedServer;
+  accounts?: UserServerAccounts;
   scope: 'global' | 'user';
 };
 
@@ -454,15 +617,16 @@ function getToolFunctionEntry(userId: string, bundle: ToolBundle, functionName: 
     }
   }
 
-  for (const server of userServers.get(userId)?.values() ?? []) {
-    if (!isServerInBundle(bundle, server.name)) {
+  for (const [serverName, accounts] of userServers.get(userId)?.entries() ?? []) {
+    if (!isServerInBundle(bundle, serverName)) {
       continue;
     }
 
-    const fn = server.functions.find(candidate => candidate.functionName === functionName);
+    const canonical = canonicalClient(accounts);
+    const fn = canonical?.functions.find(candidate => candidate.functionName === functionName);
 
-    if (fn) {
-      return { fn, server, scope: 'user' };
+    if (canonical && fn) {
+      return { fn, server: canonical, accounts, scope: 'user' };
     }
   }
 
@@ -487,11 +651,32 @@ export function isServerToolFunction(userId: string, bundle: ToolBundle, functio
 // ones, and builtin servers — connecting pending and per-user servers first.
 export async function getServerToolFunctions(userId: string, bundle: ToolBundle): Promise<ToolFunction[]> {
   await ensurePendingExternalServers();
-  await ensureUserServers(userId);
 
-  const functions = [...servers.values(), ...(userServers.get(userId)?.values() ?? [])]
+  const connectionRows = await ensureUserServers(userId);
+
+  const functions = [...servers.values()]
     .filter(server => isServerInBundle(bundle, server.name))
     .flatMap(server => server.functions);
+
+  // User-auth servers expose one function set per server — the canonical
+  // client's — regardless of how many accounts are connected; every tool
+  // schema gets the platform account parameter.
+  for (const [serverName, accounts] of userServers.get(userId)?.entries() ?? []) {
+    if (!isServerInBundle(bundle, serverName)) {
+      continue;
+    }
+
+    const slugs = [...accounts.keys()];
+    const described = slugs.map(slug => {
+      const row = connectionRows.find(candidate => candidate.server === serverName && candidate.accountKey === slug);
+
+      return row ? describeAccount(row) : slug;
+    });
+
+    for (const fn of canonicalClient(accounts)?.functions ?? []) {
+      functions.push(withAccountParameter(fn, slugs, described));
+    }
+  }
 
   for (const server of builtinToolServers.values()) {
     if (isServerInBundle(bundle, server.name)) {
@@ -532,7 +717,25 @@ export async function callServerTool(
     throw new Error(`Unknown tool "${functionName}"`);
   }
 
-  const { fn, server, scope } = entry;
+  const { fn, scope, accounts } = entry;
+
+  let { server } = entry;
+  let callArgs = args;
+
+  // Resolve the platform account parameter: slug → this account's client. The
+  // parameter never crosses the module boundary — it is stripped here; a
+  // missing or unknown slug teaches instead of guessing.
+  if (scope === 'user') {
+    const { [ACCOUNT_PARAMETER]: accountArg, ...rest } = args;
+    const target = typeof accountArg === 'string' ? accounts?.get(accountArg) : undefined;
+
+    if (!target) {
+      throw new Error(await accountSelectionError(fn.serverName, userId, accountArg, new Set(accounts?.keys() ?? [])));
+    }
+
+    server = target;
+    callArgs = rest;
+  }
 
   let raw: Record<string, unknown>;
 
@@ -542,15 +745,20 @@ export async function callServerTool(
     // as an ownerless row. External servers never see workspace internals.
     const meta = server.origin === 'file' ? { _meta: { balabash: { userId, threadId: ctx.threadId } } } : {};
 
-    raw = (await server.client.callTool({ name: fn.toolName, arguments: args, ...meta }, undefined, {
+    raw = (await server.client.callTool({ name: fn.toolName, arguments: callArgs, ...meta }, undefined, {
       timeout: TOOL_CALL_TIMEOUT_MS,
       resetTimeoutOnProgress: true,
     })) as Record<string, unknown>;
   } catch (error) {
     // Tokens can die between the connect at turn start and the call itself.
     if (scope === 'user' && error instanceof UnauthorizedError) {
-      dropUserClient(fn.serverName, userId);
-      await markReauthorizationRequired(fn.serverName, userId, getErrorMessage(error));
+      if (server.accountKey) {
+        dropUserClient(fn.serverName, userId, server.accountKey);
+      }
+
+      if (server.connectionId) {
+        await markReauthorizationRequired(server.connectionId, getErrorMessage(error));
+      }
 
       throw new Error(
         `Authorization for "${fn.serverName}" has expired. A re-authorization thread is started automatically — tell the user to complete it in the new topic; do not start another auth thread yourself.`,

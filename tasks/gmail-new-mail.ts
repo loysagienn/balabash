@@ -29,6 +29,18 @@ type SearchResult = {
   next_page_token?: string;
 };
 
+// The connected gmail accounts, read from the platform-injected `account`
+// enum of the tool schema — the same contract the models consume. No gmail
+// tool (nothing connected) → empty list, the run is a quiet no-op.
+async function gmailAccounts(ctx: TaskContext): Promise<string[]> {
+  const definitions = await ctx.tools.list();
+  const search = definitions.find(definition => definition.name === 'gmail_search_emails');
+  const properties = (search?.inputSchema as { properties?: Record<string, unknown> } | undefined)?.properties;
+  const account = properties?.account as { enum?: unknown } | undefined;
+
+  return Array.isArray(account?.enum) ? account.enum.filter((slug): slug is string => typeof slug === 'string') : [];
+}
+
 // Newsletter snippets are padded with invisible characters (zero-width
 // joiners, combining grapheme joiner, soft hyphens…) to control the Gmail
 // preview line — strip them and collapse whitespace.
@@ -89,54 +101,64 @@ export async function run(ctx: TaskContext): Promise<void> {
   // it narrows the search; the exact window is enforced by the ms filter below.
   const query = `after:${Math.floor(since / 1000)}`;
 
-  const fresh: SearchMessage[] = [];
-  let pageToken: string | undefined;
+  const accounts = await gmailAccounts(ctx);
+
+  if (!accounts.length) {
+    return; // gmail is not connected — nothing to watch
+  }
+
+  const fresh: Array<SearchMessage & { account: string }> = [];
   let truncated = false;
 
-  for (let page = 0; page < MAX_PAGES; page += 1) {
-    const outcome = await ctx.tools.call('gmail_search_emails', {
-      query,
-      max_results: PAGE_SIZE,
-      ...(pageToken ? { page_token: pageToken } : {}),
-    });
+  for (const account of accounts) {
+    let pageToken: string | undefined;
 
-    if (outcome.isError) {
-      throw new Error(`gmail_search_emails failed: ${JSON.stringify(outcome.structuredContent ?? outcome.content)}`);
-    }
+    for (let page = 0; page < MAX_PAGES; page += 1) {
+      const outcome = await ctx.tools.call('gmail_search_emails', {
+        query,
+        max_results: PAGE_SIZE,
+        account,
+        ...(pageToken ? { page_token: pageToken } : {}),
+      });
 
-    const result = (outcome.structuredContent ?? {}) as SearchResult;
-    const messages = result.messages ?? [];
-    // Results come newest-first: once a page dips below `since`, older pages
-    // have nothing for us.
-    let reachedOlder = false;
-
-    for (const message of messages) {
-      const date = typeof message.date === 'string' ? Date.parse(message.date) : NaN;
-
-      if (Number.isNaN(date)) {
-        continue;
+      if (outcome.isError) {
+        throw new Error(`gmail_search_emails failed: ${JSON.stringify(outcome.structuredContent ?? outcome.content)}`);
       }
 
-      if (date <= since) {
-        reachedOlder = true;
-        continue;
+      const result = (outcome.structuredContent ?? {}) as SearchResult;
+      const messages = result.messages ?? [];
+      // Results come newest-first: once a page dips below `since`, older pages
+      // have nothing for us.
+      let reachedOlder = false;
+
+      for (const message of messages) {
+        const date = typeof message.date === 'string' ? Date.parse(message.date) : NaN;
+
+        if (Number.isNaN(date)) {
+          continue;
+        }
+
+        if (date <= since) {
+          reachedOlder = true;
+          continue;
+        }
+
+        // A message that lands mid-run with date > until belongs to the next
+        // window; one already listed in a recent event is the overlap re-scan.
+        if (date <= until && !(message.message_id && seen.has(message.message_id))) {
+          fresh.push({ ...message, account });
+        }
       }
 
-      // A message that lands mid-run with date > until belongs to the next
-      // window; one already listed in a recent event is the overlap re-scan.
-      if (date <= until && !(message.message_id && seen.has(message.message_id))) {
-        fresh.push(message);
+      pageToken = result.next_page_token || undefined;
+
+      if (reachedOlder || !pageToken) {
+        break;
       }
-    }
 
-    pageToken = result.next_page_token || undefined;
-
-    if (reachedOlder || !pageToken) {
-      break;
-    }
-
-    if (page === MAX_PAGES - 1) {
-      truncated = true;
+      if (page === MAX_PAGES - 1) {
+        truncated = true;
+      }
     }
   }
 
@@ -154,6 +176,7 @@ export async function run(ctx: TaskContext): Promise<void> {
     ...(truncated ? { truncated: true } : {}),
     newMessages: fresh.map(message => ({
       messageId: message.message_id ?? '',
+      account: message.account,
       date: message.date ?? '',
       from: message.from ?? '',
       subject: message.subject ?? '',

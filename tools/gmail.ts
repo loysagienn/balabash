@@ -938,6 +938,13 @@ export async function start(ctx: { filesApi: ToolFilesApi }) {
         "Gmail integration over the plain Gmail REST API. Each user connects their own Google account through a one-time OAuth link; until then no Gmail tools are available for them. After authorization the gmail_* tools can search mail with Gmail query syntax, read full messages and threads as plain text, download attachments into Balabash file storage, manage plain-text drafts (replies in a thread included) and send mail — each tool describes itself. Outgoing attachments and HTML composition are not supported. Requested Google scopes: gmail.readonly and gmail.compose. Operator prerequisite (one-time, before the first authorization): a Google Cloud project with the Gmail API enabled and an OAuth 2.0 'Web application' client whose authorized redirect URI is https://<balabash-domain>/oauth/callback; provision its client ID and secret via request_oauth_client_credentials. While that Google OAuth app is in Testing mode, Google expires refresh tokens after 7 days and users must re-authorize weekly; publishing the app removes this limit.",
       clientRegistration: 'manual' as const,
       scope: SCOPES.join(' '),
+      // Identity probe: the platform asks Gmail who authorized, right after
+      // the OAuth callback — the precondition for multiple Google accounts.
+      identityProbe: {
+        url: 'https://gmail.googleapis.com/gmail/v1/users/me/profile',
+        idField: 'emailAddress',
+        labelField: 'emailAddress',
+      },
       authorizationParams: {
         // Google only issues a refresh token for offline access, and only
         // reliably on a consent-prompted flow; without these the connection
