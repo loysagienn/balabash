@@ -19,6 +19,28 @@ function inputSchema(parameters: Record<string, unknown>) {
   return z.fromJSONSchema(parameters as never);
 }
 
+// The inner CLI surfaces a failed call's message only from text content
+// blocks and falls back to a literal "Unknown error" when there are none —
+// the platform's structured-only error shape (§9) would arrive illegible.
+// The bridge mirrors the structured message (details included) into a text
+// block for the inner session; the journal keeps the clean structured form.
+function withLegibleError(result: CallToolResult): CallToolResult {
+  if (!result.isError || result.content?.length) {
+    return result;
+  }
+
+  const error = (result.structuredContent as { error?: { message?: unknown; details?: unknown } } | undefined)?.error;
+  const message = typeof error?.message === 'string' ? error.message : null;
+
+  if (!message) {
+    return result;
+  }
+
+  const details = error?.details !== undefined ? `\n${JSON.stringify(error.details)}` : '';
+
+  return { ...result, content: [{ type: 'text', text: `${message}${details}` }] };
+}
+
 type BridgeEntry = {
   definition: ToolDefinition;
   registered: RegisteredTool;
@@ -60,7 +82,7 @@ export async function createBridgeServer({ tools, extraTools }: BridgeOptions): 
     server.registerTool(
       tool.name,
       { description: tool.description, inputSchema: inputSchema(tool.inputSchema) },
-      args => runToolHandler(() => tool.handler(args as JsonObject)),
+      args => runToolHandler(() => tool.handler(args as JsonObject)).then(withLegibleError),
     );
   }
 
@@ -76,8 +98,9 @@ export async function createBridgeServer({ tools, extraTools }: BridgeOptions): 
     const result = await tools.call(name, args);
 
     // The cast is the pass-through: the verbatim result crosses into the MCP
-    // SDK's stricter static shape unchanged.
-    return { ...result, content: result.content ?? [] } as CallToolResult;
+    // SDK's stricter static shape unchanged (except the error-legibility
+    // mirror above).
+    return withLegibleError({ ...result, content: result.content ?? [] } as CallToolResult);
   };
 
   const listDesired = async (): Promise<Map<string, ToolDefinition>> => {
@@ -95,11 +118,23 @@ export async function createBridgeServer({ tools, extraTools }: BridgeOptions): 
     return desired;
   };
 
+  const registerCatalogTool = (name: string, next: ToolDefinition) => {
+    const registered = server.registerTool(
+      name,
+      { description: next.description, inputSchema: inputSchema(next.inputSchema) },
+      args => callBridgeTool(name, args as JsonObject).catch(error => withLegibleError(toErrorResult(error))),
+    );
+
+    entries.set(name, { definition: next, registered });
+  };
+
   // A schema this MCP SDK cannot express must not kill the session: every
   // register/update is isolated per tool, and a broken tool is skipped or
   // hidden until its definition changes again.
   const applyDesired = (desired: Map<string, ToolDefinition>) => {
-    for (const [name, entry] of entries) {
+    // Snapshot: a changed definition re-registers under the same name, and a
+    // re-inserted key must not be revisited by this very loop.
+    for (const [name, entry] of [...entries]) {
       const next = desired.get(name);
 
       if (!next) {
@@ -113,19 +148,24 @@ export async function createBridgeServer({ tools, extraTools }: BridgeOptions): 
 
       try {
         if (definitionFingerprint(entry.definition) !== definitionFingerprint(next)) {
-          entry.registered.update({
-            description: next.description,
-            paramsSchema: inputSchema(next.inputSchema) as never,
-            enabled: true,
-          });
-          entry.definition = next;
+          // Not update(): the SDK's update() unconditionally treats
+          // paramsSchema as a raw Zod shape (objectFromShape), which mangles
+          // a real ZodObject into a broken validator — every later call of
+          // the tool then dies with "keyValidator._parse is not a function".
+          // Remove + fresh registration stays on the code path that handles
+          // a full schema correctly.
+          entry.registered.remove();
+          entries.delete(name);
+          registerCatalogTool(name, next);
         } else if (!entry.registered.enabled) {
           entry.registered.enable();
         }
       } catch (error) {
         console.error(`[sdk-bridge] failed to update bridge tool "${name}": ${getErrorMessage(error)}`);
+        // If re-registration failed after removal, the entry is already gone;
+        // a still-registered tool is hidden until its definition changes.
         try {
-          entry.registered.disable();
+          entries.get(name)?.registered.disable();
         } catch {
           // A tool that cannot even be disabled is left as-is.
         }
@@ -134,13 +174,7 @@ export async function createBridgeServer({ tools, extraTools }: BridgeOptions): 
 
     for (const [name, next] of desired) {
       try {
-        const registered = server.registerTool(
-          name,
-          { description: next.description, inputSchema: inputSchema(next.inputSchema) },
-          args => callBridgeTool(name, args as JsonObject).catch(error => toErrorResult(error)),
-        );
-
-        entries.set(name, { definition: next, registered });
+        registerCatalogTool(name, next);
       } catch (error) {
         console.error(`[sdk-bridge] skipping bridge tool "${name}": ${getErrorMessage(error)}`);
       }
