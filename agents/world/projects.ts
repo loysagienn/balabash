@@ -5,7 +5,7 @@
 
 export const PROJECTS_WORLD_NOTE =
   "The user's projects are named long-lived work contexts — passive libraries: each is a folder in the " +
-  'workspace file area, named by its immutable slug, with AGENTS.md as the entry point. A project is not ' +
+  'workspace file area, named by its slug, with AGENTS.md as the entry point. A project is not ' +
   'tied to any thread.';
 
 export const PROJECTS_NOTE =

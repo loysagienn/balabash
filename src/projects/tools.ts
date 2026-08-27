@@ -7,7 +7,9 @@
 // Projects are not units of work (no status or progress) and own no
 // resources; threads and tasks are never linked to them — an agent matches a
 // conversation to a project by its description and goes to the library
-// itself. Nothing is ever deleted: archive flips a flag, folders never move.
+// itself. Nothing is ever deleted: archive flips a flag; the only thing that
+// ever moves a folder is a slug rename via projects_update, which renames
+// the folder in the same step.
 
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -64,7 +66,8 @@ const FUNCTIONS: ToolFunction[] = [
     toolName: 'projects_create',
     description:
       'Create a project: a registry record plus its folder <slug>/ in the workspace file area. The slug ' +
-      `names the folder and is FIXED FOREVER (renaming the title never moves the folder): ${String(SLUG_PATTERN)}, ` +
+      `names the folder (renaming the title never moves the folder; the slug itself can later be changed ` +
+      `via projects_update, which renames the folder in step): ${String(SLUG_PATTERN)}, ` +
       `at most ${SLUG_MAX_LENGTH} chars. If the folder already ` +
       'exists it is ADOPTED as the project library (adopted: true in the result); a fresh AGENTS.md entry ' +
       'point is written only when the folder has none. The description is required — it is how agents and ' +
@@ -75,7 +78,7 @@ const FUNCTIONS: ToolFunction[] = [
         title: { type: 'string', description: 'Human-readable project title, unique within the workspace (archived projects included).' },
         slug: {
           type: 'string',
-          description: `Folder name in the workspace file area, ${String(SLUG_PATTERN)}, at most ${SLUG_MAX_LENGTH} chars; unique and immutable.`,
+          description: `Folder name in the workspace file area, ${String(SLUG_PATTERN)}, at most ${SLUG_MAX_LENGTH} chars; unique. Changing it later (projects_update) renames the folder too.`,
         },
         description: {
           type: 'string',
@@ -91,7 +94,9 @@ const FUNCTIONS: ToolFunction[] = [
     serverName: PROJECTS_SERVER_NAME,
     toolName: 'projects_update',
     description:
-      'Update a project: change the title and/or the description (the slug and the folder NEVER change). ' +
+      'Update a project: change the title, the description and/or the slug. Renaming the slug RENAMES the ' +
+      "project's folder in the workspace file area to match — do it only on an explicit user request, and " +
+      'not while other work is running inside the folder (their paths go stale). ' +
       'A call with only the id is a "touch": it bumps updatedAt — "work touched this project just now" — ' +
       'and moves the project up the list. Touch the project when finishing work on it.',
     inputSchema: {
@@ -100,6 +105,12 @@ const FUNCTIONS: ToolFunction[] = [
         id: { type: 'string', description: 'The project id.' },
         title: { type: ['string', 'null'], description: 'New title, or null to keep the current one.' },
         description: { type: ['string', 'null'], description: 'New description, or null to keep the current one.' },
+        slug: {
+          type: ['string', 'null'],
+          description:
+            `New slug (${String(SLUG_PATTERN)}, at most ${SLUG_MAX_LENGTH} chars), or null to keep the current one. ` +
+            'Renames the project folder on disk in the same step; only on an explicit user request.',
+        },
       },
       required: ['id', 'title', 'description'],
       additionalProperties: false,
@@ -291,6 +302,13 @@ async function executeUpdate(args: JsonObject, ctx: BuiltinServerCallContext): P
 
   const title = typeof args.title === 'string' && args.title.trim() ? args.title.trim() : null;
   const description = typeof args.description === 'string' && args.description.trim() ? args.description.trim() : null;
+  const requestedSlug = typeof args.slug === 'string' && args.slug.trim() ? args.slug.trim() : null;
+  // Same slug as now is a no-op, not an error — makes retries idempotent.
+  const slug = requestedSlug && requestedSlug !== project.slug ? requestedSlug : null;
+
+  if (slug && (!SLUG_PATTERN.test(slug) || slug.length > SLUG_MAX_LENGTH)) {
+    throw new Error(`slug must match ${String(SLUG_PATTERN)} and be at most ${SLUG_MAX_LENGTH} chars`);
+  }
 
   if (title && title !== project.title) {
     const clash = await prisma.project.findFirst({
@@ -304,6 +322,45 @@ async function executeUpdate(args: JsonObject, ctx: BuiltinServerCallContext): P
     }
   }
 
+  if (slug) {
+    const clash = await prisma.project.findFirst({
+      where: { userId: ctx.userId, slug, id: { not: project.id } },
+    });
+
+    if (clash) {
+      throw new Error(
+        `slug "${slug}" is already taken by project ${clash.id}${clash.archived ? ' (archived — slugs stay reserved)' : ''}`,
+      );
+    }
+  }
+
+  // The folder moves ahead of the row update and is moved back if the write
+  // fails — the registry row stays the source of truth for the path.
+  let movedFromDir: string | null = null;
+
+  if (slug) {
+    const filesDir = workspaceFilesDir(ctx.userId);
+    const oldDir = path.join(filesDir, project.slug);
+    const newDir = path.join(filesDir, slug);
+
+    if (await fs.stat(newDir).catch(() => null)) {
+      throw new Error(
+        `the path "${slug}" in the workspace file area is already taken — nothing is ever deleted or overwritten; pick another slug`,
+      );
+    }
+
+    const existing = await fs.stat(oldDir).catch(() => null);
+
+    if (existing?.isDirectory()) {
+      await fs.rename(oldDir, newDir);
+      movedFromDir = oldDir;
+    } else {
+      // The library folder is missing (never provisioned or lost) — the
+      // rename provisions the new location instead of failing.
+      await fs.mkdir(newDir, { recursive: true });
+    }
+  }
+
   let updated: ProjectModel;
 
   try {
@@ -312,13 +369,18 @@ async function executeUpdate(args: JsonObject, ctx: BuiltinServerCallContext): P
       // With no fields given the call is a "touch": prisma writes nothing on
       // empty data, so updatedAt is set explicitly.
       data:
-        title || description
-          ? { ...(title ? { title } : {}), ...(description ? { description } : {}) }
+        title || description || slug
+          ? { ...(title ? { title } : {}), ...(description ? { description } : {}), ...(slug ? { slug } : {}) }
           : { updatedAt: new Date() },
     });
   } catch (error) {
+    if (movedFromDir && slug) {
+      // Roll the folder back so disk keeps matching the (unchanged) row.
+      await fs.rename(path.join(workspaceFilesDir(ctx.userId), slug), movedFromDir).catch(() => {});
+    }
+
     if (isUniqueViolation(error)) {
-      throw new Error(`title "${title}" is already taken — check projects_list`);
+      throw new Error(`title "${title}" or slug "${slug}" is already taken — check projects_list`);
     }
 
     throw error;
@@ -326,7 +388,8 @@ async function executeUpdate(args: JsonObject, ctx: BuiltinServerCallContext): P
 
   return {
     project: projectToJson(updated),
-    ...(title || description ? {} : { note: 'touched — updatedAt bumped, nothing else changed' }),
+    ...(slug ? { folder: `${updated.slug}/`, note: `folder renamed: ${project.slug}/ → ${updated.slug}/` } : {}),
+    ...(title || description || slug ? {} : { note: 'touched — updatedAt bumped, nothing else changed' }),
   };
 }
 

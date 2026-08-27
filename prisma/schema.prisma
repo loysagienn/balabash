@@ -301,8 +301,9 @@ model ScheduledTask {
 // against) and the slug naming the project's folder in the workspace file
 // area (<filesDir>/<slug>, AGENTS.md as the entry point). All knowledge
 // lives in the folder, never in columns here. Nothing is ever deleted:
-// archiving flips the flag, the folder stays put; the slug is fixed at
-// creation and survives renames. updatedAt means "when work last touched
+// archiving flips the flag, the folder stays put; title renames never move
+// the folder, and a slug change (projects_update) renames the folder in the
+// same step. updatedAt means "when work last touched
 // the project" and drives sorting (the @updatedAt bump on rename/archive is
 // an accepted blur).
 model Project {
