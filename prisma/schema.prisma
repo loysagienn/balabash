@@ -276,23 +276,72 @@ model LlmRequest {
 // with neither is a stored procedure started manually via run_task. kind
 // 'note' carries data that fires as a schedule.fired event into the main
 // thread; kind 'code' names a run(ctx) body in the static tasks/ catalog (a
-// row without a body in the current process sleeps until a rebuild+restart).
-// Runs leave no rows behind — a task's only memory is the events it pushes.
+// row without a body in the current process sleeps until a rebuild+restart);
+// kind 'command' is a workspace job — a shell command run in the workspace
+// file area, armed from the moment the row exists (no build, no restart, no
+// sleeping). note/code runs leave no rows behind — a task's only memory is
+// the events it pushes; command runs are journaled in JobRun.
 model ScheduledTask {
   id          String    @id @default(uuid())
   slug        String    @unique
   userId      String    @map("user_id")
   name        String
   description String?
-  kind        String // 'note' | 'code'
+  kind        String // 'note' | 'code' | 'command'
   cron        String? // cron expression, evaluated in config.scheduleTimezone
   at          DateTime? // one-shot "not before T"; consumed on fire
-  note        String? // the payload of a 'note' task; ignored for 'code'
+  note        String? // the payload of a 'note' task; ignored for 'code'/'command'
+  // kind 'command' only: the shell command (`bash -c`), its working
+  // directory (relative to the workspace file area; null = the root), the
+  // kill timeout and whether a successful run pushes a schedule.fired event
+  // (failures always surface as system.exception).
+  command         String?
+  cwd             String?
+  timeoutMs       Int?     @map("timeout_ms")
+  reportOnSuccess Boolean  @default(false) @map("report_on_success")
   createdBy   String?   @map("created_by") // agent that registered the task
   createdAt   DateTime  @default(now()) @map("created_at")
 
   @@index([userId])
   @@map("scheduled_tasks")
+}
+
+// Run journal of workspace jobs (kind 'command' scheduled tasks) — operational
+// telemetry in the platform database, deliberately NOT in workspace.sqlite
+// (fate-sharing: a job that corrupts or locks the workspace database must not
+// take the record of that very run down with it) and deliberately outside the
+// event log (the LlmRequest pattern: machinery telemetry, not domain
+// history). Rows are written fire-and-forget — a failed insert/update never
+// affects the run; the id is generated before the insert so run_task can
+// return it regardless. command/cwd are snapshots of the registry row at fire
+// time: a one-shot task's row is deleted before the run, and a recreated slug
+// may carry a different command — the journal keeps what actually executed.
+model JobRun {
+  id     String @id
+  userId String @map("user_id")
+  slug   String
+
+  command String
+  cwd     String? // workspace-relative working directory; null = the file-area root
+  trigger String // 'cron' | 'at' | 'manual'
+
+  status   String // 'running' | 'ok' | 'failed' | 'timeout' | 'spawn_error' | 'aborted'
+  exitCode Int?   @map("exit_code")
+
+  startedAt  DateTime  @default(now()) @map("started_at")
+  finishedAt DateTime? @map("finished_at")
+  durationMs Int?      @map("duration_ms")
+
+  // Last 16 KiB of each stream (tail-keep: the end of a long log, not its
+  // beginning), with honest truncation flags.
+  stdoutTail      String  @default("") @map("stdout_tail")
+  stderrTail      String  @default("") @map("stderr_tail")
+  stdoutTruncated Boolean @default(false) @map("stdout_truncated")
+  stderrTruncated Boolean @default(false) @map("stderr_truncated")
+
+  @@index([userId, startedAt])
+  @@index([slug, startedAt])
+  @@map("job_runs")
 }
 
 // Registry of projects — named long-lived work contexts, passive libraries

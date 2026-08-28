@@ -17,7 +17,7 @@ import { getMainThread } from '../core/threads.ts';
 import { config } from '../config/index.ts';
 import type { ScheduledTaskModel } from '../../prisma-generated/models.ts';
 import { getTaskBody } from './catalog.ts';
-import { fireTask } from './engine.ts';
+import { fireTask, sweepAbortedJobRuns } from './engine.ts';
 
 const POLL_INTERVAL_MS = 5_000;
 
@@ -124,7 +124,7 @@ export function startScheduleHeart(): { name: string; stop: () => void } {
       armed.delete(row.id);
     }
 
-    const outcome = await fireTask(row);
+    const outcome = await fireTask(row, 'cron');
 
     if (outcome.kind === 'already_running') {
       console.log(`[schedule] task "${row.slug}": previous run still going — the moment burns`);
@@ -145,7 +145,7 @@ export function startScheduleHeart(): { name: string; stop: () => void } {
       return;
     }
 
-    await fireTask(row);
+    await fireTask(row, 'at');
   };
 
   let ticking = false;
@@ -166,6 +166,9 @@ export function startScheduleHeart(): { name: string; stop: () => void } {
   }, POLL_INTERVAL_MS);
 
   void sweepSleepingTasks();
+  // Workspace jobs do not survive a restart: rows left 'running' by the
+  // previous process are settled as 'aborted'.
+  void sweepAbortedJobRuns();
 
   console.log('[schedule] heart started');
 

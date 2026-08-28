@@ -18,6 +18,7 @@ import { createRestartToolServer } from './capabilities/restart-tools.ts';
 import { startReauthDetector } from './capabilities/reauth-detector.ts';
 import { loadToolServers, registerBuiltinToolServer } from './capabilities/tool-manager.ts';
 import { loadTasks } from './schedule/catalog.ts';
+import { isAnyJobRunning, killRunningJobs } from './schedule/engine.ts';
 import { startScheduleHeart } from './schedule/heart.ts';
 import { startWorkspaceIndexer } from './workspace/indexer.ts';
 import { createScheduleToolServer } from './schedule/tools.ts';
@@ -156,6 +157,9 @@ await completePendingRestarts({ migrationsError });
 consumers.push(
   startRestartModule({
     isBusy: hasActiveCoordinatorTurns,
+    // Workspace jobs do not survive a restart — the safe window waits for
+    // them (force skips the wait; the shutdown sweep then kills the groups).
+    hasActiveJobs: isAnyJobRunning,
     onRestartWindow: () => shutdown(RESTART_EXIT_CODE),
   }),
 );
@@ -188,6 +192,11 @@ async function shutdown(code: number): Promise<void> {
       console.error(`[app] failed to stop consumer "${consumer.name}":`, error);
     }
   }
+
+  // Workspace jobs do not survive a restart: kill their process groups (the
+  // in-flight completions journal 'aborted'; anything missed is settled by
+  // the boot sweep of the next process).
+  killRunningJobs();
 
   await prisma.$disconnect().catch(() => {});
 

@@ -40,35 +40,72 @@ export type ChildOutcome = {
   stderrTruncated: boolean;
 };
 
-export function runChild(
-  command: string,
-  args: string[],
-  options: { cwd: string; env: Record<string, string>; timeoutMs: number; maxOutputChars: number },
-): Promise<ChildOutcome> {
+export type RunChildOptions = {
+  cwd: string;
+  env: Record<string, string>;
+  timeoutMs: number;
+  maxOutputChars: number;
+  // 'head' (default) keeps the first maxOutputChars of a stream, 'tail' the
+  // last — job journals want the end of a long log, not its beginning.
+  capMode?: 'head' | 'tail';
+  // Called once after a successful spawn with the child's pid (equal to the
+  // process-group id — children run detached in their own group). Lets the
+  // caller register the group for an external kill (shutdown sweep).
+  onSpawn?: (pid: number) => void;
+};
+
+// Kill the child's whole process group: `bash -c` (and scripts generally)
+// spawn grandchildren, and killing only the direct child would orphan them.
+// The child is detached into its own group, so -pid addresses all of it.
+function killGroup(pid: number | undefined, fallback: () => void): void {
+  if (pid === undefined) {
+    fallback();
+    return;
+  }
+
+  try {
+    process.kill(-pid, 'SIGKILL');
+  } catch {
+    fallback();
+  }
+}
+
+export function runChild(command: string, args: string[], options: RunChildOptions): Promise<ChildOutcome> {
   return new Promise((resolve, reject) => {
     const startedAt = Date.now();
     const child = spawn(command, args, {
       cwd: options.cwd,
       env: options.env,
       stdio: ['ignore', 'pipe', 'pipe'],
+      // Own process group: the timeout (and any external sweep) kills the
+      // whole tree, not just the direct child.
+      detached: true,
     });
+
+    if (child.pid !== undefined) {
+      options.onSpawn?.(child.pid);
+    }
 
     let timedOut = false;
     const timer = setTimeout(() => {
       timedOut = true;
-      child.kill('SIGKILL');
+      killGroup(child.pid, () => child.kill('SIGKILL'));
     }, options.timeoutMs);
 
     const buffers = { stdout: '', stderr: '' };
     const truncated = { stdout: false, stderr: false };
+    const tailKeep = options.capMode === 'tail';
 
-    // Keep consuming (so the pipe never backpressures the child), but stop
-    // buffering past the cap.
+    // Keep consuming (so the pipe never backpressures the child), but cap the
+    // buffer: head-keep stops buffering past the cap, tail-keep slides the
+    // window and keeps only the last maxOutputChars.
     const collect = (stream: 'stdout' | 'stderr') => (chunk: Buffer) => {
-      if (truncated[stream]) return;
+      if (!tailKeep && truncated[stream]) return;
       buffers[stream] += chunk.toString('utf8');
       if (buffers[stream].length > options.maxOutputChars) {
-        buffers[stream] = buffers[stream].slice(0, options.maxOutputChars);
+        buffers[stream] = tailKeep
+          ? buffers[stream].slice(-options.maxOutputChars)
+          : buffers[stream].slice(0, options.maxOutputChars);
         truncated[stream] = true;
       }
     };

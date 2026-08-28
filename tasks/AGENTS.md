@@ -5,6 +5,24 @@ The registry (the ScheduledTask table, operated via the `schedule` tool
 server: create_task / list_tasks / cancel_task / run_task) says WHEN a task
 fires; a file here says WHAT it does. The slug joins the two.
 
+## Choosing the kind
+
+Three kinds share the registry; only 'code' has a body here:
+
+- `note` — natural-language intent, fired into the main thread, interpreted
+  by the secretary. No engineering at all.
+- `command` — a WORKSPACE JOB: a shell command (`bash -c`) run in the
+  workspace file area (usually a project folder), hermetic environment
+  (PATH/HOME/locale/TZ + WORKSPACE_DB), exit code is the whole protocol.
+  Armed the moment the row exists — NO bundle, NO build, NO restart, no
+  sleeping. Every run is journaled (list_job_runs / get_job_run); failure
+  always surfaces as system.exception, success is silent unless
+  report_on_success. Prefer this kind for user/workspace automations: a
+  script collecting data into workspace.sqlite, a periodic export, anything
+  deterministic that needs no LLM and nothing platform-internal.
+- `code` — trusted platform code in the bundle (this directory), for tasks
+  that need ctx.prisma or ctx.tools. Requires build + restart.
+
 ## The contract
 
 - One task = one file `tasks/<slug>.ts` exporting ONLY `async function run(ctx)`.

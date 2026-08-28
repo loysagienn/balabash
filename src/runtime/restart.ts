@@ -148,11 +148,17 @@ type RestartModuleHooks = {
   // In-memory truth about coordinator turns in flight — injected by the
   // composition root (the runtime does not know the coordinator, §3).
   isBusy(): boolean;
+  // In-memory truth about workspace jobs (kind 'command' scheduled tasks) in
+  // flight — injected likewise (the runtime does not know the schedule
+  // module). Jobs do not survive a restart, so the safe window waits for
+  // them; force skips the wait and the shutdown sweep kills their process
+  // groups.
+  hasActiveJobs(): boolean;
   // Graceful shutdown ending in process.exit(RESTART_EXIT_CODE).
   onRestartWindow(): Promise<void>;
 };
 
-export function startRestartModule({ isBusy, onRestartWindow }: RestartModuleHooks): Consumer {
+export function startRestartModule({ isBusy, hasActiveJobs, onRestartWindow }: RestartModuleHooks): Consumer {
   let exiting = false;
 
   const notifyLongPending = async (current: PendingRestart, blockedBy: string[]): Promise<void> => {
@@ -213,6 +219,10 @@ export function startRestartModule({ isBusy, onRestartWindow }: RestartModuleHoo
 
     if (isBusy()) {
       blockedBy.push('a secretary turn in flight');
+    }
+
+    if (hasActiveJobs()) {
+      blockedBy.push('a workspace job still running');
     }
 
     const quietSeconds = await getLogQuietSeconds();
