@@ -9,7 +9,7 @@
 import type { AgentDeclaration } from '../src/core/contract.ts';
 import { BALABASH_PREAMBLE, REPO_RULES_NOTE, TELEGRAM_OUTPUT_NOTE, WORKSPACE_STORAGE_NOTE } from './world/index.ts';
 
-const CLAUDE_MODEL = 'claude-fable-5';
+const CLAUDE_MODEL = 'claude-fable-5-1';
 
 // The app process always starts in the repository root, so cwd IS the
 // repo — no configuration needed.

@@ -51,7 +51,7 @@ export const agent = {
 
   session: {
     instructions: SYSTEM_PROMPT,
-    model: 'claude-fable-5',
+    model: 'claude-fable-5-1',
     preset: 'full',
     cwd: (userId: string) => workspaceFilesDir(userId),
   },

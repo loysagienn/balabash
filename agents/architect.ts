@@ -11,7 +11,7 @@
 import type { AgentDeclaration } from '../src/core/contract.ts';
 import { BALABASH_PREAMBLE, TELEGRAM_OUTPUT_NOTE, WORKSPACE_STORAGE_NOTE } from './world/index.ts';
 
-const ARCHITECT_MODEL = 'claude-fable-5';
+const ARCHITECT_MODEL = 'claude-fable-5-1';
 
 // The app process always starts in the repository root.
 const REPO_ROOT = process.cwd();
