@@ -41,6 +41,22 @@ const NOVNC_URL = 'https://novnc.loysagienn.com/vnc.html';
 
 const PLAYWRIGHT_CALL_TIMEOUT_MS = 5 * 60_000;
 
+// Chromium launch flags. The host has no GPU (Xvfb or headless), so WebGPU
+// sites — Astronelia among them — get no adapter with the stock flags and
+// refuse to render. The four GPU flags turn on WebGPU over software Vulkan
+// (SwiftShader): the adapter appears in both headful and headless modes, at
+// the cost of some CPU on WebGPU pages only. Ordinary pages are unaffected —
+// no site is forced through the software path unless it asks for WebGPU.
+const CHROMIUM_ARGS = [
+  // Hide the navigator.webdriver automation marker.
+  '--disable-blink-features=AutomationControlled',
+  // WebGPU without a real GPU (see above).
+  '--enable-unsafe-webgpu',
+  '--enable-features=Vulkan',
+  '--use-angle=swiftshader',
+  '--ignore-gpu-blocklist',
+];
+
 function isObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
@@ -333,7 +349,7 @@ export const agent = {
           // Headful on the host's Xvfb display when available — the user can
           // watch and intervene through noVNC; headless otherwise.
           headless: !process.env.DISPLAY,
-          args: ['--disable-blink-features=AutomationControlled'],
+          args: CHROMIUM_ARGS,
         });
 
         cleanup.browserContext = browserContext;
