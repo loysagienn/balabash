@@ -2,6 +2,12 @@
 // Inputs are accepted synchronously into a FIFO at any time. Codex turns run
 // sequentially over one SDK thread: a push never interrupts the active turn,
 // and the next queued input is delivered after that turn finishes.
+//
+// A codex session is always 'full': the native tool set (shell, file edits,
+// web search) is Codex's by construction, and the Balabash bridge joins it as
+// the session's one MCP server. What the session must NOT see is the host
+// user's personal Codex layer — that is cut off by running in the app's own
+// CODEX_HOME (codex-home.ts) and by explicit feature overrides below.
 
 import http from 'node:http';
 import type { IncomingMessage } from 'node:http';
@@ -9,9 +15,12 @@ import { Codex } from '@openai/codex-sdk';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import type { AgentSdkSession, SdkSessionOptions, SdkTurn, ToolsApi } from '../../core/contract.ts';
 import { createBridgeServer } from '../claude-sdk/bridge.ts';
+import { mergeEnv } from '../env.ts';
+import { ensureCodexHome } from './codex-home.ts';
 
 export type CodexSessionDeps = {
   tools: ToolsApi;
+  // Fallback working directory — the run's stateDir; options.cwd wins.
   cwd: string;
 };
 
@@ -160,23 +169,8 @@ async function startBridgeHttpServer(deps: CodexSessionDeps, extraTools: SdkSess
   };
 }
 
-function initialInput(options: SdkSessionOptions): string {
-  return `${options.instructions}\n\n---\n\n${options.initialMessage}`;
-}
-
-// process.env values can be undefined; the SDK wants Record<string, string>.
-function mergeEnv(extra: Record<string, string>): Record<string, string> {
-  const env: Record<string, string> = {};
-
-  for (const [name, value] of Object.entries(process.env)) {
-    if (value !== undefined) env[name] = value;
-  }
-
-  return { ...env, ...extra };
-}
-
 export function createCodexSession(options: SdkSessionOptions, deps: CodexSessionDeps): AgentSdkSession {
-  const queue = createInputQueue(initialInput(options));
+  const queue = createInputQueue(options.initialMessage);
   let closed = false;
   let activeTurn: AbortController | null = null;
 
@@ -184,11 +178,18 @@ export function createCodexSession(options: SdkSessionOptions, deps: CodexSessio
     const bridge = await startBridgeHttpServer(deps, options.extraTools);
 
     try {
+      const codexHome = ensureCodexHome();
       const codex = new Codex({
         // SDK `env` replaces the subprocess environment entirely, so merge the
-        // extra variables over the inherited app environment.
-        ...(options.env ? { env: mergeEnv(options.env) } : {}),
+        // extra variables over the inherited app environment. CODEX_HOME is
+        // the app's isolated home, never the host user's ~/.codex.
+        env: mergeEnv({ ...options.env, CODEX_HOME: codexHome }),
+        // Every override rides each `codex exec` invocation (a turn is one
+        // invocation, resumed by thread id), so the whole session sees them.
         config: {
+          // The brief is a developer message ahead of the conversation — the
+          // system-prompt position — not a prefix of the first user turn.
+          developer_instructions: options.instructions,
           mcp_servers: {
             balabash: {
               url: bridge.url,
@@ -196,14 +197,36 @@ export function createCodexSession(options: SdkSessionOptions, deps: CodexSessio
               default_tools_approval_mode: 'approve',
             },
           },
+          // Codex reads AGENTS.md from the git root down to cwd; the workbench
+          // lives inside the Balabash repository, so that chain would inject
+          // the repo's own AGENTS.md into a workbench session. Project docs
+          // are off: the brief tells the agent which AGENTS.md to read.
+          project_doc_max_bytes: 0,
+          // ChatGPT apps/connectors, plugins and the memories store are not
+          // part of the Balabash tool set: integrations are the run's tool
+          // bundle, memory is the workspace. Codex's own agent team
+          // (multi_agent) stays on — its native sub-agents work inside the
+          // session, next to the bridge's Balabash sub-agents (spawn_agent).
+          features: {
+            apps: false,
+            plugins: false,
+            memories: false,
+          },
         },
       });
       const thread = codex.startThread({
         ...(options.model ? { model: options.model } : {}),
-        workingDirectory: deps.cwd,
+        // Reasoning effort: the platform scale is a subset of Codex's, so the
+        // value passes through; the platform default is explicit.
+        modelReasoningEffort: options.effort ?? 'high',
+        workingDirectory: options.cwd ?? deps.cwd,
         skipGitRepoCheck: true,
-        sandboxMode: 'workspace-write',
+        // Parity with the Claude sessions (bypassPermissions): the host is
+        // fully accessible and the network is open; the workbench boundary is
+        // held by the brief, not by a sandbox.
+        sandboxMode: 'danger-full-access',
         approvalPolicy: 'never',
+        webSearchMode: 'live',
       });
 
       for await (const input of queue.iterable) {
@@ -227,7 +250,7 @@ export function createCodexSession(options: SdkSessionOptions, deps: CodexSessio
             }
           }
 
-          // A turn can end with a bridge-tool call (end_codex) and no trailing
+          // A turn can end with a bridge-tool call (end_thread) and no trailing
           // agent_message; consumers detect completion on yielded turns, so
           // every turn closes with an empty boundary turn.
           yield { text: '' };

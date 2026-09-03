@@ -105,8 +105,10 @@ export type ToolResult = {
 // ---------------------------------------------------------------------------
 // Agent declaration
 
-// Reasoning effort of the inner model (the Claude Agent SDK scale; the codex
-// SDK ignores it). 'high' is the platform default.
+// Reasoning effort of the inner model, one scale for both SDKs: these are the
+// Claude Agent SDK levels, and a strict subset of Codex's (which also knows
+// minimal/ultra/persistent — not exposed), so a value passes through to either
+// backend unchanged. 'high' is the platform default.
 export type EffortLevel = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
 // Machine-readable domain event declared by an agent: types '<agent>.*',
@@ -131,7 +133,7 @@ export type SessionAgentSpec = {
   // different opening move.
   initialMessage?(prompt: string): string;
   model?: string; // agent-level choice; omit for the SDK default
-  effort?: EffortLevel; // reasoning effort; default 'high' (claude SDK only)
+  effort?: EffortLevel; // reasoning effort; default 'high'
   preset?: 'bridge-only' | 'full'; // see SdkSessionOptions.preset
   // Session working directory; default — the run's stateDir. A function form
   // resolves per run from the calling user's id (e.g. a per-user workbench
@@ -234,12 +236,13 @@ export type SdkSessionOptions = {
   instructions: string; // the inner session's system prompt
   initialMessage: string; // the first user message opening the session
   model?: string; // agent-level choice; omit for the SDK default
-  effort?: EffortLevel; // reasoning effort; default 'high' (claude SDK only)
+  effort?: EffortLevel; // reasoning effort; default 'high'
   extraTools?: SdkBridgeTool[]; // bridge-only tools on top of ctx.tools
   // 'bridge-only' (default): the inner model sees the Balabash bridge and
   // nothing else. 'full' unlocks the provider's native tool preset for host
   // work; interpretation is SDK-specific (claude: the claude_code preset plus
-  // project settings from cwd; codex sessions are full by construction).
+  // project settings from cwd; codex sessions are full by construction —
+  // Codex's native tools plus the bridge, in the app's isolated CODEX_HOME).
   preset?: 'bridge-only' | 'full';
   cwd?: string; // session working directory; default — the run's stateDir
   // Extra environment variables for the session process, merged over the app

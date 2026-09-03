@@ -16,23 +16,13 @@ import { startClaudeSession } from './session.ts';
 import type { ClaudeSession } from './session.ts';
 import { createBridgeServer } from './bridge.ts';
 import type { BridgeServer } from './bridge.ts';
+import { mergeEnv } from '../env.ts';
 
 export type SdkSessionDeps = {
   tools: ToolsApi;
   // Working directory of the inner session — the run's persistent stateDir.
   cwd: string;
 };
-
-// process.env values can be undefined; the SDK wants Record<string, string>.
-function mergeEnv(extra: Record<string, string>): Record<string, string> {
-  const env: Record<string, string> = {};
-
-  for (const [name, value] of Object.entries(process.env)) {
-    if (value !== undefined) env[name] = value;
-  }
-
-  return { ...env, ...extra };
-}
 
 export function createClaudeSession(options: SdkSessionOptions, deps: SdkSessionDeps): AgentSdkSession {
   let closed = false;

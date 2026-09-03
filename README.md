@@ -40,7 +40,7 @@ is multi-voice by design.
 | ⏰ **scheduler** | Engineers scheduled code tasks: writes the task body, registers it, rebuilds, requests a restart. |
 | 🛠 **engineer** | Balabash's own engineer — edits the system's source code in a live session, builds, and requests a restart of itself. |
 | 📐 **architect** | Design analysis and audits at maximum reasoning effort; advises, never implements. |
-| 🤖 **codex** | An autonomous OpenAI Codex session with the full Balabash toolset. |
+| 🤖 **codex** | The manager on OpenAI Codex: the same brief, tools and workbench as the manager, run as an autonomous Codex session. |
 
 Three model vendors run side by side behind one session contract: the secretary runs
 on an OpenAI model, most agents on Claude (via the Claude Agent SDK), and the codex

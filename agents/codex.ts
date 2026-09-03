@@ -1,50 +1,36 @@
-// Codex agent: a general-purpose OpenAI Codex session in its own thread. It
-// keeps Codex's built-in tool set intact and adds the run's Balabash MCP
-// bundle plus the standard base verbs (end_thread, send_file). Fully
-// declarative: the platform's session runner drives the lifecycle.
+// Codex agent: the manager on OpenAI Codex. Same brief, same tool passport,
+// same browser sub-agent and the same workbench (the workspace file area as
+// cwd) as the manager agent — the role is shared through roles/manager; only
+// the backend differs: an OpenAI Codex session with its native tool set
+// (shell, file editing, web search) plus the run's Balabash MCP bundle and
+// the standard base verbs. The session runs in an isolated CODEX_HOME
+// (harness/codex-sdk/codex-home), so nothing from the host user's ~/.codex —
+// personal AGENTS.md, MCP servers, memories — reaches it. Fully declarative:
+// the platform's session runner drives the lifecycle.
 
 import type { AgentDeclaration } from '../src/core/contract.ts';
-import { BALABASH_PREAMBLE, PROJECTS_NOTE, TELEGRAM_OUTPUT_NOTE, THREAD_DIALOGUE_NOTE, WORKSPACE_STORAGE_NOTE } from './world/index.ts';
-
-const SYSTEM_PROMPT = `You are OpenAI Codex working inside Balabash, talking to the user directly in a dedicated Telegram forum topic. ${BALABASH_PREAMBLE}
-
-${THREAD_DIALOGUE_NOTE}
-
-${TELEGRAM_OUTPUT_NOTE}
-
-Your normal Codex tools remain available. The Balabash tools are loaded lazily in your environment: at the start of the session, search the full runtime tool catalog for mcp__balabash__* so they are available before you need them.
-
-${WORKSPACE_STORAGE_NOTE}
-
-${PROJECTS_NOTE}
-
-End the thread when the task is complete, cannot continue, or the user asks to stop; your report must state what was done, the outcome, files or refs produced, and anything that remains. Stay with the assigned task: if the user clearly switches to an unrelated task or asks for the secretary, wrap up and end the thread.`;
+import { workspaceFilesDir } from '../src/workspace/layout.ts';
+import { MANAGER_AGENTS, MANAGER_INSTRUCTIONS, MANAGER_TOOLS } from './roles/manager.ts';
 
 export const agent = {
   name: 'codex',
   description:
-    'Start a dedicated OpenAI Codex thread for a substantial task that benefits from an autonomous agent, ' +
-    'its built-in local workspace tools, or an extended multi-turn execution context. The user talks to Codex ' +
-    'directly in a separate forum topic; Codex also receives the full Balabash tool bundle and reports a summary ' +
-    'back when the task ends.',
+    'Start a manager thread on OpenAI Codex — the same general-purpose manager (same brief, tools, workbench ' +
+    'and browser sub-agent) as the manager agent, running as an autonomous Codex session instead of Claude. ' +
+    'The thread opens as a separate topic where the user talks to it directly; a task may be given upfront, ' +
+    'or the prompt may say the thread starts open-ended. Start it when the user asks for Codex explicitly, ' +
+    'or wants a task done by the OpenAI model.',
   icon: '🤖',
   sdk: 'codex',
-  tools: [
-    'current_datetime',
-    'events',
-    'gmail',
-    'http_get',
-    'notion',
-    'perplexity',
-    'projects',
-    'schedule',
-    'storage',
-    'storage_download_file',
-    'workspace',
-  ],
+  tools: MANAGER_TOOLS,
+  agents: MANAGER_AGENTS,
   notification: 'normal',
 
   session: {
-    instructions: SYSTEM_PROMPT,
+    instructions: MANAGER_INSTRUCTIONS,
+    model: 'gpt-5.6-sol',
+    effort: 'high',
+    preset: 'full',
+    cwd: (userId: string) => workspaceFilesDir(userId),
   },
 } satisfies AgentDeclaration;
