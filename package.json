@@ -39,7 +39,7 @@
     "@grammyjs/runner": "^2.0.3",
     "@koa/router": "^15.7.0",
     "@modelcontextprotocol/sdk": "^1.30.0",
-    "@openai/codex-sdk": "^0.153.0",
+    "@openai/codex-sdk": "^0.153.2",
     "@playwright/mcp": "0.0.80",
     "@prisma/adapter-pg": "^7.10.0",
     "@prisma/client": "^7.10.0",
