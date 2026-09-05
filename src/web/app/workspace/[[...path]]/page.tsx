@@ -4,20 +4,37 @@
 // data/workspace/<userId>/files. The path lives in the URL (deep links and
 // bookmarks work); one polymorphic /api/workspace/node request answers
 // whether it names a directory (→ navigator) or a file (→ viewer). Viewers
-// are a small registry by mediaType — markdown renders via react-markdown
-// (raw HTML inside md stays unrendered, the library's default: files are
-// agent-written, their content is not trusted); everything else shows an
+// are a small registry: markdown renders via react-markdown (raw HTML inside
+// md stays unrendered, the library's default: files are agent-written, their
+// content is not trusted); any other text file — scripts, configs, JSON,
+// HTML as source — shows in the code viewer with syntax highlighting (the
+// grammar registry lives in lib/highlight.ts); everything else shows an
 // honest "no viewer" card with the metadata.
 
+import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import ReactMarkdown from 'react-markdown';
+import rehypeHighlight from 'rehype-highlight';
 import { ApiError, apiFetch } from '../../../lib/api';
 import { useAuthRedirect } from '../../../lib/auth-gate';
 import { formatDateTime } from '../../../lib/format';
+import { aliases, detectLanguage, formatJson, highlightToReact, languages } from '../../../lib/highlight';
 import type { WorkspaceFileMeta, WorkspaceNodeResponse } from '../../../../api/contract.ts';
 import styles from './workspace.module.css';
+
+// Text viewers refuse files above this size outright (the download link is
+// the way) and skip highlighting above the smaller bound — the grammars are
+// regex-driven and a multi-megabyte log would freeze the tab.
+const VIEW_LIMIT_BYTES = 1024 * 1024;
+const HIGHLIGHT_LIMIT_BYTES = 300 * 1024;
+
+// Fenced blocks in markdown go through the same grammar registry as the
+// code viewer; `txt`/`text` fences stay plain on purpose.
+const rehypePlugins: React.ComponentProps<typeof ReactMarkdown>['rehypePlugins'] = [
+  [rehypeHighlight, { languages, aliases, plainText: ['txt', 'text', 'plain'] }],
+];
 
 // useParams keeps catch-all segments URL-encoded; a malformed escape falls
 // back to the raw segment instead of crashing the page.
@@ -101,7 +118,15 @@ function Breadcrumbs({ relPath }: { relPath: string }) {
   );
 }
 
-function DirListing({ relPath, directories, files }: { relPath: string; directories: string[]; files: WorkspaceFileMeta[] }) {
+function DirListing({
+  relPath,
+  directories,
+  files,
+}: {
+  relPath: string;
+  directories: string[];
+  files: WorkspaceFileMeta[];
+}) {
   if (directories.length === 0 && files.length === 0) {
     return <p className={styles.dim}>Папка пуста.</p>;
   }
@@ -126,7 +151,9 @@ function DirListing({ relPath, directories, files }: { relPath: string; director
             {file.title ? <span className={styles.fileTitle}>{file.title}</span> : null}
             <span className={styles.rowMeta}>
               <span className={styles.size}>{formatSize(file.sizeBytes)}</span>
-              {file.modifiedAt ? <span className={styles.time}>{formatDateTime(new Date(file.modifiedAt))}</span> : null}
+              {file.modifiedAt ? (
+                <span className={styles.time}>{formatDateTime(new Date(file.modifiedAt))}</span>
+              ) : null}
             </span>
             {file.description ? <span className={styles.description}>{file.description}</span> : null}
           </Link>
@@ -144,21 +171,29 @@ function DirListing({ relPath, directories, files }: { relPath: string; director
   );
 }
 
-// The viewer registry: mediaType first, extension as the fallback. Only
-// markdown for now — new viewers slot in here locally.
-function pickViewer(file: WorkspaceFileMeta): 'markdown' | null {
+// The viewer registry: markdown by mediaType/extension first, then any file
+// the grammar registry recognizes as text goes to the code viewer with that
+// grammar. New viewers slot in here locally.
+type Viewer = { kind: 'markdown' } | { kind: 'code'; language: string } | null;
+
+function pickViewer(file: WorkspaceFileMeta): Viewer {
   if (file.mediaType === 'text/markdown' || /\.(md|markdown)$/i.test(file.path)) {
-    return 'markdown';
+    return { kind: 'markdown' };
   }
 
-  return null;
+  const language = detectLanguage(file);
+
+  return language ? { kind: 'code', language } : null;
 }
 
-function MarkdownViewer({ relPath }: { relPath: string }) {
+// The text of one workspace file over the raw byte surface. Plain fetch, not
+// apiFetch: the body is raw text, not a JSON envelope. A 401 here leads to
+// the login redirect, same as the API.
+function useRawFile(relPath: string, { enabled = true }: { enabled?: boolean } = {}) {
   const raw = useQuery({
     queryKey: ['workspace-file', relPath],
+    enabled,
     queryFn: async () => {
-      // Plain fetch, not apiFetch: the body is raw text, not a JSON envelope.
       const response = await fetch(filesHref(relPath), {
         credentials: 'same-origin',
       });
@@ -171,10 +206,31 @@ function MarkdownViewer({ relPath }: { relPath: string }) {
     },
   });
 
-  // A 401 on the raw fetch leads to the login redirect, same as the API.
   const unauthorized = useAuthRedirect(raw.error);
 
-  if (unauthorized || raw.isPending) {
+  return { ...raw, unauthorized };
+}
+
+function TooLargeCard({ file }: { file: WorkspaceFileMeta }) {
+  return (
+    <div className={styles.card}>
+      <p className={styles.dim}>
+        Файл слишком большой для просмотра ({formatSize(file.sizeBytes)}, предел {formatSize(VIEW_LIMIT_BYTES)}).{' '}
+        <a href={filesHref(file.path, { download: true })}>Скачать</a>
+      </p>
+    </div>
+  );
+}
+
+function MarkdownViewer({ file }: { file: WorkspaceFileMeta }) {
+  const tooLarge = file.sizeBytes !== null && file.sizeBytes > VIEW_LIMIT_BYTES;
+  const raw = useRawFile(file.path, { enabled: !tooLarge });
+
+  if (tooLarge) {
+    return <TooLargeCard file={file} />;
+  }
+
+  if (raw.unauthorized || raw.isPending) {
     return <p className={styles.dim}>Загрузка файла…</p>;
   }
 
@@ -183,9 +239,54 @@ function MarkdownViewer({ relPath }: { relPath: string }) {
   }
 
   return (
-    <div className={`${styles.card} ${styles.markdown}`}>
-      <ReactMarkdown>{raw.data}</ReactMarkdown>
+    <div className={`${styles.card} ${styles.markdown} ${styles.hl}`}>
+      <ReactMarkdown rehypePlugins={rehypePlugins}>{raw.data}</ReactMarkdown>
     </div>
+  );
+}
+
+function CodeViewer({ file, language }: { file: WorkspaceFileMeta; language: string }) {
+  const tooLarge = file.sizeBytes !== null && file.sizeBytes > VIEW_LIMIT_BYTES;
+  const highlight = file.sizeBytes === null || file.sizeBytes <= HIGHLIGHT_LIMIT_BYTES;
+  const raw = useRawFile(file.path, { enabled: !tooLarge });
+
+  // Highlighting is the expensive step; memoized so a re-render of the page
+  // (react-query refetch bookkeeping, navigation state) does not redo it.
+  const content = useMemo(() => {
+    if (raw.data === undefined) {
+      return null;
+    }
+
+    const text = language === 'json' ? formatJson(raw.data) : raw.data;
+
+    return highlight ? highlightToReact(language, text) : text;
+  }, [raw.data, language, highlight]);
+
+  if (tooLarge) {
+    return <TooLargeCard file={file} />;
+  }
+
+  if (raw.unauthorized || raw.isPending) {
+    return <p className={styles.dim}>Загрузка файла…</p>;
+  }
+
+  if (raw.error) {
+    return <p className={styles.error}>Не удалось загрузить файл: {raw.error.message}</p>;
+  }
+
+  return (
+    <>
+      {highlight ? null : (
+        <p className={styles.viewerNote}>
+          Подсветка синтаксиса отключена: файл больше {formatSize(HIGHLIGHT_LIMIT_BYTES)}.
+        </p>
+      )}
+      <div className={`${styles.card} ${styles.codeCard}`}>
+        <pre className={`${styles.code} ${styles.hl}`}>
+          <code>{content}</code>
+        </pre>
+      </div>
+    </>
   );
 }
 
@@ -207,8 +308,10 @@ function FileView({ file }: { file: WorkspaceFileMeta }) {
         {file.description ? <p className={styles.description}>{file.description}</p> : null}
       </header>
 
-      {viewer === 'markdown' ? (
-        <MarkdownViewer relPath={file.path} />
+      {viewer?.kind === 'markdown' ? (
+        <MarkdownViewer file={file} />
+      ) : viewer?.kind === 'code' ? (
+        <CodeViewer file={file} language={viewer.language} />
       ) : (
         <div className={styles.card}>
           <p className={styles.dim}>Просмотр файлов этого типа пока недоступен.</p>

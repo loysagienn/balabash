@@ -73,6 +73,40 @@ export const CONTENT_TYPES_BY_EXTENSION: Record<string, string> = {
   '.html': 'text/html',
   '.css': 'text/css',
   '.js': 'text/javascript',
+  '.mjs': 'text/javascript',
+  '.cjs': 'text/javascript',
+  '.jsx': 'text/javascript',
+  '.ts': 'text/typescript',
+  '.mts': 'text/typescript',
+  '.cts': 'text/typescript',
+  '.tsx': 'text/typescript',
+  '.py': 'text/x-python',
+  '.sh': 'text/x-shellscript',
+  '.bash': 'text/x-shellscript',
+  '.zsh': 'text/x-shellscript',
+  '.yaml': 'application/yaml',
+  '.yml': 'application/yaml',
+  '.toml': 'application/toml',
+  '.ini': 'text/plain',
+  '.cfg': 'text/plain',
+  '.conf': 'text/plain',
+  '.log': 'text/plain',
+  '.jsonl': 'application/x-ndjson',
+  '.ndjson': 'application/x-ndjson',
+  '.sql': 'application/sql',
+  '.diff': 'text/x-diff',
+  '.patch': 'text/x-diff',
+  '.scss': 'text/x-scss',
+  '.less': 'text/x-less',
+  '.go': 'text/x-go',
+  '.rs': 'text/x-rust',
+  '.rb': 'text/x-ruby',
+  '.php': 'text/x-php',
+  '.java': 'text/x-java-source',
+  '.c': 'text/x-c',
+  '.h': 'text/x-c',
+  '.cpp': 'text/x-c++',
+  '.hpp': 'text/x-c++',
   '.xml': 'application/xml',
   '.pdf': 'application/pdf',
   '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
@@ -136,8 +170,7 @@ export function ensureFilesDb(dbPath: string): void {
 
 export function readMeta(db: DatabaseSync, relPath: string): FileMeta {
   const row = db.prepare('SELECT title, description FROM _files WHERE path = ?').get(relPath) as
-    | { title: string | null; description: string | null }
-    | undefined;
+    { title: string | null; description: string | null } | undefined;
 
   return { title: row?.title ?? null, description: row?.description ?? null };
 }

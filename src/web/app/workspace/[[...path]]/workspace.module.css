@@ -289,3 +289,117 @@
 .error {
   color: var(--danger);
 }
+
+/* The code viewer: one <pre> in a card, no line numbers, no wrapping —
+   horizontal scroll keeps long lines honest. */
+.codeCard {
+  padding: 12px 0;
+}
+
+.code {
+  margin: 0;
+  padding: 0 16px;
+  overflow-x: auto;
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.55;
+  tab-size: 4;
+  white-space: pre;
+}
+
+.code code {
+  font-family: inherit;
+  font-size: inherit;
+}
+
+.viewerNote {
+  margin: 0 0 10px;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+/* The highlight.js theme, on the app's dark palette. One theme for both the
+   code viewer and fenced blocks in markdown: any container with .hl gets it.
+   Token classes are global (hljs- prefix), hence :global. */
+.hl :global(.hljs-comment),
+.hl :global(.hljs-quote) {
+  color: #6f7f94;
+  font-style: italic;
+}
+
+.hl :global(.hljs-keyword),
+.hl :global(.hljs-selector-tag),
+.hl :global(.hljs-doctag),
+.hl :global(.hljs-formula) {
+  color: #c792ea;
+}
+
+.hl :global(.hljs-string),
+.hl :global(.hljs-regexp),
+.hl :global(.hljs-addition),
+.hl :global(.hljs-meta .hljs-string) {
+  color: #9ece6a;
+}
+
+.hl :global(.hljs-number),
+.hl :global(.hljs-literal),
+.hl :global(.hljs-symbol),
+.hl :global(.hljs-bullet),
+.hl :global(.hljs-link) {
+  color: #ff9e64;
+}
+
+.hl :global(.hljs-title),
+.hl :global(.hljs-title.function_),
+.hl :global(.hljs-section),
+.hl :global(.hljs-name) {
+  color: #82aaff;
+}
+
+.hl :global(.hljs-title.class_),
+.hl :global(.hljs-type),
+.hl :global(.hljs-built_in) {
+  color: #ffcb6b;
+}
+
+.hl :global(.hljs-attr),
+.hl :global(.hljs-attribute),
+.hl :global(.hljs-property),
+.hl :global(.hljs-variable),
+.hl :global(.hljs-template-variable),
+.hl :global(.hljs-selector-attr),
+.hl :global(.hljs-selector-pseudo),
+.hl :global(.hljs-selector-id),
+.hl :global(.hljs-selector-class) {
+  color: #7dcfff;
+}
+
+.hl :global(.hljs-tag),
+.hl :global(.hljs-template-tag) {
+  color: #f07178;
+}
+
+.hl :global(.hljs-meta),
+.hl :global(.hljs-meta .hljs-keyword),
+.hl :global(.hljs-params),
+.hl :global(.hljs-operator),
+.hl :global(.hljs-punctuation) {
+  color: #89ddff;
+}
+
+.hl :global(.hljs-subst),
+.hl :global(.hljs-code) {
+  color: var(--text);
+}
+
+.hl :global(.hljs-deletion) {
+  color: #ff6b6b;
+}
+
+.hl :global(.hljs-emphasis) {
+  font-style: italic;
+}
+
+.hl :global(.hljs-strong) {
+  font-weight: 600;
+}
