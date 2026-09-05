@@ -11,12 +11,18 @@
 // the mtime/updated_at comparison, so an empty pass costs only stats.
 // A manual (or any newer) annotation wins: annotating bumps updated_at past
 // mtime, and the file is not touched again until it changes.
+//
+// The pass also prunes orphaned annotations — _files rows whose files are
+// gone. Files deleted by scripts, shells or a removed directory leave their
+// rows behind; the listing prunes only the directory it shows, so a deleted
+// directory's rows would otherwise live forever. The pass already walks the
+// area and reads the whole table: the sweep is the difference of the two.
 
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { config } from '../config/index.ts';
 import { getOpenaiClient } from '../harness/openai/client.ts';
-import { ensureFilesDb, readAnnotationTimes, upsertMeta } from './files.ts';
+import { deleteMeta, ensureFilesDb, readAnnotationTimes, upsertMeta } from './files.ts';
 import { workspaceDbPath, workspaceFilesDir, workspaceRoot } from './layout.ts';
 
 const FIRST_PASS_DELAY_MS = 2 * 60_000;
@@ -198,6 +204,40 @@ function looksBinary(head: Buffer): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// Orphan sweep: rows of the metadata table with no file behind them.
+// ---------------------------------------------------------------------------
+
+// The walk skips dot-files, binaries and empty files, and any of those may
+// carry a manual annotation — so a row absent from the walk is not an orphan
+// yet: a stat confirms the file is gone before the row goes. Unmatched rows
+// are few (the skipped kinds plus the real orphans), so the stats are cheap.
+async function pruneOrphans(
+  userId: string,
+  filesDir: string,
+  walked: CandidateFile[],
+  annotationTimes: Map<string, Date>,
+): Promise<number> {
+  const walkedPaths = new Set(walked.map(file => file.relPath));
+  const orphans: string[] = [];
+
+  for (const relPath of annotationTimes.keys()) {
+    if (walkedPaths.has(relPath)) {
+      continue;
+    }
+
+    const stats = await fs.stat(path.join(filesDir, relPath)).catch(() => null);
+
+    if (!stats?.isFile()) {
+      orphans.push(relPath);
+    }
+  }
+
+  await deleteMeta(userId, orphans);
+
+  return orphans.length;
+}
+
+// ---------------------------------------------------------------------------
 // The model call: one file per call, strict JSON output.
 // ---------------------------------------------------------------------------
 
@@ -258,6 +298,7 @@ async function annotate(candidate: CandidateFile, head: string, truncated: boole
 async function runPass(isStopped: () => boolean): Promise<void> {
   let annotated = 0;
   let failed = 0;
+  let pruned = 0;
   let capped = false;
 
   let userIds: string[];
@@ -286,11 +327,24 @@ async function runPass(isStopped: () => boolean): Promise<void> {
 
     await walkFiles(filesDir, '', files);
 
-    if (files.length >= MAX_FILES_PER_USER) {
+    const walkComplete = files.length < MAX_FILES_PER_USER;
+
+    if (!walkComplete) {
       console.warn(`[indexer] user ${userId}: file walk hit the ${MAX_FILES_PER_USER}-file cap; the rest waits`);
     }
 
     const annotationTimes = await readAnnotationTimes(userId);
+
+    // A capped walk leaves most rows unmatched; the confirming stats would
+    // cost a stat per row of the table — the sweep waits for a full walk.
+    if (walkComplete) {
+      try {
+        pruned += await pruneOrphans(userId, filesDir, files, annotationTimes);
+      } catch (error) {
+        console.error(`[indexer] failed to prune orphaned annotations of user ${userId}:`, error);
+      }
+    }
+
     const candidates = files.filter(file => {
       const annotatedAt = annotationTimes.get(file.relPath);
 
@@ -342,9 +396,9 @@ async function runPass(isStopped: () => boolean): Promise<void> {
     }
   }
 
-  if (annotated || failed) {
+  if (annotated || failed || pruned) {
     console.log(
-      `[indexer] pass done: ${annotated} annotated, ${failed} failed${capped ? ' (call cap reached, the rest waits for the next pass)' : ''}`,
+      `[indexer] pass done: ${annotated} annotated, ${failed} failed, ${pruned} orphaned annotations pruned${capped ? ' (call cap reached, the rest waits for the next pass)' : ''}`,
     );
   }
 }

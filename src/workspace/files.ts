@@ -142,11 +142,10 @@ export function readMeta(db: DatabaseSync, relPath: string): FileMeta {
   return { title: row?.title ?? null, description: row?.description ?? null };
 }
 
-// The one write primitive of the metadata: annotating a file. A null keeps
+// The write primitive of the metadata: annotating a file. A null keeps
 // the existing value (COALESCE) — callers update title and description
-// independently. Deliberately the only write in this otherwise read-side
-// module; the caller is responsible for the database existing (the tools'
-// ensureWorkspace provisions it).
+// independently. The caller is responsible for the database existing (the
+// tools' ensureWorkspace provisions it).
 export function upsertMeta(
   dbPath: string,
   relPath: string,
@@ -192,6 +191,24 @@ function readMetaMap(db: DatabaseSync): Map<string, FileMeta> {
   }
 
   return map;
+}
+
+// The pruning primitive: drops the metadata rows of the given paths. Shared
+// by the listing (orphans of one directory, on sight) and the indexer
+// (orphans of the whole area, once a pass). A missing database has nothing
+// to prune — a read-side door, never provisions.
+export async function deleteMeta(userId: string, relPaths: string[]): Promise<void> {
+  if (!relPaths.length) {
+    return;
+  }
+
+  await withExistingDb(userId, undefined, db => {
+    const remove = db.prepare('DELETE FROM _files WHERE path = ?');
+
+    for (const relPath of relPaths) {
+      remove.run(relPath);
+    }
+  });
 }
 
 // Annotation freshness index for the background indexer: every _files row's
@@ -286,7 +303,9 @@ export async function listDir(userId: string, relDir: string): Promise<Workspace
   }
 
   // The filesystem is the source of truth: metadata rows whose files in
-  // this directory are gone (deleted by a script) are pruned on sight.
+  // this directory are gone (deleted by a script) are pruned on sight. Only
+  // direct children are visible here — a deleted subdirectory's rows are
+  // the indexer's area-wide sweep to catch.
   const stale = [...metaByPath.keys()].filter(metaPath => {
     const slash = metaPath.lastIndexOf('/');
     const parent = slash === -1 ? '' : metaPath.slice(0, slash);
@@ -294,12 +313,7 @@ export async function listDir(userId: string, relDir: string): Promise<Workspace
     return parent === rel && !presentNames.has(name);
   });
 
-  if (stale.length) {
-    await withExistingDb(userId, undefined, db => {
-      const remove = db.prepare('DELETE FROM _files WHERE path = ?');
-      for (const metaPath of stale) remove.run(metaPath);
-    });
-  }
+  await deleteMeta(userId, stale);
 
   return { directories, files };
 }
