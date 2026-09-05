@@ -17,6 +17,11 @@
 // in-process FIFO lock. With DISPLAY set the browser runs headful on the
 // host's Xvfb display — the user can watch and intervene (login, CAPTCHA)
 // through noVNC; without DISPLAY it falls back to headless.
+//
+// Outbound traffic goes through the host's HTTP proxy named by
+// BROWSER_PROXY_SERVER (Privoxy on 127.0.0.1:8118, which forwards `.ru`
+// domains into the Moscow SOCKS tunnel and everything else directly). Unset,
+// the browser connects directly.
 
 import { mkdir, rm } from 'node:fs/promises';
 import path from 'node:path';
@@ -40,6 +45,9 @@ import { WORKSPACE_STORAGE_NOTE } from './world/index.ts';
 const NOVNC_URL = 'https://novnc.loysagienn.com/vnc.html';
 
 const PLAYWRIGHT_CALL_TIMEOUT_MS = 5 * 60_000;
+
+// Read once: the running app's environment, not per launch (see the header).
+const proxyServer = process.env.BROWSER_PROXY_SERVER?.trim() || null;
 
 // Chromium launch flags. The host has no GPU (Xvfb or headless), so WebGPU
 // sites — Astronelia among them — get no adapter with the stock flags and
@@ -350,6 +358,7 @@ export const agent = {
           // watch and intervene through noVNC; headless otherwise.
           headless: !process.env.DISPLAY,
           args: CHROMIUM_ARGS,
+          ...(proxyServer ? { proxy: { server: proxyServer } } : {}),
         });
 
         cleanup.browserContext = browserContext;
