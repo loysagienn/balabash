@@ -202,6 +202,9 @@ export type AppListingView = {
 
 export type AppsResponse = {
   apps: AppListingView[];
+  // The apps domain (config.appsDomain) — the client builds public links
+  // https://<appsDomain>/<slug> from it. Null when the surface is off.
+  appsDomain: string | null;
 };
 
 export type PublishAppRequest = {

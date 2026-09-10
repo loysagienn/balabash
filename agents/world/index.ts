@@ -9,6 +9,7 @@
 // needs.
 
 export { BALABASH_PREAMBLE } from './preamble.ts';
+export { CLAUDE_DESIGN_NOTE } from './claude-design.ts';
 export { PROJECTS_NOTE, PROJECTS_WORLD_NOTE } from './projects.ts';
 export { REPO_RULES_NOTE } from './repo-rules.ts';
 export { TELEGRAM_MARKDOWN_NOTE } from './telegram-markdown.ts';

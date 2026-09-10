@@ -17,6 +17,7 @@ import type { ClaudeSession } from './session.ts';
 import { createBridgeServer } from './bridge.ts';
 import type { BridgeServer } from './bridge.ts';
 import { mergeEnv } from '../env.ts';
+import { nativeMcpServers } from './native-servers.ts';
 
 export type SdkSessionDeps = {
   tools: ToolsApi;
@@ -60,7 +61,9 @@ export function createClaudeSession(options: SdkSessionOptions, deps: SdkSession
       // platform plugin (skills like balabash:app-builder): workbench agents
       // run with cwd in the workspace file area, where repo skills are
       // invisible, so the plugin path delivers them (design №15 of /apps).
-      // skipMcpDiscovery: the MCP surface stays owned by the Balabash bridge.
+      // skipMcpDiscovery: the MCP surface stays owned by the Balabash bridge —
+      // plus the first-party harness servers the agent opted into (see
+      // native-servers.ts), which the CLI authenticates itself.
       ...(full
         ? {
             settingSources: ['project' as const],
@@ -68,7 +71,10 @@ export function createClaudeSession(options: SdkSessionOptions, deps: SdkSession
           }
         : { tools: [], settingSources: [] }),
       strictMcpConfig: true,
-      mcpServers: { balabash: { type: 'sdk', name: 'balabash', instance: bridge.server } },
+      mcpServers: {
+        balabash: { type: 'sdk', name: 'balabash', instance: bridge.server },
+        ...nativeMcpServers(options.nativeServers),
+      },
     });
 
     // close() may have won the race while the session was starting.

@@ -36,6 +36,7 @@ is multi-voice by design.
 | **secretary** | Owns the main thread. Dispatches, answers quick questions, operates tools, spawns everyone else. |
 | 🎩 **manager** | General-purpose task executor working through the connected integrations; can drive the browser. |
 | **browser** | A real Chromium session driven via Playwright — a headless sub-agent operated by other agents. Runs headful on a virtual display, so you can watch it (and take over for logins or CAPTCHAs) through VNC. |
+| 🎨 **designer** | The design specialist: builds landing pages, UI mockups, decks and option canvases as Claude Design projects, checks its renders in its own headless browser (with a fresh-eyes verifier subagent), sends screenshots and iterates in its topic. |
 | 🔑 **auth** | Connects and re-authorizes integrations. Only ever sends links — credential values never pass through it. |
 | ⏰ **scheduler** | Engineers scheduled code tasks: writes the task body, registers it, rebuilds, requests a restart. |
 | 🛠 **engineer** | Balabash's own engineer — edits the system's source code in a live session, builds, and requests a restart of itself. |
@@ -51,6 +52,8 @@ agent on OpenAI Codex. An agent picks its backend with a one-line declaration.
 **Integrations out of the box**
 - **Gmail** — search, read, threads, attachments, drafts, send; per-user Google OAuth.
 - **Notion** — the official hosted MCP server; each user connects their own workspace.
+- **Claude Design** — the official Claude Design MCP server, attached to the designer agent through
+  the Claude Code harness; the operator signs in once on the host (`/design-login`).
 - **Perplexity** — ask / search / reason / deep research.
 - **Web** — fetch pages and download files into storage, with SSRF protection
   (DNS/IP blocklists, redirect and size caps).

@@ -320,7 +320,7 @@ router.get('/threads/:id/events', requireSession, async ctx => {
 // edge — the public edge on the apps domain never shows these details.
 
 router.get('/apps', requireSession, async ctx => {
-  const response: AppsResponse = { apps: await listApps(ctx.state.userId as string) };
+  const response: AppsResponse = { apps: await listApps(ctx.state.userId as string), appsDomain: config.appsDomain };
 
   ctx.body = prepareObject(response);
 });
