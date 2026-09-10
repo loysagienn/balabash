@@ -80,6 +80,9 @@ export default function HomePage() {
           <Link className={styles.coordinator} href="/workspace">
             Файлы
           </Link>
+          <Link className={styles.coordinator} href="/applications">
+            Приложения
+          </Link>
           <Link className={styles.coordinator} href="/llm-usage">
             LLM
           </Link>

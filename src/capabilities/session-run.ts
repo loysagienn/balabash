@@ -17,6 +17,7 @@ import {
 import type {
   AgentDeclaration,
   AgentRun,
+  AgentSdkSession,
   ContentBlock,
   Event,
   JsonObject,
@@ -24,6 +25,7 @@ import type {
   RunContext,
   SdkBridgeTool,
   SessionAgentSpec,
+  SessionEnvironment,
   ThreadSummary,
   ToolDefinition,
 } from '../core/contract.ts';
@@ -417,24 +419,47 @@ export function createSessionRun(
     mkdirSync(cwd, { recursive: true });
   }
 
-  const session = ctx.harness.sdkSession({
-    instructions: spec.instructions,
-    // The platform default session-opening message is the spawn prompt
-    // verbatim; a declaration overrides it only for a different opening move.
-    initialMessage: spec.initialMessage ? spec.initialMessage(prompt) : prompt,
-    ...(spec.model ? { model: spec.model } : {}),
-    ...(spec.effort ? { effort: spec.effort } : {}),
-    ...(spec.preset ? { preset: spec.preset } : {}),
-    ...(cwd ? { cwd } : {}),
-    // Scripts run from the session reach the workspace database the same way
-    // run_script children do: via the WORKSPACE_DB env variable.
-    env: { WORKSPACE_DB: workspaceDbPath(ctx.userId) },
-    extraTools: [
-      createEndThreadTool(end),
-      createSendFileTool(ctx, headless),
-      ...(allowedAgents.length ? createChildTools(ctx, allowedAgents, childThreadIds) : []),
-    ],
-  });
+  // The session exists only after the declaration's environment (if any) is
+  // up: its bridge tools are part of the session's tool set. Text routed in
+  // before that is queued and flushed into the session once it exists.
+  let session: AgentSdkSession | null = null;
+  const preSessionInbox: string[] = [];
+
+  const pushText = (text: string): void => {
+    if (!session) {
+      preSessionInbox.push(text);
+
+      return;
+    }
+
+    try {
+      session.push(text);
+    } catch {
+      // The session may be closing; the run terminal covers the outcome.
+    }
+  };
+
+  const startSession = (environment: SessionEnvironment | null): AgentSdkSession =>
+    ctx.harness.sdkSession({
+      instructions: spec.instructions,
+      // The platform default session-opening message is the spawn prompt
+      // verbatim; a declaration overrides it only for a different opening move.
+      initialMessage: spec.initialMessage ? spec.initialMessage(prompt) : prompt,
+      ...(spec.model ? { model: spec.model } : {}),
+      ...(spec.effort ? { effort: spec.effort } : {}),
+      ...(spec.preset ? { preset: spec.preset } : {}),
+      ...(spec.nativeServers ? { nativeServers: spec.nativeServers } : {}),
+      ...(cwd ? { cwd } : {}),
+      // Scripts run from the session reach the workspace database the same way
+      // run_script children do: via the WORKSPACE_DB env variable.
+      env: { WORKSPACE_DB: workspaceDbPath(ctx.userId) },
+      extraTools: [
+        createEndThreadTool(end),
+        createSendFileTool(ctx, headless),
+        ...(allowedAgents.length ? createChildTools(ctx, allowedAgents, childThreadIds) : []),
+        ...(environment?.extraTools ?? []),
+      ],
+    });
 
   const stop = (error?: unknown) => {
     if (settled) {
@@ -442,7 +467,7 @@ export function createSessionRun(
     }
 
     settled = true;
-    session.close();
+    session?.close();
 
     if (error === undefined) {
       resolveFinished();
@@ -471,8 +496,28 @@ export function createSessionRun(
   };
 
   void (async () => {
+    let environment: SessionEnvironment | null = null;
+
     try {
-      for await (const turn of session.turns) {
+      if (spec.environment) {
+        environment = await spec.environment(ctx, cwd ?? ctx.stateDir);
+      }
+
+      // Cancelled while the environment was starting: the terminal is
+      // already written; the environment is disposed below.
+      if (settled) {
+        return;
+      }
+
+      const created = startSession(environment);
+
+      session = created;
+
+      for (const text of preSessionInbox.splice(0)) {
+        created.push(text);
+      }
+
+      for await (const turn of created.turns) {
         if (settled) {
           return;
         }
@@ -500,6 +545,11 @@ export function createSessionRun(
       stop(settled ? undefined : new Error(`${declaration.name} session ended before end_thread was called`));
     } catch (error) {
       stop(error);
+    } finally {
+      // The environment outlives the session by exactly this step: whatever
+      // ended the run (end_thread, abort, a failed turn, a failed start),
+      // its machinery is torn down here.
+      await environment?.dispose?.().catch(() => {});
     }
   })();
 
@@ -515,7 +565,7 @@ export function createSessionRun(
         const text = describeUserMessage(payload);
 
         if (text) {
-          session.push(text);
+          pushText(text);
         }
 
         return;
@@ -525,7 +575,7 @@ export function createSessionRun(
         const text = describeThreadMessage(event, headless, childThreadIds);
 
         if (text) {
-          session.push(text);
+          pushText(text);
         }
 
         return;
@@ -534,10 +584,19 @@ export function createSessionRun(
       // Any other delivered event may have changed the tool catalog (an
       // integration connected); refresh the bridge before the model reads
       // about it. When nothing changed the sync is a no-op diff; syncTools
-      // never rejects.
+      // never rejects. Before the session exists there is nothing to sync:
+      // the bridge is built from the live catalog when the session starts.
+      const text = describeEvent(event);
+
+      if (!session) {
+        pushText(text);
+
+        return;
+      }
+
       void session.syncTools().then(() => {
         if (!settled) {
-          session.push(describeEvent(event));
+          pushText(text);
         }
       });
     },

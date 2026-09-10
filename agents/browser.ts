@@ -27,9 +27,6 @@ import { mkdir, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { chromium } from 'playwright';
 import type { BrowserContext } from 'playwright';
-import { createConnection } from '@playwright/mcp';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import type {
   AgentDeclaration,
   AgentRun,
@@ -40,11 +37,11 @@ import type {
   SdkBridgeTool,
 } from '../src/core/contract.ts';
 import { describeEvent, describeThreadMessage } from '../src/capabilities/session-run.ts';
+import { connectPlaywrightMcp, createPlaywrightBridgeTools, imageExtension } from './kit/playwright.ts';
+import type { PlaywrightImageSink } from './kit/playwright.ts';
 import { WORKSPACE_STORAGE_NOTE } from './world/index.ts';
 
 const NOVNC_URL = 'https://novnc.loysagienn.com/vnc.html';
-
-const PLAYWRIGHT_CALL_TIMEOUT_MS = 5 * 60_000;
 
 // Read once: the running app's environment, not per launch (see the header).
 const proxyServer = process.env.BROWSER_PROXY_SERVER?.trim() || null;
@@ -64,10 +61,6 @@ const CHROMIUM_ARGS = [
   '--use-angle=swiftshader',
   '--ignore-gpu-blocklist',
 ];
-
-function isObject(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-}
 
 // ---------------------------------------------------------------------------
 // Profile lock: one Chromium per user data dir. In-process FIFO keyed by the
@@ -143,99 +136,21 @@ function buildInitialMessage(prompt: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Playwright MCP → bridge tools: the inner session sees the browser tools as
-// bridge-only tools; results are converted to canonical blocks, and images
-// (screenshots) are ingested into workspace files at capture time.
+// Screenshots: the inner model works from the textual page snapshots — it
+// does not see the pixels. Images are ingested into workspace files at
+// capture time and referenced by fileId, for the operator.
 
-function extensionOf(mimeType: string): string {
-  if (mimeType.includes('jpeg') || mimeType.includes('jpg')) {
-    return 'jpg';
-  }
+function createScreenshotSink(ctx: RunContext): PlaywrightImageSink {
+  return async ({ data, mimeType }) => {
+    const stored = await ctx.files.ingest({
+      body: data,
+      filename: `screenshot-${new Date().toISOString().replace(/[:.]/g, '-')}.${imageExtension(mimeType)}`,
+      contentType: mimeType,
+      sizeBytes: data.length,
+    });
 
-  return 'png';
-}
-
-// Birth contract: data or throw. Text blocks join into one string;
-// images are ingested into file storage and referenced by fileId (the inner
-// model works from the textual page snapshots — it does not see the pixels).
-async function convertPlaywrightResult(raw: Record<string, unknown>, ctx: RunContext): Promise<string> {
-  const content = Array.isArray(raw.content) ? raw.content : [];
-  const lines: string[] = [];
-
-  for (const item of content) {
-    if (!isObject(item)) {
-      continue;
-    }
-
-    if (item.type === 'text' && typeof item.text === 'string') {
-      lines.push(item.text);
-      continue;
-    }
-
-    if (item.type === 'image' && typeof item.data === 'string') {
-      const mimeType = typeof item.mimeType === 'string' && item.mimeType ? item.mimeType : 'image/png';
-      const body = Buffer.from(item.data, 'base64');
-      const stored = await ctx.files.ingest({
-        body,
-        filename: `screenshot-${new Date().toISOString().replace(/[:.]/g, '-')}.${extensionOf(mimeType)}`,
-        contentType: mimeType,
-        sizeBytes: body.length,
-      });
-
-      lines.push(`[image stored as fileId=${stored.id}]`);
-    }
-  }
-
-  const text = lines.join('\n');
-
-  if (raw.isError) {
-    throw new Error(text || 'Browser tool call failed');
-  }
-
-  return text;
-}
-
-// browser_take_screenshot only includes the image in its result when no
-// `filename` is passed — and the image in the result is what gets ingested
-// into workspace files (the local outputDir is disposable). Hide the
-// parameter from the model entirely so every screenshot yields a fileId.
-function sanitizeToolSchema(toolName: string, schema: Record<string, unknown>): Record<string, unknown> {
-  if (toolName !== 'browser_take_screenshot' || !isObject(schema.properties)) {
-    return schema;
-  }
-
-  const { filename: _dropped, ...properties } = schema.properties;
-  const required = Array.isArray(schema.required) ? schema.required.filter(name => name !== 'filename') : undefined;
-
-  return { ...schema, properties, ...(required ? { required } : {}) };
-}
-
-async function createPlaywrightBridgeTools(
-  playwrightClient: Client,
-  ctx: RunContext,
-): Promise<SdkBridgeTool[]> {
-  const { tools } = await playwrightClient.listTools();
-
-  return tools.map(tool => ({
-    name: tool.name,
-    description: tool.description ?? tool.name,
-    inputSchema: sanitizeToolSchema(
-      tool.name,
-      (tool.inputSchema as Record<string, unknown>) ?? { type: 'object', properties: {} },
-    ),
-    handler: async (args: JsonObject) => {
-      if (tool.name === 'browser_take_screenshot') {
-        delete args.filename;
-      }
-
-      const raw = (await playwrightClient.callTool({ name: tool.name, arguments: args }, undefined, {
-        timeout: PLAYWRIGHT_CALL_TIMEOUT_MS,
-        resetTimeoutOnProgress: true,
-      })) as Record<string, unknown>;
-
-      return convertPlaywrightResult(raw, ctx);
-    },
-  }));
+    return `[image stored as fileId=${stored.id}]`;
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -363,17 +278,15 @@ export const agent = {
 
         cleanup.browserContext = browserContext;
 
-        const playwrightConnection = await createConnection({ outputDir, imageResponses: 'allow' }, async () => browserContext);
+        const playwright = await connectPlaywrightMcp({
+          outputDir,
+          clientName: 'balabash-browser',
+          context: async () => browserContext,
+        });
 
-        cleanup.playwrightConnection = playwrightConnection;
+        cleanup.playwrightConnection = playwright;
 
-        const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-        const playwrightClient = new Client({ name: 'balabash-browser', version: '2.0.0' });
-
-        await playwrightConnection.connect(serverTransport);
-        await playwrightClient.connect(clientTransport);
-
-        const playwrightTools = await createPlaywrightBridgeTools(playwrightClient, ctx);
+        const playwrightTools = await createPlaywrightBridgeTools(playwright.client, createScreenshotSink(ctx));
 
         if (ctx.signal.aborted) {
           return;

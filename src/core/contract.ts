@@ -111,6 +111,10 @@ export type ToolResult = {
 // backend unchanged. 'high' is the platform default.
 export type EffortLevel = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
+// First-party MCP servers of the Claude Code harness an agent may opt into by
+// name (see src/harness/claude-sdk/native-servers.ts). Claude sessions only.
+export type NativeMcpServerName = 'claude_design';
+
 // Machine-readable domain event declared by an agent: types '<agent>.*',
 // the first segment must equal the agent's name.
 export type AgentEventDecl = {
@@ -123,9 +127,10 @@ export type AgentEventDecl = {
 // spawn-prompt validation, the SDK session, rendering of incoming events,
 // channel binding (forum topic vs headless parent dialogue by `headless`),
 // the standard end_thread / send_file verbs, abort — is run by the platform.
-// The agent supplies only data. An agent writes run() only when it needs
-// machinery a declaration cannot express (e.g. the browser's Chromium
-// environment).
+// The agent supplies only data — plus, when the session needs machinery next
+// to it (the designer's browser), an `environment` the platform builds and
+// disposes around the session. An agent writes run() only when the lifecycle
+// itself differs (the browser agent's operator protocol).
 export type SessionAgentSpec = {
   instructions: string; // the inner session's system prompt
   // Renders the spawn prompt into the session-opening message. Optional: the
@@ -135,11 +140,25 @@ export type SessionAgentSpec = {
   model?: string; // agent-level choice; omit for the SDK default
   effort?: EffortLevel; // reasoning effort; default 'high'
   preset?: 'bridge-only' | 'full'; // see SdkSessionOptions.preset
+  // First-party harness MCP servers to attach (Claude agents only); see
+  // SdkSessionOptions.nativeServers.
+  nativeServers?: NativeMcpServerName[];
   // Session working directory; default — the run's stateDir. A function form
   // resolves per run from the calling user's id (e.g. a per-user workbench
   // under data/workspace/<userId>/...); the resolved directory is created
   // before the session starts.
   cwd?: string | ((userId: string) => string);
+  // Per-run machinery a declaration cannot express statically (a browser next
+  // to the session): built once per run after the working directory exists
+  // and before the SDK session starts; its bridge tools join the base verbs;
+  // disposed after the session ends, however it ends. Everything else of the
+  // lifecycle stays the platform's.
+  environment?(ctx: RunContext, cwd: string): Promise<SessionEnvironment>;
+};
+
+export type SessionEnvironment = {
+  extraTools?: SdkBridgeTool[]; // bridge-only tools on top of the base verbs
+  dispose?(): Promise<void>;
 };
 
 export type AgentDeclaration = {
@@ -245,6 +264,10 @@ export type SdkSessionOptions = {
   // Codex's native tools plus the bridge, in the app's isolated CODEX_HOME).
   preset?: 'bridge-only' | 'full';
   cwd?: string; // session working directory; default — the run's stateDir
+  // First-party MCP servers of the Claude Code harness to attach next to the
+  // bridge (e.g. claude_design). The harness authenticates them itself with
+  // the host's Claude login; ignored by the codex backend.
+  nativeServers?: NativeMcpServerName[];
   // Extra environment variables for the session process, merged over the app
   // process environment (e.g. WORKSPACE_DB — the workspace database path).
   env?: Record<string, string>;

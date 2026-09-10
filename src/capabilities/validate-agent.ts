@@ -32,7 +32,17 @@ const ALLOWED_KEYS = new Set([
   'run',
 ]);
 
-const SESSION_KEYS = new Set(['instructions', 'initialMessage', 'model', 'effort', 'preset', 'cwd']);
+const SESSION_KEYS = new Set([
+  'instructions',
+  'initialMessage',
+  'model',
+  'effort',
+  'preset',
+  'cwd',
+  'nativeServers',
+  'environment',
+]);
+const NATIVE_SERVERS = new Set(['claude_design']);
 const SESSION_EFFORTS = new Set(['low', 'medium', 'high', 'xhigh', 'max']);
 const SESSION_PRESETS = new Set(['bridge-only', 'full']);
 
@@ -209,6 +219,20 @@ export function validateAgent(module: Record<string, unknown>, filename: string)
       throw new Error(`${filename} agent.session.preset must be one of bridge-only, full`);
     }
 
+    if (session.nativeServers !== undefined) {
+      const names = session.nativeServers;
+
+      if (!Array.isArray(names) || names.some(name => typeof name !== 'string' || !NATIVE_SERVERS.has(name))) {
+        throw new Error(
+          `${filename} agent.session.nativeServers must be an array of: ${[...NATIVE_SERVERS].join(', ')}`,
+        );
+      }
+
+      if (candidate.sdk !== 'claude') {
+        throw new Error(`${filename} agent.session.nativeServers is supported by the claude sdk only`);
+      }
+    }
+
     const validCwd =
       session.cwd === undefined ||
       typeof session.cwd === 'function' ||
@@ -216,6 +240,10 @@ export function validateAgent(module: Record<string, unknown>, filename: string)
 
     if (!validCwd) {
       throw new Error(`${filename} agent.session.cwd must be a non-empty string or a (userId) => string function`);
+    }
+
+    if (session.environment !== undefined && typeof session.environment !== 'function') {
+      throw new Error(`${filename} agent.session.environment must be a function when present`);
     }
   }
 
