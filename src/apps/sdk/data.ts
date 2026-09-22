@@ -13,17 +13,29 @@ export type AppMode = 'owner' | 'public';
 
 export type AppContext = {
   mode: AppMode;
+  /**
+   * URL base of the app's own pages, no trailing slash: '/apps/<path>' in
+   * owner mode, '/<slug>' in public mode. A pathname router must treat it as
+   * its prefix — the same app is served under both.
+   */
+  appBase: string;
   /** URL base of the app's endpoint calls, no trailing slash. */
   apiBase: string;
   /** Workspace path of the app (owner mode). */
   appPath?: string;
   /** Public slug (public mode). */
   slug?: string;
-  /** Owner mode: where to send the browser to refresh the apps cookie. */
+  /**
+   * Owner mode: the main-domain URL of the app root; the cookie refresh
+   * sends the browser to the current in-app location resolved against it.
+   */
   refreshUrl?: string;
 };
 
-type BalabashGlobal = { __BALABASH_APP__?: AppContext; location?: { assign(url: string): void } };
+type BalabashGlobal = {
+  __BALABASH_APP__?: AppContext;
+  location?: { pathname: string; search: string; hash: string; assign(url: string): void };
+};
 
 export function getAppContext(): AppContext {
   const context = (globalThis as BalabashGlobal).__BALABASH_APP__;
@@ -52,7 +64,16 @@ export async function call(name: string, params: Record<string, unknown> = {}): 
   });
 
   if (response.status === 401 && context.mode === 'owner' && context.refreshUrl) {
-    (globalThis as BalabashGlobal).location?.assign(context.refreshUrl);
+    const location = (globalThis as BalabashGlobal).location;
+
+    // The refresh keeps the user's place: the pathname is the same on both
+    // domains (/apps/<path>/…), the handoff carries path and query, the
+    // browser carries the fragment across the redirects.
+    const target = location
+      ? new URL(location.pathname + location.search + location.hash, context.refreshUrl).toString()
+      : context.refreshUrl;
+
+    location?.assign(target);
 
     // The page is navigating away; never settle.
     return new Promise(() => {});

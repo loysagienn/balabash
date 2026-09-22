@@ -24,6 +24,8 @@ export const VENDOR_INTERNAL_FILES = ['vendor-core.js'];
 
 export type AppShellContext = {
   mode: 'owner' | 'public';
+  /** Absolute URL base of the app's own pages and files, no trailing slash. */
+  appBase: string;
   apiBase: string;
   appPath?: string;
   slug?: string;
@@ -46,15 +48,14 @@ function scriptJson(value: unknown): string {
 
 export function renderAppShell(options: {
   manifest: AppManifest;
-  /** Absolute URL base of the app's own files, no trailing slash. */
-  appBase: string;
   /** URL base of the vendor bundles, no trailing slash. */
   vendorBase: string;
   /** Cache-busting version for vendor URLs. */
   vendorVersion: string;
   context: AppShellContext;
 }): string {
-  const { manifest, appBase, vendorBase, vendorVersion, context } = options;
+  const { manifest, vendorBase, vendorVersion, context } = options;
+  const { appBase } = context;
 
   const imports: Record<string, string> = {};
 

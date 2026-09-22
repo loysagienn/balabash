@@ -73,8 +73,29 @@ The `balabash/data` SDK exports:
   carrying the platform's message otherwise. Expired owner auth is not your
   concern — on a 401 the SDK itself sends the browser through the cookie-refresh
   loop.
-- `getAppContext()` — `{ mode: 'owner' | 'public', appPath?, slug? }`, if the UI
-  wants to adapt to how it is being served.
+- `getAppContext()` — `{ mode: 'owner' | 'public', appBase, appPath?, slug? }`, if
+  the UI wants to adapt to how it is being served. `appBase` is the URL prefix of
+  the app's own pages (no trailing slash): `/apps/<folder-path>` for the owner,
+  `/<slug>` when public — the same app is served under both.
+
+## Pages and navigation inside the app
+
+An app may have nested pages addressed by pathname: `<appBase>/settings`,
+`<appBase>/items/42`. The platform serves the app shell for ANY navigation to a path
+under the app (a page reload or a shared deep link lands on the right screen); the
+app's own router reads the rest of the path. Rules:
+
+- Always build in-app URLs from `getAppContext().appBase` — never hardcode
+  `/apps/...` or the slug. Route on `location.pathname.slice(appBase.length)`.
+- Navigate with the History API (`history.pushState` + a `popstate` listener, or a
+  tiny hook around them) and plain `<a href={appBase + '/items/42'}>` links whose
+  click handler does `pushState` instead of a full load. There is no router library
+  in the vendor set.
+- The fallback answers navigations only (requests with `Accept: text/html`). Module,
+  stylesheet and image requests for a missing file still get a 404 — a mistyped
+  import shows up as a 404, not as HTML in place of a module.
+- Hash routing (`<appBase>#/settings`) still works and needs no base handling; use
+  it only if you have a reason to — path routing gives cleaner, shareable URLs.
 
 ## Your duties as the author (do these every time)
 

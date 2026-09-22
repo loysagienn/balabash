@@ -7,17 +7,21 @@
 // Current scope (steps 1–3): owner-mode serving behind the apps cookie
 // (minted from the one-time token handoff at /auth — src/apps/auth.ts),
 // vendor bundles, shell + module transformation, and the owner data gateway
-// (/platform/api/apps/…). Public slugs and their gateway arrive in step 4.
+// (/platform/api/apps/…), the public slugs and their gateway, and the SPA
+// fallback: a navigation request to a path INSIDE an app folder that is
+// neither the app root nor a file answers the app's shell, so an app may
+// route by pathname (/apps/<path>/some/page, /<slug>/some/page) and survive
+// a reload — the in-page router owns the rest of the path.
 
 import path from 'node:path';
 import fs from 'node:fs/promises';
-import { createReadStream } from 'node:fs';
+import { createReadStream, type Stats } from 'node:fs';
 import type { Context, Next } from 'koa';
 import { config } from '../config/index.ts';
 import { prisma } from '../db/client.ts';
 import { WorkspacePathError, guessContentType, sanitizeRelPath } from '../workspace/files.ts';
 import { workspaceFilesDir } from '../workspace/layout.ts';
-import { APP_MANIFEST_FILENAME, readAppManifest } from './manifest.ts';
+import { APP_MANIFEST_FILENAME, readAppManifest, type ManifestResult } from './manifest.ts';
 import { callAppEndpoint } from './endpoints.ts';
 import {
   APPS_COOKIE_MAX_AGE_MS,
@@ -102,6 +106,14 @@ function decodePath(rawPath: string): string | null {
   }
 }
 
+// A navigation request (the browser asking for a page) as opposed to a
+// resource fetch (a module script sends Accept: */*, a stylesheet text/css,
+// an image image/*). Only navigations get the SPA fallback: a mistyped
+// import must keep answering 404, never an HTML page disguised as a module.
+function wantsHtml(ctx: Context): boolean {
+  return ctx.get('accept').includes('text/html');
+}
+
 /** The nearest ancestor folder (deepest first) carrying an app manifest. */
 async function findAppRoot(filesDir: string, relFilePath: string): Promise<string | null> {
   const segments = relFilePath.split('/');
@@ -142,15 +154,8 @@ async function serveVendor(ctx: Context, filename: string): Promise<void> {
 
 // One app file: a transformable module goes through esbuild, everything else
 // streams as-is. no-store everywhere — "update = overwrite" must be an F5.
-async function serveAppFile(ctx: Context, filesDir: string, relFilePath: string): Promise<void> {
+async function serveAppFile(ctx: Context, filesDir: string, relFilePath: string, stats: Stats): Promise<void> {
   const absPath = path.join(filesDir, relFilePath);
-  const stats = await fs.stat(absPath).catch(() => null);
-
-  if (!stats?.isFile()) {
-    sendText(ctx, 404, 'Not found');
-
-    return;
-  }
 
   ctx.set('cache-control', 'no-store');
 
@@ -168,9 +173,36 @@ async function serveAppFile(ctx: Context, filesDir: string, relFilePath: string)
   ctx.body = createReadStream(absPath);
 }
 
+// The owner shell of one app folder (manifest already read): a broken
+// manifest renders as a readable error page, never a 500.
+async function renderOwnerShell(ctx: Context, appPath: string, result: Exclude<ManifestResult, { status: 'absent' }>): Promise<void> {
+  ctx.type = 'text/html; charset=utf-8';
+  ctx.set('cache-control', 'no-store');
+
+  if (result.status === 'invalid') {
+    ctx.body = renderManifestErrorPage(appPath, result.error);
+
+    return;
+  }
+
+  ctx.body = renderAppShell({
+    manifest: result.manifest,
+    vendorBase: '/platform/vendor',
+    vendorVersion: await getVendorVersion(),
+    context: {
+      mode: 'owner',
+      appBase: `/apps/${appPath}`,
+      apiBase: `/platform/api/apps/${appPath}`,
+      appPath,
+      refreshUrl: `https://${config.domain}/apps/${appPath}`,
+    },
+  });
+}
+
 // The owner surface: /apps/<workspace-path>. The app root answers the shell;
-// a file inside an app folder answers the file; everything else is a 404
-// (decision №14: no SPA fallback in v1).
+// a file inside an app folder answers the file; any other path inside an app
+// folder answers the shell too when the browser is navigating (the SPA
+// fallback) and 404 otherwise.
 async function serveOwnerPath(ctx: Context, userId: string, rawRest: string): Promise<void> {
   const decoded = decodePath(rawRest);
 
@@ -209,37 +241,14 @@ async function serveOwnerPath(ctx: Context, userId: string, rawRest: string): Pr
   if (stats?.isDirectory()) {
     const result = await readAppManifest(userId, relPath);
 
-    if (result.status === 'absent') {
-      sendText(ctx, 404, 'This folder is not an app (no balabash-app.json)');
+    if (result.status !== 'absent') {
+      await renderOwnerShell(ctx, relPath, result);
 
       return;
     }
 
-    ctx.type = 'text/html; charset=utf-8';
-    ctx.set('cache-control', 'no-store');
-
-    if (result.status === 'invalid') {
-      ctx.body = renderManifestErrorPage(relPath, result.error);
-
-      return;
-    }
-
-    const appBase = `/apps/${relPath}`;
-
-    ctx.body = renderAppShell({
-      manifest: result.manifest,
-      appBase,
-      vendorBase: '/platform/vendor',
-      vendorVersion: await getVendorVersion(),
-      context: {
-        mode: 'owner',
-        apiBase: `/platform/api/apps/${relPath}`,
-        appPath: relPath,
-        refreshUrl: `https://${config.domain}/apps/${relPath}`,
-      },
-    });
-
-    return;
+    // A plain folder: inside an app it is a route like any other path
+    // (the fallback below), outside an app it is nothing.
   }
 
   if (stats?.isFile()) {
@@ -253,12 +262,25 @@ async function serveOwnerPath(ctx: Context, userId: string, rawRest: string): Pr
       return;
     }
 
-    await serveAppFile(ctx, filesDir, relPath);
+    await serveAppFile(ctx, filesDir, relPath, stats);
 
     return;
   }
 
-  sendText(ctx, 404, 'Not found');
+  // Neither an app root nor a file: the SPA fallback. A navigation inside an
+  // app folder answers the shell of the nearest ancestor app — the
+  // in-page router reads the rest of the path. Resource fetches keep the
+  // honest 404.
+  const appRoot = wantsHtml(ctx) ? await findAppRoot(filesDir, relPath) : null;
+  const result = appRoot ? await readAppManifest(userId, appRoot) : null;
+
+  if (!appRoot || !result || result.status === 'absent') {
+    sendText(ctx, 404, stats?.isDirectory() ? 'This folder is not an app (no balabash-app.json)' : 'Not found');
+
+    return;
+  }
+
+  await renderOwnerShell(ctx, appRoot, result);
 }
 
 // The owner data gateway: POST /platform/api/apps/<app path>/<endpoint>.
@@ -364,7 +386,8 @@ async function findPublication(slug: string): Promise<{ userId: string; path: st
 }
 
 // The public page/asset surface: /:slug is the shell, /:slug/<file> an asset
-// of the app folder. The manifest itself is deliberately NOT served here —
+// of the app folder, /:slug/<anything else> the shell again for a navigation
+// (the SPA fallback). The manifest itself is deliberately NOT served here —
 // the api declaration is readable to the owner, not to the internet.
 async function servePublicPath(ctx: Context, rawPath: string): Promise<void> {
   ctx.set('x-robots-tag', 'noindex');
@@ -408,20 +431,26 @@ async function servePublicPath(ctx: Context, rawPath: string): Promise<void> {
     return;
   }
 
-  if (restSegments.length === 0) {
+  const appBase = `/${slug}`;
+
+  const renderPublicShell = async (): Promise<void> => {
     ctx.type = 'text/html; charset=utf-8';
     ctx.set('cache-control', 'no-store');
     ctx.body = renderAppShell({
       manifest: manifest.manifest,
-      appBase: `/${slug}`,
       vendorBase: '/platform/vendor',
       vendorVersion: await getVendorVersion(),
       context: {
         mode: 'public',
+        appBase,
         apiBase: `/platform/api/app/${slug}`,
         slug,
       },
     });
+  };
+
+  if (restSegments.length === 0) {
+    await renderPublicShell();
 
     return;
   }
@@ -442,7 +471,24 @@ async function servePublicPath(ctx: Context, rawPath: string): Promise<void> {
     return;
   }
 
-  await serveAppFile(ctx, workspaceFilesDir(publication.userId), relFilePath);
+  const filesDir = workspaceFilesDir(publication.userId);
+  const stats = await fs.stat(path.join(filesDir, relFilePath)).catch(() => null);
+
+  if (stats?.isFile()) {
+    await serveAppFile(ctx, filesDir, relFilePath, stats);
+
+    return;
+  }
+
+  // Not a file: the SPA fallback for navigations, 404 for resource fetches
+  // (the same rule as the owner surface).
+  if (!wantsHtml(ctx)) {
+    sendText(ctx, 404, 'Not found');
+
+    return;
+  }
+
+  await renderPublicShell();
 }
 
 // The public data gateway: POST /platform/api/app/:slug/:endpoint. The same
