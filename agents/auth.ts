@@ -40,7 +40,7 @@ export const agent = {
 
   session: {
     instructions: SYSTEM_PROMPT,
-    model: 'claude-opus-5',
+    model: 'claude-opus-5-5',
     initialMessage: (prompt: string) => `Integration task from your operator:
 ${prompt}
 

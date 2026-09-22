@@ -13,7 +13,7 @@ import type { AgentDeclaration } from '../src/core/contract.ts';
 import { workspaceFilesDir } from '../src/workspace/layout.ts';
 import { BALABASH_PREAMBLE, PROJECTS_NOTE, TELEGRAM_OUTPUT_NOTE, WORKBENCH_NOTE, WORKSPACE_STORAGE_NOTE } from './world/index.ts';
 
-const PPTX_MODEL = 'claude-fable-5-1';
+const PPTX_MODEL = 'claude-opus-5-5';
 
 const SKILL_DIR = path.resolve('.claude', 'skills', 'pptx');
 

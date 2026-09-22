@@ -295,7 +295,7 @@ export const agent = {
         const session = ctx.harness.sdkSession({
           instructions: `${SYSTEM_PROMPT}\n\n${buildInstructions()}`,
           initialMessage: buildInitialMessage(prompt),
-          model: 'claude-opus-5',
+          model: 'claude-opus-5-5',
           extraTools: [...playwrightTools, finishTool],
         });
 

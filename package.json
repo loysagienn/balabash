@@ -23,18 +23,8 @@
     "types": "tsc --noEmit",
     "test": "node --test --no-warnings=ExperimentalWarning \"src/**/*.test.ts\" \"tools/**/*.test.ts\""
   },
-  "devDependencies": {
-    "@types/koa": "^3.0.3",
-    "@types/koa__router": "^12.0.5",
-    "@types/markdown-it": "^14.1.2",
-    "@types/node": "^26.1.1",
-    "@types/pg": "^8.20.0",
-    "nodemon": "^3.1.14",
-    "prettier": "^3.9.6",
-    "typescript": "^7.0.2"
-  },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.3.257",
+    "@anthropic-ai/claude-agent-sdk": "^0.3.280",
     "@aws-sdk/client-s3": "^3.1124.0",
     "@aws-sdk/s3-request-presigner": "^3.1124.0",
     "@grammyjs/runner": "^2.0.3",
@@ -45,6 +35,11 @@
     "@prisma/adapter-pg": "^7.10.0",
     "@prisma/client": "^7.10.0",
     "@tanstack/react-query": "^5.101.4",
+    "@types/koa": "^3.0.3",
+    "@types/koa__router": "^12.0.5",
+    "@types/markdown-it": "^14.1.2",
+    "@types/node": "^26.1.1",
+    "@types/pg": "^8.20.0",
     "ajv": "^8.20.0",
     "croner": "^10.0.1",
     "dotenv": "^17.4.2",
@@ -52,12 +47,15 @@
     "grammy": "^1.45.1",
     "koa": "^3.2.1",
     "markdown-it": "^15.0.0",
+    "nodemon": "^3.1.14",
     "openai": "^7.8.0",
     "pg": "^8.22.0",
     "playwright": "1.63.0-alpha-2026-08-31",
+    "prettier": "^3.9.6",
     "prisma": "^7.10.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
+    "typescript": "^7.0.2",
     "zod": "^4.4.3"
   }
 }

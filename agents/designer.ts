@@ -37,7 +37,7 @@ import {
   WORKSPACE_STORAGE_NOTE,
 } from './world/index.ts';
 
-const DESIGNER_MODEL = 'claude-fable-5-1';
+const DESIGNER_MODEL = 'claude-opus-5-5';
 
 // The verify loop's frame (the Claude Design prompt asks for 1440×900).
 const VIEWPORT = { width: 1440, height: 900 };

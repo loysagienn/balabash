@@ -29,7 +29,7 @@ export const agent = {
 
   session: {
     instructions: MANAGER_INSTRUCTIONS,
-    model: 'claude-fable-5-1',
+    model: 'claude-opus-5-5',
     preset: 'full',
     cwd: (userId: string) => workspaceFilesDir(userId),
   },

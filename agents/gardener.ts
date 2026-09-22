@@ -81,7 +81,7 @@ ${TELEGRAM_OUTPUT_NOTE}
 ${WORKSPACE_STORAGE_NOTE}
 
 End the thread when the pass is reported and the user has no follow-ups (or asks to stop); pending questions to the user keep the thread open. Stay with the assigned project: a request to tend another project is a new thread.`,
-    model: 'claude-opus-5',
+    model: 'claude-opus-5-5',
     preset: 'full',
     cwd: (userId: string) => workspaceFilesDir(userId),
   },
