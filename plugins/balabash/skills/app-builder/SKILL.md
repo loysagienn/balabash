@@ -40,8 +40,22 @@ A single JSON object at the app folder root; unknown keys are rejected. Fields:
     resolves to an object with `changes` and `lastInsertRowid`), `all` (an array of
     rows), `get` (one row or `null`).
 
-Caps per call: 200 rows / 50 KB / 10 s. Design endpoints as narrow slices and
+  - `bulk` — optional boolean (default `false`): lifts the endpoint out of the
+    ordinary result window (see below). Only for `kind: "all"`.
+
+Caps per call: 200 rows / 50 KB. Design endpoints as narrow slices and
 aggregates the UI actually needs, never "select the whole table".
+
+**The bulk exception.** When the UI genuinely needs a whole dataset at once (a point
+cloud of every record, a full map layer) and no aggregate can replace it, mark that
+ONE endpoint `"bulk": true`. A bulk endpoint may return up to 200 000 rows / 16 MB of
+JSON; the platform runs it on a read-only database connection (it cannot write, so
+keep it a `SELECT`), gzips the answer on the wire, and runs at most 2 bulk calls at a
+time process-wide — a third concurrent call fails with a `busy` error (HTTP 503,
+retry in a moment). Keep bulk rows narrow (few short columns, rounded numbers), cache
+the result in the UI (a long `staleTime`), and never make a bulk endpoint the
+default path of a page that reloads often. Everything else stays on the ordinary
+window.
 
 ## UI sources
 

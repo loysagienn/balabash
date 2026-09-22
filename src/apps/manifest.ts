@@ -18,11 +18,21 @@ const paramTypeSchema = z.enum(['string', 'number', 'boolean', 'string?', 'numbe
 
 const identifier = z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/, 'must be an identifier');
 
-const endpointSchema = z.strictObject({
-  params: z.record(identifier, paramTypeSchema).default({}),
-  statement: z.string().min(1),
-  kind: z.enum(['run', 'all', 'get']),
-});
+const endpointSchema = z
+  .strictObject({
+    params: z.record(identifier, paramTypeSchema).default({}),
+    statement: z.string().min(1),
+    kind: z.enum(['run', 'all', 'get']),
+    // The bulk window (src/apps/endpoints.ts): a read-only 'all' endpoint
+    // that may return a whole dataset (up to the platform's bulk ceiling)
+    // instead of the 200-row slice. Opt-in per endpoint, never per app —
+    // the ordinary window stays the default for everything else.
+    bulk: z.boolean().default(false),
+  })
+  .refine(endpoint => !endpoint.bulk || endpoint.kind === 'all', {
+    message: 'bulk endpoints must be of kind "all" (a read-only row set)',
+    path: ['bulk'],
+  });
 
 // A source-relative path inside the app folder: no leading slash, no "..".
 // The serve path re-checks through sanitizeRelPath; this is the authoring-

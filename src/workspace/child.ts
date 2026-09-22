@@ -140,9 +140,11 @@ export function runChild(command: string, args: string[], options: RunChildOptio
 //   { mode: 'query', sql }            — data_query: any SQL; a row-returning
 //       statement streams rows up to the caps, anything else goes through
 //       exec() (multi-statement scripts work) and reports the change count.
-//   { mode: 'statement', statement, kind, params } — an app endpoint: one
-//       prepared statement, values bound ONLY as named parameters (no SQL
-//       concatenation by construction); kind = run | all | get.
+//   { mode: 'statement', statement, kind, params, readOnly } — an app
+//       endpoint: one prepared statement, values bound ONLY as named
+//       parameters (no SQL concatenation by construction); kind = run | all
+//       | get. readOnly opens the connection read-only (SQLITE_OPEN_READONLY):
+//       a write attempt is an SQL error, whatever the statement text says.
 // Caps arrive via env (SQL_MAX_ROWS / SQL_MAX_BYTES), the database path via
 // WORKSPACE_DB, the lock policy via SQL_BUSY_TIMEOUT_MS (src/workspace/
 // sqlite.ts: the child is its own process, so it waits for a foreign writer
@@ -182,7 +184,10 @@ const collectRows = iterator => {
   return { rows, truncated };
 };
 try {
-  const db = new DatabaseSync(process.env.WORKSPACE_DB, { timeout: Number(process.env.SQL_BUSY_TIMEOUT_MS) });
+  const db = new DatabaseSync(process.env.WORKSPACE_DB, {
+    timeout: Number(process.env.SQL_BUSY_TIMEOUT_MS),
+    readOnly: payload.readOnly === true,
+  });
   let out;
   if (payload.mode === 'statement') {
     const stmt = db.prepare(payload.statement);
@@ -244,6 +249,11 @@ export type SqlStatementCall = {
   kind: 'run' | 'all' | 'get';
   /** Every bind by name; an optional-and-absent parameter arrives as null. */
   params: Record<string, SqlParamValue>;
+  /**
+   * Open the connection read-only: the statement cannot write no matter
+   * what it says (the bulk window of app endpoints runs this way).
+   */
+  readOnly?: boolean;
 };
 
 async function runSql(
@@ -300,5 +310,5 @@ export function statementInChild(
   call: SqlStatementCall,
   caps: SqlCaps,
 ): Promise<SqlChildResult> {
-  return runSql(dbPath, cwd, { mode: 'statement', ...call }, caps);
+  return runSql(dbPath, cwd, { mode: 'statement', ...call, readOnly: call.readOnly === true }, caps);
 }

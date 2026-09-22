@@ -33,6 +33,7 @@ import {
 } from './auth.ts';
 import { allowPublicHit } from './rate-limit.ts';
 import { isTransformableModule, transformAppModule } from './transform.ts';
+import { encodeJsonResponse } from './wire.ts';
 import { VENDOR_INTERNAL_FILES, VENDOR_MODULES, renderAppShell, renderCatalogPage, renderManifestErrorPage } from './shell.ts';
 import { listApps } from './management.ts';
 
@@ -71,6 +72,29 @@ function sendText(ctx: Context, status: number, message: string): void {
 function sendJsonError(ctx: Context, status: number, code: string, message: string): void {
   ctx.status = status;
   ctx.body = { error: { code, message } };
+}
+
+// The success wire of the data gateway: {result}, gzipped when large and
+// accepted (wire.ts) — a bulk endpoint's megabytes travel compressed.
+function sendJsonResult(ctx: Context, result: unknown): void {
+  const encoded = encodeJsonResponse(JSON.stringify({ result }), ctx.get('accept-encoding'));
+
+  ctx.status = 200;
+  ctx.type = 'application/json';
+  ctx.vary('accept-encoding');
+
+  if (encoded.encoding) {
+    ctx.set('content-encoding', encoded.encoding);
+  }
+
+  ctx.body = encoded.body;
+}
+
+// The bulk fence refused the call (endpoints.ts): a 503 with a short
+// Retry-After — the SDK surfaces the message, a retrying UI waits a moment.
+function sendBusy(ctx: Context, message: string): void {
+  ctx.set('retry-after', '2');
+  sendJsonError(ctx, 503, 'busy', message);
 }
 
 // Tolerant body read (the SDK always sends a JSON object): anything that is
@@ -353,11 +377,15 @@ async function serveOwnerEndpoint(ctx: Context, userId: string, rawRest: string)
 
   switch (outcome.status) {
     case 'ok':
-      ctx.body = { result: outcome.result };
+      sendJsonResult(ctx, outcome.result);
 
       return;
     case 'bad_params':
       sendJsonError(ctx, 400, 'bad_params', outcome.message);
+
+      return;
+    case 'busy':
+      sendBusy(ctx, outcome.message);
 
       return;
     case 'error':
@@ -563,11 +591,15 @@ async function servePublicEndpoint(ctx: Context, rawRest: string): Promise<void>
 
   switch (outcome.status) {
     case 'ok':
-      ctx.body = { result: outcome.result };
+      sendJsonResult(ctx, outcome.result);
 
       return;
     case 'bad_params':
       sendJsonError(ctx, 400, 'bad_params', outcome.message);
+
+      return;
+    case 'busy':
+      sendBusy(ctx, outcome.message);
 
       return;
     case 'error':
