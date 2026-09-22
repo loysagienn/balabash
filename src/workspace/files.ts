@@ -15,8 +15,9 @@
 
 import path from 'node:path';
 import fs from 'node:fs/promises';
-import { DatabaseSync } from 'node:sqlite';
+import type { DatabaseSync } from 'node:sqlite';
 import { workspaceDbPath, workspaceFilesDir } from './layout.ts';
+import { WorkspaceDbBusyError, inWriteTransaction, withWorkspaceDb, type WithDbOptions } from './sqlite.ts';
 
 const MAX_REL_PATH_LENGTH = 300;
 
@@ -139,27 +140,20 @@ export function guessContentType(filename: string): string {
 
 export type FileMeta = { title: string | null; description: string | null };
 
-// Short-lived in-process handle for the tiny metadata operations. Bulk SQL
-// (data_query) runs in a child process instead — DatabaseSync is synchronous
-// and must not block the single app process on a heavy query.
-export function withDb<T>(dbPath: string, fn: (db: DatabaseSync) => T): T {
-  const db = new DatabaseSync(dbPath);
-
-  try {
-    db.exec('PRAGMA busy_timeout = 5000');
-    return fn(db);
-  } finally {
-    db.close();
-  }
-}
+// The tiny metadata operations run on short-lived in-process handles under
+// the platform's lock policy (src/workspace/sqlite.ts: short synchronous
+// busy slices, asynchronous retries — the event loop stays free while a
+// foreign writer holds the database). Bulk SQL (data_query) runs in a child
+// process instead — DatabaseSync is synchronous and must not block the
+// single app process on a heavy query.
 
 // Write-side provisioning of the metadata database: creates workspace.sqlite
 // (DatabaseSync creates on open) with the _files table. The one owner of the
 // _files DDL — the workbench tools and the annotation indexer both call this
 // before their first write. WAL lets tool calls and script children
 // read/write concurrently.
-export function ensureFilesDb(dbPath: string): void {
-  withDb(dbPath, db => {
+export async function ensureFilesDb(dbPath: string): Promise<void> {
+  await withWorkspaceDb(dbPath, db => {
     db.exec('PRAGMA journal_mode = WAL');
     db.exec(
       'CREATE TABLE IF NOT EXISTS _files (' +
@@ -184,8 +178,8 @@ export function upsertMeta(
   relPath: string,
   title: string | null,
   description: string | null,
-): FileMeta {
-  return withDb(dbPath, db => {
+): Promise<FileMeta> {
+  return withWorkspaceDb(dbPath, db => {
     db.prepare(
       "INSERT INTO _files (path, title, description, updated_at) VALUES (?, ?, ?, datetime('now')) " +
         'ON CONFLICT(path) DO UPDATE SET ' +
@@ -200,7 +194,12 @@ export function upsertMeta(
 
 // The read-side door to the metadata: opens the database only when the file
 // already exists (opening would create it), degrades to empty metadata.
-async function withExistingDb<T>(userId: string, fallback: T, fn: (db: DatabaseSync) => T): Promise<T> {
+async function withExistingDb<T>(
+  userId: string,
+  fallback: T,
+  fn: (db: DatabaseSync) => T,
+  options?: WithDbOptions,
+): Promise<T> {
   const dbPath = workspaceDbPath(userId);
   const stats = await fs.stat(dbPath).catch(() => null);
 
@@ -208,7 +207,7 @@ async function withExistingDb<T>(userId: string, fallback: T, fn: (db: DatabaseS
     return fallback;
   }
 
-  return withDb(dbPath, fn);
+  return withWorkspaceDb(dbPath, fn, options);
 }
 
 function readMetaMap(db: DatabaseSync): Map<string, FileMeta> {
@@ -230,19 +229,32 @@ function readMetaMap(db: DatabaseSync): Map<string, FileMeta> {
 // by the listing (orphans of one directory, on sight) and the indexer
 // (orphans of the whole area, once a pass). A missing database has nothing
 // to prune — a read-side door, never provisions.
-export async function deleteMeta(userId: string, relPaths: string[]): Promise<void> {
+export async function deleteMeta(userId: string, relPaths: string[], options?: WithDbOptions): Promise<void> {
   if (!relPaths.length) {
     return;
   }
 
-  await withExistingDb(userId, undefined, db => {
-    const remove = db.prepare('DELETE FROM _files WHERE path = ?');
+  // One short IMMEDIATE transaction: the write lock is taken up front and
+  // the rows go in a single step instead of one autocommit per path.
+  await withExistingDb(
+    userId,
+    undefined,
+    db =>
+      inWriteTransaction(db, () => {
+        const remove = db.prepare('DELETE FROM _files WHERE path = ?');
 
-    for (const relPath of relPaths) {
-      remove.run(relPath);
-    }
-  });
+        for (const relPath of relPaths) {
+          remove.run(relPath);
+        }
+      }),
+    options,
+  );
 }
+
+// The listing's on-sight pruning is hygiene, not the answer: it waits for a
+// foreign writer only briefly, and a busy database leaves the rows to the
+// indexer's next sweep rather than stalling (or failing) the listing.
+const PRUNE_ON_SIGHT_LOCK_WAIT_MS = 2_000;
 
 // Annotation freshness index for the background indexer: every _files row's
 // updated_at as a UTC Date, keyed by path. Empty when the database does not
@@ -346,7 +358,13 @@ export async function listDir(userId: string, relDir: string): Promise<Workspace
     return parent === rel && !presentNames.has(name);
   });
 
-  await deleteMeta(userId, stale);
+  try {
+    await deleteMeta(userId, stale, { lockWaitMs: PRUNE_ON_SIGHT_LOCK_WAIT_MS });
+  } catch (error) {
+    if (!(error instanceof WorkspaceDbBusyError)) {
+      throw error;
+    }
+  }
 
   return { directories, files };
 }

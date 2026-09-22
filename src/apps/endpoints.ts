@@ -14,11 +14,15 @@ import { statementInChild, type SqlParamValue } from '../workspace/child.ts';
 import { workspaceDbPath, workspaceFilesDir } from '../workspace/layout.ts';
 import type { AppEndpoint } from './manifest.ts';
 
-// Endpoint caps: the same result window as data_query, but a shorter
-// timeout — endpoint calls are interactive UI traffic, not analysis.
+// Endpoint caps: the same result window and timeout as data_query. The
+// timeout is not a statement budget (an endpoint statement is instant) but
+// the lock window of src/workspace/sqlite.ts: a write endpoint must outwait
+// a foreign writer's transaction on the shared workspace.sqlite (tens of
+// seconds) instead of failing the UI with "database is locked"; reads never
+// wait under WAL.
 const ENDPOINT_MAX_ROWS = 200;
 const ENDPOINT_MAX_BYTES = 50_000;
-const ENDPOINT_TIMEOUT_MS = 10_000;
+const ENDPOINT_TIMEOUT_MS = 60_000;
 
 export type EndpointCallOutcome =
   | { status: 'ok'; result: unknown }

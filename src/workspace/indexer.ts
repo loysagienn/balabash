@@ -383,11 +383,11 @@ async function runPass(isStopped: () => boolean): Promise<void> {
         }
 
         if (!dbReady) {
-          ensureFilesDb(dbPath);
+          await ensureFilesDb(dbPath);
           dbReady = true;
         }
 
-        upsertMeta(dbPath, candidate.relPath, annotation.title, annotation.description);
+        await upsertMeta(dbPath, candidate.relPath, annotation.title, annotation.description);
         annotated += 1;
       } catch (error) {
         failed += 1;

@@ -66,7 +66,7 @@ export async function ensureWorkspace(userId: string): Promise<Workspace> {
   await fs.mkdir(workspace.filesDir, { recursive: true });
   await fs.mkdir(workspace.tmpDir, { recursive: true });
 
-  ensureFilesDb(workspace.dbPath);
+  await ensureFilesDb(workspace.dbPath);
 
   return workspace;
 }

@@ -20,7 +20,8 @@
     "generate": "prisma generate",
     "rebuild-threads": "node --enable-source-maps --env-file=.env ./dist/rebuild-threads.js",
     "render-context": "node --enable-source-maps --env-file=.env ./dist/render-context.js",
-    "types": "tsc --noEmit"
+    "types": "tsc --noEmit",
+    "test": "node --test --no-warnings=ExperimentalWarning \"src/**/*.test.ts\" \"tools/**/*.test.ts\""
   },
   "devDependencies": {
     "@types/koa": "^3.0.3",

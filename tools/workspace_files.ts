@@ -13,7 +13,8 @@ import fs from 'node:fs/promises';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { ToolError, toErrorResult, toStructuredResult } from '../src/capabilities/tool-result.ts';
-import { listDir, sanitizeRelPath, statFile, upsertMeta, withDb } from '../src/workspace/files.ts';
+import { listDir, sanitizeRelPath, statFile, upsertMeta } from '../src/workspace/files.ts';
+import { withWorkspaceDb } from '../src/workspace/sqlite.ts';
 import { callerUserId, childEnv, ensureWorkspace, runChild, serveMcp } from './workspace_shared.ts';
 
 // run_script: the MCP call timeout is 10 minutes — the script cap stays under it.
@@ -174,7 +175,7 @@ function createMcpServer() {
           }
         }
 
-        const meta = upsertMeta(workspace.dbPath, relPath, title, description);
+        const meta = await upsertMeta(workspace.dbPath, relPath, title, description);
         const stats = await fs.stat(absPath);
 
         return toStructuredResult({
@@ -329,7 +330,7 @@ function createMcpServer() {
           throw new ToolError(`"${relPath}" is a directory; this tool deletes only files.`);
         }
 
-        const hadMeta = withDb(workspace.dbPath, db => {
+        const hadMeta = await withWorkspaceDb(workspace.dbPath, db => {
           const { changes } = db.prepare('DELETE FROM _files WHERE path = ?').run(relPath);
           return Number(changes) > 0;
         });

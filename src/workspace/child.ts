@@ -13,6 +13,7 @@
 //     prepared statement with named binds (app endpoints).
 
 import { spawn } from 'node:child_process';
+import { childBusyTimeoutMs } from './sqlite.ts';
 
 // ---------------------------------------------------------------------------
 // Generic child execution.
@@ -143,8 +144,12 @@ export function runChild(command: string, args: string[], options: RunChildOptio
 //       prepared statement, values bound ONLY as named parameters (no SQL
 //       concatenation by construction); kind = run | all | get.
 // Caps arrive via env (SQL_MAX_ROWS / SQL_MAX_BYTES), the database path via
-// WORKSPACE_DB. Row values are wire-safed in the child: blobs become
-// placeholders, bigints become numbers.
+// WORKSPACE_DB, the lock policy via SQL_BUSY_TIMEOUT_MS (src/workspace/
+// sqlite.ts: the child is its own process, so it waits for a foreign writer
+// synchronously through SQLite's busy handler; the wait stays clear of the
+// kill timeout so a lock that outlasts it surfaces as an SQL error). Row
+// values are wire-safed in the child: blobs become placeholders, bigints
+// become numbers.
 // ---------------------------------------------------------------------------
 
 const SQL_RUNNER = `
@@ -177,8 +182,7 @@ const collectRows = iterator => {
   return { rows, truncated };
 };
 try {
-  const db = new DatabaseSync(process.env.WORKSPACE_DB);
-  db.exec('PRAGMA busy_timeout = 5000');
+  const db = new DatabaseSync(process.env.WORKSPACE_DB, { timeout: Number(process.env.SQL_BUSY_TIMEOUT_MS) });
   let out;
   if (payload.mode === 'statement') {
     const stmt = db.prepare(payload.statement);
@@ -207,7 +211,12 @@ try {
   }
   process.stdout.write(JSON.stringify(out));
 } catch (error) {
-  process.stdout.write(JSON.stringify({ sqlError: String((error && error.message) || error) }));
+  let message = String((error && error.message) || error);
+  if (/database is locked/i.test(message)) {
+    message += ' (another writer held workspace.sqlite for more than ' +
+      Math.round(Number(process.env.SQL_BUSY_TIMEOUT_MS) / 1000) + 's; retry once it commits)';
+  }
+  process.stdout.write(JSON.stringify({ sqlError: message }));
   process.exitCode = 3;
 }
 `;
@@ -248,6 +257,7 @@ async function runSql(
     env: childEnv(dbPath, {
       SQL_MAX_ROWS: String(caps.maxRows),
       SQL_MAX_BYTES: String(caps.maxBytes),
+      SQL_BUSY_TIMEOUT_MS: String(childBusyTimeoutMs(caps.timeoutMs)),
     }),
     timeoutMs: caps.timeoutMs,
     // The runner emits at most ~maxBytes of rows plus envelope; leave headroom.
