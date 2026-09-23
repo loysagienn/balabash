@@ -5,6 +5,7 @@
 import {
   DeleteObjectCommand,
   GetObjectCommand,
+  HeadObjectCommand,
   PutObjectCommand,
   S3Client,
   type PutObjectCommandInput,
@@ -15,6 +16,9 @@ import { config } from '../config/index.ts';
 export type StorageBody = PutObjectCommandInput['Body'];
 
 const DEFAULT_PRESIGN_TTL_SECONDS = 900;
+
+// SigV4 presigned URLs cannot outlive 7 days; Spaces enforces the same cap.
+export const MAX_PRESIGN_TTL_SECONDS = 7 * 24 * 60 * 60;
 
 export function getStorageBucket(): string {
   return config.spacesBucketName;
@@ -58,6 +62,13 @@ export async function deleteStorageObject(bucket: string, key: string): Promise<
 
 export async function getStorageObject(bucket: string, key: string) {
   return createStorageClient().send(new GetObjectCommand({ Bucket: bucket, Key: key }));
+}
+
+// Size of a stored object in bytes, without fetching its content.
+export async function getStorageObjectSize(bucket: string, key: string): Promise<number | null> {
+  const head = await createStorageClient().send(new HeadObjectCommand({ Bucket: bucket, Key: key }));
+
+  return head.ContentLength ?? null;
 }
 
 export async function getStorageDownloadUrl(input: {

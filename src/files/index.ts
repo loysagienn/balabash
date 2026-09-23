@@ -12,6 +12,7 @@ import {
   getStorageBucket,
   getStorageDownloadUrl,
   getStorageObject,
+  getStorageObjectSize,
   uploadStorageObject,
   type StorageBody,
 } from './storage.ts';
@@ -162,6 +163,25 @@ export async function ingestFile({
 
 export async function getFile(fileId: string): Promise<FileRef> {
   return toFileRef(await requireFile(fileId));
+}
+
+// Size in bytes: the recorded value, or — for files ingested without one — a
+// HeadObject on the stored object, remembered on the row so the next lookup
+// is a plain read. Null only when the object itself reports no length.
+export async function getFileSizeBytes(fileId: string): Promise<number | null> {
+  const file = await requireFile(fileId);
+
+  if (file.sizeBytes !== null) {
+    return file.sizeBytes;
+  }
+
+  const sizeBytes = await getStorageObjectSize(file.bucket, normalizeObjectKey(file.objectKey));
+
+  if (sizeBytes !== null) {
+    await prisma.file.update({ where: { id: fileId }, data: { sizeBytes } });
+  }
+
+  return sizeBytes;
 }
 
 // Workspace-scoped lookup for model-supplied file ids (§6): a fileId coming
