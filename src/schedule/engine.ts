@@ -27,7 +27,7 @@ import type { TaskContext } from './contract.ts';
 // the journaled tail size per stream, and the fragments that ride in events.
 export const JOB_TIMEOUT_DEFAULT_MS = 600_000;
 export const JOB_TIMEOUT_MIN_MS = 1_000;
-export const JOB_TIMEOUT_MAX_MS = 3_600_000;
+export const JOB_TIMEOUT_MAX_MS = 18_000_000; // 5 hours: room for long nightly jobs
 const JOB_TAIL_MAX_CHARS = 16_384;
 const JOB_STDERR_FRAGMENT_CHARS = 500;
 const JOB_STDOUT_REPORT_CHARS = 1_000;

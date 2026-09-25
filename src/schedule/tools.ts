@@ -98,7 +98,7 @@ const FUNCTIONS: ToolFunction[] = [
         },
         timeout_ms: {
           type: ['number', 'null'],
-          description: `kind "command" only: kill timeout in milliseconds, ${JOB_TIMEOUT_MIN_MS}-${JOB_TIMEOUT_MAX_MS}. Null = default ${JOB_TIMEOUT_DEFAULT_MS} (10 minutes). On expiry the whole process group is killed and the run is journaled as "timeout".`,
+          description: `kind "command" only: kill timeout in milliseconds, ${JOB_TIMEOUT_MIN_MS}-${JOB_TIMEOUT_MAX_MS} (up to 5 hours). Null = default ${JOB_TIMEOUT_DEFAULT_MS} (10 minutes). On expiry the whole process group is killed and the run is journaled as "timeout".`,
         },
         report_on_success: {
           type: ['boolean', 'null'],
