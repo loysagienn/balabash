@@ -41,7 +41,9 @@ const COORDINATOR_BUNDLE: ToolBundle = {
     'events',
     'gmail',
     'http_get',
-    'notion',
+    // Notion is deliberately absent: its tool catalog is the heaviest head
+    // item by far and the secretary never used it — Notion work goes to the
+    // agents that carry the server (manager, engineer, ...).
     'perplexity',
     'projects',
     'schedule',

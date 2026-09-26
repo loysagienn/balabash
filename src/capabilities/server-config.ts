@@ -18,6 +18,13 @@ export type ToolOverride = {
   disabled?: boolean;
 };
 
+// Positive tool selection: when present, only the named tools of the server
+// are exposed, everything else it advertises is dropped. Preferred over
+// per-tool "disabled" for servers with large, growing catalogs (a hosted
+// server adding tools must not silently widen the model's context). Names
+// missing from the server's current list are logged, not fatal.
+export type EnabledTools = string[];
+
 // Identity probe of a user-auth server: the provider's own answer to "who is
 // authorized here", fetched by the platform with a fresh access token right
 // after authorization. The service declares where to ask and which response
@@ -40,6 +47,7 @@ export type ExternalServerConfig =
       command: string;
       args?: string[];
       env?: Record<string, string>;
+      enabledTools?: EnabledTools;
       toolOverrides?: Record<string, ToolOverride>;
     }
   | {
@@ -67,6 +75,7 @@ export type ExternalServerConfig =
       // Identity probe — required for the service to hold more than one
       // connected account per user (the multiplicity gate).
       identityProbe?: IdentityProbeConfig;
+      enabledTools?: EnabledTools;
       toolOverrides?: Record<string, ToolOverride>;
     };
 
@@ -81,6 +90,20 @@ function isMissingDirectoryError(error: unknown): boolean {
 export function validateExternalServerConfig(raw: unknown, source: string): ExternalServerConfig {
   if (!isObject(raw)) {
     throw new Error(`${source} must contain a JSON object`);
+  }
+
+  if (raw.enabledTools !== undefined) {
+    if (
+      !Array.isArray(raw.enabledTools) ||
+      !raw.enabledTools.length ||
+      raw.enabledTools.some(name => typeof name !== 'string' || !name.trim())
+    ) {
+      throw new Error(`${source}: "enabledTools" must be a non-empty array of tool names`);
+    }
+
+    if (new Set(raw.enabledTools).size !== raw.enabledTools.length) {
+      throw new Error(`${source}: "enabledTools" must not repeat tool names`);
+    }
   }
 
   if (raw.toolOverrides !== undefined) {

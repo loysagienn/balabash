@@ -2,5 +2,20 @@
   "transport": "http",
   "url": "https://mcp.notion.com/mcp",
   "auth": "user",
-  "description": "Notion workspace access via Notion's official hosted MCP server: search, read, create and update pages, databases and comments. Each user authorizes their own Notion account; on first use, start the authorization flow to get a consent link where the user picks the workspace and pages to share."
+  "description": "Notion workspace access via Notion's official hosted MCP server: search, read, create and update pages, databases and comments. Each user authorizes their own Notion account; on first use, start the authorization flow to get a consent link where the user picks the workspace and pages to share.",
+  "enabledTools": [
+    "notion-search",
+    "notion-fetch",
+    "notion-create-pages",
+    "notion-update-page",
+    "notion-list-private-pages"
+  ],
+  "toolOverrides": {
+    "notion-create-pages": {
+      "description": "Creates one or more Notion pages with the given properties and content; all pages of one call share the parent. Parent: \"page_id\" for a regular page, \"data_source_id\" for a database item (fetch the database first to get its collection:// data source URL and schema — never pass a database URL as page_id). With no destination named, pass \"creation_mode\": \"draft\" (a private workspace-level page; tell the user it is a draft and offer to move it). Content is Notion-flavored Markdown without the title (the title goes into properties); for anything beyond plain headings/lists/links, read the spec first by fetching the id `notion://docs/enhanced-markdown-spec` with notion-fetch. Properties are a JSON map of property names to values, using the exact names from the fetched data source schema; every data source has exactly one title property (not always named \"title\"); pages outside a database take only \"title\". Value formats: dates split into \"date:{property}:start\" / \":end\" / \":is_datetime\" (0|1); numbers as numbers; checkboxes \"__YES__\" / \"__NO__\"; relations as arrays of page URLs or IDs; properties named \"id\" or \"url\" are prefixed \"userDefined:\". Optional \"template_id\" pre-populates a database item (omit content then; it fills in asynchronously). Optional \"icon\" (emoji or image URL) and \"cover\" (image URL)."
+    },
+    "notion-update-page": {
+      "description": "Updates one Notion page — its properties, content, icon/cover — by page_id and command. Commands: \"update_properties\" (properties map, omitted properties unchanged); \"update_content\" (targeted edit: the smallest exact old_str from the fetched page that identifies the target, and new_str); \"insert_content\" (prepend/append); \"replace_content\" (whole page — prefer a targeted command; it fails if child pages/databases would be lost, which requires allow_deleting_content — ask the user first, never assume); \"apply_template\". Fetch the page before editing unless it is already loaded, match its heading levels, block types and style, and make the smallest complete edit. Content is Notion-flavored Markdown; for anything beyond plain headings/lists/links, read the spec first by fetching the id `notion://docs/enhanced-markdown-spec` with notion-fetch. Property value formats: exact names from the fetched data source schema; dates split into \"date:{property}:start\" / \":end\" / \":is_datetime\" (0|1); numbers as numbers; checkboxes \"__YES__\" / \"__NO__\"; relations as arrays of page URLs or IDs; properties named \"id\" or \"url\" are prefixed \"userDefined:\"; pages outside a database take only \"title\". Leave \"allow_async\" unset or false so the call returns the finished result; an \"async_task\" response means the update is still being applied — re-fetch the page shortly before depending on it."
+    }
+  }
 }

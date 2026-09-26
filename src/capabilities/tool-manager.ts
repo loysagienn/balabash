@@ -16,6 +16,7 @@ import {
   readExternalServerConfigs,
   type ExternalServerConfig,
   type IdentityProbeConfig,
+  type EnabledTools,
   type ToolOverride,
 } from './server-config.ts';
 import { resolveExternalServerSecrets } from './server-secrets.ts';
@@ -138,6 +139,7 @@ export type UserAuthServer = {
   authorizationParams: Record<string, string> | null;
   // Declared identity probe — the precondition for multiple accounts.
   identityProbe: IdentityProbeConfig | null;
+  enabledTools: EnabledTools | undefined;
   toolOverrides: Record<string, ToolOverride> | undefined;
 };
 
@@ -415,6 +417,7 @@ function toUserAuthServer(
     scope: config.scope ?? null,
     authorizationParams: config.authorizationParams ?? null,
     identityProbe: config.identityProbe ?? null,
+    enabledTools: config.enabledTools,
     toolOverrides: config.toolOverrides,
   };
 }

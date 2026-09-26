@@ -5,7 +5,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { createTransportAuthProvider } from './connections/oauth-provider.ts';
-import type { ExternalServerConfig, ToolOverride } from './server-config.ts';
+import type { EnabledTools, ExternalServerConfig, ToolOverride } from './server-config.ts';
 import type { UserAuthServer } from './tool-manager.ts';
 
 const CLIENT_INFO = { name: 'balabash', version: '2.0.0' };
@@ -31,14 +31,33 @@ export type ConnectedServer = {
   functions: ToolFunction[];
 };
 
+// What the config says about the server's tool catalog: the positive
+// selection (enabledTools) and the per-tool adjustments (toolOverrides).
+export type ToolSelection = {
+  enabledTools?: EnabledTools;
+  toolOverrides?: Record<string, ToolOverride>;
+};
+
 async function listServerFunctions(
   serverName: string,
   client: Client,
-  toolOverrides?: Record<string, ToolOverride>,
+  { enabledTools, toolOverrides }: ToolSelection = {},
 ): Promise<ToolFunction[]> {
   const { tools } = await client.listTools();
 
+  if (enabledTools) {
+    const advertised = new Set(tools.map(tool => tool.name));
+    const missing = enabledTools.filter(name => !advertised.has(name));
+
+    // The server renamed or dropped a tool the config counts on: visible in
+    // the log, not fatal — the rest of the selection still works.
+    if (missing.length) {
+      console.warn(`[tools] "${serverName}" does not advertise enabled tools: ${missing.join(', ')}`);
+    }
+  }
+
   return tools
+    .filter(tool => !enabledTools || enabledTools.includes(tool.name))
     .filter(tool => !toolOverrides?.[tool.name]?.disabled)
     .map(tool => ({
       functionName: tool.name,
@@ -73,7 +92,7 @@ export async function connectExternalServer(
     origin: 'external',
     client,
     close: () => client.close(),
-    functions: await listServerFunctions(serverName, client, config.toolOverrides),
+    functions: await listServerFunctions(serverName, client, config),
   };
 }
 
@@ -98,6 +117,6 @@ export async function connectUserServer(
     accountKey: connection.accountKey,
     client,
     close: () => client.close(),
-    functions: await listServerFunctions(server.name, client, server.toolOverrides),
+    functions: await listServerFunctions(server.name, client, server),
   };
 }
