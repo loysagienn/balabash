@@ -247,6 +247,13 @@ model LlmRequest {
 
   lastSeq   BigInt? @map("last_seq") // lastSeq of the log snapshot this turn was built from
   iteration Int? // request number within the turn's inner loop (1..N)
+  purpose   String? // 'turn' (a model turn) | 'keepalive' (prompt-cache prewarm ping); null on rows before the column existed
+
+  // Prompt-cache diagnostics (prompt_cache_options.comparison_response_id):
+  // the server's verdict on reuse against the previous request of the thread.
+  cacheDiagnostic   String? @map("cache_diagnostic") // 'cache_hit' | 'cache_miss' | 'comparison_response_not_found' | 'unavailable'
+  cacheMissReason   String? @map("cache_miss_reason") // e.g. 'tools_changed', 'input_changed' — set on cache_miss only
+  cacheMissedTokens Int?    @map("cache_missed_tokens")
 
   status      String // response status, or 'request_failed' when the call threw
   error       String?

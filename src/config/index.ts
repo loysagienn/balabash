@@ -36,6 +36,22 @@ export const config = {
     return requireEnv('MAIN_OPENAI_MODEL');
   },
 
+  // Prompt-cache keep-alive window of the coordinator, minutes after the last
+  // turn during which the thread's cached prefix is kept warm with prewarm
+  // pings (see coordinator/index.ts). 0 disables. Default 6h: with ~75k
+  // prefixes a ping costs ~1/12 of a cold write, and the pauses between the
+  // user's turns rarely exceed a working half-day.
+  get coordinatorCacheKeepaliveWindowMs(): number {
+    const raw = process.env.COORDINATOR_CACHE_KEEPALIVE_MINUTES;
+    const minutes = raw === undefined || raw.trim() === '' ? 360 : Number(raw);
+
+    if (!Number.isFinite(minutes) || minutes < 0) {
+      throw new Error('COORDINATOR_CACHE_KEEPALIVE_MINUTES must be a non-negative number');
+    }
+
+    return minutes * 60 * 1000;
+  },
+
   // The cheap model of the workspace annotation indexer (title/description
   // of workspace files). Optional with a default: the indexer is background
   // hygiene, its absence from env must not block a boot.
