@@ -12,7 +12,10 @@
 // are ingested into workspace files at capture time and referenced by fileId.
 //
 // The Chromium profile is persistent per user (ctx.stateDir/profile): cookies
-// and sessions survive between runs. Chromium cannot share one user data dir
+// and sessions survive between runs. The inner session itself is a full-preset
+// session (native shell and file tools) with cwd in the user's workspace file
+// area, like the other workbench agents; the profile and the disposable
+// Playwright output stay in the run's stateDir. Chromium cannot share one user data dir
 // between processes, so concurrent runs of the same user queue on an
 // in-process FIFO lock. With DISPLAY set the browser runs headful on the
 // host's Xvfb display — the user can watch and intervene (login, CAPTCHA)
@@ -39,6 +42,7 @@ import type {
 import { describeEvent, describeThreadMessage } from '../src/capabilities/session-run.ts';
 import { connectPlaywrightMcp, createPlaywrightBridgeTools, imageExtension } from './kit/playwright.ts';
 import type { PlaywrightImageSink } from './kit/playwright.ts';
+import { workspaceDbPath, workspaceFilesDir } from '../src/workspace/layout.ts';
 import { WORKSPACE_STORAGE_NOTE } from './world/index.ts';
 
 const NOVNC_URL = 'https://novnc.loysagienn.com/vnc.html';
@@ -126,7 +130,7 @@ function buildInstructions(): string {
     '- Take a screenshot only when the operator asks for one. Its result reports a stored fileId — include that exact fileId in your reply so the operator can use the file.',
     '- When an instruction asks you to collect structured data from pages (listings, tables, many items), never dump it into your reply: extract it in batches (page evaluation returning limited chunks), store it into the workspace database — into the table the operator named, or a sensibly named new one — and reply with row counts plus a small sample. The workspace data tools are shared with the operator and other agents.',
     WORKSPACE_STORAGE_NOTE,
-    "- Reading from or writing to the user's Notion workspace goes through the dedicated Notion tools, and only when the operator's instruction calls for it — never by driving notion.so in the browser.",
+    "- Your working directory is the operator's workspace file area — the workbench shared with the operator and other agents. Your native tools (shell, file reads and edits) work there: `./x` for them is the same file as `x` for the workspace bridge tools. Use them for what the browser tools cannot do well — post-processing extracted data, saving page content or downloads as files. The host beyond the workbench is not yours to explore.",
     '- End the session only when the operator explicitly instructs you to finish: close the browser, then report a concise result of the whole session. Never finish on your own initiative.',
   ].join('\n');
 }
@@ -167,7 +171,7 @@ export const agent = {
     'yourself or pass the request on.',
   sdk: 'claude',
   headless: true,
-  tools: ['workspace', 'workspace_files', 'notion', 'storage'],
+  tools: ['workspace', 'workspace_files', 'storage'],
   notification: 'normal',
 
   run(prompt: string, ctx: RunContext): AgentRun {
@@ -258,10 +262,13 @@ export const agent = {
 
         const profileDir = path.join(ctx.stateDir, 'profile');
         const outputDir = path.join(ctx.stateDir, 'runs', ctx.threadId);
+        const cwd = workspaceFilesDir(ctx.userId);
 
         cleanup.outputDir = outputDir;
         await mkdir(profileDir, { recursive: true });
         await mkdir(outputDir, { recursive: true });
+        // The session working directory must exist before the SDK starts in it.
+        await mkdir(cwd, { recursive: true });
 
         if (ctx.signal.aborted) {
           return;
@@ -296,6 +303,13 @@ export const agent = {
           instructions: `${SYSTEM_PROMPT}\n\n${buildInstructions()}`,
           initialMessage: buildInitialMessage(prompt),
           model: 'claude-opus-5-5',
+          // Full native preset: shell and file tools on the workbench next to
+          // the browser tools (post-processing extracted data, saving files).
+          preset: 'full',
+          cwd,
+          // Same as the platform session runner: the workspace database path
+          // for anything the session runs from its working directory.
+          env: { WORKSPACE_DB: workspaceDbPath(ctx.userId) },
           extraTools: [...playwrightTools, finishTool],
         });
 
