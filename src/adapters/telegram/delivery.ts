@@ -166,6 +166,13 @@ async function downloadLinkText(fileId: string): Promise<string> {
   return `📎 **${name}**${formatSize(sizeBytes)} — [скачать](${url}), ссылка действует до ${until}.`;
 }
 
+// Retries for createForumTopic on top of the first attempt, and the pause
+// between them.
+const CREATE_TOPIC_RETRIES = 3;
+const CREATE_TOPIC_RETRY_DELAY_MS = 1000;
+
+const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
+
 // Deep link into a topic of a private supergroup: t.me/c/<internal id>/<topic>.
 function topicLink(chatId: bigint, messageThreadId: number): string | null {
   const raw = chatId.toString();
@@ -216,9 +223,37 @@ export function startTelegramDelivery({ bot }: { bot: Bot }): Consumer {
     return sendText(target, await downloadLinkText(fileId));
   };
 
+  // createForumTopic is the one call with no second chance: the consumer
+  // journals a failed thread.started and moves on, so a transient network
+  // blip would leave the child thread with no topic for good. Retry it a few
+  // times; a definitive Bot API rejection (4xx: no forum mode, missing right)
+  // is not going to heal by waiting and fails at once.
+  const createForumTopicWithRetry = async (chatId: number, name: string) => {
+    let attempt = 0;
+
+    for (;;) {
+      try {
+        return await bot.api.createForumTopic(chatId, name);
+      } catch (error) {
+        const definitive = error instanceof GrammyError && error.error_code >= 400 && error.error_code < 500;
+
+        if (definitive || attempt >= CREATE_TOPIC_RETRIES) {
+          throw error;
+        }
+
+        attempt += 1;
+        console.warn(
+          `[telegram-delivery] createForumTopic failed (attempt ${attempt}/${CREATE_TOPIC_RETRIES + 1}), retrying:`,
+          error instanceof Error ? error.message : error,
+        );
+        await sleep(CREATE_TOPIC_RETRY_DELAY_MS);
+      }
+    }
+  };
+
   // Birth of a child thread → a forum topic. Failure to create one (no forum
-  // mode, missing Manage topics right) is journaled loudly: without the
-  // mapping the whole child conversation has nowhere to go.
+  // mode, missing Manage topics right, network down for good) is journaled
+  // loudly: without the mapping the whole child conversation has nowhere to go.
   const handleThreadStarted = async (event: Event): Promise<void> => {
     if (!event.targetThreadId || !event.threadId || !event.userId) {
       // A main thread lives in General; no topic to create.
@@ -248,7 +283,7 @@ export function startTelegramDelivery({ bot }: { bot: Bot }): Consumer {
     const chatId = Number(group.chatId);
 
     try {
-      const topic = await bot.api.createForumTopic(chatId, title.slice(0, 128));
+      const topic = await createForumTopicWithRetry(chatId, title.slice(0, 128));
 
       await prisma.telegramTopic.create({
         data: {
