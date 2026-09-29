@@ -1,14 +1,23 @@
 // OAuthClientProvider implementations for the MCP SDK (§10). Two flavours:
 // the interactive provider drives a browser flow (consent URL capture, PKCE
 // verifier on the connection row), the transport provider serves stored
-// tokens to background MCP clients and saves refreshes, but refuses to start
-// an interactive flow. Tokens and PKCE state live only in the connections
-// table — never in the log (§2 ставка 4).
+// tokens to background MCP clients, refreshes them ahead of expiry and saves
+// refreshes, but refuses to start an interactive flow. Tokens and PKCE state
+// live only in the connections table — never in the log (§2 ставка 4).
 
 import crypto from 'node:crypto';
-import { UnauthorizedError } from '@modelcontextprotocol/sdk/client/auth.js';
-import type { OAuthClientProvider } from '@modelcontextprotocol/sdk/client/auth.js';
-import type { OAuthClientInformationMixed, OAuthClientMetadata } from '@modelcontextprotocol/sdk/shared/auth.js';
+import {
+  discoverOAuthServerInfo,
+  refreshAuthorization,
+  selectResourceURL,
+  UnauthorizedError,
+} from '@modelcontextprotocol/sdk/client/auth.js';
+import type { OAuthClientProvider, OAuthServerInfo } from '@modelcontextprotocol/sdk/client/auth.js';
+import type {
+  OAuthClientInformationMixed,
+  OAuthClientMetadata,
+  OAuthTokens,
+} from '@modelcontextprotocol/sdk/shared/auth.js';
 import { Prisma } from '../../../prisma-generated/client.ts';
 import { prisma } from '../../db/client.ts';
 import { config } from '../../config/index.ts';
@@ -17,6 +26,10 @@ import type { ConnectionModel } from '../../../prisma-generated/models.ts';
 function isObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
+
+// The tokens as stored on the connection row: the SDK's shape plus the
+// instant they were obtained — expires_in is relative to that instant.
+type StoredTokens = OAuthTokens & { obtained_at?: string };
 
 function redirectUrl(): string {
   return `https://${config.domain}/oauth/callback`;
@@ -78,7 +91,7 @@ export function createInteractiveAuthProvider(
         where: { id: connection.id },
         data: {
           status: 'connected',
-          tokens: tokens as unknown as Prisma.InputJsonValue,
+          tokens: stampObtainedAt(tokens) as unknown as Prisma.InputJsonValue,
           connectNonce: null,
           pendingState: null,
           pending: Prisma.DbNull,
@@ -107,13 +120,106 @@ export function createInteractiveAuthProvider(
   };
 }
 
-// Used by background MCP transports. It serves stored tokens and saves
-// refreshes, but deliberately refuses to start an interactive flow. Addressed
-// by connection row id: one provider serves exactly one account's tokens.
-export function createTransportAuthProvider(connection: { id: string; server: string }): OAuthClientProvider {
+// ---------------------------------------------------------------------------
+// Proactive refresh. The SDK refreshes only when the resource server answers
+// 401 — a check that happens at call time, by a server asking the provider
+// whether the token is still good. That check can fail open (network) or
+// race the expiry by a second, and then an expired token reaches the API and
+// the 401 comes back inside a tool result, where no refresh ever happens
+// (gmail, 2026-09-22 and 2026-09-29). The provider knows the lifetime from
+// expires_in and the instant the tokens were saved, so it refreshes before
+// expiry itself; the server-side 401 stays as the safety net (and as the
+// path through which a dead refresh token still ends in re-authorization).
+// ---------------------------------------------------------------------------
+
+// Refresh this long before the access token actually expires.
+const REFRESH_LEEWAY_MS = 60 * 1000;
+// A failed proactive refresh is not retried for this long: the SDK's own
+// 401-driven refresh runs right after it and must not be preceded by a
+// second identical attempt on every request.
+const REFRESH_FAILURE_BACKOFF_MS = 30 * 1000;
+
+function stampObtainedAt(tokens: OAuthTokens): StoredTokens {
+  return { ...tokens, obtained_at: new Date().toISOString() };
+}
+
+function isExpiringSoon(tokens: StoredTokens): boolean {
+  const obtainedAt = typeof tokens.obtained_at === 'string' ? Date.parse(tokens.obtained_at) : NaN;
+  const expiresIn = Number(tokens.expires_in);
+
+  if (Number.isNaN(obtainedAt) || !Number.isFinite(expiresIn) || expiresIn <= 0) {
+    return false;
+  }
+
+  return Date.now() >= obtainedAt + expiresIn * 1000 - REFRESH_LEEWAY_MS;
+}
+
+// Authorization server discovery per resource server url, once per process:
+// the metadata is static and the discovery costs two network round-trips.
+const discoveryCache = new Map<string, Promise<OAuthServerInfo>>();
+
+function discoverServerInfo(serverUrl: string): Promise<OAuthServerInfo> {
+  let pending = discoveryCache.get(serverUrl);
+
+  if (!pending) {
+    pending = discoverOAuthServerInfo(serverUrl).catch(error => {
+      discoveryCache.delete(serverUrl);
+      throw error;
+    });
+    discoveryCache.set(serverUrl, pending);
+  }
+
+  return pending;
+}
+
+// One refresh at a time per connection row: concurrent requests of one
+// account share the in-flight attempt instead of each asking the provider.
+const refreshesInFlight = new Map<string, Promise<StoredTokens>>();
+const refreshFailedAt = new Map<string, number>();
+
+async function refreshStoredTokens(
+  connection: { id: string; server: string },
+  serverUrl: string,
+  provider: OAuthClientProvider,
+  refreshToken: string,
+): Promise<StoredTokens> {
+  const info = await discoverServerInfo(serverUrl);
+  const clientInformation = await loadClientInformation(connection.server);
+
+  if (!clientInformation) {
+    throw new Error('no OAuth client information');
+  }
+
+  const resource = await selectResourceURL(serverUrl, provider, info.resourceMetadata);
+  const fresh = stampObtainedAt(
+    await refreshAuthorization(info.authorizationServerUrl, {
+      metadata: info.authorizationServerMetadata,
+      clientInformation,
+      refreshToken,
+      resource,
+    }),
+  );
+
+  await prisma.connection.update({
+    where: { id: connection.id },
+    data: { tokens: fresh as unknown as Prisma.InputJsonValue },
+  });
+
+  return fresh;
+}
+
+// Used by background MCP transports. It serves stored tokens (refreshing
+// them ahead of expiry) and saves the SDK's own refreshes, but deliberately
+// refuses to start an interactive flow. Addressed by connection row id: one
+// provider serves exactly one account's tokens. serverUrl is the resource
+// server the tokens are for — the anchor of authorization server discovery.
+export function createTransportAuthProvider(
+  connection: { id: string; server: string },
+  serverUrl: string,
+): OAuthClientProvider {
   const getConnection = () => prisma.connection.findUnique({ where: { id: connection.id } });
 
-  return {
+  const provider: OAuthClientProvider = {
     get redirectUrl() {
       return redirectUrl();
     },
@@ -124,21 +230,59 @@ export function createTransportAuthProvider(connection: { id: string; server: st
     clientInformation: () => loadClientInformation(connection.server),
     saveClientInformation: info => saveClientInformation(connection.server, info),
     tokens: async () => {
-      const connection = await getConnection();
+      const row = await getConnection();
 
-      if (!connection || connection.status !== 'connected' || !isObject(connection.tokens)) {
+      if (!row || row.status !== 'connected' || !isObject(row.tokens)) {
         return undefined;
       }
 
-      return connection.tokens as { access_token: string; token_type: string };
+      const stored = row.tokens as StoredTokens;
+
+      if (!stored.refresh_token || !isExpiringSoon(stored)) {
+        return stored;
+      }
+
+      const failedAt = refreshFailedAt.get(connection.id);
+
+      if (failedAt !== undefined && Date.now() - failedAt < REFRESH_FAILURE_BACKOFF_MS) {
+        return stored;
+      }
+
+      let inFlight = refreshesInFlight.get(connection.id);
+
+      if (!inFlight) {
+        inFlight = refreshStoredTokens(connection, serverUrl, provider, stored.refresh_token).finally(() => {
+          refreshesInFlight.delete(connection.id);
+        });
+        refreshesInFlight.set(connection.id, inFlight);
+      }
+
+      try {
+        const fresh = await inFlight;
+
+        refreshFailedAt.delete(connection.id);
+        console.log(`[oauth] refreshed "${connection.server}" tokens ahead of expiry (connection ${connection.id})`);
+
+        return fresh;
+      } catch (error) {
+        // The stored tokens go out as they are: the resource server's 401
+        // hands the SDK its own refresh attempt, and a refresh token the
+        // provider no longer honors ends in re-authorization there.
+        refreshFailedAt.set(connection.id, Date.now());
+        console.warn(
+          `[oauth] proactive refresh of "${connection.server}" tokens failed (connection ${connection.id}): ${error instanceof Error ? error.message : String(error)}`,
+        );
+
+        return stored;
+      }
     },
     saveTokens: async tokens => {
-      const connection = await getConnection();
+      const row = await getConnection();
 
-      if (connection) {
+      if (row) {
         await prisma.connection.update({
-          where: { id: connection.id },
-          data: { tokens: tokens as unknown as Prisma.InputJsonValue },
+          where: { id: row.id },
+          data: { tokens: stampObtainedAt(tokens) as unknown as Prisma.InputJsonValue },
         });
       }
     },
@@ -154,11 +298,13 @@ export function createTransportAuthProvider(connection: { id: string; server: st
         return;
       }
 
-      const connection = await getConnection();
+      const row = await getConnection();
 
-      if (connection) {
-        await prisma.connection.update({ where: { id: connection.id }, data: { tokens: Prisma.DbNull } });
+      if (row) {
+        await prisma.connection.update({ where: { id: row.id }, data: { tokens: Prisma.DbNull } });
       }
     },
   };
+
+  return provider;
 }

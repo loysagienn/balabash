@@ -104,7 +104,7 @@ export async function connectUserServer(
   connection: { id: string; server: string; accountKey: string },
 ): Promise<ConnectedServer> {
   const transport = new StreamableHTTPClientTransport(new URL(server.url), {
-    authProvider: createTransportAuthProvider(connection),
+    authProvider: createTransportAuthProvider(connection, server.url),
   });
   const client = new Client(CLIENT_INFO);
 

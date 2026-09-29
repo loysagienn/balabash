@@ -124,9 +124,16 @@ async function gmailFetch(
       // Keep the raw body.
     }
 
+    if (response.status === 401) {
+      // Whatever the gate believed about this token, Gmail has the last
+      // word: forget the cached verdict so the next request re-validates
+      // (and lets the Balabash client refresh the token).
+      forgetTokenValidity(accessToken);
+    }
+
     const hint =
       response.status === 401
-        ? ' The Google access token was rejected mid-call (likely revoked). Ask the user to re-authorize via request_authorization.'
+        ? ' The Google access token expired or was rejected; Balabash refreshes it on the next call — retry once. Ask the user to re-authorize via request_authorization only if the 401 persists across retries.'
         : response.status === 403
           ? ' Check that the Gmail API is enabled in the Google Cloud project of the OAuth client and that the granted scopes include gmail.readonly and gmail.compose.'
           : '';
@@ -773,8 +780,16 @@ function pruneTokenCache(): void {
   }
 }
 
+function tokenCacheKey(accessToken: string): string {
+  return crypto.createHash('sha256').update(accessToken).digest('base64');
+}
+
+function forgetTokenValidity(accessToken: string): void {
+  tokenValidityCache.delete(tokenCacheKey(accessToken));
+}
+
 async function isAccessTokenValid(accessToken: string): Promise<boolean> {
-  const key = crypto.createHash('sha256').update(accessToken).digest('base64');
+  const key = tokenCacheKey(accessToken);
   const cached = tokenValidityCache.get(key);
 
   if (cached !== undefined && cached > Date.now()) {
@@ -789,9 +804,14 @@ async function isAccessTokenValid(accessToken: string): Promise<boolean> {
       headers: { 'content-type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({ access_token: accessToken }),
     });
-  } catch {
+  } catch (error) {
     // tokeninfo unreachable: fail open — if the token is actually bad, the
-    // Gmail API call itself will report it clearly.
+    // Gmail API call itself will report it clearly. Loudly: a silent pass
+    // here once turned a one-off network hiccup into a blind re-authorization.
+    console.warn(
+      `[gmail] tokeninfo unreachable, letting the request through unverified: ${error instanceof Error ? error.message : String(error)}`,
+    );
+
     return true;
   }
 
