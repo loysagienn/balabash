@@ -172,8 +172,12 @@ consumers.push(startScheduleHeart());
 
 // The workspace annotation indexer: background hygiene giving workspace
 // files titles/descriptions when their writers left none. Not a log
-// consumer, but it stops like one.
-consumers.push(startWorkspaceIndexer());
+// consumer, but it stops like one. Off under INDEXER_ENABLED="false".
+if (config.indexerEnabled) {
+  consumers.push(startWorkspaceIndexer());
+} else {
+  console.log('[app] indexer: disabled (INDEXER_ENABLED=false)');
+}
 
 // Every boot satisfies the restart requests recorded before it — report the
 // completions (with the supervisor's rollback marker and a migration

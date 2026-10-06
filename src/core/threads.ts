@@ -340,6 +340,9 @@ export async function rebuildThreadsProjection(db: DbClient = prisma): Promise<{
       if (event.type === THREAD_STARTED) {
         const payload = event.payload as { agent: string; title?: string };
 
+        // Timestamps come from the log, not the clock: a rebuilt row must
+        // date like the live one did (list_threads filters and pages on
+        // createdAt).
         await db.thread.create({
           data: {
             id: event.threadId!,
@@ -349,6 +352,8 @@ export async function rebuildThreadsProjection(db: DbClient = prisma): Promise<{
             title: payload.title ?? null,
             status: 'active',
             createdSeq: event.seq,
+            createdAt: event.createdAt,
+            updatedAt: event.createdAt,
           },
         });
         stats.threads += 1;
@@ -363,6 +368,7 @@ export async function rebuildThreadsProjection(db: DbClient = prisma): Promise<{
             data: {
               status: event.type.slice('thread.'.length),
               terminalSeq: event.seq,
+              updatedAt: event.createdAt,
               ...(event.type === 'thread.completed' ? completionProjectionData(event.payload) : {}),
             },
           });

@@ -115,6 +115,13 @@ export const config = {
     return minutes * 60 * 1000;
   },
 
+  // The workspace annotation indexer is background hygiene, not a feature
+  // anyone waits for: INDEXER_ENABLED="false" switches it off entirely (no
+  // passes, no model calls). Default on.
+  get indexerEnabled(): boolean {
+    return process.env.INDEXER_ENABLED?.trim().toLowerCase() !== 'false';
+  },
+
   // The cheap model of the workspace annotation indexer (title/description
   // of workspace files). Optional with a default: the indexer is background
   // hygiene, its absence from env must not block a boot.
