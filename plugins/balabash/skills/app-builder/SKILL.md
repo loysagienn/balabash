@@ -90,7 +90,8 @@ The `balabash/data` SDK exports:
 - `getAppContext()` — `{ mode: 'owner' | 'public', appBase, appPath?, slug? }`, if
   the UI wants to adapt to how it is being served. `appBase` is the URL prefix of
   the app's own pages (no trailing slash): `/apps/<folder-path>` for the owner,
-  `/<slug>` when public — the same app is served under both.
+  `/<slug>` or `/a/<slug>` when public (the platform decides, by deployment) — the
+  same app is served under all of them.
 
 ## Pages and navigation inside the app
 
@@ -142,9 +143,10 @@ app's own router reads the rest of the path. Rules:
 
 ## URLs and publication
 
-- The owner opens the app at `https://balabash.loysagienn.com/apps/<folder-path>`
-  (auto-redirects to the execution domain). Give the user this link when the app is
-  ready.
-- Making the app public (a no-auth URL `https://balabash.app/<slug>` for anyone) is a
-  separate explicit action owned by the secretary's `apps_publish` tool — tell the
-  user to ask for publication in the main thread if they want a public link.
+- The owner opens the app at `https://<the workspace's domain>/apps/<folder-path>`
+  (the exact URL comes from `apps_list` — ownerUrl). Give the user this link when the
+  app is ready.
+- Making the app public (a no-auth URL for anyone — `apps_list` reports it as
+  publicUrl once published) is a separate explicit action owned by the secretary's
+  `apps_publish` tool — tell the user to ask for publication in the main thread if
+  they want a public link.

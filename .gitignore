@@ -6,6 +6,7 @@ dist-last-good
 .DS_Store
 prisma-generated
 data
+/files
 src/web/.next
 src/web/.next-build
 src/web/.swc

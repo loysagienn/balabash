@@ -486,7 +486,13 @@ export type Transcript = {
   dropped: boolean;
 };
 
-export function buildTranscript(events: TranscriptEvent[]): Transcript {
+export type TranscriptOptions = {
+  // Overrides TRANSCRIPT_CHAR_LIMIT (the coordinator's budget is configured).
+  charLimit?: number;
+};
+
+export function buildTranscript(events: TranscriptEvent[], options: TranscriptOptions = {}): Transcript {
+  const charLimit = options.charLimit ?? TRANSCRIPT_CHAR_LIMIT;
   const rendered = events.map(event => renderEvent(event)).filter(item => item !== null);
 
   const lines = rendered.map((item, index) => ({
@@ -500,7 +506,7 @@ export function buildTranscript(events: TranscriptEvent[]): Transcript {
     const mandatory = included.length < ALWAYS_INCLUDED_EVENTS;
     const candidate = [lines[index]!, ...included];
 
-    if (!mandatory && renderLines(candidate).length > TRANSCRIPT_CHAR_LIMIT) {
+    if (!mandatory && renderLines(candidate).length > charLimit) {
       break;
     }
 

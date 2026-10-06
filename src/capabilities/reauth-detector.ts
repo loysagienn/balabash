@@ -74,7 +74,7 @@ export function startReauthDetector(): Consumer {
         threadId: thread.id,
         payload: {
           level: 'normal',
-          text: `Authorization for ${who} has expired — re-authorize it in the new topic.`,
+          text: `Authorization for ${who} has expired — re-authorize it in the new thread.`,
         },
       });
     },

@@ -1,3 +1,5 @@
+import path from 'node:path';
+
 function requireEnv(name: string): string {
   const value = process.env[name];
 
@@ -13,22 +15,83 @@ export const config = {
     return requireEnv('DATABASE_URL');
   },
 
+  // Telegram is one channel adapter among several: it exists only when a
+  // bot token is configured. The core never
+  // consults this flag — app.ts starts the adapter under it, and the adapter
+  // itself reads the token through telegramBotToken (required there).
+  get telegramEnabled(): boolean {
+    return Boolean(process.env.TELEGRAM_BOT_TOKEN?.trim());
+  },
+
+  // Claude remote-control (CCR, src/adapters/ccr): the operator's Claude app
+  // as the surface of claude-sdk threads. A singleton channel — one ambient
+  // Claude CLI login = one operator = the operator workspace (§3.1).
+  get ccrEnabled(): boolean {
+    return process.env.CCR_ENABLED === 'true';
+  },
+
+  // Read only inside the Telegram adapter, which runs only when
+  // telegramEnabled — hence still required here.
   get telegramBotToken(): string {
     return requireEnv('TELEGRAM_BOT_TOKEN');
   },
 
   // Logins that may activate a workspace with /start. Membership in an
   // activated group is the trust boundary after that (§6) — this list gates
-  // activation only.
+  // activation only. Optional: without it no new group can be activated, the
+  // groups activated earlier keep working.
   get telegramAllowedLogins(): string[] {
-    return requireEnv('TELEGRAM_ALLOWED_LOGINS')
+    return (process.env.TELEGRAM_ALLOWED_LOGINS ?? '')
       .split(',')
       .map(login => login.trim().toLowerCase())
       .filter(Boolean);
   },
 
+  // The operator's workspace: the one
+  // workspace a singleton channel (CCR) or an offline script serves. Needed
+  // only when the users table holds several rows — with zero or one user
+  // ensureOperatorWorkspace() resolves it without configuration.
+  get operatorUserId(): string | null {
+    return process.env.OPERATOR_USER_ID?.trim() || null;
+  },
+
   get openaiApiKey(): string {
     return requireEnv('OPENAI_API_KEY');
+  },
+
+  // Which OpenAI-shaped backend the Responses API calls go to:
+  // 'openai' — api.openai.com with its
+  // stateful turns and explicit prompt cache; 'openai-compatible' — any
+  // server speaking the Responses API statelessly (LiteLLM/vLLM): the full
+  // input every iteration, no cache options, no prewarm pings. The one
+  // place reading this is harness/openai/backend.ts.
+  get llmBackend(): 'openai' | 'openai-compatible' {
+    const raw = process.env.LLM_BACKEND?.trim().toLowerCase() || 'openai';
+
+    if (raw !== 'openai' && raw !== 'openai-compatible') {
+      throw new Error('LLM_BACKEND must be "openai" or "openai-compatible"');
+    }
+
+    return raw;
+  },
+
+  // Base URL of the OpenAI-shaped API; unset = the SDK default (api.openai.com).
+  get openaiBaseUrl(): string | null {
+    return process.env.OPENAI_BASE_URL?.trim() || null;
+  },
+
+  // Char budget of the coordinator's transcript (the rendered event log in a
+  // turn's prompt); the model window is the ceiling, the model's attention
+  // the real limit. Default 50 000 (~12k tokens).
+  get coordinatorTranscriptChars(): number {
+    const raw = process.env.COORDINATOR_TRANSCRIPT_CHARS;
+    const chars = raw === undefined || raw.trim() === '' ? 50_000 : Number(raw);
+
+    if (!Number.isInteger(chars) || chars <= 0) {
+      throw new Error('COORDINATOR_TRANSCRIPT_CHARS must be a positive integer');
+    }
+
+    return chars;
   },
 
   // The coordinator model — always from config, never hardcoded.
@@ -71,8 +134,9 @@ export const config = {
   },
 
   // The apps execution domain (balabash.app): the host the core branches on
-  // to serve the /apps runtime. Optional — without it the apps surface does
-  // not exist at all.
+  // to serve the /apps runtime. Optional — without it the apps runtime
+  // lives on the main domain (owner /apps/* by the web session, published
+  // /a/<slug> without login; src/apps/urls.ts).
   get appsDomain(): string | null {
     return process.env.APPS_DOMAIN?.trim().toLowerCase() || null;
   },
@@ -95,6 +159,30 @@ export const config = {
   // triggers (at) are absolute instants and do not depend on it.
   get scheduleTimezone(): string {
     return process.env.SCHEDULE_TIMEZONE || 'Asia/Jerusalem';
+  },
+
+  // File storage driver: 'spaces' —
+  // the S3-compatible object store with presigned URLs; 'local' — the local
+  // disk under filesRoot with signed links onto the web surface. Default:
+  // spaces when the SPACES_* variables are set, local otherwise.
+  get fileStorage(): 'local' | 'spaces' {
+    const raw = process.env.FILE_STORAGE?.trim().toLowerCase();
+
+    if (raw === 'local' || raw === 'spaces') {
+      return raw;
+    }
+
+    if (raw) {
+      throw new Error('FILE_STORAGE must be "local" or "spaces"');
+    }
+
+    return process.env.SPACES_BUCKET_NAME ? 'spaces' : 'local';
+  },
+
+  // Root directory of the local file storage driver; files/ in the
+  // repository root by default (gitignored).
+  get filesRoot(): string {
+    return path.resolve(process.env.FILES_ROOT?.trim() || 'files');
   },
 
   get spacesRegion(): string {

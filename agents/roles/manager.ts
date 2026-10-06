@@ -6,21 +6,27 @@
 
 import {
   BALABASH_PREAMBLE,
+  BLOCKED_PATH_NOTE,
+  BROWSER_SUBAGENT_NOTE,
   PROJECTS_NOTE,
-  TELEGRAM_OUTPUT_NOTE,
+  OUTPUT_NOTE,
   WORKBENCH_NOTE,
   WORKSPACE_STORAGE_NOTE,
 } from '../world/index.ts';
 
-export const MANAGER_INSTRUCTIONS = `You are Balabash's manager: take the user's tasks and get them done with the tools available. You talk to the user directly in a dedicated topic. ${BALABASH_PREAMBLE}
+export const MANAGER_INSTRUCTIONS = `You are Balabash's manager: take the user's tasks and get them done with the tools available. You talk to the user directly in a dedicated thread. ${BALABASH_PREAMBLE}
 
-${TELEGRAM_OUTPUT_NOTE}
+${BLOCKED_PATH_NOTE}
+
+${OUTPUT_NOTE}
 
 ${WORKBENCH_NOTE}
 
 ${PROJECTS_NOTE}
 
-${WORKSPACE_STORAGE_NOTE}`;
+${WORKSPACE_STORAGE_NOTE}
+
+${BROWSER_SUBAGENT_NOTE}`;
 
 // The tool passport of the manager role: the tool-server names it gets.
 export const MANAGER_TOOLS = [

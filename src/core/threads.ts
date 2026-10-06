@@ -11,6 +11,7 @@ import type { ThreadModel as ThreadRow } from '../../prisma-generated/models.ts'
 import { appendEvent, completionProjectionData } from './append.ts';
 import type { AppendResult } from './append.ts';
 import { AppendError, TERMINAL_TYPES, THREAD_CANCELLED, THREAD_STARTED, toEvent } from './envelope.ts';
+import { config } from '../config/index.ts';
 
 export const COORDINATOR_AGENT = 'coordinator';
 
@@ -159,6 +160,52 @@ export async function ensureMainThread(userId: string): Promise<Thread> {
   return (await getThread(threadId))!;
 }
 
+// The operator's workspace, channel-neutrally: the one workspace of this
+// installation that a singleton channel (CCR, whose credentials are one
+// account) or the channel-less web login (the console code of /login) serves.
+// Telegram keeps its own binding — group ↔ user in telegram_groups, created
+// by /start — and may hold several workspaces; this resolves exactly one:
+// a single user is it, no user at all (a fresh install without Telegram) is
+// created here together with its main thread — the channel-neutral analogue
+// of /start — and several users need OPERATOR_USER_ID to disambiguate (a
+// loud error instead of a silent "oldest wins").
+export async function ensureOperatorWorkspace(): Promise<Thread> {
+  const users = await prisma.user.findMany({ select: { id: true }, orderBy: { createdAt: 'asc' } });
+  const configured = config.operatorUserId;
+
+  let userId: string;
+
+  if (configured) {
+    if (!users.some(user => user.id === configured)) {
+      throw new Error(`OPERATOR_USER_ID ${configured} does not exist in the users table`);
+    }
+
+    userId = configured;
+  } else if (users.length === 1) {
+    userId = users[0].id;
+  } else if (users.length === 0) {
+    userId = (await prisma.user.create({ data: {} })).id;
+    console.log(`[threads] operator workspace created: user ${userId}`);
+  } else {
+    throw new Error(
+      `several users in the database — set OPERATOR_USER_ID to the operator's workspace: ${users.map(user => user.id).join(', ')}`,
+    );
+  }
+
+  return ensureMainThread(userId);
+}
+
+// The spawn-time policy of a thread lives in its thread.started payload —
+// the projection does not store it. Headless = no user surface by
+// declaration: the dialogue is with the parent only (no topic, no CCR
+// session, no web chat input).
+export async function isHeadlessThread(threadId: string): Promise<boolean> {
+  const row = await prisma.event.findFirst({ where: { threadId, type: THREAD_STARTED }, select: { payload: true } });
+  const payload = row?.payload;
+
+  return typeof payload === 'object' && payload !== null && !Array.isArray(payload) && (payload as JsonObject).headless === true;
+}
+
 // Spawn helper: generates the thread id and writes thread.started addressed
 // to the parent. The runtime builds on this; input/title come from the
 // spawner.
@@ -174,10 +221,11 @@ type StartThreadInput = {
   // store them — consumers read them from the thread.started event.
   notification?: string;
   tools?: string[];
-  // The spawned agent's topic emoji (§11.2): adapters know only core, so the
+  // The spawned agent's thread icon (§11.2): adapters know only core, so the
   // surface hint travels in the event, not in the catalog.
   icon?: string;
-  // Headless thread (§11.2): no user surface — adapters create no topic. Like
+  // Headless thread (§11.2): no user surface — adapters create none for it
+  // (e.g. no Telegram topic). Like
   // icon, the hint comes from the spawned agent's declaration and travels in
   // the event.
   headless?: boolean;
@@ -263,15 +311,17 @@ export async function tombstoneActiveThreads(reason: string): Promise<number> {
 // is complete — cascades write explicit thread.cancelled events — so replay
 // is a plain fold. Run offline (stopped process).
 
-export async function rebuildThreadsProjection(): Promise<{ threads: number; terminals: number }> {
-  await prisma.$executeRaw`TRUNCATE TABLE threads`;
+// db: the root client or a transaction — the import script rebuilds inside
+// the transaction that loads the log, so a failure leaves nothing behind.
+export async function rebuildThreadsProjection(db: DbClient = prisma): Promise<{ threads: number; terminals: number }> {
+  await db.$executeRaw`TRUNCATE TABLE threads`;
 
   const stats = { threads: 0, terminals: 0 };
   const batchSize = 500;
   let cursor = 0n;
 
   for (;;) {
-    const events = await prisma.event.findMany({
+    const events = await db.event.findMany({
       where: {
         seq: { gt: cursor },
         type: { in: [THREAD_STARTED, ...TERMINAL_TYPES] },
@@ -290,7 +340,7 @@ export async function rebuildThreadsProjection(): Promise<{ threads: number; ter
       if (event.type === THREAD_STARTED) {
         const payload = event.payload as { agent: string; title?: string };
 
-        await prisma.thread.create({
+        await db.thread.create({
           data: {
             id: event.threadId!,
             userId: event.userId!,
@@ -303,12 +353,12 @@ export async function rebuildThreadsProjection(): Promise<{ threads: number; ter
         });
         stats.threads += 1;
       } else {
-        const thread = await prisma.thread.findUnique({ where: { id: event.threadId! } });
+        const thread = await db.thread.findUnique({ where: { id: event.threadId! } });
 
         // First terminal wins; append never writes a second one, but replay
         // stays defensive.
         if (thread && thread.status === 'active') {
-          await prisma.thread.update({
+          await db.thread.update({
             where: { id: thread.id },
             data: {
               status: event.type.slice('thread.'.length),

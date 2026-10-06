@@ -300,7 +300,9 @@ export async function spawnAgentRun(thread: Thread, startedEvent: Event): Promis
       sdkSession: options =>
         declaration.sdk === 'codex'
           ? createCodexSession(options, { tools, cwd: stateDir })
-          : createClaudeSession(options, { tools, cwd: stateDir }),
+          : // threadId feeds the stream tap: a surface adapter (CCR) mirrors the
+            // raw inner stream of claude-sdk threads.
+            createClaudeSession(options, { tools, cwd: stateDir, threadId }),
     },
 
     tools,
@@ -349,6 +351,20 @@ export async function spawnAgentRun(thread: Thread, startedEvent: Event): Promis
 
     abort: reason => {
       abortController.abort(reason);
+    },
+
+    interrupt: () => {
+      if (!run.interrupt) {
+        console.log(`[agent-run:${threadId}] interrupt ignored: agent "${agentName}" has no interruptible turn`);
+
+        return;
+      }
+
+      try {
+        run.interrupt();
+      } catch (error) {
+        console.error(`[agent-run:${threadId}] interrupt failed:`, error);
+      }
     },
   };
 }

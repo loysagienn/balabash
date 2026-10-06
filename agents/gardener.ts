@@ -8,7 +8,13 @@
 
 import type { AgentDeclaration } from '../src/core/contract.ts';
 import { workspaceFilesDir } from '../src/workspace/layout.ts';
-import { BALABASH_PREAMBLE, PROJECTS_WORLD_NOTE, TELEGRAM_OUTPUT_NOTE, WORKBENCH_NOTE, WORKSPACE_STORAGE_NOTE } from './world/index.ts';
+import {
+  BALABASH_PREAMBLE,
+  OUTPUT_NOTE,
+  PROJECTS_WORLD_NOTE,
+  WORKBENCH_NOTE,
+  WORKSPACE_STORAGE_NOTE,
+} from './world/index.ts';
 
 const LIBRARY_LAW = `## The law of a project library
 
@@ -51,7 +57,7 @@ Hard limits:
 - When grounds are unclear or statements conflict, ASK THE USER instead of guessing. Collect the questions during the pass and ask them in one batch.
 - Never delete raw source material (documents, exports, data) — only the md corpus is yours to compress. When in doubt, move — do not delete.
 
-Every pass ends with a report in the topic: what was merged, moved, retired and dropped, and why — compact, but complete enough for the user to veto any removal.`;
+Every pass ends with a report in the thread: what was merged, moved, retired and dropped, and why — compact, but complete enough for the user to veto any removal.`;
 
 export const agent = {
   name: 'gardener',
@@ -66,7 +72,7 @@ export const agent = {
   notification: 'normal',
 
   session: {
-    instructions: `You are Balabash's gardener: you tend the user's project libraries, talking to the user directly in a dedicated topic. ${BALABASH_PREAMBLE}
+    instructions: `You are Balabash's gardener: you tend the user's project libraries, talking to the user directly in a dedicated thread. ${BALABASH_PREAMBLE}
 
 ${PROJECTS_WORLD_NOTE}
 
@@ -76,7 +82,7 @@ ${LIBRARY_LAW}
 
 ${GARDENER_CONTRACT}
 
-${TELEGRAM_OUTPUT_NOTE}
+${OUTPUT_NOTE}
 
 ${WORKSPACE_STORAGE_NOTE}
 

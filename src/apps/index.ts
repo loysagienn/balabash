@@ -1,8 +1,15 @@
-// The apps execution domain (balabash.app): the host-aware branch of the
-// core. This middleware owns the WHOLE apps host — when the request's host
-// is config.appsDomain nothing falls through to the main-domain surfaces
-// (/api, /files, sessions): the minimal surface of the apps domain is part
-// of the design (domains-and-auth.md).
+// The apps runtime, in two layouts (src/apps/urls.ts):
+//
+// - The apps execution domain (balabash.app): the host-aware branch of the
+//   core. createAppsMiddleware owns the WHOLE apps host — when the request's
+//   host is config.appsDomain nothing falls through to the main-domain
+//   surfaces (/api, /files, sessions): the minimal surface of the apps
+//   domain is part of the design (domains-and-auth.md).
+// - Without APPS_DOMAIN, the same runtime on the main domain
+//   (createMainDomainAppsMiddleware): owner pages and the owner gateway
+//   behind the web session instead of the apps cookie, published apps under
+//   /a/<slug> without login. The serving functions below are shared; only
+//   the dispatch and the authorization differ.
 //
 // Current scope (steps 1–3): owner-mode serving behind the apps cookie
 // (minted from the one-time token handoff at /auth — src/apps/auth.ts),
@@ -36,6 +43,8 @@ import { isTransformableModule, transformAppModule } from './transform.ts';
 import { encodeJsonResponse } from './wire.ts';
 import { VENDOR_INTERNAL_FILES, VENDOR_MODULES, renderAppShell, renderCatalogPage, renderManifestErrorPage } from './shell.ts';
 import { listApps } from './management.ts';
+import { getSession } from '../api/session.ts';
+import { PUBLIC_PATH_PREFIX, publicAppUrl } from './urls.ts';
 
 const VENDOR_DIR = path.resolve('dist', 'apps-vendor');
 const VENDOR_FILES = new Set([...Object.values(VENDOR_MODULES), ...VENDOR_INTERNAL_FILES]);
@@ -244,7 +253,7 @@ async function serveOwnerPath(ctx: Context, userId: string, rawRest: string): Pr
     // registry of existence.
     ctx.type = 'text/html; charset=utf-8';
     ctx.set('cache-control', 'no-store');
-    ctx.body = renderCatalogPage(await listApps(userId), config.appsDomain ?? ctx.hostname);
+    ctx.body = renderCatalogPage(await listApps(userId), publicAppUrl);
 
     return;
   }
@@ -417,7 +426,9 @@ async function findPublication(slug: string): Promise<{ userId: string; path: st
 // of the app folder, /:slug/<anything else> the shell again for a navigation
 // (the SPA fallback). The manifest itself is deliberately NOT served here —
 // the api declaration is readable to the owner, not to the internet.
-async function servePublicPath(ctx: Context, rawPath: string): Promise<void> {
+// appBasePrefix is where the slugs are mounted: '' on the apps domain,
+// PUBLIC_PATH_PREFIX on the main domain — the shell's appBase follows it.
+async function servePublicPath(ctx: Context, rawPath: string, appBasePrefix = ''): Promise<void> {
   ctx.set('x-robots-tag', 'noindex');
 
   if (!allowPublicHit(ctx.ip)) {
@@ -459,7 +470,7 @@ async function servePublicPath(ctx: Context, rawPath: string): Promise<void> {
     return;
   }
 
-  const appBase = `/${slug}`;
+  const appBase = `${appBasePrefix}/${slug}`;
 
   const renderPublicShell = async (): Promise<void> => {
     ctx.type = 'text/html; charset=utf-8';
@@ -757,6 +768,118 @@ export function createAppsMiddleware(): (ctx: Context, next: Next) => Promise<vo
 
     try {
       await handleAppsRequest(ctx);
+    } catch (error) {
+      console.error('[apps] unhandled error:', error);
+      sendText(ctx, 500, 'Internal error');
+    }
+  };
+}
+
+// --------------------------------------------------------------------------
+// The main-domain layout (no APPS_DOMAIN): the same surfaces on the one host
+// the deployment has. Owner pages /apps/* and the owner gateway
+// /platform/api/apps/* authorize by the WEB SESSION — the apps cookie and
+// the handoff do not exist here; published apps live under /a/<slug> without
+// login, their gateway /platform/api/app/* as on the apps domain;
+// /platform/vendor/* serves the vendor set. Fixed prefixes are matched
+// first, so a published slug can never shadow them — and the prefix /a is
+// itself reserved: Next has no such page. Everything else falls through to
+// the main-domain surfaces.
+
+async function handleMainDomainRequest(ctx: Context): Promise<void> {
+  const { path: urlPath } = ctx;
+
+  if (urlPath.startsWith('/platform/api/')) {
+    if (ctx.method !== 'POST') {
+      sendJsonError(ctx, 405, 'method_not_allowed', 'Endpoint calls are POST');
+
+      return;
+    }
+
+    if (urlPath.startsWith('/platform/api/apps/')) {
+      // 401 is the signal the SDK's refresh loop listens for: it sends the
+      // browser to refreshUrl (the owner page), which asks for a login.
+      const session = await getSession(ctx);
+
+      if (!session || !session.userId) {
+        sendJsonError(ctx, 401, 'unauthorized', 'The web session is missing or expired');
+
+        return;
+      }
+
+      await serveOwnerEndpoint(ctx, session.userId, urlPath.slice('/platform/api/apps/'.length));
+
+      return;
+    }
+
+    if (urlPath.startsWith('/platform/api/app/')) {
+      await servePublicEndpoint(ctx, urlPath.slice('/platform/api/app/'.length));
+
+      return;
+    }
+
+    sendJsonError(ctx, 404, 'not_found', 'Not found');
+
+    return;
+  }
+
+  if (ctx.method !== 'GET' && ctx.method !== 'HEAD') {
+    sendText(ctx, 405, 'Method not allowed');
+
+    return;
+  }
+
+  if (urlPath.startsWith('/platform/vendor/')) {
+    await serveVendor(ctx, urlPath.slice('/platform/vendor/'.length));
+
+    return;
+  }
+
+  if (urlPath.startsWith('/platform/')) {
+    sendText(ctx, 404, 'Not found');
+
+    return;
+  }
+
+  if (urlPath === '/apps' || urlPath.startsWith('/apps/')) {
+    const session = await getSession(ctx);
+
+    if (!session || !session.userId) {
+      ctx.redirect(`/login?next=${encodeURIComponent(sanitizeAppsRedirect(urlPath + ctx.search))}`);
+
+      return;
+    }
+
+    await serveOwnerPath(ctx, session.userId, urlPath === '/apps' ? '' : urlPath.slice('/apps/'.length));
+
+    return;
+  }
+
+  // /a/<slug>[/…]
+  await servePublicPath(ctx, urlPath.slice(PUBLIC_PATH_PREFIX.length), PUBLIC_PATH_PREFIX);
+}
+
+/**
+ * The main-domain branch, active only without an apps domain: claims
+ * /apps, /apps/*, /a/*, /platform/* and lets everything else through.
+ */
+export function createMainDomainAppsMiddleware(): (ctx: Context, next: Next) => Promise<void> {
+  return async (ctx, next) => {
+    const { path: urlPath } = ctx;
+    const claimed =
+      urlPath === '/apps' ||
+      urlPath.startsWith('/apps/') ||
+      urlPath.startsWith(`${PUBLIC_PATH_PREFIX}/`) ||
+      urlPath.startsWith('/platform/');
+
+    if (config.appsDomain || !claimed) {
+      await next();
+
+      return;
+    }
+
+    try {
+      await handleMainDomainRequest(ctx);
     } catch (error) {
       console.error('[apps] unhandled error:', error);
       sendText(ctx, 500, 'Internal error');

@@ -8,7 +8,7 @@
 import type { JsonObject } from '../core/contract.ts';
 import type { ToolFunction } from './mcp-client.ts';
 import type { BuiltinServerCallContext, BuiltinToolServer, UserAuthServer } from './tool-manager.ts';
-import { listExternalSecretTargets, listUserAuthServers } from './tool-manager.ts';
+import { describeExternalServerStatuses, listExternalSecretTargets, listUserAuthServers } from './tool-manager.ts';
 import {
   ACCOUNT_KEY_PATTERN,
   disconnectConnection,
@@ -19,13 +19,14 @@ import {
   requestOauthClientCredentials,
 } from './connections/index.ts';
 import { identityLabel } from './connections/identity.ts';
-import { requestExternalServerCredentials } from './external-secrets.ts';
+import { forgetExternalServerSecrets, requestExternalServerCredentials } from './external-secrets.ts';
 
 export const AUTH_SERVER_NAME = 'auth';
 
 export const REQUEST_AUTHORIZATION_FUNCTION_NAME = 'request_authorization';
 export const REQUEST_OAUTH_CLIENT_FUNCTION_NAME = 'request_oauth_client_credentials';
 export const REQUEST_EXTERNAL_SERVER_CREDENTIALS_FUNCTION_NAME = 'request_external_server_credentials';
+export const FORGET_EXTERNAL_SERVER_CREDENTIALS_FUNCTION_NAME = 'forget_external_server_credentials';
 export const RENAME_CONNECTION_FUNCTION_NAME = 'rename_connection';
 export const DISCONNECT_CONNECTION_FUNCTION_NAME = 'disconnect_connection';
 
@@ -253,8 +254,11 @@ async function requestOauthClientFunction(): Promise<ToolFunction | null> {
 }
 
 // request_external_server_credentials: servers waiting for (or already
-// running on) ${secret:NAME} installation credentials.
-function requestExternalSecretsFunction(): ToolFunction | null {
+// running on) ${secret:NAME} installation credentials. The description also
+// carries the status of every external server (connected / pending / per
+// user) — the auth agent is the one agent that sees servers without
+// functions.
+function requestExternalSecretsFunction(connections: ConnectionRow[]): ToolFunction | null {
   const targets = listExternalSecretTargets();
 
   if (!targets.length) {
@@ -270,12 +274,31 @@ function requestExternalSecretsFunction(): ToolFunction | null {
 
     return `- ${target.name}: fields ${target.secretNames.join(', ')} (${status})`;
   });
+  const statuses = describeExternalServerStatuses(connections);
 
   return serverEnumFunction(
     REQUEST_EXTERNAL_SERVER_CREDENTIALS_FUNCTION_NAME,
-    `Create a one-time web link where the operator can securely enter or replace installation credentials for a global external MCP server. Values go directly to the database and are never returned to the model or written to the event log. Send the link to the user and wait for a secrets.provisioned event in this thread. For a connected server, call this only when the user asks to replace or rotate credentials. Servers:\n${lines.join('\n')}`,
+    `Create a one-time web link where the operator can securely enter or replace installation credentials for a global external MCP server. Values go directly to the database and are never returned to the model or written to the event log. Send the link to the user and wait for a secrets.provisioned event in this thread. For a connected server, call this only when the user asks to replace or rotate credentials. Servers:\n${lines.join('\n')}\n\nStatus of every external server of this installation:\n${statuses.join('\n')}`,
     targets.map(target => target.name),
     'The external MCP server whose installation credentials must be provisioned',
+  );
+}
+
+// forget_external_server_credentials: the reverse of provisioning — servers
+// whose installation credentials are stored (connected, or configured and
+// failing). Forgetting returns the server to pending for everyone.
+function forgetExternalSecretsFunction(): ToolFunction | null {
+  const targets = listExternalSecretTargets().filter(target => target.connected || target.error);
+
+  if (!targets.length) {
+    return null;
+  }
+
+  return serverEnumFunction(
+    FORGET_EXTERNAL_SERVER_CREDENTIALS_FUNCTION_NAME,
+    `Forget the stored installation credentials of a global external MCP server: the values are deleted from the database, the server is disconnected and its tools disappear for every agent and user until credentials are provisioned again. Confirm with the user before calling — this cannot be undone except by entering the credentials anew. Servers with stored credentials:\n${targets.map(target => `- ${target.name}: fields ${target.secretNames.join(', ')} (${target.connected ? 'connected' : `connection failed: ${target.error}`})`).join('\n')}`,
+    targets.map(target => target.name),
+    'The external MCP server whose installation credentials must be forgotten',
   );
 }
 
@@ -352,6 +375,7 @@ export function createAuthToolServer(): BuiltinToolServer {
       REQUEST_AUTHORIZATION_FUNCTION_NAME,
       REQUEST_OAUTH_CLIENT_FUNCTION_NAME,
       REQUEST_EXTERNAL_SERVER_CREDENTIALS_FUNCTION_NAME,
+      FORGET_EXTERNAL_SERVER_CREDENTIALS_FUNCTION_NAME,
       RENAME_CONNECTION_FUNCTION_NAME,
       DISCONNECT_CONNECTION_FUNCTION_NAME,
     ],
@@ -362,7 +386,8 @@ export function createAuthToolServer(): BuiltinToolServer {
       const functions = await Promise.all([
         requestAuthorizationFunction(connections),
         requestOauthClientFunction(),
-        Promise.resolve(requestExternalSecretsFunction()),
+        Promise.resolve(requestExternalSecretsFunction(connections)),
+        Promise.resolve(forgetExternalSecretsFunction()),
       ]);
 
       return [...functions.filter((fn): fn is ToolFunction => fn !== null), ...lifecycleFunctions(connections)];
@@ -408,6 +433,12 @@ export function createAuthToolServer(): BuiltinToolServer {
         const url = await requestExternalServerCredentials(ctx.userId, ctx.threadId, server);
 
         return `One-time operator link for the installation credentials of "${server}" (valid 15 minutes): ${url}\nSend it to the user and wait — a secrets.provisioned event arrives in this thread when the values are saved.`;
+      }
+
+      if (toolName === FORGET_EXTERNAL_SERVER_CREDENTIALS_FUNCTION_NAME) {
+        const count = await forgetExternalServerSecrets(server);
+
+        return `The installation credentials of "${server}" are forgotten (${count} value${count === 1 ? '' : 's'} deleted); the server is disconnected and its tools are gone for everyone until credentials are provisioned again.`;
       }
 
       throw new Error(`Unknown auth tool "${toolName}"`);

@@ -9,6 +9,9 @@ export type RegisteredRun = {
   accept(event: Event): void;
   // Hard stop from outside (terminal routed for this thread). Idempotent.
   abort(reason: string): void;
+  // Soft stop (thread.interrupt): cut the turn in flight, keep the run alive
+  // waiting for the next message. A no-op when idle.
+  interrupt(): void;
 };
 
 const runs = new Map<string, RegisteredRun>();

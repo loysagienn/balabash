@@ -11,6 +11,11 @@
 //
 // Spawned by supervisor.js as an independent aide; can also be run by hand:
 //   node --env-file=.env web-runner.js
+//
+// WEB_HTTP_PORT (default 3041) is where `next start` listens; WEB_HTTP_HOST
+// (default: Next's own, all interfaces) narrows the bind — e.g. 127.0.0.1
+// behind nginx. On a single-port deployment Next is the edge itself and
+// listens on the ingress port.
 
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -21,6 +26,7 @@ const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const WEB_DIR = path.join(ROOT, 'src', 'web');
 const NEXT_BIN = path.join(WEB_DIR, 'node_modules', '.bin', 'next');
 const PORT = process.env.WEB_HTTP_PORT || '3041';
+const HOST = process.env.WEB_HTTP_HOST || null;
 
 const QUIET_WINDOW_MS = 10_000;
 const HEALTHY_AFTER_MS = 60_000;
@@ -53,8 +59,10 @@ function startServer() {
 
   const startedAt = Date.now();
 
-  server = spawn(NEXT_BIN, ['start', '-p', PORT], { cwd: WEB_DIR, stdio: 'inherit', env: process.env });
-  log(`web server starting on port ${PORT}`);
+  const args = ['start', '-p', PORT, ...(HOST ? ['-H', HOST] : [])];
+
+  server = spawn(NEXT_BIN, args, { cwd: WEB_DIR, stdio: 'inherit', env: process.env });
+  log(`web server starting on ${HOST ? `${HOST}:` : 'port '}${PORT}`);
 
   server.on('exit', (code, signal) => {
     server = null;

@@ -11,6 +11,10 @@ export const THREAD_COMPLETED = 'thread.completed';
 export const THREAD_FAILED = 'thread.failed';
 export const THREAD_CANCELLED = 'thread.cancelled';
 export const THREAD_CANCEL = 'thread.cancel';
+// Soft stop: interrupt the addressee's current turn without terminating the
+// thread — the run stays alive and waits for the next message (a surface's
+// Stop button). Authored like thread.cancel: at the parent, one hop down.
+export const THREAD_INTERRUPT = 'thread.interrupt';
 export const THREAD_MESSAGE = 'thread.message';
 export const THREAD_NOTIFICATION = 'thread.notification';
 export const SYSTEM_EXCEPTION = 'system.exception';
@@ -35,6 +39,7 @@ const CANONICAL_TYPES: ReadonlySet<string> = new Set([
   THREAD_FAILED,
   THREAD_CANCELLED,
   THREAD_CANCEL,
+  THREAD_INTERRUPT,
   THREAD_MESSAGE,
   THREAD_NOTIFICATION,
   'tool.call.started',
@@ -222,7 +227,8 @@ function validateCanonicalActor(input: AppendInput): void {
       isToolCall ||
       TERMINAL_TYPES.has(type) ||
       type === THREAD_STARTED ||
-      type === THREAD_CANCEL) &&
+      type === THREAD_CANCEL ||
+      type === THREAD_INTERRUPT) &&
     !threadId
   ) {
     throw new AppendError('thread_required', `Event "${type}" requires threadId`);

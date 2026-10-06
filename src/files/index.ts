@@ -1,5 +1,6 @@
-// Files layer — port of v1: binary content lives in Spaces, the log and every
-// consumer operate on fileId (§9). Database access goes straight to Prisma:
+// Files layer — port of v1: binary content lives in the configured storage
+// (Spaces or the local disk, storage.ts), the log and every consumer operate
+// on fileId (§9). Database access goes straight to Prisma:
 // the files table is this module's private state.
 
 import crypto from 'node:crypto';
@@ -148,7 +149,7 @@ export async function ingestFile({
       objectKey,
       userId: userId ?? undefined,
       contentType: contentType ?? undefined,
-      sizeBytes: sizeBytes ?? undefined,
+      sizeBytes: uploadResult.sizeBytes ?? sizeBytes ?? undefined,
       etag: uploadResult.ETag ?? undefined,
       originalFilename: originalFilename ?? undefined,
       scope: scope ?? undefined,
@@ -203,6 +204,7 @@ export async function getFileDownloadUrl(fileId: string, options: DownloadUrlOpt
   return getStorageDownloadUrl({
     bucket: file.bucket,
     key: normalizeObjectKey(file.objectKey),
+    fileId: file.id,
     filename: file.originalFilename,
     expiresInSeconds: options.expiresInSeconds,
   });
@@ -210,13 +212,8 @@ export async function getFileDownloadUrl(fileId: string, options: DownloadUrlOpt
 
 export async function openFileContent(fileId: string): Promise<ReadableStream<Uint8Array>> {
   const file = await requireFile(fileId);
-  const result = await getStorageObject(file.bucket, normalizeObjectKey(file.objectKey));
 
-  if (!result.Body) {
-    throw new Error(`File "${fileId}" has no content`);
-  }
-
-  return result.Body.transformToWebStream();
+  return getStorageObject(file.bucket, normalizeObjectKey(file.objectKey));
 }
 
 export async function deleteFile(fileId: string): Promise<void> {

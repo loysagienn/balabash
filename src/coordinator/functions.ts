@@ -9,7 +9,7 @@
 // 'accepted' — their consequences arrive as events.
 
 import type { ContentBlock, JsonObject } from '../core/contract.ts';
-import { TELEGRAM_MARKDOWN_NOTE, THREAD_NAMING_NOTE } from '../../agents/world/index.ts';
+import { THREAD_NAMING_NOTE } from '../../agents/world/index.ts';
 import {
   CANCEL_REASON_PARAM_DESCRIPTION,
   CANCEL_THREAD_DESCRIPTION,
@@ -69,7 +69,7 @@ const STATIC_FUNCTION_DEFINITIONS: FunctionDefinition[] = [
       properties: {
         text: {
           type: 'string',
-          description: `The complete text to send. ${TELEGRAM_MARKDOWN_NOTE}`,
+          description: 'The complete text to send, in standard Markdown.',
         },
         fileIds: {
           type: ['array', 'null'],
@@ -98,8 +98,8 @@ const STATIC_FUNCTION_DEFINITIONS: FunctionDefinition[] = [
     type: 'function',
     name: 'send_to_thread',
     description:
-      `${SEND_TO_THREAD_DESCRIPTION} For a headless agent (one without a forum topic) this is the only ` +
-      'channel; for agents with a topic the user talks there directly — use this only when relaying is ' +
+      `${SEND_TO_THREAD_DESCRIPTION} For a headless agent (one without a user-facing thread) this is the only ` +
+      'channel; for user-facing agents the user talks in their thread directly — use this only when relaying is ' +
       'genuinely needed.',
     strict: true,
     parameters: {
@@ -146,8 +146,8 @@ const STATIC_FUNCTION_DEFINITIONS: FunctionDefinition[] = [
 const RESERVED_FUNCTION_NAMES = new Set(STATIC_FUNCTION_DEFINITIONS.map(definition => definition.name));
 
 // The spawn function of an agent: every agent takes the same input — one
-// text prompt — plus the thread_title (the surface shows the title as the
-// forum topic name, so the model names every thread it starts).
+// text prompt — plus the thread_title (every user surface shows the title,
+// so the model names every thread it starts).
 const AGENT_SPAWN_PARAMETERS: Record<string, unknown> = {
   type: 'object',
   properties: {
@@ -161,8 +161,8 @@ const AGENT_SPAWN_PARAMETERS: Record<string, unknown> = {
     thread_title: {
       type: 'string',
       description:
-        'Short human-readable title for the new thread, in the user’s language — it becomes the forum ' +
-        `topic name. ${THREAD_NAMING_NOTE}`,
+        'Short human-readable title for the new thread, in the user’s language — it is what the user sees ' +
+        `the thread as. ${THREAD_NAMING_NOTE}`,
     },
   },
   required: ['prompt', 'thread_title'],

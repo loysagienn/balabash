@@ -34,6 +34,7 @@ import {
   TERMINAL_TYPES,
   THREAD_CANCEL,
   THREAD_CANCELLED,
+  THREAD_INTERRUPT,
   THREAD_MESSAGE,
   THREAD_PROGRESS,
   THREAD_STARTED,
@@ -57,6 +58,7 @@ const ROUTED_TYPES = [
   'user.message',
   THREAD_STARTED,
   THREAD_CANCEL,
+  THREAD_INTERRUPT,
   THREAD_MESSAGE,
   THREAD_PROGRESS,
   ...TERMINAL_TYPES,
@@ -147,6 +149,34 @@ export function startThreadRouter({ createRun, spawnRun }: RouterHooks): Consume
           threadId: event.targetThreadId,
           payload: { reason, requestedBy: event.actor === 'agent' ? (event.agentName ?? 'agent') : event.actor },
         });
+
+        return;
+      }
+
+      // The soft stop: interrupt the addressee's turn in flight — the run
+      // itself stays registered and alive. Addressed to a child (one hop
+      // down, like thread.cancel). A redirected command (the child died in
+      // between) is dropped rather than stopping the main thread.
+      if (event.type === THREAD_INTERRUPT) {
+        const targetId = event.targetThreadId;
+
+        if (!targetId || 'redirectedFromThreadId' in event.payload) {
+          return;
+        }
+
+        const run = getRun(targetId);
+
+        if (!run) {
+          console.log(`[router] interrupt ignored: no run in memory for thread ${targetId}`);
+
+          return;
+        }
+
+        try {
+          run.interrupt();
+        } catch (error) {
+          console.error(`[router] interrupt failed thread=${targetId}:`, error);
+        }
 
         return;
       }

@@ -4,7 +4,7 @@
 // shape lives in sdk-session.ts; this module owns only the SDK mechanics.
 
 import { query } from '@anthropic-ai/claude-agent-sdk';
-import type { SDKMessage, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
+import type { SDKControlGetContextUsageResponse, SDKMessage, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 
 export type ClaudeSessionOptions = NonNullable<Parameters<typeof query>[0]['options']>;
 
@@ -13,6 +13,13 @@ export type ClaudeSession = {
   messages: AsyncIterable<SDKMessage>;
   // Enqueue the next user message. Throws after close().
   push: (text: string) => void;
+  // Interrupt the turn in flight (SDK control request); the session stays
+  // open. Resolves when the CLI acknowledged; rejects when the session is
+  // gone.
+  interrupt: () => Promise<void>;
+  // Context-window occupancy as the inner CLI computes it (the /context
+  // report, structured). Rejects when the session is gone.
+  getContextUsage: (opts?: { detail?: 'summary' | 'full' }) => Promise<SDKControlGetContextUsageResponse>;
   // End the input queue and close the underlying session. Idempotent.
   close: () => void;
 };
@@ -99,6 +106,20 @@ export function startClaudeSession(initialText: string, options: ClaudeSessionOp
   return {
     messages: session,
     push: text => queue.push(createUserMessage(text)),
+    interrupt: async () => {
+      if (closed) {
+        return;
+      }
+
+      await session.interrupt();
+    },
+    getContextUsage: async opts => {
+      if (closed) {
+        throw new Error('Claude session is closed');
+      }
+
+      return session.getContextUsage(opts);
+    },
     close: () => {
       if (closed) {
         return;

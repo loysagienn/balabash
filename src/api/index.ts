@@ -9,6 +9,7 @@ import { connect } from './connect.ts';
 import { createApiMiddleware, createFilesMiddleware } from './api.ts';
 import { createAppsMiddleware } from '../apps/index.ts';
 import { createAppsHandoffMiddleware } from '../apps/handoff.ts';
+import { createMainDomainAppsMiddleware } from '../apps/index.ts';
 
 export function startWebServer(): void {
   const app = new Koa();
@@ -23,11 +24,15 @@ export function startWebServer(): void {
 
   // Nonce/state-authenticated surfaces first (one-time links, OAuth
   // redirects), then the session-gated byte surface /files and the
-  // session-gated /api namespace. The /apps handoff sits with the
-  // session-gated surfaces: it turns the web session into a one-time token
-  // for the apps domain.
+  // session-gated /api namespace. The apps surfaces of the main domain sit
+  // with the session-gated ones: with an apps domain the /apps handoff
+  // turns the web session into a one-time token for that domain; without
+  // one the whole apps runtime runs here (/apps owner pages by the web
+  // session, /a/<slug> public, /platform/*). Each gates itself on
+  // config.appsDomain.
   app.use(connect);
   app.use(createAppsHandoffMiddleware());
+  app.use(createMainDomainAppsMiddleware());
   app.use(createFilesMiddleware());
   app.use(createApiMiddleware());
 

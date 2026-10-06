@@ -11,6 +11,7 @@ function getOptions(NODE_ENV, APP_VERSION) {
       app: './src/app.ts',
       'rebuild-threads': './scripts/rebuild-threads.ts',
       'render-context': './scripts/render-context.ts',
+      'import-sqlite': './scripts/import-sqlite.ts',
     },
     bundle: true,
     outdir: './dist',

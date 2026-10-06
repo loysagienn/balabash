@@ -125,7 +125,7 @@ export type AgentEventDecl = {
 
 // The declarative session agent (the preferred form): the whole lifecycle —
 // spawn-prompt validation, the SDK session, rendering of incoming events,
-// channel binding (forum topic vs headless parent dialogue by `headless`),
+// channel binding (user-facing thread vs headless parent dialogue by `headless`),
 // the standard end_thread / send_file verbs, abort — is run by the platform.
 // The agent supplies only data — plus, when the session needs machinery next
 // to it (the designer's browser), an `environment` the platform builds and
@@ -164,7 +164,7 @@ export type SessionEnvironment = {
 export type AgentDeclaration = {
   name: string; // = spawn function name in the catalog
   description: string;
-  icon?: string; // topic emoji
+  icon?: string; // thread icon, shown by the user surface (e.g. the Telegram topic emoji)
   sdk: 'claude' | 'codex'; // provider behind ctx.harness.sdkSession()
   // Spawn input is the same for every agent: one non-empty text prompt — the
   // task plus everything it should start from. No per-agent schema.
@@ -179,7 +179,7 @@ export type AgentDeclaration = {
   // cancel_thread) — spawning makes it the child's operator.
   agents?: string[];
   events?: AgentEventDecl[]; // domain types '<name>.*'
-  // A headless agent's thread has no user surface (no forum topic): the user
+  // A headless agent's thread has no user surface (no Telegram topic, no web chat): the user
   // is not a participant — the agent talks to its parent via progress/summary
   // and receives forwarded input as thread.message.
   headless?: boolean;
@@ -192,11 +192,15 @@ export type AgentDeclaration = {
 
 export type AgentRun = {
   accept(event: Event): void;
+  // Soft stop (thread.interrupt): abort the current turn, keep the run alive
+  // and wait for the next message. Optional — an imperative run without an
+  // interruptible turn may omit it. Never throws; a no-op when idle.
+  interrupt?(): void;
   finished: Promise<void>;
 };
 
 export type SpawnOptions = {
-  title?: string; // thread title — the surface shows it (forum topic name)
+  title?: string; // thread title — every user surface shows it (e.g. as the Telegram topic name)
   tools?: string[]; // narrow the child's bundle; widening is not possible
   notification?: NotificationLevel;
 };
@@ -277,6 +281,9 @@ export type SdkSessionOptions = {
 // failed turn ends the iteration with a thrown error.
 export type SdkTurn = {
   text: string;
+  // The turn was cut short by interrupt(); text is empty — whatever the
+  // model produced before the stop already rode the live stream.
+  interrupted?: true;
 };
 
 export type AgentSdkSession = {
@@ -286,6 +293,11 @@ export type AgentSdkSession = {
   turns: AsyncIterable<SdkTurn>;
   // Re-diff the bridge against ctx.tools after a catalog change; never rejects.
   syncTools(): Promise<void>;
+  // Interrupt the turn in flight: the inner model stops, the interrupted turn
+  // still closes through `turns` (empty text, `interrupted: true`) and the
+  // session stays open for the next push. A no-op when idle; never rejects.
+  // Optional — a harness without a soft stop (codex) omits it.
+  interrupt?(): Promise<void>;
   // End the input queue and the underlying session. Idempotent.
   close(): void;
 };

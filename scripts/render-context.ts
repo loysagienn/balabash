@@ -99,7 +99,7 @@ async function renderAgent(declaration: AgentDeclaration, userId: string): Promi
     `- sdk: ${declaration.sdk}`,
     `- tools bundle: ${JSON.stringify(declaration.tools)}`,
     ...(declaration.agents?.length ? [`- spawnable sub-agents: ${declaration.agents.join(', ')}`] : []),
-    ...(declaration.headless ? ['- headless: no forum topic, talks only to its operator'] : []),
+    ...(declaration.headless ? ['- headless: no user-facing thread, talks only to its operator'] : []),
     ...(declaration.session?.model ? [`- model: ${declaration.session.model}`] : []),
     ...(declaration.session?.effort ? [`- effort: ${declaration.session.effort}`] : []),
     ...(declaration.session?.preset ? [`- preset: ${declaration.session.preset}`] : []),

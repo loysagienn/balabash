@@ -9,11 +9,12 @@
 // needs.
 
 export { BALABASH_PREAMBLE } from './preamble.ts';
+export { BLOCKED_PATH_NOTE } from './blocked-path.ts';
+export { BROWSER_SUBAGENT_NOTE } from './browser-subagent.ts';
 export { CLAUDE_DESIGN_NOTE } from './claude-design.ts';
+export { OUTPUT_NOTE } from './output.ts';
 export { PROJECTS_NOTE, PROJECTS_WORLD_NOTE } from './projects.ts';
 export { REPO_RULES_NOTE } from './repo-rules.ts';
-export { TELEGRAM_MARKDOWN_NOTE } from './telegram-markdown.ts';
-export { TELEGRAM_OUTPUT_NOTE } from './telegram-output.ts';
 export { THREAD_DIALOGUE_NOTE } from './thread-dialogue.ts';
 export { THREAD_NAMING_NOTE } from './thread-naming.ts';
 export { WORKBENCH_NOTE } from './workbench.ts';

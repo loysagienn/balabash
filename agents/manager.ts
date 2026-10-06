@@ -1,5 +1,5 @@
 // Manager agent: a general-purpose task thread — the user talks to it
-// directly in its own topic and hands it everyday tasks; it acts through the
+// directly in its own thread and hands it everyday tasks; it acts through the
 // Balabash tool bundle plus the full native tool preset working on the
 // per-user workbench (the workspace file area itself is its cwd, like the
 // power_point agent), and can spawn the browser sub-agent for operating real
@@ -17,9 +17,9 @@ export const agent = {
   description:
     "Start a manager thread — a general-purpose assistant that takes on the user's tasks and sees them " +
     'through using the connected integrations, and can operate a real browser via a sub-agent when a task ' +
-    'requires it. The thread opens as a separate topic where the user talks to the manager directly; a task ' +
+    'requires it. The thread opens as a separate user-facing thread where the user talks to the manager directly; a task ' +
     'may be given upfront, or the prompt may say the thread starts open-ended — the manager then greets the ' +
-    'user and takes tasks in the topic. Start it when the user asks for the manager or hands over a task of ' +
+    'user and takes tasks in the thread. Start it when the user asks for the manager or hands over a task of ' +
     'this kind.',
   icon: '🎩',
   sdk: 'claude',

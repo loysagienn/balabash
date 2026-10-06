@@ -1,13 +1,15 @@
 // Process entry. Start order (design doc): db → files → tombstone of
-// orphaned threads → agent catalog → tool servers → web → telegram → router →
-// consumers → restart module. The process runs under supervisor.js: a clean
-// exit with RESTART_EXIT_CODE relaunches it, exit 0 stops the pair.
+// orphaned threads → agent catalog → tool servers → web → channel adapters
+// (telegram when configured) → router → consumers → restart module. The
+// process runs under supervisor.js: a clean exit with RESTART_EXIT_CODE
+// relaunches it, exit 0 stops the pair.
 
 import { execFile } from 'node:child_process';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import type { Consumer } from './core/consumers.ts';
 import { prisma } from './db/client.ts';
+import { config } from './config/index.ts';
 import { COORDINATOR_AGENT, tombstoneActiveThreads } from './core/threads.ts';
 import { getFile, getFileDownloadUrl, ingestFile, openFileContent } from './files/index.ts';
 import { loadAgents } from './capabilities/agent-catalog.ts';
@@ -29,6 +31,7 @@ import { startThreadRouter } from './runtime/router.ts';
 import { RESTART_EXIT_CODE, completePendingRestarts, startRestartModule } from './runtime/restart.ts';
 import { initTelegramBot } from './adapters/telegram/bot.ts';
 import { startTelegramDelivery } from './adapters/telegram/delivery.ts';
+import { startCcrAdapter } from './adapters/ccr/index.ts';
 
 // Pending migrations are applied before anything else touches the database:
 // schema changes ride the same restart as the code that needs them. A
@@ -109,7 +112,15 @@ await loadToolServers({
 
 startWebServer();
 
-const { bot, stop: stopTelegram } = await initTelegramBot();
+// Channel adapters are optional: Telegram
+// exists only when TELEGRAM_BOT_TOKEN is set. The core does not know which
+// channels are up — every channel is a log consumer plus a user.message
+// source, nothing else.
+const telegram = config.telegramEnabled ? await initTelegramBot() : null;
+
+if (!telegram) {
+  console.log('[app] telegram: disabled (no TELEGRAM_BOT_TOKEN)');
+}
 
 const consumers: Consumer[] = [];
 
@@ -129,6 +140,9 @@ consumers.push(
         accept: run.accept,
         // The main thread is eternal; a coordinator run has nothing to abort.
         abort: () => {},
+        // No surface addresses a soft stop to the main thread (thread.interrupt
+        // is a one-hop-down command); the coordinator's turn runs to its end.
+        interrupt: () => {},
       };
     },
 
@@ -136,7 +150,19 @@ consumers.push(
   }),
 );
 
-consumers.push(startTelegramDelivery({ bot }));
+if (telegram) {
+  consumers.push(startTelegramDelivery({ bot: telegram.bot }));
+}
+
+// Claude remote-control: after the router — its inbound user.message events
+// need the runs to be reachable.
+const ccr = config.ccrEnabled ? await startCcrAdapter() : null;
+
+if (ccr) {
+  consumers.push(ccr.consumer);
+} else {
+  console.log('[app] ccr: disabled (CCR_ENABLED is not "true")');
+}
 
 consumers.push(startReauthDetector());
 
@@ -167,9 +193,9 @@ consumers.push(
 console.log('[app] balabash is running');
 
 // ---------------------------------------------------------------------------
-// Shutdown: stop taking input (telegram polling confirms its offset), stop
-// the consumer loops, release the db and exit. The supervisor reads the exit
-// code: RESTART_EXIT_CODE relaunches, 0 stops the pair.
+// Shutdown: stop taking input (telegram polling, when running, confirms its
+// offset), stop the consumer loops, release the db and exit. The supervisor
+// reads the exit code: RESTART_EXIT_CODE relaunches, 0 stops the pair.
 
 let shuttingDown = false;
 
@@ -181,9 +207,17 @@ async function shutdown(code: number): Promise<void> {
   shuttingDown = true;
   console.log(`[app] shutting down (exit code ${code})`);
 
-  await stopTelegram().catch(error => {
-    console.error('[app] telegram stop failed:', error);
+  // CCR first: its sessions re-attach after the restart from the persisted
+  // cursors; a clean stop saves them.
+  await ccr?.stop().catch(error => {
+    console.error('[app] ccr stop failed:', error);
   });
+
+  if (telegram) {
+    await telegram.stop().catch(error => {
+      console.error('[app] telegram stop failed:', error);
+    });
+  }
 
   for (const consumer of consumers) {
     try {

@@ -1,5 +1,7 @@
-// In-memory one-time auth codes for linking a web session to a telegram
-// user. Ported from v1 src/auth-codes as is. Deliberately not persisted: a
+// In-memory one-time auth codes for linking a web session to a workspace
+// user; any channel (Telegram /auth_code, …) may issue one, and so does the
+// /login page itself for the operator's workspace (the console code,
+// printed to the server log — api.ts). Ported from v1 src/auth-codes as is. Deliberately not persisted: a
 // restart just invalidates pending codes.
 
 import crypto from 'node:crypto';

@@ -16,7 +16,7 @@ import { SYSTEM_EXCEPTION } from '../core/envelope.ts';
 import { getMainThread } from '../core/threads.ts';
 import { config } from '../config/index.ts';
 import type { ScheduledTaskModel } from '../../prisma-generated/models.ts';
-import { getTaskBody } from './catalog.ts';
+import { hasTaskBody, workspaceTaskFile } from './catalog.ts';
 import { fireTask, sweepAbortedJobRuns } from './engine.ts';
 
 const POLL_INTERVAL_MS = 5_000;
@@ -33,14 +33,14 @@ export function assertValidCron(expression: string): void {
 }
 
 // Boot sweep — the loud registry-vs-catalog reconciliation: every registered
-// code task without a body in this process gets a system.exception into its
-// workspace's main thread. This closes the create_task → restart window
+// code task without a body (neither bundled nor a workspace file) gets a
+// system.exception into its workspace's main thread. This closes the create_task → restart window
 // honestly: the task sleeps, and everyone can see why.
 async function sweepSleepingTasks(): Promise<void> {
   const rows = await prisma.scheduledTask.findMany({ where: { kind: 'code' }, orderBy: { createdAt: 'asc' } });
 
   for (const row of rows) {
-    if (getTaskBody(row.slug)) {
+    if (await hasTaskBody(row.userId, row.slug)) {
       continue;
     }
 
@@ -55,8 +55,8 @@ async function sweepSleepingTasks(): Promise<void> {
         scope: 'schedule-boot',
         slug: row.slug,
         error:
-          `Scheduled task "${row.slug}" (kind code) has no body in the running bundle — it sleeps until ` +
-          `tasks/${row.slug}.ts is added to the static index, the app is rebuilt and restarted.`,
+          `Scheduled task "${row.slug}" (kind code) has no body — it sleeps until ${workspaceTaskFile(row.userId, row.slug)} ` +
+          `exists (live at the next fire) or tasks/${row.slug}.ts is added to the repository index, built and restarted.`,
       },
     }).catch(error => {
       console.error(`[schedule] boot sweep failed to journal sleeping task "${row.slug}":`, error);
@@ -84,7 +84,7 @@ export function startScheduleHeart(): { name: string; stop: () => void } {
     for (const row of rows) {
       // The sleeping-task rule: no body — the heart does not arm and does not
       // complain; the boot sweep already did, once and loudly.
-      if (row.kind === 'code' && !getTaskBody(row.slug)) {
+      if (row.kind === 'code' && !(await hasTaskBody(row.userId, row.slug))) {
         continue;
       }
 

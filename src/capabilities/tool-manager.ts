@@ -1,17 +1,30 @@
 // Tool-server manager: local in-process servers (tools/*.ts) and
 // external MCP servers (mcp-servers/*.json) behind one registry. Servers with
 // unresolved ${secret:NAME} references wait in pending and reconnect when the
-// secrets are provisioned; servers with auth: "user" are registered without a
-// global connection — per-user clients are created lazily once the user's
-// connection row says "connected". Module-level state is deliberate: the
-// whole system is one process, the runs consume this registry through
-// their bundled ToolsApi.
+// secrets are provisioned; an external server whose connection fails waits in
+// pending too and is retried before the next catalog is handed out — an
+// unreachable or unauthorized server never fails the boot, it simply has no
+// functions until it connects; servers with
+// auth: "user" are registered without a global connection — per-user clients
+// are created lazily once the user's connection row says "connected".
+// Module-level state is deliberate: the whole system is one process, the
+// runs consume this registry through their bundled ToolsApi.
 
+import path from 'node:path';
 import { UnauthorizedError } from '@modelcontextprotocol/sdk/client/auth.js';
 import type { JsonObject, JsonValue, ToolResult } from '../core/contract.ts';
 import { localToolModules } from '../../tools/index.ts';
-import { connectExternalServer, connectUserServer, type ConnectedServer, type ToolFunction } from './mcp-client.ts';
-import { startLocalToolSource, type LocalToolContext, type LocalToolSource } from './local-tool-source.ts';
+import {
+  connectExternalServer,
+  connectUserServer,
+  isLostSessionError,
+  type ConnectedServer,
+  type ToolFunction,
+} from './mcp-client.ts';
+import { startLocalToolSource, type LocalToolContext, type LocalToolHelpers, type LocalToolSource } from './local-tool-source.ts';
+import { INSTALLATION_SERVERS_DIR, INSTALLATION_TOOLS_DIR, importExtensionModule, listExtensionFiles } from './extensions.ts';
+import { ToolError, toErrorResult, toStructuredResult } from './tool-result.ts';
+import { callerUserId, serveMcp } from '../../tools/workspace_shared.ts';
 import {
   readExternalServerConfigs,
   type ExternalServerConfig,
@@ -30,6 +43,11 @@ import { backfillConnectionIdentity, identityLabel } from './connections/identit
 const TOOL_CALL_TIMEOUT_MS = 10 * 60_000;
 
 export const SERVER_NAME_PATTERN = /^[a-z][a-z0-9_]*$/;
+
+// A pending server whose connection failed is retried before a catalog is
+// handed out, but not on every turn: a server that is down stays down for a
+// while, and each attempt costs a connect timeout.
+const PENDING_RETRY_INTERVAL_MS = 60_000;
 
 // The platform-owned account parameter injected into every tool of a
 // user-auth server: the model addresses one connected account per call, the
@@ -113,6 +131,17 @@ function isServerInBundle(bundle: ToolBundle, serverName: string): boolean {
 let servers = new Map<string, ConnectedServer>();
 let localToolSources = new Map<string, LocalToolSource>();
 
+// Names of the installation's extension servers (data/tools/<name>.ts that
+// loaded, data/mcp-servers/<name>.json), filled by loadToolServers. The
+// operator's own code and configs: scheduled tasks get them without a
+// passport entry (src/schedule/engine.ts), unlike repository servers which
+// every bundle names explicitly.
+let installationExtensionServers: string[] = [];
+
+export function listInstallationExtensionServers(): string[] {
+  return installationExtensionServers;
+}
+
 type PendingExternalServer = {
   name: string;
   config: ExternalServerConfig;
@@ -120,6 +149,9 @@ type PendingExternalServer = {
   error: string | null;
   connected: boolean;
   secretVersion: string | null;
+  // Earliest moment of the next connection attempt after a failure (epoch
+  // ms); 0 = retry at the next catalog.
+  retryAfter: number;
 };
 
 let pendingExternalServers = new Map<string, PendingExternalServer>();
@@ -141,6 +173,7 @@ export type UserAuthServer = {
   identityProbe: IdentityProbeConfig | null;
   enabledTools: EnabledTools | undefined;
   toolOverrides: Record<string, ToolOverride> | undefined;
+  prefixTools: boolean;
 };
 
 const userAuthServers = new Map<string, UserAuthServer>();
@@ -368,6 +401,7 @@ export type ExternalSecretTarget = {
 
 export function listExternalSecretTargets(): ExternalSecretTarget[] {
   return [...pendingExternalServers.values()]
+    .filter(pending => pending.secretNames.length)
     .map(pending => ({
       name: pending.name,
       secretNames: pending.secretNames,
@@ -375,6 +409,71 @@ export function listExternalSecretTargets(): ExternalSecretTarget[] {
       connected: pending.connected,
     }))
     .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+// One line per external server for the auth agent:
+// connected / pending: secrets missing / pending: connection failed
+// (<error>) / per-user: N accounts — the only place a server that has no
+// functions right now is still visible to any agent.
+export function describeExternalServerStatuses(
+  connections: ReadonlyArray<{ server: string; status: string }>,
+): string[] {
+  const lines: string[] = [];
+
+  for (const server of servers.values()) {
+    if (server.origin === 'external' && !pendingExternalServers.has(server.name)) {
+      lines.push(`- ${server.name}: connected`);
+    }
+  }
+
+  for (const pending of pendingExternalServers.values()) {
+    if (pending.connected && servers.has(pending.name)) {
+      lines.push(`- ${pending.name}: connected`);
+    } else if (pending.error) {
+      lines.push(`- ${pending.name}: pending — connection failed (${pending.error})`);
+    } else {
+      lines.push(`- ${pending.name}: pending — secrets missing (${pending.secretNames.join(', ')})`);
+    }
+  }
+
+  for (const server of userAuthServers.values()) {
+    const accounts = connections.filter(row => row.server === server.name && row.status === 'connected').length;
+
+    lines.push(`- ${server.name}: per-user — ${accounts} connected account${accounts === 1 ? '' : 's'}`);
+  }
+
+  return lines.sort();
+}
+
+// Forgetting a server's installation credentials (auth agent): the live
+// client is closed and the server returns to pending with no secret version
+// — its functions disappear from every catalog until the secrets are
+// provisioned again. Returns false when no such server is configured.
+export async function disconnectExternalServer(serverName: string): Promise<boolean> {
+  const pending = pendingExternalServers.get(serverName);
+
+  if (!pending) {
+    return false;
+  }
+
+  const live = servers.get(serverName);
+
+  if (live) {
+    const next = new Map(servers);
+
+    next.delete(serverName);
+    servers = next;
+    void live.close().catch(() => {});
+  }
+
+  pending.connected = false;
+  pending.secretVersion = null;
+  pending.error = null;
+  pending.retryAfter = 0;
+
+  console.log(`[tools] external server "${serverName}" disconnected; its installation credentials were forgotten`);
+
+  return true;
 }
 
 function getErrorMessage(error: unknown): string {
@@ -419,20 +518,32 @@ function toUserAuthServer(
     identityProbe: config.identityProbe ?? null,
     enabledTools: config.enabledTools,
     toolOverrides: config.toolOverrides,
+    prefixTools: config.prefixTools === true,
   };
 }
 
 // Retries pending servers whose secrets appeared or changed since the last
-// attempt (secretVersion), before tool definitions are handed out.
+// attempt (secretVersion), and servers whose last connection attempt failed
+// (after PENDING_RETRY_INTERVAL_MS), before tool definitions are handed out.
 async function ensurePendingExternalServers(): Promise<void> {
   for (const pending of [...pendingExternalServers.values()]) {
     const resolved = await resolveExternalServerSecrets(pending.name, pending.config);
 
     if (!resolved.config) {
+      // Secrets gone (forgotten) under a live client: the server leaves the
+      // catalog with them.
+      if (pending.connected) {
+        await disconnectExternalServer(pending.name);
+      }
+
       continue;
     }
 
     if (pending.connected && pending.secretVersion === resolved.secretVersion && servers.has(pending.name)) {
+      continue;
+    }
+
+    if (Date.now() < pending.retryAfter) {
       continue;
     }
 
@@ -454,6 +565,7 @@ async function ensurePendingExternalServers(): Promise<void> {
       pending.connected = true;
       pending.secretVersion = resolved.secretVersion;
       pending.error = null;
+      pending.retryAfter = 0;
 
       if (existing) {
         void existing.close().catch(() => {});
@@ -464,16 +576,19 @@ async function ensurePendingExternalServers(): Promise<void> {
       );
     } catch (error) {
       pending.error = getErrorMessage(error);
+      pending.retryAfter = Date.now() + PENDING_RETRY_INTERVAL_MS;
       console.error(`[tools] failed to connect pending external server "${pending.name}":`, error);
     }
   }
 }
 
-export async function loadToolServers(ctx: LocalToolContext): Promise<void> {
+export async function loadToolServers(input: Omit<LocalToolContext, keyof LocalToolHelpers>): Promise<void> {
+  const ctx: LocalToolContext = { ...input, serveMcp, callerUserId, toStructuredResult, toErrorResult, ToolError };
   const connected = new Map<string, ConnectedServer>();
   const nextUserAuth = new Map<string, UserAuthServer>();
   const nextPending = new Map<string, PendingExternalServer>();
   const nextLocalSources = new Map<string, LocalToolSource>();
+  const nextExtensionServers: string[] = [];
   const discovered: Array<{
     name: string;
     config: ExternalServerConfig;
@@ -502,8 +617,38 @@ export async function loadToolServers(ctx: LocalToolContext): Promise<void> {
     addDiscovered(serverName, source.config, 'file');
   }
 
+  // Installation extensions: data/tools/<name>.ts under the same start(ctx)
+  // contract, imported at boot. Unlike bundled modules they are NOT
+  // fail-fast: a broken file lives outside the bundle, so a boot failure
+  // could not be rolled back by the supervisor — it is logged and skipped,
+  // and the server simply does not exist until the file is fixed and the
+  // app restarted.
+  for (const filename of await listExtensionFiles(INSTALLATION_TOOLS_DIR, '.ts')) {
+    const serverName = path.basename(filename, '.ts');
+    const file = path.join(INSTALLATION_TOOLS_DIR, filename);
+
+    try {
+      if (names.has(serverName)) {
+        throw new Error(`the name is taken by a repository tool server`);
+      }
+
+      const source = await startLocalToolSource(serverName, await importExtensionModule(file), ctx);
+
+      nextLocalSources.set(serverName, source);
+      addDiscovered(serverName, source.config, 'file');
+      nextExtensionServers.push(serverName);
+      console.log(`[tools] extension tool server "${serverName}" loaded from ${file}`);
+    } catch (error) {
+      console.error(`[tools] extension tool server "${serverName}" (${file}) skipped:`, error);
+    }
+  }
+
   for (const [serverName, config] of Object.entries(await readExternalServerConfigs())) {
     addDiscovered(serverName, config, 'external');
+  }
+
+  for (const filename of await listExtensionFiles(INSTALLATION_SERVERS_DIR, '.json')) {
+    nextExtensionServers.push(path.basename(filename, '.json'));
   }
 
   for (const { name: serverName, config, origin } of discovered) {
@@ -515,7 +660,32 @@ export async function loadToolServers(ctx: LocalToolContext): Promise<void> {
     const resolved = await resolveExternalServerSecrets(serverName, config);
 
     if (resolved.config) {
-      const server = await connectExternalServer(serverName, resolved.config);
+      let server: ConnectedServer;
+
+      try {
+        server = await connectExternalServer(serverName, resolved.config);
+      } catch (error) {
+        // An external server that cannot be reached or rejects its
+        // credentials must not fail the boot (and roll back a bundle that is
+        // not at fault): it waits in pending and is retried before the next
+        // catalog. In-process servers keep the strict fail-fast — their
+        // failure is a bug in the bundle.
+        if (origin !== 'external') {
+          throw error;
+        }
+
+        console.error(`[tools] failed to connect external server "${serverName}" (will retry):`, error);
+        nextPending.set(serverName, {
+          name: serverName,
+          config,
+          secretNames: resolved.secretNames,
+          error: getErrorMessage(error),
+          connected: false,
+          secretVersion: null,
+          retryAfter: Date.now() + PENDING_RETRY_INTERVAL_MS,
+        });
+        continue;
+      }
 
       server.origin = origin;
       connected.set(serverName, server);
@@ -528,6 +698,7 @@ export async function loadToolServers(ctx: LocalToolContext): Promise<void> {
           error: null,
           connected: true,
           secretVersion: resolved.secretVersion,
+          retryAfter: 0,
         });
       }
     } else {
@@ -538,6 +709,7 @@ export async function loadToolServers(ctx: LocalToolContext): Promise<void> {
         error: null,
         connected: false,
         secretVersion: null,
+        retryAfter: 0,
       });
     }
   }
@@ -549,6 +721,7 @@ export async function loadToolServers(ctx: LocalToolContext): Promise<void> {
 
   servers = connected;
   localToolSources = nextLocalSources;
+  installationExtensionServers = nextExtensionServers.sort();
   pendingExternalServers = nextPending;
 
   userAuthServers.clear();
@@ -581,11 +754,18 @@ export async function loadToolServers(ctx: LocalToolContext): Promise<void> {
   );
 
   if (pendingExternalServers.size) {
-    const waiting = [...pendingExternalServers.values()].filter(pending => !pending.connected);
+    const waiting = [...pendingExternalServers.values()].filter(pending => !pending.connected && !pending.error);
+    const failed = [...pendingExternalServers.values()].filter(pending => !pending.connected && pending.error);
 
     if (waiting.length) {
       console.log(
         `[tools] pending servers (installation credentials required): ${waiting.map(pending => pending.name).join(', ')}`,
+      );
+    }
+
+    if (failed.length) {
+      console.log(
+        `[tools] pending servers (connection failed, retrying): ${failed.map(pending => pending.name).join(', ')}`,
       );
     }
   }
@@ -690,6 +870,41 @@ export async function getServerToolFunctions(userId: string, bundle: ToolBundle)
   return functions;
 }
 
+// Swaps a reconnected server into its registry slot and closes the stale one.
+// Compare-and-set on the map slot: a concurrent reconnect of the same server
+// that already won keeps its client, the loser's connection is closed.
+function replaceServer(
+  userId: string,
+  scope: ToolFunctionEntry['scope'],
+  stale: ConnectedServer,
+  fresh: ConnectedServer,
+): void {
+  if (scope === 'user') {
+    const accounts = userServers.get(userId)?.get(stale.name);
+
+    if (!accounts || !stale.accountKey || accounts.get(stale.accountKey) !== stale) {
+      void fresh.close().catch(() => {});
+
+      return;
+    }
+
+    accounts.set(stale.accountKey, fresh);
+  } else {
+    if (servers.get(stale.name) !== stale) {
+      void fresh.close().catch(() => {});
+
+      return;
+    }
+
+    const next = new Map(servers);
+
+    next.set(stale.name, fresh);
+    servers = next;
+  }
+
+  void stale.close().catch(() => {});
+}
+
 export type ServerToolOutcome = {
   serverName: string;
   toolName: string;
@@ -740,20 +955,18 @@ export async function callServerTool(
     callArgs = rest;
   }
 
-  let raw: Record<string, unknown>;
-
-  try {
-    // Local (in-process) servers receive the calling run's identity in _meta:
-    // a file ingested by a local tool must land in the caller's workspace, not
-    // as an ownerless row. External servers never see workspace internals.
-    const meta = server.origin === 'file' ? { _meta: { balabash: { userId, threadId: ctx.threadId } } } : {};
-
-    raw = (await server.client.callTool({ name: fn.toolName, arguments: callArgs, ...meta }, undefined, {
+  // Local (in-process) servers receive the calling run's identity in _meta:
+  // a file ingested by a local tool must land in the caller's workspace, not
+  // as an ownerless row. External servers never see workspace internals.
+  const meta = server.origin === 'file' ? { _meta: { balabash: { userId, threadId: ctx.threadId } } } : {};
+  const invoke = (target: ConnectedServer) =>
+    target.client.callTool({ name: fn.toolName, arguments: callArgs, ...meta }, undefined, {
       timeout: TOOL_CALL_TIMEOUT_MS,
       resetTimeoutOnProgress: true,
-    })) as Record<string, unknown>;
-  } catch (error) {
-    // Tokens can die between the connect at turn start and the call itself.
+    }) as Promise<Record<string, unknown>>;
+
+  // Tokens can die between the connect at turn start and the call itself.
+  const rejectUnauthorized = async (error: unknown): Promise<never> => {
     if (scope === 'user' && error instanceof UnauthorizedError) {
       if (server.accountKey) {
         dropUserClient(fn.serverName, userId, server.accountKey);
@@ -764,11 +977,46 @@ export async function callServerTool(
       }
 
       throw new Error(
-        `Authorization for "${fn.serverName}" has expired. A re-authorization thread is started automatically — tell the user to complete it in the new topic; do not start another auth thread yourself.`,
+        `Authorization for "${fn.serverName}" has expired. A re-authorization thread is started automatically — tell the user to complete it in the new thread; do not start another auth thread yourself.`,
       );
     }
 
     throw error;
+  };
+
+  let raw: Record<string, unknown>;
+
+  try {
+    raw = await invoke(server);
+  } catch (error) {
+    // The server forgot our MCP session (redeploy, pod restart): the 404
+    // arrives before the tool ran at all, so a fresh session and one retry
+    // are safe — the caller journals a single call either way.
+    if (!isLostSessionError(error) || !server.reconnect) {
+      return rejectUnauthorized(error);
+    }
+
+    console.warn(`[tools] "${server.name}" lost its MCP session (${getErrorMessage(error)}); reconnecting`);
+
+    let fresh: ConnectedServer;
+
+    try {
+      fresh = await server.reconnect();
+    } catch (reconnectError) {
+      return rejectUnauthorized(reconnectError);
+    }
+
+    // The function namespace was validated when the server was registered;
+    // the fresh connection serves the same tools.
+    fresh.functions = server.functions;
+    fresh.origin = server.origin;
+    replaceServer(userId, scope, server, fresh);
+
+    try {
+      raw = await invoke(fresh);
+    } catch (retryError) {
+      return rejectUnauthorized(retryError);
+    }
   }
 
   // Verbatim record: the raw MCP answer exactly as the server

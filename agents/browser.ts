@@ -4,8 +4,8 @@
 //
 // The agent is a sub-agent for OTHER agents: its operator is the parent
 // thread (the coordinator or any agent that spawned it), never the user —
-// it knows nothing about the user. The thread is headless: no forum
-// topic. The dialogue is symmetric thread.message events: the operator sends
+// it knows nothing about the user. The thread is headless: no user-facing
+// surface. The dialogue is symmetric thread.message events: the operator sends
 // instructions (sendToChild / send_to_thread), the browser executes and
 // replies with its turn's final text (sendToParent). All the Playwright
 // machinery stays in this thread, out of the operator's context; screenshots
@@ -43,7 +43,7 @@ import { describeEvent, describeThreadMessage } from '../src/capabilities/sessio
 import { connectPlaywrightMcp, createPlaywrightBridgeTools, imageExtension } from './kit/playwright.ts';
 import type { PlaywrightImageSink } from './kit/playwright.ts';
 import { workspaceDbPath, workspaceFilesDir } from '../src/workspace/layout.ts';
-import { WORKSPACE_STORAGE_NOTE } from './world/index.ts';
+import { BLOCKED_PATH_NOTE, WORKSPACE_STORAGE_NOTE } from './world/index.ts';
 
 const NOVNC_URL = 'https://novnc.loysagienn.com/vnc.html';
 
@@ -300,7 +300,7 @@ export const agent = {
         }
 
         const session = ctx.harness.sdkSession({
-          instructions: `${SYSTEM_PROMPT}\n\n${buildInstructions()}`,
+          instructions: `${SYSTEM_PROMPT}\n\n${BLOCKED_PATH_NOTE}\n\n${buildInstructions()}`,
           initialMessage: buildInitialMessage(prompt),
           model: 'claude-opus-5-5',
           // Full native preset: shell and file tools on the workbench next to

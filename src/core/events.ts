@@ -89,7 +89,11 @@ export async function getTranscript(
 }
 
 type ListThreadEventsOptions = {
+  // Older than seq, newest first (history paging).
   beforeSeq?: bigint;
+  // Newer than seq, OLDEST first (the live tail of a chat). Exclusive with
+  // beforeSeq.
+  afterSeq?: bigint;
   limit?: number;
 };
 
@@ -102,14 +106,15 @@ type ListThreadEventsOptions = {
 // duplicates, no gaps at page boundaries.
 export async function listThreadEvents(
   threadId: string,
-  { beforeSeq, limit = 100 }: ListThreadEventsOptions = {},
+  { beforeSeq, afterSeq, limit = 100 }: ListThreadEventsOptions = {},
 ): Promise<Event[]> {
   const rows = await prisma.event.findMany({
     where: {
       OR: [{ threadId }, { targetThreadId: threadId }],
       ...(beforeSeq !== undefined ? { seq: { lt: beforeSeq } } : {}),
+      ...(afterSeq !== undefined ? { seq: { gt: afterSeq } } : {}),
     },
-    orderBy: { seq: 'desc' },
+    orderBy: { seq: afterSeq !== undefined ? 'asc' : 'desc' },
     take: limit,
   });
 

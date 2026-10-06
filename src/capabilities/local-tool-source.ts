@@ -1,12 +1,15 @@
 // In-process tool servers (§10): tools/*.ts files export start(ctx) which
 // brings up a streamable HTTP MCP endpoint on loopback and returns { config,
-// close }. The modules ship inside the app bundle through the static
-// tools/index.ts — the import() machinery went away with hot-reload — but
-// each module is still validated hard before it is trusted.
+// close }. Repository modules ship inside the app bundle through the static
+// tools/index.ts; installation extensions are imported at boot from
+// data/tools/<name>.ts (extensions.ts) under the same contract — each module
+// is validated hard before it is trusted.
 
+import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { FileRef } from '../core/contract.ts';
 import type { StorageBody } from '../files/storage.ts';
 import { validateExternalServerConfig, type ExternalServerConfig } from './server-config.ts';
+import type { StructuredToolResult, ToolError } from './tool-result.ts';
 
 export type LocalToolSource = {
   config: ExternalServerConfig;
@@ -39,7 +42,21 @@ export type LocalToolFilesApi = {
   open: (fileId: string) => Promise<ReadableStream<Uint8Array>>;
 };
 
-export type LocalToolContext = {
+// The helpers a repository tool imports from tools/workspace_shared.ts and
+// tool-result.ts, handed to extension modules through ctx — an extension
+// must not import runtime code from the repository tree (extensions.ts).
+export type LocalToolHelpers = {
+  // Serves a streamable HTTP MCP endpoint on loopback; one server instance
+  // per request. Returns what start() must return.
+  serveMcp: (createMcpServer: () => McpServer) => Promise<{ config: ExternalServerConfig; close: () => Promise<void> }>;
+  // The calling run's userId from the request _meta (per-user scoping).
+  callerUserId: (extra: { _meta?: Record<string, unknown> }) => string;
+  toStructuredResult: (data: unknown) => StructuredToolResult;
+  toErrorResult: (error: unknown) => StructuredToolResult;
+  ToolError: typeof ToolError;
+};
+
+export type LocalToolContext = LocalToolHelpers & {
   filesApi: LocalToolFilesApi;
 };
 
