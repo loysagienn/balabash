@@ -73,6 +73,11 @@ export type ExternalServerConfig =
       // CCR adapter runs on. The OAuth relationship with the provider (e.g.
       // Slack) lives on claude.ai; nothing is provisioned locally. The
       // endpoint is undocumented alpha, same species as the CCR bridge.
+      // The one credential involved is the operator's ambient CLI token:
+      // it rotates only while a Claude Code session runs on this box, so a
+      // quiet 8h boundary leaves the connector failing with 401 until the
+      // next turn (mcp-client.ts ClaudeConnectorAuthError) — nothing to
+      // re-authorize, neither here nor at the provider.
       transport: 'claude-connector';
       // The connector's Anthropic server id (mcpsrv_…). Discoverable via
       // GET https://api.anthropic.com/v1/mcp_servers with the ambient token
