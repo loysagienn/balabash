@@ -1,41 +1,72 @@
-# scripts/
+# Balabash — the repository
 
-Offline maintenance scripts of the Balabash repository. They are not part of
-the running app: each is bundled by `npm run build` into its own `dist/`
-entry (see `build/server.js` entryPoints) and run manually with an npm
-script. They read `.env` themselves (`--env-file`) and talk to the same
-database and tool servers as the app — run them from the repository root.
+This is the source code of Balabash, a personal self-hosted assistant. An
+agent working here is working on the very system it runs inside: the app
+process serving the user right now is this code, loaded into memory. The
+user of that app is its developer and operator — nothing internal is
+confidential from them.
 
-## rebuild-threads (`scripts/rebuild-threads.ts`)
+## Map
 
-Rebuilds the threads projection from the event log: truncate + replay. The
-projection is secondary by design; run this offline, with the app process
-stopped.
+- `agents/` — the agent catalog: one declaration per agent, registered in the
+  static index `agents/index.ts` (a new agent is a module plus an entry
+  there). `agents/world/` is the world library: canonical prompt fragments,
+  one file per world fact, every prompt imports instead of retelling.
+  `agents/roles/` holds a brief shared by agents that play one role on
+  different backends.
+- `src/` — the app. `core/` (event log, envelopes, threads), `capabilities/`
+  (tool servers, the tool manager, the agent runtime and session runner,
+  agent validation), `coordinator/` (the secretary: instructions and
+  function definitions), `harness/` (the model backends: `claude-sdk/`,
+  `codex-sdk/`, `openai/`), `adapters/` (surfaces: `telegram/`, `ccr/`),
+  `workspace/` (the per-user workbench: layout, sqlite, child processes),
+  `projects/` (the project registry), `schedule/` (scheduled tasks and jobs),
+  `apps/` (the mini-app platform), `files/` (file storage), `runtime/`
+  (restart, router, runs), `web/` (the Next.js UI, its own package).
+- `tasks/` — scheduled task bodies shipped with the product; `tasks/AGENTS.md`
+  is their contract.
+- `scripts/` — offline maintenance scripts (`scripts/AGENTS.md`); among them
+  `render-context`, the verification instrument for any work on prompts and
+  tool descriptions.
+- `plugins/balabash/` — the platform plugin (skills) every full-preset agent
+  session loads, whatever its working directory.
+- `prisma/` — the database schema and its migrations; `prisma-generated/` is
+  the generated client (`npm run build` regenerates it).
+- `build/` — the esbuild configuration; `dist/` is the bundle output.
+- `data/` — runtime state (workspaces, supervisor, showcase output), not
+  source.
 
-```
-npm run build && npm run rebuild-threads
-```
+## Rules of working on Balabash
 
-## render-context (`scripts/render-context.ts`)
+- Verify your changes yourself with `npm run types` (tsc) and
+  `npm run build`. Building is safe: the running app loaded its bundle into
+  memory and is not affected by files on disk.
+- NEVER start, stop or restart the Balabash app process yourself (no
+  `npm start`, no `kill`, no supervisor commands). A live process is serving
+  the user right now. Code changes go live only through an app restart,
+  which is requested, not performed: `request_restart` records the request
+  and the app restarts under the supervisor once every non-main thread is
+  closed — so after requesting one, wrap up and end your thread to let it
+  happen.
+- Database schema changes ride the same restart: edit `prisma/schema.prisma`,
+  author an SQL migration into
+  `prisma/migrations/<timestamp>_<name>/migration.sql`
+  (`npx prisma migrate diff --from-url "$DATABASE_URL" --to-schema-datamodel prisma/schema.prisma --script`),
+  and let the boot-time `prisma migrate deploy` apply it — never apply
+  schema changes to the live database by hand, never edit an already-applied
+  migration. Migrations must be additive and backward-compatible (new
+  tables, new nullable columns); renames and drops go into a later change
+  once no running code references them. A migration that fails to apply
+  does not stop the boot — it is journaled (`migrationsFailed` on
+  `system.restart.completed`) and blocks later migrations until fixed and
+  resolved with `prisma migrate resolve --rolled-back <name>`.
+- Prompt and tool-description work: run `npm run build && npm run
+  render-context` before and after the change and diff `data/showcase/` —
+  the output is what the models actually see.
+- Commit only when the user asks. Long-running processes and destructive
+  host-level commands are out unless the user explicitly asks.
 
-The instruction-layer showcase: materializes, per model, what that model
-actually sees — the assembled system prompt, the initialMessage template, the
-bridge base verbs and the descriptions of its real tool bundle — one markdown
-file per agent plus `coordinator.md` for the secretary, written into
-`data/showcase/` (overwritten on every run). It walks the same code paths as
-the live app (agent catalog, tool-manager bundles, session-run base verbs,
-coordinator function definitions), so the output is the truth, not a
-retelling.
+## Finishing a thread
 
-This is the verification instrument for any work on prompts and tool
-descriptions: run it before and after a change and diff the output.
-
-```
-npm run build && npm run render-context [-- <userId>]
-```
-
-With one user in the database the userId is inferred; with several the
-script lists them and exits. Connecting per-user servers (gmail, notion) may
-hit the network; a server that fails to connect is reported inside the
-output instead of failing the run. Safe to run next to the live app: it
-renders texts and never journals events or calls tools.
+The report must state what was changed, whether it was built, whether a
+restart was requested, and anything that remains.

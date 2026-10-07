@@ -39,7 +39,7 @@ is multi-voice by design.
 | 🎨 **designer** | The design specialist: builds landing pages, UI mockups, decks and option canvases as Claude Design projects, checks its renders in its own headless browser (with a fresh-eyes verifier subagent), sends screenshots and iterates in its topic. |
 | 🔑 **auth** | Connects and re-authorizes integrations. Only ever sends links — credential values never pass through it. |
 | ⏰ **scheduler** | Engineers scheduled code tasks: writes the task body, registers it, rebuilds, requests a restart. |
-| 🛠 **engineer** | Balabash's own engineer — edits the system's source code in a live session, builds, and requests a restart of itself. |
+| 🛠 **engineer** | Software engineering on the host: edits code in whatever repository a task or project points it to — including Balabash's own source, where it builds and requests a restart of itself. |
 | 📐 **architect** | Design analysis and audits at maximum reasoning effort; advises, never implements. |
 | 🤖 **codex** | The manager on OpenAI Codex: the same brief, tools and workbench as the manager, run as an autonomous Codex session. |
 
@@ -74,8 +74,10 @@ for the secretary to interpret ("remind me", "check X every morning") — or **c
 a TypeScript body shipped in the repo and written by the scheduler agent. Every agent
 can operate the registry; the event log is the audit trail.
 
-**Self-extension.** The engineer agent works in the Balabash repository itself, with the
-running system as its subject. A restart is a first-class event: it is *requested* into
+**Self-extension.** Balabash's own repository is just another codebase the engineer agent
+can be pointed at — through a project in the operator's workspace whose library leads to
+the repository and its `AGENTS.md` (the rules of working on the live system). A restart
+is a first-class event: it is *requested* into
 the log, then waits for a structurally safe window — no active task threads, no turn in
 flight, a quiet log — before the process exits and the supervisor relaunches it. If a
 new build crash-loops, the supervisor rolls back to the last good bundle, and the fresh

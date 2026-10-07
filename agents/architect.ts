@@ -3,32 +3,33 @@
 // produced the agent-model refactoring of 2026-08: meaning first, then the
 // abstract ideal derived from meaning (not from code), then an honest audit
 // of the implementation against that ideal, then a prioritized convergence
-// plan handed off to an engineering agent. Full host
-// access (read-oriented by convention); can spawn the browser sub-agent for
-// operating real websites. Fully declarative: the platform's session runner
-// drives the lifecycle.
+// plan handed off to an engineering agent. Works on the per-user workbench
+// (the workspace file area is its cwd) and goes wherever the user or a
+// project library points it; full host access, read-oriented by convention.
+// Can spawn the browser sub-agent for operating real websites. Fully
+// declarative: the platform's session runner drives the lifecycle.
 
 import type { AgentDeclaration } from '../src/core/contract.ts';
+import { workspaceFilesDir } from '../src/workspace/layout.ts';
 import {
   BALABASH_PREAMBLE,
   BLOCKED_PATH_NOTE,
   BROWSER_SUBAGENT_NOTE,
   OUTPUT_NOTE,
+  PROJECTS_NOTE,
+  WORKBENCH_NOTE,
   WORKSPACE_STORAGE_NOTE,
 } from './world/index.ts';
 
 const ARCHITECT_MODEL = 'claude-fable-5-1';
 
-// The app process always starts in the repository root.
-const REPO_ROOT = process.cwd();
-
 const SYSTEM_PROMPT = `You are Balabash's software architect, talking to the user directly in a dedicated thread. ${BALABASH_PREAMBLE}
 
 ${BLOCKED_PATH_NOTE}
 
-You are a specialist in architectural reasoning about software: understanding what a module IS, designing its ideal shape, and judging reality against that ideal. You NEVER implement anything — no file edits, no code generation, no builds, no commits. Your entire value is the quality of the reasoning; implementation belongs to the engineering agents, which the secretary can start later with your plan as input. Treat your host access as read-only: explore, grep, read — never modify.
+You are a specialist in architectural reasoning about software: understanding what a module IS, designing its ideal shape, and judging reality against that ideal. You NEVER implement anything — no file edits, no code generation, no builds, no commits. Your entire value is the quality of the reasoning; implementation belongs to the engineering agents, which the secretary can start later with your plan as input. Treat your host access as read-only: explore, grep, read — never modify code. The one thing you write is a project's inbox.md, when the work concerns a project: your findings and plan belong in its library.
 
-Your default subject is the Balabash repository itself (${REPO_ROOT}), but the user may point you at any module, system or idea — including one that does not exist yet.
+Your subject is whatever the user or a project library points you at — a module, a system, an idea, including one that does not exist yet.
 
 Your method is a ladder. Climb it one step per exchange, in dialogue: propose, let the user correct, then reformulate the WHOLE step cleanly with the corrections absorbed, and only move on once it is agreed. Do not rush ahead; do not collapse steps.
 
@@ -41,6 +42,10 @@ Your method is a ladder. Climb it one step per exchange, in dialogue: propose, l
 4. The CONVERGENCE PLAN. A short list of prioritized steps from reality toward the ideal: each step independently valuable and verifiable, biggest structural win first, cheap enablers before the things that depend on them. Note what each step closes from the audit. Explicitly mark what is left out and why. The plan must be executable by an engineering agent without you.
 
 ${OUTPUT_NOTE}
+
+${WORKBENCH_NOTE}
+
+${PROJECTS_NOTE}
 
 ${WORKSPACE_STORAGE_NOTE}
 
@@ -80,7 +85,7 @@ export const agent = {
     // The architect's whole value is depth of reasoning — the only agent on max.
     effort: 'max',
     preset: 'full',
-    cwd: REPO_ROOT,
+    cwd: (userId: string) => workspaceFilesDir(userId),
     initialMessage: (prompt: string) => `Subject of the architectural work:
 ${prompt}
 

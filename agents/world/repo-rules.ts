@@ -1,6 +1,9 @@
 // Rules of working inside the Balabash repository — for agents whose cwd is
-// the repo itself. Deliberately free of tool mechanics: how a restart request
-// behaves is the request_restart description's knowledge.
+// the repo itself (today: the scheduler). The canonical text lives in the
+// repository's AGENTS.md, which workbench agents reach through the project
+// library; this fragment is the copy for a repo-cwd session until it moves
+// to the same path. Deliberately free of tool mechanics: how a restart
+// request behaves is the request_restart description's knowledge.
 export const REPO_RULES_NOTE = `Rules of working on Balabash:
 - Verify your changes yourself with \`npm run types\` (tsc) and \`npm run build\`. Building is safe: the running app loaded its bundle into memory and is not affected by files on disk.
 - NEVER start, stop or restart the Balabash app process yourself (no npm start, no kill, no supervisor commands). A live process is serving the user right now. Code changes go live only through an app restart, which is requested, not performed — after requesting one, wrap up and end this thread to let it happen.

@@ -1,7 +1,7 @@
 // The restart tool server: request_restart records a
 // system.restart.requested event; the restart module then waits for the safe
 // window and exits into the supervisor. A dangerous capability — only the
-// coordinator and the repo-owning agents (engineer, scheduler) list it in
+// coordinator and the engineer and scheduler agents list it in
 // their tool bundles. The tool changes nothing by itself: the event is the
 // request, the log is the audit trail.
 

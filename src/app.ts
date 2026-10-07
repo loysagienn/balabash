@@ -39,7 +39,7 @@ import { startCcrAdapter } from './adapters/ccr/index.ts';
 // a loud journal instead of exiting: a broken migration file lives in the
 // repo, not in dist/, so a crash-exit would loop forever and no bundle
 // rollback could cure it. The additive-only migration discipline lives in
-// the engineer agent's rules; the error reaches the user through
+// the repository's AGENTS.md; the error reaches the user through
 // completePendingRestarts and system.exception.
 let migrationsError: string | null = null;
 
@@ -79,7 +79,7 @@ loadTasks();
 
 // Dangerous-capability servers, granted only where deliberately listed: the
 // auth tools to the auth agent, the restart request to the coordinator and
-// the repo-owning agents (engineer, scheduler).
+// the engineer and scheduler agents.
 registerBuiltinToolServer(createAuthToolServer());
 registerBuiltinToolServer(createRestartToolServer());
 
