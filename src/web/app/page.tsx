@@ -10,7 +10,7 @@ import { useState } from 'react';
 import { apiFetch } from '../lib/api';
 import { useAuthRedirect } from '../lib/auth-gate';
 import { STATUS_LABELS, formatDateTime } from '../lib/format';
-import type { LogoutResponse, MeResponse, ThreadStatus, ThreadsResponse } from '../../api/contract.ts';
+import type { LogoutResponse, MeResponse, ThreadResponse, ThreadStatus, ThreadsResponse } from '../../api/contract.ts';
 import styles from './page.module.css';
 
 const PAGE_SIZE = 50;
@@ -52,6 +52,16 @@ export default function HomePage() {
     getNextPageParam: lastPage => (lastPage.nextCursor !== null ? String(lastPage.nextCursor) : null),
   });
 
+  // The main thread — the window to the coordinator — is pinned above the
+  // list (and left out of it) whenever the filter admits it: it is eternal
+  // and always active.
+  const mainThreadId = me.data?.mainThreadId ?? null;
+  const mainThread = useQuery({
+    queryKey: ['thread', mainThreadId],
+    queryFn: () => apiFetch<ThreadResponse>(`/api/threads/${mainThreadId}`),
+    enabled: mainThreadId !== null,
+  });
+
   const unauthorized = useAuthRedirect(me.error, threads.error);
 
   const logout = useMutation({
@@ -62,7 +72,8 @@ export default function HomePage() {
     },
   });
 
-  const rows = threads.data?.pages.flatMap(page => page.threads) ?? [];
+  const rows = (threads.data?.pages.flatMap(page => page.threads) ?? []).filter(thread => thread.id !== mainThreadId);
+  const pinned = (filter === 'all' || filter === 'active') && mainThread.data ? mainThread.data.thread : null;
 
   if (unauthorized || me.isPending) {
     return (
@@ -119,9 +130,21 @@ export default function HomePage() {
       {threads.error && !unauthorized ? (
         <p className={styles.error}>Не удалось загрузить треды: {threads.error.message}</p>
       ) : null}
-      {threads.data && rows.length === 0 ? <p className={styles.dim}>Тредов нет.</p> : null}
+      {threads.data && rows.length === 0 && !pinned ? <p className={styles.dim}>Тредов нет.</p> : null}
 
       <ul className={styles.list}>
+        {pinned ? (
+          <li>
+            <Link className={`${styles.row} ${styles.rowMain}`} href={`/thread/${pinned.id}`}>
+              <span className={styles.agent}>главный</span>
+              <span className={styles.threadTitle}>{pinned.title ?? 'Координатор'}</span>
+              <span className={`${styles.status} ${styles[`status_${pinned.status}`]}`}>
+                {STATUS_LABELS[pinned.status]}
+              </span>
+              <span className={styles.times}>{formatDateTime(pinned.updatedAt)}</span>
+            </Link>
+          </li>
+        ) : null}
         {rows.map(thread => (
           <li key={thread.id}>
             <Link className={styles.row} href={`/thread/${thread.id}`}>

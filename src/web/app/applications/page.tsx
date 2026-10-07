@@ -26,10 +26,10 @@ function encodePath(relPath: string): string {
 
 type AppRowProps = {
   app: AppListingView;
-  appsDomain: string | null;
+  publicAppsBase: string;
 };
 
-function AppRow({ app, appsDomain }: AppRowProps) {
+function AppRow({ app, publicAppsBase }: AppRowProps) {
   const queryClient = useQueryClient();
   const [slugDraft, setSlugDraft] = useState('');
   const [publishing, setPublishing] = useState(false);
@@ -52,7 +52,7 @@ function AppRow({ app, appsDomain }: AppRowProps) {
 
   const busy = publish.isPending || unpublish.isPending;
   const error = publish.error ?? unpublish.error;
-  const publicUrl = app.slug && appsDomain ? `https://${appsDomain}/${app.slug}` : null;
+  const publicUrl = app.slug ? `${publicAppsBase}/${app.slug}` : null;
 
   return (
     <li className={styles.row}>
@@ -186,7 +186,7 @@ export default function ApplicationsPage() {
       {apps.data ? (
         <ul className={styles.list}>
           {apps.data.apps.map(app => (
-            <AppRow key={app.path} app={app} appsDomain={apps.data.appsDomain ?? null} />
+            <AppRow key={app.path} app={app} publicAppsBase={apps.data.publicAppsBase} />
           ))}
         </ul>
       ) : null}

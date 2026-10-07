@@ -2,13 +2,13 @@
 // into an AgentRun. This is the platform half of "an agent is a declaration"
 // — everything the four original session agents used to copy by hand lives
 // here once: the SDK session lifecycle, rendering of incoming events into
-// session messages, channel binding (forum topic vs headless parent
+// session messages, channel binding (user-facing thread vs headless parent
 // dialogue), the standard base verbs (end_thread, send_file), abort handling
 // and tool-catalog resyncs.
 
 import { mkdirSync } from 'node:fs';
 import { THREAD_NAMING_NOTE } from '../../agents/world/index.ts';
-import { workspaceDbPath } from '../workspace/layout.ts';
+import { workspaceDbPath, workspaceTasksDir } from '../workspace/layout.ts';
 import {
   CANCEL_REASON_PARAM_DESCRIPTION,
   CANCEL_THREAD_DESCRIPTION,
@@ -76,7 +76,7 @@ function describeUserMessage(payload: Record<string, unknown>): string {
 }
 
 // An incoming thread.message: text plus attached file references. From the
-// parent it is the operator speaking (labeled in a topic thread, where the
+// parent it is the operator speaking (labeled in a user-facing thread, where the
 // operator is distinct from the user; plain in a headless thread, where the
 // operator's instructions are the only dialogue); from a spawned child it is
 // the child's reply, labeled with the child's threadId. Exported for
@@ -141,7 +141,7 @@ function createEndThreadTool(end: EndState): SdkBridgeTool {
           type: 'string',
           description:
             `Final thread title: 2–5 words naming the work done, in the language of the thread. ${THREAD_NAMING_NOTE} ` +
-            'It replaces the start-time title in thread lists and the forum topic name.',
+            'It replaces the start-time title in thread lists and on the user surface.',
         },
         description: {
           type: 'string',
@@ -194,7 +194,7 @@ function createSendFileTool(ctx: RunContext, headless: boolean): SdkBridgeTool {
     name: 'send_file',
     description: headless
       ? 'Send a stored Balabash file to your operator, by fileId.'
-      : 'Send a stored Balabash file into the topic, by fileId.',
+      : 'Send a stored Balabash file into the thread, to the user, by fileId.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -451,8 +451,9 @@ export function createSessionRun(
       ...(spec.nativeServers ? { nativeServers: spec.nativeServers } : {}),
       ...(cwd ? { cwd } : {}),
       // Scripts run from the session reach the workspace database the same way
-      // run_script children do: via the WORKSPACE_DB env variable.
-      env: { WORKSPACE_DB: workspaceDbPath(ctx.userId) },
+      // run_script children do: via the WORKSPACE_DB env variable; the
+      // workspace's task-body directory rides along for the scheduler.
+      env: { WORKSPACE_DB: workspaceDbPath(ctx.userId), WORKSPACE_TASKS_DIR: workspaceTasksDir(ctx.userId) },
       extraTools: [
         createEndThreadTool(end),
         createSendFileTool(ctx, headless),
@@ -480,7 +481,7 @@ export function createSessionRun(
   // already written; just shut the session down.
   ctx.signal.addEventListener('abort', () => stop(), { once: true });
 
-  // The channel binding: where a turn's final text goes. A topic agent talks
+  // The channel binding: where a turn's final text goes. A user-facing agent talks
   // to the user through agent.message; a headless agent answers its operator
   // with an addressed thread.message.
   const deliverTurnText = async (text: string) => {
@@ -523,7 +524,7 @@ export function createSessionRun(
         }
 
         // On end_thread the summary carries the report to the operator; the
-        // final text is the goodbye — meaningful in a topic (the user reads
+        // final text is the goodbye — meaningful in a user-facing thread (the user reads
         // it), redundant in a headless thread (the parent gets the summary).
         if (turn.text && !(headless && end.result !== null)) {
           await deliverTurnText(turn.text);
@@ -554,6 +555,17 @@ export function createSessionRun(
   })();
 
   return {
+    // Soft stop (thread.interrupt — a surface's Stop button): cut the turn in
+    // flight, keep the session open for the next message. The interrupted
+    // turn closes through `turns` with empty text, so nothing is delivered.
+    interrupt: () => {
+      if (settled || !session?.interrupt) {
+        return;
+      }
+
+      void session.interrupt();
+    },
+
     accept: (event: Event) => {
       if (settled) {
         return;

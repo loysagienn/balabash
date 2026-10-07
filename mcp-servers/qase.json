@@ -1,0 +1,9 @@
+{
+  "transport": "stdio",
+  "command": "node",
+  "args": ["node_modules/@qase/mcp-server/build/index.js"],
+  "env": {
+    "QASE_API_TOKEN": "${secret:QASE_API_TOKEN}"
+  },
+  "description": "Qase test management (app.qase.io) via the official @qase/mcp-server run locally over stdio: projects, suites, test cases, test plans, runs and results, defects, milestones, shared steps; QQL search across cases/runs/results/defects; qase_api as a raw REST escape hatch. Acts as the operator's Qase user via a personal API token (QASE_API_TOKEN in .env)."
+}

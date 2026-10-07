@@ -23,8 +23,8 @@ export function createAppsHandoffMiddleware(): (ctx: Context, next: Next) => Pro
       return;
     }
 
-    // Without an apps domain the whole surface does not exist: fall through
-    // to the ordinary 404 of the main domain.
+    // Without an apps domain there is nothing to hand off to: the apps
+    // runtime lives on this very host (createMainDomainAppsMiddleware).
     const appsDomain = config.appsDomain;
 
     if (!appsDomain) {

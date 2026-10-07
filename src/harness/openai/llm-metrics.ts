@@ -6,8 +6,11 @@
 import type { Response } from 'openai/resources/responses/responses';
 import type { Prisma } from '../../../prisma-generated/client.ts';
 import { prisma } from '../../db/client.ts';
+import { getLlmBackend } from './backend.ts';
 
-const PROVIDER = 'openai';
+// The provider column: which backend answered — 'openai' or
+// 'openai-compatible' (the model column names the model itself).
+const PROVIDER = getLlmBackend().kind;
 
 type LlmMetricsContext = {
   userId: string;

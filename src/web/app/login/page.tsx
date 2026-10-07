@@ -1,7 +1,10 @@
 'use client';
 
-// Login: exchange a one-time code from the telegram bot (/auth_code) for a
-// long-lived session cookie. No passwords by design.
+// Login: exchange a one-time code (issued by any connected channel, e.g.
+// /auth_code in Telegram) for a long-lived session cookie. No passwords by
+// design. Without any channel the page itself asks the server for a code:
+// the word "console" in the code field → POST /api/auth/console-code → the
+// code lands in the server log, where the operator reads it (ssh).
 
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -11,11 +14,24 @@ import { sanitizeNextPath } from '../../lib/auth-gate';
 import type { AuthRequest, MeResponse } from '../../../api/contract';
 import styles from './login.module.css';
 
+// Typed into the code field instead of a code: asks the server to print a
+// login code for the operator's workspace into its log.
+const CONSOLE_WORD = 'console';
+
 function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const queryClient = useQueryClient();
   const [code, setCode] = useState('');
+  const [consoleNotice, setConsoleNotice] = useState<string | null>(null);
+
+  const consoleCode = useMutation({
+    mutationFn: () => apiFetch<null>('/api/auth/console-code', { method: 'POST' }),
+    onSuccess: () => {
+      setCode('');
+      setConsoleNotice('Код напечатан в лог сервера. Прочитай его там и введи здесь — действует 10 минут.');
+    },
+  });
 
   const auth = useMutation({
     mutationFn: (body: AuthRequest) => apiFetch<MeResponse>('/api/auth', { method: 'POST', body }),
@@ -41,7 +57,15 @@ function LoginForm() {
 
     const trimmed = code.trim();
 
-    if (trimmed && !auth.isPending) {
+    if (!trimmed || auth.isPending || consoleCode.isPending) {
+      return;
+    }
+
+    setConsoleNotice(null);
+
+    if (trimmed.toLowerCase() === CONSOLE_WORD) {
+      consoleCode.mutate();
+    } else {
       auth.mutate({ code: trimmed });
     }
   }
@@ -51,21 +75,25 @@ function LoginForm() {
       <form className={styles.card} onSubmit={onSubmit}>
         <h1 className={styles.title}>Balabash</h1>
         <p className={styles.hint}>
-          Отправь боту команду <code>/auth_code</code> в группе воркспейса и введи полученный код.
+          Введи одноразовый код для входа. Код выдаёт любой подключённый канал Balabash (в Telegram — команда{' '}
+          <code>/auth_code</code>); без каналов набери здесь <code>console</code> и нажми Enter — код напечатается в лог
+          сервера.
         </p>
         <input
           className={styles.input}
           value={code}
           onChange={event => setCode(event.target.value.toUpperCase())}
-          placeholder="Код из Telegram"
+          placeholder="Одноразовый код"
           autoComplete="one-time-code"
           autoFocus
           spellCheck={false}
         />
-        <button className={styles.submit} type="submit" disabled={auth.isPending || !code.trim()}>
-          {auth.isPending ? 'Проверяю…' : 'Войти'}
+        <button className={styles.submit} type="submit" disabled={auth.isPending || consoleCode.isPending || !code.trim()}>
+          {auth.isPending ? 'Проверяю…' : consoleCode.isPending ? 'Запрашиваю…' : 'Войти'}
         </button>
+        {consoleNotice ? <p className={styles.notice}>{consoleNotice}</p> : null}
         {auth.error ? <p className={styles.error}>{auth.error.message}</p> : null}
+        {consoleCode.error ? <p className={styles.error}>{consoleCode.error.message}</p> : null}
       </form>
     </main>
   );

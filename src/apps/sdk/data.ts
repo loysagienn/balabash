@@ -15,8 +15,9 @@ export type AppContext = {
   mode: AppMode;
   /**
    * URL base of the app's own pages, no trailing slash: '/apps/<path>' in
-   * owner mode, '/<slug>' in public mode. A pathname router must treat it as
-   * its prefix — the same app is served under both.
+   * owner mode; in public mode '/<slug>' on an apps domain or '/a/<slug>'
+   * on a single-host deployment. A pathname router must treat it as its
+   * prefix — the same app is served under all of them, never assume one.
    */
   appBase: string;
   /** URL base of the app's endpoint calls, no trailing slash. */

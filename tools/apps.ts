@@ -1,6 +1,6 @@
 // Apps platform management tools (step 5 of the /apps plan): the
 // secretary's window into publications — list the workspace's apps, publish
-// one under a public slug on the apps domain, unpublish. Existence of an
+// one under a public slug (where public apps live is src/apps/urls.ts), unpublish. Existence of an
 // app is the folder in the workspace file area (agents create apps with
 // ordinary file tools); these tools only flip the publication fact and
 // enumerate. All the rules live in src/apps/management.ts — the same
@@ -9,17 +9,9 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { ToolError, toErrorResult, toStructuredResult } from '../src/capabilities/tool-result.ts';
-import { config } from '../src/config/index.ts';
 import { AppManagementError, listApps, publishApp, unpublishApp } from '../src/apps/management.ts';
+import { ownerAppUrl as ownerUrl, publicAppUrl as publicUrl } from '../src/apps/urls.ts';
 import { callerUserId, serveMcp } from './workspace_shared.ts';
-
-function publicUrl(slug: string): string {
-  return config.appsDomain ? `https://${config.appsDomain}/${slug}` : slug;
-}
-
-function ownerUrl(path: string): string {
-  return `https://${config.domain}/apps/${path.split('/').map(encodeURIComponent).join('/')}`;
-}
 
 async function guarded<T>(call: () => Promise<T>): Promise<T> {
   try {

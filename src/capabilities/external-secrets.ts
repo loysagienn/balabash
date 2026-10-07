@@ -9,7 +9,7 @@ import { prisma } from '../db/client.ts';
 import { appendEvent } from '../core/append.ts';
 import { SECRETS_PROVISIONED } from '../core/envelope.ts';
 import { config } from '../config/index.ts';
-import { listExternalSecretTargets, type ExternalSecretTarget } from './tool-manager.ts';
+import { disconnectExternalServer, listExternalSecretTargets, type ExternalSecretTarget } from './tool-manager.ts';
 
 const SECRET_KEY_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
@@ -84,6 +84,24 @@ export async function requestExternalServerCredentials(
   });
 
   return `https://${config.domain}/secrets/${row.id}`;
+}
+
+// The reverse of provisioning (auth agent):
+// the server's installation credentials are deleted and its live client
+// closed — the server returns to pending and its functions disappear from
+// every catalog. Returns the number of deleted secret rows.
+export async function forgetExternalServerSecrets(serverName: string): Promise<number> {
+  const target = getTarget(serverName);
+
+  if (!target) {
+    throw new Error(`External server "${serverName}" has no installation credentials to forget`);
+  }
+
+  const { count } = await prisma.externalServerSecret.deleteMany({ where: { server: target.name } });
+
+  await disconnectExternalServer(target.name);
+
+  return count;
 }
 
 export type ExternalServerSecretRequestView = {

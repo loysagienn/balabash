@@ -1,18 +1,31 @@
 // The inner loop of one model turn over the OpenAI Responses API (§8.1):
-// tool_choice: 'required', parallel calls, previous_response_id between
-// iterations. Synchronous tool results return to the model in the same turn
-// as function_call_output; async dispatches (messages, future spawns) are
-// acknowledged with 'accepted' and their consequences arrive as later events.
-// Dispatch errors come back to the model in the same turn so it can recover.
+// tool_choice: 'required', parallel calls. Synchronous tool results return
+// to the model in the same turn as function_call_output; async dispatches
+// (messages, future spawns) are acknowledged with 'accepted' and their
+// consequences arrive as later events. Dispatch errors come back to the
+// model in the same turn so it can recover.
 //
-// Also home of the prompt-cache prewarm ping (prewarmPrompt): the same
-// request shape with prompt_cache_options.prewarm, which refreshes the
-// cached prefix without generating output. The two share one request
-// builder on purpose — any parameter that differs between them would be a
-// different cache entry.
+// How one iteration continues into the next is the backend's business
+// (backend.ts): with stateful turns the next request carries
+// previous_response_id and only the outputs; without them it carries the
+// whole input so far plus the response's own output items (function_call,
+// reasoning, message — a reasoning model needs its reasoning echoed back)
+// plus the outputs. Everything else about the request is identical.
+//
+// Also home of the prompt-cache prewarm ping (prewarmPrompt, explicit
+// prompt cache only): the same request shape with
+// prompt_cache_options.prewarm, which refreshes the cached prefix without
+// generating output. The two share one request builder on purpose — any
+// parameter that differs between them would be a different cache entry.
 
-import type { ResponseCreateParamsNonStreaming, ResponseInput } from 'openai/resources/responses/responses';
+import type {
+  Response,
+  ResponseCreateParamsNonStreaming,
+  ResponseInput,
+  ResponseInputItem,
+} from 'openai/resources/responses/responses';
 import type { ToolResult } from '../../core/contract.ts';
+import { getLlmBackend } from './backend.ts';
 import { getOpenaiClient } from './client.ts';
 import { toolResultToModelOutput } from './content.ts';
 import type { ModelOutput } from './content.ts';
@@ -84,6 +97,20 @@ export type TurnOutcome = {
   firstResponseId: string;
 };
 
+// The next iteration's request continuation: the two ways a turn carries its
+// own history, see the header.
+type Continuation = { input: ResponseInput; previousResponseId?: string };
+
+function continueStateful(response: Response, outputs: FunctionCallOutputItem[]): Continuation {
+  return { input: outputs, previousResponseId: response.id };
+}
+
+function continueStateless(input: ResponseInput, response: Response, outputs: FunctionCallOutputItem[]): Continuation {
+  const history = typeof input === 'string' ? [{ role: 'user' as const, content: input }] : input;
+
+  return { input: [...history, ...(response.output as ResponseInputItem[]), ...outputs] };
+}
+
 export async function runTurn({
   model,
   instructions,
@@ -94,6 +121,8 @@ export async function runTurn({
   cacheComparisonResponseId,
 }: RunTurnOptions): Promise<TurnOutcome> {
   const client = getOpenaiClient();
+  const backend = getLlmBackend();
+  const explicitCache = backend.promptCache === 'explicit';
 
   let input: ResponseInput = prompt.input;
   let previousResponseId: string | undefined;
@@ -104,14 +133,13 @@ export async function runTurn({
       client.responses.create({
         ...baseRequest({ model, instructions, tools }, input),
         ...(previousResponseId ? { previous_response_id: previousResponseId } : {}),
-        prompt_cache_key: prompt.cacheKey,
-        ...(!previousResponseId && cacheComparisonResponseId
+        ...(explicitCache ? { prompt_cache_key: prompt.cacheKey } : {}),
+        ...(explicitCache && !firstResponseId && cacheComparisonResponseId
           ? { prompt_cache_options: { comparison_response_id: cacheComparisonResponseId } }
           : {}),
       }),
     );
 
-    previousResponseId = response.id;
     firstResponseId ??= response.id;
 
     const functionCalls = response.output.filter(item => item.type === 'function_call');
@@ -165,7 +193,12 @@ export async function runTurn({
       return { firstResponseId };
     }
 
-    input = outputs;
+    const next = backend.statefulTurns
+      ? continueStateful(response, outputs)
+      : continueStateless(input, response, outputs);
+
+    input = next.input;
+    previousResponseId = next.previousResponseId;
   }
 }
 
@@ -190,6 +223,10 @@ export async function prewarmPrompt({
   metrics,
   cacheComparisonResponseId,
 }: PrewarmOptions): Promise<string> {
+  if (getLlmBackend().promptCache !== 'explicit') {
+    throw new Error('prewarmPrompt requires a backend with an explicit prompt cache');
+  }
+
   const client = getOpenaiClient();
 
   const response = await metrics.measure(() =>

@@ -1,12 +1,19 @@
 // Tool-server configs: external MCP servers are mcp-servers/<name>.json
-// (stdio | http), validated hard; local in-process servers ship inside the
-// bundle (tools/index.ts) and reuse the same config validation.
+// (stdio | http | claude-connector), validated hard; local in-process servers
+// ship inside the bundle (tools/index.ts) and reuse the same config
+// validation. Which agents see a server is decided by the agents' explicit
+// tool lists, not here.
 
-import { readFile, readdir } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import path from 'node:path';
+import { INSTALLATION_SERVERS_DIR, listExtensionFiles } from './extensions.ts';
 import { getSecretReferenceNames } from './server-secrets.ts';
 
+// Two directories, one catalog: the repository's mcp-servers/ and the
+// installation's data/mcp-servers/ (src/capabilities/extensions.ts). A name
+// present in both is a loud error — an extension never shadows the repository.
 const externalServersDirectory = path.resolve('mcp-servers');
+const externalServersDirectories = [externalServersDirectory, INSTALLATION_SERVERS_DIR];
 
 // Per-tool adjustments applied on top of what the server advertises via
 // listTools(): replace a description (the server's own wording may steer the
@@ -41,16 +48,46 @@ export type IdentityProbeConfig = {
   authScheme?: 'Bearer' | 'OAuth';
 };
 
+// Tool names live in one flat function namespace shared by every server. A
+// server whose tool names carry no vendor prefix (a bare "ask" or "search")
+// collides with same-named tools of other servers; prefixTools renames its
+// functions to "<server>__<tool>" at listing time. Purely a namespace remap —
+// the MCP call still uses the server's own tool name.
+type NamespaceOptions = {
+  prefixTools?: boolean;
+};
+
 export type ExternalServerConfig =
-  | {
+  | (NamespaceOptions & {
       transport: 'stdio';
       command: string;
       args?: string[];
       env?: Record<string, string>;
       enabledTools?: EnabledTools;
       toolOverrides?: Record<string, ToolOverride>;
-    }
-  | {
+    })
+  | (NamespaceOptions & {
+      // A claude.ai account-level connector reused through Anthropic's MCP
+      // proxy (mcp-proxy.anthropic.com), authenticated by the operator's
+      // ambient Claude CLI login — the same read-only credentials store the
+      // CCR adapter runs on. The OAuth relationship with the provider (e.g.
+      // Slack) lives on claude.ai; nothing is provisioned locally. The
+      // endpoint is undocumented alpha, same species as the CCR bridge.
+      // The one credential involved is the operator's ambient CLI token:
+      // it rotates only while a Claude Code session runs on this box, so a
+      // quiet 8h boundary leaves the connector failing with 401 until the
+      // next turn (mcp-client.ts ClaudeConnectorAuthError) — nothing to
+      // re-authorize, neither here nor at the provider.
+      transport: 'claude-connector';
+      // The connector's Anthropic server id (mcpsrv_…). Discoverable via
+      // GET https://api.anthropic.com/v1/mcp_servers with the ambient token
+      // and the "anthropic-beta: mcp-servers-2025-12-04" header.
+      serverId: string;
+      description?: string;
+      enabledTools?: EnabledTools;
+      toolOverrides?: Record<string, ToolOverride>;
+    })
+  | (NamespaceOptions & {
       transport: 'http';
       url: string;
       // Static headers sent with every request, e.g. an Authorization header
@@ -77,19 +114,20 @@ export type ExternalServerConfig =
       identityProbe?: IdentityProbeConfig;
       enabledTools?: EnabledTools;
       toolOverrides?: Record<string, ToolOverride>;
-    };
+    });
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
-function isMissingDirectoryError(error: unknown): boolean {
-  return isObject(error) && error.code === 'ENOENT';
-}
 
 export function validateExternalServerConfig(raw: unknown, source: string): ExternalServerConfig {
   if (!isObject(raw)) {
     throw new Error(`${source} must contain a JSON object`);
+  }
+
+  if (raw.prefixTools !== undefined && typeof raw.prefixTools !== 'boolean') {
+    throw new Error(`${source}: "prefixTools" must be a boolean`);
   }
 
   if (raw.enabledTools !== undefined) {
@@ -154,8 +192,24 @@ export function validateExternalServerConfig(raw: unknown, source: string): Exte
     return raw as ExternalServerConfig;
   }
 
+  if (raw.transport === 'claude-connector') {
+    if (typeof raw.serverId !== 'string' || !/^mcpsrv_[A-Za-z0-9]+$/.test(raw.serverId)) {
+      throw new Error(`${source}: "serverId" must be an Anthropic MCP server id (mcpsrv_…)`);
+    }
+
+    if (raw.description !== undefined && typeof raw.description !== 'string') {
+      throw new Error(`${source}: "description" must be a string`);
+    }
+
+    if (getSecretReferenceNames(raw).length) {
+      throw new Error(`${source}: \${secret:NAME} references are not allowed with "claude-connector"`);
+    }
+
+    return raw as ExternalServerConfig;
+  }
+
   if (raw.transport !== 'http') {
-    throw new Error(`${source}: "transport" must be "stdio" or "http"`);
+    throw new Error(`${source}: "transport" must be "stdio", "http" or "claude-connector"`);
   }
 
   if (typeof raw.url !== 'string' || !raw.url) {
@@ -245,36 +299,49 @@ export function validateExternalServerConfig(raw: unknown, source: string): Exte
   return raw as ExternalServerConfig;
 }
 
-export async function readExternalServerConfig(serverName: string): Promise<ExternalServerConfig> {
+async function readExternalServerConfigFile(directory: string, serverName: string): Promise<ExternalServerConfig> {
   const filename = `${serverName}.json`;
-  const raw = await readFile(path.join(externalServersDirectory, filename), 'utf8');
+  const raw = await readFile(path.join(directory, filename), 'utf8');
 
-  return validateExternalServerConfig(JSON.parse(raw), filename);
+  return validateExternalServerConfig(JSON.parse(raw), path.join(path.basename(directory), filename));
 }
 
+// Repository configs are validated hard (a broken file fails the build's
+// boot and the supervisor rolls the bundle back); an installation's
+// data/mcp-servers/<name>.json is NOT fail-fast — it lives outside the
+// bundle, so a boot failure could not be rolled back: a broken or clashing
+// file is logged and skipped, and the server does not exist until the file
+// is fixed and the app restarted (the same rule as data/tools).
 export async function readExternalServerConfigs(): Promise<Record<string, ExternalServerConfig>> {
-  let entries;
-
-  try {
-    entries = await readdir(externalServersDirectory, { withFileTypes: true });
-  } catch (error) {
-    if (isMissingDirectoryError(error)) {
-      return {};
-    }
-
-    throw error;
-  }
-
   const configs: Record<string, ExternalServerConfig> = {};
-  const filenames = entries
-    .filter(entry => entry.isFile() && entry.name.endsWith('.json'))
-    .map(entry => entry.name)
-    .sort();
+  const origins = new Map<string, string>();
 
-  for (const filename of filenames) {
-    const serverName = path.basename(filename, '.json');
+  for (const directory of externalServersDirectories) {
+    const extension = directory === INSTALLATION_SERVERS_DIR;
 
-    configs[serverName] = await readExternalServerConfig(serverName);
+    for (const filename of await listExtensionFiles(directory, '.json')) {
+      const serverName = path.basename(filename, '.json');
+      const file = path.join(directory, filename);
+
+      try {
+        const origin = origins.get(serverName);
+
+        if (origin) {
+          throw new Error(`External server "${serverName}" is defined twice: ${path.join(origin, filename)} and ${file}`);
+        }
+
+        const config = await readExternalServerConfigFile(directory, serverName);
+
+        origins.set(serverName, directory);
+        configs[serverName] = config;
+      } catch (error) {
+        if (!extension) {
+          throw error;
+        }
+
+        console.error(`[tools] extension server config ${file} skipped:`, error);
+      }
+    }
   }
 
   return configs;

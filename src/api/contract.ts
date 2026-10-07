@@ -16,9 +16,14 @@ export type AuthRequest = {
   code: string;
 };
 
+// POST /api/auth/console-code: no body, no session; 204 with an empty body —
+// the code goes to the server's stdout, never over the wire. 429 when one
+// was printed moments ago.
+
 export type MeResponse = {
   userId: string;
-  // Title of the bound telegram group — the human-readable workspace name.
+  // Human-readable workspace name (the bound Telegram group's title when that
+  // channel is on; null otherwise).
   workspaceName: string | null;
   // The workspace's main thread (the coordinator's root thread) — the
   // header's «to the coordinator» link target. Null only before activation.
@@ -35,6 +40,7 @@ export type LogoutResponse = {
 // server serves — still type-only, still one source of truth.
 
 export type {
+  ContentBlock,
   Event,
   EventActor,
   JsonObject,
@@ -69,17 +75,43 @@ export type ThreadsResponse = {
 
 export type ThreadResponse = {
   thread: Thread;
+  // Spawn-time policy from the thread.started payload: a headless thread has
+  // no user surface — the chat is the read-only dialogue with the parent and
+  // POST /messages answers 409.
+  headless: boolean;
 };
 
-// GET /api/threads/:id/events: newest first, cursor-paginated by the global
-// event seq — pass the previous page's nextCursor as ?before= to continue
-// into older events. seq is unique and follows insert order, so events
-// sharing a createdAt timestamp still page deterministically.
+// GET /api/threads/:id/events: cursor-paginated by the global event seq,
+// which is unique and follows insert order, so events sharing a createdAt
+// timestamp still page deterministically. Two directions, exclusive:
+// - default / ?before=<seq>: newest first — pass the previous page's
+//   nextCursor as ?before= to continue into older events (history);
+// - ?after=<seq>: oldest first, strictly newer than seq — the live tail a
+//   chat polls with the seq of the last event it has (?after=0 = from the
+//   beginning).
 export type ThreadEventsResponse = {
   events: Event[];
-  // seq of the last (oldest) returned event when the page came back full —
-  // pass it as ?before= to continue; null = the feed is exhausted.
+  // seq of the last returned event when the page came back full — pass it
+  // as ?before= (or ?after=, in the same direction) to continue; null = the
+  // page was short, the feed is exhausted for now.
   nextCursor: bigint | null;
+};
+
+// POST /api/threads/:id/messages: the web chat's inbound. Appends a
+// user.message to one of the session's own threads (the main thread or an
+// active child); the event comes back as written. A thread that is not
+// active answers 409 (thread_closed), a headless one 409 (thread_headless).
+//
+// GET /api/files/:fileId streams a stored file of the workspace (the
+// attachments of user/agent messages: payload.files[].fileId, content
+// blocks' fileId) — inline, ?download=1 for an attachment; a foreign or
+// missing id is the same 404.
+export type PostThreadMessageRequest = {
+  text: string;
+};
+
+export type PostThreadMessageResponse = {
+  event: Event;
 };
 
 // ---------------------------------------------------------------------------
@@ -202,9 +234,10 @@ export type AppListingView = {
 
 export type AppsResponse = {
   apps: AppListingView[];
-  // The apps domain (config.appsDomain) — the client builds public links
-  // https://<appsDomain>/<slug> from it. Null when the surface is off.
-  appsDomain: string | null;
+  // Absolute base of public app URLs, no trailing slash (src/apps/urls.ts):
+  // https://<APPS_DOMAIN> with an apps domain, https://<DOMAIN>/a without
+  // one — the client builds <publicAppsBase>/<slug>.
+  publicAppsBase: string;
 };
 
 export type PublishAppRequest = {

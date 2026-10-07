@@ -269,12 +269,21 @@ async function annotate(candidate: CandidateFile, head: string, truncated: boole
     { timeout: MODEL_TIMEOUT_MS },
   );
 
+  // A rejected answer is the model's failure, not the file's: say what came
+  // back, so a model that ignores the json_schema format is visible in the
+  // log rather than a silent "failed" count.
+  const reject = (reason: string): null => {
+    console.warn(`[indexer] rejected annotation of ${candidate.relPath}: ${reason}: ${response.output_text.slice(0, 200)}`);
+
+    return null;
+  };
+
   let parsed: unknown;
 
   try {
     parsed = JSON.parse(response.output_text);
   } catch {
-    return null;
+    return reject('not JSON');
   }
 
   if (
@@ -283,12 +292,12 @@ async function annotate(candidate: CandidateFile, head: string, truncated: boole
     typeof (parsed as Record<string, unknown>).title !== 'string' ||
     typeof (parsed as Record<string, unknown>).description !== 'string'
   ) {
-    return null;
+    return reject('schema mismatch');
   }
 
   const { title, description } = parsed as { title: string; description: string };
 
-  return title.trim() && description.trim() ? { title: title.trim(), description: description.trim() } : null;
+  return title.trim() && description.trim() ? { title: title.trim(), description: description.trim() } : reject('empty title or description');
 }
 
 // ---------------------------------------------------------------------------

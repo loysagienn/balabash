@@ -13,7 +13,7 @@ import type { ToolFunction } from '../capabilities/mcp-client.ts';
 import type { BuiltinServerCallContext, BuiltinToolServer } from '../capabilities/tool-manager.ts';
 import type { ScheduledTaskModel } from '../../prisma-generated/models.ts';
 import { WorkspacePathError, sanitizeRelPath } from '../workspace/files.ts';
-import { getTaskBody } from './catalog.ts';
+import { hasTaskBody, workspaceTaskFile } from './catalog.ts';
 import {
   JOB_TIMEOUT_DEFAULT_MS,
   JOB_TIMEOUT_MAX_MS,
@@ -43,9 +43,10 @@ const FUNCTIONS: ToolFunction[] = [
     description:
       'Register a named scheduled task. kind "note": at the trigger moment the note falls into the main ' +
       'thread as a schedule.fired event and the secretary interprets it — use this for reminders and ' +
-      'recurring instructions. kind "code": the trigger runs the run(ctx) body registered under the same ' +
-      'slug in the repository tasks/ catalog (the scheduler agent ships bodies; until the body is built ' +
-      'and the app restarted the task SLEEPS — no errors, no runs). kind "command": a workspace job — the ' +
+      'recurring instructions. kind "code": the trigger runs the run(ctx) body under the same slug — a ' +
+      'workspace task file data/workspace/<userId>/tasks/<slug>.ts (live at the next fire, no build) or a body ' +
+      'in the repository tasks/ catalog (built and restarted); the scheduler agent writes bodies; until a body ' +
+      'exists the task SLEEPS — no errors, no runs. kind "command": a workspace job — the ' +
       'trigger runs the given shell command (bash -c) inside the workspace file area, with WORKSPACE_DB in ' +
       'the environment; armed immediately, no build or restart needed. Exit code 0 = success (silent unless ' +
       'report_on_success), anything else (or a timeout) = failure surfaced as a system.exception; every run ' +
@@ -69,7 +70,7 @@ const FUNCTIONS: ToolFunction[] = [
           type: 'string',
           enum: ['note', 'code', 'command'],
           description:
-            'note = data interpreted by the secretary; code = run(ctx) body from tasks/; command = a shell command run in the workspace file area.',
+            'note = data interpreted by the secretary; code = run(ctx) body (workspace tasks/ or repository tasks/); command = a shell command run in the workspace file area.',
         },
         cron: {
           type: ['string', 'null'],
@@ -232,8 +233,8 @@ function describeTrigger(task: ScheduledTaskModel): string {
   return 'no trigger (manual run_task only)';
 }
 
-function isSleeping(task: ScheduledTaskModel): boolean {
-  return task.kind === 'code' && !getTaskBody(task.slug);
+async function isSleeping(task: ScheduledTaskModel): Promise<boolean> {
+  return task.kind === 'code' && !(await hasTaskBody(task.userId, task.slug));
 }
 
 async function createTask(args: JsonObject, ctx: BuiltinServerCallContext): Promise<string> {
@@ -375,10 +376,11 @@ async function createTask(args: JsonObject, ctx: BuiltinServerCallContext): Prom
   }
 
   if (kind === 'code') {
-    if (isSleeping(task)) {
+    if (await isSleeping(task)) {
       lines.push(
-        `The task SLEEPS: no run(ctx) body under slug "${slug}" in the running bundle. It comes alive after ` +
-          `tasks/${slug}.ts is added to the tasks/ index, the app is rebuilt and restarted.`,
+        `The task SLEEPS: no run(ctx) body under slug "${slug}". It comes alive the moment ` +
+          `${workspaceTaskFile(task.userId, slug)} exists (a workspace task body, no build or restart), or after ` +
+          `tasks/${slug}.ts is added to the repository tasks/ index, the app is rebuilt and restarted.`,
       );
     }
 
@@ -412,9 +414,17 @@ async function listTasks(ctx: BuiltinServerCallContext): Promise<string> {
     return 'No scheduled tasks registered.';
   }
 
+  const sleeping = new Set<string>();
+
+  for (const task of tasks) {
+    if (await isSleeping(task)) {
+      sleeping.add(task.id);
+    }
+  }
+
   const lines = tasks.map(task => {
     const flags = [
-      ...(isSleeping(task) ? ['SLEEPING — no body in the running bundle'] : []),
+      ...(sleeping.has(task.id) ? ['SLEEPING — no run(ctx) body (workspace tasks/ or bundle)'] : []),
       ...(isTaskRunning(task.slug) ? ['running right now'] : []),
     ];
 
@@ -456,9 +466,9 @@ async function runTask(args: JsonObject, ctx: BuiltinServerCallContext): Promise
   }
 
   // The sleeping-task rule, synchronously: a body-less code task cannot run.
-  if (isSleeping(task)) {
+  if (await isSleeping(task)) {
     throw new Error(
-      `task "${slug}" is sleeping — its run(ctx) body is not in the running bundle. Build and restart first.`,
+      `task "${slug}" is sleeping — no run(ctx) body: neither ${workspaceTaskFile(task.userId, slug)} nor a bundled tasks/${slug}.ts.`,
     );
   }
 

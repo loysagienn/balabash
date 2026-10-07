@@ -15,12 +15,17 @@ import type { JsonObject, ToolsApi } from '../core/contract.ts';
 import { appendEvent } from '../core/append.ts';
 import { SCHEDULE_FIRED, SYSTEM_EXCEPTION } from '../core/envelope.ts';
 import { getMainThread } from '../core/threads.ts';
-import { callServerTool, getServerToolFunctions, type ToolBundle } from '../capabilities/tool-manager.ts';
+import {
+  callServerTool,
+  getServerToolFunctions,
+  listInstallationExtensionServers,
+  type ToolBundle,
+} from '../capabilities/tool-manager.ts';
 import type { ScheduledTaskModel } from '../../prisma-generated/models.ts';
 import { childEnv, runChild } from '../workspace/child.ts';
 import { sanitizeRelPath } from '../workspace/files.ts';
 import { workspaceDbPath, workspaceFilesDir } from '../workspace/layout.ts';
-import { getTaskBody } from './catalog.ts';
+import { loadTaskBody, locateTaskBody } from './catalog.ts';
 import type { TaskContext } from './contract.ts';
 
 // Workspace-job constants (agreed in the design): the kill timeout bounds,
@@ -32,12 +37,15 @@ const JOB_TAIL_MAX_CHARS = 16_384;
 const JOB_STDERR_FRAGMENT_CHARS = 500;
 const JOB_STDOUT_REPORT_CHARS = 1_000;
 
-// A task's tool passport, listed explicitly like every agent's: tasks run
-// with no native tools at all, so the workspace_files hands ride along;
-// restart and auth are deliberately absent. Calls are NOT journaled as
+// A task's tool passport: the repository servers are listed explicitly like
+// every agent's (tasks run with no native tools at all, so the
+// workspace_files hands ride along; restart and auth are deliberately
+// absent), and the installation's extension servers (data/tools,
+// data/mcp-servers — the operator's own code and configs, src/capabilities/extensions.ts)
+// are all in by construction: a task body lives outside the repository too,
+// and the pair is the same trust domain. Calls are NOT journaled as
 // tool.call.* — the envelope requires an author thread and a task has none.
-const TASK_BUNDLE: ToolBundle = {
-  declared: [
+const TASK_REPOSITORY_SERVERS = [
     'current_datetime',
     'events',
     'gmail',
@@ -50,8 +58,11 @@ const TASK_BUNDLE: ToolBundle = {
     'storage_download_file',
     'workspace',
     'workspace_files',
-  ],
-};
+];
+
+function taskBundle(): ToolBundle {
+  return { declared: [...TASK_REPOSITORY_SERVERS, ...listInstallationExtensionServers()] };
+}
 
 function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -120,14 +131,14 @@ export async function sweepAbortedJobRuns(): Promise<void> {
 function createTaskToolsApi(userId: string, mainThreadId: string): ToolsApi {
   return {
     list: async () =>
-      (await getServerToolFunctions(userId, TASK_BUNDLE)).map(fn => ({
+      (await getServerToolFunctions(userId, taskBundle())).map(fn => ({
         name: fn.functionName,
         description: fn.description,
         inputSchema: fn.inputSchema,
       })),
 
     call: async (name, args) => {
-      const outcome = await callServerTool({ userId, threadId: mainThreadId }, TASK_BUNDLE, name, args);
+      const outcome = await callServerTool({ userId, threadId: mainThreadId }, taskBundle(), name, args);
 
       return outcome.result;
     },
@@ -183,9 +194,9 @@ export async function fireTask(task: ScheduledTaskModel, trigger: JobTrigger): P
     return fireCommandTask(task, trigger, main.id, pushFired);
   }
 
-  const body = getTaskBody(task.slug);
+  const location = await locateTaskBody(task.userId, task.slug);
 
-  if (!body) {
+  if (!location) {
     return { kind: 'sleeping' };
   }
 
@@ -202,9 +213,12 @@ export async function fireTask(task: ScheduledTaskModel, trigger: JobTrigger): P
   };
 
   // Detached: the body must not block the heart's pass. An exception is the
-  // end of the run — journaled loudly, never retried.
+  // end of the run — journaled loudly, never retried. A workspace body is
+  // imported here, fresh: a broken file is this run's failure, not the heart's.
   void (async () => {
     try {
+      const body = await loadTaskBody(location);
+
       await body(ctx);
     } catch (error) {
       const message = getErrorMessage(error);

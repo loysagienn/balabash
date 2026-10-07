@@ -1,38 +1,32 @@
-// Spaces (S3-compatible) object storage — port of v1 files/storage. The
-// endpoint host is derived from the region; buckets are private, downloads go
-// through short-lived presigned URLs.
+// File storage: one of two drivers behind one API, chosen by configuration.
+// `spaces` — the S3-compatible object
+// store of the original with presigned download URLs; `local` — the local
+// disk of the fork with signed links onto the web surface. The files row
+// records the driver in `bucket` (the Spaces bucket name, or "local") and
+// the object key in `objectKey` (an S3 key, or the path relative to
+// FILES_ROOT): a row is always read by the driver that wrote it, so an
+// installation may switch drivers and keep its old files readable.
 
-import {
-  DeleteObjectCommand,
-  GetObjectCommand,
-  HeadObjectCommand,
-  PutObjectCommand,
-  S3Client,
-  type PutObjectCommandInput,
-} from '@aws-sdk/client-s3';
-import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { config } from '../config/index.ts';
+import * as spaces from './storage/spaces.ts';
+import * as local from './storage/local.ts';
 
-export type StorageBody = PutObjectCommandInput['Body'];
+export type StorageBody = spaces.StorageBody;
 
 const DEFAULT_PRESIGN_TTL_SECONDS = 900;
 
-// SigV4 presigned URLs cannot outlive 7 days; Spaces enforces the same cap.
-export const MAX_PRESIGN_TTL_SECONDS = 7 * 24 * 60 * 60;
+// SigV4 presigned URLs cannot outlive 7 days; Spaces enforces the same cap,
+// and the local signed links keep the same ceiling.
+export const MAX_PRESIGN_TTL_SECONDS = spaces.MAX_PRESIGN_TTL_SECONDS;
 
+// The bucket new files are written into: the configured Spaces bucket, or
+// the local driver's marker.
 export function getStorageBucket(): string {
-  return config.spacesBucketName;
+  return config.fileStorage === 'spaces' ? spaces.getStorageBucket() : local.LOCAL_BUCKET;
 }
 
-function createStorageClient(): S3Client {
-  return new S3Client({
-    region: config.spacesRegion,
-    endpoint: `https://${config.spacesRegion}.digitaloceanspaces.com`,
-    credentials: {
-      accessKeyId: config.spacesAccessKeyId,
-      secretAccessKey: config.spacesAccessKeySecret,
-    },
-  });
+function isLocal(bucket: string): boolean {
+  return bucket === local.LOCAL_BUCKET;
 }
 
 export async function uploadStorageObject(input: {
@@ -42,52 +36,63 @@ export async function uploadStorageObject(input: {
   contentType?: string | null;
   contentLength?: number | null;
   cacheControl?: string | null;
-}) {
-  return createStorageClient().send(
-    new PutObjectCommand({
-      Bucket: input.bucket,
-      Key: input.key,
-      Body: input.body,
-      ContentType: input.contentType ?? undefined,
-      ContentLength: input.contentLength ?? undefined,
-      CacheControl: input.cacheControl ?? undefined,
-      ACL: 'private',
-    }),
-  );
+}): Promise<{ ETag?: string; sizeBytes?: number }> {
+  if (isLocal(input.bucket)) {
+    // The local driver measures what it wrote; the caller's contentLength
+    // is a claim (a gzip-compressed download reports the wire size).
+    const { etag, sizeBytes } = await local.writeLocalObject(config.filesRoot, input.key, input.body as local.LocalStorageBody);
+
+    return { ETag: etag, sizeBytes };
+  }
+
+  return spaces.uploadStorageObject(input);
 }
 
 export async function deleteStorageObject(bucket: string, key: string): Promise<void> {
-  await createStorageClient().send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
+  if (isLocal(bucket)) {
+    await local.deleteLocalObject(config.filesRoot, key);
+
+    return;
+  }
+
+  await spaces.deleteStorageObject(bucket, key);
 }
 
-export async function getStorageObject(bucket: string, key: string) {
-  return createStorageClient().send(new GetObjectCommand({ Bucket: bucket, Key: key }));
+export async function getStorageObject(bucket: string, key: string): Promise<ReadableStream<Uint8Array>> {
+  if (isLocal(bucket)) {
+    return local.openLocalObject(config.filesRoot, key);
+  }
+
+  return spaces.getStorageObject(bucket, key);
 }
 
 // Size of a stored object in bytes, without fetching its content.
 export async function getStorageObjectSize(bucket: string, key: string): Promise<number | null> {
-  const head = await createStorageClient().send(new HeadObjectCommand({ Bucket: bucket, Key: key }));
+  if (isLocal(bucket)) {
+    return local.localObjectSize(config.filesRoot, key);
+  }
 
-  return head.ContentLength ?? null;
+  return spaces.getStorageObjectSize(bucket, key);
 }
 
 export async function getStorageDownloadUrl(input: {
   bucket: string;
   key: string;
+  // The files row id — the address of a local signed link.
+  fileId: string;
   filename?: string | null;
   expiresInSeconds?: number;
 }): Promise<{ url: string; expiresAt: Date }> {
-  const expiresInSeconds = input.expiresInSeconds ?? DEFAULT_PRESIGN_TTL_SECONDS;
-  const command = new GetObjectCommand({
-    Bucket: input.bucket,
-    Key: input.key,
-    ResponseContentDisposition: input.filename
-      ? `attachment; filename*=UTF-8''${encodeURIComponent(input.filename)}`
-      : undefined,
-  });
+  const expiresInSeconds = Math.min(input.expiresInSeconds ?? DEFAULT_PRESIGN_TTL_SECONDS, MAX_PRESIGN_TTL_SECONDS);
 
-  return {
-    url: await getSignedUrl(createStorageClient(), command, { expiresIn: expiresInSeconds }),
-    expiresAt: new Date(Date.now() + expiresInSeconds * 1000),
-  };
+  if (isLocal(input.bucket)) {
+    return local.signDownloadLink({
+      origin: `https://${config.domain}`,
+      secret: config.sessionPepper,
+      fileId: input.fileId,
+      expiresInSeconds,
+    });
+  }
+
+  return spaces.getStorageDownloadUrl({ ...input, expiresInSeconds });
 }

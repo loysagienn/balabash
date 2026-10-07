@@ -16,6 +16,7 @@ import { getPendingRestart } from '../runtime/restart.ts';
 import { buildTurnPrompt, buildKeepalivePrompt, markPromptStateWarm, PROMPT_CACHE_TTL_MS } from '../harness/openai/prompt-builder.ts';
 import { startLlmRequestMetrics } from '../harness/openai/llm-metrics.ts';
 import { runTurn, prewarmPrompt } from '../harness/openai/turn.ts';
+import { getLlmBackend } from '../harness/openai/backend.ts';
 import { COORDINATOR_INSTRUCTIONS } from './instructions.ts';
 import { getCoordinatorFunctionDefinitions, dispatchCoordinatorFunction } from './functions.ts';
 
@@ -107,7 +108,9 @@ export function createCoordinatorRun({ threadId, userId }: { threadId: string; u
       keepaliveTimer = null;
     }
 
-    if (config.coordinatorCacheKeepaliveWindowMs <= 0) {
+    // Pings refresh OpenAI's explicit prompt cache; a backend with an
+    // automatic prefix cache has nothing to keep warm.
+    if (config.coordinatorCacheKeepaliveWindowMs <= 0 || getLlmBackend().promptCache !== 'explicit') {
       return;
     }
 

@@ -4,9 +4,8 @@
 // data/workspace/<userId>/files. The path lives in the URL (deep links and
 // bookmarks work); one polymorphic /api/workspace/node request answers
 // whether it names a directory (→ navigator) or a file (→ viewer). Viewers
-// are a small registry: markdown renders via react-markdown (raw HTML inside
-// md stays unrendered, the library's default: files are agent-written, their
-// content is not trusted); any other text file — scripts, configs, JSON,
+// are a small registry: markdown renders through the shared Markdown
+// component (components/Markdown.tsx); any other text file — scripts, configs, JSON,
 // HTML as source — shows in the code viewer with syntax highlighting (the
 // grammar registry lives in lib/highlight.ts); everything else shows an
 // honest "no viewer" card with the metadata.
@@ -15,12 +14,11 @@ import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import ReactMarkdown from 'react-markdown';
-import rehypeHighlight from 'rehype-highlight';
+import { Markdown, highlightClass } from '../../../components/Markdown';
 import { ApiError, apiFetch } from '../../../lib/api';
 import { useAuthRedirect } from '../../../lib/auth-gate';
 import { formatDateTime } from '../../../lib/format';
-import { aliases, detectLanguage, formatJson, highlightToReact, languages } from '../../../lib/highlight';
+import { detectLanguage, formatJson, highlightToReact } from '../../../lib/highlight';
 import type { WorkspaceFileMeta, WorkspaceNodeResponse } from '../../../../api/contract.ts';
 import styles from './workspace.module.css';
 
@@ -29,12 +27,6 @@ import styles from './workspace.module.css';
 // regex-driven and a multi-megabyte log would freeze the tab.
 const VIEW_LIMIT_BYTES = 1024 * 1024;
 const HIGHLIGHT_LIMIT_BYTES = 300 * 1024;
-
-// Fenced blocks in markdown go through the same grammar registry as the
-// code viewer; `txt`/`text` fences stay plain on purpose.
-const rehypePlugins: React.ComponentProps<typeof ReactMarkdown>['rehypePlugins'] = [
-  [rehypeHighlight, { languages, aliases, plainText: ['txt', 'text', 'plain'] }],
-];
 
 // useParams keeps catch-all segments URL-encoded; a malformed escape falls
 // back to the raw segment instead of crashing the page.
@@ -239,8 +231,8 @@ function MarkdownViewer({ file }: { file: WorkspaceFileMeta }) {
   }
 
   return (
-    <div className={`${styles.card} ${styles.markdown} ${styles.hl}`}>
-      <ReactMarkdown rehypePlugins={rehypePlugins}>{raw.data}</ReactMarkdown>
+    <div className={styles.card}>
+      <Markdown>{raw.data}</Markdown>
     </div>
   );
 }
@@ -282,7 +274,7 @@ function CodeViewer({ file, language }: { file: WorkspaceFileMeta; language: str
         </p>
       )}
       <div className={`${styles.card} ${styles.codeCard}`}>
-        <pre className={`${styles.code} ${styles.hl}`}>
+        <pre className={`${styles.code} ${highlightClass}`}>
           <code>{content}</code>
         </pre>
       </div>

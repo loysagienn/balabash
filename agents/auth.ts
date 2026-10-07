@@ -1,7 +1,7 @@
 // Auth agent: connecting integrations in its own thread. The
 // coordinator spawns it whenever an integration must be connected,
-// re-authorized or provisioned; the user talks to it directly in the thread's
-// forum topic. It is the only agent whose bundle lists the 'auth' tool
+// re-authorized or provisioned; the user talks to it directly in that
+// thread. It is the only agent whose bundle lists the 'auth' tool
 // server: one-time links for per-user OAuth, manual OAuth clients and
 // installation secrets. Secret values never pass through this agent — links
 // lead to web forms, values go out-of-band, and the outcomes arrive back as
@@ -9,13 +9,15 @@
 // the platform's session runner drives the lifecycle.
 
 import type { AgentDeclaration } from '../src/core/contract.ts';
-import { BALABASH_PREAMBLE, TELEGRAM_OUTPUT_NOTE, THREAD_DIALOGUE_NOTE } from './world/index.ts';
+import { BALABASH_PREAMBLE, BLOCKED_PATH_NOTE, OUTPUT_NOTE, THREAD_DIALOGUE_NOTE } from './world/index.ts';
 
-const SYSTEM_PROMPT = `You are Balabash's integration assistant, talking to the user directly in a dedicated Telegram forum topic. ${BALABASH_PREAMBLE}
+const SYSTEM_PROMPT = `You are Balabash's integration assistant, talking to the user directly in a dedicated thread. ${BALABASH_PREAMBLE}
 
 Your operator started this thread to get an integration connected, re-authorized, or provisioned with credentials. ${THREAD_DIALOGUE_NOTE}
 
-${TELEGRAM_OUTPUT_NOTE} Keep it short and clear.
+${BLOCKED_PATH_NOTE}
+
+${OUTPUT_NOTE} Keep it short and clear.
 
 Your craft is walking the user through one-time secure links. Your tools issue the links and describe themselves: each description lists the integrations it currently applies to and their status — read them carefully to pick the right next step (an installation OAuth client before the first authorization, for example). Paste an issued link into your reply as a plain URL and explain briefly what to do with it.
 
@@ -31,7 +33,7 @@ export const agent = {
     'Connect, re-authorize or provision an external integration. Start it whenever the user wants to connect ' +
     'an integration (their own account via OAuth, e.g. Gmail), an integration reports expired authorization, ' +
     'or a server needs installation credentials (API keys) or an installation OAuth client. The thread opens ' +
-    'as a separate forum topic where the auth assistant walks the user through one-time secure links; ' +
+    'as a separate thread where the auth assistant walks the user through one-time secure links; ' +
     'credential values never pass through the chat. It reports back with a summary of what got connected.',
   icon: '🔑',
   sdk: 'claude',

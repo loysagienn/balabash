@@ -6,20 +6,25 @@
 // instead of falling through to other middleware.
 
 import { createReadStream } from 'node:fs';
+import { Readable } from 'node:stream';
 import Router from '@koa/router';
 import { Api } from 'grammy';
 import type { Context, Next } from 'koa';
 import { prisma } from '../db/client.ts';
 import { config } from '../config/index.ts';
 import { parseJson, prepareObject } from '../utils/serialize-json.ts';
-import { getMainThread, getThread, listThreads } from '../core/threads.ts';
+import { ensureOperatorWorkspace, getMainThread, getThread, isHeadlessThread, listThreads } from '../core/threads.ts';
 import { listThreadEvents } from '../core/events.ts';
-import type { Thread, ThreadStatus } from '../core/contract.ts';
+import { appendEvent } from '../core/append.ts';
+import type { FileRef, Thread, ThreadStatus } from '../core/contract.ts';
 import { WorkspacePathError, listDir, resolveFilePath, sanitizeRelPath, statFile } from '../workspace/files.ts';
+import { getFile, getUserFile, openFileContent } from '../files/index.ts';
+import { verifyDownloadLink } from '../files/storage/local.ts';
 import { getExternalServerSecretRequest, provisionExternalServerSecrets } from '../capabilities/external-secrets.ts';
 import { getOauthClientRequest, provisionOauthClient } from '../capabilities/connections/index.ts';
 import { AppManagementError, listApps, publishApp, unpublishApp } from '../apps/management.ts';
-import { consumeAuthCode } from './auth-codes.ts';
+import { publicAppsBase } from '../apps/urls.ts';
+import { consumeAuthCode, createAuthCode } from './auth-codes.ts';
 import { createUserSession, destroySession, getSession } from './session.ts';
 import type {
   AppsResponse,
@@ -27,6 +32,7 @@ import type {
   LlmRequestsResponse,
   LogoutResponse,
   MeResponse,
+  PostThreadMessageResponse,
   ProvisionSecretsResponse,
   SecretRequestResponse,
   SecretRequestView,
@@ -81,12 +87,18 @@ async function requireSession(ctx: Context, next: Next): Promise<void> {
 
 // The workspace name for /api/me is the bound telegram group's title: the
 // User row itself is empty by design. Fetched via the Bot API and cached —
-// a failure degrades to null, never to an error.
-const telegramApi = new Api(config.telegramBotToken);
+// a failure degrades to null, never to an error. Telegram is an optional
+// channel: without it there is no group and the name is null; the Bot API
+// client is created lazily so a boot without the token never touches it.
+let telegramApi: Api | null = null;
 const workspaceNameCache = new Map<string, { name: string | null; fetchedAt: number }>();
 const WORKSPACE_NAME_TTL_MS = 10 * 60 * 1000;
 
 async function getWorkspaceName(userId: string): Promise<string | null> {
+  if (!config.telegramEnabled) {
+    return null;
+  }
+
   const cached = workspaceNameCache.get(userId);
 
   if (cached && Date.now() - cached.fetchedAt < WORKSPACE_NAME_TTL_MS) {
@@ -99,6 +111,8 @@ async function getWorkspaceName(userId: string): Promise<string | null> {
     const group = await prisma.telegramGroup.findUnique({ where: { userId } });
 
     if (group) {
+      telegramApi ??= new Api(config.telegramBotToken);
+
       const chat = await telegramApi.getChat(Number(group.chatId));
 
       name = chat.title ?? null;
@@ -168,13 +182,44 @@ async function requireOwnThread(ctx: Context, id: string): Promise<Thread | null
 
 const router = new Router({ prefix: '/api' });
 
+// The login code without any channel: the /login page asks for one (the
+// user types the word "console" into the code field), the server mints it
+// for the operator's workspace and prints it to its own stdout — the
+// operator reads it from the process log (ssh, the supervisor's terminal).
+// The response carries nothing: anyone who can reach the page may press the
+// button, only whoever can read the log learns the code, and an extra
+// request merely rotates it (one active code per user). The throttle keeps
+// a stranger from flooding the log.
+const CONSOLE_CODE_MIN_INTERVAL_MS = 10 * 1000;
+let lastConsoleCodeAt = 0;
+
+router.post('/auth/console-code', async ctx => {
+  const now = Date.now();
+
+  if (now - lastConsoleCodeAt < CONSOLE_CODE_MIN_INTERVAL_MS) {
+    ctx.set('retry-after', String(Math.ceil((CONSOLE_CODE_MIN_INTERVAL_MS - (now - lastConsoleCodeAt)) / 1000)));
+    sendError(ctx, 429, 'rate_limited', 'A login code was printed moments ago — look at the server log');
+
+    return;
+  }
+
+  lastConsoleCodeAt = now;
+
+  const mainThread = await ensureOperatorWorkspace();
+  const code = createAuthCode(mainThread.userId);
+
+  console.log(`[web] login code for the operator workspace (one-time, valid 10 minutes): ${code}`);
+
+  ctx.status = 204;
+});
+
 router.post('/auth', async ctx => {
   const body = await readJsonBody(ctx);
   const code = typeof body.code === 'string' ? body.code : '';
   const userId = code ? consumeAuthCode(code) : null;
 
   if (!userId) {
-    sendError(ctx, 401, 'invalid_code', 'The code is invalid or expired — request a new one with /auth_code');
+    sendError(ctx, 401, 'invalid_code', 'The code is invalid or expired — request a new one');
 
     return;
   }
@@ -270,7 +315,7 @@ router.get('/threads/:id', requireSession, async ctx => {
     return;
   }
 
-  const response: ThreadResponse = { thread };
+  const response: ThreadResponse = { thread, headless: await isHeadlessThread(thread.id) };
 
   ctx.body = prepareObject(response);
 });
@@ -283,9 +328,16 @@ router.get('/threads/:id/events', requireSession, async ctx => {
   }
 
   const before = queryValue(ctx.query.before);
+  const after = queryValue(ctx.query.after);
 
-  if (before !== undefined && !/^\d+$/.test(before)) {
-    sendError(ctx, 400, 'bad_request', 'before must be a decimal event seq cursor');
+  if ((before !== undefined && !/^\d+$/.test(before)) || (after !== undefined && !/^\d+$/.test(after))) {
+    sendError(ctx, 400, 'bad_request', 'before/after must be a decimal event seq cursor');
+
+    return;
+  }
+
+  if (before !== undefined && after !== undefined) {
+    sendError(ctx, 400, 'bad_request', 'before and after are exclusive');
 
     return;
   }
@@ -298,10 +350,12 @@ router.get('/threads/:id/events', requireSession, async ctx => {
     return;
   }
 
-  // Newest first, cursor by the global seq: unique and insert-ordered, so
-  // events sharing a createdAt timestamp page deterministically.
+  // Cursor by the global seq: unique and insert-ordered, so events sharing
+  // a createdAt timestamp page deterministically. Newest first for history
+  // (before), oldest first for the live tail (after).
   const events = await listThreadEvents(thread.id, {
     ...(before !== undefined ? { beforeSeq: BigInt(before) } : {}),
+    ...(after !== undefined ? { afterSeq: BigInt(after) } : {}),
     limit,
   });
 
@@ -314,13 +368,116 @@ router.get('/threads/:id/events', requireSession, async ctx => {
 });
 
 // --------------------------------------------------------------------------
+// The web chat's inbound: a user.message into one of the session's threads.
+// The same canonical event every channel writes (Telegram, CCR) — the
+// router wakes the thread's run; the coordinator rises lazily for the main
+// thread. The identity is the workspace's one human (the session IS the
+// operator's), the source marks the channel for adapters and renderers.
+
+const MESSAGE_TEXT_MAX_CHARS = 20_000;
+const WEB_IDENTITY = { username: 'operator' };
+
+router.post('/threads/:id/messages', requireSession, async ctx => {
+  const thread = await requireOwnThread(ctx, ctx.params.id);
+
+  if (!thread) {
+    return;
+  }
+
+  if (thread.status !== 'active') {
+    sendError(ctx, 409, 'thread_closed', 'The thread is no longer active');
+
+    return;
+  }
+
+  if (await isHeadlessThread(thread.id)) {
+    sendError(ctx, 409, 'thread_headless', 'A headless thread takes no user messages — it talks to its parent only');
+
+    return;
+  }
+
+  const body = await readJsonBody(ctx);
+  const text = typeof body.text === 'string' ? body.text.trim() : '';
+
+  if (!text) {
+    sendError(ctx, 400, 'bad_request', 'text must be a non-empty string');
+
+    return;
+  }
+
+  if (text.length > MESSAGE_TEXT_MAX_CHARS) {
+    sendError(ctx, 400, 'bad_request', `text must be at most ${MESSAGE_TEXT_MAX_CHARS} characters`);
+
+    return;
+  }
+
+  const result = await appendEvent({
+    type: 'user.message',
+    actor: 'user',
+    userId: thread.userId,
+    threadId: thread.id,
+    payload: { text, identity: WEB_IDENTITY, source: 'web' },
+  });
+
+  if (!result.written) {
+    sendError(ctx, 409, 'thread_closed', 'The thread is no longer active');
+
+    return;
+  }
+
+  const response: PostThreadMessageResponse = { event: result.event };
+
+  ctx.body = prepareObject(response);
+});
+
+// --------------------------------------------------------------------------
+// Stored files of the workspace (the attachments of messages), by id, under
+// the session: the same ownership rule as the model-facing lookup — a
+// foreign file and a missing one answer the same 404. Stored files are
+// immutable, so the browser may cache them privately.
+
+router.get('/files/:fileId', requireSession, async ctx => {
+  const fileId = ctx.params.fileId as string;
+  let file: FileRef;
+
+  try {
+    file = await getUserFile(ctx.state.userId as string, fileId);
+  } catch {
+    sendError(ctx, 404, 'not_found', 'No such file');
+
+    return;
+  }
+
+  const contentType = file.contentType ?? 'application/octet-stream';
+
+  ctx.type = contentType;
+  ctx.set('x-content-type-options', 'nosniff');
+  ctx.set('cache-control', 'private, max-age=3600');
+  ctx.set(
+    'content-disposition',
+    contentDisposition(file.originalFilename ?? fileId, {
+      // A stored HTML/SVG/XML/script file rendered inline would run in the
+      // session's origin (an agent saved it, an MCP server produced it):
+      // active types are always a download, whatever the query says.
+      attachment: queryValue(ctx.query.download) === '1' || isActiveContentType(contentType),
+    }),
+  );
+
+  if (file.sizeBytes !== null) {
+    ctx.length = file.sizeBytes;
+  }
+
+  ctx.body = Readable.fromWeb(await openFileContent(fileId));
+});
+
+// --------------------------------------------------------------------------
 // Apps platform: publication management (step 4). The session is the only
 // authorization; a rejected call (bad path/slug, broken manifest, taken
 // slug) is an AppManagementError → 400 with the reason. This is the owner
 // edge — the public edge on the apps domain never shows these details.
 
 router.get('/apps', requireSession, async ctx => {
-  const response: AppsResponse = { apps: await listApps(ctx.state.userId as string), appsDomain: config.appsDomain };
+  const response: AppsResponse = { apps: await listApps(ctx.state.userId as string), publicAppsBase: publicAppsBase() };
 
   ctx.body = prepareObject(response);
 });
@@ -455,6 +612,13 @@ router.get('/workspace/node', requireSession, async ctx => {
 // the URL alone.
 
 // RFC 6266: an ASCII fallback in filename=, the real name in filename*.
+// Content types a browser would execute when rendered inline.
+const ACTIVE_CONTENT_TYPES = /^(text\/html|application\/xhtml\+xml|image\/svg\+xml|text\/xml|application\/xml|text\/javascript|application\/(x-)?javascript|application\/ecmascript)\b/i;
+
+function isActiveContentType(contentType: string): boolean {
+  return ACTIVE_CONTENT_TYPES.test(contentType.trim());
+}
+
 function contentDisposition(filename: string, { attachment }: { attachment: boolean }): string {
   const fallback = filename.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '_');
 
@@ -462,6 +626,48 @@ function contentDisposition(filename: string, { attachment }: { attachment: bool
 }
 
 const filesRouter = new Router();
+
+// Signed download links of the local storage driver (src/files/storage.ts):
+// GET /files/dl/:fileId?exp=&sig= streams a stored file WITHOUT a session —
+// the link is the credential, exactly like a presigned Spaces URL, and it
+// expires with exp. Registered before the workspace byte surface so that
+// "dl/…" is never read as a workspace path. Always an attachment under the
+// original filename: these links are what channels (Telegram) and agents
+// hand out as "the file".
+filesRouter.get('/files/dl/:fileId', async ctx => {
+  const fileId = ctx.params.fileId as string;
+  const valid = verifyDownloadLink({
+    secret: config.sessionPepper,
+    fileId,
+    exp: queryValue(ctx.query.exp),
+    sig: queryValue(ctx.query.sig),
+  });
+
+  if (!valid) {
+    sendError(ctx, 403, 'forbidden', 'The download link is invalid or has expired');
+
+    return;
+  }
+
+  let file;
+
+  try {
+    file = await getFile(fileId);
+  } catch {
+    sendError(ctx, 404, 'not_found', 'No such file');
+
+    return;
+  }
+
+  ctx.set('content-type', file.contentType ?? 'application/octet-stream');
+  ctx.set('content-disposition', contentDisposition(file.originalFilename ?? fileId, { attachment: true }));
+  ctx.set('cache-control', 'private, no-store');
+  ctx.body = Readable.fromWeb(await openFileContent(fileId));
+
+  if (file.sizeBytes !== null) {
+    ctx.length = file.sizeBytes;
+  }
+});
 
 // A bare /files (and /files/ — the trailing slash is optional) names no file.
 filesRouter.get('/files', requireSession, ctx => {

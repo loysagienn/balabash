@@ -17,7 +17,7 @@ export const agent = {
   description:
     'Start a manager thread on OpenAI Codex — the same general-purpose manager (same brief, tools, workbench ' +
     'and browser sub-agent) as the manager agent, running as an autonomous Codex session instead of Claude. ' +
-    'The thread opens as a separate topic where the user talks to it directly; a task may be given upfront, ' +
+    'The thread opens as a separate user-facing thread where the user talks to it directly; a task may be given upfront, ' +
     'or the prompt may say the thread starts open-ended. Start it when the user asks for Codex explicitly, ' +
     'or wants a task done by the OpenAI model.',
   icon: '🤖',

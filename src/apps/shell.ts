@@ -120,14 +120,14 @@ export type CatalogEntry = {
   slug: string | null;
 };
 
-export function renderCatalogPage(entries: CatalogEntry[], appsDomain: string): string {
+export function renderCatalogPage(entries: CatalogEntry[], publicUrl: (slug: string) => string): string {
   const rows = entries
     .map(entry => {
       const title = entry.name ?? entry.path;
       const label = entry.manifestError
         ? '<span class="broken">broken manifest</span>'
         : entry.slug
-          ? `<a href="https://${escapeHtml(appsDomain)}/${escapeHtml(entry.slug)}">public: /${escapeHtml(entry.slug)}</a>`
+          ? `<a href="${escapeHtml(publicUrl(entry.slug))}">public: /${escapeHtml(entry.slug)}</a>`
           : '<span class="private">not published</span>';
 
       return `  <li>

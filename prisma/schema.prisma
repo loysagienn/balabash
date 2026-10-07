@@ -141,6 +141,34 @@ model Session {
   @@map("web_sessions")
 }
 
+// CCR adapter state (src/adapters/ccr): the Claude remote-control session
+// (cse_*) mirroring a claude-sdk thread into the operator's Claude app, with
+// the SSE cursor the worker resumes from. Transport state, not events.
+model CcrSession {
+  threadId   String    @id @map("thread_id")
+  cseId      String    @unique @map("cse_id")
+  seqCursor  Int       @default(0) @map("seq_cursor")
+  // When the finished thread's session was archived in the operator's app;
+  // null while it is still listed (the adapter keeps the newest N visible).
+  archivedAt DateTime? @map("archived_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
+
+  @@map("ccr_sessions")
+}
+
+// CCR adapter state: event → delivered frame(s), for at-least-once delivery
+// idempotency.
+model CcrDelivery {
+  id        String   @id @default(uuid())
+  eventId   String   @map("event_id")
+  cseId     String   @map("cse_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([eventId])
+  @@map("ccr_deliveries")
+}
+
 // Per-user authorization state for an external MCP server with auth: "user".
 // Secret material (tokens, PKCE verifier) lives only here and never enters the
 // event log — the connection lifecycle is mirrored there as sanitized

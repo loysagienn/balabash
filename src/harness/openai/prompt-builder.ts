@@ -21,6 +21,8 @@
 
 import crypto from 'node:crypto';
 import type { ResponseInput } from 'openai/resources/responses/responses';
+import { config } from '../../config/index.ts';
+import { getLlmBackend } from './backend.ts';
 import { buildTranscript } from './transcript.ts';
 
 type PromptEvent = Parameters<typeof buildTranscript>[0][number] & { seq: bigint };
@@ -29,6 +31,10 @@ type PromptEvent = Parameters<typeof buildTranscript>[0][number] & { seq: bigint
 // transcript from scratch (which is itself bounded by the transcript's own
 // char budget), so the cycle is: rebuild → grow → reset.
 const MAX_TOTAL_CHARS = 200_000;
+
+// The transcript budget of a rebuild (and of every turn on a backend with an
+// automatic prompt cache, see buildTurnPrompt).
+const transcriptOptions = () => ({ charLimit: config.coordinatorTranscriptChars });
 
 // Lifetime of a cached prefix on GPT-5.6+ models: 30 minutes after its last
 // write or reuse, the only supported prompt_cache_options.ttl. Measured on
@@ -117,6 +123,16 @@ export function buildTurnPrompt({
   tools,
   statusText,
 }: BuildTurnPromptOptions): TurnPrompt | null {
+  // Without an explicit prompt cache there is nothing to freeze: the
+  // transcript is rebuilt from the log every turn — the model's view is a
+  // pure function of the log, and the server's automatic prefix cache still
+  // serves the heavy, byte-identical head (instructions + tools) for free.
+  if (getLlmBackend().promptCache !== 'explicit') {
+    const { text } = buildTranscript(events, transcriptOptions());
+
+    return text ? { input: toInput([text], statusText), cacheKey: threadId } : null;
+  }
+
   const headHash = headHashOf(model, instructions, tools);
 
   const state = states.get(threadId);
@@ -133,7 +149,7 @@ export function buildTurnPrompt({
       return null;
     }
 
-    const { text, dropped } = buildTranscript(newEvents);
+    const { text, dropped } = buildTranscript(newEvents, transcriptOptions());
 
     // dropped means even the fresh slice alone overflows the transcript
     // budget — only a full rebuild handles that correctly.
@@ -151,7 +167,7 @@ export function buildTurnPrompt({
     }
   }
 
-  const { text } = buildTranscript(events);
+  const { text } = buildTranscript(events, transcriptOptions());
 
   if (!text) {
     states.delete(threadId);
