@@ -23,7 +23,12 @@ const RESERVED_SLUGS = new Set(['apps', 'auth', 'platform']);
 
 // Scan caps in the walkFiles spirit (indexer.ts): a runaway tree must not
 // hang the management API. An app folder itself is a leaf — no app-in-app.
-const MAX_SCANNED_DIRS = 2000;
+// The walk is breadth-first and depth-capped so that one huge project tree
+// (thousands of data folders deep inside) cannot starve the shallow app
+// folders of every other project: by the time the budget runs out, every
+// folder up to the last fully visited level has been seen.
+const MAX_SCANNED_DIRS = 4000;
+const MAX_APP_DEPTH = 6;
 
 export type AppListing = {
   /** Workspace-relative path of the app folder. */
@@ -41,45 +46,65 @@ function isSkippedName(name: string): boolean {
   return name.startsWith('.') || name === 'node_modules';
 }
 
-async function collectAppDirs(absDir: string, relPrefix: string, out: string[], budget: { dirs: number }): Promise<void> {
-  if (budget.dirs <= 0) {
-    return;
-  }
+/**
+ * Breadth-first walk of the file area collecting app folders (folders with a
+ * manifest). Returns the folders found and whether the walk was complete —
+ * false when the directory budget ran out, in which case apps deeper than
+ * the last fully visited level may be missing.
+ */
+async function collectAppDirs(rootDir: string): Promise<{ appDirs: string[]; complete: boolean }> {
+  const appDirs: string[] = [];
+  let queue: string[] = [''];
+  let budget = MAX_SCANNED_DIRS;
 
-  budget.dirs -= 1;
+  for (let depth = 0; depth <= MAX_APP_DEPTH && queue.length; depth += 1) {
+    const nextLevel: string[] = [];
 
-  let entries;
+    for (const relPrefix of queue) {
+      if (budget <= 0) {
+        return { appDirs, complete: false };
+      }
 
-  try {
-    entries = await fs.readdir(absDir, { withFileTypes: true });
-  } catch {
-    return; // vanished mid-walk — the filesystem is the source of truth
-  }
+      budget -= 1;
 
-  const isApp = entries.some(entry => entry.isFile() && entry.name === APP_MANIFEST_FILENAME);
+      let entries;
 
-  if (relPrefix && isApp) {
-    out.push(relPrefix);
+      try {
+        entries = await fs.readdir(path.join(rootDir, relPrefix), { withFileTypes: true });
+      } catch {
+        continue; // vanished mid-walk — the filesystem is the source of truth
+      }
 
-    return;
-  }
+      if (relPrefix && entries.some(entry => entry.isFile() && entry.name === APP_MANIFEST_FILENAME)) {
+        appDirs.push(relPrefix);
 
-  for (const entry of entries) {
-    if (!entry.isDirectory() || isSkippedName(entry.name)) {
-      continue;
+        continue;
+      }
+
+      if (depth === MAX_APP_DEPTH) {
+        continue; // deeper folders are never apps by the platform's rule
+      }
+
+      for (const entry of entries) {
+        if (entry.isDirectory() && !isSkippedName(entry.name)) {
+          nextLevel.push(relPrefix ? `${relPrefix}/${entry.name}` : entry.name);
+        }
+      }
     }
 
-    const relPath = relPrefix ? `${relPrefix}/${entry.name}` : entry.name;
-
-    await collectAppDirs(path.join(absDir, entry.name), relPath, out, budget);
+    queue = nextLevel;
   }
+
+  return { appDirs, complete: true };
 }
 
 /** Every app folder of the user's file area, joined with publication facts. */
 export async function listApps(userId: string): Promise<AppListing[]> {
-  const appDirs: string[] = [];
+  const { appDirs, complete } = await collectAppDirs(workspaceFilesDir(userId));
 
-  await collectAppDirs(workspaceFilesDir(userId), '', appDirs, { dirs: MAX_SCANNED_DIRS });
+  if (!complete) {
+    console.warn(`[apps] user ${userId}: app scan hit the ${MAX_SCANNED_DIRS}-directory cap; apps in deep folders may be missing from the list`);
+  }
 
   const publications = await prisma.appPublication.findMany({ where: { userId } });
   const slugByPath = new Map(publications.map(row => [row.path, row.slug]));
