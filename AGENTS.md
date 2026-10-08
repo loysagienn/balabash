@@ -19,10 +19,13 @@ confidential from them.
   agent validation), `coordinator/` (the secretary: instructions and
   function definitions), `harness/` (the model backends: `claude-sdk/`,
   `codex-sdk/`, `openai/`), `adapters/` (surfaces: `telegram/`, `ccr/`),
+  `console/` (the new web interface: a browser SPA, its own tsconfig,
+  served by the core on `CONSOLE_DOMAIN` through `src/api/console.ts`),
   `workspace/` (the per-user workbench: layout, sqlite, child processes),
   `projects/` (the project registry), `schedule/` (scheduled tasks and jobs),
   `apps/` (the mini-app platform), `files/` (file storage), `runtime/`
-  (restart, router, runs), `web/` (the Next.js UI, its own package).
+  (restart, router, runs), `web/` (the previous Next.js UI, frozen: its own
+  package, not developed further).
 - `tasks/` — scheduled task bodies shipped with the product; `tasks/AGENTS.md`
   is their contract.
 - `scripts/` — offline maintenance scripts (`scripts/AGENTS.md`); among them
@@ -33,6 +36,9 @@ confidential from them.
 - `prisma/` — the database schema and its migrations; `prisma-generated/` is
   the generated client (`npm run build` regenerates it).
 - `build/` — the esbuild configuration; `dist/` is the bundle output.
+  `build/console.js` bundles `src/console` into `dist/console/` (hashed
+  assets + `manifest.json`); the core reads the manifest per request, so
+  `npm run build-console` goes live with the next page load — no restart.
 - `data/` — runtime state (workspaces, supervisor, showcase output), not
   source.
 

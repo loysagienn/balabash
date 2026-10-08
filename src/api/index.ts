@@ -10,6 +10,7 @@ import { createApiMiddleware, createFilesMiddleware } from './api.ts';
 import { createAppsMiddleware } from '../apps/index.ts';
 import { createAppsHandoffMiddleware } from '../apps/handoff.ts';
 import { createMainDomainAppsMiddleware } from '../apps/index.ts';
+import { createConsoleMiddleware } from './console.ts';
 
 export function startWebServer(): void {
   const app = new Koa();
@@ -21,6 +22,11 @@ export function startWebServer(): void {
   // whole balabash.app host and never falls through — none of the surfaces
   // below exist there (src/apps/index.ts).
   app.use(createAppsMiddleware());
+
+  // The console host next: on CONSOLE_DOMAIN only /api and /files of the
+  // surfaces below exist (they fall through), everything else is the SPA —
+  // its assets and its shell (src/api/console.ts).
+  app.use(createConsoleMiddleware());
 
   // Nonce/state-authenticated surfaces first (one-time links, OAuth
   // redirects), then the session-gated byte surface /files and the

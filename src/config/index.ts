@@ -148,6 +148,14 @@ export const config = {
     return process.env.APPS_DOMAIN?.trim().toLowerCase() || null;
   },
 
+  // The console domain (console.balabash.app): the host of the new web
+  // interface, a browser SPA served by the core itself (src/api/console.ts)
+  // next to the same /api and /files. Optional — without it the console is
+  // not served anywhere.
+  get consoleDomain(): string | null {
+    return process.env.CONSOLE_DOMAIN?.trim().toLowerCase() || null;
+  },
+
   // Secret of the stateless apps cookie (HMAC over {userId, exp, kind});
   // deliberately its OWN secret — the cookie is never interchangeable with
   // session machinery even if one of the secrets leaks. Read lazily: only

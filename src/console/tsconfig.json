@@ -1,0 +1,19 @@
+{
+  // The console SPA (src/console): a browser sub-project of the repo — DOM
+  // libs and JSX, excluded from the core tsc (../../tsconfig.json) and checked
+  // by `npm run types` through this file. From the core tree it may import
+  // ONLY contract types (src/api/contract.ts, type-only) and src/utils
+  // (isolated runtime modules) — nothing that touches node.
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "lib": ["ESNext", "DOM", "DOM.Iterable"],
+    // node types only because src/core/contract.ts (reached through
+    // src/api/contract.ts) names the NodeJS namespace; the bundle itself is
+    // platform: browser, so any node builtin actually imported fails the
+    // esbuild build, not just the typecheck.
+    "types": ["node"],
+    "jsx": "react-jsx"
+  },
+  "include": ["./**/*", "../api/contract.ts", "../core/contract.ts", "../utils/**/*"],
+  "exclude": ["../utils/**/*.test.ts"]
+}

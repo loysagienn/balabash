@@ -16,7 +16,9 @@
     "noEmit": true
   },
   "include": ["src/**/*", "agents/**/*", "tools/**/*", "tasks/**/*", "scripts/**/*", "prisma-generated/**/*", "prisma.config.ts"],
-  // src/web is the Next.js client app: its own sub-project with its own
-  // tsconfig (DOM libs, jsx) — the core typecheck must not touch it.
-  "exclude": ["node_modules", "src/web"]
+  // src/web (the frozen Next.js app) and src/console (the console SPA) are
+  // browser sub-projects with their own tsconfig (DOM libs, jsx) — the core
+  // typecheck must not touch them; src/console is checked by `npm run types`
+  // through src/console/tsconfig.json.
+  "exclude": ["node_modules", "src/web", "src/console"]
 }

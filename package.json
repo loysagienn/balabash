@@ -21,7 +21,9 @@
     "rebuild-threads": "node --enable-source-maps --env-file=.env ./dist/rebuild-threads.js",
     "render-context": "node --enable-source-maps --env-file=.env ./dist/render-context.js",
     "import-sqlite": "node --enable-source-maps --env-file=.env ./dist/import-sqlite.js",
-    "types": "tsc --noEmit",
+    "build-console": "NODE_ENV=production node ./build/build-console.js",
+    "build-console-dev": "NODE_ENV=development node ./build/build-console.js",
+    "types": "tsc --noEmit && tsc --noEmit -p src/console/tsconfig.json",
     "postinstall": "node scripts/patch-sdk-bridge.mjs",
     "test": "node --test --no-warnings=ExperimentalWarning \"src/**/*.test.ts\" \"tools/**/*.test.ts\""
   },
@@ -60,5 +62,9 @@
     "react-dom": "^19.2.0",
     "typescript": "^7.0.2",
     "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0"
   }
 }
