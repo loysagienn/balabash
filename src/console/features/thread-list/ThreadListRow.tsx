@@ -8,6 +8,7 @@ import { useMemo } from 'react';
 import type { Thread } from '../../../core/contract.ts';
 import { useLinkProps } from '../../lib/router/Link.tsx';
 import { useAppSelector } from '../../store/hooks.ts';
+import { selectAgent } from '../../store/agents/selectors.ts';
 import { makeSelectThreadEvents } from '../../store/feed/selectors.ts';
 import { selectSession, selectThreadState } from '../../store/sessions/selectors.ts';
 import { selectChildCount } from '../../store/threads/selectors.ts';
@@ -32,7 +33,7 @@ export function ThreadListRow({ thread, now, hit, fresh, current, noAgent }: Thr
   const session = useAppSelector(s => selectSession(s, thread.id));
   const project = useAppSelector(s => (thread.projectId ? (s.projects.byId[thread.projectId]?.title ?? null) : null));
   const kids = useAppSelector(s => selectChildCount(s, thread.id));
-  const headless = useAppSelector(s => s.agents.byName[thread.agent]?.headless ?? false);
+  const headless = useAppSelector(s => selectAgent(s, thread.agent)?.headless ?? false);
   const selectEvents = useMemo(makeSelectThreadEvents, []);
   const active = isActiveState(state);
   const events = useAppSelector(s => (active ? selectEvents(s, thread.id) : NO_EVENTS));

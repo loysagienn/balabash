@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { agentMatches, agentsShell, agentsSummary, engineLabel, engineName, modeLabel, withAgentsFilters } from './AgentsScreen.logic.ts';
+import { agentMatches, agentsDetail, agentsShell, agentsSummary, engineLabel, engineName, modeLabel, withAgentsFilters } from './AgentsScreen.logic.ts';
 
 describe('agents screen rules', () => {
   it('matches the search against the name and the description, case-insensitive', () => {
@@ -32,6 +32,15 @@ describe('agents screen rules', () => {
     assert.deepEqual(withAgentsFilters({ key: 'agents', name: 'engineer', q: 'x' }, { q: '' }), { key: 'agents', name: 'engineer' });
     assert.deepEqual(withAgentsFilters({ key: 'agents', q: 'x' }, { name: 'codex' }), { key: 'agents', name: 'codex', q: 'x' });
     assert.deepEqual(withAgentsFilters({ key: 'agents', name: 'codex' }, { name: undefined }), { key: 'agents' });
+  });
+
+  it('tells what the details panel shows: the named agent, an unknown name once the catalog is in, the first snapshot in flight, or nothing picked', () => {
+    assert.equal(agentsDetail(undefined, false, 'loading'), 'pick');
+    assert.equal(agentsDetail(undefined, false, 'ready'), 'pick');
+    assert.equal(agentsDetail('engineer', true, 'ready'), 'agent');
+    assert.equal(agentsDetail('nope', false, 'ready'), 'unknown');
+    assert.equal(agentsDetail('engineer', false, 'loading'), 'loading');
+    assert.equal(agentsDetail('engineer', false, 'failed'), 'loading');
   });
 
   it('shapes the shell: the catalog is the section, a selected agent is a detail screen on the phone only', () => {

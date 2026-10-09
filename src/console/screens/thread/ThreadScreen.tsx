@@ -10,6 +10,7 @@ import type { Thread as ThreadRecord } from '../../../core/contract.ts';
 import { countOf, dateTimeLabel } from '../../lib/format/index.ts';
 import { useNow } from '../../lib/format/useNow.ts';
 import { useAppDispatch, useAppSelector } from '../../store/hooks.ts';
+import { selectAgent } from '../../store/agents/selectors.ts';
 import { makeSelectThreadEvents, selectThreadFeed } from '../../store/feed/selectors.ts';
 import { selectMe } from '../../store/session/selectors.ts';
 import { selectSession, selectThreadState } from '../../store/sessions/selectors.ts';
@@ -181,7 +182,7 @@ function ThreadPage({ thread }: { thread: ThreadRecord }) {
   const me = useAppSelector(selectMe);
   const parent = useAppSelector(s => (thread.parentId ? (s.threads.byId[thread.parentId] ?? null) : null));
   const childIds = useAppSelector(s => s.threads.childrenOf[id]) ?? [];
-  const agentView = useAppSelector(s => s.agents.byName[thread.agent]);
+  const agentView = useAppSelector(s => selectAgent(s, thread.agent));
   const project = useAppSelector(s => (thread.projectId ? (s.projects.byId[thread.projectId] ?? null) : null));
   const feed = useAppSelector(s => selectThreadFeed(s, id));
   const selectEvents = useMemo(makeSelectThreadEvents, []);

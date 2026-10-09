@@ -5,7 +5,9 @@
 // A split view: the catalog beside the details when wide, one of them on
 // the phone (the selected agent is a detail screen there). The selection
 // and the search are the route. Nothing is requested: the catalog and the
-// threads are the snapshot and its tail.
+// threads are the snapshot and its tail. A failed first snapshot replaces
+// the split view (Home does the same): the error and Retry must be in
+// sight on the phone too, where the named agent hides the catalog.
 
 import { useMemo } from 'react';
 import type { AgentView } from '../../../api/contract.ts';
@@ -16,6 +18,7 @@ import { useNow } from '../../lib/format/useNow.ts';
 import { useAppDispatch, useAppSelector } from '../../store/hooks.ts';
 import { routeTo } from '../../store/router/actions.ts';
 import { snapshotLoad } from '../../store/stream/actions.ts';
+import { agentOf } from '../../store/agents/selectors.ts';
 import { selectStream, snapshotStage } from '../../store/stream/selectors.ts';
 import { makeSelectAgentThreads, selectRunningCount, selectRunningCountByAgent } from '../../store/threads/selectors.ts';
 import { Shell } from '../../features/shell/Shell.tsx';
@@ -30,10 +33,10 @@ import { Input } from '../../ui/Input/Input.tsx';
 import { KeyValue } from '../../ui/KeyValue/KeyValue.tsx';
 import { List, Row } from '../../ui/List/List.tsx';
 import { Screen } from '../../ui/Screen/Screen.tsx';
-import { SkelRow } from '../../ui/Skel/Skel.tsx';
+import { Skel, SkelRow, SkelStack } from '../../ui/Skel/Skel.tsx';
 import { DetailSection, Split, SplitDetail, SplitList } from '../../ui/Split/Split.tsx';
 import { Code, Quiet, Tag } from '../../ui/atoms/atoms.tsx';
-import { agentMatches, agentsShell, agentsSummary, engineLabel, engineName, modeLabel, withAgentsFilters } from './AgentsScreen.logic.ts';
+import { agentMatches, agentsDetail, agentsShell, agentsSummary, engineLabel, engineName, modeLabel, withAgentsFilters } from './AgentsScreen.logic.ts';
 import './AgentsScreen.css';
 
 // The activity shows the newest threads; the rest are a link away.
@@ -60,7 +63,7 @@ function AgentDetail({ agent, running }: { agent: AgentView; running: number }) 
     <Card narrow="bare">
       <DetailSection>
         <div className="agt-head">
-          <Avatar agent={agent.name} size="lg" />
+          <Avatar agent={agent.name} size="lg" className="agt-head-av" />
           <h3 className="card-t">{agent.name}</h3>
           <span className="agt-desc">{agent.description}</span>
         </div>
@@ -126,7 +129,8 @@ export function AgentsScreen({ route }: { route: AgentsRoute }) {
   const go = (patch: Parameters<typeof withAgentsFilters>[1]) => dispatch(routeTo(withAgentsFilters(route, patch), { replace: true }));
   const agents = names.map(name => byName[name]).filter((agent): agent is AgentView => agent !== undefined);
   const visible = agents.filter(agent => agentMatches(agent, route.q));
-  const selected = route.name ? (byName[route.name] ?? null) : null;
+  const selected = route.name ? agentOf(byName, route.name) : null;
+  const detailStage = agentsDetail(route.name, selected !== null, stage);
 
   let catalog;
 
@@ -137,12 +141,6 @@ export function AgentsScreen({ route }: { route: AgentsRoute }) {
           <SkelRow key={i} widths={w} />
         ))}
       </List>
-    );
-  } else if (stage === 'failed') {
-    catalog = (
-      <Empty icon="cloud-off" state="err" title="Couldn’t load the agents" action="Retry" actionIcon="refresh-cw" onAction={() => dispatch(snapshotLoad())}>
-        {stream.snapshot.error?.message}
-      </Empty>
     );
   } else if (visible.length === 0) {
     catalog = route.q ? (
@@ -191,9 +189,9 @@ export function AgentsScreen({ route }: { route: AgentsRoute }) {
 
   let detail;
 
-  if (selected) {
+  if (detailStage === 'agent' && selected) {
     detail = <AgentDetail key={selected.name} agent={selected} running={runningByAgent[selected.name] ?? 0} />;
-  } else if (route.name && stage === 'ready') {
+  } else if (detailStage === 'unknown') {
     detail = (
       <Card narrow="bare">
         <Empty icon="bot" title={`No agent named “${route.name}”`} action="All agents" onAction={() => go({ name: undefined })}>
@@ -201,7 +199,7 @@ export function AgentsScreen({ route }: { route: AgentsRoute }) {
         </Empty>
       </Card>
     );
-  } else if (!route.name) {
+  } else if (detailStage === 'pick') {
     detail = (
       <Card narrow="bare">
         <Empty icon="bot" title="Pick an agent">
@@ -210,32 +208,55 @@ export function AgentsScreen({ route }: { route: AgentsRoute }) {
       </Card>
     );
   } else {
-    detail = null;
+    detail = (
+      <Card narrow="bare" label="Loading the agent">
+        <DetailSection>
+          <div className="agt-head" aria-hidden="true">
+            <Skel shape="av" />
+            <SkelStack widths={[32, 70]} />
+          </div>
+        </DetailSection>
+        <DetailSection>
+          <span aria-hidden="true">
+            <SkelStack widths={[48, 36, 54, 40]} smFirst />
+          </span>
+        </DetailSection>
+      </Card>
+    );
   }
+
+  const body =
+    stage === 'failed' ? (
+      <Card narrow="bare">
+        <Empty icon="cloud-off" state="err" title="Couldn’t load the agents" action="Retry" actionIcon="refresh-cw" onAction={() => dispatch(snapshotLoad())}>
+          {stream.snapshot.error?.message}
+        </Empty>
+      </Card>
+    ) : (
+      <Split view={route.name ? 'detail' : 'list'}>
+        <SplitList>
+          <FBar
+            filters={<Quiet>{stage === 'ready' ? agentsSummary(agents.length, running) : '—'}</Quiet>}
+            search={
+              <Input
+                value={route.q ?? ''}
+                onChange={q => go({ q })}
+                placeholder="Search agents"
+                lead="search"
+                ariaLabel="Search agents"
+                end={route.q ? <IconBtn icon="x" label="Clear" size="sm" onClick={() => go({ q: undefined })} /> : undefined}
+              />
+            }
+          />
+          <Card narrow="bare">{catalog}</Card>
+        </SplitList>
+        <SplitDetail>{detail}</SplitDetail>
+      </Split>
+    );
 
   return (
     <Shell current="agents" title={shell.title} titleNarrow={shell.titleNarrow} back={shell.back} backNarrow={shell.backNarrow} detail={shell.detail}>
-      <Screen>
-        <Split view={route.name ? 'detail' : 'list'}>
-          <SplitList>
-            <FBar
-              filters={<Quiet>{stage === 'ready' ? agentsSummary(agents.length, running) : '—'}</Quiet>}
-              search={
-                <Input
-                  value={route.q ?? ''}
-                  onChange={q => go({ q })}
-                  placeholder="Search agents"
-                  lead="search"
-                  ariaLabel="Search agents"
-                  end={route.q ? <IconBtn icon="x" label="Clear" size="sm" onClick={() => go({ q: undefined })} /> : undefined}
-                />
-              }
-            />
-            <Card narrow="bare">{catalog}</Card>
-          </SplitList>
-          <SplitDetail>{detail}</SplitDetail>
-        </Split>
-      </Screen>
+      <Screen>{body}</Screen>
     </Shell>
   );
 }

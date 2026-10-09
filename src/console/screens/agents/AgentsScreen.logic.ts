@@ -7,6 +7,7 @@
 import type { AgentView } from '../../../api/contract.ts';
 import type { AgentsRoute, AppRoute } from '../../lib/router/routes.ts';
 import { countOf } from '../../lib/format/index.ts';
+import type { SnapshotStage } from '../../store/stream/selectors.ts';
 
 // The search looks through the name and the description, case-insensitive.
 export function agentMatches(agent: Pick<AgentView, 'name' | 'description'>, q: string | undefined): boolean {
@@ -51,6 +52,25 @@ export function withAgentsFilters(route: AgentsRoute, patch: AgentsFilterPatch):
   }
 
   return next;
+}
+
+export type AgentsDetail = 'pick' | 'agent' | 'unknown' | 'loading';
+
+// What the details panel shows — the panel is the whole screen on the phone
+// when an agent is named, so the first snapshot in flight shows there too
+// (the catalog with its skeleton is hidden). A name the ready catalog does
+// not know is "unknown"; a failed first snapshot is the screen's state, not
+// the panel's (agentsFailed).
+export function agentsDetail(name: string | undefined, found: boolean, stage: SnapshotStage): AgentsDetail {
+  if (!name) {
+    return 'pick';
+  }
+
+  if (found) {
+    return 'agent';
+  }
+
+  return stage === 'ready' ? 'unknown' : 'loading';
 }
 
 export type AgentsShell = {
