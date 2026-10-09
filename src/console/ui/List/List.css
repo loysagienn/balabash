@@ -14,6 +14,7 @@
 .row-m{display:block;margin-top:var(--sp-0h);font-size:var(--fs-meta);line-height:var(--lh-meta);color:var(--text-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .row-d{margin-top:var(--sp-1);font-size:var(--fs-meta);line-height:var(--lh-meta);color:var(--text-2);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .row-end{display:flex;align-items:center;gap:var(--sp-3h)}
+.row-end .url{max-width:50cqi}   /* the right side is an auto track: a long address would grow it and squeeze the title to nothing */
 /* Right side in columns across the whole list: .list[data-end-cols] + --row-end-cols (column template). Items fill the columns in order;
    a row missing the last items leaves the tail empty — the other columns do not shift. --row-time-w — time column width without the grid. */
 .list[data-end-cols] .row-end{display:grid;grid-template-columns:var(--row-end-cols);justify-items:end}
@@ -22,6 +23,7 @@
 @container list (max-width:480px){
   .row{grid-template-columns:auto minmax(0,1fr);align-items:start}
   .row-end,.list[data-end-cols] .row-end{display:flex;grid-column:2;gap:var(--sp-1) var(--sp-3);flex-wrap:wrap}
+  .row-end .url{max-width:100%}
   .row-t{flex-wrap:wrap}
   .row-t-text{white-space:normal}
   .row-time{min-width:0;text-align:left}

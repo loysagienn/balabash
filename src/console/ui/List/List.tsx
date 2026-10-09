@@ -36,7 +36,9 @@ export function List({ children, narrow, endCols, timeW, busy, className }: List
 }
 
 export type RowProps = {
-  lead?: ReactNode;
+  // The design's row always starts with a lead (avatar, object icon): the
+  // grid has a column for it.
+  lead: ReactNode;
   title: ReactNode;
   meta?: ReactNode;
   desc?: ReactNode;

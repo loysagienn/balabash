@@ -14,8 +14,9 @@
 .attn{--attn:7px;width:var(--attn);height:var(--attn);border-radius:50%;background:var(--st-act);box-shadow:0 0 0 3px var(--st-act-bg);flex:none}
 .pulse{--pulse-size:8px;width:var(--pulse-size);height:var(--pulse-size);border-radius:50%;background:var(--st-run);flex:none;animation:bb-pulse var(--pulse) ease-in-out infinite}
 .pulse[data-state="off"]{background:var(--text-4);animation:none}
-.url{--url-h:22px;display:inline-flex;align-items:center;gap:var(--sp-1);height:var(--url-h);padding:0 var(--sp-2);border-radius:var(--r-pill);background:var(--accent-bg);color:var(--link);font-family:var(--mono);letter-spacing:0;font-size:var(--fs-code-sm);white-space:nowrap;text-decoration:none}
-.url .ic{font-size:var(--ico-xs)}
+.url{--url-h:22px;display:inline-flex;align-items:center;gap:var(--sp-1);min-width:0;max-width:100%;height:var(--url-h);padding:0 var(--sp-2);border-radius:var(--r-pill);background:var(--accent-bg);color:var(--link);font-family:var(--mono);letter-spacing:0;font-size:var(--fs-code-sm);white-space:nowrap;text-decoration:none}
+.url .ic{flex:none;font-size:var(--ico-xs)}
+.url-t{min-width:0;overflow:hidden;text-overflow:ellipsis}   /* the chip never widens its place: a long address is cut with an ellipsis, the whole value is in title */
 
 /* ── Search match ──  <mark class="hit">slug</mark> */
 .hit{background:var(--accent-bg);color:var(--text);border-radius:var(--r-xs);padding:0 var(--sp-0h)}

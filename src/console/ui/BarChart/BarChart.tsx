@@ -4,6 +4,8 @@
 // draws one line per label); cols — the bars: v in percent of the height,
 // x — the label under the bar (or none), title and detail — the tooltip.
 // Single series — no legend; a chart always has a table view next to it.
+// Every column knows its index and the count (--i, --n): the CSS keeps the
+// tooltip of an edge column inside the plot, where a card would clip it.
 
 import type { CSSProperties } from 'react';
 import { Tip } from '../Hint/Hint.tsx';
@@ -43,7 +45,7 @@ export function BarChart({ label, y, cols, className }: BarChartProps) {
           <span
             key={i}
             className="chart-col"
-            style={{ '--v': `${Math.max(0, Math.min(col.v, 100))}%` } as CSSProperties}
+            style={{ '--v': Math.max(0, Math.min(col.v, 100)), '--i': i, '--n': cols.length } as CSSProperties}
             data-current={col.current ? '' : undefined}
             tabIndex={0}
           >

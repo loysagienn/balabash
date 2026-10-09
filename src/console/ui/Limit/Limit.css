@@ -3,7 +3,7 @@
    Default — in a row, as many as fit (no narrower than --lim-min); stack — in a column. Dividers — a hairline gap. */
 .lims{--lim-min:200px;display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,var(--lim-min)),1fr));gap:1px;background:var(--border)}
 .lim{display:grid;grid-template-columns:minmax(0,1fr);justify-items:start;align-items:center;gap:var(--sp-3h);padding:var(--sp-3) var(--sp-4h);background:var(--surface)}
-.lim-main{display:flex;flex-direction:column;gap:var(--sp-0h);min-width:0}
+.lim-main{display:flex;flex-direction:column;gap:var(--sp-0h);min-width:0;justify-self:stretch}   /* stretch, not start: the loading skeleton is percent-wide */
 .lim-t{font-size:var(--fs-ui);font-weight:var(--fw-semibold);color:var(--text)}
 .lim-m{font-size:var(--fs-meta);line-height:var(--lh-meta);color:var(--text-3);font-variant-numeric:tabular-nums}
 .lim-s{font-size:var(--fs-meta);line-height:var(--lh-meta);font-weight:var(--fw-semibold);color:var(--lvl-ok)}

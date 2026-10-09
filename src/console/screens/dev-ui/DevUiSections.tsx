@@ -34,6 +34,9 @@ import { Caption, Code, Kbd, Tag } from '../../ui/atoms/atoms.tsx';
 
 const stop = (event: { preventDefault: () => void }) => event.preventDefault();
 
+// The longest slug the server allows (64 characters).
+const LONG_URL = '/p/calorie-tracker-with-macro-counts-and-a-weekly-report-for-family';
+
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
     <section className="dev-sec">
@@ -174,10 +177,11 @@ function ThreadRows({ endCols }: { endCols?: string }) {
 function AppRows({ menuOpen, onMenu }: { menuOpen: boolean; onMenu: (open: boolean) => void }) {
   return (
     <>
-      <Label>link rows: published · not published · manifest error</Label>
+      <Label>link rows: published · not published · manifest error · the longest allowed slug (64 characters)</Label>
       <List>
         <AppRow title="Calorie tracker" desc="Food diary with macro counts" url="/p/kcal" href="#" onClick={stop} />
         <AppRow title="Reading list" desc="Books to read, with notes" href="#" onClick={stop} />
+        <AppRow title="Long slug" desc="The address ends in an ellipsis, the whole value is in its title" url={LONG_URL} href="#" onClick={stop} />
         <AppRow
           title="Expenses"
           desc="Monthly budget by category"
@@ -218,6 +222,15 @@ function AppRows({ menuOpen, onMenu }: { menuOpen: boolean; onMenu: (open: boole
           desc="Monthly budget by category"
           folder="apps/expenses"
           err="endpoints[2].sql: expected a string, got number"
+          more={<IconBtn icon="ellipsis" label="App actions" size="sm" />}
+        />
+        <AppRow
+          actions
+          title="Long slug"
+          desc="The address takes at most half the row; the title keeps its place"
+          folder="apps/long-slug"
+          url={LONG_URL}
+          appHref="https://long.apps.example"
           more={<IconBtn icon="ellipsis" label="App actions" size="sm" />}
         />
       </List>
@@ -455,10 +468,17 @@ export function DevUiSections() {
             <Sections />
           </CardBody>
         </Card>
-        <Label>limits in a row (as many as fit), stacked, loading</Label>
+        <Label>limits in a row (as many as fit), loading, stacked</Label>
         <div className="dev-box">
           <Limits>
             <LimitItems />
+          </Limits>
+        </div>
+        <div className="dev-box">
+          <Limits>
+            <Limit loading />
+            <Limit loading />
+            <Limit loading />
           </Limits>
         </div>
         <div className="dev-grid">
@@ -469,7 +489,6 @@ export function DevUiSections() {
           </div>
           <div className="dev-box">
             <Limits layout="stack">
-              <Limit loading />
               <Limit loading />
             </Limits>
           </div>
@@ -485,8 +504,13 @@ export function DevUiSections() {
           <Stat label="Errors" value="7" desc="0.5% of requests" state="err" />
           <Stat label="Sign-in" value="1" desc="connection awaits" state="act" />
         </Stats>
-        <Label>bar chart: one series, a tooltip on hover and focus, the last day is current</Label>
-        <BarChart label="Tokens per day over 14 days" y={['0', '10M', '20M', '30M', '40M', '50M']} cols={CHART_COLS} />
+        <Label>bar chart in a card (System): one series, a tooltip on hover and focus — kept inside the plot on the edge bars, the last day is current</Label>
+        <Card>
+          <CardHead title="Tokens per day" />
+          <CardBody>
+            <BarChart label="Tokens per day over 14 days" y={['0', '10M', '20M', '30M', '40M', '50M']} cols={CHART_COLS} />
+          </CardBody>
+        </Card>
         <Label>sparklines: per core · traffic over an hour · muted</Label>
         <div className="dev-row">
           <div style={{ width: 160 }}>

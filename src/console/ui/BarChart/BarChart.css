@@ -1,17 +1,27 @@
 @layer components{
-/* ── Bar chart, single series ──  .chart[role=img] > .chart-y + .chart-plot (.chart-grid > i, .chart-col[--v][data-current] > .chart-bar + .tip.chart-tip) + .chart-x
-   Bar ≤ 24px, rounded on top only, grid of hairlines, labels in text tokens. Single series — no legend. */
-.chart{--chart-h:180px;--chart-bar-w:24px;display:grid;grid-template-columns:auto minmax(0,1fr);grid-template-rows:var(--chart-h) auto;column-gap:var(--sp-2);font-size:var(--fs-micro);line-height:var(--lh-micro);color:var(--text-3);font-variant-numeric:tabular-nums}
+/* ── Bar chart, single series ──  .chart[role=img] > .chart-y + .chart-plot (.chart-grid > i, .chart-col[--v --i --n][data-current] > .chart-bar + .tip.chart-tip) + .chart-x
+   Bar ≤ 24px, rounded on top only, grid of hairlines, labels in text tokens. Single series — no legend.
+   --v — the bar height as a number of percent (50, not 50%), --i / --n — the column's index and the count: the tooltip
+   clamps itself with them. */
+.chart{--chart-h:180px;--chart-bar-w:24px;--chart-gap:var(--sp-0h);display:grid;grid-template-columns:auto minmax(0,1fr);grid-template-rows:var(--chart-h) auto;column-gap:var(--sp-2);font-size:var(--fs-micro);line-height:var(--lh-micro);color:var(--text-3);font-variant-numeric:tabular-nums}
 .chart-y{display:flex;flex-direction:column-reverse;justify-content:space-between;text-align:right;line-height:1;transform:translateY(0.5em)}
-.chart-plot{position:relative;display:flex;align-items:flex-end;gap:var(--sp-0h);border-bottom:1px solid var(--border-strong)}
+.chart-plot{position:relative;display:flex;align-items:flex-end;gap:var(--chart-gap);border-bottom:1px solid var(--border-strong);container-type:inline-size}   /* the container: the tooltip measures the plot in cqi */
 .chart-grid{position:absolute;inset:0;display:flex;flex-direction:column;justify-content:space-between;pointer-events:none}
 .chart-grid > i{display:block;border-top:1px solid var(--border)}
-.chart-col{position:relative;flex:1;display:flex;justify-content:center;align-items:flex-end;height:100%}
-.chart-bar{width:min(var(--chart-bar-w),100%);height:var(--v);border-radius:var(--r-xs) var(--r-xs) 0 0;background:var(--accent)}
+.chart-col{position:relative;flex:1 1 0;min-width:0;display:flex;justify-content:center;align-items:flex-end;height:100%}
+.chart-bar{width:min(var(--chart-bar-w),100%);height:calc(var(--v) * 1%);border-radius:var(--r-xs) var(--r-xs) 0 0;background:var(--accent)}
 .chart-col:hover .chart-bar,.chart-col[data-current] .chart-bar{background:var(--link)}
-.chart-tip{position:absolute;bottom:calc(var(--v) + var(--sp-2));left:50%;transform:translateX(-50%);z-index:var(--z-raised);display:none;flex-direction:column;align-items:flex-start;gap:0;white-space:nowrap}
+/* The tooltip sits centered above the bar, but stays inside the plot — a card clips what sticks out of it. Horizontally:
+   the column's center in the plot is --chart-col-x; the shift is clamped so that neither edge of the tip leaves the plot
+   (percentages in translate are the tip's own size). Vertically: a tip that would rise above the plot is pushed down
+   onto the bar. */
+.chart-col{--chart-col-w:calc((100cqi - (var(--n) - 1) * var(--chart-gap)) / var(--n));--chart-col-x:calc(var(--i) * (var(--chart-col-w) + var(--chart-gap)) + var(--chart-col-w) / 2)}
+.chart-tip{position:absolute;bottom:calc(var(--v) * 1% + var(--sp-2));left:50%;z-index:var(--z-raised);display:none;flex-direction:column;align-items:flex-start;gap:0;white-space:nowrap;
+  transform:translate(clamp(calc(-1 * var(--chart-col-x)),-50%,calc(100cqi - var(--chart-col-x) - 100%)),max(0px,calc(var(--v) / 100 * var(--chart-h) + var(--sp-2) + 100% - var(--chart-h))))}
 .chart-col:is(:hover,:focus-within) .chart-tip{display:flex}
 .chart-tip b{font-size:var(--fs-ui);font-weight:var(--fw-semibold)}
-.chart-x{grid-column:2;display:flex;gap:var(--sp-0h);padding-top:var(--sp-1h)}
-.chart-x > span{flex:1;text-align:center;white-space:nowrap}
+/* The labels share the columns' geometry exactly (equal flex basis, no text minimum); a label wider than its column
+   overflows it evenly on both sides, so it stays centered under the bar. */
+.chart-x{grid-column:2;display:flex;gap:var(--chart-gap);padding-top:var(--sp-1h)}
+.chart-x > span{flex:1 1 0;min-width:0;display:flex;justify-content:center;white-space:nowrap}
 }

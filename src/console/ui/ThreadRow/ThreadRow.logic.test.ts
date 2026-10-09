@@ -39,6 +39,33 @@ describe('highlightParts', () => {
   it('leaves text without the match plain', () => {
     assert.deepEqual(highlightParts('Sort emails', 'slug'), [{ text: 'Sort emails', hit: false }]);
   });
+
+  it('keeps the indices of the original text when lowercasing changes the length', () => {
+    // "İ".toLowerCase() is two code units: "i" and a combining dot.
+    assert.deepEqual(highlightParts('İstanbul slug', 'slug'), [
+      { text: 'İstanbul ', hit: false },
+      { text: 'slug', hit: true },
+    ]);
+    assert.deepEqual(highlightParts('İİx', 'x'), [
+      { text: 'İİ', hit: false },
+      { text: 'x', hit: true },
+    ]);
+    // A match that ends inside the expanded character takes the whole character.
+    assert.deepEqual(highlightParts('İstanbul', 'i'), [
+      { text: 'İ', hit: true },
+      { text: 'stanbul', hit: false },
+    ]);
+    // Astral characters (surrogate pairs) are never cut in half.
+    assert.deepEqual(highlightParts('🙂 Slug', 'slug'), [
+      { text: '🙂 ', hit: false },
+      { text: 'Slug', hit: true },
+    ]);
+    assert.deepEqual(highlightParts('a🙂b', '🙂'), [
+      { text: 'a', hit: false },
+      { text: '🙂', hit: true },
+      { text: 'b', hit: false },
+    ]);
+  });
 });
 
 describe('threadRowMeta', () => {

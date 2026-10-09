@@ -50,21 +50,23 @@ export function Caption({ children }: { children: ReactNode }) {
 }
 
 // A published address as a chip (design: .url): a link when href is given,
-// plain text otherwise (inside a row that is itself a link).
-export function Url({ children, href, onClick }: { children: ReactNode; href?: string; onClick?: (event: MouseEvent<HTMLAnchorElement>) => void }) {
+// plain text otherwise (inside a row that is itself a link). The chip is one
+// line and shrinks with its place: a long address (a slug may be 64
+// characters) ends in an ellipsis, the full value stays in `title`.
+export function Url({ children, href, onClick }: { children: string; href?: string; onClick?: (event: MouseEvent<HTMLAnchorElement>) => void }) {
   if (href) {
     return (
-      <a className="url" href={href} target="_blank" rel="noreferrer" onClick={onClick}>
+      <a className="url" href={href} target="_blank" rel="noreferrer" title={children} onClick={onClick}>
         <Icon name="globe" />
-        {children}
+        <span className="url-t">{children}</span>
       </a>
     );
   }
 
   return (
-    <span className="url">
+    <span className="url" title={children}>
       <Icon name="globe" />
-      {children}
+      <span className="url-t">{children}</span>
     </span>
   );
 }
