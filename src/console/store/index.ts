@@ -75,7 +75,12 @@ export function createStore({ api, initialRoute, enhancer }: CreateStoreOptions)
   };
 
   const middleware = applyMiddleware(actionHandlersMiddleware(handlers, api));
-  const enhanced: StoreEnhancer = enhancer ? (next => enhancer(middleware(next))) : middleware;
+  // The extra enhancer goes INSIDE the middleware (Redux's "devtools last"):
+  // the DevTools instrument replaces the reducer with a lifted one and feeds
+  // the store it builds PERFORM_ACTION wrappers, so a middleware composed
+  // outside it would see only wrappers and never run a handler — with the
+  // extension installed the session check would never fire.
+  const enhanced: StoreEnhancer = enhancer ? (next => middleware(enhancer(next))) : middleware;
 
   return createRedux(rootReducer, undefined, enhanced) as AppStore;
 }

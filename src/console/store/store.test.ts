@@ -7,6 +7,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import type { Api } from '../lib/api/index.ts';
 import { ApiError } from '../lib/api/index.ts';
+import type { StoreEnhancer } from 'redux';
 import { createStore } from './index.ts';
 import type { Action, AppStore } from './index.ts';
 import { eventAction } from './events.ts';
@@ -64,6 +65,26 @@ async function dispatched(store: AppStore, action: Action): Promise<void> {
 
 // Lets the cascade of handlers (each awaiting its api call) settle.
 const settle = () => new Promise(resolve => setTimeout(resolve, 0));
+
+// An enhancer shaped like the Redux DevTools instrument: the store it builds
+// runs a lifted reducer and its dispatch wraps every action into
+// PERFORM_ACTION — whatever is composed outside it sees only the wrappers.
+type Lifted = { type: 'PERFORM_ACTION'; action: unknown };
+
+const liftingEnhancer: StoreEnhancer = next => (reducer, preloadedState) => {
+  const lifted = (state: unknown, action: unknown) =>
+    (reducer as (state: unknown, action: unknown) => unknown)(state, (action as Lifted).type === 'PERFORM_ACTION' ? (action as Lifted).action : action);
+  const store = next(lifted as typeof reducer, preloadedState);
+
+  return {
+    ...store,
+    dispatch: (action => {
+      store.dispatch({ type: 'PERFORM_ACTION', action } as unknown as Parameters<typeof store.dispatch>[0]);
+
+      return action;
+    }) as typeof store.dispatch,
+  };
+};
 
 describe('session start-up', () => {
   it('checks the session, loads the snapshot and the route data', async () => {
@@ -312,6 +333,22 @@ describe('route data', () => {
     await settle();
     assert.equal(calls.filter(call => call.name === 'threads.list').length, 2);
     assert.deepEqual(calls.at(-1)?.args, [{ limit: 50 }]);
+  });
+
+  // Regression: with the Redux DevTools extension installed, the console
+  // showed SESSION_CHECK in the extension and nothing else happened — the
+  // enhancer sat outside the middleware, which saw only PERFORM_ACTION.
+  it('runs the handlers with a DevTools-like lifting enhancer composed in', async () => {
+    const calls: Calls = [];
+    const store = createStore({ api: fakeApi({}, calls), initialRoute: { key: 'home' }, enhancer: liftingEnhancer });
+
+    await dispatched(store, sessionCheck());
+    await settle();
+    assert.equal(store.getState().session.status, 'signed-in');
+    assert.deepEqual(
+      calls.map(call => call.name),
+      ['me', 'snapshot'],
+    );
   });
 
   it('closes the More sheet on navigation', () => {
