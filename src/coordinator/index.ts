@@ -12,6 +12,7 @@ import { listThreads } from '../core/threads.ts';
 import { config } from '../config/index.ts';
 import { listProjects } from '../projects/store.ts';
 import type { ProjectModel } from '../projects/store.ts';
+import { getFailingConsumers } from '../core/consumers.ts';
 import { getPendingRestart } from '../runtime/restart.ts';
 import { buildTurnPrompt, buildKeepalivePrompt, markPromptStateWarm, PROMPT_CACHE_TTL_MS } from '../harness/openai/prompt-builder.ts';
 import { startLlmRequestMetrics } from '../harness/openai/llm-metrics.ts';
@@ -60,6 +61,21 @@ export function buildStatusText(children: Thread[], projects: ProjectModel[]): s
   if (pendingRestart) {
     lines.push(
       `restart pending: requested ${pendingRestart.requestedAt.toISOString()} (${pendingRestart.reason}) — happens once every child thread is closed and the log goes quiet; avoid starting new threads`,
+    );
+  }
+
+  // Event-log consumers that cannot reach the database right now: their
+  // delivery (runs, Telegram, restart requests) is paused, not lost — they
+  // retry by themselves and resume from their cursor.
+  const failingConsumers = getFailingConsumers();
+
+  if (failingConsumers.length) {
+    const details = failingConsumers
+      .map(consumer => `${consumer.name} (since ${consumer.failing!.since.toISOString()}, ${consumer.failing!.failures} failed rounds: ${consumer.failing!.lastError})`)
+      .join('; ');
+
+    lines.push(
+      `event delivery degraded — the database is unreachable for: ${details}. Delivery is paused and resumes by itself; tell the user if they ask why agents are silent`,
     );
   }
 

@@ -1,32 +1,23 @@
 // Polling consumer loop over the event log — a straight port of v1's
 // event-bus (§4.4). Consumers are orthogonal to threads: a thread bounds
-// transcripts, not consumers.
+// transcripts, not consumers. The loop itself lives in consumer-loop.ts
+// (storage injected, testable); this module binds it to the real log and
+// is the one the app imports.
 
 import { prisma } from '../db/client.ts';
+import { isConnectivityError } from '../db/connectivity.ts';
 import type { Event } from './contract.ts';
 import { SYSTEM_EXCEPTION } from './envelope.ts';
 import { appendEvent } from './append.ts';
 import { getEventsAfter } from './events.ts';
 import { getMainThread } from './threads.ts';
+import { startConsumerLoop } from './consumer-loop.ts';
+import type { Consumer, ConsumerIo, ConsumerLoopOptions, ConsumerOutage } from './consumer-loop.ts';
 
-type ConsumerOptions = {
-  name: string;
-  handler: (event: Event) => Promise<void>;
-  // Only receive events of these types; a function allows the subscription to
-  // follow runtime registry changes. Omit to receive everything.
-  types?: string[] | (() => string[]);
-  // Start at the head of the log on the very first run instead of replaying
-  // everything already recorded. For consumers whose handling is visible
-  // outside the system, where replaying history would be worse than missing it.
-  startAtHead?: boolean;
-  batchSize?: number;
-  pollIntervalMs?: number;
-};
+export type { Consumer, ConsumerHealth } from './consumer-loop.ts';
+export { getConsumerHealth, getFailingConsumers } from './consumer-loop.ts';
 
-export type Consumer = {
-  name: string;
-  stop: () => void;
-};
+type ConsumerOptions = Omit<ConsumerLoopOptions, 'io'>;
 
 async function getConsumerCursor(name: string): Promise<bigint> {
   const consumer = await prisma.eventConsumer.upsert({
@@ -78,63 +69,38 @@ async function reportHandlerError(consumerName: string, event: Event, error: unk
   });
 }
 
-export function startConsumer({
-  name,
-  handler,
-  types,
-  startAtHead = false,
-  batchSize = 100,
-  pollIntervalMs = 1000,
-}: ConsumerOptions): Consumer {
-  let stopped = false;
-
-  const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-
-  const loop = async () => {
-    let cursor = startAtHead ? await registerConsumerAtHead(name) : await getConsumerCursor(name);
-
-    console.log(`[consumer:${name}] started at seq=${cursor}`);
-
-    while (!stopped) {
-      const resolvedTypes = typeof types === 'function' ? types() : types;
-      const events = await getEventsAfter(cursor, { types: resolvedTypes, limit: batchSize });
-
-      for (const event of events) {
-        if (stopped) {
-          return;
-        }
-
-        try {
-          await handler(event);
-        } catch (error) {
-          console.error(`[consumer:${name}] handler failed for event ${event.id}:`, error);
-
-          try {
-            await reportHandlerError(name, event, error);
-          } catch (reportError) {
-            console.error(`[consumer:${name}] failed to report handler error:`, reportError);
-          }
-        }
-
-        cursor = event.seq;
-        await setConsumerCursor(name, cursor);
-      }
-
-      // Batch not full — we are at the head of the log, wait for new events
-      if (events.length < batchSize) {
-        await sleep(pollIntervalMs);
-      }
-    }
-  };
-
-  loop().catch(error => {
-    console.error(`[consumer:${name}] loop crashed:`, error);
-  });
-
-  return {
-    name,
-    stop: () => {
-      stopped = true;
+// An outage is installation-level (the log itself was unreachable, no
+// workspace owns that), journaled once it is over — like a failed migration
+// or a supervisor rollback: the fact reaches the log as soon as the log is
+// back, with the span and the last error for the record.
+async function reportOutage(consumerName: string, outage: ConsumerOutage): Promise<void> {
+  await appendEvent({
+    type: SYSTEM_EXCEPTION,
+    actor: 'system',
+    userId: null,
+    payload: {
+      scope: 'consumer-outage',
+      consumerName,
+      since: outage.since.toISOString(),
+      until: outage.until.toISOString(),
+      failures: outage.failures,
+      error:
+        `Consumer "${consumerName}" could not reach the log for ${outage.failures} round(s) ` +
+        `(${outage.since.toISOString()} – ${outage.until.toISOString()}) and resumed from its cursor: ${outage.lastError}`,
     },
-  };
+  });
+}
+
+const io: ConsumerIo = {
+  loadCursor: (name, startAtHead) => (startAtHead ? registerConsumerAtHead(name) : getConsumerCursor(name)),
+  readAfter: (seq, types, limit) => getEventsAfter(seq, { types, limit }),
+  saveCursor: setConsumerCursor,
+  reportHandlerError,
+  reportOutage,
+  isTransient: isConnectivityError,
+  sleep: ms => new Promise(resolve => setTimeout(resolve, ms)),
+};
+
+export function startConsumer(options: ConsumerOptions): Consumer {
+  return startConsumerLoop({ ...options, io });
 }

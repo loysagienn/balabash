@@ -12,11 +12,25 @@ import { createAppsHandoffMiddleware } from '../apps/handoff.ts';
 import { createMainDomainAppsMiddleware } from '../apps/index.ts';
 import { createConsoleMiddleware } from './console.ts';
 
+const CLIENT_ABORT_CODES = new Set(['ERR_STREAM_PREMATURE_CLOSE', 'ECONNRESET', 'ECONNABORTED', 'EPIPE']);
+
 export function startWebServer(): void {
   const app = new Koa();
 
   // Behind the TLS-terminating proxy: trust X-Forwarded-* for protocol/ip.
   app.proxy = true;
+
+  // A client leaving mid-stream (a download or preview abandoned, a tab
+  // closed) is not a server error, yet Koa's default reporter prints a
+  // stack for each — enough to flush a real error out of a short log.
+  // Everything else keeps Koa's own reporting.
+  app.on('error', (error: NodeJS.ErrnoException) => {
+    if (CLIENT_ABORT_CODES.has(error.code ?? '')) {
+      return;
+    }
+
+    app.onerror(error);
+  });
 
   // The apps execution domain first: a host-aware branch that owns the
   // whole balabash.app host and never falls through — none of the surfaces
