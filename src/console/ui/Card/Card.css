@@ -1,0 +1,24 @@
+@layer components{
+/* ── Card ──  .card > .card-h (h3.card-t, .card-h-end) + .card-b | .list + .card-f */
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);overflow:hidden;min-width:0}
+.card-h{--card-h-min:50px;display:flex;align-items:center;gap:var(--sp-2);min-height:var(--card-h-min);padding:var(--sp-3h) var(--sp-4h);border-bottom:1px solid var(--border)}
+.card-t{margin:0;font-size:var(--fs-ui);font-weight:var(--fw-semibold)}
+.card-h-end{margin-left:auto;display:flex;align-items:center;gap:var(--sp-1h)}
+.card-b{padding:var(--sp-3h) var(--sp-4h)}   /* side padding = header and rows: everything in a card starts at one edge */
+.card-f{display:flex;align-items:center;gap:var(--sp-2);padding:var(--sp-2h) var(--sp-4h);border-top:1px solid var(--border)}
+}
+@layer patterns{
+/* ── Card on the phone ──  .card[data-narrow="bare"]: no background or border, the header becomes the section title
+   (design: patterns.css “Sections on phone”; the list, limits and section links carry their own tile rules). */
+@container shell (max-width:720px){
+  .card[data-narrow="bare"]{overflow:visible;background:none;border:0;border-radius:0}
+  .card[data-narrow="bare"] .card-h{--card-h-min:var(--ctl-h-sm);padding:0 0 var(--sp-2h);border-bottom:0}
+  .card[data-narrow="bare"] .card-h .card-t{font-size:var(--fs-h2)}
+  .card[data-narrow="bare"] > .card-b{padding:0}
+  .card[data-narrow="bare"] .tile{background:var(--surface)}
+  .card[data-narrow="bare"] .dsec{padding-inline:0}
+  .card[data-narrow="bare"] .loadmore{border-top:0}
+  .card[data-narrow="bare"] .list:not([data-narrow]) :is(.row,.listgrp),.card[data-narrow="bare"] > .card-f{padding-inline:0}
+  .card[data-narrow="bare"] .dtable{--dtable-edge:0px}
+}
+}

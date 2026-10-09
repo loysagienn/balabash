@@ -1,0 +1,12 @@
+@layer components{
+/* ── Modal ──  <div class="modal" role="dialog" aria-modal="true"> .modal-h (h3.modal-t, .modal-close) .modal-b .modal-f */
+.modal{--modal-w:460px;width:min(var(--modal-w),100%);background:var(--surface);border-radius:var(--r-lg);box-shadow:var(--shadow-modal);overflow:hidden;outline:none}
+.modal-h{display:flex;align-items:flex-start;gap:var(--sp-3);padding:var(--sp-4h) var(--sp-5) var(--sp-2)}
+.modal-t{margin:0;font-size:var(--fs-h2);line-height:var(--lh-h2);font-weight:var(--fw-semibold)}
+.modal-close{margin:calc(-1 * var(--sp-1)) calc(-1 * var(--sp-2)) 0 auto}
+.modal-b{padding:0 var(--sp-5) var(--sp-4h);font-size:var(--fs-body);line-height:var(--lh-body);color:var(--text-2)}
+.modal-f{display:flex;justify-content:flex-end;gap:var(--sp-2);padding:var(--sp-3) var(--sp-5);border-top:1px solid var(--border)}
+
+/* Modal layer over the screen  .scrim + .modal-layer > .modal */
+.modal-layer{position:absolute;inset:0;z-index:var(--z-modal);display:grid;place-items:center;padding:var(--sp-6)}
+}

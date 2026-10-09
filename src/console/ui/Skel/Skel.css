@@ -1,0 +1,10 @@
+@layer components{
+/* ── Skeleton ──  <span class="skel" data-shape="line-sm|av|pill" style="--w:62%"></span> */
+.skel{--skel-h:10px;--skel-sheen:400px;--skel-pill-w:76px;display:block;flex:none;width:var(--w,100%);height:var(--skel-h);border-radius:var(--r-xs);background:linear-gradient(90deg,var(--surface-2) 0,var(--surface-3) 50%,var(--surface-2) 100%);background-size:var(--skel-sheen) 100%;animation:bb-shimmer 1.4s linear infinite}
+.skel[data-shape="line-sm"]{--skel-h:8px}
+.skel[data-shape="av"]{width:var(--av);--skel-h:var(--av);border-radius:var(--r-av)}
+.skel[data-shape="pill"]{--skel-h:22px;width:var(--w,var(--skel-pill-w));border-radius:var(--r-pill)}
+
+/* Several skeleton lines stacked  .skel-stack > .skel… */
+.skel-stack{display:flex;flex-direction:column;gap:var(--sp-2);min-width:0}
+}

@@ -1,0 +1,8 @@
+@layer components{
+/* ── Compact state ──  <span class="st" data-state="wait"><i class="st-dot"></i>waiting</span> */
+.st{--st-dot:7px;display:inline-flex;align-items:center;gap:var(--sp-1h);font-size:var(--fs-meta);line-height:var(--lh-meta);color:var(--text-2);white-space:nowrap}
+.st-dot{width:var(--st-dot);height:var(--st-dot);border-radius:50%;flex:none;background:var(--st-c,var(--text-3))}
+.st .ic{font-size:var(--ico-xs);color:var(--st-c,var(--text-3))}
+.st[data-state="run"] .st-dot{animation:bb-blink var(--blink) infinite}
+.st[data-state="err"]{color:var(--st-err)}
+}

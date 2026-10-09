@@ -6,21 +6,66 @@ import { useState } from 'react';
 import type { ReactNode } from 'react';
 import { Shell } from '../../features/shell/Shell.tsx';
 import { ActivityChip } from '../../ui/ActivityChip/ActivityChip.tsx';
-import { Btn } from '../../ui/Btn/Btn.tsx';
+import { Avatar } from '../../ui/Avatar/Avatar.tsx';
+import { AGENT_AVATARS } from '../../ui/Avatar/agents.ts';
+import { Badge } from '../../ui/Badge/Badge.tsx';
+import { ActionLink, Btn } from '../../ui/Btn/Btn.tsx';
+import { Card, CardBody, CardFoot, CardHead } from '../../ui/Card/Card.tsx';
+import { Check } from '../../ui/Check/Check.tsx';
+import { Crumbs } from '../../ui/Crumbs/Crumbs.tsx';
 import { Empty } from '../../ui/Empty/Empty.tsx';
+import { FChip } from '../../ui/FChip/FChip.tsx';
 import { Field } from '../../ui/Field/Field.tsx';
+import { Hint, Tip } from '../../ui/Hint/Hint.tsx';
 import { Icon } from '../../ui/Icon/Icon.tsx';
 import { ICONS } from '../../ui/Icon/icons.ts';
 import type { IconName } from '../../ui/Icon/Icon.tsx';
 import { IconBtn } from '../../ui/IconBtn/IconBtn.tsx';
 import { Input } from '../../ui/Input/Input.tsx';
+import { List, ListGroup, LoadMore } from '../../ui/List/List.tsx';
+import { Menu, MenuAnchor, MenuItem, MenuLabel, MenuSep } from '../../ui/Menu/Menu.tsx';
+import { Modal } from '../../ui/Modal/Modal.tsx';
+import { Note } from '../../ui/Note/Note.tsx';
 import { Obj } from '../../ui/Obj/Obj.tsx';
+import { PageHead } from '../../ui/PageHead/PageHead.tsx';
+import { Prog } from '../../ui/Prog/Prog.tsx';
+import { Ctx } from '../../ui/Ring/Ctx.tsx';
+import { Gauge } from '../../ui/Ring/Gauge.tsx';
+import { Ring } from '../../ui/Ring/Ring.tsx';
 import { Screen } from '../../ui/Screen/Screen.tsx';
+import { Seg, SegItem } from '../../ui/Seg/Seg.tsx';
+import { Sheet } from '../../ui/Sheet/Sheet.tsx';
+import { SkelRow, SkelStack } from '../../ui/Skel/Skel.tsx';
+import { Status } from '../../ui/Status/Status.tsx';
+import { Tab, Tabs } from '../../ui/Tabs/Tabs.tsx';
+import { Toast } from '../../ui/Toast/Toast.tsx';
 import { Attn, Caption, Code, Count, Kbd, Pulse, Quiet, Tag } from '../../ui/atoms/atoms.tsx';
 import type { StateName } from '../../ui/atoms/atoms.tsx';
 import './DevUi.css';
 
 const STATES: StateName[] = ['run', 'wait', 'act', 'done', 'err', 'off'];
+const STATE_LABEL: Record<StateName, string> = { run: 'running', wait: 'waiting', act: 'reply needed', done: 'done', err: 'crashed', off: 'cancelled' };
+const AGENTS = Object.keys(AGENT_AVATARS);
+
+// A sample thread row of the design, for the list blocks (ThreadRow itself
+// comes with the composites).
+function DemoRow({ agent, title, meta, state, time, pip, fresh }: { agent: string; title: string; meta: ReactNode; state: StateName; time: string; pip?: 'run' | 'err'; fresh?: boolean }) {
+  return (
+    <a className="row" href="#" data-fresh={fresh ? '' : undefined} onClick={event => event.preventDefault()}>
+      <Avatar agent={agent} pip={pip} />
+      <span className="row-main">
+        <span className="row-t">
+          <span className="row-t-text">{title}</span>
+        </span>
+        <span className="row-m">{meta}</span>
+      </span>
+      <span className="row-end">
+        <Badge state={state} label={STATE_LABEL[state]} />
+        <span className="row-time">{time}</span>
+      </span>
+    </a>
+  );
+}
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -43,6 +88,12 @@ function Row({ label, children }: { label?: string; children: ReactNode }) {
 export function DevUi() {
   const [text, setText] = useState('K7QM2X');
   const [area, setArea] = useState('');
+  const [checks, setChecks] = useState({ box: true, radio: 'a', tgl: false });
+  const [seg, setSeg] = useState('active');
+  const [tab, setTab] = useState('tasks');
+  const [overlay, setOverlay] = useState<'modal' | 'sheet' | 'form' | null>(null);
+  const [menu, setMenu] = useState(false);
+  const [toasts, setToasts] = useState([1, 2, 3, 4]);
 
   return (
     <Shell current={null} title="UI kit" sub="/dev/ui · blocks of the design system in code">
@@ -191,6 +242,311 @@ export function DevUi() {
                 HTTP 502 · the server did not answer.
               </Empty>
             </div>
+          </div>
+        </Section>
+
+        <Section title="Check">
+          <Row label="checkbox · radio · switch · disabled">
+            <Check label="Notify on successful runs" checked={checks.box} onChange={box => setChecks({ ...checks, box })} />
+            <Check kind="radio" name="dev-r" label="Desktop" checked={checks.radio === 'a'} onChange={() => setChecks({ ...checks, radio: 'a' })} />
+            <Check kind="radio" name="dev-r" label="Phone" checked={checks.radio === 'b'} onChange={() => setChecks({ ...checks, radio: 'b' })} />
+            <Check kind="switch" label="Light theme" checked={checks.tgl} onChange={tgl => setChecks({ ...checks, tgl })} />
+            <Check label="Locked" checked disabled onChange={() => undefined} />
+            <Check kind="switch" label="Locked" checked={false} disabled onChange={() => undefined} />
+          </Row>
+        </Section>
+
+        <Section title="Seg · Tabs · FChip">
+          <Row label="segments">
+            <Seg label="Mode">
+              {[
+                ['active', 'Active', 4],
+                ['all', 'All', 1312],
+                ['mine', 'Mine', 0],
+              ].map(([key, label, n]) => (
+                <SegItem key={key} label={label} n={n} sel={seg === key} onClick={() => setSeg(String(key))} />
+              ))}
+            </Seg>
+          </Row>
+          <Row label="tabs">
+            <div style={{ width: '100%' }}>
+              <Tabs label="Schedule">
+                <Tab label="Tasks" n={7} sel={tab === 'tasks'} onClick={() => setTab('tasks')} />
+                <Tab label="Runs" n={128} sel={tab === 'runs'} onClick={() => setTab('runs')} />
+                <Tab label="Settings" sel={tab === 'settings'} onClick={() => setTab('settings')} />
+              </Tabs>
+            </div>
+          </Row>
+          <Row label="filter chips: empty · value · picker">
+            <FChip label="Add filter" />
+            <FChip label="Agent" value="engineer" />
+            <FChip label="Project" value="balabash" icon="folder" end="chevron-down" />
+          </Row>
+        </Section>
+
+        <Section title="Crumbs">
+          <Row label="plain · with lead · file area header">
+            <Crumbs items={[{ label: 'Files', href: '#' }, { label: 'balabash', href: '#' }]} current="design" />
+            <Crumbs lead="folder" items={[{ label: 'renovation', href: '#' }]} current="estimates" />
+          </Row>
+          <div className="dev-box" style={{ width: 280, padding: 'var(--sp-2)' }}>
+            <Crumbs fa items={[{ label: 'Files', href: '#' }, { label: 'balabash', href: '#' }, { label: 'design', href: '#' }]} current="a-very-long-file-name-that-does-not-fit.md" />
+          </div>
+        </Section>
+
+        <Section title="Badge · Status">
+          <Row label="badge: six states · sm">
+            {STATES.map(state => (
+              <Badge key={state} state={state} label={STATE_LABEL[state]} />
+            ))}
+            <Badge state="run" label="running" size="sm" />
+          </Row>
+          <Row label="status: six states · custom icon">
+            {STATES.map(state => (
+              <Status key={state} state={state} label={STATE_LABEL[state]} />
+            ))}
+            <Status state="wait" icon="clock-alert" label="overdue" />
+          </Row>
+          <div className="dev-box" style={{ width: 320 }}>
+            <List>
+              <DemoRow agent="engineer" title="Narrow list: badges go compact" meta="engineer · Balabash" state="run" time="since 14:02" pip="run" />
+              <DemoRow agent="browser" title="Checking /p/kcal" meta="browser · Balabash" state="off" time="23:10 → 23:14" />
+            </List>
+          </div>
+        </Section>
+
+        <Section title="Avatar">
+          <Row label="the catalog, plus an unknown agent">
+            {AGENTS.map(agent => (
+              <Avatar key={agent} agent={agent} />
+            ))}
+            <Avatar agent="translator" />
+          </Row>
+          <Row label="xs · sm · default · lg · pips run / wait / act / err">
+            <Avatar agent="engineer" size="xs" />
+            <Avatar agent="engineer" size="sm" />
+            <Avatar agent="engineer" />
+            <Avatar agent="engineer" size="lg" />
+            <Avatar agent="coordinator" pip="run" />
+            <Avatar agent="designer" pip="wait" />
+            <Avatar agent="browser" pip="act" />
+            <Avatar agent="codex" pip="err" />
+          </Row>
+        </Section>
+
+        <Section title="Ring · Ctx · Gauge · Prog">
+          <Row label="ring 20 · 62 · 85 · 100 · 130 · lg">
+            <Ring value={20} />
+            <Ring value={62} />
+            <Ring value={85} />
+            <Ring value={100} />
+            <Ring value={130} />
+            <Ring value={62} size="lg" />
+          </Row>
+          <Row label="ctx: plain · with tokens (hover for the tooltip) · custom text">
+            <Ctx percentage={62} />
+            <Ctx percentage={41} usedTokens={82_000} maxTokens={200_000} />
+            <Ctx percentage={91} usedTokens={182_000} maxTokens={200_000} text="182k" />
+          </Row>
+          <Row label="gauge 47 · 84 · 100">
+            <Gauge value={47} />
+            <Gauge value={84} />
+            <Gauge value={100} />
+          </Row>
+          <Row label="progress 62 · err · indeterminate">
+            <div style={{ width: 200 }}>
+              <Prog value={62} label="Uploading" />
+            </div>
+            <div style={{ width: 200 }}>
+              <Prog value={38} state="err" label="Upload failed" />
+            </div>
+            <div style={{ width: 200 }}>
+              <Prog indeterminate label="Working" />
+            </div>
+          </Row>
+          <Row label="tooltip · hint on focus">
+            <Tip>
+              Context fill: 124k of 200k<Kbd>C</Kbd>
+            </Tip>
+            <Hint label="Focus or hover to see the tip">
+              <Tag>hover me</Tag>
+              <Tip hint>
+                A tip <b>adds</b>, it doesn’t hide
+              </Tip>
+            </Hint>
+          </Row>
+        </Section>
+
+        <Section title="Card · CardHead · List">
+          <div className="dev-grid" data-wide="">
+            <Card>
+              <CardHead title="Active threads" count={4} countState="run" link={<ActionLink label="All threads" href="#" onClick={event => event.preventDefault()} />} />
+              <List timeW="96px">
+                <ListGroup end="7 threads">Today, October 8</ListGroup>
+                <DemoRow agent="engineer" title="Mini-apps: publishing by slug" meta={<>engineer · Balabash · <Code>Read src/api/apps.ts</Code></>} state="run" time="since 14:02" pip="run" fresh />
+                <DemoRow agent="coordinator" title="Sort contractor emails" meta="coordinator · Renovation" state="wait" time="16:42" />
+                <ListGroup end="5 threads">Yesterday, October 7</ListGroup>
+                <DemoRow agent="browser" title="Checking /p/kcal in the browser" meta="browser · Balabash" state="err" time="23:10 → 23:14" />
+                <LoadMore>Loading earlier · showing 12 of 1,312</LoadMore>
+              </List>
+            </Card>
+            <Card>
+              <CardHead title="Loading" tag="skeleton">
+                <IconBtn icon="refresh-cw" label="Refresh" size="sm" />
+              </CardHead>
+              <List busy>
+                <SkelRow widths={[62, 38]} />
+                <SkelRow widths={[48, 30]} />
+                <SkelRow widths={[55, 35, 80]} pill={false} />
+              </List>
+              <CardFoot>
+                <Caption>skeleton stack alone:</Caption>
+                <div style={{ flex: 1 }}>
+                  <SkelStack widths={[70, 40]} smFirst />
+                </div>
+              </CardFoot>
+            </Card>
+            <Card narrow="bare">
+              <CardHead title="Bare on the phone" count={2} />
+              <List narrow="tiles">
+                <DemoRow agent="gardener" title="Rows become tiles on the phone" meta="gardener · Balabash" state="done" time="12:40 → 12:52" />
+                <DemoRow agent="scheduler" title="A card without a frame when the shell is narrow" meta="scheduler" state="wait" time="09:00" />
+              </List>
+              <CardBody>
+                <Quiet>card body at the gutter edge</Quiet>
+              </CardBody>
+            </Card>
+          </div>
+        </Section>
+
+        <Section title="PageHead">
+          <PageHead
+            title="Renovation"
+            desc="Apartment on Petrogradsky: estimate, contractors, work schedule."
+            slug="renovation/"
+            created="created Aug 14"
+            work="active 7 min ago"
+            onMore={() => setMenu(open => !open)}
+            moreExpanded={menu}
+          >
+            <Btn label="Edit" icon="pencil" />
+            <Btn label="New thread" icon="plus" variant="primary" />
+          </PageHead>
+          <PageHead title="Old kitchen" desc="Archived project: nothing runs here." slug="kitchen/" created="created Mar 2" archived />
+        </Section>
+
+        <Section title="Note">
+          <div className="dev-col">
+            <Note role="alert" state="err" icon="database" action="Retry now" actionVariant="ghost">
+              Database unavailable. Retrying in 8s.
+            </Note>
+            <Note state="act" icon="message-circle-question">
+              The agent is waiting for your reply — a 2FA confirmation code.
+            </Note>
+            <Note state="wait" icon="hourglass">
+              Restart requested: waiting for 2 threads to close.
+            </Note>
+            <Note state="off" icon="archive">
+              This project is archived.
+            </Note>
+            <Note>File is over 2 MB — no preview, download only.</Note>
+          </div>
+        </Section>
+
+        <Section title="Menu">
+          <Row label="menu · anchored at a “⋯” button (opens on click)">
+            <Menu label="Thread">
+              <MenuLabel>Thread</MenuLabel>
+              <MenuItem icon="pause" label="Stop turn">
+                <Kbd>⌘</Kbd>
+                <Kbd>.</Kbd>
+              </MenuItem>
+              <MenuItem icon="git-fork" label="Parent thread" />
+              <MenuItem icon="link" label="Copy link" />
+              <MenuSep />
+              <MenuLabel>Show</MenuLabel>
+              <MenuItem icon="brain" label="Thinking" checked />
+              <MenuItem icon="wrench" label="Messages only" checked={false} />
+              <MenuSep />
+              <MenuItem icon="circle-stop" label="Cancel thread" variant="danger" />
+            </Menu>
+            <MenuAnchor>
+              <IconBtn icon="ellipsis" label="More" variant="regular" expanded={menu} onClick={() => setMenu(open => !open)} />
+              {menu ? (
+                <Menu label="More">
+                  <MenuItem icon="pencil" label="Edit" onClick={() => setMenu(false)} />
+                  <MenuItem icon="archive" label="Archive" onClick={() => setMenu(false)} />
+                  <MenuSep />
+                  <MenuItem icon="trash-2" label="Delete" variant="danger" onClick={() => setMenu(false)} />
+                </Menu>
+              ) : null}
+            </MenuAnchor>
+          </Row>
+        </Section>
+
+        <Section title="Modal · Sheet">
+          <Row label="bare window (showcase) · open the real ones">
+            <Modal bare title="Cancel thread?" cancel="Keep running" confirm="Cancel thread" confirmVariant="danger" onClose={() => undefined}>
+              The “engineer” agent will stop and the thread will end without a summary. Child threads (2) will be cancelled too. This can’t be undone.
+            </Modal>
+          </Row>
+          <Row>
+            <Btn label="Open modal" onClick={() => setOverlay('modal')} />
+            <Btn label="Open form modal" onClick={() => setOverlay('form')} />
+            <Btn label="Open sheet" onClick={() => setOverlay('sheet')} />
+          </Row>
+          {overlay === 'modal' ? (
+            <Modal title="Cancel thread?" cancel="Keep running" confirm="Cancel thread" confirmVariant="danger" onClose={() => setOverlay(null)} onConfirm={() => setOverlay(null)}>
+              The “engineer” agent will stop and the thread will end without a summary. This can’t be undone.
+            </Modal>
+          ) : null}
+          {overlay === 'form' ? (
+            <Modal title="New project" confirm="Create project" form="dev-form" onClose={() => setOverlay(null)}>
+              <form
+                id="dev-form"
+                className="form"
+                onSubmit={event => {
+                  event.preventDefault();
+                  setOverlay(null);
+                }}
+              >
+                <Field label="Name" fid="dev-m-name">
+                  <Input id="dev-m-name" value={text} onChange={setText} autoFocus />
+                </Field>
+                <Field label="Folder" fid="dev-m-slug" hint="Can’t be changed after creation.">
+                  <Input id="dev-m-slug" value="bathroom-renovation" onChange={() => undefined} pre="~/" mono />
+                </Field>
+              </form>
+            </Modal>
+          ) : null}
+          {overlay === 'sheet' ? (
+            <Sheet label="Cancel thread?" title="Cancel thread?" desc="The agent will stop and the thread will end without a summary." confirm="Cancel thread" confirmVariant="danger" cancel="Keep running" onConfirm={() => setOverlay(null)} onClose={() => setOverlay(null)} />
+          ) : null}
+        </Section>
+
+        <Section title="Toast">
+          <div className="dev-col">
+            {toasts.includes(1) ? (
+              <Toast state="done" title="Saved" onClose={() => setToasts(toasts.filter(id => id !== 1))}>
+                <Code>balabash/inbox.md</Code>
+              </Toast>
+            ) : null}
+            {toasts.includes(2) ? (
+              <Toast state="err" icon="circle-alert" title="Task didn’t start" action="Retry" action2="Log" onClose={() => setToasts(toasts.filter(id => id !== 2))}>
+                “DB backup”: the command exited with code 127.
+              </Toast>
+            ) : null}
+            {toasts.includes(3) ? (
+              <Toast state="act" icon="key-round" title="Sign-in required" action="Reconnect" onClose={() => setToasts(toasts.filter(id => id !== 3))}>
+                Gmail · loysagienn — token revoked.
+              </Toast>
+            ) : null}
+            {toasts.includes(4) ? (
+              <Toast state="run" icon="upload" title="Uploading 3 files" progress={62}>
+                to <Code>renovation/estimates</Code> · 2.1 of 3.4 MB
+              </Toast>
+            ) : null}
+            {toasts.length < 4 ? <Btn label="Restore toasts" size="sm" onClick={() => setToasts([1, 2, 3, 4])} /> : null}
           </div>
         </Section>
       </Screen>

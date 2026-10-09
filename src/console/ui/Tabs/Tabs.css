@@ -1,0 +1,8 @@
+@layer components{
+/* ── Tabs ──  <div class="tabs" role="tablist"><button class="tab" role="tab" aria-selected="true"> */
+.tabs{display:flex;gap:var(--sp-5);border-bottom:1px solid var(--border);overflow-x:auto;scrollbar-width:none}
+.tab{display:inline-flex;align-items:center;gap:var(--sp-1h);height:max(var(--ctl-h-lg),var(--ctl-h));font-size:var(--fs-ui);font-weight:var(--fw-medium);color:var(--text-2);border-bottom:2px solid transparent;margin-bottom:-1px;white-space:nowrap}
+.tab:hover{color:var(--text)}
+.tab[aria-selected="true"]{color:var(--text);border-bottom-color:var(--accent)}
+.tab:focus-visible{outline-offset:-2px}
+}

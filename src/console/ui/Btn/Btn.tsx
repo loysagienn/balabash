@@ -92,3 +92,23 @@ export function Btn({
     </button>
   );
 }
+
+// Action link (design: .link) — "All threads ›" in a card header or under a
+// list. For a route, a feature renders the router's <Link className="link">
+// with the same children instead.
+export type ActionLinkProps = {
+  label: ReactNode;
+  href: string;
+  icon?: IconName;
+  onClick?: (event: MouseEvent<HTMLAnchorElement>) => void;
+  className?: string;
+};
+
+export function ActionLink({ label, href, icon = 'chevron-right', onClick, className }: ActionLinkProps) {
+  return (
+    <a className={className ? `link ${className}` : 'link'} href={href} onClick={onClick}>
+      {label}
+      <Icon name={icon} />
+    </a>
+  );
+}

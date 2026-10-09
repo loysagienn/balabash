@@ -1,0 +1,16 @@
+@layer components{
+/* ── Fill ring ──  <svg class="ring" data-level="warn|over" data-size="lg" viewBox="0 0 24 24">
+       <circle class="ring-trk" cx="12" cy="12" r="10"/><circle class="ring-bar" cx="12" cy="12" r="10" pathLength="100" stroke-dasharray="62 100"/></svg>
+   Value = the first stroke-dasharray number, in percent. */
+.ring{--ring-size:var(--ring-sm);--ring-stroke:3.3;width:var(--ring-size);height:var(--ring-size);flex:none;transform:rotate(-90deg);color:var(--lvl-ok)}
+.ring[data-size="lg"]{--ring-size:var(--ring-lg);--ring-stroke:2.6}
+.ring[data-level="warn"]{color:var(--lvl-warn)}
+.ring[data-level="over"]{color:var(--lvl-over)}
+.ring-trk{fill:none;stroke:var(--lvl-track);stroke-width:var(--ring-stroke)}
+.ring-bar{fill:none;stroke:currentColor;stroke-width:var(--ring-stroke);stroke-linecap:round}
+/* ring with a label in a row */
+.ctx{display:inline-flex;align-items:center;gap:var(--sp-1h);font-size:var(--fs-meta);line-height:var(--lh-meta);font-weight:var(--fw-medium);color:var(--text-2);font-variant-numeric:tabular-nums;white-space:nowrap}
+/* large ring with a number inside */
+.gauge{position:relative;display:grid;place-items:center;flex:none}
+.gauge-v{position:absolute;font-size:var(--fs-meta);line-height:var(--lh-meta);font-weight:var(--fw-bold);color:var(--text);font-variant-numeric:tabular-nums}
+}

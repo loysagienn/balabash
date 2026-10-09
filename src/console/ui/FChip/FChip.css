@@ -1,0 +1,10 @@
+@layer components{
+/* ── Filter chip ──  <button class="fchip" aria-pressed="true|false">Status: <span class="fchip-v">active</span></button> */
+/* height matches segments and fields: all controls in the filter bar share one line */
+.fchip{position:relative;display:inline-flex;align-items:center;gap:var(--sp-1h);height:var(--ctl-h);padding:0 var(--sp-2h);border-radius:var(--r-pill);border:1px dashed var(--border-ctl);color:var(--text-2);font-size:var(--fs-meta);line-height:var(--lh-meta);font-weight:var(--fw-medium);white-space:nowrap}
+.fchip .ic{font-size:var(--ico-xs);color:var(--text-3)}
+.fchip:hover{color:var(--text);border-color:var(--border-hover)}
+.fchip[aria-pressed="true"]{border-style:solid;border-color:var(--border-strong);background:var(--surface-3);color:var(--text-2)}
+.fchip[aria-pressed="true"] .ic{color:var(--text-2)}
+.fchip-v{color:var(--text);font-weight:var(--fw-semibold)}
+}

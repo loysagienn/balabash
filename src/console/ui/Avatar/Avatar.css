@@ -1,0 +1,12 @@
+@layer components{
+/* ── Agent avatar ──  <span class="av" data-id="1" data-size="xs|sm|lg">E<i class="av-pip" data-state="run"></i></span> */
+.av{
+  --av-size:var(--av);--av-letter:var(--av-fs);
+  position:relative;width:var(--av-size);height:var(--av-size);border-radius:var(--r-av);display:grid;place-items:center;flex:none;
+  font-size:var(--av-letter);font-weight:var(--fw-bold);line-height:1;letter-spacing:0;
+  color:var(--id-c,var(--text-2));background:color-mix(in srgb,var(--id-c,var(--text-2)) var(--id-tint),transparent)}
+.av[data-size="xs"]{--av-size:var(--av-xs);--av-letter:var(--av-fs-xs);border-radius:var(--r-xs)}
+.av[data-size="sm"]{--av-size:var(--av-sm);--av-letter:var(--av-fs-sm);border-radius:var(--r-inner)}
+.av[data-size="lg"]{--av-size:var(--av-lg);--av-letter:var(--av-fs-lg);border-radius:var(--r-md)}
+.av-pip{--pip:11px;--pip-out:-3px;--pip-ring:2.5px;position:absolute;right:var(--pip-out);bottom:var(--pip-out);width:var(--pip);height:var(--pip);border-radius:50%;background:var(--st-c,var(--text-3));border:var(--pip-ring) solid var(--av-ring,var(--surface))}
+}

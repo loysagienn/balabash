@@ -1,12 +1,15 @@
 // Bottom sheet (design: Sheet) over a scrim: confirmation, form or details
-// on the phone. Escape and the scrim close it; buttons are full width, the
-// main one on top.
+// on the phone. Rendered through a portal into document.body, so it docks
+// to the window wherever it is opened from. Escape and the scrim close it;
+// buttons are full width, the main one on top.
 
 import { useEffect } from 'react';
 import type { ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { Btn } from '../Btn/Btn.tsx';
 import type { BtnVariant } from '../Btn/Btn.tsx';
 import type { IconName } from '../Icon/Icon.tsx';
+import { Scrim } from '../Scrim/Scrim.tsx';
 import './Sheet.css';
 
 export type SheetProps = {
@@ -36,9 +39,9 @@ export function Sheet({ label, title, desc, confirm, confirmVariant = 'primary',
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
 
-  return (
+  return createPortal(
     <>
-      <div className="scrim" onClick={onClose} />
+      <Scrim onClick={onClose} />
       <div className="sheet" role="dialog" aria-modal="true" aria-label={label} data-dock="bottom">
         <div className="sheet-grab" />
         {title ? <h3 className="sheet-t">{title}</h3> : null}
@@ -47,6 +50,7 @@ export function Sheet({ label, title, desc, confirm, confirmVariant = 'primary',
         {confirm ? <Btn label={confirm} icon={confirmIcon} variant={confirmVariant} block disabled={confirmDisabled} onClick={onConfirm} /> : null}
         {cancel ? <Btn label={cancel} variant="ghost" block onClick={onClose} /> : null}
       </div>
-    </>
+    </>,
+    document.body,
   );
 }

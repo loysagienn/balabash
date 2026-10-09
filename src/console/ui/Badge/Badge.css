@@ -1,0 +1,13 @@
+@layer components{
+/* ── State badge ──  <span class="badge" data-state="run"><i class="badge-dot"></i>running</span> · data-size="sm" */
+.badge{--badge-h:24px;--badge-dot:6px;display:inline-flex;align-items:center;gap:var(--sp-1h);height:var(--badge-h);padding:0 var(--sp-2);border-radius:var(--r-pill);font-size:var(--fs-meta);line-height:var(--lh-meta);font-weight:var(--fw-semibold);white-space:nowrap;flex:none;color:var(--st-c,var(--text-2));background:var(--st-bg,var(--surface-3))}
+.badge[data-size="sm"]{--badge-h:20px}
+.badge[data-state="off"]{box-shadow:inset 0 0 0 1px var(--border-strong)}
+.badge .ic{font-size:var(--ico-xs)}
+.badge-dot{width:var(--badge-dot);height:var(--badge-dot);border-radius:50%;background:currentColor;flex:none}
+.badge[data-state="run"] .badge-dot{animation:bb-blink var(--blink) infinite}
+/* in a narrow list the badge becomes compact: no background */
+@container list (max-width:480px){
+  .badge,.badge[data-state="off"]{height:auto;padding:0;background:none;box-shadow:none;font-weight:var(--fw-medium)}
+}
+}

@@ -1,0 +1,48 @@
+@layer components{
+/* ── List and row ──  .list (container “list”) > a.row: [avatar|icon] .row-main (.row-t > .row-t-text, .row-m, .row-d) .row-end
+   In a container narrower than 480px the row reflows: the right side moves under the title. */
+.list{display:flex;flex-direction:column;container:list / inline-size}
+.row{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:var(--sp-3);min-height:var(--row-h);padding:var(--sp-2h) var(--sp-4h);border-top:1px solid var(--border);color:inherit;text-decoration:none;transition:background-color var(--dur-1) var(--ease)}
+.row:first-child{border-top:0}
+.row:is(a,button,[tabindex]):hover{background-image:var(--layer-hover)}
+.row:is([aria-selected="true"],[aria-current="page"]){background-image:var(--layer-selected)}
+.row:focus-visible{outline-offset:-2px}
+.row[data-fresh]{animation:bb-flash var(--flash) var(--ease-out)}
+.row-main{display:block;min-width:0}
+.row-t{display:flex;align-items:center;gap:var(--sp-1h);min-width:0;font-size:var(--fs-ui);font-weight:var(--fw-semibold);color:var(--text)}
+.row-t-text{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row-m{display:block;margin-top:var(--sp-0h);font-size:var(--fs-meta);line-height:var(--lh-meta);color:var(--text-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row-d{margin-top:var(--sp-1);font-size:var(--fs-meta);line-height:var(--lh-meta);color:var(--text-2);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.row-end{display:flex;align-items:center;gap:var(--sp-3h)}
+/* Right side in columns across the whole list: .list[data-end-cols] + --row-end-cols (column template). Items fill the columns in order;
+   a row missing the last items leaves the tail empty — the other columns do not shift. --row-time-w — time column width without the grid. */
+.list[data-end-cols] .row-end{display:grid;grid-template-columns:var(--row-end-cols);justify-items:end}
+.row-time{min-width:var(--row-time-w,0);font-size:var(--fs-meta);line-height:var(--lh-meta);color:var(--text-2);text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.row-time-sub{display:block;font-size:var(--fs-micro);line-height:var(--lh-micro);color:var(--text-3)}
+@container list (max-width:480px){
+  .row{grid-template-columns:auto minmax(0,1fr);align-items:start}
+  .row-end,.list[data-end-cols] .row-end{display:flex;grid-column:2;gap:var(--sp-1) var(--sp-3);flex-wrap:wrap}
+  .row-t{flex-wrap:wrap}
+  .row-t-text{white-space:normal}
+  .row-time{min-width:0;text-align:left}
+  .row-time-sub{display:none}
+}
+
+/* ── List group ──  <div class="listgrp">Today <span class="listgrp-end">7 threads</span></div> — between .list rows */
+.listgrp{display:flex;align-items:center;gap:var(--sp-2);padding:var(--sp-2h) var(--sp-4h) var(--sp-1h);border-top:1px solid var(--border);font-size:var(--fs-micro);line-height:var(--lh-micro);font-weight:var(--fw-semibold);color:var(--text-3);font-variant-numeric:tabular-nums}
+.listgrp:first-child{border-top:0}
+.listgrp-end{margin-left:auto;font-weight:var(--fw-regular)}
+
+/* ── Load more at list end ──  <div class="loadmore" role="status"><svg class="ic" data-spin></svg>Loading earlier…</div> */
+.loadmore{display:flex;align-items:center;justify-content:center;gap:var(--sp-2);padding:var(--sp-3h) var(--sp-4);border-top:1px solid var(--border);font-size:var(--fs-meta);line-height:var(--lh-meta);color:var(--text-3)}
+}
+@layer patterns{
+/* ── List on the phone ──  .list[data-narrow="tiles"]: rows as separate tiles; a row whose right side is only a
+   quiet caption hides it (“empty” isn’t needed in a tile). */
+@container shell (max-width:720px){
+  .list[data-narrow="tiles"]{gap:var(--sp-2)}
+  .list[data-narrow="tiles"] .row{border-top:0;border-radius:var(--r-md);background-color:var(--surface);padding:var(--sp-3)}
+  .list[data-narrow="tiles"] .listgrp{padding:var(--sp-2) 0 0;border-top:0}
+  .list[data-narrow="tiles"] .row-end:has(> .quiet:only-child){display:none}
+}
+}

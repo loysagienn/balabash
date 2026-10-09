@@ -1,0 +1,29 @@
+@layer components{
+/* ── Checkbox and radio ──  <label class="chk"><input type="checkbox|radio" class="chk-box"> Label</label>
+   The .md input[type=checkbox] of the design is styled by the Markdown block (ui/Md). */
+.chk{position:relative;display:inline-flex;align-items:center;gap:var(--sp-2);min-height:var(--ctl-h-sm);font-size:var(--fs-ui);color:var(--text);cursor:pointer}
+.chk::after{content:"";position:absolute;inset:var(--hit-ext) 0}
+.chk:has(:disabled){color:var(--text-4);cursor:default}
+.chk-box{
+  --chk-size:16px;--chk-mark-w:5px;--chk-mark-h:9px;--chk-dot:6px;
+  appearance:none;margin:0;flex:none;display:grid;place-items:center;width:var(--chk-size);height:var(--chk-size);
+  border:1.5px solid var(--border-ctl);border-radius:var(--r-xs);background:var(--surface);cursor:inherit}
+.chk-box::before{content:"";width:var(--chk-mark-w);height:var(--chk-mark-h);margin-top:calc(var(--chk-mark-w) / -2);border:solid var(--accent-ink);border-width:0 2px 2px 0;transform:rotate(45deg);opacity:0}
+.chk-box:checked{background:var(--accent);border-color:var(--accent)}
+.chk-box:checked::before{opacity:1}
+.chk-box[type="radio"]{border-radius:50%}
+.chk-box[type="radio"]::before{width:var(--chk-dot);height:var(--chk-dot);margin:0;border:0;border-radius:50%;background:var(--accent-ink);transform:none}
+.chk-box:disabled{background:var(--bg);border-color:var(--border)}
+.chk-box:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+
+/* ── Switch ──  <input type="checkbox" role="switch" class="tgl"> */
+.tgl{
+  --tgl-w:32px;--tgl-h:18px;--tgl-knob:14px;--tgl-pad:2px;
+  appearance:none;margin:0;position:relative;flex:none;width:var(--tgl-w);height:var(--tgl-h);border-radius:var(--r-pill);
+  background:var(--surface-3);box-shadow:inset 0 0 0 1px var(--border-ctl);cursor:pointer;transition:background-color var(--dur-1) var(--ease)}
+.tgl::before{content:"";position:absolute;top:var(--tgl-pad);left:var(--tgl-pad);width:var(--tgl-knob);height:var(--tgl-knob);border-radius:50%;background:var(--text-2);transition:transform var(--dur-1) var(--ease),background-color var(--dur-1)}
+.tgl:checked{background:var(--accent);box-shadow:none}
+.tgl:checked::before{transform:translateX(calc(var(--tgl-w) - var(--tgl-knob) - 2 * var(--tgl-pad)));background:var(--accent-ink)}
+.tgl:disabled{opacity:.4;cursor:default}
+.tgl:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+}

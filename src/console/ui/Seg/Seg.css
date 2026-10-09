@@ -1,0 +1,9 @@
+@layer components{
+/* ── Segments ──  <div class="seg" role="tablist"><button class="seg-i" role="tab" aria-selected="true">Active <span class="seg-n">9</span></button> */
+.seg{--seg-pad:3px;display:inline-flex;width:fit-content;gap:var(--sp-0h);padding:var(--seg-pad);border-radius:var(--r-sm);background:var(--bg);border:1px solid var(--border)}
+.seg-i{display:inline-flex;align-items:center;gap:var(--sp-1h);height:calc(var(--ctl-h) - 2 * var(--seg-pad) - 2px);padding:0 var(--sp-2h);border-radius:var(--r-inner);font-size:var(--fs-ui);font-weight:var(--fw-medium);color:var(--text-2);white-space:nowrap}
+.seg-i:hover{color:var(--text)}
+.seg-i[aria-selected="true"]{background:var(--surface-3);color:var(--text)}
+.seg-n{font-size:var(--fs-micro);line-height:var(--lh-micro);color:var(--text-3);font-variant-numeric:tabular-nums}
+.seg-i[aria-selected="true"] .seg-n{color:var(--text-2)}
+}

@@ -1,0 +1,12 @@
+@layer components{
+/* ── Tooltip ──  <span class="tip" role="tooltip">Context fill: 124k of 200k <kbd class="kbd">C</kbd></span> */
+.tip{display:inline-flex;align-items:center;gap:var(--sp-2);padding:var(--sp-1) var(--sp-2);border-radius:var(--r-inner);background:var(--surface-3);box-shadow:var(--shadow-pop);font-size:var(--fs-meta);line-height:var(--lh-meta);color:var(--text);white-space:nowrap}
+.tip .kbd{background:transparent;box-shadow:inset 0 0 0 1px var(--border-ctl);color:var(--text-2)}
+
+/* ── Hover tooltip ──  <span class="hint"> trigger <span class="tip hint-tip" role="tooltip">…</span></span>
+   Shown on hover and focus; on a touch screen — on long press. */
+.hint{position:relative;display:inline-flex}
+.hint-tip{position:absolute;right:0;bottom:calc(100% + var(--sp-1h));z-index:var(--z-raised);display:none}
+.hint:is(:hover,:focus-within) .hint-tip{display:block}   /* a phrase with <b> inside — continuous text, no flex gaps */
+.hint-tip b{font-weight:var(--fw-semibold)}
+}

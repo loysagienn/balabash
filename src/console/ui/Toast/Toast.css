@@ -1,0 +1,11 @@
+@layer components{
+/* ── Toast ──  <div class="toast" role="status" data-state="err"> svg.ic.toast-ic · .toast-body (.toast-t .toast-d .toast-acts .prog.toast-prog) · .toast-close */
+.toast{--toast-w:380px;display:flex;align-items:flex-start;gap:var(--sp-3);width:min(var(--toast-w),100%);padding:var(--sp-3) var(--sp-3) var(--sp-3) var(--sp-3h);background:var(--surface-2);border-radius:var(--r-md);box-shadow:var(--shadow-pop);font-size:var(--fs-ui)}
+.toast-ic{margin-top:var(--sp-0h);color:var(--st-c,var(--text-2))}
+.toast-body{flex:1;min-width:0}
+.toast-t{font-weight:var(--fw-semibold);color:var(--text)}
+.toast-d{margin-top:var(--sp-0h);font-size:var(--fs-meta);line-height:var(--lh-meta);color:var(--text-2)}
+.toast-acts{display:flex;gap:var(--sp-1h);margin-top:var(--sp-2)}
+.toast-prog{margin-top:var(--sp-2)}
+.toast-close{margin:calc(-1 * var(--sp-1)) calc(-1 * var(--sp-1)) 0 auto}
+}

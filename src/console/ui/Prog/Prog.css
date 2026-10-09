@@ -1,0 +1,7 @@
+@layer components{
+/* ── Progress bar ──  <div class="prog" role="progressbar" style="--v:62%" data-state="err" data-indeterminate><i class="prog-bar"></i></div> */
+.prog{--prog-h:4px;height:var(--prog-h);border-radius:var(--r-pill);background:var(--surface-3);overflow:hidden}
+.prog-bar{display:block;height:100%;width:var(--v,0%);border-radius:inherit;background:var(--accent)}
+.prog[data-state="err"] .prog-bar{background:var(--st-err)}
+.prog[data-indeterminate] .prog-bar{width:30%;animation:bb-indet 1.3s var(--ease) infinite}
+}

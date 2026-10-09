@@ -2,9 +2,10 @@
 // count, attention dot, pulse, key, code chip, tag, quiet label, caption.
 
 import type { HTMLAttributes, ReactNode } from 'react';
+import type { StateName } from './state.ts';
 import './atoms.css';
 
-export type StateName = 'run' | 'wait' | 'act' | 'done' | 'err' | 'off';
+export type { StateName };
 
 export function Count({ state, size, children, className, ...rest }: HTMLAttributes<HTMLSpanElement> & { state?: 'run' | 'act' | 'err'; size?: 'sm'; children: ReactNode }) {
   return (

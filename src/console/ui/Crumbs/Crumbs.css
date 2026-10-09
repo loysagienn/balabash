@@ -1,0 +1,11 @@
+@layer components{
+/* ── Breadcrumbs ──  <nav class="crumbs"><a class="crumbs-i">…</a><svg class="ic crumbs-sep"></svg><span class="crumbs-cur" aria-current="page">…</span></nav>
+   .crumbs-part keeps a link and its separator together (display: contents — no box of its own). */
+.crumbs{display:flex;align-items:center;flex-wrap:nowrap;overflow:hidden;gap:var(--sp-0h);font-size:var(--fs-ui);color:var(--text-2);min-width:0}
+.crumbs .ic{color:var(--text-3)}
+.crumbs-part{display:contents}
+.crumbs-i{flex:none;color:var(--text-2);padding:var(--sp-0h) var(--sp-1);border-radius:var(--r-inner);text-decoration:none}
+.crumbs-i:hover{background-image:var(--layer-hover);color:var(--text)}
+.crumbs-sep{flex:none;font-size:var(--ico-xs)}
+.crumbs-cur{display:block;flex:0 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--text);font-weight:var(--fw-semibold);padding:var(--sp-0h) var(--sp-1)}
+}

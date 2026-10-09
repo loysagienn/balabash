@@ -1,0 +1,4 @@
+@layer components{
+/* ── Backdrop ── */
+.scrim{position:absolute;inset:0;z-index:var(--z-scrim);background:var(--overlay)}
+}

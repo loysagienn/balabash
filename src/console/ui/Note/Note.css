@@ -1,0 +1,6 @@
+@layer components{
+/* ── Banner ──  <div class="note" data-state="err|act|wait"> svg.ic.note-ic · text · .note-end */
+.note{display:flex;align-items:center;gap:var(--sp-2h);padding:var(--sp-2h) var(--sp-3);border-radius:var(--r-md);font-size:var(--fs-meta);line-height:var(--lh-meta);color:var(--text);background:var(--st-bg,var(--surface-2))}
+.note-ic{color:var(--st-c,var(--text-3))}
+.note-end{margin-left:auto;flex:none}
+}
