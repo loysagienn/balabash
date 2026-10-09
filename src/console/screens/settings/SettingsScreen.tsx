@@ -1,9 +1,11 @@
 // Settings (design: SettingsScreen): the cards "Workspace" (its name) and
 // "You" (the operator's name), each saving on its own through
 // PATCH /api/settings — the answer updates `me`, so the sidebar and the
-// feed follow, and a toast confirms; "Session" with the way out. The
-// Telegram group and the schedule time zone wait for their data (plan,
-// "Чего нет в данных").
+// feed follow, and a toast confirms; "Session" with two actions on this
+// browser: "Reload page" — a plain location.reload() (Vladimir's 29000: the
+// installed app has no address bar to reload from; it is not a restart of
+// the server) — and the way out. The Telegram group and the schedule time
+// zone wait for their data (plan, "Чего нет в данных").
 
 import { useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
@@ -14,6 +16,7 @@ import type { SettingsField } from '../../store/session/reducer.ts';
 import { Shell } from '../../features/shell/Shell.tsx';
 import { Btn } from '../../ui/Btn/Btn.tsx';
 import { Card, CardBody, CardHead } from '../../ui/Card/Card.tsx';
+import { Caption } from '../../ui/atoms/atoms.tsx';
 import { Field } from '../../ui/Field/Field.tsx';
 import { Input } from '../../ui/Input/Input.tsx';
 import { Screen } from '../../ui/Screen/Screen.tsx';
@@ -114,7 +117,14 @@ export function SettingsScreen() {
           <Card narrow="bare" label="Session">
             <CardHead title="Session" />
             <CardBody>
-              <Btn label="Sign out" icon="log-out" busy={logoutPending} onClick={() => dispatch(logout())} />
+              <div className="set-act">
+                <Caption>Reloads the console in this tab — the way to pick up a newly published build in the installed app. The server keeps running.</Caption>
+                <Btn label="Reload page" icon="refresh-cw" onClick={() => window.location.reload()} />
+              </div>
+              <div className="set-act">
+                <Caption>Signs this browser out of the console.</Caption>
+                <Btn label="Sign out" icon="log-out" busy={logoutPending} onClick={() => dispatch(logout())} />
+              </div>
             </CardBody>
           </Card>
         </div>

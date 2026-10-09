@@ -18,14 +18,17 @@ npm run build && npm run rebuild-threads
 
 ## console-icons (`scripts/console-icons.mjs`)
 
-Renders the console's app icons (`src/console/public/*.png`: favicon 32/192,
-install icons 192/512 `any` and `maskable`, `apple-touch-icon` 180) from the
-approved service icon — the pair of 1254 px PNGs in the project library,
-`balabash/design/balabash-icon-transparent.png` and `balabash-icon-dark.png`
-(their `design/README.md` names them) — with headless Chromium (playwright, a
-devDependency): the `any` icons are the transparent one as is, the maskable
-ones put it at 86 % over `--bg` (the safe zone is the inner 80 % circle), the
-Apple icon is the dark one as is. Not bundled and not part of the build: the
+Renders the console's app icons (`src/console/public/*.png`: the tab's
+`favicon-32/192`, install icons 192/512 `any` and `maskable`,
+`apple-touch-icon` 180) from the approved service icon — the pair of 1254 px
+PNGs in the project library, `balabash/design/balabash-icon-transparent.png`
+and `balabash-icon-dark.png` (their `design/README.md` names them) — with
+headless Chromium (playwright, a devDependency): the favicons are the
+transparent one cropped to its visible pixels (alpha ≥ 2, so the mark runs to
+the edges of the image, centered across its narrower side), the `any` icons
+are the transparent one as is, the maskable ones put it at 86 % over `--bg`
+(the safe zone is the inner 80 % circle), the Apple icon is the dark one as
+is. Not bundled and not part of the build: the
 PNGs are committed, and the script runs again only when the icon changes.
 
 ```

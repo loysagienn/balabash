@@ -24,12 +24,13 @@ import type { ThreadsFilterPatch } from './filters.ts';
 
 const SEARCH_ID = 'threads-search';
 
+// "All" (no status filter, the default of the route) opens the row — Vladimir's 29156.
 export const STATUS_SEGMENTS: { label: string; status: ThreadStatus | undefined }[] = [
+  { label: 'All', status: undefined },
   { label: 'Active', status: 'active' },
   { label: 'Completed', status: 'completed' },
   { label: 'Crashed', status: 'failed' },
   { label: 'Cancelled', status: 'cancelled' },
-  { label: 'All', status: undefined },
 ];
 
 function isTyping(target: EventTarget | null): boolean {

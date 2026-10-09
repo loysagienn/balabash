@@ -126,7 +126,8 @@ describe('console host branch', () => {
     assert.match(html, /<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">/);
     assert.match(html, /<link rel="manifest" href="\/static\/manifest\.webmanifest">/);
     assert.match(html, /<link rel="apple-touch-icon" href="\/static\/apple-touch-icon\.png">/);
-    assert.match(html, /<link rel="icon" type="image\/png" sizes="32x32" href="\/static\/icon-32\.png">/);
+    assert.match(html, /<link rel="icon" type="image\/png" sizes="32x32" href="\/static\/favicon-32\.png">/);
+    assert.match(html, /<link rel="icon" type="image\/png" sizes="192x192" href="\/static\/favicon-192\.png">/);
     assert.match(html, /<meta name="theme-color" content="#0c0d0f">/);
     assert.match(html, /<meta name="mobile-web-app-capable" content="yes">/);
     assert.match(html, /<meta name="apple-mobile-web-app-capable" content="yes">/);

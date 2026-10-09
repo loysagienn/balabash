@@ -1,4 +1,4 @@
-// Segmented control (design: SegItem): modes of a list — Active · All ·
+// Segmented control (design: SegItem): modes of a list — All · Active ·
 // Mine — on one line with the filters; the selected segment is raised.
 // Only the selected segment is in the Tab order; Left/Right, Home and End
 // move between the segments and select (atoms/keys.ts).

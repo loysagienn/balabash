@@ -4,4 +4,8 @@
 /* A field and its button on one line; the hint goes under both. */
 .set-inline{display:flex;gap:var(--sp-2)}
 .set-inline .inp{flex:1;min-width:0}
+/* An action of the Session card: its caption on the left, the button on the right; the rows stack. */
+.set-act{display:flex;align-items:center;justify-content:space-between;gap:var(--sp-3)}
+.set-act .caption{flex:1;min-width:0}
+.set-act + .set-act{margin-top:var(--sp-3);padding-top:var(--sp-3);border-top:1px solid var(--border)}
 }
