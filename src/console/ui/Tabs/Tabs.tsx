@@ -1,13 +1,16 @@
 // Page section tabs (design: Tab): a tablist under a page header or in a
-// filter bar; the selected tab is underlined with the accent.
+// filter bar; the selected tab is underlined with the accent. Only the
+// selected tab is in the Tab order; Left/Right, Home and End move between
+// the tabs and select (atoms/keys.ts).
 
 import type { MouseEvent, ReactNode } from 'react';
 import { Count } from '../atoms/atoms.tsx';
+import { tablistKeyDown } from '../atoms/keys.ts';
 import './Tabs.css';
 
 export function Tabs({ label, children, className }: { label: string; children: ReactNode; className?: string }) {
   return (
-    <div className={className ? `tabs ${className}` : 'tabs'} role="tablist" aria-label={label}>
+    <div className={className ? `tabs ${className}` : 'tabs'} role="tablist" aria-label={label} onKeyDown={tablistKeyDown}>
       {children}
     </div>
   );

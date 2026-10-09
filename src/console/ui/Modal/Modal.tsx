@@ -1,18 +1,19 @@
 // Modal over the screen (design: Modal): title, body (children), "Cancel"
 // and the main action; danger — confirmVariant="danger". Rendered through
-// a portal into document.body, so the scrim covers everything but the
-// window; Escape and a click outside the window close it (the click lands
-// on the centering layer, which sits over the scrim). On the phone the same
-// question is a Sheet. bare — the window alone, for the showcase.
+// an Overlay (a portal into document.body), so the scrim covers everything
+// but the window, the rest of the page is inert and the focus stays
+// inside; Escape and a click outside the window close it (the click lands
+// on the centering layer, which sits over the scrim). It can submit a form
+// in its body (form="<id>"). On the phone the same question is a Sheet.
+// bare — the window alone, for the showcase.
 
-import { useEffect, useId, useRef, useState } from 'react';
+import { useId } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
-import { createPortal } from 'react-dom';
 import { Btn } from '../Btn/Btn.tsx';
 import type { BtnVariant } from '../Btn/Btn.tsx';
 import type { IconName } from '../Icon/Icon.tsx';
 import { IconBtn } from '../IconBtn/IconBtn.tsx';
-import { Scrim } from '../Scrim/Scrim.tsx';
+import { Overlay } from '../Overlay/Overlay.tsx';
 import './Modal.css';
 
 export type ModalProps = {
@@ -35,38 +36,9 @@ export type ModalProps = {
 
 export function Modal({ title, cancel = 'Cancel', confirm, confirmVariant = 'primary', confirmIcon, confirmDisabled, busy, width, onClose, onConfirm, form, bare, children }: ModalProps) {
   const id = useId();
-  const dialog = useRef<HTMLDivElement>(null);
-  // Who had the focus when the modal was opened (read during the first
-  // render, before an autoFocus field inside takes it); it gets it back.
-  const [opener] = useState(() => (bare ? null : (document.activeElement as HTMLElement | null)));
-
-  useEffect(() => {
-    if (bare) {
-      return;
-    }
-
-    // An autoFocus field inside keeps the focus; otherwise the window takes it.
-    if (!dialog.current?.contains(document.activeElement)) {
-      dialog.current?.focus();
-    }
-
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.stopPropagation();
-        onClose();
-      }
-    };
-
-    window.addEventListener('keydown', onKey);
-
-    return () => {
-      window.removeEventListener('keydown', onKey);
-      opener?.focus?.();
-    };
-  }, [bare, onClose, opener]);
 
   const window_ = (
-    <div ref={dialog} className="modal" role="dialog" aria-modal="true" aria-labelledby={id} aria-busy={busy ? 'true' : undefined} tabIndex={-1} style={width ? ({ '--modal-w': width } as CSSProperties) : undefined}>
+    <div className="modal" role="dialog" aria-modal="true" aria-labelledby={id} aria-busy={busy ? 'true' : undefined} tabIndex={-1} style={width ? ({ '--modal-w': width } as CSSProperties) : undefined}>
       <div className="modal-h">
         <h3 className="modal-t" id={id}>
           {title}
@@ -85,9 +57,8 @@ export function Modal({ title, cancel = 'Cancel', confirm, confirmVariant = 'pri
     return window_;
   }
 
-  return createPortal(
-    <>
-      <Scrim onClick={onClose} />
+  return (
+    <Overlay onClose={onClose}>
       <div
         className="modal-layer"
         onClick={event => {
@@ -98,7 +69,6 @@ export function Modal({ title, cancel = 'Cancel', confirm, confirmVariant = 'pri
       >
         {window_}
       </div>
-    </>,
-    document.body,
+    </Overlay>
   );
 }

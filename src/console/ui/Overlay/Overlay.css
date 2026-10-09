@@ -1,0 +1,4 @@
+@layer components{
+/* ── Overlay ──  the root of a floating dialog in document.body: .overlay > .scrim + the dialog's layer; no box of its own */
+.overlay{display:contents}
+}

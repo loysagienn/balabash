@@ -1,12 +1,15 @@
 // Segmented control (design: SegItem): modes of a list — Active · All ·
 // Mine — on one line with the filters; the selected segment is raised.
+// Only the selected segment is in the Tab order; Left/Right, Home and End
+// move between the segments and select (atoms/keys.ts).
 
 import type { MouseEvent, ReactNode } from 'react';
+import { tablistKeyDown } from '../atoms/keys.ts';
 import './Seg.css';
 
 export function Seg({ label, children, className }: { label: string; children: ReactNode; className?: string }) {
   return (
-    <div className={className ? `seg ${className}` : 'seg'} role="tablist" aria-label={label}>
+    <div className={className ? `seg ${className}` : 'seg'} role="tablist" aria-label={label} onKeyDown={tablistKeyDown}>
       {children}
     </div>
   );

@@ -13,7 +13,8 @@
 .mi[data-variant="danger"],.mi[data-variant="danger"] .ic{color:var(--st-err)}
 .menu-sep{height:1px;background:var(--border);margin:var(--sp-1) calc(-1 * var(--sp-1))}
 .menu-label{padding:var(--sp-1h) var(--sp-2) var(--sp-1);font-size:var(--fs-micro);line-height:var(--lh-micro);font-weight:var(--fw-semibold);color:var(--text-3)}
-/* Menu anchor at a “⋯” button in a row or header:  <span class="menu-anchor"> button + <div class="menu"> */
-.menu-anchor{position:relative;display:inline-flex}
-.menu-anchor > .menu{position:absolute;right:0;top:calc(100% + var(--sp-1));z-index:var(--z-pop)}
+/* Menu anchor at a “⋯” button in a row or header:  <span class="menu-anchor"> button; the open menu floats next to it
+   in a .menu-layer in document.body (position: fixed at the button, so an overflow:hidden card does not clip it) */
+.menu-anchor{display:inline-flex}
+.menu-layer{position:fixed;z-index:var(--z-pop)}
 }

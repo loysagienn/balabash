@@ -93,6 +93,7 @@ export function DevUi() {
   const [tab, setTab] = useState('tasks');
   const [overlay, setOverlay] = useState<'modal' | 'sheet' | 'form' | null>(null);
   const [menu, setMenu] = useState(false);
+  const [cardMenu, setCardMenu] = useState(false);
   const [toasts, setToasts] = useState([1, 2, 3, 4]);
 
   return (
@@ -470,17 +471,44 @@ export function DevUi() {
               <MenuSep />
               <MenuItem icon="circle-stop" label="Cancel thread" variant="danger" />
             </Menu>
-            <MenuAnchor>
-              <IconBtn icon="ellipsis" label="More" variant="regular" expanded={menu} onClick={() => setMenu(open => !open)} />
-              {menu ? (
+            <MenuAnchor
+              open={menu}
+              onClose={() => setMenu(false)}
+              menu={
                 <Menu label="More">
                   <MenuItem icon="pencil" label="Edit" onClick={() => setMenu(false)} />
                   <MenuItem icon="archive" label="Archive" onClick={() => setMenu(false)} />
                   <MenuSep />
                   <MenuItem icon="trash-2" label="Delete" variant="danger" onClick={() => setMenu(false)} />
                 </Menu>
-              ) : null}
+              }
+            >
+              <IconBtn icon="ellipsis" label="More" variant="regular" expanded={menu} onClick={() => setMenu(open => !open)} />
             </MenuAnchor>
+          </Row>
+          <Row label="anchored in a short card: the menu floats over the card’s edge">
+            <Card label="Short card">
+              <CardHead title="DB backup" tag="command">
+                <Btn label="Run now" icon="play" size="sm" />
+                <MenuAnchor
+                  open={cardMenu}
+                  onClose={() => setCardMenu(false)}
+                  menu={
+                    <Menu label="Task actions">
+                      <MenuItem icon="pencil" label="Edit" onClick={() => setCardMenu(false)} />
+                      <MenuItem icon="pause" label="Pause" onClick={() => setCardMenu(false)} />
+                      <MenuSep />
+                      <MenuItem icon="trash-2" label="Delete task" variant="danger" onClick={() => setCardMenu(false)} />
+                    </Menu>
+                  }
+                >
+                  <IconBtn icon="ellipsis" label="Task actions" size="sm" expanded={cardMenu} onClick={() => setCardMenu(open => !open)} />
+                </MenuAnchor>
+              </CardHead>
+              <CardBody>
+                <Quiet>pg_dump to file storage, keep 14 copies</Quiet>
+              </CardBody>
+            </Card>
           </Row>
         </Section>
 
