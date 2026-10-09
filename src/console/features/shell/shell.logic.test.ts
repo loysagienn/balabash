@@ -14,6 +14,22 @@ describe('main thread shortcut', () => {
     assert.equal(isMainThreadShortcut(press('k', { metaKey: true })), false);
   });
 
+  it('is the same physical key under a non-Latin layout, not under another Latin one', () => {
+    assert.equal(isMainThreadShortcut(press('о', { ctrlKey: true, code: 'KeyJ' })), true);
+    assert.equal(isMainThreadShortcut(press('о', { metaKey: true, code: 'KeyJ' })), true);
+    assert.equal(isMainThreadShortcut(press('о', { code: 'KeyJ' })), false);
+    assert.equal(isMainThreadShortcut(press('о', { ctrlKey: true, code: 'KeyO' })), false);
+    // Dvorak: the key at the J position gives "h" and says so.
+    assert.equal(isMainThreadShortcut(press('h', { ctrlKey: true, code: 'KeyJ' })), false);
+    assert.equal(isMainThreadShortcut(press('j', { ctrlKey: true, code: 'KeyC' })), true);
+  });
+
+  it('is not a press of an IME composition or one already handled', () => {
+    assert.equal(isMainThreadShortcut(press('j', { ctrlKey: true, isComposing: true })), false);
+    assert.equal(isMainThreadShortcut(press('j', { ctrlKey: true, defaultPrevented: true })), false);
+    assert.equal(isMainThreadShortcut(press('j', { ctrlKey: true, isComposing: false, defaultPrevented: false })), true);
+  });
+
   it('is labelled for the platform', () => {
     assert.equal(mainThreadShortcutLabel('MacIntel'), '⌘J');
     assert.equal(mainThreadShortcutLabel('iPhone'), '⌘J');

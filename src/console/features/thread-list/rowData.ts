@@ -2,7 +2,8 @@
 // active one — "since 14:02 / running 2h 36m" and the context ring; a
 // closed one — "13:17 → 13:59 / 42m" and its summary; the main thread —
 // the pinned row "Main thread": a pin instead of the state, its last
-// message and the message's time when the store holds one, no ring, its
+// message (the time always, the words when it has any) when the store
+// holds one, no ring, its
 // children uncounted (the store knows a window of them, not all). Pure, so
 // the mapping is tested
 // without the store or the DOM; the connected row reads the pieces (state,
@@ -63,7 +64,7 @@ export function threadRowData({ thread, state, session, project, kids, headless,
     return {
       ...base,
       pinned: true,
-      ...(lastMessage ? { last: lastMessage.text, time: dateTimeLabel(lastMessage.at, now) } : {}),
+      ...(lastMessage ? { ...(lastMessage.text ? { last: lastMessage.text } : {}), time: dateTimeLabel(lastMessage.at, now) } : {}),
     };
   }
 

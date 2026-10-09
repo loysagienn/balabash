@@ -70,6 +70,8 @@ describe('threadRowData', () => {
       last: 'Started the designer on the token chart',
       time: '16:02',
     });
+    // A message without words (neither text nor attachments): its time alone.
+    assert.deepEqual(threadRowData({ ...input, lastMessage: { text: '', at: at(16, 2) } }), { agent: 'coordinator', title: 'Main thread', state: 'wait', pinned: true, time: '16:02' });
     assert.equal(threadRowData({ ...input, lastMessage: { text: 'Hi', at: new Date(2026, 9, 7, 9, 5) } }).time, 'Oct 7, 09:05');
   });
 

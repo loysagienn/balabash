@@ -468,6 +468,21 @@ describe('route data', () => {
     assert.equal(store.getState().ui.moreSheet, false);
     assert.deepEqual(store.getState().router, { route: { key: 'apps' }, source: 'app', replace: false });
   });
+
+  it('keeps the router state as is on ROUTE_TO to the current route', () => {
+    const store = createStore({ api: fakeApi(), initialRoute: { key: 'thread', id: 'main' } });
+    const before = store.getState().router;
+
+    store.dispatch({ type: 'MORE_SHEET_OPEN' });
+    store.dispatch(routeTo({ key: 'thread', id: 'main' }));
+    assert.equal(store.getState().router, before);
+    assert.equal(store.getState().ui.moreSheet, false);
+    store.dispatch(routeTo({ key: 'thread', id: 'main' }, { source: 'history' }));
+    assert.equal(store.getState().router, before);
+    store.dispatch(routeTo({ key: 'thread', id: 'other' }));
+    assert.notEqual(store.getState().router, before);
+    assert.deepEqual(store.getState().router.route, { key: 'thread', id: 'other' });
+  });
 });
 
 describe('sessions from events', () => {

@@ -8,7 +8,7 @@
 // The operator's name under the workspace name waits for its data (plan,
 // "Чего нет в данных").
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import type { ReactNode } from 'react';
 import { Link } from '../../lib/router/Link.tsx';
 import type { AppRoute, NavKey } from '../../lib/router/routes.ts';
@@ -46,8 +46,10 @@ export function Shell({ current, detail, children, ...top }: ShellProps) {
   const route = useAppSelector(state => state.router.route);
   const source = useAppSelector(state => state.router.source);
   const body = useRef<HTMLElement>(null);
-  const mainRoute = mainThreadRoute(me?.mainThreadId);
-  const mainOpen = isMainThreadOpen(route, me?.mainThreadId);
+  const mainThreadId = me?.mainThreadId ?? null;
+  // One route object per id: the key listener below binds once, not per render.
+  const mainRoute = useMemo(() => mainThreadRoute(mainThreadId), [mainThreadId]);
+  const mainOpen = isMainThreadOpen(route, mainThreadId);
   const main = mainRoute ? { route: mainRoute, current: mainOpen } : null;
   // On the main thread no section is current: it has its own item.
   const section = mainOpen ? null : current;
@@ -59,7 +61,8 @@ export function Shell({ current, detail, children, ...top }: ShellProps) {
     }
   }, [route, source]);
 
-  // ⌘J / Ctrl+J opens the main thread from any screen.
+  // ⌘J / Ctrl+J opens the main thread from any screen (on the main thread
+  // itself ROUTE_TO is a no-op: the route is the same).
   useEffect(() => {
     if (!mainRoute) {
       return undefined;

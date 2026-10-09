@@ -5,15 +5,18 @@
 // no action. A command or a tool goes into the row as a code chip, a
 // progress note as text.
 
-import type { Event } from '../../../core/contract.ts';
+import type { ContentBlock, Event } from '../../../core/contract.ts';
 import type { EventOf, EventType } from '../../../core/event-types.ts';
 
 export type LastAction = { last?: string; lastCode?: string };
 
 // The last message of the main thread for its pinned row: the newest
-// user.message or agent.message among the events the store holds — its
-// first line and its time. Null while none is loaded: the snapshot brings
-// the thread, not its messages; the tail and the thread page's chunk do.
+// user.message or agent.message among the events the store holds, whatever
+// it carries — its first line of text, or the names of its attachments
+// when it has no text (a photo from Telegram without a caption arrives
+// with text: null), or an empty text — and its time. Null while none is
+// loaded: the snapshot brings the thread, not its messages; the tail and
+// the thread page's chunk do.
 export type LastMessage = { text: string; at: Date };
 
 const MAX = 80;
@@ -51,22 +54,37 @@ function fromTool(payload: EventOf<'session.tool.started'>['payload']): LastActi
 
 const is = <T extends EventType>(event: Event, type: T): event is Event & EventOf<T> => event.type === type;
 
+// The words of a message for the row: its text, or its attachments.
+function messageText(text: string | null | undefined, attachments: readonly string[]): string {
+  return clip(text ?? '') || clip(attachments.join(', '));
+}
+
+function blockAttachments(blocks: readonly ContentBlock[]): string[] {
+  return blocks.flatMap(block =>
+    block.type === 'image' ? ['image'] : block.type === 'file' ? ['file'] : block.type === 'resource_link' ? [block.name ?? block.uri] : [],
+  );
+}
+
+function userAttachments(payload: EventOf<'user.message'>['payload']): string[] {
+  if (Array.isArray(payload.files) && payload.files.length > 0) {
+    return payload.files.map(file => file.originalFilename ?? (typeof file.contentType === 'string' && file.contentType.startsWith('image/') ? 'image' : 'file'));
+  }
+
+  return Array.isArray(payload.blocks) ? blockAttachments(payload.blocks) : [];
+}
+
 export function lastMessageOf(events: readonly Event[]): LastMessage | null {
   for (let i = events.length - 1; i >= 0; i -= 1) {
     const event = events[i]!;
-    const text = is(event, 'user.message')
-      ? clip(event.payload.text)
-      : is(event, 'agent.message')
-        ? clip(
-            event.payload.content
-              .map(block => (block.type === 'text' ? block.text : ''))
-              .filter(Boolean)
-              .join('\n'),
-          )
-        : '';
 
-    if (text) {
-      return { text, at: event.createdAt };
+    if (is(event, 'user.message')) {
+      return { text: messageText(event.payload.text, userAttachments(event.payload)), at: event.createdAt };
+    }
+    if (is(event, 'agent.message')) {
+      const content = Array.isArray(event.payload.content) ? event.payload.content : [];
+      const text = content.map(block => (block.type === 'text' && typeof block.text === 'string' ? block.text : '')).filter(Boolean).join('\n');
+
+      return { text: messageText(text, blockAttachments(content)), at: event.createdAt };
     }
   }
 
