@@ -1,5 +1,6 @@
 // Interface state that is not data: the "More" sheet on the phone, toasts,
-// composer drafts per thread. Navigation closes the sheet.
+// composer drafts per thread and whether a thread's message is on its way.
+// Navigation closes the sheet.
 
 import type { Action } from '../types.ts';
 import type { ToastInput } from './actions.ts';
@@ -11,9 +12,17 @@ export type UiState = {
   toasts: Toast[];
   nextToastId: number;
   composerDrafts: Record<string, string>;
+  // Threads whose composer message is on its way (SEND_MESSAGE).
+  composerSending: Record<string, true>;
 };
 
-export const initialUi: UiState = { moreSheet: false, toasts: [], nextToastId: 1, composerDrafts: {} };
+export const initialUi: UiState = { moreSheet: false, toasts: [], nextToastId: 1, composerDrafts: {}, composerSending: {} };
+
+function withoutSending(state: UiState, threadId: string): Record<string, true> {
+  const { [threadId]: dropped, ...rest } = state.composerSending;
+
+  return dropped ? rest : state.composerSending;
+}
 
 export function uiReducer(state: UiState = initialUi, action: Action): UiState {
   switch (action.type) {
@@ -28,6 +37,17 @@ export function uiReducer(state: UiState = initialUi, action: Action): UiState {
       return { ...state, toasts: state.toasts.filter(toast => toast.id !== action.id) };
     case 'COMPOSER_DRAFT_SET':
       return { ...state, composerDrafts: { ...state.composerDrafts, [action.threadId]: action.text } };
+    case 'SEND_MESSAGE':
+      return { ...state, composerSending: { ...state.composerSending, [action.threadId]: true } };
+    case 'SEND_MESSAGE_DONE': {
+      const { [action.threadId]: dropped, ...composerDrafts } = state.composerDrafts;
+
+      void dropped;
+
+      return { ...state, composerDrafts, composerSending: withoutSending(state, action.threadId) };
+    }
+    case 'SEND_MESSAGE_FAIL':
+      return { ...state, composerSending: withoutSending(state, action.threadId) };
     default:
       return state;
   }

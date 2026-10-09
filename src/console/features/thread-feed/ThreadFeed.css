@@ -1,0 +1,7 @@
+@layer patterns{
+/* Feed details: a failed command's output in the error color; the frames of a native sub-agent
+   nested under its Agent row — a small feed without the avatar indent. */
+.tf-term-err{color:var(--st-err)}
+.tf-nested{--feed-indent:0px;display:flex;flex-direction:column;gap:var(--sp-2h)}
+.tf-nested .actgroup{margin-left:0}
+}

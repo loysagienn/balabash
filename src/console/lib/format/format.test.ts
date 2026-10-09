@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { countOf, dayKey, dayLabel, durationLabel, rangeLabel, shortDate, sinceLabel, timeOfDay } from './index.ts';
+import { countOf, dateTimeLabel, dayKey, dayLabel, durationLabel, fileSize, rangeLabel, shortDate, sinceLabel, startedLabel, timeOfDay } from './index.ts';
 
 // Local-time constructors: the helpers format in the browser's zone.
 const at = (y: number, m: number, d: number, h = 0, min = 0) => new Date(y, m - 1, d, h, min);
@@ -43,5 +43,20 @@ describe('format', () => {
     assert.equal(durationLabel((2 * 60 + 36) * 60_000), '2h 36m');
     assert.equal(durationLabel((1 * 60 + 5) * 60_000), '1h 05m');
     assert.equal(durationLabel((3 * 24 + 4) * 3_600_000), '3d 4h');
+  });
+});
+
+describe('format — feed times and sizes', () => {
+  it('labels a point in time by the day and sizes in binary units', () => {
+    const now = new Date(2026, 9, 9, 16, 0);
+
+    assert.equal(dateTimeLabel(new Date(2026, 9, 9, 14, 2), now), '14:02');
+    assert.equal(dateTimeLabel(new Date(2026, 9, 7, 14, 2), now), 'Oct 7, 14:02');
+    assert.equal(startedLabel(new Date(2026, 9, 9, 14, 2), now), 'today, 14:02');
+    assert.equal(startedLabel(new Date(2025, 9, 7, 13, 17), now), 'Oct 7, 2025, 13:17');
+    assert.equal(fileSize(512), '512 B');
+    assert.equal(fileSize(4300), '4.2 KiB');
+    assert.equal(fileSize(60207), '59 KiB');
+    assert.equal(fileSize(1.5 * 1024 * 1024), '1.5 MiB');
   });
 });

@@ -4,7 +4,8 @@
 
 import { toApiFailure } from '../../lib/api/index.ts';
 import type { ActionHandler } from '../types.ts';
-import { loadThreadEventsDone, loadThreadEventsFail, loadThreadsDone, loadThreadsFail } from './actions.ts';
+import { pushToast } from '../ui/actions.ts';
+import { loadThreadDone, loadThreadEventsDone, loadThreadEventsFail, loadThreadFail, loadThreadsDone, loadThreadsFail, sendMessageDone, sendMessageFail } from './actions.ts';
 
 export const THREADS_PAGE = 50;
 export const FEED_CHUNK = 500;
@@ -56,5 +57,46 @@ export const loadThreadEventsHandler: ActionHandler<'LOAD_THREAD_EVENTS'> =
       dispatch(loadThreadEventsDone(threadId, before, page.events, page.nextCursor));
     } catch (error) {
       dispatch(loadThreadEventsFail(threadId, before, toApiFailure(error)));
+    }
+  };
+
+export const loadThreadHandler: ActionHandler<'LOAD_THREAD'> =
+  ({ api, dispatch, getState, next }) =>
+  async action => {
+    if (getState().threads.lookup[action.id]?.loading) {
+      return;
+    }
+
+    next(action);
+
+    try {
+      const { thread } = await api.threads.get(action.id);
+
+      dispatch(loadThreadDone(action.id, thread));
+    } catch (error) {
+      dispatch(loadThreadFail(action.id, toApiFailure(error)));
+    }
+  };
+
+// The message itself comes back as event/user.message through the tail;
+// here only the request's fate: the draft clears on success, a failure
+// keeps it and tells the user why.
+export const sendMessageHandler: ActionHandler<'SEND_MESSAGE'> =
+  ({ api, dispatch, getState, next }) =>
+  async action => {
+    if (getState().ui.composerSending[action.threadId]) {
+      return;
+    }
+
+    next(action);
+
+    try {
+      await api.threads.sendMessage(action.threadId, action.text);
+      dispatch(sendMessageDone(action.threadId));
+    } catch (error) {
+      const failure = toApiFailure(error);
+
+      dispatch(sendMessageFail(action.threadId, failure));
+      dispatch(pushToast({ title: 'Message not sent', desc: failure.message, state: 'err' }));
     }
   };

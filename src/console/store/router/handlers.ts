@@ -6,7 +6,7 @@
 
 import type { AppRoute } from '../../lib/router/routes.ts';
 import type { ActionHandler, Dispatch, State } from '../types.ts';
-import { loadThreadEvents, loadThreads } from '../threads/actions.ts';
+import { loadThread, loadThreadEvents, loadThreads } from '../threads/actions.ts';
 import { threadsFiltersOf, sameFilters } from '../threads/filters.ts';
 
 export function loadRouteData(route: AppRoute, dispatch: Dispatch, getState: () => State): void {
@@ -19,6 +19,12 @@ export function loadRouteData(route: AppRoute, dispatch: Dispatch, getState: () 
   switch (route.key) {
     case 'thread': {
       const feed = state.feed.byThread[route.id];
+
+      // A thread outside the snapshot window is fetched by id (once; a
+      // failed lookup stays until the screen retries).
+      if (!state.threads.byId[route.id] && !state.threads.lookup[route.id]) {
+        dispatch(loadThread(route.id));
+      }
 
       if (!feed || (feed.knownFrom === null && !feed.exhausted && !feed.request)) {
         dispatch(loadThreadEvents(route.id, null));

@@ -15,7 +15,8 @@ import type { Action, AppStore } from './index.ts';
 import { eventAction } from './events.ts';
 import { routeTo } from './router/actions.ts';
 import { login, logout, sessionCheck, sessionLost } from './session/actions.ts';
-import { loadThreadEvents, loadThreads } from './threads/actions.ts';
+import { loadThread, loadThreadEvents, loadThreads, sendMessage } from './threads/actions.ts';
+import { setComposerDraft } from './ui/actions.ts';
 import { hasLoadedPage, selectKnownAgents, selectListThreads, selectRunningCount, selectVisibleListThreads } from './threads/selectors.ts';
 import { makeSelectThreadEvents } from './feed/selectors.ts';
 import { selectThreadState } from './sessions/selectors.ts';
@@ -602,5 +603,104 @@ describe('threads list projection', () => {
     assert.deepEqual(selectVisibleListThreads(store.getState()).map(t => t.id), ['n']);
     assert.equal(calls.filter(call => call.name === 'threads.list').length, 1);
     assert.deepEqual(selectKnownAgents(store.getState()), ['coordinator', 'designer', 'engineer']);
+  });
+});
+
+describe('thread page data', () => {
+  it('fetches a thread outside the snapshot window by id once, and keeps a 404 until a retry', async () => {
+    resetSeq(1n);
+
+    const calls: Calls = [];
+    let answer: 'ok' | 'missing' = 'missing';
+    const api = fakeApi(
+      {
+        snapshot: async () => snapshot({ asOfSeq: 20n }),
+        threads: {
+          get: async id => {
+            if (answer === 'missing') {
+              throw new ApiError(404, 'not_found', 'No such thread');
+            }
+
+            return { thread: thread({ id, agent: 'browser', createdSeq: 3n }), headless: false };
+          },
+        },
+      },
+      calls,
+    );
+    const store = createStore({ api, initialRoute: { key: 'thread', id: 'tx' } });
+
+    await dispatched(store, sessionCheck());
+    await settle();
+    await settle();
+
+    assert.equal(calls.filter(call => call.name === 'threads.get').length, 1);
+    assert.deepEqual(store.getState().threads.lookup.tx, { loading: false, error: { status: 404, code: 'not_found', message: 'No such thread' } });
+
+    // Coming back to the route does not ask again; the screen's retry does.
+    store.dispatch(routeTo({ key: 'threads' }));
+    store.dispatch(routeTo({ key: 'thread', id: 'tx' }));
+    await settle();
+    assert.equal(calls.filter(call => call.name === 'threads.get').length, 1);
+
+    answer = 'ok';
+    await dispatched(store, loadThread('tx'));
+    assert.equal(store.getState().threads.byId.tx?.agent, 'browser');
+    assert.equal(store.getState().threads.lookup.tx, undefined);
+
+    // A thread the snapshot knows is never fetched.
+    store.dispatch(routeTo({ key: 'thread', id: 'tx' }));
+    await settle();
+    assert.equal(calls.filter(call => call.name === 'threads.get').length, 2);
+  });
+
+  it('sends a composer message: the draft clears on success, stays with a toast on failure, one request at a time', async () => {
+    resetSeq(1n);
+
+    const calls: Calls = [];
+    let resolveSend: (() => void) | null = null;
+    let fail = false;
+    const api = fakeApi(
+      {
+        snapshot: async () => snapshot({ asOfSeq: 20n, threads: [thread({ id: 't1' })] }),
+        threads: {
+          sendMessage: () =>
+            new Promise((resolve, reject) => {
+              resolveSend = () => (fail ? reject(new ApiError(409, 'thread_closed', 'The thread is no longer active')) : resolve({}));
+            }),
+        },
+      },
+      calls,
+    );
+    const store = createStore({ api, initialRoute: { key: 'thread', id: 't1' } });
+
+    await dispatched(store, sessionCheck());
+    await settle();
+
+    store.dispatch(setComposerDraft('t1', 'hello'));
+
+    const sending = dispatched(store, sendMessage('t1', 'hello'));
+
+    assert.equal(store.getState().ui.composerSending.t1, true);
+    store.dispatch(sendMessage('t1', 'hello again'));
+    assert.equal(calls.filter(call => call.name === 'threads.sendMessage').length, 1);
+
+    resolveSend!();
+    await sending;
+    assert.equal(store.getState().ui.composerSending.t1, undefined);
+    assert.equal(store.getState().ui.composerDrafts.t1, undefined);
+
+    store.dispatch(setComposerDraft('t1', 'later'));
+    fail = true;
+
+    const failing = dispatched(store, sendMessage('t1', 'later'));
+
+    resolveSend!();
+    await failing;
+    assert.equal(store.getState().ui.composerSending.t1, undefined);
+    assert.equal(store.getState().ui.composerDrafts.t1, 'later');
+    assert.deepEqual(
+      store.getState().ui.toasts.map(toast => [toast.title, toast.state]),
+      [['Message not sent', 'err']],
+    );
   });
 });

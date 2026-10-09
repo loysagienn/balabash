@@ -20,3 +20,15 @@ export const loadThreadEventsDone = (threadId: string, before: bigint | null, ev
   ({ type: 'LOAD_THREAD_EVENTS_DONE', threadId, before, events, nextCursor }) as const;
 export const loadThreadEventsFail = (threadId: string, before: bigint | null, error: ApiFailure) =>
   ({ type: 'LOAD_THREAD_EVENTS_FAIL', threadId, before, error }) as const;
+
+// One thread by id, for a thread page outside the snapshot window (the
+// list of the store does not know it). The answer merges into byId.
+export const loadThread = (id: string) => ({ type: 'LOAD_THREAD', id }) as const;
+export const loadThreadDone = (id: string, thread: Thread) => ({ type: 'LOAD_THREAD_DONE', id, thread }) as const;
+export const loadThreadFail = (id: string, error: ApiFailure) => ({ type: 'LOAD_THREAD_FAIL', id, error }) as const;
+
+// A message from the composer: its outcome is the user.message the tail
+// brings back; _DONE clears the draft, _FAIL keeps it and reports.
+export const sendMessage = (threadId: string, text: string) => ({ type: 'SEND_MESSAGE', threadId, text }) as const;
+export const sendMessageDone = (threadId: string) => ({ type: 'SEND_MESSAGE_DONE', threadId }) as const;
+export const sendMessageFail = (threadId: string, error: ApiFailure) => ({ type: 'SEND_MESSAGE_FAIL', threadId, error }) as const;

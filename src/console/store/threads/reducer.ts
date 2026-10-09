@@ -19,16 +19,21 @@ export type ThreadsListState = {
   error: ApiFailure | null;
 };
 
+// A thread asked for by id (LOAD_THREAD): in flight, or how it failed.
+export type ThreadLookup = { loading: boolean; error: ApiFailure | null };
+
 export type ThreadsState = {
   byId: Record<string, Thread>;
   list: ThreadsListState;
   childrenOf: Record<string, string[]>;
+  lookup: Record<string, ThreadLookup>;
 };
 
 export const initialThreads: ThreadsState = {
   byId: {},
   list: { ids: [], nextCursor: null, loading: false, filters: null, error: null },
   childrenOf: {},
+  lookup: {},
 };
 
 function indexChildren(byId: Record<string, Thread>): Record<string, string[]> {
@@ -109,6 +114,18 @@ export function threadsReducer(state: ThreadsState = initialThreads, action: Act
     }
     case 'LOAD_THREADS_FAIL':
       return sameRequest(state.list, action) ? { ...state, list: { ...state.list, loading: false, error: action.error } } : state;
+    case 'LOAD_THREAD':
+      return { ...state, lookup: { ...state.lookup, [action.id]: { loading: true, error: null } } };
+    case 'LOAD_THREAD_DONE': {
+      const byId = mergeThreads(state.byId, [action.thread]);
+      const { [action.id]: dropped, ...lookup } = state.lookup;
+
+      void dropped;
+
+      return { ...state, byId, childrenOf: indexChildren(byId), lookup };
+    }
+    case 'LOAD_THREAD_FAIL':
+      return state.lookup[action.id]?.loading ? { ...state, lookup: { ...state.lookup, [action.id]: { loading: false, error: action.error } } } : state;
     case 'event/thread.started': {
       const thread = threadFromStarted(action.event);
 

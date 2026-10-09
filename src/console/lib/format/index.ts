@@ -95,3 +95,30 @@ export function durationLabel(ms: number): string {
 
   return `${days}d ${hours}h`;
 }
+
+// "14:02" today, "Oct 7, 14:02" on another day — the time of a feed item.
+export function dateTimeLabel(date: Date, now: Date): string {
+  return sameDay(date, now) ? timeOfDay(date) : `${shortDate(date, now)}, ${timeOfDay(date)}`;
+}
+
+// "today, 14:02" / "Oct 7, 13:17" — a point in time in a sentence.
+export function startedLabel(date: Date, now: Date): string {
+  return sameDay(date, now) ? `today, ${timeOfDay(date)}` : `${shortDate(date, now)}, ${timeOfDay(date)}`;
+}
+
+// "512 B", "4.2 KiB", "1.5 MiB" — binary units, one decimal above bytes.
+export function fileSize(bytes: number): string {
+  if (bytes < 1024) {
+    return `${Math.max(0, Math.round(bytes))} B`;
+  }
+
+  const kib = bytes / 1024;
+
+  if (kib < 1024) {
+    return `${kib < 10 ? kib.toFixed(1) : Math.round(kib)} KiB`;
+  }
+
+  const mib = kib / 1024;
+
+  return `${mib < 10 ? mib.toFixed(1) : Math.round(mib)} MiB`;
+}

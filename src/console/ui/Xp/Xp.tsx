@@ -1,9 +1,10 @@
 // Agent action on one line (design: Xp): the state icon, the tool and its
 // argument (tool / arg, mono) or a summary (text / textArg: "Read 3 files
 // in src/api"); on the right the time and the changes (+38 −6). Details
-// (children) open on press; defaultOpen — expanded at first. depth=1 — a
-// nested call under a batch summary. Consecutive actions go in an
-// ActGroup (design: .actgroup).
+// (children) open on press and mount only then — a feed holds hundreds of
+// rows whose details (terminal output, diffs) nobody opened; defaultOpen —
+// expanded at first. depth=1 — a nested call under a batch summary.
+// Consecutive actions go in an ActGroup (design: .actgroup).
 
 import { useState } from 'react';
 import type { ReactNode } from 'react';
@@ -86,7 +87,7 @@ export function Xp({
           {end}
         </span>
       </button>
-      {hasBody ? <div className="xp-b">{children}</div> : null}
+      {hasBody && open ? <div className="xp-b">{children}</div> : null}
     </div>
   );
 }

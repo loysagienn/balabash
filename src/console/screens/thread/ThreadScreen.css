@@ -1,0 +1,7 @@
+@layer screens{
+/* Thread page: the thread container fills the scrolling shell body, so the composer sticks to its
+   bottom and a short feed sits next to it; the skeleton of a loading feed stacks like messages. */
+.ths{min-height:100%}
+.ths-skel{display:flex;flex-direction:column;gap:var(--sp-4)}
+.ths-top{align-self:center}
+}
