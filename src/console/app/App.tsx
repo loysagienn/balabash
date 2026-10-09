@@ -11,6 +11,7 @@ import { NotFound } from '../screens/outside/NotFound.tsx';
 import { SessionError } from '../screens/outside/SessionError.tsx';
 import { SignIn } from '../screens/outside/SignIn.tsx';
 import { ThreadScreen } from '../screens/thread/ThreadScreen.tsx';
+import { ThreadsScreen } from '../screens/threads/ThreadsScreen.tsx';
 import { SettingsScreen } from '../screens/settings/SettingsScreen.tsx';
 import { DevUi } from '../screens/dev-ui/DevUi.tsx';
 import { selectTitle } from './title.ts';
@@ -44,7 +45,7 @@ export function App() {
     case 'home':
       return <Placeholder current="home" title="Home" icon="house" what="Home" />;
     case 'threads':
-      return <Placeholder current="threads" title="Threads" icon="messages-square" what="The thread list" />;
+      return <ThreadsScreen route={route} />;
     case 'thread':
       return <ThreadScreen id={route.id} />;
     case 'projects':

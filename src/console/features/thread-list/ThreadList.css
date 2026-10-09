@@ -1,0 +1,6 @@
+@layer patterns{
+/* ── Thread list ── .list.thl-list (Home, Threads, project): the right side in columns — state · time · context
+   (the template is the List's endCols: auto · --thl-time-w · --thl-ctx-w). A closed thread has no ring: its column stays
+   empty, time and badge sit where they do for active ones. The ring's hover anchor starts its column. */
+.thl-list .row-end .hint{justify-self:start}
+}

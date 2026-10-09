@@ -9,12 +9,13 @@ import type { Api } from '../lib/api/index.ts';
 import { ApiError } from '../lib/api/index.ts';
 import type { StoreEnhancer } from 'redux';
 import { createStore } from './index.ts';
+import type { AppRoute } from '../lib/router/routes.ts';
 import type { Action, AppStore } from './index.ts';
 import { eventAction } from './events.ts';
 import { routeTo } from './router/actions.ts';
 import { login, logout, sessionCheck, sessionLost } from './session/actions.ts';
 import { loadThreadEvents } from './threads/actions.ts';
-import { selectRunningCount } from './threads/selectors.ts';
+import { selectKnownAgents, selectListThreads, selectRunningCount, selectVisibleListThreads } from './threads/selectors.ts';
 import { makeSelectThreadEvents } from './feed/selectors.ts';
 import { selectThreadState } from './sessions/selectors.ts';
 import { ME, event, resetSeq, snapshot, thread } from './fixtures.ts';
@@ -438,5 +439,80 @@ describe('sessions from events', () => {
     assert.equal(store.getState().sessions.t2, undefined);
     assert.equal(selectThreadState(store.getState(), 't2'), 'done');
     assert.deepEqual(store.getState().sessions, { t1: { state: 'run', context: { used: 10_000, max: 200_000 } } });
+  });
+});
+
+describe('threads list projection', () => {
+  const page = [thread({ id: 'a', createdSeq: 7n }), thread({ id: 'b', createdSeq: 5n, status: 'completed' })];
+
+  async function listStore(route: AppRoute, nextCursor: bigint | null = null, calls: Calls = []) {
+    const api = fakeApi(
+      {
+        snapshot: async () => snapshot({ asOfSeq: 50n, threads: [thread({ id: 'old', createdSeq: 2n, status: 'completed' }), thread({ id: 'main', parentId: null, agent: 'coordinator' })] }),
+        threads: { list: async () => ({ threads: page, nextCursor }) },
+      },
+      calls,
+    );
+    const store = createStore({ api, initialRoute: route });
+
+    await dispatched(store, sessionCheck());
+    await settle();
+
+    return store;
+  }
+
+  it('shows the loaded range of the store, newest first, and nothing before the first page', async () => {
+    const calls: Calls = [];
+    const api = fakeApi({ threads: { list: () => new Promise(() => {}) } }, calls);
+    const pending = createStore({ api, initialRoute: { key: 'threads' } });
+
+    await dispatched(pending, sessionCheck());
+    await settle();
+    assert.deepEqual(selectListThreads(pending.getState()), []);
+
+    // A full page: the range stops at its oldest row — the snapshot's older thread waits for the next page.
+    const partial = await listStore({ key: 'threads' }, 5n);
+
+    assert.deepEqual(
+      selectListThreads(partial.getState()).map(t => t.id),
+      ['a', 'b'],
+    );
+
+    // An exhausted cursor opens the range: the snapshot's threads join in order.
+    const full = await listStore({ key: 'threads' });
+
+    assert.deepEqual(
+      selectListThreads(full.getState()).map(t => t.id),
+      ['a', 'b', 'old', 'main'],
+    );
+  });
+
+  it('lets the tail insert a new thread and move a finished one between status filters', async () => {
+    const store = await listStore({ key: 'threads', status: 'active' }, 5n);
+
+    assert.deepEqual(selectListThreads(store.getState()).map(t => t.id), ['a']);
+
+    store.dispatch(eventAction(event({ type: 'thread.started', seq: 60n, threadId: 'n', targetThreadId: 'main', payload: { agent: 'designer', title: 'New' } })));
+    assert.deepEqual(selectListThreads(store.getState()).map(t => t.id), ['n', 'a']);
+
+    store.dispatch(eventAction(event({ type: 'thread.completed', seq: 61n, threadId: 'a', payload: { summary: { text: 'done' } } })));
+    assert.deepEqual(selectListThreads(store.getState()).map(t => t.id), ['n']);
+  });
+
+  it('narrows the visible rows by the route’s agent and search without reloading', async () => {
+    const calls: Calls = [];
+    const store = await listStore({ key: 'threads' }, null, calls);
+
+    store.dispatch(eventAction(event({ type: 'thread.started', seq: 60n, threadId: 'n', targetThreadId: 'main', payload: { agent: 'designer', title: 'Slug scheme' } })));
+
+    await dispatched(store, routeTo({ key: 'threads', agent: 'designer' }, { replace: true }));
+    await settle();
+    assert.deepEqual(selectVisibleListThreads(store.getState()).map(t => t.id), ['n']);
+
+    await dispatched(store, routeTo({ key: 'threads', q: 'SLUG' }, { replace: true }));
+    await settle();
+    assert.deepEqual(selectVisibleListThreads(store.getState()).map(t => t.id), ['n']);
+    assert.equal(calls.filter(call => call.name === 'threads.list').length, 1);
+    assert.deepEqual(selectKnownAgents(store.getState()), ['coordinator', 'designer', 'engineer']);
   });
 });

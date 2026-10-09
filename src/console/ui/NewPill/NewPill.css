@@ -1,0 +1,5 @@
+@layer components{
+/* ── “N new” pill ── a dark pill that floats over a list while it is scrolled: new rows wait above */
+.newpill{display:inline-flex;align-items:center;gap:var(--sp-1h);height:var(--ctl-h-sm);padding:0 var(--sp-3);border:0;border-radius:var(--r-pill);background:var(--text);color:var(--bg);font:inherit;font-size:var(--fs-meta);line-height:var(--lh-meta);font-weight:var(--fw-semibold);box-shadow:var(--shadow-pop);cursor:pointer}
+.newpill .ic{font-size:var(--ico-sm)}
+}

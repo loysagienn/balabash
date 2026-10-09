@@ -1,0 +1,6 @@
+@layer screens{
+/* Threads: the "N new" pill floats over the list while it is scrolled — a sticky zero-height bar at the top of the
+   screen keeps it in view inside the scrolling shell body; the top sentinel tells whether the list is at its head. */
+.thl-top{height:1px;margin-bottom:-1px}
+.thl-pillbar{position:sticky;top:var(--sp-3);z-index:var(--z-raised);display:flex;justify-content:center;height:0}
+}

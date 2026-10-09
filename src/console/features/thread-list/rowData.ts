@@ -1,0 +1,74 @@
+// From a thread of the store to the words of its row (ui/ThreadRow): an
+// active one — "since 14:02 / running 2h 36m" and the context ring; a
+// closed one — "13:17 → 13:59 / 42m" and its summary. Pure, so the mapping
+// is tested without the store or the DOM; the connected row reads the
+// pieces (state, session, project, children, agent policy, last action)
+// and calls it.
+
+import type { Thread } from '../../../core/contract.ts';
+import type { SessionView } from '../../../projections/session.ts';
+import { durationLabel, rangeLabel, sinceLabel } from '../../lib/format/index.ts';
+import type { CtxInput } from '../../ui/Ring/Ring.logic.ts';
+import type { ThreadRowProps } from '../../ui/ThreadRow/ThreadRow.tsx';
+import type { StateName } from '../../ui/atoms/state.ts';
+import { isActiveState } from '../../ui/ThreadRow/ThreadRow.logic.ts';
+import type { LastAction } from './lastAction.ts';
+
+export type ThreadRowInput = {
+  thread: Thread;
+  state: StateName;
+  session: SessionView | null;
+  project: string | null;
+  kids: number;
+  headless: boolean;
+  last: LastAction | null;
+  now: Date;
+};
+
+export type ThreadRowData = Omit<ThreadRowProps, 'href' | 'onClick' | 'current' | 'fresh' | 'hit' | 'noAgent'>;
+
+export function ctxOf(session: SessionView | null): CtxInput | undefined {
+  const context = session?.context;
+
+  if (!context || context.max <= 0) {
+    return undefined;
+  }
+
+  return { percentage: (context.used / context.max) * 100, usedTokens: context.used, maxTokens: context.max };
+}
+
+// The row title: the thread's title, or the agent's name while it has none.
+export function threadTitle(thread: Thread): string {
+  return thread.title?.trim() || thread.agent;
+}
+
+export function threadRowData({ thread, state, session, project, kids, headless, last, now }: ThreadRowInput): ThreadRowData {
+  const base: ThreadRowData = {
+    agent: thread.agent,
+    title: threadTitle(thread),
+    state,
+    ...(project ? { project } : {}),
+    ...(headless ? { headless: true } : {}),
+    ...(kids > 0 ? { kids } : {}),
+    time: '',
+  };
+
+  if (isActiveState(state)) {
+    return {
+      ...base,
+      ...(last?.lastCode ? { lastCode: last.lastCode } : last?.last ? { last: last.last } : {}),
+      time: sinceLabel(thread.createdAt, now),
+      sub: `running ${durationLabel(now.getTime() - thread.createdAt.getTime())}`,
+      ...(ctxOf(session) ? { ctx: ctxOf(session) } : {}),
+    };
+  }
+
+  const desc = thread.description?.trim() || thread.summary?.text?.trim();
+
+  return {
+    ...base,
+    time: rangeLabel(thread.createdAt, thread.updatedAt, now),
+    sub: durationLabel(thread.updatedAt.getTime() - thread.createdAt.getTime()),
+    ...(desc ? { desc } : {}),
+  };
+}

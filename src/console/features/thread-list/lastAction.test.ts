@@ -1,0 +1,40 @@
+import assert from 'node:assert/strict';
+import { describe, it } from 'node:test';
+import { event, resetSeq } from '../../store/fixtures.ts';
+import { lastActionOf } from './lastAction.ts';
+
+describe('lastActionOf', () => {
+  it('takes the newest telling event', () => {
+    resetSeq();
+    const events = [
+      event({ type: 'thread.progress', threadId: 't1', payload: { text: 'Reading the plan' } }),
+      event({ type: 'session.tool.started', threadId: 't1', payload: { toolUseId: 'a', name: 'Bash', input: { command: 'npm run build\nnpm test' } } }),
+      event({ type: 'session.text', threadId: 't1', payload: { text: 'Now the docs.' } }),
+    ];
+
+    assert.deepEqual(lastActionOf(events), { lastCode: 'npm run build' });
+    assert.deepEqual(lastActionOf(events.slice(0, 1)), { last: 'Reading the plan' });
+    assert.equal(lastActionOf([]), null);
+    assert.equal(lastActionOf([event({ type: 'session.text', threadId: 't1', payload: { text: 'x' } })]), null);
+  });
+
+  it('names tools by their file, bridge calls by function, subagents by description', () => {
+    assert.deepEqual(lastActionOf([event({ type: 'session.tool.started', threadId: 't1', payload: { toolUseId: 'a', name: 'Edit', input: { file_path: '/home/x/journal.md' } } })]), {
+      lastCode: 'Edit journal.md',
+    });
+    assert.deepEqual(lastActionOf([event({ type: 'session.tool.started', threadId: 't1', payload: { toolUseId: 'a', name: 'FileChange', input: { changes: [{ path: 'src/a.ts', kind: 'update' }] } } })]), {
+      lastCode: 'Edit a.ts',
+    });
+    assert.deepEqual(lastActionOf([event({ type: 'session.tool.started', threadId: 't1', payload: { toolUseId: 'a', name: 'WebSearch', input: { query: 'x' } } })]), { lastCode: 'WebSearch' });
+    assert.deepEqual(lastActionOf([event({ type: 'tool.call.started', threadId: 't1', payload: { callId: 'c', functionName: 'spawn_agent', input: {} } })]), { lastCode: 'spawn_agent' });
+    assert.deepEqual(lastActionOf([event({ type: 'session.task.started', threadId: 't1', payload: { taskId: 'k', description: 'Explore the repo' } })]), { last: 'Explore the repo' });
+  });
+
+  it('clips to the first line and 80 characters', () => {
+    const long = 'x'.repeat(100);
+    const action = lastActionOf([event({ type: 'thread.progress', threadId: 't1', payload: { text: `${long}\nmore` } })]);
+
+    assert.equal(action?.last?.length, 80);
+    assert.ok(action?.last?.endsWith('…'));
+  });
+});
