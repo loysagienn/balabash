@@ -1,14 +1,15 @@
-import type { Thread } from '../../../core/contract.ts';
+import type { Thread, ThreadCounts } from '../../../core/contract.ts';
 import type { Event } from '../../../core/contract.ts';
 import type { ApiFailure } from '../../lib/api/index.ts';
 import type { ThreadsListFilters } from './filters.ts';
 
 // A page of the threads list: before = the cursor of the previous page
 // (null — the first page). Filters travel with the action so a late answer
-// to an old filter set is recognised and dropped.
+// to an old filter set is recognised and dropped. The first page brings
+// the per-status counts of the set.
 export const loadThreads = (filters: ThreadsListFilters, before: bigint | null) => ({ type: 'LOAD_THREADS', filters, before }) as const;
-export const loadThreadsDone = (filters: ThreadsListFilters, before: bigint | null, threads: Thread[], nextCursor: bigint | null) =>
-  ({ type: 'LOAD_THREADS_DONE', filters, before, threads, nextCursor }) as const;
+export const loadThreadsDone = (filters: ThreadsListFilters, before: bigint | null, threads: Thread[], nextCursor: bigint | null, counts: ThreadCounts | null = null) =>
+  ({ type: 'LOAD_THREADS_DONE', filters, before, threads, nextCursor, counts }) as const;
 export const loadThreadsFail = (filters: ThreadsListFilters, before: bigint | null, error: ApiFailure) =>
   ({ type: 'LOAD_THREADS_FAIL', filters, before, error }) as const;
 

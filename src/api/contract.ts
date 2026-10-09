@@ -46,11 +46,12 @@ export type {
   JsonObject,
   JsonValue,
   Thread,
+  ThreadCounts,
   ThreadStatus,
   ThreadSummary,
 } from '../core/contract.ts';
 
-import type { Event, Thread, ThreadStatus } from '../core/contract.ts';
+import type { Event, Thread, ThreadCounts, ThreadStatus } from '../core/contract.ts';
 
 // GET /api/threads query: everything optional, everything scoped to the
 // session's userId on the server. Newest first; `before` is the cursor —
@@ -61,6 +62,11 @@ export type ThreadsQuery = {
   parentId?: string;
   // A project id (Thread.projectId): threads spawned for that project.
   projectId?: string;
+  // An agent name (Thread.agent).
+  agent?: string;
+  // A case-insensitive substring of the title, the description or the
+  // summary text (at most 200 characters).
+  q?: string;
   createdAtGte?: string; // ISO date-time
   createdAtLte?: string; // ISO date-time
   before?: string; // decimal createdSeq cursor
@@ -73,6 +79,10 @@ export type ThreadsResponse = {
   // pass it as ?before= to continue into older threads; null = exhausted.
   // createdSeq is unique, so equal createdAt values cannot split a page.
   nextCursor: bigint | null;
+  // With the first page (no `before`): how many threads of the workspace
+  // fall under each status with the same filters, status aside — the
+  // segments of the list. Absent on later pages.
+  counts?: ThreadCounts;
 };
 
 export type ThreadResponse = {

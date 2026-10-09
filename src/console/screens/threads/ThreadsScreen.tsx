@@ -1,9 +1,10 @@
 // Threads — the flat list, newest first, grouped by day; earlier pages load
-// as the reader scrolls. Filters and search are the route (ThreadFilters);
-// the rows are the store's projection over the loaded range
-// (selectVisibleListThreads). A thread the tail starts while the list is at
-// its head is inserted with a highlight; while the list is scrolled it waits
-// above and an "N new threads" pill offers the way up.
+// as the reader scrolls. Filters and search are the route (ThreadFilters)
+// and the server's; the rows are the store's projection over the loaded
+// range (selectListThreads). The main thread is pinned above the list,
+// outside the filters and the pages. A thread the tail starts while the
+// list is at its head is inserted with a highlight; while the list is
+// scrolled it waits above and an "N new threads" pill offers the way up.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { RefObject } from 'react';
@@ -14,9 +15,10 @@ import { useAppDispatch, useAppSelector } from '../../store/hooks.ts';
 import { routeTo } from '../../store/router/actions.ts';
 import { loadThreads } from '../../store/threads/actions.ts';
 import { threadsFiltersOf } from '../../store/threads/filters.ts';
-import { selectThreadsList, selectVisibleListThreads } from '../../store/threads/selectors.ts';
+import { selectActiveCountIn, selectListThreads, selectMainThread, selectThreadsList } from '../../store/threads/selectors.ts';
 import { Shell } from '../../features/shell/Shell.tsx';
 import { emptyMatchNote, threadsBody, threadsFoot } from './ThreadsScreen.logic.ts';
+import { segmentCount } from '../../features/thread-list/counts.ts';
 import { ThreadFilters } from '../../features/thread-list/ThreadFilters.tsx';
 import { ThreadList } from '../../features/thread-list/ThreadList.tsx';
 import { hasFilters } from '../../features/thread-list/filters.ts';
@@ -62,10 +64,13 @@ export function ThreadsScreen({ route }: { route: ThreadsRoute }) {
   const dispatch = useAppDispatch();
   const now = useNow();
   const list = useAppSelector(selectThreadsList);
-  const threads = useAppSelector(selectVisibleListThreads);
+  const threads = useAppSelector(selectListThreads);
+  const main = useAppSelector(selectMainThread);
   const projects = useAppSelector(s => s.projects);
   const streamSeq = useAppSelector(s => s.stream.lastSeq ?? s.stream.asOfSeq);
   const filters = list.filters ?? threadsFiltersOf(route, projects);
+  const active = useAppSelector(s => selectActiveCountIn(s, filters));
+  const total = segmentCount(undefined, list.counts, active);
 
   // Rows above this seq are new to the screen: it opened with the store at streamSeq.
   const mountSeq = useRef<bigint | null>(null);
@@ -118,11 +123,14 @@ export function ThreadsScreen({ route }: { route: ThreadsRoute }) {
       </div>
     ) : null;
 
+  // The main thread above everything else, whatever the stage of the list.
+  const pinned = main ? <ThreadList threads={[]} pinned={main} now={now} /> : null;
   let body;
 
   if (stage === 'skeleton') {
     body = (
       <Card narrow="bare">
+        {pinned}
         <List narrow="tiles" busy>
           {SKELETON.map((w, i) => (
             <SkelRow key={i} widths={[w, 35]} />
@@ -133,6 +141,7 @@ export function ThreadsScreen({ route }: { route: ThreadsRoute }) {
   } else if (stage === 'failed') {
     body = (
       <Card narrow="bare">
+        {pinned}
         <Empty icon="cloud-off" state="err" title="Couldn’t load threads" action="Retry" actionIcon="refresh-cw" onAction={retry}>
           {error?.message}
         </Empty>
@@ -141,6 +150,7 @@ export function ThreadsScreen({ route }: { route: ThreadsRoute }) {
   } else if (stage === 'empty') {
     body = (
       <Card narrow="bare">
+        {pinned}
         {hasFilters(route) ? (
           <Empty icon="circle-check" title="No threads match" action="Reset filters" onAction={() => dispatch(routeTo({ key: 'threads' }, { replace: true }))}>
             {emptyMatchNote(footKind)}
@@ -156,13 +166,13 @@ export function ThreadsScreen({ route }: { route: ThreadsRoute }) {
   } else {
     body = (
       <Card narrow="bare">
-        <ThreadList threads={rows} now={now} hit={route.q} freshAfter={mountSeq.current} foot={foot} />
+        <ThreadList threads={rows} pinned={main} now={now} hit={route.q} hitTotal={total} freshAfter={mountSeq.current} foot={foot} />
       </Card>
     );
   }
 
   return (
-    <Shell current="threads" title="Threads">
+    <Shell current="threads" title="Threads" sub={total === undefined ? undefined : countOf(total, 'thread')}>
       <Screen>
         <div ref={topRef} className="thl-top" aria-hidden="true" />
         {waiting > 0 ? (
@@ -170,7 +180,7 @@ export function ThreadsScreen({ route }: { route: ThreadsRoute }) {
             <NewPill label={countOf(waiting, 'new thread')} onClick={toTop} />
           </div>
         ) : null}
-        <ThreadFilters route={route} />
+        <ThreadFilters route={route} counts={list.counts} active={active} />
         {body}
       </Screen>
     </Shell>

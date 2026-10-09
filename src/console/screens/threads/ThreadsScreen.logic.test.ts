@@ -3,8 +3,8 @@ import { describe, it } from 'node:test';
 import type { ThreadsListState } from '../../store/threads/reducer.ts';
 import { emptyMatchNote, threadsBody, threadsFoot } from './ThreadsScreen.logic.ts';
 
-const filters = { status: null, projectId: null };
-const list = (partial: Partial<ThreadsListState>): ThreadsListState => ({ ids: [], nextCursor: null, loading: false, filters, error: null, ...partial });
+const filters = { status: null, projectId: null, agent: null, q: null };
+const list = (partial: Partial<ThreadsListState>): ThreadsListState => ({ ids: [], nextCursor: null, loading: false, filters, error: null, counts: null, ...partial });
 const failure = { status: 0, code: 'network', message: 'offline' };
 
 describe('Threads screen body', () => {
@@ -20,7 +20,7 @@ describe('Threads screen body', () => {
     assert.equal(threadsBody(list({ ids: ['a'] }), 1), 'rows');
   });
 
-  it('keeps the empty state when the browser-side filters hide every loaded row', () => {
+  it('keeps the empty state while the loaded range has no rows', () => {
     assert.equal(threadsBody(list({ ids: ['a'], nextCursor: 51n }), 0), 'empty');
     assert.equal(threadsBody(list({ ids: ['a'], nextCursor: 51n, loading: true }), 0), 'empty');
     assert.equal(threadsBody(list({ ids: ['a'], error: failure }), 0), 'empty');
@@ -31,7 +31,7 @@ describe('Threads screen body', () => {
     assert.equal(threadsFoot(list({ ids: ['a'], nextCursor: 51n, error: failure })), 'retry');
     assert.equal(threadsFoot(list({ ids: ['a'] })), null);
     assert.match(emptyMatchNote('more'), /loading/);
-    assert.match(emptyMatchNote('retry'), /may match/);
+    assert.match(emptyMatchNote('retry'), /could not be loaded/);
     assert.match(emptyMatchNote(null), /whole list/);
   });
 });

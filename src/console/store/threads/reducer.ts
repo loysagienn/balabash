@@ -3,12 +3,13 @@
 // order, cursor, filters); the parent → children index. The fold of events
 // into a thread is the server's (src/projections/thread.ts).
 
-import type { Thread } from '../../../core/contract.ts';
+import type { Thread, ThreadCounts } from '../../../core/contract.ts';
 import type { EventOf } from '../../../core/event-types.ts';
 import { threadCompletionFields, threadStartFields, threadStatusFrom } from '../../../projections/thread.ts';
 import type { ApiFailure } from '../../lib/api/index.ts';
 import { isEventAction } from '../events.ts';
 import type { Action } from '../types.ts';
+import { inFilterSet } from './filters.ts';
 import type { ThreadsListFilters } from './filters.ts';
 
 export type ThreadsListState = {
@@ -17,6 +18,10 @@ export type ThreadsListState = {
   loading: boolean;
   filters: ThreadsListFilters | null;
   error: ApiFailure | null;
+  // How many threads of the set fall under each status, from the first
+  // page of the server; a terminal the tail brings moves one across. Null
+  // until the first page of the set lands.
+  counts: ThreadCounts | null;
 };
 
 // A thread asked for by id (LOAD_THREAD): in flight, or how it failed.
@@ -31,7 +36,7 @@ export type ThreadsState = {
 
 export const initialThreads: ThreadsState = {
   byId: {},
-  list: { ids: [], nextCursor: null, loading: false, filters: null, error: null },
+  list: { ids: [], nextCursor: null, loading: false, filters: null, error: null, counts: null },
   childrenOf: {},
   lookup: {},
 };
@@ -95,7 +100,7 @@ export function threadsReducer(state: ThreadsState = initialThreads, action: Act
       return { ...state, byId, childrenOf: indexChildren(byId) };
     }
     case 'LOAD_THREADS':
-      return { ...state, list: { ...state.list, loading: true, error: null, filters: action.filters, ...(action.before === null ? { ids: [], nextCursor: null } : {}) } };
+      return { ...state, list: { ...state.list, loading: true, error: null, filters: action.filters, ...(action.before === null ? { ids: [], nextCursor: null, counts: null } : {}) } };
     case 'LOAD_THREADS_DONE': {
       if (!sameRequest(state.list, action)) {
         return state;
@@ -110,7 +115,7 @@ export function threadsReducer(state: ThreadsState = initialThreads, action: Act
         }
       }
 
-      return { ...state, byId, childrenOf: indexChildren(byId), list: { ...state.list, ids, nextCursor: action.nextCursor, loading: false, error: null } };
+      return { ...state, byId, childrenOf: indexChildren(byId), list: { ...state.list, ids, nextCursor: action.nextCursor, loading: false, error: null, counts: action.counts ?? state.list.counts } };
     }
     case 'LOAD_THREADS_FAIL':
       return sameRequest(state.list, action) ? { ...state, list: { ...state.list, loading: false, error: action.error } } : state;
@@ -149,22 +154,17 @@ export function threadsReducer(state: ThreadsState = initialThreads, action: Act
 
       const status = threadStatusFrom(event.type) ?? known.status;
       const completion = event.type === 'thread.completed' ? threadCompletionFields(event.payload) : {};
-
-      return {
-        ...state,
-        byId: {
-          ...state.byId,
-          [known.id]: {
-            ...known,
-            status,
-            terminalSeq: event.seq,
-            updatedAt: event.createdAt,
-            ...(completion.summary !== undefined ? { summary: completion.summary } : {}),
-            ...(completion.title !== undefined ? { title: completion.title } : {}),
-            ...(completion.description !== undefined ? { description: completion.description } : {}),
-          },
-        },
+      const ended: Thread = {
+        ...known,
+        status,
+        terminalSeq: event.seq,
+        updatedAt: event.createdAt,
+        ...(completion.summary !== undefined ? { summary: completion.summary } : {}),
+        ...(completion.title !== undefined ? { title: completion.title } : {}),
+        ...(completion.description !== undefined ? { description: completion.description } : {}),
       };
+
+      return { ...state, byId: { ...state.byId, [known.id]: ended }, list: countEnded(state.list, known, ended) };
     }
     default: {
       // Any event of a thread at work is its activity. A finished thread
@@ -183,6 +183,18 @@ export function threadsReducer(state: ThreadsState = initialThreads, action: Act
       return state;
     }
   }
+}
+
+// A thread of the loaded set that just ended moves between the counts of
+// the segments: one fewer active, one more under its terminal status.
+function countEnded(list: ThreadsListState, before: Thread, after: Thread): ThreadsListState {
+  const { counts, filters } = list;
+
+  if (!counts || !filters || before.status !== 'active' || after.status === 'active' || !inFilterSet(after, filters)) {
+    return list;
+  }
+
+  return { ...list, counts: { ...counts, active: Math.max(0, counts.active - 1), [after.status]: counts[after.status] + 1 } };
 }
 
 function sameRequest(list: ThreadsListState, action: { filters: ThreadsListFilters; before: bigint | null }): boolean {

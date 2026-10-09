@@ -42,6 +42,9 @@ export type Event = {
 
 export type ThreadStatus = 'active' | 'completed' | 'failed' | 'cancelled';
 
+// How many threads fall under each status (a listing's filters applied).
+export type ThreadCounts = Record<ThreadStatus, number>;
+
 // refs are event ids (Event.id) — the envelope's stable references.
 export type ThreadSummary = {
   text: string;

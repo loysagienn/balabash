@@ -1,6 +1,7 @@
 import { createSelector } from 'reselect';
 import type { Thread } from '../../../core/contract.ts';
 import type { State } from '../types.ts';
+import { inFilterSet, matchesFilters } from './filters.ts';
 import type { ThreadsListFilters } from './filters.ts';
 import type { ThreadsListState } from './reducer.ts';
 
@@ -49,9 +50,19 @@ export const selectLatestFinishedThread = createSelector([selectThreadsById], by
   return latest;
 });
 
-export function matchesFilters(thread: Thread, filters: ThreadsListFilters): boolean {
-  return (filters.status === null || thread.status === filters.status) && (filters.projectId === null || thread.projectId === filters.projectId);
-}
+// The workspace's main thread — the coordinator's, the only root; null
+// until the snapshot brings it.
+export const selectMainThread = (state: State): Thread | null => {
+  const id = state.session.me?.mainThreadId;
+
+  return id ? (state.threads.byId[id] ?? null) : null;
+};
+
+// Agent threads at work in the set the filters describe (status aside):
+// the number of the Active segment — exact, since the snapshot holds every
+// active thread.
+export const selectActiveCountIn = (state: State, filters: ThreadsListFilters): number =>
+  selectRunningThreads(state).filter(thread => inFilterSet(thread, filters)).length;
 
 // Whether a page of the current filter set has landed. Rows in `ids` say so;
 // without them the request state decides: an empty first page (the set has
@@ -70,7 +81,8 @@ export function hasLoadedPage(list: ThreadsListState): boolean {
 // tail started appears at the top, one that finished moves between the
 // status filters, and a page never has to be refetched. Before the first
 // page lands — or when it failed — there are no rows (the screen shows the
-// skeleton or the error).
+// skeleton or the error). The main thread is never a row: it is pinned
+// above the list, outside the filters and the pages.
 export const selectListThreads = createSelector([selectThreadsById, selectThreadsList], (byId, list): Thread[] => {
   if (list.filters === null || !hasLoadedPage(list)) {
     return [];
@@ -92,28 +104,9 @@ export const selectListThreads = createSelector([selectThreadsById, selectThread
   const bound = list.nextCursor === null ? null : floor;
 
   return Object.values(byId)
-    .filter(thread => matchesFilters(thread, filters) && (bound === null || thread.createdSeq >= bound))
+    .filter(thread => thread.parentId !== null && matchesFilters(thread, filters) && (bound === null || thread.createdSeq >= bound))
     .sort(newestFirst);
 });
-
-// The text of a thread the search looks through: title, description, summary.
-export function threadMatches(thread: Thread, q: string): boolean {
-  const needle = q.trim().toLowerCase();
-
-  if (!needle) {
-    return true;
-  }
-
-  return [thread.title, thread.description, thread.summary?.text].some(text => text?.toLowerCase().includes(needle));
-}
-
-// The rows the Threads screen shows: the list range narrowed by the route's
-// agent and search — browser-side, over the loaded rows (the server filters
-// by status and project only).
-export const selectVisibleListThreads = createSelector(
-  [selectListThreads, (state: State) => (state.router.route.key === 'threads' ? state.router.route.agent : undefined), (state: State) => (state.router.route.key === 'threads' ? state.router.route.q : undefined)],
-  (threads, agent, q) => threads.filter(thread => (!agent || thread.agent === agent) && (!q || threadMatches(thread, q))),
-);
 
 // Agents that can be picked in the list filter: the catalog plus every agent
 // seen in a thread the store knows.

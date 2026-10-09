@@ -3,8 +3,7 @@
 // left: a failed first attempt is "failed", an exhausted set with no rows is
 // "empty". The status line at the end (the next page's sentinel, a failed
 // page with Retry) belongs to the loaded range, so it stays whether the rows
-// or the empty state are shown — the remaining pages stay reachable when the
-// browser-side filters hide every loaded row.
+// or the empty state are shown.
 
 import { hasLoadedPage } from '../../store/threads/selectors.ts';
 import type { ThreadsListState } from '../../store/threads/reducer.ts';
@@ -24,13 +23,13 @@ export function threadsFoot(list: ThreadsListState): ThreadsFoot {
   return list.error ? 'retry' : list.nextCursor !== null ? 'more' : null;
 }
 
-// The explanation under "No threads match": how far the search has looked.
+// The explanation under "No threads match": how far the list has looked.
 export function emptyMatchNote(foot: ThreadsFoot): string {
   switch (foot) {
     case 'more':
-      return 'Among the threads loaded so far; earlier ones are loading.';
+      return 'Earlier threads are still loading.';
     case 'retry':
-      return 'Among the threads loaded so far; earlier ones may match.';
+      return 'Earlier threads could not be loaded.';
     default:
       return 'Nothing with these filters in the whole list.';
   }

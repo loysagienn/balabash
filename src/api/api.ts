@@ -13,7 +13,7 @@ import type { Context, Next } from 'koa';
 import { prisma } from '../db/client.ts';
 import { config } from '../config/index.ts';
 import { parseJson, prepareObject } from '../utils/serialize-json.ts';
-import { ensureOperatorWorkspace, getMainThread, getThread, isHeadlessThread, listThreads } from '../core/threads.ts';
+import { countThreads, ensureOperatorWorkspace, getMainThread, getThread, isHeadlessThread, listThreads } from '../core/threads.ts';
 import { getEventsAfter, listThreadEvents } from '../core/events.ts';
 import { getLiveHub } from '../core/live.ts';
 import { appendEvent } from '../core/append.ts';
@@ -137,6 +137,8 @@ async function getWorkspaceName(userId: string): Promise<string | null> {
 // anything present but malformed is a 400, not a silent default.
 
 const THREAD_STATUSES: ThreadStatus[] = ['active', 'completed', 'failed', 'cancelled'];
+// The longest agent name or search text GET /threads accepts.
+const THREAD_FILTER_MAX = 200;
 const LIST_LIMIT_DEFAULT = 100;
 const LIST_LIMIT_MAX = 500;
 
@@ -287,6 +289,15 @@ router.get('/threads', requireSession, async ctx => {
 
   const parentId = queryValue(ctx.query.parentId);
   const projectId = queryValue(ctx.query.projectId);
+  const agent = queryValue(ctx.query.agent);
+  const q = queryValue(ctx.query.q)?.trim();
+
+  if ((agent !== undefined && agent.length > THREAD_FILTER_MAX) || (q !== undefined && q.length > THREAD_FILTER_MAX)) {
+    sendError(ctx, 400, 'bad_request', `agent and q must be at most ${THREAD_FILTER_MAX} characters`);
+
+    return;
+  }
+
   const createdAtGte = parseDateParam(queryValue(ctx.query.createdAtGte));
   const createdAtLte = parseDateParam(queryValue(ctx.query.createdAtLte));
 
@@ -314,21 +325,32 @@ router.get('/threads', requireSession, async ctx => {
 
   // Newest first, cursor by createdSeq: unique per thread, so equal
   // createdAt timestamps cannot duplicate or skip rows across pages.
-  const threads = await listThreads(userId, {
-    ...(status !== undefined ? { status: status as ThreadStatus } : {}),
+  const filters = {
     // The literal "null" selects root threads (no parent).
     ...(parentId !== undefined ? { parentId: parentId === 'null' ? null : parentId } : {}),
     ...(projectId !== undefined ? { projectId } : {}),
+    ...(agent !== undefined ? { agent } : {}),
+    ...(q ? { q } : {}),
     ...(createdAtGte !== undefined ? { createdAtGte } : {}),
     ...(createdAtLte !== undefined ? { createdAtLte } : {}),
-    ...(before !== undefined ? { beforeCreatedSeq: BigInt(before) } : {}),
-    limit,
-    order: 'desc',
-  });
+  };
+  // The counts ride with the first page only: the set does not change
+  // between pages, and later pages are the scroll of the same list.
+  const [threads, counts] = await Promise.all([
+    listThreads(userId, {
+      ...filters,
+      ...(status !== undefined ? { status: status as ThreadStatus } : {}),
+      ...(before !== undefined ? { beforeCreatedSeq: BigInt(before) } : {}),
+      limit,
+      order: 'desc',
+    }),
+    before === undefined ? countThreads(userId, filters) : undefined,
+  ]);
 
   const response: ThreadsResponse = {
     threads,
     nextCursor: threads.length === limit ? threads[threads.length - 1]!.createdSeq : null,
+    ...(counts ? { counts } : {}),
   };
 
   ctx.body = prepareObject(response);

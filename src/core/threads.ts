@@ -4,15 +4,18 @@
 // pull tools); every read-then-write lives in append.ts.
 
 import { randomUUID } from 'node:crypto';
+import { Prisma } from '../../prisma-generated/client.ts';
 import { prisma } from '../db/client.ts';
 import type { DbClient } from '../db/client.ts';
-import type { JsonObject, JsonValue, Thread, ThreadStatus, ThreadSummary } from './contract.ts';
+import type { JsonObject, JsonValue, Thread, ThreadCounts, ThreadStatus, ThreadSummary } from './contract.ts';
 import type { ThreadModel as ThreadRow } from '../../prisma-generated/models.ts';
 import { appendEvent, completionProjectionData } from './append.ts';
 import type { AppendResult } from './append.ts';
 import { AppendError, TERMINAL_TYPES, THREAD_CANCELLED, THREAD_STARTED, toEvent } from './envelope.ts';
 import { config } from '../config/index.ts';
 import { threadStartFields } from '../projections/thread.ts';
+import { threadsWhere } from './thread-query.ts';
+import type { ThreadFilters } from './thread-query.ts';
 
 export const COORDINATOR_AGENT = 'coordinator';
 
@@ -40,16 +43,13 @@ export async function getThread(id: string): Promise<Thread | null> {
   return row ? toThread(row) : null;
 }
 
-type ListThreadsOptions = {
-  status?: ThreadStatus;
-  parentId?: string | null;
-  projectId?: string;
-  createdAtGte?: Date;
-  createdAtLte?: Date;
-  // Cursor for newest-first pagination: only threads with
-  // createdSeq < beforeCreatedSeq. createdSeq is unique (the global seq of
-  // thread.started), so equal createdAt timestamps page deterministically.
-  beforeCreatedSeq?: bigint;
+// The columns of a threads row as the raw listing reads them, aliased to
+// the model's field names so the rows go through toThread like any other.
+const THREAD_COLUMNS = Prisma.sql`id, user_id AS "userId", parent_id AS "parentId", agent, title, description, status, summary,
+       project_id AS "projectId", created_seq AS "createdSeq", terminal_seq AS "terminalSeq",
+       created_at AS "createdAt", updated_at AS "updatedAt"`;
+
+type ListThreadsOptions = ThreadFilters & {
   limit?: number;
   // 'asc' (default) keeps the historical shape: the newest matching window
   // returned in creation order. 'desc' returns newest first — the web
@@ -57,37 +57,41 @@ type ListThreadsOptions = {
   order?: 'asc' | 'desc';
 };
 
-export async function listThreads(
-  userId: string,
-  { status, parentId, projectId, createdAtGte, createdAtLte, beforeCreatedSeq, limit = 100, order = 'asc' }: ListThreadsOptions = {},
-): Promise<Thread[]> {
+export async function listThreads(userId: string, { limit = 100, order = 'asc', ...filters }: ListThreadsOptions = {}): Promise<Thread[]> {
   // The limit keeps the newest matching threads (the useful end of a growing
-  // workspace) regardless of the output order.
-  const rows = await prisma.thread.findMany({
-    where: {
-      userId,
-      ...(status !== undefined ? { status } : {}),
-      ...(parentId !== undefined ? { parentId } : {}),
-      ...(projectId !== undefined ? { projectId } : {}),
-      ...(beforeCreatedSeq !== undefined ? { createdSeq: { lt: beforeCreatedSeq } } : {}),
-      ...(createdAtGte !== undefined || createdAtLte !== undefined
-        ? {
-            createdAt: {
-              ...(createdAtGte !== undefined ? { gte: createdAtGte } : {}),
-              ...(createdAtLte !== undefined ? { lte: createdAtLte } : {}),
-            },
-          }
-        : {}),
-    },
-    orderBy: { createdSeq: 'desc' },
-    take: limit,
-  });
+  // workspace) regardless of the output order. Raw SQL: the filters are the
+  // fragments of thread-query.ts (the search reaches into the summary).
+  const rows = await prisma.$queryRaw<ThreadRow[]>`
+    SELECT ${THREAD_COLUMNS}
+    FROM threads
+    WHERE ${threadsWhere(userId, filters)}
+    ORDER BY created_seq DESC
+    LIMIT ${limit}`;
 
   if (order === 'asc') {
     rows.reverse();
   }
 
   return rows.map(toThread);
+}
+
+// How many threads of the workspace fall under each status with the same
+// filters (status and cursor aside) — the segments of the threads list.
+export async function countThreads(userId: string, filters: Omit<ThreadFilters, 'status' | 'beforeCreatedSeq'>): Promise<ThreadCounts> {
+  const rows = await prisma.$queryRaw<{ status: string; n: number }[]>`
+    SELECT status, COUNT(*)::int AS n
+    FROM threads
+    WHERE ${threadsWhere(userId, filters)}
+    GROUP BY status`;
+  const counts: ThreadCounts = { active: 0, completed: 0, failed: 0, cancelled: 0 };
+
+  for (const row of rows) {
+    if (row.status in counts) {
+      counts[row.status as ThreadStatus] = row.n;
+    }
+  }
+
+  return counts;
 }
 
 // Every active non-main thread across all workspaces — the restart module's

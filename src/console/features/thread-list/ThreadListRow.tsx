@@ -24,11 +24,13 @@ export type ThreadListRowProps = {
   fresh?: boolean;
   current?: boolean;
   noAgent?: boolean;
+  // The pinned main thread: worded as always on, without a children count.
+  main?: boolean;
 };
 
 const NO_EVENTS: never[] = [];
 
-export function ThreadListRow({ thread, now, hit, fresh, current, noAgent }: ThreadListRowProps) {
+export function ThreadListRow({ thread, now, hit, fresh, current, noAgent, main }: ThreadListRowProps) {
   const state = useAppSelector(s => selectThreadState(s, thread.id)) ?? 'wait';
   const session = useAppSelector(s => selectSession(s, thread.id));
   const project = useAppSelector(s => (thread.projectId ? (s.projects.byId[thread.projectId]?.title ?? null) : null));
@@ -39,7 +41,7 @@ export function ThreadListRow({ thread, now, hit, fresh, current, noAgent }: Thr
   const events = useAppSelector(s => (active ? selectEvents(s, thread.id) : NO_EVENTS));
   const last = useMemo(() => (active ? lastActionOf(events) : null), [active, events]);
   const link = useLinkProps({ key: 'thread', id: thread.id });
-  const data = threadRowData({ thread, state, session, project, kids, headless, last, now });
+  const data = threadRowData({ thread, state, session, project, kids, headless, last, now, ...(main ? { main } : {}) });
 
   return <ThreadRow {...data} {...link} hit={hit} fresh={fresh} current={current} noAgent={noAgent} />;
 }

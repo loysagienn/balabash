@@ -17,7 +17,8 @@ import { routeTo } from './router/actions.ts';
 import { login, logout, sessionCheck, sessionLost } from './session/actions.ts';
 import { commandThread, loadThread, loadThreadEvents, loadThreads, sendMessage } from './threads/actions.ts';
 import { setComposerDraft } from './ui/actions.ts';
-import { hasLoadedPage, makeSelectAgentThreads, selectKnownAgents, selectLatestFinishedThread, selectListThreads, selectRunningCount, selectRunningCountByAgent, selectRunningCountByProject, selectVisibleListThreads } from './threads/selectors.ts';
+import { hasLoadedPage, makeSelectAgentThreads, selectActiveCountIn, selectKnownAgents, selectLatestFinishedThread, selectListThreads, selectMainThread, selectRunningCount, selectRunningCountByAgent, selectRunningCountByProject } from './threads/selectors.ts';
+import { SEARCH_DEBOUNCE_MS } from './threads/handlers.ts';
 import { selectActiveProjects, selectArchivedProjectCount } from './projects/selectors.ts';
 import { selectConnections, selectConnectionsNeedingAction } from './connections/selectors.ts';
 import { makeSelectThreadEvents } from './feed/selectors.ts';
@@ -375,7 +376,8 @@ describe('route data', () => {
     const listCalls = calls.filter(call => call.name === 'threads.list');
 
     assert.equal(listCalls.length, 1);
-    assert.deepEqual(listCalls[0].args, [{ status: 'active', projectId: 'p1', limit: 50 }]);
+    assert.deepEqual(listCalls[0].args[0], { status: 'active', projectId: 'p1', limit: 50 });
+    assert.ok(listCalls[0].args[1] instanceof AbortSignal);
     assert.deepEqual(store.getState().threads.list.ids, ['a', 'b']);
     assert.equal(store.getState().threads.list.loading, false);
 
@@ -386,7 +388,7 @@ describe('route data', () => {
     await dispatched(store, routeTo({ key: 'threads' }));
     await settle();
     assert.equal(calls.filter(call => call.name === 'threads.list').length, 2);
-    assert.deepEqual(calls.at(-1)?.args, [{ limit: 50 }]);
+    assert.deepEqual(calls.at(-1)?.args[0], { limit: 50 });
   });
 
   // Regression (review 080661d, R2): a status picked while the first page of
@@ -435,7 +437,7 @@ describe('route data', () => {
     answers[3]!({ threads: [thread({ id: 'd', createdSeq: 3n })], nextCursor: null });
     await settle();
     assert.equal(calls.filter(call => call.name === 'threads.list').length, 5);
-    assert.deepEqual(calls.at(-1)?.args, [{ status: 'failed', limit: 50 }]);
+    assert.deepEqual(calls.at(-1)?.args[0], { status: 'failed', limit: 50 });
     assert.deepEqual(store.getState().threads.list.ids, []);
     assert.equal(store.getState().threads.list.loading, true);
   });
@@ -549,7 +551,7 @@ describe('threads list projection', () => {
 
     assert.deepEqual(
       selectListThreads(full.getState()).map(t => t.id),
-      ['a', 'b', 'old', 'main'],
+      ['a', 'b', 'old'],
     );
   });
 
@@ -601,7 +603,7 @@ describe('threads list projection', () => {
     assert.deepEqual(selectListThreads(store.getState()).map(t => t.id), ['n']);
   });
 
-  it('narrows the visible rows by the route’s agent and search without reloading', async () => {
+  it('reloads the list for the route’s agent and search, the search once the typing rests, and reads the rows by the same rules', async () => {
     const calls: Calls = [];
     const store = await listStore({ key: 'threads' }, null, calls);
 
@@ -609,13 +611,50 @@ describe('threads list projection', () => {
 
     await dispatched(store, routeTo({ key: 'threads', agent: 'designer' }, { replace: true }));
     await settle();
-    assert.deepEqual(selectVisibleListThreads(store.getState()).map(t => t.id), ['n']);
+    assert.deepEqual(calls.filter(call => call.name === 'threads.list').map(call => call.args[0]), [{ limit: 50 }, { agent: 'designer', limit: 50 }]);
+    // The page (a, b — engineer's) is loaded, the rows are read by the filters: only the designer's thread.
+    assert.deepEqual(selectListThreads(store.getState()).map(t => t.id), ['n']);
 
+    // Typing: the route changes at every keystroke, the request waits for the pause.
+    await dispatched(store, routeTo({ key: 'threads', q: 'SL' }, { replace: true }));
     await dispatched(store, routeTo({ key: 'threads', q: 'SLUG' }, { replace: true }));
     await settle();
-    assert.deepEqual(selectVisibleListThreads(store.getState()).map(t => t.id), ['n']);
-    assert.equal(calls.filter(call => call.name === 'threads.list').length, 1);
+    assert.equal(calls.filter(call => call.name === 'threads.list').length, 2);
+    assert.equal(store.getState().threads.list.loading, true);
+    await new Promise(resolve => setTimeout(resolve, SEARCH_DEBOUNCE_MS + 20));
+    assert.deepEqual(calls.filter(call => call.name === 'threads.list').map(call => call.args[0]).slice(2), [{ q: 'SLUG', limit: 50 }]);
+    assert.deepEqual(selectListThreads(store.getState()).map(t => t.id), ['n']);
     assert.deepEqual(selectKnownAgents(store.getState()), ['coordinator', 'designer', 'engineer']);
+  });
+
+  it('pins the main thread outside the rows and counts the set: the server’s closed ones, the store’s active ones, a terminal moving one across', async () => {
+    const counts = { active: 9, completed: 1290, failed: 12, cancelled: 6 };
+    const api = fakeApi({
+      snapshot: async () => snapshot({ asOfSeq: 50n, threads: [thread({ id: 'main', parentId: null, agent: 'coordinator', createdSeq: 1n }), thread({ id: 'x', createdSeq: 9n, agent: 'designer' })] }),
+      threads: { list: async query => (query.before ? { threads: [], nextCursor: null } : { threads: page, nextCursor: 5n, counts }) },
+    });
+    const store = createStore({ api, initialRoute: { key: 'threads' } });
+
+    await dispatched(store, sessionCheck());
+    await settle();
+
+    const state = store.getState();
+
+    assert.equal(selectMainThread(state)?.id, 'main');
+    assert.deepEqual(selectListThreads(state).map(t => t.id), ['x', 'a', 'b']);
+    assert.deepEqual(state.threads.list.counts, counts);
+    // The active ones are the store's: two agent threads, the main thread aside.
+    assert.equal(selectActiveCountIn(state, state.threads.list.filters!), 2);
+    assert.equal(selectActiveCountIn(state, { ...state.threads.list.filters!, agent: 'designer' }), 1);
+
+    store.dispatch(eventAction(event({ type: 'thread.failed', seq: 61n, threadId: 'x', payload: { error: 'boom' } })));
+    assert.deepEqual(store.getState().threads.list.counts, { ...counts, active: 8, failed: 13 });
+
+    // A later page keeps the counts of the set.
+    await dispatched(store, loadThreads(store.getState().threads.list.filters!, 5n));
+    await settle();
+    assert.deepEqual(store.getState().threads.list.counts, { ...counts, active: 8, failed: 13 });
+    assert.equal(store.getState().threads.list.nextCursor, null);
   });
 });
 

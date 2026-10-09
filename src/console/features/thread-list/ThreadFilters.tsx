@@ -1,16 +1,17 @@
 // The filter bar of the Threads screen: status segments, agent and project
 // pickers, search — all of it is the route (frontend.md: filters live in
-// the URL, a change replaces the history entry). Status and project reload
-// the list from the server; agent and search narrow the loaded rows in the
-// browser. "/" focuses the search from anywhere on the screen.
+// the URL, a change replaces the history entry), and every one of them
+// reloads the list from the server. The segments carry the counts of the
+// set (segmentCount). "/" focuses the search from anywhere on the screen.
 
 import { useEffect, useState } from 'react';
-import type { ThreadStatus } from '../../../core/contract.ts';
+import type { ThreadCounts, ThreadStatus } from '../../../core/contract.ts';
 import type { ThreadsRoute } from '../../lib/router/routes.ts';
 import { useAppDispatch, useAppSelector } from '../../store/hooks.ts';
 import { selectProjects } from '../../store/projects/selectors.ts';
 import { routeTo } from '../../store/router/actions.ts';
-import { selectKnownAgents, selectThreadsById } from '../../store/threads/selectors.ts';
+import { selectKnownAgents } from '../../store/threads/selectors.ts';
+import { segmentCount } from './counts.ts';
 import { FBar } from '../../ui/FBar/FBar.tsx';
 import { FChip } from '../../ui/FChip/FChip.tsx';
 import { IconBtn } from '../../ui/IconBtn/IconBtn.tsx';
@@ -35,16 +36,18 @@ function isTyping(target: EventTarget | null): boolean {
   return target instanceof HTMLElement && (target.closest('input, textarea, select, [contenteditable]') !== null);
 }
 
-export function ThreadFilters({ route }: { route: ThreadsRoute }) {
+export type ThreadFiltersProps = {
+  route: ThreadsRoute;
+  // The counts of the current set and the store's number of active threads in it.
+  counts: ThreadCounts | null;
+  active: number;
+};
+
+export function ThreadFilters({ route, counts, active }: ThreadFiltersProps) {
   const dispatch = useAppDispatch();
   const agents = useAppSelector(selectKnownAgents);
   const projects = useAppSelector(selectProjects);
   const project = route.project ? projects.find(p => p.slug === route.project) : undefined;
-  const activeCount = useAppSelector(s => {
-    const byId = selectThreadsById(s);
-
-    return Object.values(byId).filter(t => t.status === 'active' && (!project || t.projectId === project.id) && (!route.agent || t.agent === route.agent)).length;
-  });
   const [menu, setMenu] = useState<'agent' | 'project' | null>(null);
   const go = (patch: ThreadsFilterPatch) => dispatch(routeTo(withFilters(route, patch), { replace: true }));
 
@@ -72,7 +75,7 @@ export function ThreadFilters({ route }: { route: ThreadsRoute }) {
               <SegItem
                 key={segment.label}
                 label={segment.label}
-                n={segment.status === 'active' ? activeCount : undefined}
+                n={segmentCount(segment.status, counts, active)}
                 sel={route.status === segment.status}
                 onClick={() => go({ status: segment.status })}
               />

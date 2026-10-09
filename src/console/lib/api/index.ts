@@ -26,7 +26,7 @@ export type Api = {
   logout(): Promise<LogoutResponse>;
   snapshot(): Promise<SnapshotResponse>;
   threads: {
-    list(query: ThreadsQuery): Promise<ThreadsResponse>;
+    list(query: ThreadsQuery, signal?: AbortSignal): Promise<ThreadsResponse>;
     get(id: string): Promise<ThreadResponse>;
     events(id: string, query: ThreadEventsQuery): Promise<ThreadEventsResponse>;
     sendMessage(id: string, text: string): Promise<unknown>;
@@ -67,7 +67,7 @@ export function createApi(options: FetchOptions = {}): Api {
     logout: () => apiFetch<LogoutResponse>('/api/logout', { method: 'POST', unauthenticated: true }),
     snapshot: () => apiFetch<SnapshotResponse>('/api/snapshot'),
     threads: {
-      list: query => apiFetch<ThreadsResponse>('/api/threads', { query }),
+      list: (query, signal) => apiFetch<ThreadsResponse>('/api/threads', { query, signal }),
       get: id => apiFetch<ThreadResponse>(thread(id)),
       events: (id, query) => apiFetch<ThreadEventsResponse>(`${thread(id)}/events`, { query }),
       sendMessage: (id, text) => apiFetch(`${thread(id)}/messages`, { method: 'POST', body: { text } }),

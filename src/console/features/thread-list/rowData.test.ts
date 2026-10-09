@@ -47,6 +47,22 @@ describe('threadRowData', () => {
     assert.deepEqual(row, { agent: 'engineer', title: 'Public URL scheme', state: 'done', headless: true, time: '14:09 → 14:31', sub: '22m', desc: 'slug is globally unique' });
   });
 
+  it('words the pinned main thread as always on, its children uncounted', () => {
+    const row = threadRowData({
+      thread: thread({ id: 'main', parentId: null, agent: 'coordinator', createdAt: new Date(2026, 7, 6, 22, 44) }),
+      state: 'wait',
+      session: null,
+      project: null,
+      kids: 200,
+      headless: false,
+      last: null,
+      now: NOW,
+      main: true,
+    });
+
+    assert.deepEqual(row, { agent: 'coordinator', title: 'Main thread', state: 'wait', time: 'since Aug 6', sub: 'always on' });
+  });
+
   it('falls back to the summary text and the agent name', () => {
     const t = thread({ id: 't3', title: '  ', status: 'failed', summary: { text: 'Summary here' }, createdAt: at(1, 0), updatedAt: at(1, 4) });
 

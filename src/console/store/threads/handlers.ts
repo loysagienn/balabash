@@ -9,31 +9,65 @@ import { commandThreadDone, commandThreadFail, loadThreadDone, loadThreadEventsD
 
 export const THREADS_PAGE = 50;
 export const FEED_CHUNK = 500;
+// The first page of a searched set waits for the typing to pause.
+export const SEARCH_DEBOUNCE_MS = 300;
 
-export const loadThreadsHandler: ActionHandler<'LOAD_THREADS'> =
-  ({ api, dispatch, getState, next }) =>
-  async action => {
+const pause = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
+
+// One page request in flight at a time: a new filter set aborts the
+// request of the old one (its answer would be dropped anyway), and the
+// first page of a search is sent only once the text has rested.
+export const loadThreadsHandler: ActionHandler<'LOAD_THREADS'> = ({ api, dispatch, getState, next }) => {
+  let inFlight: AbortController | null = null;
+
+  return async action => {
     next(action);
 
     const { filters, before } = action;
 
+    if (before === null && filters.q !== null) {
+      await pause(SEARCH_DEBOUNCE_MS);
+
+      if (getState().threads.list.filters !== filters) {
+        return;
+      }
+    }
+
+    inFlight?.abort();
+
+    const controller = new AbortController();
+
+    inFlight = controller;
+
     try {
-      const page = await api.threads.list({
-        ...(filters.status ? { status: filters.status } : {}),
-        ...(filters.projectId ? { projectId: filters.projectId } : {}),
-        ...(before !== null ? { before: before.toString() } : {}),
-        limit: THREADS_PAGE,
-      });
+      const page = await api.threads.list(
+        {
+          ...(filters.status ? { status: filters.status } : {}),
+          ...(filters.projectId ? { projectId: filters.projectId } : {}),
+          ...(filters.agent ? { agent: filters.agent } : {}),
+          ...(filters.q ? { q: filters.q } : {}),
+          ...(before !== null ? { before: before.toString() } : {}),
+          limit: THREADS_PAGE,
+        },
+        controller.signal,
+      );
 
       if (getState().threads.list.filters !== filters) {
         return;
       }
 
-      dispatch(loadThreadsDone(filters, before, page.threads, page.nextCursor));
+      dispatch(loadThreadsDone(filters, before, page.threads, page.nextCursor, page.counts ?? null));
     } catch (error) {
-      dispatch(loadThreadsFail(filters, before, toApiFailure(error)));
+      if (!controller.signal.aborted) {
+        dispatch(loadThreadsFail(filters, before, toApiFailure(error)));
+      }
+    } finally {
+      if (inFlight === controller) {
+        inFlight = null;
+      }
     }
   };
+};
 
 export const loadThreadEventsHandler: ActionHandler<'LOAD_THREAD_EVENTS'> =
   ({ api, dispatch, getState, next }) =>

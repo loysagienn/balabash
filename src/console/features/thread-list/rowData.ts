@@ -1,13 +1,14 @@
 // From a thread of the store to the words of its row (ui/ThreadRow): an
 // active one — "since 14:02 / running 2h 36m" and the context ring; a
-// closed one — "13:17 → 13:59 / 42m" and its summary. Pure, so the mapping
-// is tested without the store or the DOM; the connected row reads the
-// pieces (state, session, project, children, agent policy, last action)
-// and calls it.
+// closed one — "13:17 → 13:59 / 42m" and its summary; the main thread —
+// "Main thread", "since Aug 6 / always on", its children uncounted (the
+// store knows a window of them, not all). Pure, so the mapping is tested
+// without the store or the DOM; the connected row reads the pieces (state,
+// session, project, children, agent policy, last action) and calls it.
 
 import type { Thread } from '../../../core/contract.ts';
 import type { SessionView } from '../../../projections/session.ts';
-import { durationLabel, rangeLabel, sinceLabel } from '../../lib/format/index.ts';
+import { durationLabel, rangeLabel, shortDate, sinceLabel } from '../../lib/format/index.ts';
 import type { CtxInput } from '../../ui/Ring/Ring.logic.ts';
 import type { ThreadRowProps } from '../../ui/ThreadRow/ThreadRow.tsx';
 import type { StateName } from '../../ui/atoms/state.ts';
@@ -23,6 +24,7 @@ export type ThreadRowInput = {
   headless: boolean;
   last: LastAction | null;
   now: Date;
+  main?: boolean;
 };
 
 export type ThreadRowData = Omit<ThreadRowProps, 'href' | 'onClick' | 'current' | 'fresh' | 'hit' | 'noAgent'>;
@@ -42,16 +44,26 @@ export function threadTitle(thread: Thread): string {
   return thread.title?.trim() || thread.agent;
 }
 
-export function threadRowData({ thread, state, session, project, kids, headless, last, now }: ThreadRowInput): ThreadRowData {
+export function threadRowData({ thread, state, session, project, kids, headless, last, now, main }: ThreadRowInput): ThreadRowData {
   const base: ThreadRowData = {
     agent: thread.agent,
-    title: threadTitle(thread),
+    title: main ? thread.title?.trim() || 'Main thread' : threadTitle(thread),
     state,
     ...(project ? { project } : {}),
     ...(headless ? { headless: true } : {}),
-    ...(kids > 0 ? { kids } : {}),
+    ...(kids > 0 && !main ? { kids } : {}),
     time: '',
   };
+
+  if (main) {
+    return {
+      ...base,
+      ...(last?.lastCode ? { lastCode: last.lastCode } : last?.last ? { last: last.last } : {}),
+      time: `since ${shortDate(thread.createdAt, now)}`,
+      sub: 'always on',
+      ...(ctxOf(session) ? { ctx: ctxOf(session) } : {}),
+    };
+  }
 
   if (isActiveState(state)) {
     return {
