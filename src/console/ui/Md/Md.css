@@ -1,0 +1,47 @@
+@layer components{
+/* ── Markdown ──  .md — rendered Markdown (messages, summary, file preview). The only block that styles tags.
+   data-variant="quiet" — intermediate agent text; data-plain — the source as text while the renderer chunk loads. */
+.md{font-size:var(--fs-body);line-height:var(--lh-body);color:var(--text);text-wrap:pretty;overflow-wrap:break-word}
+.md > *{margin:0}
+.md > * + *{margin-top:var(--sp-2)}
+.md > * + :is(h1,h2,h3){margin-top:var(--sp-4)}
+.md :is(h1,h2,h3,h4,h5,h6){font-weight:var(--fw-semibold);color:var(--text)}
+.md h1{font-size:var(--fs-lg);line-height:var(--lh-lg)}
+.md h2{font-size:var(--fs-h2);line-height:var(--lh-h2)}
+.md h3{font-size:var(--fs-body);line-height:var(--lh-body)}
+.md :is(h4,h5,h6){font-size:var(--fs-ui);line-height:var(--lh-ui);color:var(--text-2)}
+.md :is(strong,b){font-weight:var(--fw-semibold)}
+.md :is(ul,ol){padding-left:var(--sp-5)}
+.md li + li{margin-top:var(--sp-1)}
+.md li > :is(ul,ol){margin-top:var(--sp-1)}
+.md li::marker{color:var(--text-3)}
+.md a{color:var(--link);text-decoration:underline;text-decoration-color:var(--accent-line);text-underline-offset:2px}
+.md a:hover{color:var(--text)}
+.md :not(pre) > code{font-family:var(--mono);letter-spacing:0;font-size:var(--fs-code-sm);color:var(--text);background:var(--surface-3);border-radius:var(--r-xs);padding:1px var(--sp-1)}
+.md pre{font-family:var(--mono);letter-spacing:0;font-size:var(--fs-code-sm);line-height:var(--lh-code-sm);color:var(--text-2);background:var(--bg);border:1px solid var(--border);border-radius:var(--r-md);padding:var(--sp-2h) var(--sp-3);white-space:pre-wrap;overflow-wrap:anywhere}
+.md pre code{font:inherit;color:inherit;background:none;padding:0;border-radius:0}
+.md blockquote{padding-left:var(--sp-3);border-left:2px solid var(--border-strong);color:var(--text-2)}
+.md hr{height:0;border:0;border-top:1px solid var(--border);margin-block:var(--sp-4)}
+.md img{max-width:100%;height:auto;border-radius:var(--r-sm);border:1px solid var(--border)}
+.md table{width:100%;font-size:var(--fs-meta);line-height:var(--lh-meta);font-variant-numeric:tabular-nums}
+.md :is(th,td){text-align:left;padding:var(--sp-1h) var(--sp-2h);border-bottom:1px solid var(--border)}
+.md th{color:var(--text-3);font-weight:var(--fw-semibold)}
+/* task list: the renderer's bare <input type="checkbox"> drawn like .chk-box (ui/Check), the bullet gone */
+.md .task-list-item{list-style:none;margin-left:calc(-1 * var(--sp-5))}
+.md input[type="checkbox"]{--chk-size:16px;--chk-mark-w:5px;--chk-mark-h:9px;appearance:none;display:inline-grid;place-items:center;width:var(--chk-size);height:var(--chk-size);margin:0 var(--sp-1h) 0 0;vertical-align:-0.2em;border:1.5px solid var(--border-ctl);border-radius:var(--r-xs);background:var(--surface)}
+.md input[type="checkbox"]::before{content:"";width:var(--chk-mark-w);height:var(--chk-mark-h);margin-top:calc(var(--chk-mark-w) / -2);border:solid var(--accent-ink);border-width:0 2px 2px 0;transform:rotate(45deg);opacity:0}
+.md input[type="checkbox"]:checked{background:var(--accent);border-color:var(--accent)}
+.md input[type="checkbox"]:checked::before{opacity:1}
+.md[data-variant="quiet"]{font-size:var(--fs-ui);line-height:var(--lh-ui);color:var(--text-2)}
+.md[data-plain] p{white-space:pre-wrap}
+/* code highlighting (rehype-highlight classes) on the design's --code-* palette */
+.md :is(.hljs-keyword,.hljs-selector-tag,.hljs-tag,.hljs-name,.hljs-literal,.hljs-built_in,.hljs-type,.hljs-doctag,.hljs-meta){color:var(--code-kw)}
+.md :is(.hljs-string,.hljs-regexp,.hljs-symbol,.hljs-selector-attr,.hljs-selector-pseudo,.hljs-template-tag,.hljs-bullet){color:var(--code-str)}
+.md :is(.hljs-title,.hljs-attr,.hljs-attribute,.hljs-variable,.hljs-section,.hljs-selector-class,.hljs-selector-id){color:var(--code-fn)}
+.md .hljs-number{color:var(--code-num)}
+.md :is(.hljs-comment,.hljs-quote){color:var(--code-com);font-style:italic}
+.md .hljs-addition{color:var(--diff-add)}
+.md .hljs-deletion{color:var(--diff-del)}
+.md .hljs-emphasis{font-style:italic}
+.md .hljs-strong{font-weight:var(--fw-semibold)}
+}

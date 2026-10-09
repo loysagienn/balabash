@@ -1,0 +1,7 @@
+@layer components{
+/* ── Key–value pairs ──  <dl class="kv" data-variant="mono"><dt>…</dt><dd>…</dd></dl> · --kv-dt-w — a shared label width when several dl are stacked */
+.kv{display:grid;grid-template-columns:var(--kv-dt-w,auto) minmax(0,1fr);gap:var(--sp-1h) var(--sp-3);font-size:var(--fs-meta);line-height:var(--lh-meta);color:var(--text-2)}
+.kv > dt{color:var(--text-3)}
+.kv > dd{margin:0;min-width:0;overflow-wrap:anywhere}
+.kv[data-variant="mono"] > dd{font-family:var(--mono);letter-spacing:0;font-size:var(--fs-code-sm)}
+}

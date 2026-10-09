@@ -1,0 +1,14 @@
+@layer patterns{
+/* ── Thread ──  .th (container “thread”) > .th-head (ThreadHead) + .th-body (.th-main > .feed + .composer, aside.th-rail)
+   ≤ 900 — no right rail (the header reflows on its own, ThreadHead.css). */
+.th{container:thread / inline-size;display:flex;flex-direction:column;min-width:0;min-height:0;background:var(--bg)}
+.th-body{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:start;flex:1;min-height:0}
+.th-main{display:flex;flex-direction:column;min-width:0;min-height:100%}
+.th-rail{--kv-dt-w:76px;width:var(--rail-w);display:flex;flex-direction:column;gap:var(--sp-4h);align-self:stretch;padding:var(--sp-4h) var(--sp-4h) var(--sp-6);border-left:1px solid var(--border)}
+.th-rail-h{margin:0 0 var(--sp-2);font-size:var(--fs-micro);line-height:var(--lh-micro);font-weight:var(--fw-semibold);color:var(--text-3)}
+.th-rail-gauge{display:flex;align-items:center;gap:var(--sp-3);font-size:var(--fs-meta);line-height:var(--lh-meta);color:var(--text-3)}
+@container thread (max-width:900px){
+  .th-body{grid-template-columns:minmax(0,1fr)}
+  .th-rail{display:none}
+}
+}

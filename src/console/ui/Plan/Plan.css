@@ -1,0 +1,12 @@
+@layer patterns{
+/* ── Agent plan ──  .plan > .plan-h (.plan-h-end) + .plan-i[data-state=run|done] — indented to the avatar column */
+.plan{margin-left:var(--feed-indent,0px);padding:var(--sp-2h) var(--sp-3h) var(--sp-3);border:1px solid var(--border);border-radius:var(--r-md);background:var(--surface)}
+.plan-h{display:flex;align-items:center;gap:var(--sp-2);margin-bottom:var(--sp-1h);font-size:var(--fs-meta);line-height:var(--lh-meta);font-weight:var(--fw-semibold);color:var(--text-2)}
+.plan-h-end{margin-left:auto;font-weight:var(--fw-regular);color:var(--text-3);font-variant-numeric:tabular-nums}
+.plan-i{display:flex;align-items:center;gap:var(--sp-2h);padding:var(--sp-0h) 0;font-size:var(--fs-ui);color:var(--text-2)}
+.plan-i > .ic{color:var(--text-4)}
+.plan-i[data-state="done"]{color:var(--text-3);text-decoration:line-through;text-decoration-color:var(--text-4)}
+.plan-i[data-state="done"] > .ic{color:var(--st-done)}
+.plan-i[data-state="run"]{color:var(--text)}
+.plan-i[data-state="run"] > .ic{color:var(--st-run)}
+}

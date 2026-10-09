@@ -1,0 +1,7 @@
+@layer patterns{
+/* ── Feed ──  .feed — a column of events. --feed-indent — indent for the avatar column; 0 in a narrow thread.
+   data-align="end" — a short feed sits at the bottom, next to the composer. */
+.feed{--feed-indent:calc(var(--av-sm) + var(--sp-3));width:100%;max-width:var(--feed-max);margin:0 auto;padding:var(--sp-5) var(--gutter) var(--sp-6);display:flex;flex-direction:column;gap:var(--sp-4)}
+.feed[data-align="end"]{justify-content:flex-end;flex:1}
+@container thread (max-width:480px){ .feed{--feed-indent:0px;padding-top:var(--sp-3h);gap:var(--sp-3h)} }
+}

@@ -1,0 +1,26 @@
+@layer patterns{
+/* ── Message ──  article.msg[data-variant=task|user|ask|quiet] > .av.msg-av + .msg-h (.msg-from → .msg-to, .tag, .badge, .msg-time) + .msg-b (.msg-fold, .msg-more, .msg-quick)
+   Inside .feed (--feed-indent) in a .th (container “thread”): ≤ 480 — no avatar column. */
+.msg{display:grid;grid-template-columns:var(--av-sm) minmax(0,1fr);gap:var(--sp-1h) var(--sp-3);align-items:start}
+.msg-av{grid-row:1 / span 2;margin-top:1px}
+.msg-h{display:flex;flex-wrap:wrap;align-items:center;gap:var(--sp-1) var(--sp-1h);min-height:var(--av-sm);font-size:var(--fs-meta);line-height:var(--lh-meta);color:var(--text-3)}
+.msg-from{font-size:var(--fs-ui);font-weight:var(--fw-semibold);color:var(--text)}
+.msg-arrow{font-size:var(--ico-xs);color:var(--text-4)}
+.msg-to{color:var(--text-2)}
+.msg-time{margin-left:auto;font-variant-numeric:tabular-nums}
+.msg-b{grid-column:2;min-width:0}
+.msg:is([data-variant="task"],[data-variant="ask"]) .msg-b{padding:var(--sp-3) var(--sp-4);border:1px solid var(--border);border-radius:var(--r-md);background:var(--surface)}
+.msg[data-variant="ask"] .msg-b{border-color:color-mix(in srgb,var(--st-act) 30%,var(--border))}
+.msg[data-variant="user"] .msg-b{padding:var(--sp-2h) var(--sp-3h);border-radius:var(--r-md);background:var(--surface-2)}
+.msg[data-variant="quiet"]{display:block;padding-left:var(--feed-indent,0px)}
+.msg-fold{--fold-h:150px;--fold-fade:56px;position:relative;max-height:var(--fold-h);overflow:hidden}
+.msg-fold::after{content:"";position:absolute;left:0;right:0;bottom:0;height:var(--fold-fade);background:linear-gradient(transparent,var(--surface))}
+.msg-more{display:inline-flex;align-items:center;gap:var(--sp-1);margin-top:var(--sp-2);font-size:var(--fs-meta);line-height:var(--lh-meta);font-weight:var(--fw-medium);color:var(--link)}
+.msg-more:hover{color:var(--text)}
+.msg-quick{display:flex;flex-wrap:wrap;gap:var(--sp-1h);margin-top:var(--sp-3)}
+@container thread (max-width:480px){
+  .msg{grid-template-columns:minmax(0,1fr)}
+  .msg-av{display:none}
+  .msg-b{grid-column:1}
+}
+}

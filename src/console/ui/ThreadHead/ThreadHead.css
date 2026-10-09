@@ -1,0 +1,21 @@
+@layer patterns{
+/* ── Thread header ──  .th-head > .av.th-av + h2.th-title + .th-acts (.th-act… .th-more) + .th-meta (.th-meta-i) + .th-chips
+   Inside .th (container “thread”): ≤ 560 — the title is already in the shell header, details are in the “⋯” menu. */
+.th-head{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:start;gap:var(--sp-1) var(--sp-3h);padding:var(--sp-4h) var(--gutter) var(--sp-4);border-bottom:1px solid var(--border)}
+.th-av{grid-row:1 / span 3}
+.th-title{grid-column:2;min-width:0;margin:0;font-size:var(--fs-h1);line-height:var(--lh-h1);font-weight:var(--fw-semibold);text-wrap:pretty}
+.th-acts{grid-column:3;grid-row:1;display:flex;align-items:center;gap:var(--sp-1h)}
+.th-act,.th-more{flex:none}   /* .th-act hides in a narrow thread, .th-more (“⋯”: details, links, copy link) is always visible */
+.th-meta{grid-column:2 / -1;display:flex;flex-wrap:wrap;align-items:center;gap:var(--sp-1) var(--sp-2);font-size:var(--fs-meta);line-height:var(--lh-meta);color:var(--text-3)}
+.th-meta-i{white-space:nowrap}
+.th-meta a{color:var(--text-2);text-decoration:none}
+.th-meta a:hover{color:var(--text)}
+.th-chips{grid-column:2 / -1;display:flex;flex-wrap:wrap;align-items:center;gap:var(--sp-2) var(--sp-3h);margin-top:var(--sp-1h)}
+@container thread (max-width:560px){
+  .th-head{grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:var(--sp-2);padding:var(--sp-2) var(--gutter)}
+  .th-av,.th-title,.th-meta,.th-act{display:none}
+  .th-chips{grid-column:1;grid-row:1;flex-wrap:nowrap;overflow:hidden;margin-top:0}
+  .th-chips > .link{display:none}   /* links — in the “⋯” menu */
+  .th-acts{grid-column:2;grid-row:1}
+}
+}

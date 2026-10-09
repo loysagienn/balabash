@@ -41,15 +41,39 @@ import { Tab, Tabs } from '../../ui/Tabs/Tabs.tsx';
 import { Toast } from '../../ui/Toast/Toast.tsx';
 import { Attn, Caption, Code, Count, Kbd, Pulse, Quiet, Tag } from '../../ui/atoms/atoms.tsx';
 import type { StateName } from '../../ui/atoms/atoms.tsx';
+import { DevUiFeed } from './DevUiFeed.tsx';
 import './DevUi.css';
 
 const STATES: StateName[] = ['run', 'wait', 'act', 'done', 'err', 'off'];
-const STATE_LABEL: Record<StateName, string> = { run: 'running', wait: 'waiting', act: 'reply needed', done: 'done', err: 'crashed', off: 'cancelled' };
+const STATE_LABEL: Record<StateName, string> = {
+  run: 'running',
+  wait: 'waiting',
+  act: 'reply needed',
+  done: 'done',
+  err: 'crashed',
+  off: 'cancelled',
+};
 const AGENTS = Object.keys(AGENT_AVATARS);
 
 // A sample thread row of the design, for the list blocks (ThreadRow itself
 // comes with the composites).
-function DemoRow({ agent, title, meta, state, time, pip, fresh }: { agent: string; title: string; meta: ReactNode; state: StateName; time: string; pip?: 'run' | 'err'; fresh?: boolean }) {
+function DemoRow({
+  agent,
+  title,
+  meta,
+  state,
+  time,
+  pip,
+  fresh,
+}: {
+  agent: string;
+  title: string;
+  meta: ReactNode;
+  state: StateName;
+  time: string;
+  pip?: 'run' | 'err';
+  fresh?: boolean;
+}) {
   return (
     <a className="row" href="#" data-fresh={fresh ? '' : undefined} onClick={event => event.preventDefault()}>
       <Avatar agent={agent} pip={pip} />
@@ -173,7 +197,14 @@ export function DevUi() {
               <Input id="dev-code" value={text} onChange={setText} mono autoComplete="off" />
             </Field>
             <Field label="Search" fid="dev-search" opt="optional">
-              <Input id="dev-search" value="" onChange={() => undefined} lead="search" placeholder="Search" end={<Kbd>⌘K</Kbd>} />
+              <Input
+                id="dev-search"
+                value=""
+                onChange={() => undefined}
+                lead="search"
+                placeholder="Search"
+                end={<Kbd>⌘K</Kbd>}
+              />
             </Field>
             <Field label="Slug" fid="dev-slug" err="Already taken">
               <Input id="dev-slug" value="balabash" onChange={() => undefined} pre="/p/" mono invalid />
@@ -239,7 +270,13 @@ export function DevUi() {
               </Empty>
             </div>
             <div className="dev-box">
-              <Empty icon="circle-alert" state="err" title="Couldn’t load threads" action="Try again" actionIcon="refresh-cw">
+              <Empty
+                icon="circle-alert"
+                state="err"
+                title="Couldn’t load threads"
+                action="Try again"
+                actionIcon="refresh-cw"
+              >
                 HTTP 502 · the server did not answer.
               </Empty>
             </div>
@@ -248,10 +285,31 @@ export function DevUi() {
 
         <Section title="Check">
           <Row label="checkbox · radio · switch · disabled">
-            <Check label="Notify on successful runs" checked={checks.box} onChange={box => setChecks({ ...checks, box })} />
-            <Check kind="radio" name="dev-r" label="Desktop" checked={checks.radio === 'a'} onChange={() => setChecks({ ...checks, radio: 'a' })} />
-            <Check kind="radio" name="dev-r" label="Phone" checked={checks.radio === 'b'} onChange={() => setChecks({ ...checks, radio: 'b' })} />
-            <Check kind="switch" label="Light theme" checked={checks.tgl} onChange={tgl => setChecks({ ...checks, tgl })} />
+            <Check
+              label="Notify on successful runs"
+              checked={checks.box}
+              onChange={box => setChecks({ ...checks, box })}
+            />
+            <Check
+              kind="radio"
+              name="dev-r"
+              label="Desktop"
+              checked={checks.radio === 'a'}
+              onChange={() => setChecks({ ...checks, radio: 'a' })}
+            />
+            <Check
+              kind="radio"
+              name="dev-r"
+              label="Phone"
+              checked={checks.radio === 'b'}
+              onChange={() => setChecks({ ...checks, radio: 'b' })}
+            />
+            <Check
+              kind="switch"
+              label="Light theme"
+              checked={checks.tgl}
+              onChange={tgl => setChecks({ ...checks, tgl })}
+            />
             <Check label="Locked" checked disabled onChange={() => undefined} />
             <Check kind="switch" label="Locked" checked={false} disabled onChange={() => undefined} />
           </Row>
@@ -287,11 +345,25 @@ export function DevUi() {
 
         <Section title="Crumbs">
           <Row label="plain · with lead · file area header">
-            <Crumbs items={[{ label: 'Files', href: '#' }, { label: 'balabash', href: '#' }]} current="design" />
+            <Crumbs
+              items={[
+                { label: 'Files', href: '#' },
+                { label: 'balabash', href: '#' },
+              ]}
+              current="design"
+            />
             <Crumbs lead="folder" items={[{ label: 'renovation', href: '#' }]} current="estimates" />
           </Row>
           <div className="dev-box" style={{ width: 280, padding: 'var(--sp-2)' }}>
-            <Crumbs fa items={[{ label: 'Files', href: '#' }, { label: 'balabash', href: '#' }, { label: 'design', href: '#' }]} current="a-very-long-file-name-that-does-not-fit.md" />
+            <Crumbs
+              fa
+              items={[
+                { label: 'Files', href: '#' },
+                { label: 'balabash', href: '#' },
+                { label: 'design', href: '#' },
+              ]}
+              current="a-very-long-file-name-that-does-not-fit.md"
+            />
           </div>
         </Section>
 
@@ -310,8 +382,21 @@ export function DevUi() {
           </Row>
           <div className="dev-box" style={{ width: 320 }}>
             <List>
-              <DemoRow agent="engineer" title="Narrow list: badges go compact" meta="engineer · Balabash" state="run" time="since 14:02" pip="run" />
-              <DemoRow agent="browser" title="Checking /p/kcal" meta="browser · Balabash" state="off" time="23:10 → 23:14" />
+              <DemoRow
+                agent="engineer"
+                title="Narrow list: badges go compact"
+                meta="engineer · Balabash"
+                state="run"
+                time="since 14:02"
+                pip="run"
+              />
+              <DemoRow
+                agent="browser"
+                title="Checking /p/kcal"
+                meta="browser · Balabash"
+                state="off"
+                time="23:10 → 23:14"
+              />
             </List>
           </div>
         </Section>
@@ -381,13 +466,42 @@ export function DevUi() {
         <Section title="Card · CardHead · List">
           <div className="dev-grid" data-wide="">
             <Card>
-              <CardHead title="Active threads" count={4} countState="run" link={<ActionLink label="All threads" href="#" onClick={event => event.preventDefault()} />} />
+              <CardHead
+                title="Active threads"
+                count={4}
+                countState="run"
+                link={<ActionLink label="All threads" href="#" onClick={event => event.preventDefault()} />}
+              />
               <List timeW="96px">
                 <ListGroup end="7 threads">Today, October 8</ListGroup>
-                <DemoRow agent="engineer" title="Mini-apps: publishing by slug" meta={<>engineer · Balabash · <Code>Read src/api/apps.ts</Code></>} state="run" time="since 14:02" pip="run" fresh />
-                <DemoRow agent="coordinator" title="Sort contractor emails" meta="coordinator · Renovation" state="wait" time="16:42" />
+                <DemoRow
+                  agent="engineer"
+                  title="Mini-apps: publishing by slug"
+                  meta={
+                    <>
+                      engineer · Balabash · <Code>Read src/api/apps.ts</Code>
+                    </>
+                  }
+                  state="run"
+                  time="since 14:02"
+                  pip="run"
+                  fresh
+                />
+                <DemoRow
+                  agent="coordinator"
+                  title="Sort contractor emails"
+                  meta="coordinator · Renovation"
+                  state="wait"
+                  time="16:42"
+                />
                 <ListGroup end="5 threads">Yesterday, October 7</ListGroup>
-                <DemoRow agent="browser" title="Checking /p/kcal in the browser" meta="browser · Balabash" state="err" time="23:10 → 23:14" />
+                <DemoRow
+                  agent="browser"
+                  title="Checking /p/kcal in the browser"
+                  meta="browser · Balabash"
+                  state="err"
+                  time="23:10 → 23:14"
+                />
                 <LoadMore>Loading earlier · showing 12 of 1,312</LoadMore>
               </List>
             </Card>
@@ -410,8 +524,20 @@ export function DevUi() {
             <Card narrow="bare">
               <CardHead title="Bare on the phone" count={2} />
               <List narrow="tiles">
-                <DemoRow agent="gardener" title="Rows become tiles on the phone" meta="gardener · Balabash" state="done" time="12:40 → 12:52" />
-                <DemoRow agent="scheduler" title="A card without a frame when the shell is narrow" meta="scheduler" state="wait" time="09:00" />
+                <DemoRow
+                  agent="gardener"
+                  title="Rows become tiles on the phone"
+                  meta="gardener · Balabash"
+                  state="done"
+                  time="12:40 → 12:52"
+                />
+                <DemoRow
+                  agent="scheduler"
+                  title="A card without a frame when the shell is narrow"
+                  meta="scheduler"
+                  state="wait"
+                  time="09:00"
+                />
               </List>
               <CardBody>
                 <Quiet>card body at the gutter edge</Quiet>
@@ -433,7 +559,13 @@ export function DevUi() {
             <Btn label="Edit" icon="pencil" />
             <Btn label="New thread" icon="plus" variant="primary" />
           </PageHead>
-          <PageHead title="Old kitchen" desc="Archived project: nothing runs here." slug="kitchen/" created="created Mar 2" archived />
+          <PageHead
+            title="Old kitchen"
+            desc="Archived project: nothing runs here."
+            slug="kitchen/"
+            created="created Mar 2"
+            archived
+          />
         </Section>
 
         <Section title="Note">
@@ -483,7 +615,13 @@ export function DevUi() {
                 </Menu>
               }
             >
-              <IconBtn icon="ellipsis" label="More" variant="regular" expanded={menu} onClick={() => setMenu(open => !open)} />
+              <IconBtn
+                icon="ellipsis"
+                label="More"
+                variant="regular"
+                expanded={menu}
+                onClick={() => setMenu(open => !open)}
+              />
             </MenuAnchor>
           </Row>
           <Row label="anchored in a short card: the menu floats over the card’s edge">
@@ -498,11 +636,22 @@ export function DevUi() {
                       <MenuItem icon="pencil" label="Edit" onClick={() => setCardMenu(false)} />
                       <MenuItem icon="pause" label="Pause" onClick={() => setCardMenu(false)} />
                       <MenuSep />
-                      <MenuItem icon="trash-2" label="Delete task" variant="danger" onClick={() => setCardMenu(false)} />
+                      <MenuItem
+                        icon="trash-2"
+                        label="Delete task"
+                        variant="danger"
+                        onClick={() => setCardMenu(false)}
+                      />
                     </Menu>
                   }
                 >
-                  <IconBtn icon="ellipsis" label="Task actions" size="sm" expanded={cardMenu} onClick={() => setCardMenu(open => !open)} />
+                  <IconBtn
+                    icon="ellipsis"
+                    label="Task actions"
+                    size="sm"
+                    expanded={cardMenu}
+                    onClick={() => setCardMenu(open => !open)}
+                  />
                 </MenuAnchor>
               </CardHead>
               <CardBody>
@@ -514,8 +663,16 @@ export function DevUi() {
 
         <Section title="Modal · Sheet">
           <Row label="bare window (showcase) · open the real ones">
-            <Modal bare title="Cancel thread?" cancel="Keep running" confirm="Cancel thread" confirmVariant="danger" onClose={() => undefined}>
-              The “engineer” agent will stop and the thread will end without a summary. Child threads (2) will be cancelled too. This can’t be undone.
+            <Modal
+              bare
+              title="Cancel thread?"
+              cancel="Keep running"
+              confirm="Cancel thread"
+              confirmVariant="danger"
+              onClose={() => undefined}
+            >
+              The “engineer” agent will stop and the thread will end without a summary. Child threads (2) will be
+              cancelled too. This can’t be undone.
             </Modal>
           </Row>
           <Row>
@@ -524,7 +681,14 @@ export function DevUi() {
             <Btn label="Open sheet" onClick={() => setOverlay('sheet')} />
           </Row>
           {overlay === 'modal' ? (
-            <Modal title="Cancel thread?" cancel="Keep running" confirm="Cancel thread" confirmVariant="danger" onClose={() => setOverlay(null)} onConfirm={() => setOverlay(null)}>
+            <Modal
+              title="Cancel thread?"
+              cancel="Keep running"
+              confirm="Cancel thread"
+              confirmVariant="danger"
+              onClose={() => setOverlay(null)}
+              onConfirm={() => setOverlay(null)}
+            >
               The “engineer” agent will stop and the thread will end without a summary. This can’t be undone.
             </Modal>
           ) : null}
@@ -548,7 +712,16 @@ export function DevUi() {
             </Modal>
           ) : null}
           {overlay === 'sheet' ? (
-            <Sheet label="Cancel thread?" title="Cancel thread?" desc="The agent will stop and the thread will end without a summary." confirm="Cancel thread" confirmVariant="danger" cancel="Keep running" onConfirm={() => setOverlay(null)} onClose={() => setOverlay(null)} />
+            <Sheet
+              label="Cancel thread?"
+              title="Cancel thread?"
+              desc="The agent will stop and the thread will end without a summary."
+              confirm="Cancel thread"
+              confirmVariant="danger"
+              cancel="Keep running"
+              onConfirm={() => setOverlay(null)}
+              onClose={() => setOverlay(null)}
+            />
           ) : null}
         </Section>
 
@@ -560,12 +733,25 @@ export function DevUi() {
               </Toast>
             ) : null}
             {toasts.includes(2) ? (
-              <Toast state="err" icon="circle-alert" title="Task didn’t start" action="Retry" action2="Log" onClose={() => setToasts(toasts.filter(id => id !== 2))}>
+              <Toast
+                state="err"
+                icon="circle-alert"
+                title="Task didn’t start"
+                action="Retry"
+                action2="Log"
+                onClose={() => setToasts(toasts.filter(id => id !== 2))}
+              >
                 “DB backup”: the command exited with code 127.
               </Toast>
             ) : null}
             {toasts.includes(3) ? (
-              <Toast state="act" icon="key-round" title="Sign-in required" action="Reconnect" onClose={() => setToasts(toasts.filter(id => id !== 3))}>
+              <Toast
+                state="act"
+                icon="key-round"
+                title="Sign-in required"
+                action="Reconnect"
+                onClose={() => setToasts(toasts.filter(id => id !== 3))}
+              >
                 Gmail · loysagienn — token revoked.
               </Toast>
             ) : null}
@@ -574,9 +760,13 @@ export function DevUi() {
                 to <Code>renovation/estimates</Code> · 2.1 of 3.4 MB
               </Toast>
             ) : null}
-            {toasts.length < 4 ? <Btn label="Restore toasts" size="sm" onClick={() => setToasts([1, 2, 3, 4])} /> : null}
+            {toasts.length < 4 ? (
+              <Btn label="Restore toasts" size="sm" onClick={() => setToasts([1, 2, 3, 4])} />
+            ) : null}
           </div>
         </Section>
+
+        <DevUiFeed />
       </Screen>
     </Shell>
   );

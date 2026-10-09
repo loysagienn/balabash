@@ -1,0 +1,14 @@
+@layer patterns{
+/* ── Subagent or background task ──  .subtask > .obj.subtask-ic + .subtask-t (.subtask-k) + .badge.subtask-st + .subtask-m — indented to the avatar column */
+.subtask{margin-left:var(--feed-indent,0px);display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:var(--sp-1) var(--sp-2h);padding:var(--sp-2h) var(--sp-3h);border:1px solid var(--border);border-radius:var(--r-md);background:var(--surface)}
+.subtask-ic{grid-row:1 / span 2}
+.subtask-t{font-size:var(--fs-ui);font-weight:var(--fw-medium);color:var(--text);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.subtask-k{margin-right:var(--sp-1h);font-size:var(--fs-meta);line-height:var(--lh-meta);font-weight:var(--fw-regular);color:var(--text-3)}
+.subtask-m{grid-column:2 / span 2;display:flex;flex-wrap:wrap;gap:var(--sp-1) var(--sp-3);font-size:var(--fs-meta);line-height:var(--lh-meta);color:var(--text-3);font-variant-numeric:tabular-nums}
+@container thread (max-width:480px){
+  .subtask{grid-template-columns:auto minmax(0,1fr)}
+  .subtask-ic{grid-row:1 / span 3}
+  .subtask-st{grid-column:2;justify-self:start}
+  .subtask-m{grid-column:2}
+}
+}

@@ -1,0 +1,5 @@
+@layer patterns{
+/* ── Event line inside a turn ──  .evline[data-state] — indented to the avatar column */
+.evline{margin-left:var(--feed-indent,0px);display:flex;align-items:center;gap:var(--sp-2);font-size:var(--fs-meta);line-height:var(--lh-meta);color:var(--st-c,var(--text-3))}
+.evline .ic{font-size:var(--ico-xs)}
+}

@@ -1,0 +1,30 @@
+@layer components{
+/* ── Expandable row ──  .xp > button.xp-h[aria-expanded] (.xp-chev .xp-s .xp-t .xp-end) + .xp-b
+   The container sets the padding: --xp-px (sides), --xp-b-indent (details indent). data-depth="1" — nested. */
+.xp{border-top:1px solid var(--border)}
+.xp:first-child{border-top:0}
+.xp-h{display:grid;grid-template-columns:var(--ico-sm) var(--ico) minmax(0,1fr) auto;align-items:center;gap:var(--sp-2h);width:100%;min-height:max(var(--xp-h),var(--ctl-h));padding:var(--sp-1h) var(--xp-px,var(--sp-4));font-size:var(--fs-ui);color:var(--text-2);text-align:left}
+.xp-h:hover{background-image:var(--layer-hover)}
+.xp-h:focus-visible{outline-offset:-2px}
+.xp[data-depth="1"] .xp-h{padding-left:calc(var(--xp-px,var(--sp-4)) + var(--sp-6))}
+.xp-chev{font-size:var(--ico-xs);color:var(--text-3);transition:transform var(--dur-2) var(--ease)}
+.xp-h[aria-expanded="true"] .xp-chev{transform:rotate(90deg)}
+.xp-s{display:grid;place-items:center;font-size:var(--ico);color:var(--st-c,var(--text-3))}
+.xp-s .ic{font-size:inherit}
+.xp-s[data-state="done"]{color:var(--text-3)}
+.xp-t{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.xp-name{font-family:var(--mono);letter-spacing:0;font-weight:var(--fw-medium);font-size:var(--fs-code);color:var(--text);margin-right:var(--sp-2)}
+.xp-arg{font-family:var(--mono);letter-spacing:0;font-size:var(--fs-code-sm);color:var(--text-3)}
+.xp-end{display:flex;align-items:center;gap:var(--sp-2h);font-size:var(--fs-meta);line-height:var(--lh-meta);color:var(--text-3);font-variant-numeric:tabular-nums}
+.xp-end[data-state="run"]{color:var(--st-run)}
+.xp-end[data-state="err"]{color:var(--st-err)}
+.xp-add{color:var(--diff-add)}
+.xp-del{color:var(--diff-del)}
+.xp-b{display:flex;flex-direction:column;gap:var(--sp-2h);padding:var(--sp-0h) var(--xp-px,var(--sp-4)) var(--sp-3h) var(--xp-b-indent,calc(var(--xp-px,var(--sp-4)) + var(--ico-sm) + var(--sp-2h) * 2 + var(--ico)))}
+.xp-h[aria-expanded="false"] + .xp-b{display:none}
+}
+@layer patterns{
+/* ── Action group ──  .actgroup — consecutive .xp rows in the feed, indented to the avatar column */
+.actgroup{--xp-px:var(--sp-3);margin-left:var(--feed-indent,0px);border:1px solid var(--border);border-radius:var(--r-md);background:var(--surface);overflow:hidden}
+@container thread (max-width:480px){ .actgroup{--xp-b-indent:var(--sp-3)} }
+}

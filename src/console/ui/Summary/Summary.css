@@ -1,0 +1,8 @@
+@layer patterns{
+/* ── Summary of a completed thread ──  section.summary > .summary-h (.summary-h-end) + .summary-b — first under the header */
+.summary{border:1px solid var(--border);border-radius:var(--r-md);background:var(--surface);overflow:hidden}
+.summary-h{display:flex;align-items:center;gap:var(--sp-2);padding:var(--sp-2h) var(--sp-4);border-bottom:1px solid var(--border);font-size:var(--fs-ui);font-weight:var(--fw-semibold)}
+.summary-h .ic{color:var(--st-done)}
+.summary-h-end{margin-left:auto;font-size:var(--fs-meta);line-height:var(--lh-meta);font-weight:var(--fw-regular);color:var(--text-3)}
+.summary-b{padding:var(--sp-3) var(--sp-4) var(--sp-3h)}
+}

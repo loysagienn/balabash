@@ -1,0 +1,27 @@
+@layer patterns{
+/* ── Thread composer ──  .composer > .composer-box (textarea.composer-input + .composer-f > .composer-attach .composer-hint .composer-send) | .composer-lock
+   Sticks to the bottom of the main column. In a narrow thread (≤ 480): same layout, its own sizes. */
+.composer{position:sticky;bottom:0;z-index:var(--z-sticky);margin-top:auto;padding:var(--sp-3) var(--gutter) var(--sp-4);background:linear-gradient(transparent,var(--bg) var(--sp-4h))}
+.composer-box{--composer-min-h:40px;display:flex;flex-direction:column;gap:var(--sp-1h);max-width:calc(var(--feed-max) - 2 * var(--gutter));   /* = feed column width */margin:0 auto;padding:var(--sp-2h) var(--sp-2h) var(--sp-2) var(--sp-3h);border:1px solid var(--border-ctl);border-radius:var(--r-lg);background:var(--surface)}
+.composer-box:focus-within{border-color:var(--accent);box-shadow:var(--ring-field)}
+.composer-input{--composer-max-lines:8;width:100%;min-height:var(--composer-min-h);max-height:calc(var(--lh-body) * var(--composer-max-lines));field-sizing:content;margin:0;padding:0;border:0;background:transparent;outline:none;resize:none;font-size:var(--fs-body);line-height:var(--lh-body);color:var(--text)}
+.composer-input::placeholder{color:var(--text-3)}
+.composer-f{display:flex;align-items:center;gap:var(--sp-1h)}
+.composer-attach,.composer-send{flex:none}
+.composer-hint{margin-left:auto;display:flex;align-items:center;gap:var(--sp-1h);font-size:var(--fs-micro);line-height:var(--lh-micro);color:var(--text-3)}
+.composer-lock{display:flex;align-items:center;gap:var(--sp-2h);max-width:calc(var(--feed-max) - 2 * var(--gutter));margin:0 auto;padding:var(--sp-3) var(--sp-4);border:1px dashed var(--border-strong);border-radius:var(--r-lg);font-size:var(--fs-meta);line-height:var(--lh-meta);color:var(--text-3)}
+.composer-lock strong{color:var(--text-2);font-weight:var(--fw-semibold)}
+/* narrow thread: same layout, its own sizes. The field is one line and grows to six; buttons below it —
+   “attach” aligned with the text, “send” round; the phone’s system bar is accounted for at the bottom */
+@container thread (max-width:480px){
+  .composer{padding:var(--sp-2) var(--gutter) calc(var(--sp-2) + env(safe-area-inset-bottom,0px));background:var(--bg)}
+  .composer-box{--composer-min-h:var(--lh-lg);gap:var(--sp-1);padding:var(--sp-2h) var(--sp-1h) var(--sp-1h) var(--sp-3h)}
+  .composer-input{--composer-max-lines:6;padding:var(--sp-0h) 0;font-size:var(--fs-input-touch);line-height:var(--lh-lg);max-height:calc(var(--lh-lg) * var(--composer-max-lines) + var(--sp-1))}
+  .composer-hint{display:none}
+  .composer-attach{margin-left:calc(-1 * var(--sp-2h))}
+  .composer-send{margin-left:auto;border-radius:var(--r-pill)}
+  .composer-attach .ic{font-size:var(--ico-md)}
+  .composer-send .ic{font-size:var(--ico)}
+  .composer-lock{padding:var(--sp-2h) var(--sp-3)}
+}
+}

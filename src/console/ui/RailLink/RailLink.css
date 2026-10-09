@@ -1,0 +1,7 @@
+@layer patterns{
+/* ── Rail link ──  a.th-rail-link > .av + .th-rail-link-t + (.ic arrow-up — parent | .st — child state) */
+.th-rail-link{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:var(--sp-2);margin:0 calc(-1 * var(--sp-2));padding:var(--sp-1h) var(--sp-2);border-radius:var(--r-sm);font-size:var(--fs-ui);color:var(--text);text-decoration:none}
+.th-rail-link:hover{background-image:var(--layer-hover);color:var(--text)}
+.th-rail-link-t{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.th-rail-link .ic{color:var(--text-3)}
+}

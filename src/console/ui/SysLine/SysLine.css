@@ -1,0 +1,9 @@
+@layer patterns{
+/* ── System divider ──  .sysline — an event of the whole thread. data-level="normal|urgent" (notifications, stages), data-state="act|err" */
+.sysline{display:flex;align-items:center;gap:var(--sp-2h);font-size:var(--fs-meta);line-height:var(--lh-meta);color:var(--st-c,var(--text-3));white-space:nowrap}
+.sysline::before,.sysline::after{content:"";flex:1;min-width:var(--sp-4);height:1px;background:var(--border)}   /* the lines stay visible even when the text wraps to two lines */
+.sysline .ic{font-size:var(--ico-xs)}
+.sysline-t{white-space:normal;text-align:center}
+.sysline[data-level="normal"]{color:var(--text-2)}
+.sysline[data-level="urgent"]{color:var(--st-act);font-weight:var(--fw-semibold)}
+}

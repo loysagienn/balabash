@@ -1,0 +1,10 @@
+@layer patterns{
+/* ── Child thread ──  .childth > .childth-h (.av, .childth-t > .childth-name + .childth-sub, .badge, button) + .childth-b — indented to the avatar column */
+.childth{--childth-t-min:200px;margin-left:var(--feed-indent,0px);border:1px solid var(--border);border-radius:var(--r-md);background:var(--surface);overflow:hidden}
+.childth-h{display:flex;flex-wrap:wrap;align-items:center;gap:var(--sp-2) var(--sp-2h);padding:var(--sp-2h) var(--sp-3h)}
+.childth-t{flex:1 1 var(--childth-t-min);min-width:0}
+.childth-name{display:block;font-size:var(--fs-ui);font-weight:var(--fw-semibold);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.childth-sub{display:block;font-size:var(--fs-meta);line-height:var(--lh-meta);color:var(--text-3)}
+.childth-b{padding:var(--sp-2h) var(--sp-3h) var(--sp-3);border-top:1px solid var(--border);font-size:var(--fs-meta);line-height:var(--lh-meta);color:var(--text-2)}
+.childth-b strong{color:var(--text);font-weight:var(--fw-semibold)}
+}

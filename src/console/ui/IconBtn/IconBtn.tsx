@@ -13,11 +13,22 @@ export type IconBtnProps = {
   size?: BtnSize;
   className?: string;
   disabled?: boolean;
+  busy?: boolean;
   expanded?: boolean;
   onClick?: (event: MouseEvent<HTMLElement>) => void;
 };
 
-export function IconBtn({ icon, label, variant = 'ghost', size, className, disabled, expanded, onClick }: IconBtnProps) {
+export function IconBtn({
+  icon,
+  label,
+  variant = 'ghost',
+  size,
+  className,
+  disabled,
+  busy,
+  expanded,
+  onClick,
+}: IconBtnProps) {
   return (
     <Btn
       icon={icon}
@@ -28,6 +39,7 @@ export function IconBtn({ icon, label, variant = 'ghost', size, className, disab
       size={size}
       className={className}
       disabled={disabled}
+      busy={busy}
       expanded={expanded}
       onClick={onClick}
     />
