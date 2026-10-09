@@ -752,9 +752,20 @@ describe('home overview', () => {
     assert.equal(selectLatestFinishedThread(store.getState())?.id, 'last');
 
     // A thread that ends now becomes the last one; its project count drops.
-    store.dispatch(eventAction(event({ seq: 51n, type: 'thread.completed', threadId: 'a', targetThreadId: 'main', payload: { title: 'A done', summary: { text: 's' }, description: 'd' } })));
+    const done = event({ seq: 51n, type: 'thread.completed', threadId: 'a', targetThreadId: 'main', payload: { title: 'A done', summary: { text: 's' }, description: 'd' } });
+
+    store.dispatch(eventAction(done));
     assert.deepEqual(selectRunningCountByProject(store.getState()), { p1: 1 });
     assert.equal(selectLatestFinishedThread(store.getState())?.title, 'A done');
+    assert.equal(selectLatestFinishedThread(store.getState())?.updatedAt, done.createdAt);
+
+    // A late tail of its journal (allowed by the log) is not activity: the thread keeps the time of its terminal.
+    store.dispatch(eventAction(event({ seq: 52n, type: 'session.turn', threadId: 'a', payload: { phase: 'completed' } })));
+    assert.equal(store.getState().stream.lastSeq, 52n);
+    assert.equal(selectLatestFinishedThread(store.getState())?.updatedAt, done.createdAt);
+    assert.equal(store.getState().threads.byId.b.updatedAt.getTime(), 1_700_000_000_000);
+    store.dispatch(eventAction(event({ seq: 53n, type: 'session.turn', threadId: 'b', payload: { phase: 'started' } })));
+    assert.equal(store.getState().threads.byId.b.updatedAt.getTime(), 1_700_000_000_000 + 53_000);
   });
 
   it('lists the projects in work by recency, archived ones aside', async () => {

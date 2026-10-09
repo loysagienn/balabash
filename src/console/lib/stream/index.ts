@@ -46,7 +46,13 @@ export function connectStoreToStream(store: Store<State, Action>): () => void {
     // Remembered before any dispatch: the dispatch notifies this very
     // process (sync), which must see the source and not open a second one.
     source = next;
-    store.dispatch(streamConnecting());
+
+    // The first opening says "connecting"; a reopening after a lost
+    // connection keeps "reconnecting" until the tail flows again (onopen) —
+    // the attempt is not the recovery, and the screens warn on that status.
+    if (stream.status !== 'reconnecting') {
+      store.dispatch(streamConnecting());
+    }
 
     next.onopen = () => {
       if (source === next) {
@@ -67,12 +73,15 @@ export function connectStoreToStream(store: Store<State, Action>): () => void {
 
       if (next.readyState === EventSource.CLOSED) {
         // The browser gave up (a non-200 answer): wait, then open again.
+        // The timer is set before the dispatch: the dispatch notifies this
+        // very process (sync), which must see the pending retry and not
+        // reopen at once.
         close();
-        store.dispatch(streamReconnecting());
         retry = setTimeout(() => {
           retry = null;
           sync();
         }, RETRY_AFTER_MS);
+        store.dispatch(streamReconnecting());
       } else {
         store.dispatch(streamReconnecting());
       }

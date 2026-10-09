@@ -167,11 +167,15 @@ export function threadsReducer(state: ThreadsState = initialThreads, action: Act
       };
     }
     default: {
+      // Any event of a thread at work is its activity. A finished thread
+      // keeps the time of its terminal: a late tail of its journal (allowed
+      // by the log) is a fact about a closed author, not activity — and
+      // the row of the snapshot stops at the terminal the same way.
       if (isEventAction(action)) {
         const { event } = action;
         const known = event.threadId ? state.byId[event.threadId] : undefined;
 
-        if (known && known.updatedAt < event.createdAt) {
+        if (known && known.status === 'active' && known.updatedAt < event.createdAt) {
           return { ...state, byId: { ...state.byId, [known.id]: { ...known, updatedAt: event.createdAt } } };
         }
       }

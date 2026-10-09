@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { appUrlText, homeStage, nothingRunningNote, sectionSummary } from './HomeScreen.logic.ts';
+import { appUrlText, homeAppLink, homeStage, nothingRunningNote, sectionSummary } from './HomeScreen.logic.ts';
 import type { SectionCounts } from './HomeScreen.logic.ts';
 
 const at = (y: number, m: number, d: number, h = 0, min = 0) => new Date(y, m - 1, d, h, min);
@@ -65,6 +65,17 @@ describe('home words', () => {
   it('writes the app address without the scheme', () => {
     assert.equal(appUrlText('https://kcal.apps.balabash.app'), 'kcal.apps.balabash.app');
     assert.equal(appUrlText('https://balabash.app/a/kcal'), 'balabash.app/a/kcal');
+  });
+
+  it('leads a published app to itself, an unpublished or broken one to the Apps section', () => {
+    const base = 'https://apps.example';
+
+    assert.deepEqual(homeAppLink({ slug: 'kcal', manifestError: null }, base), { address: 'https://apps.example/kcal', href: 'https://apps.example/kcal' });
+    assert.deepEqual(homeAppLink({ slug: 'a b', manifestError: null }, base), { address: 'https://apps.example/a%20b', href: 'https://apps.example/a%20b' });
+    assert.deepEqual(homeAppLink({ slug: null, manifestError: null }, base), { address: null, href: null });
+    assert.deepEqual(homeAppLink({ slug: null, manifestError: 'Invalid manifest' }, base), { address: null, href: null });
+    // Published but broken: its address answers 503 — the chip keeps the address, the row does not lead there.
+    assert.deepEqual(homeAppLink({ slug: 'broken', manifestError: 'Invalid manifest' }, base), { address: 'https://apps.example/broken', href: null });
   });
 
   it('tells the stage of the overview from the snapshot', () => {

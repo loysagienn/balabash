@@ -80,6 +80,17 @@ export function appUrlText(href: string): string {
   return href.replace(/^https?:\/\//, '');
 }
 
+// Where a row of the Apps card leads. A published app has an address
+// (publicAppsBase + slug) — the chip shows it, and the row opens it in a
+// new tab while the manifest is valid; a broken manifest keeps the address
+// (the publication stands) but answers 503 there, so the row, like one of
+// an unpublished app, leads to the Apps section instead (href null).
+export function homeAppLink(app: { slug: string | null; manifestError: string | null }, base: string): { address: string | null; href: string | null } {
+  const address = app.slug ? `${base}/${encodeURIComponent(app.slug)}` : null;
+
+  return { address, href: address !== null && app.manifestError === null ? address : null };
+}
+
 // The stage of the overview: the first snapshot in flight, failed before
 // any landed, or the data on screen.
 export function homeStage(stream: { asOfSeq: bigint | null; snapshot: { pending: boolean; error: { message: string } | null } }): 'loading' | 'failed' | 'ready' {

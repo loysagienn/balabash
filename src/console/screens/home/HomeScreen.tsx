@@ -29,7 +29,7 @@ import { Obj } from '../../ui/Obj/Obj.tsx';
 import { Screen } from '../../ui/Screen/Screen.tsx';
 import { SectionLink, SectionLinks } from '../../ui/SectionLink/SectionLink.tsx';
 import { SkelRow } from '../../ui/Skel/Skel.tsx';
-import { appUrlText, homeStage, nothingRunningNote, sectionSummary } from './HomeScreen.logic.ts';
+import { appUrlText, homeAppLink, homeStage, nothingRunningNote, sectionSummary } from './HomeScreen.logic.ts';
 import './HomeScreen.css';
 
 // The projects card shows the most recently touched; the rest are a link away.
@@ -65,15 +65,16 @@ function ProjectRow({ project, running, now }: { project: ProjectView; running: 
   );
 }
 
-// A published app opens itself in a new tab; one without an address (or
-// with a broken manifest) leads to the Apps section, where it is managed.
+// A published app opens itself in a new tab; one without an address or
+// with a broken manifest leads to the Apps section, where it is managed
+// (homeAppLink).
 function HomeAppRow({ app, base }: { app: AppListingView; base: string }) {
   const section = useLinkProps({ key: 'apps' });
-  const href = app.slug ? `${base}/${encodeURIComponent(app.slug)}` : null;
+  const { address, href } = homeAppLink(app, base);
   const title = app.name ?? app.path.split('/').pop() ?? app.path;
-  const common = { title, desc: app.description ?? undefined, err: app.manifestError ?? undefined };
+  const common = { title, desc: app.description ?? undefined, err: app.manifestError ?? undefined, url: address === null ? undefined : appUrlText(address) };
 
-  return href ? <AppRow {...common} url={appUrlText(href)} appHref={href} href={href} external /> : <AppRow {...common} {...section} />;
+  return href ? <AppRow {...common} appHref={href} href={href} external /> : <AppRow {...common} {...section} />;
 }
 
 function HomeSectionLink({ item, meta, state }: { item: (typeof NAV)[number]; meta?: string; state?: 'act' }) {
