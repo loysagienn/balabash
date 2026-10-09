@@ -5,11 +5,11 @@
 // Telegram group and the schedule time zone wait for their data (plan,
 // "Чего нет в данных").
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import { useAppDispatch, useAppSelector } from '../../store/hooks.ts';
 import { logout, saveSettings } from '../../store/session/actions.ts';
-import { selectMe, selectSession, selectSettingsSaving } from '../../store/session/selectors.ts';
+import { selectMe, selectSession, selectSettingsSaved, selectSettingsSaving } from '../../store/session/selectors.ts';
 import type { SettingsField } from '../../store/session/reducer.ts';
 import { Shell } from '../../features/shell/Shell.tsx';
 import { Btn } from '../../ui/Btn/Btn.tsx';
@@ -28,23 +28,35 @@ type NameCardProps = {
   fid: string;
   hint: string;
   field: SettingsField;
-  // The effective value from `me`; the input restarts from it after a save.
+  // The effective value from `me`: what the input shows while it has no draft.
   current: string | null;
   saving: boolean;
+  // The count of accepted saves of this field (session.settingsSaved).
+  saved: number;
   onSave: (value: string) => void;
 };
 
-function NameCard({ title, label, fid, hint, field, current, saving, onSave }: NameCardProps) {
-  const [value, setValue] = useState(current ?? '');
+// The input is a draft over the effective value: null — no edits, the input
+// shows `current` and follows it. Save sends the draft as it is; once the
+// server accepts it (`saved` moves) the draft is dropped, so the input shows
+// the effective value — trimmed, or the fallback after clearing — even when
+// that value equals the previous one. A draft edited after Save stays: it is
+// not what was sent. A failed save leaves the draft for another try.
+function NameCard({ title, label, fid, hint, field, current, saving, saved, onSave }: NameCardProps) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const sent = useRef<string | null>(null);
+  const value = draft ?? current ?? '';
 
   useEffect(() => {
-    setValue(current ?? '');
-  }, [current]);
+    setDraft(pending => (pending === sent.current ? null : pending));
+    sent.current = null;
+  }, [saved]);
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
 
     if (!saving) {
+      sent.current = value;
       onSave(value);
     }
   };
@@ -56,7 +68,7 @@ function NameCard({ title, label, fid, hint, field, current, saving, onSave }: N
         <form onSubmit={submit}>
           <Field label={label} fid={fid} hint={hint}>
             <div className="set-inline">
-              <Input id={fid} name={field} value={value} onChange={setValue} maxLength={NAME_MAX_LENGTH} autoComplete="off" />
+              <Input id={fid} name={field} value={value} onChange={setDraft} maxLength={NAME_MAX_LENGTH} autoComplete="off" />
               <Btn label="Save" type="submit" busy={saving} />
             </div>
           </Field>
@@ -70,6 +82,7 @@ export function SettingsScreen() {
   const dispatch = useAppDispatch();
   const me = useAppSelector(selectMe);
   const saving = useAppSelector(selectSettingsSaving);
+  const saved = useAppSelector(selectSettingsSaved);
   const { logoutPending } = useAppSelector(selectSession);
 
   return (
@@ -84,6 +97,7 @@ export function SettingsScreen() {
             field="workspaceName"
             current={me?.workspaceName ?? null}
             saving={saving.workspaceName}
+            saved={saved.workspaceName}
             onSave={value => dispatch(saveSettings({ workspaceName: value }))}
           />
           <NameCard
@@ -94,6 +108,7 @@ export function SettingsScreen() {
             field="operatorName"
             current={me?.operatorName ?? null}
             saving={saving.operatorName}
+            saved={saved.operatorName}
             onSave={value => dispatch(saveSettings({ operatorName: value }))}
           />
           <Card narrow="bare" label="Session">

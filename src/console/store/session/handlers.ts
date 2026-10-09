@@ -74,15 +74,18 @@ export const logoutHandler: ActionHandler<'LOGOUT'> =
   };
 
 // What the "Saved" toast says: the effective name after the save, or that
-// the name is cleared (the workspace then shows the group's title, which
-// the answer carries).
+// the name is cleared. Clearing is what the patch asked for — null or a
+// blank string, the form's way — not what the answer carries: a cleared
+// workspace name answers the group's title.
 export function savedWords(patch: SettingsPatchRequest, settings: NamesView): string {
   return patchFields(patch)
     .map(field => {
       const label = field === 'workspaceName' ? 'Workspace name' : 'Your name';
+      const sent = patch[field];
       const value = settings[field];
+      const cleared = sent === null || sent === undefined || sent.trim() === '' || value === null;
 
-      return value !== null && patch[field] !== null ? `${label}: “${value}”` : `${label} cleared`;
+      return cleared ? `${label} cleared` : `${label}: “${value}”`;
     })
     .join(' · ');
 }

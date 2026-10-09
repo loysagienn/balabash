@@ -363,7 +363,7 @@ class Builder {
     }
 
     if (is(event, 'thread.interrupt')) {
-      this.push({ kind: 'sys', key, at, icon: 'pause', level: 'normal', text: 'Turn stopped — the agent halted and is awaiting a message' });
+      this.push({ kind: 'sys', key, at, icon: 'pause', level: 'normal', text: `${who(event) === 'you' ? (this.ctx.you ?? 'You') : who(event)} stopped the turn — the agent halted and is awaiting a message` });
 
       return;
     }

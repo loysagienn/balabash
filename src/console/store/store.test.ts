@@ -223,6 +223,56 @@ describe('session start-up', () => {
     assert.equal(calls.filter(call => call.name === 'settings.update').length, 2);
   });
 
+  it('takes only the saved field from the answer: a late answer of one card keeps the other card\'s name', async () => {
+    // Both cards save at once; the answer of the first (workspace) arrives
+    // after the second (operator) — each answer carries both names.
+    const answers: ((settings: { workspaceName: string | null; operatorName: string | null }) => void)[] = [];
+    const api = fakeApi({ settings: { update: () => new Promise(resolve => answers.push(settings => resolve({ settings }))) } });
+    const store = createStore({ api, initialRoute: { key: 'settings' } });
+
+    await dispatched(store, sessionCheck());
+    await settle();
+
+    const first = store.dispatch(saveSettings({ workspaceName: 'Personal' }));
+    const second = store.dispatch(saveSettings({ operatorName: 'Vladimir' }));
+
+    assert.deepEqual(store.getState().session.settingsSaving, { workspaceName: true, operatorName: true });
+    answers[1]!({ workspaceName: 'Personal', operatorName: 'Vladimir' });
+    await second;
+    assert.deepEqual(store.getState().session.settingsSaved, { workspaceName: 0, operatorName: 1 });
+    answers[0]!({ workspaceName: 'Personal', operatorName: null });
+    await first;
+
+    assert.equal(store.getState().session.me?.workspaceName, 'Personal');
+    assert.equal(selectOperatorName(store.getState()), 'Vladimir');
+    assert.deepEqual(store.getState().session.settingsSaving, { workspaceName: false, operatorName: false });
+    assert.deepEqual(store.getState().session.settingsSaved, { workspaceName: 1, operatorName: 1 });
+  });
+
+  it('says "cleared" for the blank string the form sends, whatever fallback the answer carries', async () => {
+    // The server reads a blank name as "clear" and answers the group's title.
+    const api = fakeApi({
+      settings: {
+        update: async patch => ({ settings: { workspaceName: patch.workspaceName?.trim() ? patch.workspaceName.trim() : 'Group', operatorName: patch.operatorName?.trim() || null } }),
+      },
+    });
+    const store = createStore({ api, initialRoute: { key: 'settings' } });
+
+    await dispatched(store, sessionCheck());
+    await settle();
+
+    await dispatched(store, saveSettings({ workspaceName: '' }));
+    assert.equal(store.getState().session.me?.workspaceName, 'Group');
+    assert.equal(store.getState().ui.toasts.at(-1)?.desc, 'Workspace name cleared');
+    await dispatched(store, saveSettings({ workspaceName: '   ' }));
+    assert.equal(store.getState().ui.toasts.at(-1)?.desc, 'Workspace name cleared');
+    await dispatched(store, saveSettings({ operatorName: ' ' }));
+    assert.equal(store.getState().ui.toasts.at(-1)?.desc, 'Your name cleared');
+    await dispatched(store, saveSettings({ workspaceName: ' Personal ' }));
+    assert.equal(store.getState().ui.toasts.at(-1)?.desc, 'Workspace name: “Personal”');
+    assert.deepEqual(store.getState().session.settingsSaved, { workspaceName: 3, operatorName: 1 });
+  });
+
   it('reports a failed save and frees the card', async () => {
     const api = fakeApi({
       settings: {
@@ -238,6 +288,7 @@ describe('session start-up', () => {
     await dispatched(store, saveSettings({ operatorName: 'x' }));
 
     assert.deepEqual(store.getState().session.settingsSaving, { workspaceName: false, operatorName: false });
+    assert.deepEqual(store.getState().session.settingsSaved, { workspaceName: 0, operatorName: 0 });
     assert.equal(selectOperatorName(store.getState()), null);
     assert.deepEqual(
       store.getState().ui.toasts.map(toast => [toast.title, toast.desc, toast.state]),

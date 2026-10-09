@@ -6,3 +6,4 @@ export const selectSignedIn = (state: State) => state.session.status === 'signed
 // The operator's name for the feed and the sidebar; null until set in Settings.
 export const selectOperatorName = (state: State) => state.session.me?.operatorName ?? null;
 export const selectSettingsSaving = (state: State) => state.session.settingsSaving;
+export const selectSettingsSaved = (state: State) => state.session.settingsSaved;

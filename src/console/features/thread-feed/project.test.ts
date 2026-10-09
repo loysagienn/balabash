@@ -368,13 +368,15 @@ describe('projectFeed — the operator in the system lines', () => {
     const events = [
       event({ type: 'user.message', threadId: 't1', actor: 'user', payload: { text: 'hi' } }),
       event({ type: 'thread.cancel', threadId: 'main', targetThreadId: 't1', actor: 'user', payload: { reason: 'enough' } }),
+      event({ type: 'thread.interrupt', threadId: 'main', targetThreadId: 't1', actor: 'user', payload: { reason: 'interrupted_by_user', source: 'web' } }),
       event({ type: 'thread.cancelled', threadId: 't1', payload: { reason: 'enough', requestedBy: 'user' } }),
     ];
     const text = (items: ReturnType<typeof projectFeed>) => items.map(item => (item.kind === 'sys' ? item.text : item.kind === 'message' ? `${item.from} → ${item.to}` : item.kind));
+    const stopped = 'stopped the turn — the agent halted and is awaiting a message';
 
     resetSeq(1n);
-    assert.deepEqual(text(projectFeed(events, ctx)), ['you → engineer', 'You asked to cancel the thread — enough', 'Thread cancelled by you — enough']);
+    assert.deepEqual(text(projectFeed(events, ctx)), ['you → engineer', 'You asked to cancel the thread — enough', `You ${stopped}`, 'Thread cancelled by you — enough']);
     resetSeq(1n);
-    assert.deepEqual(text(projectFeed(events, { ...ctx, you: 'Vladimir' })), ['you → engineer', 'Vladimir asked to cancel the thread — enough', 'Thread cancelled by Vladimir — enough']);
+    assert.deepEqual(text(projectFeed(events, { ...ctx, you: 'Vladimir' })), ['you → engineer', 'Vladimir asked to cancel the thread — enough', `Vladimir ${stopped}`, 'Thread cancelled by Vladimir — enough']);
   });
 });

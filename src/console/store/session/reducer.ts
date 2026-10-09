@@ -1,4 +1,4 @@
-import type { MeResponse, SettingsPatchRequest } from '../../../api/contract.ts';
+import type { MeResponse, NamesView, SettingsPatchRequest } from '../../../api/contract.ts';
 import type { ApiFailure } from '../../lib/api/index.ts';
 import type { Action } from '../types.ts';
 
@@ -14,10 +14,14 @@ export type SessionState = {
   // The names of Settings in flight, by field: the card of a field saving
   // is busy, the other card is not.
   settingsSaving: SettingsSaving;
+  // How many saves of each field the server accepted: the card drops the
+  // draft it sent when the count moves (a failed save leaves the draft).
+  settingsSaved: SettingsSaved;
 };
 
 export type SettingsField = keyof SettingsPatchRequest;
 export type SettingsSaving = Record<SettingsField, boolean>;
+export type SettingsSaved = Record<SettingsField, number>;
 
 export const SETTINGS_FIELDS: readonly SettingsField[] = ['workspaceName', 'operatorName'];
 
@@ -35,6 +39,24 @@ function withSaving(state: SessionState, patch: SettingsPatchRequest, saving: bo
   return next;
 }
 
+// The answer carries both names, but the cards save on their own: only the
+// fields of this patch are taken, so a late answer of one card never puts
+// back the other card's name saved meanwhile.
+function withSaved(state: SessionState, patch: SettingsPatchRequest, settings: NamesView): Pick<SessionState, 'me' | 'settingsSaved'> {
+  const me = state.me ? { ...state.me } : null;
+  const saved = { ...state.settingsSaved };
+
+  for (const field of patchFields(patch)) {
+    if (me) {
+      me[field] = settings[field];
+    }
+
+    saved[field] += 1;
+  }
+
+  return { me, settingsSaved: saved };
+}
+
 export const initialSession: SessionState = {
   status: 'loading',
   me: null,
@@ -42,6 +64,7 @@ export const initialSession: SessionState = {
   login: { pending: false, error: null },
   logoutPending: false,
   settingsSaving: { workspaceName: false, operatorName: false },
+  settingsSaved: { workspaceName: 0, operatorName: 0 },
 };
 
 export function sessionReducer(state: SessionState = initialSession, action: Action): SessionState {
@@ -65,7 +88,7 @@ export function sessionReducer(state: SessionState = initialSession, action: Act
     case 'SAVE_SETTINGS':
       return { ...state, settingsSaving: withSaving(state, action.patch, true) };
     case 'SAVE_SETTINGS_DONE':
-      return { ...state, me: state.me ? { ...state.me, ...action.settings } : state.me, settingsSaving: withSaving(state, action.patch, false) };
+      return { ...state, ...withSaved(state, action.patch, action.settings), settingsSaving: withSaving(state, action.patch, false) };
     case 'SAVE_SETTINGS_FAIL':
       return { ...state, settingsSaving: withSaving(state, action.patch, false) };
     case 'LOGOUT_DONE':
