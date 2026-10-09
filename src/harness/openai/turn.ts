@@ -1,9 +1,14 @@
 // The inner loop of one model turn over the OpenAI Responses API (§8.1):
-// tool_choice: 'required', parallel calls. Synchronous tool results return
-// to the model in the same turn as function_call_output; async dispatches
-// (messages, future spawns) are acknowledged with 'accepted' and their
-// consequences arrive as later events. Dispatch errors come back to the
-// model in the same turn so it can recover.
+// tool_choice: 'required', parallel calls. Every call's outcome returns to
+// the model in the same turn as function_call_output — synchronous tool
+// results as they are, async dispatches (messages, spawns) as 'accepted'
+// (their consequences arrive as later events), dispatch errors as
+// 'rejected: …' so the model can recover — and the model may call more.
+// The turn ends only when the model says so: an 'end' dispatch (the
+// coordinator's do_nothing). Before 2026-10-09 an all-async response ended
+// the turn by itself, which cut every step-by-step plan short: the model
+// (one call per response, the next after the result) notified a child and
+// never got to spawn the agent the user had asked for.
 //
 // How one iteration continues into the next is the backend's business
 // (backend.ts): with stateful turns the next request carries
@@ -26,6 +31,7 @@ import type {
 } from 'openai/resources/responses/responses';
 import type { ToolResult } from '../../core/contract.ts';
 import { getLlmBackend } from './backend.ts';
+import type { LlmBackend } from './backend.ts';
 import { getOpenaiClient } from './client.ts';
 import { toolResultToModelOutput } from './content.ts';
 import type { ModelOutput } from './content.ts';
@@ -50,10 +56,19 @@ export type DispatchResult =
   // The result goes back to the model and the loop continues.
   | { kind: 'sync'; result: ToolResult }
   // Accepted for asynchronous execution; consequences arrive as events.
+  // Acknowledged to the model as 'accepted' and the loop continues.
   | { kind: 'async' }
   // Rejected at dispatch; the error goes back so the model can recover
   // in the same turn.
-  | { kind: 'rejected'; error: string };
+  | { kind: 'rejected'; error: string }
+  // The model declares the turn over: nothing more to do for the newest
+  // events. The other calls of the same response are still dispatched.
+  | { kind: 'end' };
+
+// A turn that never ends is a model looping on itself (sending message
+// after message, re-spawning); the cap turns it into a journaled failure
+// (the coordinator journals a thrown turn as system.exception).
+export const MAX_TURN_ITERATIONS = 16;
 
 type FunctionCallOutputItem = {
   type: 'function_call_output';
@@ -89,6 +104,18 @@ type RunTurnOptions = RequestHead & {
   // the first request asks the server for prompt-cache diagnostics against
   // it (free; recorded by the metrics).
   cacheComparisonResponseId?: string | null;
+  // Test seam: the client and the backend description, the real ones by
+  // default.
+  deps?: {
+    client?: TurnClient;
+    backend?: LlmBackend;
+  };
+};
+
+// What the loop needs of the OpenAI client — the SDK client satisfies it,
+// a scripted fake in tests too.
+export type TurnClient = {
+  responses: { create(params: ResponseCreateParamsNonStreaming): Promise<Response> };
 };
 
 export type TurnOutcome = {
@@ -119,16 +146,21 @@ export async function runTurn({
   metrics,
   dispatch,
   cacheComparisonResponseId,
+  deps,
 }: RunTurnOptions): Promise<TurnOutcome> {
-  const client = getOpenaiClient();
-  const backend = getLlmBackend();
+  const client: TurnClient = deps?.client ?? getOpenaiClient();
+  const backend = deps?.backend ?? getLlmBackend();
   const explicitCache = backend.promptCache === 'explicit';
 
   let input: ResponseInput = prompt.input;
   let previousResponseId: string | undefined;
   let firstResponseId: string | undefined;
 
-  while (true) {
+  for (let iteration = 1; ; iteration += 1) {
+    if (iteration > MAX_TURN_ITERATIONS) {
+      throw new Error(`turn did not end within ${MAX_TURN_ITERATIONS} iterations (the model never called do_nothing)`);
+    }
+
     const response = await metrics.measure(() =>
       client.responses.create({
         ...baseRequest({ model, instructions, tools }, input),
@@ -149,7 +181,7 @@ export async function runTurn({
     }
 
     const outputs: FunctionCallOutputItem[] = [];
-    let hasSyncResult = false;
+    let ended = false;
 
     for (const functionCall of functionCalls) {
       const outcome = await dispatch({
@@ -160,7 +192,6 @@ export async function runTurn({
 
       switch (outcome.kind) {
         case 'sync':
-          hasSyncResult = true;
           outputs.push({
             type: 'function_call_output',
             call_id: functionCall.call_id,
@@ -177,19 +208,22 @@ export async function runTurn({
           break;
 
         case 'rejected':
-          // Counts as a sync result: the model must see the rejection and
-          // gets the chance to recover within the same turn.
-          hasSyncResult = true;
+          // The model must see the rejection and gets the chance to recover
+          // within the same turn.
           outputs.push({
             type: 'function_call_output',
             call_id: functionCall.call_id,
             output: `rejected: ${outcome.error}`,
           });
           break;
+
+        case 'end':
+          ended = true;
+          break;
       }
     }
 
-    if (!hasSyncResult) {
+    if (ended) {
       return { firstResponseId };
     }
 

@@ -6,7 +6,8 @@
 // tool server (dis)connecting does, which legitimately resets the head).
 // Synchronous calls are journaled as tool.call.* events in the coordinator's
 // thread; spawns and cancels are async dispatches acknowledged with
-// 'accepted' — their consequences arrive as events.
+// 'accepted' — their consequences arrive as events. do_nothing ends the
+// turn (the only way it ends).
 
 import type { ContentBlock, JsonObject } from '../core/contract.ts';
 import { THREAD_NAMING_NOTE } from '../../agents/world/index.ts';
@@ -86,7 +87,8 @@ const STATIC_FUNCTION_DEFINITIONS: FunctionDefinition[] = [
     type: 'function',
     name: 'do_nothing',
     description:
-      'Take no further action for the current events. Use this when no message or other side effect is needed.',
+      'End your turn: nothing more to do for the newest events. Call it as the last call, once every other ' +
+      'call of this turn has returned — or right away when the newest events need no action at all.',
     strict: true,
     parameters: {
       type: 'object',
@@ -373,7 +375,7 @@ export async function dispatchCoordinatorFunction(call: FunctionCall, ctx: Dispa
   }
 
   if (call.name === 'do_nothing') {
-    return { kind: 'async' };
+    return { kind: 'end' };
   }
 
   if (call.name === 'send_message') {
