@@ -3,7 +3,8 @@
 // object icon. The plain row is one link (the home page); actions — the
 // full row of the "Apps" section: the folder, the URL as a link, "Open"
 // and the "⋯" menu (more — a MenuAnchor from the feature), so the row
-// itself is not a link.
+// itself is not a link. The plain row leads where the caller says: to the
+// published app itself (external — a new tab) or to a console route.
 
 import type { MouseEvent, ReactNode } from 'react';
 import { Btn } from '../Btn/Btn.tsx';
@@ -21,7 +22,7 @@ export type AppRowProps = {
   // The manifest error text.
   err?: string;
 } & (
-  | { actions?: false; href: string; onClick?: (event: MouseEvent<HTMLAnchorElement>) => void }
+  | { actions?: false; href: string; onClick?: (event: MouseEvent<HTMLAnchorElement>) => void; external?: boolean }
   | { actions: true; folder: string; more?: ReactNode }
 );
 
@@ -36,7 +37,7 @@ export function AppRow(props: AppRowProps) {
   const published = url ? <Url href={props.actions ? appHref : undefined}>{url}</Url> : <Quiet>not published</Quiet>;
 
   if (!props.actions) {
-    return <Row href={props.href} onClick={props.onClick} lead={lead} title={title} meta={desc} desc={errLine} end={published} />;
+    return <Row href={props.href} onClick={props.onClick} external={props.external} lead={lead} title={title} meta={desc} desc={errLine} end={published} />;
   }
 
   return (

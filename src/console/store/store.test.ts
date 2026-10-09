@@ -17,7 +17,8 @@ import { routeTo } from './router/actions.ts';
 import { login, logout, sessionCheck, sessionLost } from './session/actions.ts';
 import { loadThread, loadThreadEvents, loadThreads, sendMessage } from './threads/actions.ts';
 import { setComposerDraft } from './ui/actions.ts';
-import { hasLoadedPage, selectKnownAgents, selectListThreads, selectRunningCount, selectVisibleListThreads } from './threads/selectors.ts';
+import { hasLoadedPage, selectKnownAgents, selectLatestFinishedThread, selectListThreads, selectRunningCount, selectRunningCountByProject, selectVisibleListThreads } from './threads/selectors.ts';
+import { selectActiveProjects, selectArchivedProjectCount } from './projects/selectors.ts';
 import { makeSelectThreadEvents } from './feed/selectors.ts';
 import { selectThreadState } from './sessions/selectors.ts';
 import { ME, event, resetSeq, snapshot, thread } from './fixtures.ts';
@@ -714,5 +715,65 @@ describe('thread page data', () => {
       store.getState().ui.toasts.map(toast => [toast.title, toast.state]),
       [['Message not sent', 'err']],
     );
+  });
+});
+
+describe('home overview', () => {
+  const project = (id: string, updatedAt: Date, archived = false) => ({ id, title: id, slug: id, description: '', archived, createdAt: updatedAt, updatedAt });
+
+  async function homeStore() {
+    const api = fakeApi({
+      snapshot: async () =>
+        snapshot({
+          asOfSeq: 50n,
+          threads: [
+            thread({ id: 'main', parentId: null, agent: 'coordinator' }),
+            thread({ id: 'a', createdSeq: 7n, projectId: 'p1' }),
+            thread({ id: 'b', createdSeq: 8n, projectId: 'p1' }),
+            thread({ id: 'c', createdSeq: 9n }),
+            thread({ id: 'old', createdSeq: 2n, status: 'completed', terminalSeq: 20n, title: 'Old one' }),
+            thread({ id: 'last', createdSeq: 3n, status: 'failed', terminalSeq: 30n, title: 'Last one' }),
+          ],
+          projects: [project('p1', new Date(1000)), project('p2', new Date(3000)), project('p3', new Date(2000), true)],
+        }),
+    });
+    const store = createStore({ api, initialRoute: { key: 'home' } });
+
+    await dispatched(store, sessionCheck());
+    await settle();
+
+    return store;
+  }
+
+  it('counts the running threads per project and knows the thread that ended last', async () => {
+    const store = await homeStore();
+
+    assert.deepEqual(selectRunningCountByProject(store.getState()), { p1: 2 });
+    assert.equal(selectLatestFinishedThread(store.getState())?.id, 'last');
+
+    // A thread that ends now becomes the last one; its project count drops.
+    store.dispatch(eventAction(event({ seq: 51n, type: 'thread.completed', threadId: 'a', targetThreadId: 'main', payload: { title: 'A done', summary: { text: 's' }, description: 'd' } })));
+    assert.deepEqual(selectRunningCountByProject(store.getState()), { p1: 1 });
+    assert.equal(selectLatestFinishedThread(store.getState())?.title, 'A done');
+  });
+
+  it('lists the projects in work by recency, archived ones aside', async () => {
+    const store = await homeStore();
+
+    assert.deepEqual(
+      selectActiveProjects(store.getState()).map(p => p.id),
+      ['p2', 'p1'],
+    );
+    assert.equal(selectArchivedProjectCount(store.getState()), 1);
+  });
+
+  it('knows nothing has finished before any terminal event', async () => {
+    const api = fakeApi({ snapshot: async () => snapshot({ asOfSeq: 50n, threads: [thread({ id: 'main', parentId: null })] }) });
+    const store = createStore({ api, initialRoute: { key: 'home' } });
+
+    await dispatched(store, sessionCheck());
+    await settle();
+    assert.equal(selectLatestFinishedThread(store.getState()), null);
+    assert.deepEqual(selectRunningCountByProject(store.getState()), {});
   });
 });

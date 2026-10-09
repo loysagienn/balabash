@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { countOf, dateTimeLabel, dayKey, dayLabel, durationLabel, fileSize, rangeLabel, shortDate, sinceLabel, startedLabel, timeOfDay } from './index.ts';
+import { agoLabel, clockLabel, countOf, dateTimeLabel, dayKey, dayLabel, durationLabel, fileSize, rangeLabel, shortDate, sinceLabel, startedLabel, timeOfDay } from './index.ts';
 
 // Local-time constructors: the helpers format in the browser's zone.
-const at = (y: number, m: number, d: number, h = 0, min = 0) => new Date(y, m - 1, d, h, min);
+const at = (y: number, m: number, d: number, h = 0, min = 0, sec = 0) => new Date(y, m - 1, d, h, min, sec);
 const NOW = at(2026, 10, 9, 17, 30);
 
 describe('format', () => {
@@ -34,6 +34,17 @@ describe('format', () => {
     assert.equal(rangeLabel(at(2026, 10, 9, 13, 17), at(2026, 10, 9, 13, 59), NOW), '13:17 → 13:59');
     assert.equal(rangeLabel(at(2026, 10, 7, 23, 10), at(2026, 10, 8, 0, 14), NOW), '23:10 → Oct 8, 00:14');
     assert.equal(shortDate(at(2026, 10, 7), NOW), 'Oct 7');
+  });
+
+  it('writes how long ago and the clock of Home', () => {
+    assert.equal(agoLabel(at(2026, 10, 9, 17, 29, 40), NOW), 'just now');
+    assert.equal(agoLabel(at(2026, 10, 9, 17, 23), NOW), '7 min ago');
+    assert.equal(agoLabel(at(2026, 10, 9, 16, 29), NOW), '1 hour ago');
+    assert.equal(agoLabel(at(2026, 10, 9, 14, 0), NOW), '3 hours ago');
+    assert.equal(agoLabel(at(2026, 10, 6, 17, 0), NOW), '3 days ago');
+    assert.equal(agoLabel(at(2026, 10, 1, 17, 0), NOW), 'Oct 1');
+    assert.equal(agoLabel(at(2025, 10, 1, 17, 0), NOW), 'Oct 1, 2025');
+    assert.equal(clockLabel(at(2026, 10, 8, 16, 38)), 'Thursday, October 8 · 16:38');
   });
 
   it('writes durations in the largest two units', () => {

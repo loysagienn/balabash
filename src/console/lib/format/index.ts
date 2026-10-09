@@ -96,6 +96,32 @@ export function durationLabel(ms: number): string {
   return `${days}d ${hours}h`;
 }
 
+// "just now", "7 min ago", "2 hours ago", "3 days ago" — how long ago
+// something happened, in a row's time column; a week and more — the date.
+export function agoLabel(date: Date, now: Date): string {
+  const ms = now.getTime() - date.getTime();
+
+  if (ms < MINUTE) {
+    return 'just now';
+  }
+  if (ms < HOUR) {
+    return `${Math.floor(ms / MINUTE)} min ago`;
+  }
+  if (ms < DAY) {
+    return `${countOf(Math.floor(ms / HOUR), 'hour')} ago`;
+  }
+  if (ms < 7 * DAY) {
+    return `${countOf(Math.floor(ms / DAY), 'day')} ago`;
+  }
+
+  return shortDate(date, now);
+}
+
+// "Wednesday, October 8 · 16:38" — the clock under the title of Home.
+export function clockLabel(now: Date): string {
+  return `${now.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })} · ${timeOfDay(now)}`;
+}
+
 // "14:02" today, "Oct 7, 14:02" on another day — the time of a feed item.
 export function dateTimeLabel(date: Date, now: Date): string {
   return sameDay(date, now) ? timeOfDay(date) : `${shortDate(date, now)}, ${timeOfDay(date)}`;

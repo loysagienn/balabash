@@ -1,0 +1,9 @@
+@layer screens{
+/* threads on Home: time column narrower than in the full list */
+.home-ths{--thl-time-w:72px}
+/* Home: on phone the columns (.grid12 > [data-stack]) dissolve and blocks line up by importance */
+@container shell (max-width:720px){
+  .home-col{display:contents}
+  .home-o1{order:1} .home-o2{order:2} .home-o3{order:3} .home-o4{order:4} .home-o5{order:5}
+}
+}

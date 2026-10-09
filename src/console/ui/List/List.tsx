@@ -47,12 +47,14 @@ export type RowProps = {
   // links) otherwise.
   href?: string;
   onClick?: (event: MouseEvent<HTMLAnchorElement>) => void;
+  // A link that leaves the console (a published app): a new tab.
+  external?: boolean;
   current?: boolean;
   fresh?: boolean;
   className?: string;
 };
 
-export function Row({ lead, title, meta, desc, end, href, onClick, current, fresh, className }: RowProps) {
+export function Row({ lead, title, meta, desc, end, href, onClick, external, current, fresh, className }: RowProps) {
   const classes = className ? `row ${className}` : 'row';
   const body = (
     <>
@@ -70,7 +72,15 @@ export function Row({ lead, title, meta, desc, end, href, onClick, current, fres
 
   if (href !== undefined) {
     return (
-      <a className={classes} href={href} onClick={onClick} aria-current={current ? 'page' : undefined} data-fresh={fresh ? '' : undefined}>
+      <a
+        className={classes}
+        href={href}
+        onClick={onClick}
+        target={external ? '_blank' : undefined}
+        rel={external ? 'noopener' : undefined}
+        aria-current={current ? 'page' : undefined}
+        data-fresh={fresh ? '' : undefined}
+      >
         {body}
       </a>
     );

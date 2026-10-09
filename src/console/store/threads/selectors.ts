@@ -21,6 +21,34 @@ export const selectRunningThreads = createSelector([selectThreadsById], byId =>
 
 export const selectRunningCount = (state: State) => selectRunningThreads(state).length;
 
+// How many threads are at work for each project (projectId → count).
+export const selectRunningCountByProject = createSelector([selectRunningThreads], threads => {
+  const counts: Record<string, number> = {};
+
+  for (const thread of threads) {
+    if (thread.projectId !== null) {
+      counts[thread.projectId] = (counts[thread.projectId] ?? 0) + 1;
+    }
+  }
+
+  return counts;
+});
+
+// The thread that ended last among those the store knows (the newest
+// terminal event); null while nothing has finished. Its `updatedAt` is the
+// time of its terminal event.
+export const selectLatestFinishedThread = createSelector([selectThreadsById], byId => {
+  let latest: Thread | null = null;
+
+  for (const thread of Object.values(byId)) {
+    if (thread.terminalSeq !== null && (latest === null || latest.terminalSeq === null || thread.terminalSeq > latest.terminalSeq)) {
+      latest = thread;
+    }
+  }
+
+  return latest;
+});
+
 export function matchesFilters(thread: Thread, filters: ThreadsListFilters): boolean {
   return (filters.status === null || thread.status === filters.status) && (filters.projectId === null || thread.projectId === filters.projectId);
 }

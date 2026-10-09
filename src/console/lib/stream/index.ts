@@ -3,7 +3,9 @@
 // closed when either goes away. Every frame becomes an event/<type> action.
 // The browser reconnects by itself and sends Last-Event-ID; when it gives up
 // (the server answered with an error status, e.g. a lost session), the
-// process retries after a pause from the last seq it saw.
+// process retries after a pause from the last seq it saw — the store says
+// "reconnecting" the whole time the tail is not flowing; "closed" is only
+// the end of a session.
 
 import type { Store } from 'redux';
 import type { Event } from '../../../core/contract.ts';
@@ -66,7 +68,7 @@ export function connectStoreToStream(store: Store<State, Action>): () => void {
       if (next.readyState === EventSource.CLOSED) {
         // The browser gave up (a non-200 answer): wait, then open again.
         close();
-        store.dispatch(streamClosed());
+        store.dispatch(streamReconnecting());
         retry = setTimeout(() => {
           retry = null;
           sync();

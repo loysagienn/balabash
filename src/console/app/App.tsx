@@ -10,6 +10,7 @@ import { Placeholder } from '../screens/Placeholder.tsx';
 import { NotFound } from '../screens/outside/NotFound.tsx';
 import { SessionError } from '../screens/outside/SessionError.tsx';
 import { SignIn } from '../screens/outside/SignIn.tsx';
+import { HomeScreen } from '../screens/home/HomeScreen.tsx';
 import { ThreadScreen } from '../screens/thread/ThreadScreen.tsx';
 import { ThreadsScreen } from '../screens/threads/ThreadsScreen.tsx';
 import { SettingsScreen } from '../screens/settings/SettingsScreen.tsx';
@@ -43,7 +44,7 @@ export function App() {
 
   switch (route.key) {
     case 'home':
-      return <Placeholder current="home" title="Home" icon="house" what="Home" />;
+      return <HomeScreen />;
     case 'threads':
       return <ThreadsScreen route={route} />;
     case 'thread':

@@ -1,0 +1,14 @@
+@layer patterns{
+/* ── Page grid: 12 columns ──  .grid12 > [data-span="4|5|7|8|12"]; data-stack — a column stacking cards. On phone — a single column. */
+.grid12{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:var(--gap);align-items:start}
+.grid12 > [data-span="4"]{grid-column:span 4}
+.grid12 > [data-span="5"]{grid-column:span 5}
+.grid12 > [data-span="7"]{grid-column:span 7}
+.grid12 > [data-span="8"]{grid-column:span 8}
+.grid12 > [data-span="12"]{grid-column:span 12}
+.grid12 > [data-stack]{display:flex;flex-direction:column;gap:var(--gap);min-width:0}
+@container shell (max-width:720px){
+  .grid12{grid-template-columns:minmax(0,1fr)}
+  .grid12 > [data-span]{grid-column:auto}
+}
+}
