@@ -47,20 +47,30 @@ describe('threadRowData', () => {
     assert.deepEqual(row, { agent: 'engineer', title: 'Public URL scheme', state: 'done', headless: true, time: '14:09 → 14:31', sub: '22m', desc: 'slug is globally unique' });
   });
 
-  it('words the pinned main thread as always on, its children uncounted', () => {
-    const row = threadRowData({
+  it('pins the main thread with its last message, its children uncounted and no ring', () => {
+    const input = {
       thread: thread({ id: 'main', parentId: null, agent: 'coordinator', createdAt: new Date(2026, 7, 6, 22, 44) }),
-      state: 'wait',
-      session: null,
+      state: 'wait' as const,
+      session: { state: 'wait' as const, context: { used: 10, max: 100 } },
       project: null,
       kids: 200,
       headless: false,
-      last: null,
+      last: { lastCode: 'spawn_agent' },
       now: NOW,
       main: true,
-    });
+    };
 
-    assert.deepEqual(row, { agent: 'coordinator', title: 'Main thread', state: 'wait', time: 'since Aug 6', sub: 'always on' });
+    // No message loaded yet: the row is the title and the pin alone.
+    assert.deepEqual(threadRowData({ ...input, lastMessage: null }), { agent: 'coordinator', title: 'Main thread', state: 'wait', pinned: true, time: '' });
+    assert.deepEqual(threadRowData({ ...input, lastMessage: { text: 'Started the designer on the token chart', at: at(16, 2) } }), {
+      agent: 'coordinator',
+      title: 'Main thread',
+      state: 'wait',
+      pinned: true,
+      last: 'Started the designer on the token chart',
+      time: '16:02',
+    });
+    assert.equal(threadRowData({ ...input, lastMessage: { text: 'Hi', at: new Date(2026, 9, 7, 9, 5) } }).time, 'Oct 7, 09:05');
   });
 
   it('falls back to the summary text and the agent name', () => {

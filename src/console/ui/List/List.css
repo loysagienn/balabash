@@ -18,6 +18,9 @@
 /* Right side in columns across the whole list: .list[data-end-cols] + --row-end-cols (column template). Items fill the columns in order;
    a row missing the last items leaves the tail empty — the other columns do not shift. --row-time-w — time column width without the grid. */
 .list[data-end-cols] .row-end{display:grid;grid-template-columns:var(--row-end-cols);justify-items:end}
+/* main thread pinned above a list: a pin in place of the state badge */
+.row-pin{display:inline-flex;align-items:center;gap:var(--sp-1);font-size:var(--fs-meta);line-height:var(--lh-meta);color:var(--text-3);white-space:nowrap}
+.row-pin .ic{font-size:var(--ico-xs)}
 .row-time{min-width:var(--row-time-w,0);font-size:var(--fs-meta);line-height:var(--lh-meta);color:var(--text-2);text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
 .row-time-sub{display:block;font-size:var(--fs-micro);line-height:var(--lh-micro);color:var(--text-3)}
 @container list (max-width:480px){

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { event, resetSeq } from '../../store/fixtures.ts';
-import { lastActionOf } from './lastAction.ts';
+import { lastActionOf, lastMessageOf } from './lastAction.ts';
 
 describe('lastActionOf', () => {
   it('takes the newest telling event', () => {
@@ -36,5 +36,20 @@ describe('lastActionOf', () => {
 
     assert.equal(action?.last?.length, 80);
     assert.ok(action?.last?.endsWith('…'));
+  });
+});
+
+describe('lastMessageOf', () => {
+  it('takes the newest message of the user or the agent, by its first line', () => {
+    resetSeq();
+    const user = event({ type: 'user.message', threadId: 'main', payload: { text: 'Start the designer\nand report back' } });
+    const files = event({ type: 'user.message', threadId: 'main', payload: { text: '', files: [{ fileId: 'f', name: 'a.png', mimeType: 'image/png', size: 1 }] } });
+    const agent = event({ type: 'agent.message', threadId: 'main', payload: { content: [{ type: 'image', fileId: 'f' }, { type: 'text', text: 'Started the designer on the token chart.' }] } });
+    const tool = event({ type: 'tool.call.started', threadId: 'main', payload: { callId: 'c', functionName: 'spawn_agent', input: {} } });
+
+    assert.deepEqual(lastMessageOf([user, agent, tool]), { text: 'Started the designer on the token chart.', at: agent.createdAt });
+    assert.deepEqual(lastMessageOf([user, files]), { text: 'Start the designer', at: user.createdAt });
+    assert.equal(lastMessageOf([tool]), null);
+    assert.equal(lastMessageOf([]), null);
   });
 });

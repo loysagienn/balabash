@@ -1,9 +1,12 @@
-// The app shell (design: Shell): sidebar with the workspace and sections,
-// header (ShellTop), the screen's body, bottom tabs and the "More" sheet on
-// the phone — one markup, reflowing by the `shell` container width. Counts
-// and attention marks come from the store: running threads on "Threads",
-// a dot on a section that awaits the user. The toasts of the store stack
-// in the corner of the shell (features/toasts).
+// The app shell (design: Shell): sidebar with the workspace and sections
+// — the main thread first among them, with its shortcut (⌘J / Ctrl+J from
+// any screen) — header (ShellTop), the screen's body, bottom tabs and the
+// "More" sheet on the phone — one markup, reflowing by the `shell`
+// container width. Counts and attention marks come from the store: running
+// threads on "Threads", a dot on a section that awaits the user. The
+// toasts of the store stack in the corner of the shell (features/toasts).
+// The operator's name under the workspace name waits for its data (plan,
+// "Чего нет в данных").
 
 import { useEffect, useRef } from 'react';
 import type { ReactNode } from 'react';
@@ -11,21 +14,23 @@ import { Link } from '../../lib/router/Link.tsx';
 import type { AppRoute, NavKey } from '../../lib/router/routes.ts';
 import { useAppDispatch, useAppSelector } from '../../store/hooks.ts';
 import { selectConnectionsNeedingAction } from '../../store/connections/selectors.ts';
+import { routeTo } from '../../store/router/actions.ts';
 import { selectMe } from '../../store/session/selectors.ts';
 import { selectRunningCount } from '../../store/threads/selectors.ts';
 import { closeMoreSheet, openMoreSheet } from '../../store/ui/actions.ts';
 import { selectMoreSheet } from '../../store/ui/selectors.ts';
 import { Icon } from '../../ui/Icon/Icon.tsx';
-import { Attn, Count } from '../../ui/atoms/atoms.tsx';
+import { Attn, Count, Kbd } from '../../ui/atoms/atoms.tsx';
 import { SectionGrid } from '../../ui/SectionGrid/SectionGrid.tsx';
 import { Sheet } from '../../ui/Sheet/Sheet.tsx';
 import { Toasts } from '../toasts/Toasts.tsx';
 import { MORE, NAV, TABS } from './nav.ts';
+import { isMainThreadOpen, isMainThreadShortcut, mainThreadRoute, mainThreadShortcutLabel } from './shell.logic.ts';
 import { ShellTop } from './ShellTop.tsx';
 import type { ShellTopProps } from './ShellTop.tsx';
 import './Shell.css';
 
-export type ShellProps = Omit<ShellTopProps, 'running'> & {
+export type ShellProps = Omit<ShellTopProps, 'running' | 'main'> & {
   current: NavKey | null;
   // A detail screen: no bottom tabs on the phone.
   detail?: boolean;
@@ -41,6 +46,11 @@ export function Shell({ current, detail, children, ...top }: ShellProps) {
   const route = useAppSelector(state => state.router.route);
   const source = useAppSelector(state => state.router.source);
   const body = useRef<HTMLElement>(null);
+  const mainRoute = mainThreadRoute(me?.mainThreadId);
+  const mainOpen = isMainThreadOpen(route, me?.mainThreadId);
+  const main = mainRoute ? { route: mainRoute, current: mainOpen } : null;
+  // On the main thread no section is current: it has its own item.
+  const section = mainOpen ? null : current;
 
   // A new screen starts at the top; history navigation keeps its place.
   useEffect(() => {
@@ -49,7 +59,26 @@ export function Shell({ current, detail, children, ...top }: ShellProps) {
     }
   }, [route, source]);
 
-  const tabCurrent = TABS.some(item => item.key === current) ? current : 'more';
+  // ⌘J / Ctrl+J opens the main thread from any screen.
+  useEffect(() => {
+    if (!mainRoute) {
+      return undefined;
+    }
+
+    const onKey = (event: KeyboardEvent) => {
+      if (isMainThreadShortcut(event)) {
+        event.preventDefault();
+        dispatch(routeTo(mainRoute));
+      }
+    };
+
+    document.addEventListener('keydown', onKey);
+
+    return () => document.removeEventListener('keydown', onKey);
+  }, [mainRoute, dispatch]);
+
+  const workspace = me?.workspaceName ?? 'Workspace';
+  const tabCurrent = section === null ? null : TABS.some(item => item.key === section) ? section : 'more';
   const moreAttention = MORE.some(item => attention.has(item.key));
 
   return (
@@ -57,15 +86,23 @@ export function Shell({ current, detail, children, ...top }: ShellProps) {
       <div className="shell" data-detail={detail ? '' : undefined}>
         <aside className="shell-side">
           <div className="shell-ws">
-            <div className="shell-logo">B</div>
+            <div className="shell-logo">{workspace.charAt(0).toUpperCase()}</div>
             <div>
-              <b className="shell-ws-name">{me?.workspaceName ?? 'Workspace'}</b>
-              <small className="shell-ws-sub">Balabash</small>
+              <b className="shell-ws-name">{workspace}</b>
             </div>
           </div>
           <nav className="shell-nav" aria-label="Sections">
+            {main ? (
+              <Link className="shell-nav-i shell-mt" route={main.route} current={main.current}>
+                <Icon name="message-circle" />
+                Main thread
+                <span className="shell-nav-end">
+                  <Kbd>{mainThreadShortcutLabel(navigator.platform)}</Kbd>
+                </span>
+              </Link>
+            ) : null}
             {NAV.map(item => (
-              <Link key={item.key} className="shell-nav-i" route={item.route} current={item.key === current}>
+              <Link key={item.key} className="shell-nav-i" route={item.route} current={item.key === section}>
                 <Icon name={item.icon} />
                 {item.name}
                 {item.key === 'threads' && running > 0 ? (
@@ -82,7 +119,7 @@ export function Shell({ current, detail, children, ...top }: ShellProps) {
           </nav>
         </aside>
         <div className="shell-main">
-          <ShellTop {...top} running={running} />
+          <ShellTop {...top} running={running} main={main} />
           <main className="shell-body" ref={body}>
             {children}
           </main>
@@ -120,7 +157,7 @@ export function Shell({ current, detail, children, ...top }: ShellProps) {
         <Sheet label="More sections" onClose={() => dispatch(closeMoreSheet())}>
           <SectionGrid label="More sections">
             {MORE.map(item => (
-              <Link key={item.key} className="secgrid-i" route={item.route} current={item.key === current}>
+              <Link key={item.key} className="secgrid-i" route={item.route} current={item.key === section}>
                 <Icon name={item.icon} />
                 {item.name}
                 {attention.has(item.key) ? <Attn className="secgrid-badge" /> : null}

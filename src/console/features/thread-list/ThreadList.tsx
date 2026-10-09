@@ -1,9 +1,10 @@
 // The thread list of a section (Threads, Home, a project): rows in the
 // design's three right-hand columns, grouped by the day they started, or
 // under one caption when a search narrows them. The main thread, when
-// pinned, stands first under its own caption — outside the days, the
-// filters and the pages. Rows newer than `freshAfter` flash as new (a
-// thread the tail started while the screen was open).
+// pinned, stands first as a compact row above the day groups — outside
+// the days and the pages (the screen pins it only without filters). Rows
+// newer than `freshAfter` flash as new (a thread the tail started while
+// the screen was open).
 
 import { Fragment } from 'react';
 import type { ReactNode } from 'react';
@@ -50,12 +51,7 @@ export function ThreadList({ threads, pinned, now, hit, hitTotal, freshAfter = n
 
   return (
     <List className={className ? `thl-list ${className}` : 'thl-list'} endCols="auto var(--thl-time-w, 140px) var(--thl-ctx-w, 60px)" narrow="tiles">
-      {pinned ? (
-        <>
-          <ListGroup>Main thread</ListGroup>
-          <ThreadListRow thread={pinned} now={now} current={pinned.id === currentId} main />
-        </>
-      ) : null}
+      {pinned ? <ThreadListRow thread={pinned} now={now} current={pinned.id === currentId} main /> : null}
       {hit ? (
         <>
           <ListGroup end="in titles and summaries">{`${(hitTotal ?? threads.length).toLocaleString('en-US')} found`}</ListGroup>

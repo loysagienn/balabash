@@ -70,6 +70,7 @@ const CHART_COLS = [18, 42, 36, 58, 24, 8, 4, 62, 71, 55, 80, 66, 30, 48].map((v
 function ThreadRows({ endCols }: { endCols?: string }) {
   return (
     <List endCols={endCols} timeW={endCols ? undefined : '96px'} narrow="tiles">
+      <ThreadRow agent="coordinator" title="Main thread" state="wait" last="Started the designer on the token chart" time="16:42" pinned href="#" onClick={stop} />
       <ListGroup end="7 threads">Today, October 9</ListGroup>
       <ThreadRow
         agent="engineer"

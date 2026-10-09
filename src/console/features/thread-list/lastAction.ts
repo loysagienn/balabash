@@ -10,6 +10,12 @@ import type { EventOf, EventType } from '../../../core/event-types.ts';
 
 export type LastAction = { last?: string; lastCode?: string };
 
+// The last message of the main thread for its pinned row: the newest
+// user.message or agent.message among the events the store holds — its
+// first line and its time. Null while none is loaded: the snapshot brings
+// the thread, not its messages; the tail and the thread page's chunk do.
+export type LastMessage = { text: string; at: Date };
+
 const MAX = 80;
 
 function clip(text: string): string {
@@ -44,6 +50,28 @@ function fromTool(payload: EventOf<'session.tool.started'>['payload']): LastActi
 }
 
 const is = <T extends EventType>(event: Event, type: T): event is Event & EventOf<T> => event.type === type;
+
+export function lastMessageOf(events: readonly Event[]): LastMessage | null {
+  for (let i = events.length - 1; i >= 0; i -= 1) {
+    const event = events[i]!;
+    const text = is(event, 'user.message')
+      ? clip(event.payload.text)
+      : is(event, 'agent.message')
+        ? clip(
+            event.payload.content
+              .map(block => (block.type === 'text' ? block.text : ''))
+              .filter(Boolean)
+              .join('\n'),
+          )
+        : '';
+
+    if (text) {
+      return { text, at: event.createdAt };
+    }
+  }
+
+  return null;
+}
 
 // events — the thread's events in seq order (store/feed selectors).
 export function lastActionOf(events: readonly Event[]): LastAction | null {

@@ -122,7 +122,7 @@
   /* ── Layout frame ── */
   --side-w:236px; --top-h:56px; --tabs-h:60px;
   --gutter:28px;  --gap:16px;  --tile-gap:8px;       /* desktop: gutters, gap, 12 columns */
-  --m-gutter:16px; --m-gap:12px; --m-top-h:52px;      /* phone: substituted for --gutter/--gap/--top-h */
+  --m-gutter:16px; --m-gap:12px; --m-top-h:60px;      /* phone: substituted for --gutter/--gap/--top-h */
   --content-max:1600px; --feed-max:800px; --rail-w:300px;
   --hit:44px;                                         /* minimum hit area on a touch screen */
   --hit-ext:0px;                                      /* how far to extend the hit area of small controls (< 0 in touch) */

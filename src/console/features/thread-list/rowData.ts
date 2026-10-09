@@ -1,19 +1,21 @@
 // From a thread of the store to the words of its row (ui/ThreadRow): an
 // active one — "since 14:02 / running 2h 36m" and the context ring; a
 // closed one — "13:17 → 13:59 / 42m" and its summary; the main thread —
-// "Main thread", "since Aug 6 / always on", its children uncounted (the
-// store knows a window of them, not all). Pure, so the mapping is tested
+// the pinned row "Main thread": a pin instead of the state, its last
+// message and the message's time when the store holds one, no ring, its
+// children uncounted (the store knows a window of them, not all). Pure, so
+// the mapping is tested
 // without the store or the DOM; the connected row reads the pieces (state,
 // session, project, children, agent policy, last action) and calls it.
 
 import type { Thread } from '../../../core/contract.ts';
 import type { SessionView } from '../../../projections/session.ts';
-import { durationLabel, rangeLabel, shortDate, sinceLabel } from '../../lib/format/index.ts';
+import { dateTimeLabel, durationLabel, rangeLabel, sinceLabel } from '../../lib/format/index.ts';
 import type { CtxInput } from '../../ui/Ring/Ring.logic.ts';
 import type { ThreadRowProps } from '../../ui/ThreadRow/ThreadRow.tsx';
 import type { StateName } from '../../ui/atoms/state.ts';
 import { isActiveState } from '../../ui/ThreadRow/ThreadRow.logic.ts';
-import type { LastAction } from './lastAction.ts';
+import type { LastAction, LastMessage } from './lastAction.ts';
 
 export type ThreadRowInput = {
   thread: Thread;
@@ -25,6 +27,8 @@ export type ThreadRowInput = {
   last: LastAction | null;
   now: Date;
   main?: boolean;
+  // The main thread's last loaded message (lastMessageOf); null — none yet.
+  lastMessage?: LastMessage | null;
 };
 
 export type ThreadRowData = Omit<ThreadRowProps, 'href' | 'onClick' | 'current' | 'fresh' | 'hit' | 'noAgent'>;
@@ -44,7 +48,7 @@ export function threadTitle(thread: Thread): string {
   return thread.title?.trim() || thread.agent;
 }
 
-export function threadRowData({ thread, state, session, project, kids, headless, last, now, main }: ThreadRowInput): ThreadRowData {
+export function threadRowData({ thread, state, session, project, kids, headless, last, now, main, lastMessage }: ThreadRowInput): ThreadRowData {
   const base: ThreadRowData = {
     agent: thread.agent,
     title: main ? thread.title?.trim() || 'Main thread' : threadTitle(thread),
@@ -58,10 +62,8 @@ export function threadRowData({ thread, state, session, project, kids, headless,
   if (main) {
     return {
       ...base,
-      ...(last?.lastCode ? { lastCode: last.lastCode } : last?.last ? { last: last.last } : {}),
-      time: `since ${shortDate(thread.createdAt, now)}`,
-      sub: 'always on',
-      ...(ctxOf(session) ? { ctx: ctxOf(session) } : {}),
+      pinned: true,
+      ...(lastMessage ? { last: lastMessage.text, time: dateTimeLabel(lastMessage.at, now) } : {}),
     };
   }
 

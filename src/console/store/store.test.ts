@@ -854,7 +854,7 @@ describe('home overview', () => {
   it('counts the running threads per project and knows the thread that ended last', async () => {
     const store = await homeStore();
 
-    // The main thread is pinned above "Active threads", never among them.
+    // The main thread is reached from the shell, never among "Active threads".
     assert.equal(selectMainThread(store.getState())?.id, 'main');
     assert.deepEqual(store.getState().threads.byId.main && selectRunningCount(store.getState()), 3);
     assert.deepEqual(selectRunningCountByProject(store.getState()), { p1: 2 });

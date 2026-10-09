@@ -14,7 +14,7 @@ import { selectSession, selectThreadState } from '../../store/sessions/selectors
 import { selectChildCount } from '../../store/threads/selectors.ts';
 import { ThreadRow } from '../../ui/ThreadRow/ThreadRow.tsx';
 import { isActiveState } from '../../ui/ThreadRow/ThreadRow.logic.ts';
-import { lastActionOf } from './lastAction.ts';
+import { lastActionOf, lastMessageOf } from './lastAction.ts';
 import { threadRowData } from './rowData.ts';
 
 export type ThreadListRowProps = {
@@ -24,7 +24,8 @@ export type ThreadListRowProps = {
   fresh?: boolean;
   current?: boolean;
   noAgent?: boolean;
-  // The pinned main thread: worded as always on, without a children count.
+  // The pinned main thread: a pin instead of the state, its last loaded
+  // message instead of the last action, without a children count.
   main?: boolean;
 };
 
@@ -39,9 +40,10 @@ export function ThreadListRow({ thread, now, hit, fresh, current, noAgent, main 
   const selectEvents = useMemo(makeSelectThreadEvents, []);
   const active = isActiveState(state);
   const events = useAppSelector(s => (active ? selectEvents(s, thread.id) : NO_EVENTS));
-  const last = useMemo(() => (active ? lastActionOf(events) : null), [active, events]);
+  const last = useMemo(() => (active && !main ? lastActionOf(events) : null), [active, main, events]);
+  const lastMessage = useMemo(() => (main ? lastMessageOf(events) : null), [main, events]);
   const link = useLinkProps({ key: 'thread', id: thread.id });
-  const data = threadRowData({ thread, state, session, project, kids, headless, last, now, ...(main ? { main } : {}) });
+  const data = threadRowData({ thread, state, session, project, kids, headless, last, now, ...(main ? { main, lastMessage } : {}) });
 
   return <ThreadRow {...data} {...link} hit={hit} fresh={fresh} current={current} noAgent={noAgent} />;
 }

@@ -20,6 +20,10 @@
 .shell-nav-i[aria-current="page"]{background-image:var(--layer-selected);color:var(--text)}
 .shell-nav-i[aria-current="page"] .ic{color:var(--accent)}
 .shell-nav-end{margin-left:auto;display:flex;align-items:center}
+/* the main thread: the first item of the sections — its own icon, the shortcut on the right; on the phone — a header button with the same icon */
+.shell-mt .kbd{color:var(--text-3)}
+.shell-mt-btn{display:none}
+.shell-mt-btn[aria-current="page"]{background-image:var(--layer-selected)}
 .shell-foot{margin-top:auto;padding:var(--sp-2h) var(--sp-3);border-radius:var(--r-md);background:var(--surface-2);font-size:var(--fs-meta);line-height:var(--lh-meta);color:var(--text-3)}
 .shell-foot-v{color:var(--text-2);font-weight:var(--fw-medium)}
 
@@ -64,6 +68,7 @@
   .shell-title-narrow{display:inline}
   .shell-top[data-back="narrow"] .shell-back{display:inline-flex}
   .shell-tabs{display:grid}
+  .shell-mt-btn{display:inline-flex}
   .shell[data-detail] .shell-tabs{display:none}
 }
 }

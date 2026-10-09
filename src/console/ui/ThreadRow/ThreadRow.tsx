@@ -3,7 +3,9 @@
 // ring with its tooltip. Closed (done · err · off) — the summary, "start →
 // end / duration". hit — the search match highlighted in the title and the
 // summary. In a columned list (List endCols) the badge, the time and the
-// ring line up across rows. The row is one link as a whole.
+// ring line up across rows. pinned — the main thread above a list: a pin
+// in place of the state badge, no dot on the avatar, no ring; the time is
+// its last message's. The row is one link as a whole.
 
 import type { MouseEvent, ReactNode } from 'react';
 import { Avatar } from '../Avatar/Avatar.tsx';
@@ -41,6 +43,8 @@ export type ThreadRowProps = {
   noAgent?: boolean;
   current?: boolean;
   fresh?: boolean;
+  // The main thread pinned above the list.
+  pinned?: boolean;
   href: string;
   onClick?: (event: MouseEvent<HTMLAnchorElement>) => void;
 };
@@ -88,6 +92,7 @@ export function ThreadRow({
   noAgent,
   current,
   fresh,
+  pinned,
   href,
   onClick,
 }: ThreadRowProps) {
@@ -106,18 +111,25 @@ export function ThreadRow({
       onClick={onClick}
       current={current}
       fresh={fresh}
-      lead={<Avatar agent={agent} pip={active ? state : undefined} />}
+      lead={<Avatar agent={agent} pip={active && !pinned ? state : undefined} />}
       title={<Parts text={title} hit={hit} />}
       meta={metaNodes.length ? metaNodes : undefined}
       desc={desc ? <Parts text={desc} hit={hit} /> : undefined}
       end={
         <>
-          <Badge state={state} label={threadStateLabel(state, label)} />
+          {pinned ? (
+            <span className="row-pin">
+              <Icon name="pin" size="xs" />
+              pinned
+            </span>
+          ) : (
+            <Badge state={state} label={threadStateLabel(state, label)} />
+          )}
           <span className="row-time">
             {time}
             {sub ? <small className="row-time-sub">{sub}</small> : null}
           </span>
-          {ctx ? <Ctx {...ctx} /> : null}
+          {ctx && !pinned ? <Ctx {...ctx} /> : null}
         </>
       }
     />

@@ -1,8 +1,9 @@
 // Threads — the flat list, newest first, grouped by day; earlier pages load
 // as the reader scrolls. Filters and search are the route (ThreadFilters)
 // and the server's; the rows are the store's projection over the loaded
-// range (selectListThreads). The main thread is pinned above the list,
-// outside the filters and the pages. A thread the tail starts while the
+// range (selectListThreads). The main thread is pinned above the list —
+// in the list and while it loads — but only while no filter or search is
+// set: a narrowed list shows what matched. A thread the tail starts while the
 // list is at its head is inserted with a highlight; while the list is
 // scrolled it waits above and an "N new threads" pill offers the way up.
 
@@ -126,8 +127,10 @@ export function ThreadsScreen({ route }: { route: ThreadsRoute }) {
       </div>
     ) : null;
 
-  // The main thread above everything else, whatever the stage of the list.
-  const pinned = main ? <ThreadList threads={[]} pinned={main} now={now} /> : null;
+  // The main thread above everything else, whatever the stage of the list,
+  // unless the route narrows the list.
+  const mainPinned = hasFilters(route) ? null : main;
+  const pinned = mainPinned ? <ThreadList threads={[]} pinned={mainPinned} now={now} /> : null;
   let body;
 
   if (stage === 'skeleton') {
@@ -169,7 +172,7 @@ export function ThreadsScreen({ route }: { route: ThreadsRoute }) {
   } else {
     body = (
       <Card narrow="bare">
-        <ThreadList threads={rows} pinned={main} now={now} hit={route.q} hitTotal={found} freshAfter={mountSeq.current} foot={foot} />
+        <ThreadList threads={rows} pinned={mainPinned} now={now} hit={route.q} hitTotal={found} freshAfter={mountSeq.current} foot={foot} />
       </Card>
     );
   }

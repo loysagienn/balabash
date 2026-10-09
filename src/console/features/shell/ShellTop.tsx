@@ -1,14 +1,19 @@
 // Shell header (design: ShellTop): "back" and the section above the page,
-// the title, a subtitle; on the right the activity indicator. pageHead —
-// the page has its own titled header: on wide screens the shell header
-// shows only "← Section". The bell joins with notifications (plan, stage 7).
+// the title, a subtitle; on the right the main thread button (phone only,
+// on top-level screens — a page with "back" leaves the room to its title)
+// and the activity indicator. pageHead — the page has its own titled
+// header: on wide screens the shell header shows only "← Section". The
+// bell joins with notifications (plan, stage 7).
 
 import { Link } from '../../lib/router/Link.tsx';
 import type { AppRoute } from '../../lib/router/routes.ts';
 import { useAppDispatch } from '../../store/hooks.ts';
 import { routeTo } from '../../store/router/actions.ts';
 import { ActivityChip } from '../../ui/ActivityChip/ActivityChip.tsx';
+import { Icon } from '../../ui/Icon/Icon.tsx';
 import { IconBtn } from '../../ui/IconBtn/IconBtn.tsx';
+
+export type MainThreadLink = { route: AppRoute; current: boolean };
 
 export type ShellTopProps = {
   title: string;
@@ -28,9 +33,12 @@ export type ShellTopProps = {
   pageHead?: boolean;
   compact?: boolean;
   running: number;
+  // The main thread's link for the phone header; null until the session
+  // names the thread.
+  main: MainThreadLink | null;
 };
 
-export function ShellTop({ title, titleNarrow, sub, crumb, back, backNarrow, pageHead, compact, running }: ShellTopProps) {
+export function ShellTop({ title, titleNarrow, sub, crumb, back, backNarrow, pageHead, compact, running, main }: ShellTopProps) {
   const dispatch = useAppDispatch();
 
   return (
@@ -56,6 +64,11 @@ export function ShellTop({ title, titleNarrow, sub, crumb, back, backNarrow, pag
       </h1>
       {sub ? <span className="shell-sub">{sub}</span> : null}
       <div className="shell-top-end">
+        {main && !back ? (
+          <Link className="btn shell-mt-btn" data-icon-only="" route={main.route} current={main.current} aria-label="Main thread" title="Main thread">
+            <Icon name="message-circle" />
+          </Link>
+        ) : null}
         <ActivityChip running={running} compact={compact} onClick={() => dispatch(routeTo({ key: 'threads', status: 'active' }))} />
       </div>
     </header>
