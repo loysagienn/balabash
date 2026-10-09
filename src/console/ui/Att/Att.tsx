@@ -1,7 +1,9 @@
 // Attachments of a message or a summary (design: Att, AttThumb): Atts is
 // the row; Att — a file as a chip (type icon, name, size), AttThumb — an
 // image as a preview. Both are links to the file (href; onClick for a
-// feature that opens the preview in place).
+// feature that opens the preview in place). A long file name is cut with
+// an ellipsis inside the chip (the full name is the link's title), so an
+// attachment never widens the message.
 
 import type { MouseEvent, ReactNode } from 'react';
 import { Icon } from '../Icon/Icon.tsx';
@@ -22,9 +24,9 @@ export type AttProps = {
 
 export function Att({ icon = 'file-text', file, size, href, onClick }: AttProps) {
   return (
-    <a className="att" href={href} onClick={onClick}>
+    <a className="att" href={href} title={file} onClick={onClick}>
       <Icon name={icon} />
-      {file}
+      <span className="att-name">{file}</span>
       {size ? <small className="att-size">{size}</small> : null}
     </a>
   );

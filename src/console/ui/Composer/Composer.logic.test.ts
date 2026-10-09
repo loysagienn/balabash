@@ -27,8 +27,15 @@ describe('isSendKey', () => {
 });
 
 describe('outgoingText', () => {
-  it('trims the surrounding blank lines and keeps the inner ones', () => {
-    assert.equal(outgoingText('\n\n  hello\n\nworld \n'), 'hello\n\nworld');
+  it('drops the surrounding blank lines and keeps the inner ones', () => {
+    assert.equal(outgoingText('\n  \n\nhello\n\nworld \n\n'), 'hello\n\nworld');
     assert.equal(outgoingText('   \n'), '');
+    assert.equal(outgoingText('   '), '');
+    assert.equal(outgoingText(''), '');
+  });
+
+  it('keeps the indentation of the first line', () => {
+    assert.equal(outgoingText('    const a = 1;\n    const b = 2;'), '    const a = 1;\n    const b = 2;');
+    assert.equal(outgoingText('\n\t- item\n'), '\t- item');
   });
 });

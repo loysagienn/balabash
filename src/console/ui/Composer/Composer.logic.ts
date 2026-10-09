@@ -16,8 +16,10 @@ export function isSendKey(event: SendKey): boolean {
   );
 }
 
-// What to send: the text without the surrounding blank lines; empty means
+// What to send: the text without the surrounding blank lines — only whole
+// blank lines go, the indentation of the first line stays (a pasted code
+// block or an indented Markdown line keeps its meaning); empty means
 // nothing to send.
 export function outgoingText(value: string): string {
-  return value.trim();
+  return value.replace(/^(?:[ \t]*\r?\n)+/, '').trimEnd();
 }

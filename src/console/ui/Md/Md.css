@@ -1,6 +1,7 @@
 @layer components{
 /* ── Markdown ──  .md — rendered Markdown (messages, summary, file preview). The only block that styles tags.
-   data-variant="quiet" — intermediate agent text; data-plain — the source as text while the renderer chunk loads. */
+   data-variant="quiet" — intermediate agent text; data-plain — the source as text while the renderer chunk loads.
+   The renderer puts every table into .md-table — a horizontal scroll area, so a wide table never widens the feed. */
 .md{font-size:var(--fs-body);line-height:var(--lh-body);color:var(--text);text-wrap:pretty;overflow-wrap:break-word}
 .md > *{margin:0}
 .md > * + *{margin-top:var(--sp-2)}
@@ -23,6 +24,7 @@
 .md blockquote{padding-left:var(--sp-3);border-left:2px solid var(--border-strong);color:var(--text-2)}
 .md hr{height:0;border:0;border-top:1px solid var(--border);margin-block:var(--sp-4)}
 .md img{max-width:100%;height:auto;border-radius:var(--r-sm);border:1px solid var(--border)}
+.md-table{overflow-x:auto;max-width:100%}
 .md table{width:100%;font-size:var(--fs-meta);line-height:var(--lh-meta);font-variant-numeric:tabular-nums}
 .md :is(th,td){text-align:left;padding:var(--sp-1h) var(--sp-2h);border-bottom:1px solid var(--border)}
 .md th{color:var(--text-3);font-weight:var(--fw-semibold)}

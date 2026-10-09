@@ -1,7 +1,10 @@
 @layer components{
-/* ── Attachments ──  .atts > a.att (icon, name, .att-size) | a.att-thumb > img */
+/* ── Attachments ──  .atts > a.att (icon, .att-name, .att-size) | a.att-thumb > img
+   A chip never exceeds the row: the name shrinks with an ellipsis, the icon and the size keep their width. */
 .atts{display:flex;flex-wrap:wrap;gap:var(--sp-2);margin-top:var(--sp-2h)}
-.att{--att-h:36px;display:inline-flex;align-items:center;gap:var(--sp-2);height:var(--att-h);padding:0 var(--sp-3) 0 var(--sp-2);border-radius:var(--r-sm);background:var(--surface-2);border:1px solid var(--border);font-size:var(--fs-meta);line-height:var(--lh-meta);color:var(--text);text-decoration:none}
+.att{--att-h:36px;display:inline-flex;align-items:center;gap:var(--sp-2);height:var(--att-h);padding:0 var(--sp-3) 0 var(--sp-2);border-radius:var(--r-sm);background:var(--surface-2);border:1px solid var(--border);font-size:var(--fs-meta);line-height:var(--lh-meta);color:var(--text);text-decoration:none;max-width:100%}
+.att-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.att .ic,.att-size{flex:none}
 .att:hover{border-color:var(--border-strong);color:var(--text)}
 .att .ic{color:var(--text-2)}
 .att-size{font-size:var(--fs-micro);line-height:var(--lh-micro);color:var(--text-3)}

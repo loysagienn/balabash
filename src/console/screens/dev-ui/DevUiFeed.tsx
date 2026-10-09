@@ -59,6 +59,12 @@ const TABLE = `Done, the foundations are in the design system:
 | \`tokens.css\` | all tokens |
 | \`Foundations.dc.html\` | showcase |
 
+A wide table scrolls inside the message instead of widening the feed:
+
+| Commit | Status | Author | Date |
+| --- | --- | --- | --- |
+| \`981deb8f3e9f11a22acb6a19e2398d6a75c36abe\` | completed | engineer | 2026-10-09 |
+
 - [x] tokens
 - [ ] screens
 
@@ -418,12 +424,19 @@ export function DevUiFeed() {
           <div className="dev-frame">
             <Thread>
               <Feed>
-                <Label>agent reply to you · table, task list, strikethrough, autolink, attachments</Label>
+                <Label>agent reply to you · tables (one wide), task list, strikethrough, autolink, attachments (one long name)</Label>
                 <Message agent="designer" to="you" time="16:02">
                   <Md source={TABLE} />
                   <Atts>
                     <AttThumb src={THUMB} alt="screenshot 1440" href="#" onClick={stop} />
                     <Att icon="file-text" file="README.md" size="7 KB" href="#" onClick={stop} />
+                    <Att
+                      icon="file-text"
+                      file="balabash-console-thread-feed-review-981deb8f3e9f11a22acb6a19e2398d6a75c36abe.md"
+                      size="12 KB"
+                      href="#"
+                      onClick={stop}
+                    />
                   </Atts>
                 </Message>
                 <Label>from a child agent · question</Label>

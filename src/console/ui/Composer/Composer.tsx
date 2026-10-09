@@ -1,11 +1,12 @@
 // Thread composer (design: Composer): full-width text with "Attach", the
 // ⌘↵ hint and "Send" below it; sticks to the bottom of the main column.
 // Controlled: value / onChange (the store keeps a draft per thread);
-// onSend gets the trimmed text on ⌘↵ / Ctrl+↵ or the button; busy — the
-// message is on its way (the field stays editable, "Send" spins); onAttach
-// absent — no "Attach" button. The field grows with the text up to eight
-// lines (six in a narrow thread) through CSS field-sizing, with a measured
-// height where the browser lacks it.
+// onSend gets the text without the surrounding blank lines on ⌘↵ / Ctrl+↵
+// or the button; busy — the message is on its way: the field stays
+// editable for the next draft, "Send" spins and nothing is sent until the
+// message is through; onAttach absent — no "Attach" button. The field
+// grows with the text up to eight lines (six in a narrow thread) through
+// CSS field-sizing, with a measured height where the browser lacks it.
 
 import { useEffect, useRef } from 'react';
 import { IconBtn } from '../IconBtn/IconBtn.tsx';
@@ -30,7 +31,7 @@ export function Composer({ to, value, onChange, onSend, onAttach, busy, disabled
   const input = useRef<HTMLTextAreaElement>(null);
   const placeholder = `Message ${to}…`;
   const text = outgoingText(value);
-  const canSend = text !== '' && !disabled;
+  const canSend = text !== '' && !disabled && !busy;
 
   // Fallback for browsers without field-sizing: the height follows the
   // content, the CSS max-height still caps it.
@@ -45,6 +46,9 @@ export function Composer({ to, value, onChange, onSend, onAttach, busy, disabled
     node.style.height = `${node.scrollHeight}px`;
   }, [value]);
 
+  // Every path (⌘↵, the button, Enter on the focused button) goes through
+  // this guard — the busy button is not disabled, so the spinner keeps the
+  // design's busy look; the guard is what stops a repeated send.
   const send = () => {
     if (canSend) {
       onSend(text);
@@ -91,7 +95,7 @@ export function Composer({ to, value, onChange, onSend, onAttach, busy, disabled
             variant="primary"
             size="sm"
             className="composer-send"
-            disabled={!canSend}
+            disabled={!busy && !canSend}
             busy={busy}
             onClick={send}
           />
