@@ -3,7 +3,7 @@
 // popovers, the ⌘K palette (wide and at phone width). Store-free: a
 // headless scene can mount it alone.
 
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import { Bell } from '../../ui/Bell/Bell.tsx';
 import { ActionLink, Btn } from '../../ui/Btn/Btn.tsx';
@@ -56,13 +56,17 @@ function Notifications() {
 
 function SearchPalette({ query, onQuery }: { query: string; onQuery: (value: string) => void }) {
   const hit = query.trim() || undefined;
+  // Two instances on the page (the desktop and the phone frame): own ids.
+  const id = useId();
+  const listId = `${id}-list`;
+  const activeId = `${id}-0`;
 
   return (
     <Palette>
-      <PaletteInput value={query} onChange={onQuery} listId="dev-pal-list" activeId="dev-pal-0" />
-      <PaletteList id="dev-pal-list">
+      <PaletteInput value={query} onChange={onQuery} listId={listId} activeId={activeId} />
+      <PaletteList id={listId}>
         <PaletteGroup>Threads</PaletteGroup>
-        <PaletteItem id="dev-pal-0" agent="engineer" text="Mini-apps: publishing by slug" hit={hit} meta="engineer · Balabash" endState="run" end="running" kbd="↵" sel />
+        <PaletteItem id={activeId} agent="engineer" text="Mini-apps: publishing by slug" hit={hit} meta="engineer · Balabash" endState="run" end="running" kbd="↵" sel />
         <PaletteItem agent="architect" text="Public URL scheme (slug)" hit={hit} meta="architect" endState="done" end="3 days ago" />
         <PaletteGroup>Files</PaletteGroup>
         <PaletteItem icon="file-code" text="src/api/apps/slug.ts" hit={hit} end="4 KB · today" path />

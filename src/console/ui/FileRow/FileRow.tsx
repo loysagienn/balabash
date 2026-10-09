@@ -3,7 +3,9 @@
 // name is a link stretched over the whole row (rule 14), and the "⋯"
 // actions (more — a MenuAnchor) sit above it, visible on hover, focus and
 // selection (always on touch screens). dir — a folder: a chevron instead
-// of the actions. Without a caption the second line is not rendered.
+// of the actions, decoration only — the pointer goes through it to the
+// stretched link (data-dir, FileRow.css). Without a caption the second
+// line is not rendered.
 
 import type { MouseEvent, ReactNode } from 'react';
 import { Avatar } from '../Avatar/Avatar.tsx';
@@ -29,7 +31,7 @@ export type FileRowProps = {
 
 export function FileRow({ name, icon = 'file-text', dir, caption, agent, size, time, selected, href, onClick, more }: FileRowProps) {
   return (
-    <div className="fr" aria-selected={selected ? 'true' : undefined}>
+    <div className="fr" data-dir={dir ? '' : undefined} aria-selected={selected ? 'true' : undefined}>
       <Obj icon={dir ? 'folder' : icon} size="md" kind={dir ? 'dir' : undefined} />
       <span className="fr-main">
         <a className="fr-n" href={href} onClick={onClick}>

@@ -1,6 +1,7 @@
 @layer patterns{
 /* ── File row ──  .fr[aria-selected] > .obj + .fr-main (a.fr-n — stretched link, .fr-c > .av + .fr-c-t) + .fr-s + .fr-t + .fr-a
-   The whole row is clickable via the stretched .fr-n link; the .fr-a actions sit above it. */
+   The whole row is clickable via the stretched .fr-n link; the .fr-a actions sit above it — except the
+   folder's chevron ([data-dir]), which is decoration and lets the pointer through to the link. */
 .fr{--fr-h:48px;position:relative;display:grid;grid-template-columns:var(--fa-cols);align-items:center;gap:var(--sp-2h);min-height:var(--fr-h);padding:var(--sp-1h) var(--sp-4);border-bottom:1px solid var(--border)}
 .fr:hover{background-image:var(--layer-hover)}
 .fr[aria-selected="true"]{background-image:var(--layer-selected)}
@@ -15,6 +16,7 @@
 .fr-s,.fr-t{font-size:var(--fs-meta);line-height:var(--lh-meta);color:var(--text-3);text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
 .fr-a{position:relative;z-index:var(--z-raised);display:grid;place-items:center;opacity:0;transition:opacity var(--dur-1) var(--ease)}
 .fr:is(:hover,:focus-within,[aria-selected="true"]) .fr-a{opacity:1}
+.fr[data-dir] .fr-a{pointer-events:none}
 @media (hover:none){ .fr-a{opacity:1} }
 @container fa (max-width:520px){
   .fr{grid-template-columns:var(--obj-md) minmax(0,1fr) auto}

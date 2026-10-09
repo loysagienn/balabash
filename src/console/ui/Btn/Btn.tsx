@@ -1,6 +1,9 @@
 // Button (design: Btn). variant: primary (one per screen or form) · regular
-// (default) · ghost (toolbars, rows) · danger (irreversible). busy — a
-// spinner instead of the icon; href — the same button as a link.
+// (default) · ghost (toolbars, rows) · danger (irreversible). busy — the
+// action is in flight: a spinner instead of the icon, and the button does
+// not act — a click, Enter or Space, a form's implicit submission through
+// it are swallowed. It is not disabled on purpose: the focus stays where it
+// is and the design's busy look holds. href — the same button as a link.
 
 import type { ButtonHTMLAttributes, MouseEvent, ReactNode } from 'react';
 import { Icon } from '../Icon/Icon.tsx';
@@ -56,6 +59,7 @@ export function Btn({
 }: BtnProps) {
   const lead = busy ? 'loader-circle' : icon;
   const classes = className ? `btn ${className}` : 'btn';
+  const activate = busy ? swallow : onClick;
   const content = (
     <>
       {lead ? <Icon name={lead} spin={busy} /> : null}
@@ -80,8 +84,9 @@ export function Btn({
         target={external ? '_blank' : undefined}
         rel={external ? 'noreferrer' : undefined}
         aria-label={ariaLabel}
+        aria-busy={busy ? 'true' : undefined}
         aria-disabled={disabled ? 'true' : undefined}
-        onClick={onClick}
+        onClick={activate}
       >
         {content}
       </a>
@@ -98,11 +103,17 @@ export function Btn({
       aria-busy={busy ? 'true' : undefined}
       aria-expanded={expanded}
       disabled={disabled}
-      onClick={onClick}
+      onClick={activate}
     >
       {content}
     </button>
   );
+}
+
+// The activation of a busy button: nothing happens, and a submit button
+// does not submit its form.
+function swallow(event: MouseEvent<HTMLElement>) {
+  event.preventDefault();
 }
 
 // Action link (design: .link) — "All threads ›" in a card header or under a

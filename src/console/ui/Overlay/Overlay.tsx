@@ -7,7 +7,7 @@
 // close. The dialog is the descendant with role="dialog" (tabIndex −1, so
 // it can hold the focus itself when no field inside takes it).
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import type { ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { Scrim } from '../Scrim/Scrim.tsx';
@@ -26,8 +26,16 @@ export function Overlay({ onClose, children }: { onClose: () => void; children: 
   // notice (it would lose the focus of a field on every keystroke).
   const close = useRef(onClose);
   // Who had the focus when the overlay opened — read during the first
-  // render, before an autoFocus field inside takes it.
-  const [opener] = useState(() => document.activeElement as HTMLElement | null);
+  // render, before an autoFocus field inside takes it. Checked again once
+  // mounted: when this dialog replaces another one in the same commit
+  // (Confirm swapping its Modal for a Sheet on resize), the element read
+  // here belongs to the dialog that is gone — but its cleanup has already
+  // handed the focus back to the original opener, who is taken over.
+  const opener = useRef<HTMLElement | null | undefined>(undefined);
+
+  if (opener.current === undefined) {
+    opener.current = document.activeElement as HTMLElement | null;
+  }
 
   useEffect(() => {
     close.current = onClose;
@@ -42,6 +50,12 @@ export function Overlay({ onClose, children }: { onClose: () => void; children: 
 
     const dialog = node.querySelector<HTMLElement>('[role="dialog"]');
     const background = Array.from(document.body.children).filter((el): el is HTMLElement => el instanceof HTMLElement && el !== node && !el.inert);
+
+    if (opener.current && !opener.current.isConnected) {
+      const active = document.activeElement as HTMLElement | null;
+
+      opener.current = active && !node.contains(active) ? active : null;
+    }
 
     for (const el of background) {
       el.inert = true;
@@ -88,9 +102,9 @@ export function Overlay({ onClose, children }: { onClose: () => void; children: 
         el.inert = false;
       }
 
-      opener?.focus?.();
+      opener.current?.focus?.();
     };
-  }, [opener]);
+  }, []);
 
   return createPortal(
     <div ref={root} className="overlay">
