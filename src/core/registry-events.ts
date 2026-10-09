@@ -2,7 +2,7 @@
 // scheduled tasks, app publications). The snapshot the console hydrates
 // from is a projection of the log, so every change of a table it shows
 // must be an event too, or the browser's copy goes stale until a reload.
-// They are journaled where the table changes (src/projects/tools.ts,
+// They are journaled where the table changes (src/projects/mutations.ts,
 // src/schedule/tools.ts and heart.ts, src/apps/management.ts), in the same
 // transaction as the change: the row and its event commit together or not
 // at all, and the event's seq is allocated under the row lock the change

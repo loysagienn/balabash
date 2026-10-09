@@ -9,23 +9,30 @@
 // conversation to a project by its description and goes to the library
 // itself. Nothing is ever deleted: archive flips a flag; the only thing that
 // ever moves a folder is a slug rename via projects_update, which renames
-// the folder in the same step.
+// the folder in the same step. The changes themselves live in
+// mutations.ts, shared with the console's endpoints (src/api/api.ts); this
+// server parses the tool arguments and words the answers for the model.
 
-import fs from 'node:fs/promises';
-import path from 'node:path';
 import type { JsonObject, JsonValue } from '../core/contract.ts';
-import { prisma } from '../db/client.ts';
 import type { ToolFunction } from '../capabilities/mcp-client.ts';
 import type { BuiltinServerCallContext, BuiltinToolServer } from '../capabilities/tool-manager.ts';
-import { workspaceFilesDir } from '../workspace/layout.ts';
-import { registryMutation } from '../core/registry-events.ts';
-import { getProject, listProjects, projectRecord } from './store.ts';
+import type { RegistryAuthor } from '../core/registry-events.ts';
+import { listProjects } from './store.ts';
 import type { ProjectModel } from './store.ts';
+import {
+  SLUG_MAX_LENGTH,
+  SLUG_PATTERN,
+  archiveProject,
+  createProject,
+  isTouch,
+  parseProjectInput,
+  parseProjectPatch,
+  requireProject,
+  unarchiveProject,
+  updateProject,
+} from './mutations.ts';
 
 export const PROJECTS_SERVER_NAME = 'projects';
-
-const SLUG_PATTERN = /^[a-z][a-z0-9-]*$/;
-const SLUG_MAX_LENGTH = 64;
 
 const FUNCTIONS: ToolFunction[] = [
   {
@@ -171,20 +178,10 @@ function requireId(args: JsonObject): string {
   return id;
 }
 
-// Same error for a foreign and a missing id: existence outside the workspace
-// is not leaked.
-async function requireProject(id: string, ctx: BuiltinServerCallContext): Promise<ProjectModel> {
-  const project = await getProject(ctx.userId, id);
-
-  if (!project) {
-    throw new Error(`Project "${id}" not found in this workspace`);
-  }
-
-  return project;
-}
-
-function isUniqueViolation(error: unknown): boolean {
-  return typeof error === 'object' && error !== null && (error as { code?: unknown }).code === 'P2002';
+// The change is authored by the calling thread: the project.* event names
+// the agent and the thread that asked for it.
+function author(ctx: BuiltinServerCallContext): RegistryAuthor {
+  return { kind: 'thread', userId: ctx.userId, threadId: ctx.threadId };
 }
 
 async function executeList(ctx: BuiltinServerCallContext): Promise<JsonValue> {
@@ -194,7 +191,7 @@ async function executeList(ctx: BuiltinServerCallContext): Promise<JsonValue> {
 }
 
 async function executeGet(args: JsonObject, ctx: BuiltinServerCallContext): Promise<JsonValue> {
-  const project = await requireProject(requireId(args), ctx);
+  const project = await requireProject(ctx.userId, requireId(args));
 
   return {
     project: {
@@ -209,94 +206,11 @@ async function executeGet(args: JsonObject, ctx: BuiltinServerCallContext): Prom
 }
 
 async function executeCreate(args: JsonObject, ctx: BuiltinServerCallContext): Promise<JsonValue> {
-  const title = typeof args.title === 'string' ? args.title.trim() : '';
-  const slug = typeof args.slug === 'string' ? args.slug.trim() : '';
-  const description = typeof args.description === 'string' ? args.description.trim() : '';
-
-  if (!title) {
-    throw new Error('a non-empty title is required');
-  }
-
-  if (!SLUG_PATTERN.test(slug) || slug.length > SLUG_MAX_LENGTH) {
-    throw new Error(`slug must match ${String(SLUG_PATTERN)} and be at most ${SLUG_MAX_LENGTH} chars`);
-  }
-
-  if (!description) {
-    throw new Error('a non-empty description is required — it is how agents match conversations to the project');
-  }
-
-  // Friendly uniqueness errors ahead of the write; the db constraints stay
-  // the last word (the race window is covered by the P2002 catch below).
-  const clash = await prisma.project.findFirst({ where: { userId: ctx.userId, OR: [{ title }, { slug }] } });
-
-  if (clash) {
-    throw new Error(
-      clash.title === title
-        ? `title "${title}" is already taken by project ${clash.id}${clash.archived ? ' (archived — titles stay reserved)' : ''}`
-        : `slug "${slug}" is already taken by project ${clash.id}${clash.archived ? ' (archived — slugs stay reserved)' : ''}`,
-    );
-  }
-
-  // The folder. An existing directory is adopted as the project's library —
-  // workbench agents create per-task directories at the same root, and
-  // turning such a directory into a project is a feature. A file in the way
-  // is an error: nothing is ever deleted or moved.
-  const dir = path.join(workspaceFilesDir(ctx.userId), slug);
-  let adopted = false;
-
-  const existing = await fs.stat(dir).catch(() => null);
-
-  if (existing && !existing.isDirectory()) {
-    throw new Error(`the path "${slug}" in the workspace file area is taken by a file — pick another slug`);
-  }
-
-  adopted = existing !== null;
-
-  // mkdir recursive doubles as lazy provisioning of the file area itself.
-  await fs.mkdir(dir, { recursive: true });
-
-  // The library anatomy (the law in agents/gardener.ts), seeded only where
-  // the folder has none — an adopted folder's existing files are someone's
-  // work and are never overwritten.
-  const seed = async (name: string, content: string) => {
-    await fs.writeFile(path.join(dir, name), content, { flag: 'wx' }).catch((error: NodeJS.ErrnoException) => {
-      // A concurrent writer beat us to it — their file wins.
-      if (error.code !== 'EEXIST') {
-        throw error;
-      }
-    });
-  };
-
-  await seed(
-    'AGENTS.md',
-    `# ${title}\n\n${description}\n\n## Map\n\n- inbox.md — append anything new worth keeping: results, decisions, learned facts; dated, with the "why". A gardener agent consolidates later.\n- journal.md — dated history of the project, maintained by the gardener.\n\n(Keep this file the entry point: the map of the folder plus the project's identity and stable frame.)\n`,
-  );
-  await seed('inbox.md', '# Inbox\n\nAppend new material here freely — dated, with the "why". Drained by the gardener.\n');
-  await seed('journal.md', '# Journal\n\nDated events and decisions, newest first. Written by the gardener.\n');
-
-  let project: ProjectModel;
-
-  try {
-    project = await registryMutation(async (tx, journal) => {
-      const created = await tx.project.create({
-        data: { userId: ctx.userId, title, slug, description },
-      });
-
-      await journal('project.created', projectRecord(created), { kind: 'thread', userId: ctx.userId, threadId: ctx.threadId });
-
-      return created;
-    });
-  } catch (error) {
-    if (isUniqueViolation(error)) {
-      throw new Error(`title "${title}" or slug "${slug}" is already taken — check projects_list`);
-    }
-
-    throw error;
-  }
+  const { project, adopted } = await createProject(ctx.userId, parseProjectInput(args), author(ctx));
 
   return {
     project: projectToJson(project),
-    folder: `${slug}/`,
+    folder: `${project.slug}/`,
     adopted,
     ...(adopted
       ? { note: 'the folder already existed and was adopted as the project library; its contents are untouched' }
@@ -305,135 +219,32 @@ async function executeCreate(args: JsonObject, ctx: BuiltinServerCallContext): P
 }
 
 async function executeUpdate(args: JsonObject, ctx: BuiltinServerCallContext): Promise<JsonValue> {
-  const project = await requireProject(requireId(args), ctx);
-
-  const title = typeof args.title === 'string' && args.title.trim() ? args.title.trim() : null;
-  const description = typeof args.description === 'string' && args.description.trim() ? args.description.trim() : null;
-  const requestedSlug = typeof args.slug === 'string' && args.slug.trim() ? args.slug.trim() : null;
-  // Same slug as now is a no-op, not an error — makes retries idempotent.
-  const slug = requestedSlug && requestedSlug !== project.slug ? requestedSlug : null;
-
-  if (slug && (!SLUG_PATTERN.test(slug) || slug.length > SLUG_MAX_LENGTH)) {
-    throw new Error(`slug must match ${String(SLUG_PATTERN)} and be at most ${SLUG_MAX_LENGTH} chars`);
-  }
-
-  if (title && title !== project.title) {
-    const clash = await prisma.project.findFirst({
-      where: { userId: ctx.userId, title, id: { not: project.id } },
-    });
-
-    if (clash) {
-      throw new Error(
-        `title "${title}" is already taken by project ${clash.id}${clash.archived ? ' (archived — titles stay reserved)' : ''}`,
-      );
-    }
-  }
-
-  if (slug) {
-    const clash = await prisma.project.findFirst({
-      where: { userId: ctx.userId, slug, id: { not: project.id } },
-    });
-
-    if (clash) {
-      throw new Error(
-        `slug "${slug}" is already taken by project ${clash.id}${clash.archived ? ' (archived — slugs stay reserved)' : ''}`,
-      );
-    }
-  }
-
-  // The folder moves ahead of the row update and is moved back if the write
-  // fails — the registry row stays the source of truth for the path.
-  let movedFromDir: string | null = null;
-
-  if (slug) {
-    const filesDir = workspaceFilesDir(ctx.userId);
-    const oldDir = path.join(filesDir, project.slug);
-    const newDir = path.join(filesDir, slug);
-
-    if (await fs.stat(newDir).catch(() => null)) {
-      throw new Error(
-        `the path "${slug}" in the workspace file area is already taken — nothing is ever deleted or overwritten; pick another slug`,
-      );
-    }
-
-    const existing = await fs.stat(oldDir).catch(() => null);
-
-    if (existing?.isDirectory()) {
-      await fs.rename(oldDir, newDir);
-      movedFromDir = oldDir;
-    } else {
-      // The library folder is missing (never provisioned or lost) — the
-      // rename provisions the new location instead of failing.
-      await fs.mkdir(newDir, { recursive: true });
-    }
-  }
-
-  let updated: ProjectModel;
-
-  try {
-    updated = await registryMutation(async (tx, journal) => {
-      const row = await tx.project.update({
-        where: { id: project.id },
-        // With no fields given the call is a "touch": prisma writes nothing on
-        // empty data, so updatedAt is set explicitly.
-        data:
-          title || description || slug
-            ? { ...(title ? { title } : {}), ...(description ? { description } : {}), ...(slug ? { slug } : {}) }
-            : { updatedAt: new Date() },
-      });
-
-      await journal('project.updated', projectRecord(row), { kind: 'thread', userId: ctx.userId, threadId: ctx.threadId });
-
-      return row;
-    });
-  } catch (error) {
-    if (movedFromDir && slug) {
-      // Roll the folder back so disk keeps matching the (unchanged) row.
-      await fs.rename(path.join(workspaceFilesDir(ctx.userId), slug), movedFromDir).catch(() => {});
-    }
-
-    if (isUniqueViolation(error)) {
-      throw new Error(`title "${title}" or slug "${slug}" is already taken — check projects_list`);
-    }
-
-    throw error;
-  }
+  const patch = parseProjectPatch(args);
+  const { project, renamedFrom } = await updateProject(ctx.userId, requireId(args), patch, author(ctx));
 
   return {
-    project: projectToJson(updated),
-    ...(slug ? { folder: `${updated.slug}/`, note: `folder renamed: ${project.slug}/ → ${updated.slug}/` } : {}),
-    ...(title || description || slug ? {} : { note: 'touched — updatedAt bumped, nothing else changed' }),
+    project: projectToJson(project),
+    ...(renamedFrom !== null ? { folder: `${project.slug}/`, note: `folder renamed: ${renamedFrom}/ → ${project.slug}/` } : {}),
+    ...(isTouch(patch) ? { note: 'touched — updatedAt bumped, nothing else changed' } : {}),
   };
 }
 
 async function executeArchive(args: JsonObject, ctx: BuiltinServerCallContext): Promise<JsonValue> {
-  const project = await requireProject(requireId(args), ctx);
+  const { project, changed } = await archiveProject(ctx.userId, requireId(args), author(ctx));
 
-  if (project.archived) {
+  if (!changed) {
     return `Project "${project.title}" is already archived.`;
   }
-
-  await registryMutation(async (tx, journal) => {
-    const archived = await tx.project.update({ where: { id: project.id }, data: { archived: true } });
-
-    await journal('project.archived', projectRecord(archived), { kind: 'thread', userId: ctx.userId, threadId: ctx.threadId });
-  });
 
   return `Project "${project.title}" archived. Nothing was deleted: the record and the folder "${project.slug}/" stay; projects_unarchive brings it back.`;
 }
 
 async function executeUnarchive(args: JsonObject, ctx: BuiltinServerCallContext): Promise<JsonValue> {
-  const project = await requireProject(requireId(args), ctx);
+  const { project, changed } = await unarchiveProject(ctx.userId, requireId(args), author(ctx));
 
-  if (!project.archived) {
+  if (!changed) {
     return `Project "${project.title}" is not archived.`;
   }
-
-  await registryMutation(async (tx, journal) => {
-    const unarchived = await tx.project.update({ where: { id: project.id }, data: { archived: false } });
-
-    await journal('project.unarchived', projectRecord(unarchived), { kind: 'thread', userId: ctx.userId, threadId: ctx.threadId });
-  });
 
   return `Project "${project.title}" is back on the live list. Its folder "${project.slug}/" was never touched.`;
 }

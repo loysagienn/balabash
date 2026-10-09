@@ -310,6 +310,43 @@ export type ProjectView = {
   updatedAt: Date;
 };
 
+// ---------------------------------------------------------------------------
+// The project registry under the session (stage 6b): POST /api/projects
+// creates a project (the row plus its folder <slug>/ in the workspace file
+// area — an existing folder is adopted, `adopted: true`); PATCH
+// /api/projects/:id changes the title, the description and/or the slug (a
+// slug change renames the folder in step; an empty body is a "touch" —
+// updatedAt bumps, nothing else changes); POST /api/projects/:id/archive and
+// /unarchive flip the flag (already in that state — the row as is, no event).
+// Every change journals its project.* event in the row's transaction
+// (actor user, no thread), so the console learns of it through the stream.
+// 400 bad_request (the input: a blank title or description, a slug outside
+// /^[a-z][a-z0-9-]*$/ or over 64 chars), 404 not_found (a foreign or
+// missing project), 409 conflict (the title, the slug or the folder path is
+// taken; archived projects keep theirs). Same rules as the projects_* tools
+// of the agents — one implementation (src/projects/mutations.ts).
+
+export type CreateProjectRequest = {
+  title: string;
+  slug: string;
+  description: string;
+};
+
+export type UpdateProjectRequest = {
+  title?: string | null;
+  description?: string | null;
+  slug?: string | null;
+};
+
+export type ProjectResponse = {
+  project: ProjectView;
+};
+
+export type CreateProjectResponse = ProjectResponse & {
+  // The folder already existed in the file area and became the library.
+  adopted: boolean;
+};
+
 export type TaskView = {
   id: string;
   slug: string;

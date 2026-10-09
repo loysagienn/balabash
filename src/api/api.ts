@@ -25,6 +25,8 @@ import { verifyDownloadLink } from '../files/storage/local.ts';
 import { getExternalServerSecretRequest, provisionExternalServerSecrets } from '../capabilities/external-secrets.ts';
 import { getOauthClientRequest, provisionOauthClient } from '../capabilities/connections/index.ts';
 import { AppManagementError, listApps, publishApp, unpublishApp } from '../apps/management.ts';
+import { ProjectError, archiveProject, createProject, parseProjectInput, parseProjectPatch, unarchiveProject, updateProject } from '../projects/mutations.ts';
+import { projectView } from '../projects/store.ts';
 import { publicAppsBase } from '../apps/urls.ts';
 import { consumeAuthCode, createAuthCode } from './auth-codes.ts';
 import { createUserSession, destroySession, getSession } from './session.ts';
@@ -33,6 +35,8 @@ import { buildSnapshot } from './snapshot.ts';
 import { checkMutationOrigin } from './origin.ts';
 import type {
   AppsResponse,
+  CreateProjectResponse,
+  ProjectResponse,
   PublicationResponse,
   LlmRequestsResponse,
   LogoutResponse,
@@ -653,6 +657,73 @@ router.post('/apps/unpublish', requireSession, async ctx => {
   const body = await readJsonBody(ctx);
 
   await handleManagementCall(ctx, () => unpublishApp(ctx.state.userId as string, body.path, body.slug));
+});
+
+// --------------------------------------------------------------------------
+// The project registry (stage 6b): the operator's changes from the console,
+// the same implementation the projects_* tools use (src/projects/mutations.ts)
+// — the registry row and its project.* event commit together, authored by
+// the operator (actor user, no thread). A refusal is a ProjectError whose
+// code is the status: 400 the input, 404 a foreign or missing project (one
+// answer, no existence oracle), 409 a taken title, slug or folder path.
+
+const PROJECT_ERROR_STATUS: Record<ProjectError['code'], number> = { bad_request: 400, not_found: 404, conflict: 409 };
+
+async function handleProjectCall(ctx: Context, call: () => Promise<ProjectResponse>): Promise<void> {
+  try {
+    ctx.body = prepareObject(await call());
+  } catch (error) {
+    if (error instanceof ProjectError) {
+      sendError(ctx, PROJECT_ERROR_STATUS[error.code], error.code, error.message);
+
+      return;
+    }
+
+    throw error;
+  }
+}
+
+router.post('/projects', requireSession, async ctx => {
+  const userId = ctx.state.userId as string;
+  const body = await readJsonBody(ctx);
+
+  await handleProjectCall(ctx, async () => {
+    const { project, adopted } = await createProject(userId, parseProjectInput(body), { kind: 'user', userId });
+    const response: CreateProjectResponse = { project: projectView(project), adopted };
+
+    return response;
+  });
+});
+
+router.patch('/projects/:id', requireSession, async ctx => {
+  const userId = ctx.state.userId as string;
+  const body = await readJsonBody(ctx);
+
+  await handleProjectCall(ctx, async () => {
+    const { project } = await updateProject(userId, ctx.params.id as string, parseProjectPatch(body), { kind: 'user', userId });
+
+    return { project: projectView(project) };
+  });
+});
+
+router.post('/projects/:id/archive', requireSession, async ctx => {
+  const userId = ctx.state.userId as string;
+
+  await handleProjectCall(ctx, async () => {
+    const { project } = await archiveProject(userId, ctx.params.id as string, { kind: 'user', userId });
+
+    return { project: projectView(project) };
+  });
+});
+
+router.post('/projects/:id/unarchive', requireSession, async ctx => {
+  const userId = ctx.state.userId as string;
+
+  await handleProjectCall(ctx, async () => {
+    const { project } = await unarchiveProject(userId, ctx.params.id as string, { kind: 'user', userId });
+
+    return { project: projectView(project) };
+  });
 });
 
 // --------------------------------------------------------------------------

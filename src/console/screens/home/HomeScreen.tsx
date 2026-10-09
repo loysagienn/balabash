@@ -1,6 +1,8 @@
-// Home — the overview: the threads at work, every app, links to the
-// sections; on the right, the projects in work. Everything on the screen is
-// the snapshot and its tail: no request of its own. The columns dissolve on
+// Home — the overview: the threads at work (the coordinator's main thread
+// pinned above them, as on Threads — always on, outside the count), every
+// app, links to the sections; on the right, the projects in work.
+// Everything on the screen is the snapshot and its tail: no request of its
+// own. The columns dissolve on
 // the phone and the cards line up by importance (HomeScreen.css). The
 // subscription limits card comes with GET /api/limits (plan, stage 6).
 
@@ -14,7 +16,7 @@ import { selectConnections, selectConnectionsNeedingAction } from '../../store/c
 import { selectActiveProjects, selectArchivedProjectCount, selectProjects } from '../../store/projects/selectors.ts';
 import { selectStream, snapshotStage } from '../../store/stream/selectors.ts';
 import { snapshotLoad } from '../../store/stream/actions.ts';
-import { selectLatestFinishedThread, selectRunningCountByProject, selectRunningThreads } from '../../store/threads/selectors.ts';
+import { selectLatestFinishedThread, selectMainThread, selectRunningCountByProject, selectRunningThreads } from '../../store/threads/selectors.ts';
 import { Shell } from '../../features/shell/Shell.tsx';
 import { NAV } from '../../features/shell/nav.ts';
 import { ThreadList } from '../../features/thread-list/ThreadList.tsx';
@@ -89,6 +91,7 @@ export function HomeScreen() {
   const clock = useNow(CLOCK_MS);
   const stream = useAppSelector(selectStream);
   const running = useAppSelector(selectRunningThreads);
+  const main = useAppSelector(selectMainThread);
   const lastFinished = useAppSelector(selectLatestFinishedThread);
   const runningByProject = useAppSelector(selectRunningCountByProject);
   const projects = useAppSelector(selectProjects);
@@ -175,12 +178,15 @@ export function HomeScreen() {
               />
               {loading ? (
                 <Skeleton widths={[[62, 38], [48, 30], [55, 42]]} />
-              ) : running.length > 0 ? (
-                <ThreadList className="home-ths" threads={running} now={now} freshAfter={mountSeq.current} flat />
               ) : (
-                <Empty icon="messages-square" title="Nothing is running">
-                  {nothingRunningNote(lastFinished, now)}
-                </Empty>
+                <>
+                  {running.length > 0 || main ? <ThreadList className="home-ths" threads={running} pinned={main} now={now} freshAfter={mountSeq.current} flat /> : null}
+                  {running.length === 0 ? (
+                    <Empty icon="messages-square" title="Nothing is running">
+                      {nothingRunningNote(lastFinished, now)}
+                    </Empty>
+                  ) : null}
+                </>
               )}
             </Card>
             <Card narrow="bare" className="home-o4">
