@@ -25,8 +25,10 @@ confidential from them.
   `projects/` (the project registry), `schedule/` (scheduled tasks and jobs),
   `apps/` (the mini-app platform), `files/` (file storage), `runtime/`
   (restart, router, runs), `test-support/` (the test PostgreSQL `npm test`
-  starts: embedded-postgres, one migrated template, a copy per test;
-  `db/test-guard.ts` keeps test children off the live database), `web/` (the
+  starts: embedded-postgres, one migrated template, a copy per test; `stand.ts`
+  — the stand of one test file: the app's modules over their own copy and
+  file area, reached over HTTP; `db/test-guard.ts` keeps test children off
+  the live database), `web/` (the
   previous Next.js UI, frozen: its own package, not developed further).
 - `tasks/` — scheduled task bodies shipped with the product; `tasks/AGENTS.md`
   is their contract.

@@ -26,7 +26,9 @@ import pg from 'pg';
 // The template's URL, as the global setup hands it to the test children.
 export const TEST_PG_ENV = 'BALABASH_TEST_PG_URL';
 
-const TEMPLATE = 'balabash_template_test';
+// The template database the copies are made from (stand.ts checks it stays a
+// template and is never the database a test writes to).
+export const TEMPLATE_DATABASE = 'balabash_template_test';
 const USER = 'balabash';
 const PASSWORD = 'balabash';
 const START_TIMEOUT_MS = 60_000;
@@ -66,11 +68,11 @@ export async function startTestPostgres(): Promise<TestPostgres> {
 
   try {
     await bootCluster(cluster, START_TIMEOUT_MS);
-    const url = databaseUrl(port, TEMPLATE);
+    const url = databaseUrl(port, TEMPLATE_DATABASE);
     await deployMigrations(url);
     const client = new pg.Client({ connectionString: databaseUrl(port, 'postgres') });
     await client.connect();
-    await client.query(`alter database "${TEMPLATE}" is_template true`);
+    await client.query(`alter database "${TEMPLATE_DATABASE}" is_template true`);
     await client.end();
 
     return { url, stop };
@@ -94,7 +96,7 @@ export async function bootCluster(cluster: Cluster, timeoutMs: number): Promise<
     if (cancelled) return;
     await cluster.start();
     if (cancelled) return;
-    await cluster.createDatabase(TEMPLATE);
+    await cluster.createDatabase(TEMPLATE_DATABASE);
   })();
 
   try {
@@ -128,7 +130,7 @@ export async function createTestDatabase(): Promise<TestDatabase> {
   const client = new pg.Client({ connectionString: maintenance.href });
   await client.connect();
   try {
-    await client.query(`create database "${name}" template "${TEMPLATE}"`);
+    await client.query(`create database "${name}" template "${TEMPLATE_DATABASE}"`);
   } finally {
     await client.end();
   }
