@@ -1,5 +1,0 @@
-@layer components{
-/* ── Confirm probe ──  a hidden marker in the shell; the `shell` container query tells Confirm which dialog to show */
-.confirm-probe{--confirm-narrow:0}
-@container shell (max-width:720px){ .confirm-probe{--confirm-narrow:1} }
-}

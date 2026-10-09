@@ -5,6 +5,7 @@
 import {
   Activity,
   Archive,
+  ArchiveRestore,
   ArrowLeft,
   ArrowRight,
   ArrowUp,
@@ -80,6 +81,7 @@ import {
   RotateCcw,
   Scissors,
   Search,
+  SearchX,
   ShieldX,
   SlidersHorizontal,
   SquareTerminal,
@@ -94,6 +96,7 @@ import {
 export const ICONS = {
   activity: Activity,
   archive: Archive,
+  'archive-restore': ArchiveRestore,
   'arrow-left': ArrowLeft,
   'arrow-right': ArrowRight,
   'arrow-up': ArrowUp,
@@ -170,6 +173,7 @@ export const ICONS = {
   'rotate-ccw': RotateCcw,
   scissors: Scissors,
   search: Search,
+  'search-x': SearchX,
   'shield-x': ShieldX,
   'sliders-horizontal': SlidersHorizontal,
   'square-terminal': SquareTerminal,

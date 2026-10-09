@@ -16,7 +16,7 @@ export type ThreadsListFilters = {
   q: string | null;
 };
 
-export function threadsFiltersOf(route: ThreadsRoute, projects: ProjectsState): ThreadsListFilters {
+export function threadsFiltersOf(route: ThreadsRoute, projects: Pick<ProjectsState, 'byId' | 'ids'>): ThreadsListFilters {
   const project = route.project ? projects.ids.map(id => projects.byId[id]).find(p => p?.slug === route.project) : undefined;
 
   return {

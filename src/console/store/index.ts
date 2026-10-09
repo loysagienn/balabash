@@ -22,6 +22,7 @@ import { commandThreadHandler, loadThreadEventsHandler, loadThreadHandler, loadT
 import { feedReducer } from './feed/reducer.ts';
 import { sessionsReducer } from './sessions/reducer.ts';
 import { projectsReducer } from './projects/reducer.ts';
+import { createProjectHandler, setProjectArchivedHandler, updateProjectHandler } from './projects/handlers.ts';
 import { appsReducer } from './apps/reducer.ts';
 import { scheduleReducer } from './schedule/reducer.ts';
 import { connectionsReducer } from './connections/reducer.ts';
@@ -45,6 +46,9 @@ export const handlers = {
   LOAD_THREAD: loadThreadHandler,
   SEND_MESSAGE: sendMessageHandler,
   COMMAND_THREAD: commandThreadHandler,
+  CREATE_PROJECT: createProjectHandler,
+  UPDATE_PROJECT: updateProjectHandler,
+  SET_PROJECT_ARCHIVED: setProjectArchivedHandler,
 } satisfies ActionHandlers;
 
 export type AppStore = Store<State, Action>;

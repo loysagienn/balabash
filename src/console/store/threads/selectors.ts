@@ -146,3 +146,18 @@ export const makeSelectAgentThreads = () =>
         return liveA !== liveB ? liveA - liveB : newestFirst(a, b);
       }),
   );
+
+// The threads of one project the store knows (the snapshot window plus the
+// tail): the active ones first, then newest first — the "Project threads"
+// card of the project page. One instance per screen, memoized by the id.
+export const makeSelectProjectThreads = () =>
+  createSelector([selectThreadsById, (_state: State, projectId: string) => projectId], (byId, projectId): Thread[] =>
+    Object.values(byId)
+      .filter(thread => thread.projectId === projectId && thread.parentId !== null)
+      .sort((a, b) => {
+        const liveA = a.status === 'active' ? 0 : 1;
+        const liveB = b.status === 'active' ? 0 : 1;
+
+        return liveA !== liveB ? liveA - liveB : newestFirst(a, b);
+      }),
+  );

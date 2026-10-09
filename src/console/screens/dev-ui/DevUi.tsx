@@ -14,6 +14,7 @@ import { Badge } from '../../ui/Badge/Badge.tsx';
 import { ActionLink, Btn } from '../../ui/Btn/Btn.tsx';
 import { Card, CardBody, CardFoot, CardHead } from '../../ui/Card/Card.tsx';
 import { Confirm } from '../../ui/Confirm/Confirm.tsx';
+import { Dialog } from '../../ui/Dialog/Dialog.tsx';
 import { Check } from '../../ui/Check/Check.tsx';
 import { Crumbs } from '../../ui/Crumbs/Crumbs.tsx';
 import { Empty } from '../../ui/Empty/Empty.tsx';
@@ -87,7 +88,7 @@ export function DevUi() {
   const [checks, setChecks] = useState({ box: true, radio: 'a', tgl: false });
   const [seg, setSeg] = useState('active');
   const [tab, setTab] = useState('tasks');
-  const [overlay, setOverlay] = useState<'modal' | 'sheet' | 'form' | null>(null);
+  const [overlay, setOverlay] = useState<'modal' | 'sheet' | 'form' | 'dialog' | null>(null);
   const [menu, setMenu] = useState(false);
   const [cardMenu, setCardMenu] = useState(false);
   const [toasts, setToasts] = useState([1, 2, 3, 4]);
@@ -655,6 +656,7 @@ export function DevUi() {
             <Btn label="Open modal" onClick={() => setOverlay('modal')} />
             <Btn label="Open form modal" onClick={() => setOverlay('form')} />
             <Btn label="Open sheet" onClick={() => setOverlay('sheet')} />
+            <Btn label="Open form dialog (by shell width)" onClick={() => setOverlay('dialog')} />
           </Row>
           {overlay === 'modal' ? (
             <Modal
@@ -686,6 +688,25 @@ export function DevUi() {
                 </Field>
               </form>
             </Modal>
+          ) : null}
+          {overlay === 'dialog' ? (
+            <Dialog title="New project" confirm="Create project" confirmIcon="plus" form="dev-dialog-form" onClose={() => setOverlay(null)}>
+              <form
+                id="dev-dialog-form"
+                className="form"
+                onSubmit={event => {
+                  event.preventDefault();
+                  setOverlay(null);
+                }}
+              >
+                <Field label="Name" fid="dev-d-name">
+                  <Input id="dev-d-name" value={text} onChange={setText} autoFocus />
+                </Field>
+                <Field label="Folder" fid="dev-d-slug" hint="Can’t be changed after creation.">
+                  <Input id="dev-d-slug" value="bathroom-renovation" onChange={() => undefined} pre="~/" mono />
+                </Field>
+              </form>
+            </Dialog>
           ) : null}
           {overlay === 'sheet' ? (
             <Sheet

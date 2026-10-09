@@ -1,0 +1,5 @@
+@layer components{
+/* ── Dialog probe ──  a hidden marker in the shell; the `shell` container query tells Dialog which window to show */
+.dialog-probe{--dialog-narrow:0}
+@container shell (max-width:720px){ .dialog-probe{--dialog-narrow:1} }
+}

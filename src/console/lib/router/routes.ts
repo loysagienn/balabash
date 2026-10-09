@@ -20,7 +20,7 @@ export type ThreadsFilters = {
 export type HomeRoute = { key: 'home' };
 export type ThreadsRoute = { key: 'threads' } & ThreadsFilters;
 export type ThreadRoute = { key: 'thread'; id: string };
-export type ProjectsRoute = { key: 'projects'; archived?: boolean };
+export type ProjectsRoute = { key: 'projects'; archived?: boolean; q?: string };
 export type ProjectRoute = { key: 'project'; slug: string; path?: string };
 export type FilesRoute = { key: 'files'; path: string; view?: 'edit' };
 export type AppsFilter = 'published' | 'errors';
@@ -94,9 +94,15 @@ export const projects = defineRoute<ProjectsRoute>({
       return null;
     }
 
-    return params.get('archived') === '1' ? { key: 'projects', archived: true } : { key: 'projects' };
+    const route: ProjectsRoute = { key: 'projects' };
+    const q = param(params, 'q');
+
+    if (params.get('archived') === '1') route.archived = true;
+    if (q) route.q = q;
+
+    return route;
   },
-  writeRoute: route => `/projects${route.archived ? '?archived=1' : ''}`,
+  writeRoute: route => `/projects${queryString({ archived: route.archived ? '1' : undefined, q: route.q })}`,
 });
 
 export const project = defineRoute<ProjectRoute>({

@@ -7,6 +7,8 @@ import { useAppSelector } from '../store/hooks.ts';
 import { selectRoute } from '../store/router/selectors.ts';
 import { selectSession } from '../store/session/selectors.ts';
 import { Placeholder } from '../screens/Placeholder.tsx';
+import { ProjectScreen } from '../screens/project/ProjectScreen.tsx';
+import { ProjectsScreen } from '../screens/projects/ProjectsScreen.tsx';
 import { NotFound } from '../screens/outside/NotFound.tsx';
 import { SessionError } from '../screens/outside/SessionError.tsx';
 import { SignIn } from '../screens/outside/SignIn.tsx';
@@ -54,9 +56,9 @@ export function App() {
     case 'thread':
       return <ThreadScreen id={route.id} />;
     case 'projects':
-      return <Placeholder current="projects" title="Projects" icon="folder" what="Projects" />;
+      return <ProjectsScreen route={route} />;
     case 'project':
-      return <Placeholder current="projects" title={route.slug} crumb={{ label: 'Projects', route: { key: 'projects' } }} back={{ key: 'projects' }} icon="folder" what="The project page" />;
+      return <ProjectScreen route={route} />;
     case 'files':
       return <FilesScreen route={route} />;
     case 'apps':

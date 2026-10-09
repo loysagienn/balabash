@@ -10,6 +10,8 @@ const CASES: [string, AppRoute][] = [
   ['/threads/4f1c-aa', { key: 'thread', id: '4f1c-aa' }],
   ['/projects', { key: 'projects' }],
   ['/projects?archived=1', { key: 'projects', archived: true }],
+  ['/projects?archived=1&q=blog', { key: 'projects', archived: true, q: 'blog' }],
+  ['/projects?q=reno', { key: 'projects', q: 'reno' }],
   ['/projects/balabash', { key: 'project', slug: 'balabash' }],
   ['/projects/balabash/files', { key: 'project', slug: 'balabash', path: '' }],
   ['/projects/balabash/files/console/plan.md', { key: 'project', slug: 'balabash', path: 'console/plan.md' }],

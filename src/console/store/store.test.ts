@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import type { Thread } from '../../core/contract.ts';
 import type { Api } from '../lib/api/index.ts';
-import type { ThreadsResponse } from '../../api/contract.ts';
+import type { ProjectView, ThreadsResponse } from '../../api/contract.ts';
 import { ApiError } from '../lib/api/index.ts';
 import type { StoreEnhancer } from 'redux';
 import { createStore } from './index.ts';
@@ -19,9 +19,10 @@ import { login, logout, saveSettings, sessionCheck, sessionLost } from './sessio
 import { selectOperatorName } from './session/selectors.ts';
 import { commandThread, loadThread, loadThreadEvents, loadThreads, sendMessage } from './threads/actions.ts';
 import { setComposerDraft } from './ui/actions.ts';
-import { hasLoadedPage, makeSelectAgentThreads, selectActiveCountIn, selectKnownAgents, selectLatestFinishedThread, selectListThreads, selectMainThread, selectRunningCount, selectRunningCountByAgent, selectRunningCountByProject } from './threads/selectors.ts';
+import { hasLoadedPage, makeSelectAgentThreads, makeSelectProjectThreads, selectActiveCountIn, selectKnownAgents, selectLatestFinishedThread, selectListThreads, selectMainThread, selectRunningCount, selectRunningCountByAgent, selectRunningCountByProject } from './threads/selectors.ts';
 import { SEARCH_DEBOUNCE_MS } from './threads/handlers.ts';
-import { selectActiveProjects, selectArchivedProjectCount } from './projects/selectors.ts';
+import { createProject, setProjectArchived, updateProject } from './projects/actions.ts';
+import { selectActiveProjects, selectArchivedProjectCount, selectArchivedProjects, selectProjectCreate, selectProjectEdit, selectProjectFlagging } from './projects/selectors.ts';
 import { selectConnections, selectConnectionsNeedingAction } from './connections/selectors.ts';
 import { makeSelectThreadEvents } from './feed/selectors.ts';
 import { selectThreadState } from './sessions/selectors.ts';
@@ -29,7 +30,9 @@ import { ME, event, resetSeq, snapshot, thread } from './fixtures.ts';
 
 type Calls = { name: string; args: unknown[] }[];
 
-type ApiOverrides = Omit<Partial<Api>, 'threads' | 'workspace' | 'settings' | 'llmRequests'> & { threads?: Partial<Api['threads']>; settings?: Partial<Api['settings']> };
+const ISO_NOW = '2026-10-09T10:00:00.000Z';
+
+type ApiOverrides = Omit<Partial<Api>, 'threads' | 'workspace' | 'settings' | 'llmRequests' | 'projects'> & { threads?: Partial<Api['threads']>; settings?: Partial<Api['settings']>; projects?: Partial<Api['projects']> };
 
 // The file area and the model requests are Query, not the store: handlers
 // never call them.
@@ -48,7 +51,7 @@ function fakeApi(overrides: ApiOverrides = {}, calls: Calls = []): Api {
 
       return impl(...args);
     };
-  const base: Omit<Api, 'threads' | 'workspace' | 'settings' | 'llmRequests'> = {
+  const base: Omit<Api, 'threads' | 'workspace' | 'settings' | 'llmRequests' | 'projects'> = {
     me: async () => ME,
     auth: async () => ME,
     logout: async () => ({ ok: true as const }),
@@ -58,6 +61,14 @@ function fakeApi(overrides: ApiOverrides = {}, calls: Calls = []): Api {
   const settings: Api['settings'] = {
     update: async patch => ({ settings: { workspaceName: patch.workspaceName ?? ME.workspaceName, operatorName: patch.operatorName ?? ME.operatorName } }),
     ...overrides.settings,
+  };
+  const projectRow = (id: string, patch: Partial<ProjectView> = {}): ProjectView => ({ id, title: 'Project', slug: 'project', description: 'd', archived: false, createdAt: new Date(ISO_NOW), updatedAt: new Date(ISO_NOW), ...patch });
+  const projects: Api['projects'] = {
+    create: async input => ({ project: projectRow('new', { ...input }), adopted: false }),
+    update: async (id, patch) => ({ project: projectRow(id, { title: patch.title ?? 'Project', description: patch.description ?? 'd' }) }),
+    archive: async id => ({ project: projectRow(id, { archived: true }) }),
+    unarchive: async id => ({ project: projectRow(id, { archived: false }) }),
+    ...overrides.projects,
   };
   const threads: Api['threads'] = {
     list: async () => ({ threads: [], nextCursor: null }),
@@ -75,6 +86,12 @@ function fakeApi(overrides: ApiOverrides = {}, calls: Calls = []): Api {
     logout: wrap('logout', base.logout),
     snapshot: wrap('snapshot', base.snapshot),
     settings: { update: wrap('settings.update', settings.update) },
+    projects: {
+      create: wrap('projects.create', projects.create),
+      update: wrap('projects.update', projects.update),
+      archive: wrap('projects.archive', projects.archive),
+      unarchive: wrap('projects.unarchive', projects.unarchive),
+    },
     threads: {
       list: wrap('threads.list', threads.list),
       get: wrap('threads.get', threads.get),
@@ -1276,5 +1293,158 @@ describe('thread commands', () => {
       store.getState().ui.toasts.map(toast => [toast.title, toast.desc]),
       [['Couldn’t cancel the thread', 'The thread is no longer active']],
     );
+  });
+});
+
+describe('project registry changes', () => {
+  const ISO = '2026-10-09T10:00:00.000Z';
+  const row = (id: string, patch: Partial<ProjectView> = {}): ProjectView => ({ id, title: 'One', slug: 'one', description: 'd', archived: false, createdAt: new Date(ISO), updatedAt: new Date(ISO), ...patch });
+
+  it('creates a project: one call at a time, the row folded, a toast, the page opened', async () => {
+    const calls: Calls = [];
+    const api = fakeApi({ projects: { create: async input => ({ project: row('p9', { title: input.title, slug: input.slug, description: input.description }), adopted: true }) } }, calls);
+    const store = createStore({ api, initialRoute: { key: 'projects' } });
+
+    await dispatched(store, sessionCheck());
+    await settle();
+
+    const creating = store.dispatch(createProject({ title: 'Nine', slug: 'nine', description: 'ninth' }));
+
+    assert.equal(selectProjectCreate(store.getState()).pending, true);
+    // A second submit while the first is in flight is not a call.
+    await dispatched(store, createProject({ title: 'Ten', slug: 'ten', description: 'tenth' }));
+    assert.equal(calls.filter(call => call.name === 'projects.create').length, 1);
+    await creating;
+
+    const state = store.getState();
+
+    assert.deepEqual(selectProjectCreate(state), { pending: false, error: null, done: 1 });
+    assert.equal(state.projects.byId.p9?.slug, 'nine');
+    assert.deepEqual(selectActiveProjects(state).map(project => project.id), ['p9']);
+    assert.deepEqual(
+      state.ui.toasts.map(toast => [toast.title, toast.desc, toast.state]),
+      [['Project created', '“Nine” — the existing folder nine/ is its library; its files are kept.', 'done']],
+    );
+    assert.deepEqual(state.router.route, { key: 'project', slug: 'nine' });
+
+    // The tail's own event of the same row is idempotent.
+    store.dispatch(eventAction(event({ type: 'project.created', actor: 'user', payload: { id: 'p9', title: 'Nine', slug: 'nine', description: 'ninth', archived: false, createdAt: ISO, updatedAt: ISO } })));
+    assert.deepEqual(store.getState().projects.ids, ['p9']);
+  });
+
+  it('keeps a refused creation in the form, without a toast or a route change', async () => {
+    const api = fakeApi({
+      projects: {
+        create: async () => {
+          throw new ApiError(409, 'conflict', 'title "Nine" or slug "nine" is already taken — check the projects list');
+        },
+      },
+    });
+    const store = createStore({ api, initialRoute: { key: 'projects' } });
+
+    await dispatched(store, sessionCheck());
+    await settle();
+    await dispatched(store, createProject({ title: 'Nine', slug: 'nine', description: 'ninth' }));
+
+    const state = store.getState();
+
+    assert.deepEqual(selectProjectCreate(state), { pending: false, error: { status: 409, code: 'conflict', message: 'title "Nine" or slug "nine" is already taken — check the projects list' }, done: 0 });
+    assert.deepEqual(state.ui.toasts, []);
+    assert.deepEqual(state.router.route, { key: 'projects' });
+    assert.deepEqual(state.projects.ids, []);
+
+    // The next attempt starts clean.
+    const retry = store.dispatch(createProject({ title: 'Nine', slug: 'nine-2', description: 'ninth' }));
+
+    assert.deepEqual(selectProjectCreate(store.getState()), { pending: true, error: null, done: 0 });
+    await retry;
+  });
+
+  it('edits a project by id: the answer updates the row, the form counts the save', async () => {
+    const calls: Calls = [];
+    const api = fakeApi(
+      {
+        snapshot: async () => snapshot({ projects: [row('p1'), row('p2', { slug: 'two', title: 'Two' })] }),
+        projects: { update: async (id, patch) => ({ project: row(id, { title: patch.title ?? 'One', updatedAt: new Date('2026-10-09T11:00:00.000Z') }) }) },
+      },
+      calls,
+    );
+    const store = createStore({ api, initialRoute: { key: 'project', slug: 'one' } });
+
+    await dispatched(store, sessionCheck());
+    await settle();
+
+    const saving = store.dispatch(updateProject('p1', { title: 'One renamed' }));
+
+    assert.equal(selectProjectEdit(store.getState(), 'p1').pending, true);
+    assert.equal(selectProjectEdit(store.getState(), 'p2').pending, false);
+    await dispatched(store, updateProject('p1', { title: 'Again' }));
+    assert.equal(calls.filter(call => call.name === 'projects.update').length, 1);
+    await saving;
+
+    const state = store.getState();
+
+    assert.deepEqual(selectProjectEdit(state, 'p1'), { pending: false, error: null, done: 1 });
+    assert.equal(state.projects.byId.p1?.title, 'One renamed');
+    assert.deepEqual(selectActiveProjects(state).map(project => project.id), ['p1', 'p2']);
+    assert.deepEqual(state.ui.toasts.map(toast => [toast.title, toast.desc]), [['Saved', '“One renamed”']]);
+    assert.deepEqual(calls.find(call => call.name === 'projects.update')?.args, ['p1', { title: 'One renamed' }]);
+  });
+
+  it('flips the archive flag, and says so when it cannot', async () => {
+    const api = fakeApi({
+      snapshot: async () => snapshot({ projects: [row('p1'), row('p2', { slug: 'two', title: 'Two' })] }),
+      projects: {
+        archive: async id => ({ project: row(id, { archived: true }) }),
+        unarchive: async () => {
+          throw new ApiError(404, 'not_found', 'no such project');
+        },
+      },
+    });
+    const store = createStore({ api, initialRoute: { key: 'project', slug: 'one' } });
+
+    await dispatched(store, sessionCheck());
+    await settle();
+
+    const archiving = store.dispatch(setProjectArchived('p1', true));
+
+    assert.equal(selectProjectFlagging(store.getState(), 'p1'), true);
+    assert.equal(selectProjectFlagging(store.getState(), 'p2'), false);
+    await archiving;
+
+    assert.equal(selectProjectFlagging(store.getState(), 'p1'), false);
+    assert.deepEqual(selectArchivedProjects(store.getState()).map(project => project.id), ['p1']);
+    assert.deepEqual(selectActiveProjects(store.getState()).map(project => project.id), ['p2']);
+    assert.deepEqual(store.getState().ui.toasts.map(toast => [toast.title, toast.state]), [['Archived', 'off']]);
+
+    await dispatched(store, setProjectArchived('p1', false));
+    assert.equal(selectProjectFlagging(store.getState(), 'p1'), false);
+    assert.equal(store.getState().projects.byId.p1?.archived, true);
+    assert.deepEqual(store.getState().ui.toasts.at(-1), { id: 2, title: 'Couldn’t unarchive', desc: 'no such project', state: 'err' });
+  });
+
+  it('lists the threads of a project: active first, then newest', async () => {
+    const api = fakeApi({
+      snapshot: async () =>
+        snapshot({
+          projects: [row('p1')],
+          threads: [
+            thread({ id: 'main', parentId: null, agent: 'coordinator', projectId: 'p1' }),
+            thread({ id: 'a', projectId: 'p1', createdSeq: 10n, status: 'completed', terminalSeq: 12n }),
+            thread({ id: 'b', projectId: 'p1', createdSeq: 5n }),
+            thread({ id: 'c', projectId: 'p2', createdSeq: 20n }),
+            thread({ id: 'd', projectId: 'p1', createdSeq: 30n, status: 'failed', terminalSeq: 31n }),
+          ],
+        }),
+    });
+    const store = createStore({ api, initialRoute: { key: 'project', slug: 'one' } });
+
+    await dispatched(store, sessionCheck());
+    await settle();
+
+    const select = makeSelectProjectThreads();
+
+    assert.deepEqual(select(store.getState(), 'p1').map(t => t.id), ['b', 'd', 'a']);
+    assert.deepEqual(select(store.getState(), 'p3'), []);
   });
 });

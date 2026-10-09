@@ -3,10 +3,13 @@
 // replaces it with plain fake functions and never touches the network.
 
 import type {
+  CreateProjectRequest,
+  CreateProjectResponse,
   LlmRequestsQuery,
   LlmRequestsResponse,
   LogoutResponse,
   MeResponse,
+  ProjectResponse,
   SettingsPatchRequest,
   SettingsResponse,
   SnapshotResponse,
@@ -14,6 +17,7 @@ import type {
   ThreadResponse,
   ThreadsQuery,
   ThreadsResponse,
+  UpdateProjectRequest,
   WorkspaceNodeResponse,
 } from '../../../api/contract.ts';
 import { createFetch } from './fetch.ts';
@@ -33,6 +37,15 @@ export type Api = {
   // /api/me reports them.
   settings: {
     update(patch: SettingsPatchRequest): Promise<SettingsResponse>;
+  };
+  // The project registry's changes (stage 6b): the answer carries the row
+  // as the snapshot has it; the same change arrives as a project.* event
+  // of the tail, folded idempotently.
+  projects: {
+    create(input: CreateProjectRequest): Promise<CreateProjectResponse>;
+    update(id: string, patch: UpdateProjectRequest): Promise<ProjectResponse>;
+    archive(id: string): Promise<ProjectResponse>;
+    unarchive(id: string): Promise<ProjectResponse>;
   };
   threads: {
     list(query: ThreadsQuery, signal?: AbortSignal): Promise<ThreadsResponse>;
@@ -74,6 +87,7 @@ export function fileUrl(path: string, download = false): string {
 export function createApi(options: FetchOptions = {}): Api {
   const apiFetch = createFetch(options);
   const thread = (id: string) => `/api/threads/${encodeURIComponent(id)}`;
+  const project = (id: string) => `/api/projects/${encodeURIComponent(id)}`;
 
   return {
     me: () => apiFetch<MeResponse>('/api/me', { unauthenticated: true }),
@@ -82,6 +96,12 @@ export function createApi(options: FetchOptions = {}): Api {
     snapshot: () => apiFetch<SnapshotResponse>('/api/snapshot'),
     settings: {
       update: patch => apiFetch<SettingsResponse>('/api/settings', { method: 'PATCH', body: patch }),
+    },
+    projects: {
+      create: input => apiFetch<CreateProjectResponse>('/api/projects', { method: 'POST', body: input }),
+      update: (id, patch) => apiFetch<ProjectResponse>(project(id), { method: 'PATCH', body: patch }),
+      archive: id => apiFetch<ProjectResponse>(`${project(id)}/archive`, { method: 'POST', body: {} }),
+      unarchive: id => apiFetch<ProjectResponse>(`${project(id)}/unarchive`, { method: 'POST', body: {} }),
     },
     threads: {
       list: (query, signal) => apiFetch<ThreadsResponse>('/api/threads', { query, signal }),

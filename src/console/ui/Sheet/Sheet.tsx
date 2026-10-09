@@ -2,7 +2,8 @@
 // on the phone. Rendered through an Overlay (a portal into document.body),
 // so it docks to the window wherever it is opened from; the rest of the
 // page is inert, the focus stays inside, Escape and the scrim close it.
-// Buttons are full width, the main one on top.
+// Buttons are full width, the main one on top. It can submit a form in
+// its body (form="<id>"), like the Modal.
 
 import type { ReactNode } from 'react';
 import { Btn } from '../Btn/Btn.tsx';
@@ -20,13 +21,15 @@ export type SheetProps = {
   confirmIcon?: IconName;
   confirmDisabled?: boolean;
   busy?: boolean;
+  // The confirm button submits this form (so Enter in a field confirms).
+  form?: string;
   onConfirm?: () => void;
   cancel?: string;
   onClose: () => void;
   children?: ReactNode;
 };
 
-export function Sheet({ label, title, desc, confirm, confirmVariant = 'primary', confirmIcon, confirmDisabled, busy, onConfirm, cancel, onClose, children }: SheetProps) {
+export function Sheet({ label, title, desc, confirm, confirmVariant = 'primary', confirmIcon, confirmDisabled, busy, form, onConfirm, cancel, onClose, children }: SheetProps) {
   return (
     <Overlay onClose={onClose}>
       <div className="sheet" role="dialog" aria-modal="true" aria-label={label} aria-busy={busy ? 'true' : undefined} data-dock="bottom" tabIndex={-1}>
@@ -34,7 +37,7 @@ export function Sheet({ label, title, desc, confirm, confirmVariant = 'primary',
         {title ? <h3 className="sheet-t">{title}</h3> : null}
         {desc ? <p className="sheet-d">{desc}</p> : null}
         {children}
-        {confirm ? <Btn label={confirm} icon={confirmIcon} variant={confirmVariant} block busy={busy} disabled={confirmDisabled} onClick={onConfirm} /> : null}
+        {confirm ? <Btn label={confirm} icon={confirmIcon} variant={confirmVariant} block busy={busy} disabled={confirmDisabled} type={form ? 'submit' : 'button'} form={form} onClick={form ? undefined : onConfirm} /> : null}
         {cancel ? <Btn label={cancel} variant="ghost" block onClick={onClose} /> : null}
       </div>
     </Overlay>
