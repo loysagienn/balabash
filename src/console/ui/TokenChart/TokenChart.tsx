@@ -2,13 +2,16 @@
 // request — two panels on one request axis, input (cached → cache write →
 // uncached) and output (text → reasoning), each on its own scale; a legend
 // with the window's totals; a tooltip on hover and keyboard focus of a
-// column. Narrower than 560 the plot scrolls sideways, opened at the newest
-// request, and a detail block under the chart shows the selected request
-// (the newest until a column is tapped). view="table" — the same requests
-// as a data table, newest first, the first rowsMax of them. The rules —
-// TokenChart.logic.ts.
+// column, opening towards the side of the visible plot with the room for it,
+// dismissed by Escape until the next column. Narrower than 560 the plot
+// scrolls sideways, opened at the newest request, and a detail block under
+// the chart shows the selected request (the newest until a column is tapped;
+// the selection is the request's id, so a moved window keeps it while the
+// request is still there). view="table" — the same requests as a data table,
+// newest first, the first rowsMax of them. The rules — TokenChart.logic.ts.
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import type { FocusEvent, KeyboardEvent, PointerEvent } from 'react';
 import type { CSSProperties } from 'react';
 import { DataTable } from '../DataTable/DataTable.tsx';
 import type { DataTableCol } from '../DataTable/DataTable.tsx';
@@ -67,13 +70,51 @@ function Detail({ detail }: { detail: TokenDetail }) {
   );
 }
 
+// The tooltip's width plus its offset from the column (TokenChart.css).
+const TIP_ROOM = 264 + 8;
+
 function Chart({ reqs, now, className }: { reqs: TokenRequest[]; now: Date; className?: string }) {
   const model = useMemo(() => buildTokenChart(reqs, now), [reqs, now]);
-  const [selected, setSelected] = useState<number | null>(null);
+  const tipId = useId();
+  // The selected request (its id); null — the newest.
+  const [selected, setSelected] = useState<string | null>(null);
+  // Where the tooltip of the column under the pointer or focus opens, by the
+  // visible part of the plot: to the left when the right has no room for it
+  // and the left has more.
+  const [placed, setPlaced] = useState<{ key: string; flip: boolean } | null>(null);
+  // The column whose tooltip Escape dismissed: quiet until the pointer or
+  // the focus comes back to it; other columns show their own.
+  const [hushed, setHushed] = useState<string | null>(null);
   const scroll = useRef<HTMLDivElement>(null);
   const last = model.cols.length - 1;
-  const current = selected !== null && selected <= last ? selected : last;
+  const selectedAt = selected === null ? -1 : model.cols.findIndex(col => col.key === selected);
+  const current = selectedAt >= 0 ? selectedAt : last;
   const newest = reqs[last]?.at.getTime() ?? 0;
+
+  const place = (key: string, el: HTMLElement) => {
+    const view = scroll.current?.getBoundingClientRect();
+    const col = el.getBoundingClientRect();
+
+    if (view) {
+      const right = view.right - col.right;
+      const left = col.left - view.left;
+
+      setPlaced({ key, flip: right < TIP_ROOM && left > right });
+    }
+    // Back on the dismissed column its tooltip returns; another column's
+    // pointer leaves the focused one quiet.
+    setHushed(h => (h === key ? null : h));
+  };
+  const enter = (key: string) => (event: PointerEvent<HTMLElement>) => place(key, event.currentTarget);
+  const focus = (key: string) => (event: FocusEvent<HTMLElement>) => {
+    place(key, event.currentTarget);
+    setSelected(key);
+  };
+  const keyDown = (key: string) => (event: KeyboardEvent<HTMLElement>) => {
+    if (event.key === 'Escape') {
+      setHushed(key);
+    }
+  };
 
   // Open at the newest request once the layout and the fonts have settled;
   // again when newer requests arrive.
@@ -195,12 +236,16 @@ function Chart({ reqs, now, className }: { reqs: TokenRequest[]; now: Date; clas
                 data-turn={col.turnStart ? '' : undefined}
                 data-hour={col.hour ? '' : undefined}
                 data-tail={col.tail ? '' : undefined}
-                data-flip={col.flip ? '' : undefined}
+                data-flip={(placed?.key === col.key ? placed.flip : col.flip) ? '' : undefined}
                 data-sel={j === current ? '' : undefined}
+                data-hush={hushed === col.key ? '' : undefined}
                 tabIndex={0}
                 aria-label={col.aria}
-                onClick={() => setSelected(j)}
-                onFocus={() => setSelected(j)}
+                aria-describedby={`${tipId}-${j}`}
+                onClick={() => setSelected(col.key)}
+                onPointerEnter={enter(col.key)}
+                onFocus={focus(col.key)}
+                onKeyDown={keyDown(col.key)}
               >
                 <span className="tchart-in">
                   {col.segIn.map(seg => (
@@ -217,7 +262,7 @@ function Chart({ reqs, now, className }: { reqs: TokenRequest[]; now: Date; clas
                   {col.failed ? <Icon name="x" className="tchart-err" /> : null}
                 </span>
                 <span className="tchart-x">{col.label ? <span>{col.label}</span> : null}</span>
-                <Tip className="tchart-tip">
+                <Tip id={`${tipId}-${j}`} className="tchart-tip">
                   <Detail detail={col.detail} />
                 </Tip>
               </span>

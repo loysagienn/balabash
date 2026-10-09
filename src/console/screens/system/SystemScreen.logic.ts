@@ -22,6 +22,7 @@ export function toTokenRequest(row: LlmRequestItem): TokenRequest {
   const failed = row.status === 'request_failed';
 
   return {
+    id: row.id,
     at: row.createdAt,
     kind: failed ? 'failed' : row.purpose === 'keepalive' ? 'keepalive' : 'turn',
     iteration: row.iteration,

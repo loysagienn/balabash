@@ -5,11 +5,12 @@
 import type { ReactNode } from 'react';
 import './Hint.css';
 
-export function Tip({ children, hint, className }: { children: ReactNode; hint?: boolean; className?: string }) {
+// id — for an anchor's aria-describedby.
+export function Tip({ children, hint, className, id }: { children: ReactNode; hint?: boolean; className?: string; id?: string }) {
   const classes = ['tip', hint ? 'hint-tip' : null, className].filter(Boolean).join(' ');
 
   return (
-    <span className={classes} role="tooltip">
+    <span className={classes} role="tooltip" id={id}>
       {children}
     </span>
   );

@@ -38,6 +38,7 @@ function row(partial: Partial<LlmRequestItem> = {}): LlmRequestItem {
 describe('system — the main thread card', () => {
   it('reads a row as a request of the chart', () => {
     assert.deepEqual(toTokenRequest(row()), {
+      id: 'r1',
       at: at(2026, 10, 9, 14, 41),
       kind: 'turn',
       iteration: 1,

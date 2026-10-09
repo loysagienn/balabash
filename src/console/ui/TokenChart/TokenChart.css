@@ -2,7 +2,7 @@
 /* ── Token chart: composition of model tokens per request ──  .tchart (container “tchart”)
    > .tchart-legend (.tchart-lg > .tchart-lg-h + .tchart-lg-items > .tchart-key[data-s] > .tchart-sw)
    + .tchart-frame[role=img] > .tchart-y (.tchart-y-t, .tchart-y-s[data-p]) + .tchart-scroll > .tchart-plot
-     (.tchart-grid[data-p] > i, .tchart-req[data-turn][data-hour][data-tail][data-flip][data-sel] > .tchart-in, .tchart-out > .tchart-seg[data-s][--v];
+     (.tchart-grid[data-p] > i, .tchart-req[data-turn][data-hour][data-tail][data-flip][data-sel][data-hush] > .tchart-in, .tchart-out > .tchart-seg[data-s][--v];
       .tchart-mk > .tchart-ka | .tchart-err; .tchart-x; .tip.tchart-tip > .tchart-tip-h + .tchart-rows > .tchart-row[data-g] > .tchart-sw, label, .tchart-v, .tchart-pc)
    + .tchart-detail (phone: the selected request instead of the tooltip)
    Two panels on one request axis: input (cached + cache write + uncached = column height) and output (text + reasoning = column height),
@@ -10,6 +10,7 @@
    A turn starts after a wider gap; every hour boundary is a hairline through both panels, the hour under it where there is room.
    Narrower than 560 — the tooltip gives way to the detail block, the plot scrolls sideways (opened at the newest request).
    An hour label starts at its hairline; on the last columns (data-tail) it ends there instead, so it never runs past the plot.
+   The tooltip opens to the right, or to the left (data-flip) when the visible plot has no room there; Escape hides it (data-hush) until the pointer or the focus returns to that column.
    The tooltip rows are a grid of row spans (display:contents) so that React keys sit on a row, not on four loose cells. */
 .tchart{--tchart-in-h:168px;--tchart-out-h:64px;--tchart-slot:4px;--tchart-gap:2px;--tchart-turn:4px;--tchart-tip-w:264px;
   --tchart-ph:calc(var(--lh-micro) + var(--sp-5));--tchart-mk:var(--sp-3);--tchart-x:calc(var(--lh-micro) + var(--sp-1));
@@ -64,6 +65,7 @@
 .tchart-tip{position:absolute;top:var(--tchart-ph);left:calc(100% + var(--sp-2));z-index:var(--z-raised);display:none;flex-direction:column;align-items:stretch;gap:var(--sp-1h);width:var(--tchart-tip-w);padding:var(--sp-2) var(--sp-2h);white-space:normal}
 .tchart-req[data-flip] .tchart-tip{left:auto;right:calc(100% + var(--sp-2))}
 .tchart-req:is(:hover,:focus-visible) .tchart-tip{display:flex}
+.tchart-req[data-hush] .tchart-tip{display:none}
 .tchart-tip-h{display:flex;flex-direction:column;font-size:var(--fs-meta);line-height:var(--lh-meta);color:var(--text-2)}
 .tchart-tip-h b{font-size:var(--fs-ui);line-height:var(--lh-ui);font-weight:var(--fw-semibold);color:var(--text)}
 .tchart-tip-h .errline{margin-top:var(--sp-0h)}

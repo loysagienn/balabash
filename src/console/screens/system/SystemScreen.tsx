@@ -69,16 +69,25 @@ export function SystemScreen() {
         {query.error?.message}
       </Empty>
     );
-  } else if (rows.length === 0) {
-    body = (
-      <Empty icon="activity" title="No requests yet">
-        The main thread has not called the model yet.
-      </Empty>
-    );
   } else {
     const shown = Math.min(tableRows, rows.length);
+    // A failed refresh over the window loaded before — empty or not.
+    const stale = query.isError ? (
+      <CardBody>
+        <Note state="err" icon="cloud-off" role="alert" action="Retry" actionIcon="refresh-cw" actionBusy={query.isFetching} onAction={() => void query.refetch()}>
+          Couldn’t refresh — showing the requests loaded before. {query.error.message}
+        </Note>
+      </CardBody>
+    ) : null;
 
-    body = (
+    body = rows.length === 0 ? (
+      <>
+        {stale}
+        <Empty icon="activity" title="No requests yet">
+          The main thread has not called the model yet.
+        </Empty>
+      </>
+    ) : (
       <>
         <p className="sys-tok-d">
           {windowCount(rows.length, TOKEN_WINDOW)} of the{' '}
@@ -94,13 +103,7 @@ export function SystemScreen() {
           ))}{' '}
           · {windowRange(rows[0].createdAt, rows[rows.length - 1].createdAt, now)}
         </p>
-        {query.isError ? (
-          <CardBody>
-            <Note state="err" icon="cloud-off" role="alert" action="Retry" actionIcon="refresh-cw" actionBusy={query.isFetching} onAction={() => void query.refetch()}>
-              Couldn’t refresh — showing the requests loaded before. {query.error.message}
-            </Note>
-          </CardBody>
-        ) : null}
+        {stale}
         {view === 'chart' ? (
           <CardBody className="sys-tok-b">
             <TokenChart reqs={reqs} now={now} />

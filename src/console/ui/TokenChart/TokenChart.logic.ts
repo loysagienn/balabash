@@ -11,6 +11,10 @@ export type TokenRequestKind = 'turn' | 'keepalive' | 'failed';
 export type TokenVerdict = 'hit' | 'expired' | 'miss';
 
 export type TokenRequest = {
+  // The request's identity: keeps the selection on the same request when
+  // the window moves.
+  id: string;
+  // When the request completed (the row is written after the call).
   at: Date;
   kind: TokenRequestKind;
   // The request's number within its turn (1..N); null reads as 1.
@@ -67,7 +71,8 @@ export type TokenColumn = {
   // the right edge, where a label starting at its line would run past the
   // plot and widen the scroll area.
   tail: boolean;
-  // The tooltip opens to the left: a column in the right part of the plot.
+  // The tooltip opens to the left: a column in the right part of the plot
+  // (the component measures the visible part when the plot scrolls).
   flip: boolean;
   aria: string;
   segIn: TokenSeg[];
@@ -227,14 +232,18 @@ type Measured = TokenRequest & {
   ok: boolean;
   fresh: number;
   text: number;
-  // Every request of a turn knows its turn's length.
+  // Every request of a turn knows its turn's length: the requests of the
+  // turn in the window, or the highest number among them when the window
+  // begins inside the turn.
   turnStart: boolean;
   n: number;
 };
 
 // A turn: consecutive turn requests numbered 1, 2, 3…; a ping or a failed
 // request stands alone, and a turn request numbered 2+ after one joins the
-// turn before it.
+// turn before it. The first turn of the window may begin before the window
+// does: its length is then the highest number seen, never less than the
+// number of a request.
 function measure(reqs: TokenRequest[]): Measured[] {
   const rows: Measured[] = reqs.map(q => ({
     ...q,
@@ -245,6 +254,7 @@ function measure(reqs: TokenRequest[]): Measured[] {
     n: 1,
   }));
   const length = new Map<number, number>();
+  const highest = new Map<number, number>();
   const group: number[] = [];
   let start = -1;
 
@@ -259,10 +269,11 @@ function measure(reqs: TokenRequest[]): Measured[] {
 
     if (group[j] >= 0) {
       length.set(group[j], (length.get(group[j]) ?? 0) + 1);
+      highest.set(group[j], Math.max(highest.get(group[j]) ?? 1, q.iteration ?? 1));
     }
   });
   rows.forEach((q, j) => {
-    q.n = group[j] >= 0 ? (length.get(group[j]) ?? 1) : 1;
+    q.n = group[j] >= 0 ? Math.max(length.get(group[j]) ?? 1, highest.get(group[j]) ?? 1) : 1;
   });
 
   return rows;
@@ -282,8 +293,15 @@ function segments(parts: [TokenSeries, number][], top: number): TokenSeg[] {
   return list;
 }
 
+// The idle time before a request: from the previous request's completion to
+// this one's start — `at` is the completion, so the call's own duration is
+// taken out (a request without a duration counts from its completion).
+export function idleBefore(q: Pick<TokenRequest, 'at' | 'durationMs'>, prev: Pick<TokenRequest, 'at'>): number {
+  return q.at.getTime() - (q.durationMs ?? 0) - prev.at.getTime();
+}
+
 function detailOf(q: Measured, prev: Measured | undefined, now: Date): TokenDetail {
-  const idle = prev ? q.at.getTime() - prev.at.getTime() : 0;
+  const idle = prev ? idleBefore(q, prev) : 0;
   const sub2 = [prev && idle >= 60_000 ? `after ${idleLabel(idle)} idle` : '', q.durationMs ? secondsLabel(q.durationMs) : ''].filter(Boolean).join(' · ');
   const rows: TokenDetailRow[] = q.ok
     ? [
@@ -356,7 +374,7 @@ export function buildTokenChart(reqs: TokenRequest[], now: Date): TokenChartMode
     lastHour = hour;
 
     return {
-      key: `${q.at.getTime()}-${j}`,
+      key: q.id,
       first: j === 0,
       turnStart: j > 0 && q.turnStart,
       hour: boundary,
@@ -404,8 +422,8 @@ export function tokenTableRows(reqs: TokenRequest[], now: Date): TokenTableRow[]
   const dash = (q: Measured, value: number) => (q.ok ? exact(value) : '—');
 
   return measure(reqs)
-    .map((q, j) => ({
-      key: `${q.at.getTime()}-${j}`,
+    .map(q => ({
+      key: q.id,
       time: requestTime(q.at, now),
       kind: q.kind === 'turn' ? `turn · ${q.iteration ?? 1}/${q.n}` : q.kind,
       input: dash(q, q.input),

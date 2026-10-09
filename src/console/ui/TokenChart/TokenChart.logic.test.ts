@@ -1,13 +1,18 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { buildTokenChart, idleLabel, requestTime, share, shortTokens, ticks, tokenTableRows } from './TokenChart.logic.ts';
+import { buildTokenChart, idleBefore, idleLabel, requestTime, share, shortTokens, ticks, tokenTableRows } from './TokenChart.logic.ts';
 import type { TokenRequest } from './TokenChart.logic.ts';
 
 const at = (h: number, m: number, s = 0, day = 9) => new Date(2026, 9, day, h, m, s);
 const NOW = at(16, 38);
 
+let ids = 0;
+
 function req(partial: Partial<TokenRequest> & { at: Date }): TokenRequest {
+  ids += 1;
+
   return {
+    id: `r${ids}`,
     kind: 'turn',
     iteration: 1,
     input: 40_000,
@@ -87,6 +92,32 @@ describe('token chart — columns', () => {
     );
     assert.equal(model.cols[0].first, true);
     assert.equal(model.cols[1].first, false);
+    assert.deepEqual(
+      model.cols.map(col => col.key),
+      reqs.map(q => q.id),
+    );
+  });
+
+  it('measures a turn the window cuts by the highest number seen, never below a request’s own', () => {
+    // The window begins at the turn's third request: "3 of 3", not "3 of 1".
+    const cut = buildTokenChart([req({ at: at(9, 0, 3), iteration: 3 }), req({ at: at(9, 0, 9), iteration: 4 }), req({ at: at(9, 5), iteration: 1 })], NOW);
+
+    assert.deepEqual(
+      cut.cols.map(col => col.detail.sub),
+      ['turn · request 3 of 4', 'turn · request 4 of 4', 'turn · request 1 of 1'],
+    );
+    assert.deepEqual(
+      tokenTableRows([req({ at: at(9, 0, 3), iteration: 3 }), req({ at: at(9, 0, 9), iteration: 4 })], NOW).map(row => row.kind),
+      ['turn · 4/4', 'turn · 3/4'],
+    );
+
+    // A turn in progress at the end of the window: as many as the window holds.
+    const open = buildTokenChart([req({ at: at(9, 0), iteration: 1 }), req({ at: at(9, 0, 6), iteration: 2 })], NOW);
+
+    assert.deepEqual(
+      open.cols.map(col => col.detail.sub),
+      ['turn · request 1 of 2', 'turn · request 2 of 2'],
+    );
   });
 
   it('draws an hour boundary as a hairline and labels it only where there is room', () => {
@@ -150,6 +181,18 @@ describe('token chart — columns', () => {
     assert.equal(model.cols[7].detail.note, 'Server cache verdict: miss — tools_changed');
     // Within a turn the requests follow within seconds: no idle line.
     assert.equal(model.cols[2].detail.sub2, '6.1 s');
+
+    // A request completes at `at`: the idle time runs from the previous
+    // completion to this request's start, so a two-minute call right after
+    // the previous one is no idle time at all.
+    assert.equal(idleBefore({ at: at(12, 2), durationMs: 120_000 }, { at: at(12, 0) }), 0);
+    assert.equal(idleBefore({ at: at(12, 2), durationMs: null }, { at: at(12, 0) }), 120_000);
+
+    const slow = buildTokenChart([req({ at: at(12, 0) }), req({ at: at(12, 2), iteration: 2, durationMs: 120_000 }), req({ at: at(12, 3, 50), iteration: 1, durationMs: 17_100 })], NOW);
+
+    assert.equal(slow.cols[1].detail.sub2, '120.0 s');
+    // 12:02:00 → started 12:03:32.9: 93 s idle, not the 110 s between the completions.
+    assert.equal(slow.cols[2].detail.sub2, 'after 1m 33s idle · 17.1 s');
 
     const failed = model.cols[6].detail;
 

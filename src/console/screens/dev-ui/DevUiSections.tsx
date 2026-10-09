@@ -88,10 +88,10 @@ const TOKEN_SAMPLE: [string, TokenRequest['kind'], number, number, number, numbe
   ['11:52:33', 'turn', 1, 42014, 36413, 1152, 479, 12, 6900, 'hit'],
 ];
 const TOKEN_NOW = new Date();
-const TOKEN_REQS: TokenRequest[] = TOKEN_SAMPLE.map(([time, kind, iteration, input, cached, cacheWrite, output, reasoning, durationMs, verdict, error]) => {
+const TOKEN_REQS: TokenRequest[] = TOKEN_SAMPLE.map(([time, kind, iteration, input, cached, cacheWrite, output, reasoning, durationMs, verdict, error], j) => {
   const [h, m, s] = time.split(':').map(Number);
 
-  return { at: new Date(TOKEN_NOW.getFullYear(), TOKEN_NOW.getMonth(), TOKEN_NOW.getDate(), h, m, s), kind, iteration, input, cached, cacheWrite, output, reasoning, durationMs, verdict, missReason: null, error: error ?? null };
+  return { id: `sample-${j}`, at: new Date(TOKEN_NOW.getFullYear(), TOKEN_NOW.getMonth(), TOKEN_NOW.getDate(), h, m, s), kind, iteration, input, cached, cacheWrite, output, reasoning, durationMs, verdict, missReason: null, error: error ?? null };
 });
 
 const CHART_COLS = [18, 42, 36, 58, 24, 8, 4, 62, 71, 55, 80, 66, 30, 48].map((v, i) => ({
