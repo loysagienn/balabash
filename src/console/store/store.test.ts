@@ -29,9 +29,12 @@ import { ME, event, resetSeq, snapshot, thread } from './fixtures.ts';
 
 type Calls = { name: string; args: unknown[] }[];
 
-type ApiOverrides = Omit<Partial<Api>, 'threads' | 'workspace' | 'settings'> & { threads?: Partial<Api['threads']>; settings?: Partial<Api['settings']> };
+type ApiOverrides = Omit<Partial<Api>, 'threads' | 'workspace' | 'settings' | 'llmRequests'> & { threads?: Partial<Api['threads']>; settings?: Partial<Api['settings']> };
 
-// The file area is Query, not the store: handlers never call it.
+// The file area and the model requests are Query, not the store: handlers
+// never call them.
+const LLM_REQUESTS: Api['llmRequests'] = { list: async () => ({ requests: [] }) };
+
 const WORKSPACE: Api['workspace'] = {
   node: async () => ({ kind: 'dir', path: '', directories: [], files: [] }),
   text: async () => '',
@@ -45,7 +48,7 @@ function fakeApi(overrides: ApiOverrides = {}, calls: Calls = []): Api {
 
       return impl(...args);
     };
-  const base: Omit<Api, 'threads' | 'workspace' | 'settings'> = {
+  const base: Omit<Api, 'threads' | 'workspace' | 'settings' | 'llmRequests'> = {
     me: async () => ME,
     auth: async () => ME,
     logout: async () => ({ ok: true as const }),
@@ -81,6 +84,7 @@ function fakeApi(overrides: ApiOverrides = {}, calls: Calls = []): Api {
       cancel: wrap('threads.cancel', threads.cancel),
     },
     workspace: WORKSPACE,
+    llmRequests: LLM_REQUESTS,
   };
 }
 

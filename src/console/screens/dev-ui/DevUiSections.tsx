@@ -28,6 +28,8 @@ import { Split, SplitDetail, SplitList, DetailSection } from '../../ui/Split/Spl
 import { Stat, Stats } from '../../ui/Stat/Stat.tsx';
 import { Status } from '../../ui/Status/Status.tsx';
 import { TermErr, TermLine, Terminal, Trunc } from '../../ui/Terminal/Terminal.tsx';
+import { TokenChart } from '../../ui/TokenChart/TokenChart.tsx';
+import type { TokenRequest } from '../../ui/TokenChart/TokenChart.logic.ts';
 import { ThreadRow } from '../../ui/ThreadRow/ThreadRow.tsx';
 import { ActGroup, Xp } from '../../ui/Xp/Xp.tsx';
 import { Caption, Code, Kbd, Tag } from '../../ui/atoms/atoms.tsx';
@@ -59,6 +61,39 @@ const CHART_DAYS = Array.from({ length: 14 }, (_, i) => {
   const date = new Date(Date.UTC(2026, 8, 25 + i));
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
 });
+// The design's sample of the token chart: a morning of the main thread —
+// a cache rebuild after idle, turns of one to three requests, a keepalive
+// ping, a failed request. [time, kind, iteration, input, cached, cache
+// write, output, reasoning, ms, verdict, error].
+const TOKEN_SAMPLE: [string, TokenRequest['kind'], number, number, number, number, number, number, number, TokenRequest['verdict'], string?][] = [
+  ['09:02:11', 'turn', 1, 42034, 0, 37643, 492, 0, 11200, 'expired'],
+  ['09:21:40', 'turn', 1, 43447, 37643, 1413, 486, 0, 6100, 'hit'],
+  ['09:29:05', 'turn', 1, 44536, 39056, 1089, 525, 0, 5900, 'hit'],
+  ['09:37:30', 'turn', 1, 45861, 40145, 1325, 476, 0, 6400, 'hit'],
+  ['09:54:12', 'keepalive', 1, 45900, 40145, 0, 0, 0, 1300, 'hit'],
+  ['10:13:02', 'turn', 1, 47296, 0, 45452, 485, 0, 12900, 'expired'],
+  ['10:13:09', 'turn', 2, 52109, 45452, 4421, 96, 0, 5200, null],
+  ['10:13:15', 'turn', 3, 52290, 49873, 161, 15, 0, 3100, null],
+  ['10:31:44', 'turn', 1, 53357, 48154, 750, 56, 0, 4800, 'hit'],
+  ['10:37:20', 'failed', 1, 0, 0, 0, 0, 0, 30000, null, '502 Bad Gateway'],
+  ['10:37:58', 'turn', 1, 54217, 48904, 922, 477, 0, 6600, 'hit'],
+  ['10:38:05', 'turn', 1, 33807, 13808, 15608, 510, 0, 14200, null],
+  ['10:44:31', 'turn', 1, 35035, 29416, 1228, 541, 0, 5600, 'hit'],
+  ['10:44:38', 'turn', 2, 35794, 30644, 691, 164, 0, 4100, null],
+  ['11:02:15', 'turn', 1, 36024, 31335, 230, 58, 0, 3300, 'hit'],
+  ['11:09:40', 'turn', 1, 37055, 31565, 992, 126, 0, 4200, 'hit'],
+  ['11:09:47', 'turn', 2, 41612, 36571, 4877, 82, 0, 6500, null],
+  ['11:09:53', 'turn', 3, 41760, 41448, 98, 15, 0, 3000, null],
+  ['11:34:10', 'keepalive', 1, 41790, 36413, 0, 0, 0, 1200, 'hit'],
+  ['11:52:33', 'turn', 1, 42014, 36413, 1152, 479, 12, 6900, 'hit'],
+];
+const TOKEN_NOW = new Date();
+const TOKEN_REQS: TokenRequest[] = TOKEN_SAMPLE.map(([time, kind, iteration, input, cached, cacheWrite, output, reasoning, durationMs, verdict, error]) => {
+  const [h, m, s] = time.split(':').map(Number);
+
+  return { at: new Date(TOKEN_NOW.getFullYear(), TOKEN_NOW.getMonth(), TOKEN_NOW.getDate(), h, m, s), kind, iteration, input, cached, cacheWrite, output, reasoning, durationMs, verdict, missReason: null, error: error ?? null };
+});
+
 const CHART_COLS = [18, 42, 36, 58, 24, 8, 4, 62, 71, 55, 80, 66, 30, 48].map((v, i) => ({
   v,
   x: i % 7 === 0 || i === 13 ? CHART_DAYS[i] : undefined,
@@ -511,6 +546,17 @@ export function DevUiSections() {
           <CardBody>
             <BarChart label="Tokens per day over 14 days" y={['0', '10M', '20M', '30M', '40M', '50M']} cols={CHART_COLS} />
           </CardBody>
+        </Card>
+        <Label>token chart (System, the main thread): two panels on one request axis, a tooltip on hover and focus; the table view newest first</Label>
+        <Card>
+          <CardHead title="Main thread · tokens per request" />
+          <CardBody>
+            <TokenChart reqs={TOKEN_REQS} now={TOKEN_NOW} />
+          </CardBody>
+        </Card>
+        <Card>
+          <CardHead title="Main thread · tokens per request" tag="table" />
+          <TokenChart reqs={TOKEN_REQS} now={TOKEN_NOW} view="table" rowsMax={8} />
         </Card>
         <Label>sparklines: per core · traffic over an hour · muted</Label>
         <div className="dev-row">

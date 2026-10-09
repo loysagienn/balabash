@@ -806,10 +806,13 @@ router.post('/projects/:id/unarchive', requireSession, async ctx => {
 });
 
 // --------------------------------------------------------------------------
-// LLM request telemetry (read-only): raw rows for the /llm-usage chart.
-// The api layer reads the table directly — llm_requests is deliberately
-// outside the event log and has no core facade; this endpoint is its only
-// reader. rawUsage stays server-side (bulky and unneeded for the chart).
+// LLM request telemetry (read-only): raw rows for the /llm-usage chart of
+// the old web and for the console's "Main thread · tokens per request"
+// (threadId — one thread's window; the rows are scoped by the session's
+// user, so a thread of another workspace simply has none). The api layer
+// reads the table directly — llm_requests is deliberately outside the event
+// log and has no core facade; this endpoint is its only reader. rawUsage
+// stays server-side (bulky and unneeded for the charts).
 
 router.get('/llm-requests', requireSession, async ctx => {
   const userId = ctx.state.userId as string;
@@ -822,9 +825,17 @@ router.get('/llm-requests', requireSession, async ctx => {
     return;
   }
 
+  const threadId = queryValue(ctx.query.threadId);
+
+  if (threadId !== undefined && threadId.length > THREAD_FILTER_MAX) {
+    sendError(ctx, 400, 'bad_request', `threadId must be at most ${THREAD_FILTER_MAX} chars`);
+
+    return;
+  }
+
   // Newest N, then reversed: the client draws oldest-first, left to right.
   const rows = await prisma.llmRequest.findMany({
-    where: { userId },
+    where: { userId, ...(threadId !== undefined ? { threadId } : {}) },
     orderBy: { createdAt: 'desc' },
     take: limit,
     omit: { userId: true, rawUsage: true },

@@ -87,6 +87,14 @@
   --id-8:oklch(0.78 0.12 125);  /* olive  */
   --id-tint:15%;                /* avatar background = identifier color at 15% */
 
+  /* ── Token series: parts of model tokens in the composition chart (TokenChart).
+     L 0.58–0.66 for the dark surface; each panel's set is checked for color-blind separation ── */
+  --tok-cached:oklch(0.60 0.13 262);  /* input read from the prompt cache */
+  --tok-write:oklch(0.66 0.13 65);    /* input written to the prompt cache */
+  --tok-fresh:oklch(0.60 0.15 345);   /* input neither read nor written: uncached */
+  --tok-out:oklch(0.63 0.11 170);     /* output: visible text and tool calls */
+  --tok-reason:oklch(0.58 0.13 300);  /* output: reasoning */
+
   /* ── Code highlighting: its own palette, not the identifier colors ── */
   --code-kw:oklch(0.78 0.12 295);   /* keywords, tags */
   --code-str:oklch(0.80 0.11 165);  /* strings, attribute values */

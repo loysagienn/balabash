@@ -4,12 +4,8 @@
 // gone), not something to retry.
 
 import { useQuery } from '@tanstack/react-query';
-import { ApiError } from '../../lib/api/index.ts';
 import { useApi } from '../../lib/api/context.tsx';
-
-function retryUnlessClient(count: number, error: Error): boolean {
-  return count < 1 && !(error instanceof ApiError && error.status >= 400 && error.status < 500);
-}
+import { retryUnlessClient } from '../../lib/api/retry.ts';
 
 export function useWorkspaceNode(path: string, enabled = true) {
   const api = useApi();

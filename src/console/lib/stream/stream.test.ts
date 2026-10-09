@@ -76,6 +76,7 @@ const api: Api = {
     node: async () => ({ kind: 'dir', path: '', directories: [], files: [] }),
     text: async () => '',
   },
+  llmRequests: { list: async () => ({ requests: [] }) },
 };
 
 const settle = () => new Promise(resolve => setTimeout(resolve, 0));

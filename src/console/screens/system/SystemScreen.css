@@ -1,0 +1,13 @@
+@layer screens{
+/* System (SystemScreen.dc.html): the "Model usage" section — its heading and the main thread card. */
+.sys-usage-h{display:flex;flex-wrap:wrap;align-items:center;gap:var(--sp-2) var(--sp-3)}
+.sys-usage-t{margin:0;font-size:var(--fs-h2);font-weight:var(--fw-semibold)}
+.sys-tok-d{margin:0;padding:var(--sp-3h) var(--sp-4h) var(--sp-1h);font-size:var(--fs-meta);line-height:var(--lh-meta);color:var(--text-3);text-wrap:pretty}   /* main thread card: what the chart covers */
+.sys-tok-b{padding-top:var(--sp-2)}
+.sys-tok-skel{--sys-tok-skel-w:420px;max-width:var(--sys-tok-skel-w)}
+/* "Show more" of the table: a link-looking button at the footer's end. */
+.sys-tok-more{margin-left:auto;padding:0;border:0;background:none;font:inherit;cursor:pointer}
+@container shell (max-width:720px){
+  .sys-tok-d{padding:0 0 var(--sp-1)}
+}
+}

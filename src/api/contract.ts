@@ -218,21 +218,45 @@ export type LlmRequestItem = {
   responseId: string | null;
   previousResponseId: string | null;
   lastSeq: bigint | null;
+  // The request's number within the turn's inner loop (1..N).
   iteration: number | null;
+  // 'turn' — a model turn (1..N requests), 'keepalive' — a prompt-cache
+  // prewarm ping (one request, no output); null on rows from before the
+  // column existed — read as 'turn'.
+  purpose: string | null;
+  // The server's prompt-cache verdict against the thread's previous request:
+  // 'cache_hit' | 'cache_miss' | 'comparison_response_not_found' |
+  // 'unavailable'; null when the request asked for none. The reason comes
+  // with a miss only.
+  cacheDiagnostic: string | null;
+  cacheMissReason: string | null;
+  cacheMissedTokens: number | null;
+  // The response status, or 'request_failed' when the call threw — such a
+  // row has no token counts (null, not zero).
   status: string;
   error: string | null;
   serviceTier: string | null;
   durationMs: number | null;
   inputTokens: number | null;
+  // Parts of the input: read from the prompt cache, written to it; the rest
+  // of the input went uncached.
   cachedTokens: number | null;
   cacheWriteTokens: number | null;
   outputTokens: number | null;
+  // Part of the output spent on reasoning; the rest is text and tool calls.
   reasoningTokens: number | null;
   totalTokens: number | null;
 };
 
-// GET /api/llm-requests?limit=N — the newest N rows, returned oldest-first
+// GET /api/llm-requests?limit=N&threadId=… — the newest N rows (of one
+// thread when threadId is given; the console's "Main thread · tokens per
+// request" reads the main thread's window this way), returned oldest-first
 // so the client draws left to right without re-sorting.
+export type LlmRequestsQuery = {
+  threadId?: string;
+  limit?: number;
+};
+
 export type LlmRequestsResponse = {
   requests: LlmRequestItem[];
 };

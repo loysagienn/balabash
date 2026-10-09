@@ -1,0 +1,87 @@
+@layer components{
+/* ── Token chart: composition of model tokens per request ──  .tchart (container “tchart”)
+   > .tchart-legend (.tchart-lg > .tchart-lg-h + .tchart-lg-items > .tchart-key[data-s] > .tchart-sw)
+   + .tchart-frame[role=img] > .tchart-y (.tchart-y-t, .tchart-y-s[data-p]) + .tchart-scroll > .tchart-plot
+     (.tchart-grid[data-p] > i, .tchart-req[data-turn][data-hour][data-tail][data-flip][data-sel] > .tchart-in, .tchart-out > .tchart-seg[data-s][--v];
+      .tchart-mk > .tchart-ka | .tchart-err; .tchart-x; .tip.tchart-tip > .tchart-tip-h + .tchart-rows > .tchart-row[data-g] > .tchart-sw, label, .tchart-v, .tchart-pc)
+   + .tchart-detail (phone: the selected request instead of the tooltip)
+   Two panels on one request axis: input (cached + cache write + uncached = column height) and output (text + reasoning = column height),
+   each on its own scale. Parts are stacked bottom-up with a 2px gap, colors are the --tok-* series, a legend is always there.
+   A turn starts after a wider gap; every hour boundary is a hairline through both panels, the hour under it where there is room.
+   Narrower than 560 — the tooltip gives way to the detail block, the plot scrolls sideways (opened at the newest request).
+   An hour label starts at its hairline; on the last columns (data-tail) it ends there instead, so it never runs past the plot.
+   The tooltip rows are a grid of row spans (display:contents) so that React keys sit on a row, not on four loose cells. */
+.tchart{--tchart-in-h:168px;--tchart-out-h:64px;--tchart-slot:4px;--tchart-gap:2px;--tchart-turn:4px;--tchart-tip-w:264px;
+  --tchart-ph:calc(var(--lh-micro) + var(--sp-5));--tchart-mk:var(--sp-3);--tchart-x:calc(var(--lh-micro) + var(--sp-1));
+  container:tchart / inline-size;display:flex;flex-direction:column;gap:var(--sp-4);min-width:0;
+  font-size:var(--fs-micro);line-height:var(--lh-micro);color:var(--text-3);font-variant-numeric:tabular-nums}
+.tchart [data-s="cached"]{--sw:var(--tok-cached)}
+.tchart [data-s="write"]{--sw:var(--tok-write)}
+.tchart [data-s="fresh"]{--sw:var(--tok-fresh)}
+.tchart [data-s="out"]{--sw:var(--tok-out)}
+.tchart [data-s="reason"]{--sw:var(--tok-reason)}
+.tchart-legend{display:flex;flex-wrap:wrap;gap:var(--sp-3) var(--sp-8)}
+.tchart-lg{display:flex;flex-direction:column;gap:var(--sp-1);min-width:0}
+.tchart-lg-h{display:flex;flex-wrap:wrap;align-items:baseline;gap:0 var(--sp-2);font-size:var(--fs-meta);line-height:var(--lh-meta);color:var(--text-3)}
+.tchart-lg-h b{font-size:var(--fs-ui);font-weight:var(--fw-semibold);color:var(--text)}
+.tchart-lg-items{display:flex;flex-wrap:wrap;gap:var(--sp-1) var(--sp-4)}
+.tchart-key{display:inline-flex;align-items:center;gap:var(--sp-1h);font-size:var(--fs-meta);line-height:var(--lh-meta);color:var(--text-2);white-space:nowrap}
+.tchart-key b{font-weight:var(--fw-medium);color:var(--text)}
+.tchart-sw{flex:none;width:var(--sp-2h);height:var(--sp-2h);border-radius:var(--sp-0h);background:var(--sw)}
+.tchart-frame{display:grid;grid-template-columns:auto minmax(0,1fr);column-gap:var(--sp-2)}
+.tchart-y{display:flex;flex-direction:column;text-align:right}
+.tchart-y-t{display:flex;align-items:center;justify-content:flex-end;height:var(--tchart-ph);font-weight:var(--fw-semibold);color:var(--text-2);white-space:nowrap}
+.tchart-y-s{position:relative;line-height:1;min-width:max-content}
+.tchart-y-s > span{position:absolute;right:0;bottom:var(--p);transform:translateY(50%);white-space:nowrap}   /* centered on its grid line */
+.tchart-y-s > span:first-child{position:static;visibility:hidden}   /* holds the column width */
+.tchart-y-s[data-p="in"]{height:var(--tchart-in-h)}
+.tchart-y-s[data-p="out"]{height:var(--tchart-out-h)}
+.tchart-scroll{overflow-x:auto;overflow-y:hidden;min-width:0;scrollbar-width:thin}
+.tchart-plot{position:relative;display:flex;align-items:flex-start;width:max-content;min-width:100%}
+.tchart-grid{position:absolute;left:0;right:0;display:flex;flex-direction:column;justify-content:space-between;pointer-events:none}
+.tchart-grid[data-p="in"]{top:var(--tchart-ph);height:var(--tchart-in-h)}
+.tchart-grid[data-p="out"]{top:calc(var(--tchart-ph) * 2 + var(--tchart-in-h));height:var(--tchart-out-h)}
+.tchart-grid > i{display:block;border-top:1px solid var(--border)}
+.tchart-grid > i:last-child{border-color:var(--border-strong)}   /* baseline */
+.tchart-req{position:relative;flex:1 0 var(--tchart-slot);display:flex;flex-direction:column;margin-left:var(--tchart-gap);outline:none}
+.tchart-req[data-first]{margin-left:0}
+.tchart-req[data-turn]{margin-left:calc(var(--tchart-gap) + var(--tchart-turn))}
+.tchart-req[data-hour]::before{content:"";position:absolute;top:var(--tchart-ph);bottom:0;left:calc(var(--tchart-turn) / -2 - 1px);border-left:1px solid var(--border-strong);pointer-events:none}
+:is(.tchart-in,.tchart-out){display:flex;flex-direction:column-reverse;gap:var(--tchart-gap);margin-top:var(--tchart-ph);border-radius:var(--sp-0h) var(--sp-0h) 0 0}
+.tchart-in{height:var(--tchart-in-h)}
+.tchart-out{height:var(--tchart-out-h)}
+.tchart-seg{position:relative;flex:none;display:block;height:var(--v);background:var(--sw)}
+.tchart-seg + .tchart-seg{height:max(0px,calc(var(--v) - var(--tchart-gap)))}   /* the gap is taken out of the upper part: the top stays on the scale */
+.tchart-seg[data-top]{border-radius:var(--sp-0h) var(--sp-0h) 0 0}
+.tchart-mk{position:relative;display:flex;align-items:center;justify-content:center;height:var(--tchart-mk);margin-top:var(--sp-1)}
+.tchart-ka{width:var(--sp-1h);height:var(--sp-1h);border-radius:var(--r-pill);box-shadow:inset 0 0 0 1.5px var(--text-3)}   /* keepalive ping */
+.tchart-err{font-size:var(--ico-xs);color:var(--st-err)}                                                                  /* failed request */
+.tchart-x{position:relative;height:var(--tchart-x)}
+.tchart-x > span{position:absolute;top:var(--sp-0h);left:calc(var(--tchart-turn) / -2 - 1px);white-space:nowrap}
+.tchart-req[data-tail] .tchart-x > span{left:auto;right:calc(100% + var(--tchart-turn) / 2 + 1px)}
+.tchart-req:is(:hover,:focus-visible) :is(.tchart-in,.tchart-out){background:var(--selected);box-shadow:0 0 0 var(--tchart-gap) var(--selected)}
+.tchart-req:focus-visible :is(.tchart-in,.tchart-out){box-shadow:0 0 0 1px var(--focus)}
+.tchart-tip{position:absolute;top:var(--tchart-ph);left:calc(100% + var(--sp-2));z-index:var(--z-raised);display:none;flex-direction:column;align-items:stretch;gap:var(--sp-1h);width:var(--tchart-tip-w);padding:var(--sp-2) var(--sp-2h);white-space:normal}
+.tchart-req[data-flip] .tchart-tip{left:auto;right:calc(100% + var(--sp-2))}
+.tchart-req:is(:hover,:focus-visible) .tchart-tip{display:flex}
+.tchart-tip-h{display:flex;flex-direction:column;font-size:var(--fs-meta);line-height:var(--lh-meta);color:var(--text-2)}
+.tchart-tip-h b{font-size:var(--fs-ui);line-height:var(--lh-ui);font-weight:var(--fw-semibold);color:var(--text)}
+.tchart-tip-h .errline{margin-top:var(--sp-0h)}
+.tchart-rows{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto;align-items:center;gap:var(--sp-0h) var(--sp-2);font-size:var(--fs-meta);line-height:var(--lh-meta);color:var(--text-2)}
+.tchart-row{display:contents}
+.tchart-v,.tchart-pc{text-align:right;white-space:nowrap}
+.tchart-v{color:var(--text)}
+.tchart-pc{color:var(--text-3)}
+.tchart-row[data-g] > span{font-weight:var(--fw-semibold);color:var(--text)}   /* group row: Input / Output total */
+.tchart-note{font-size:var(--fs-meta);line-height:var(--lh-meta);color:var(--text-3)}
+.tchart-detail{display:none;flex-direction:column;gap:var(--sp-2);padding:var(--sp-3);border-radius:var(--r-md);background:var(--surface-2)}
+@container tchart (max-width:560px){
+  .tchart-frame{--tchart-in-h:152px;--tchart-slot:6px}   /* the container itself can't be restyled by its own query */
+  .tchart-req[data-sel] :is(.tchart-in,.tchart-out){background:var(--selected);box-shadow:0 0 0 var(--tchart-gap) var(--selected)}
+  .tchart-req[data-sel] .tchart-mk::after{content:"";position:absolute;left:calc(var(--tchart-gap) * -1);right:calc(var(--tchart-gap) * -1);top:0;height:var(--sp-0h);border-radius:var(--sp-0h);background:var(--accent)}   /* the request in the detail block */
+  .tchart-plot{padding-right:var(--sp-1)}
+  .tchart-legend{display:grid;grid-template-columns:minmax(0,1fr);gap:var(--sp-3)}
+  .tchart-req:is(:hover,:focus-visible) .tchart-tip{display:none}
+  .tchart-detail{display:flex}
+}
+}

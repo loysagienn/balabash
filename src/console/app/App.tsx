@@ -17,6 +17,7 @@ import { HomeScreen } from '../screens/home/HomeScreen.tsx';
 import { ThreadScreen } from '../screens/thread/ThreadScreen.tsx';
 import { ThreadsScreen } from '../screens/threads/ThreadsScreen.tsx';
 import { SettingsScreen } from '../screens/settings/SettingsScreen.tsx';
+import { SystemScreen } from '../screens/system/SystemScreen.tsx';
 import { DevUi } from '../screens/dev-ui/DevUi.tsx';
 import { selectTitle } from './title.ts';
 
@@ -69,7 +70,7 @@ export function App() {
     case 'agents':
       return <AgentsScreen route={route} />;
     case 'system':
-      return <Placeholder current="system" title="System" icon="activity" what="System" />;
+      return <SystemScreen />;
     case 'settings':
       return <SettingsScreen />;
     case 'dev_ui':

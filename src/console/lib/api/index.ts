@@ -3,6 +3,8 @@
 // replaces it with plain fake functions and never touches the network.
 
 import type {
+  LlmRequestsQuery,
+  LlmRequestsResponse,
   LogoutResponse,
   MeResponse,
   SettingsPatchRequest,
@@ -50,6 +52,11 @@ export type Api = {
     node(path: string): Promise<WorkspaceNodeResponse>;
     text(path: string, signal?: AbortSignal): Promise<string>;
   };
+  // Model request telemetry (the second data layer too): the newest rows of
+  // llm_requests, oldest first — one thread's window with threadId.
+  llmRequests: {
+    list(query: LlmRequestsQuery, signal?: AbortSignal): Promise<LlmRequestsResponse>;
+  };
 };
 
 // The URL of a file's bytes (/files/<rel>): inline for viewers, an
@@ -87,6 +94,9 @@ export function createApi(options: FetchOptions = {}): Api {
     workspace: {
       node: path => apiFetch<WorkspaceNodeResponse>('/api/workspace/node', { query: { path } }),
       text: (path, signal) => apiFetch<string>(fileUrl(path), { as: 'text', signal }),
+    },
+    llmRequests: {
+      list: (query, signal) => apiFetch<LlmRequestsResponse>('/api/llm-requests', { query, signal }),
     },
   };
 }
