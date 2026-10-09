@@ -10,6 +10,7 @@ import { Provider } from 'react-redux';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import './styles/index.css';
 import { App } from './app/App.tsx';
+import { ErrorBoundary } from './app/ErrorBoundary.tsx';
 import { createApi } from './lib/api/index.ts';
 import { ApiProvider } from './lib/api/context.tsx';
 import { connectStoreToHistory } from './lib/router/history.ts';
@@ -55,7 +56,9 @@ createRoot(root).render(
     <Provider store={store}>
       <QueryClientProvider client={queryClient}>
         <ApiProvider api={api}>
-          <App />
+          <ErrorBoundary>
+            <App />
+          </ErrorBoundary>
         </ApiProvider>
       </QueryClientProvider>
     </Provider>

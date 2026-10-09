@@ -28,7 +28,7 @@ export function SignIn() {
   return (
     <Solo title="Sign in">
       <form className="form" onSubmit={onSubmit}>
-        <Field label="One-time code" fid="code" err={error ? (error.status === 401 ? 'Invalid or expired code.' : error.message) : undefined}>
+        <Field label="One-time code" fid="code" required err={error ? (error.status === 401 ? 'Invalid or expired code.' : error.message) : undefined}>
           <Input
             id="code"
             value={code}

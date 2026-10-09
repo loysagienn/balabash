@@ -7,6 +7,7 @@
 
 import type { ContentBlock, Event } from '../../../core/contract.ts';
 import type { EventOf, EventType } from '../../../core/event-types.ts';
+import { plainLine } from '../../lib/format/plain.ts';
 
 export type LastAction = { last?: string; lastCode?: string };
 
@@ -54,9 +55,11 @@ function fromTool(payload: EventOf<'session.tool.started'>['payload']): LastActi
 
 const is = <T extends EventType>(event: Event, type: T): event is Event & EventOf<T> => event.type === type;
 
-// The words of a message for the row: its text, or its attachments.
+// The words of a message for the row: its text as plain words (the
+// Markdown marks off — a heading without its "#", a link by its text), or
+// its attachments.
 function messageText(text: string | null | undefined, attachments: readonly string[]): string {
-  return clip(text ?? '') || clip(attachments.join(', '));
+  return clip(plainLine(text ?? '')) || clip(attachments.join(', '));
 }
 
 function blockAttachments(blocks: readonly ContentBlock[]): string[] {

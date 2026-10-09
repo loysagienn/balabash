@@ -12,6 +12,7 @@
 import type { Thread } from '../../../core/contract.ts';
 import type { SessionView } from '../../../projections/session.ts';
 import { dateTimeLabel, durationLabel, rangeLabel, sinceLabel } from '../../lib/format/index.ts';
+import { plainLine } from '../../lib/format/plain.ts';
 import type { CtxInput } from '../../ui/Ring/Ring.logic.ts';
 import type { ThreadRowProps } from '../../ui/ThreadRow/ThreadRow.tsx';
 import type { StateName } from '../../ui/atoms/state.ts';
@@ -78,7 +79,9 @@ export function threadRowData({ thread, state, session, project, kids, headless,
     };
   }
 
-  const desc = thread.description?.trim() || thread.summary?.text?.trim();
+  // A description or a summary is written by an agent — Markdown marks
+  // may be in it; the row shows plain words.
+  const desc = plainLine(thread.description ?? '') || plainLine(thread.summary?.text ?? '');
 
   return {
     ...base,

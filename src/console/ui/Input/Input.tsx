@@ -1,10 +1,14 @@
 // Input field (design: Input): input or textarea inside the .inp frame.
 // lead — an icon on the left, pre — a prefix ("/p/"), end — the right edge
 // (a key, an icon button). mono — technical values (codes, slugs, paths).
+// Inside a Field the control is described by the field's hint and error
+// and knows whether it is required (FieldContext); invalid marks it
+// aria-invalid and points aria-errormessage at the error shown.
 
 import type { ChangeEvent, InputHTMLAttributes, ReactNode, TextareaHTMLAttributes } from 'react';
 import { Icon } from '../Icon/Icon.tsx';
 import type { IconName } from '../Icon/Icon.tsx';
+import { useFieldControl } from '../Field/Field.tsx';
 import './Input.css';
 
 type Shared = {
@@ -32,6 +36,7 @@ export type InputProps = Shared &
 
 export function Input(props: InputProps) {
   const { id, value, onChange, placeholder, lead, pre, mono, invalid, disabled, readOnly, autoFocus, ariaLabel, end, name } = props;
+  const field = useFieldControl();
   const common = {
     id,
     name,
@@ -41,6 +46,9 @@ export function Input(props: InputProps) {
     readOnly,
     autoFocus,
     'aria-invalid': invalid ? ('true' as const) : undefined,
+    'aria-errormessage': invalid ? field.errId : undefined,
+    'aria-describedby': field.describedBy,
+    'aria-required': field.required ? ('true' as const) : undefined,
     'aria-label': ariaLabel,
     onChange: (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => onChange(event.target.value),
   };

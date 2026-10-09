@@ -64,6 +64,12 @@ const STATE_LABEL: Record<StateName, string> = {
 const AGENTS = Object.keys(AGENT_AVATARS);
 const stop = (event: { preventDefault: () => void }) => event.preventDefault();
 
+// Throws while rendering — the way to see app/ErrorBoundary.tsx (the
+// Crashed card) on the showcase; a reload brings the showcase back.
+function Boom(): never {
+  throw new Error('dev/ui: a component threw while rendering (on purpose)');
+}
+
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
     <section className="dev-sec">
@@ -93,6 +99,7 @@ export function DevUi() {
   const [cardMenu, setCardMenu] = useState(false);
   const [toasts, setToasts] = useState([1, 2, 3, 4]);
   const [confirm, setConfirm] = useState(false);
+  const [crash, setCrash] = useState(false);
   const dispatch = useAppDispatch();
 
   return (
@@ -181,7 +188,7 @@ export function DevUi() {
                 end={<Kbd>⌘K</Kbd>}
               />
             </Field>
-            <Field label="Slug" fid="dev-slug" err="Already taken">
+            <Field label="Slug" fid="dev-slug" err="Already taken" required>
               <Input id="dev-slug" value="balabash" onChange={() => undefined} pre="/p/" mono invalid />
             </Field>
             <Field label="Disabled" fid="dev-dis">
@@ -775,6 +782,13 @@ export function DevUi() {
               The “engineer” agent will stop and the thread will end without a summary. This can’t be undone.
             </Confirm>
           ) : null}
+        </Section>
+
+        <Section title="ErrorBoundary: a render that throws becomes the Crashed card; reload to come back">
+          <Row>
+            <Btn label="Throw in render" variant="danger" icon="triangle-alert" onClick={() => setCrash(true)} />
+            {crash ? <Boom /> : null}
+          </Row>
         </Section>
 
         <DevUiShell />
