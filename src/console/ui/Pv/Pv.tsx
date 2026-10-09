@@ -64,8 +64,14 @@ export function PvNote({ agent, title, children }: { agent?: string; title: stri
   );
 }
 
-export function PvBody({ children, className }: { children: ReactNode; className?: string }) {
-  return <div className={className ? `pv-b ${className}` : 'pv-b'}>{children}</div>;
+// fill — the body is one block that takes the whole height (the PDF frame)
+// instead of content that scrolls.
+export function PvBody({ children, fill, className }: { children: ReactNode; fill?: boolean; className?: string }) {
+  return (
+    <div className={className ? `pv-b ${className}` : 'pv-b'} data-fill={fill ? '' : undefined}>
+      {children}
+    </div>
+  );
 }
 
 export function PvActBar({ children }: { children: ReactNode }) {

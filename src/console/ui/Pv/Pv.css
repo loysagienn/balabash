@@ -1,5 +1,5 @@
 @layer patterns{
-/* ── File preview ──  .pv > .pv-h (.obj, .pv-t > .pv-name + .pv-m, .pv-acts) + .pv-note + .pv-b + .pv-actbar (narrow only) */
+/* ── File preview ──  .pv > .pv-h (.obj, .pv-t > .pv-name + .pv-m, .pv-acts) + .pv-note + .pv-b [data-fill] + .pv-actbar (narrow only) */
 .pv{display:flex;flex-direction:column;min-width:0;min-height:0;flex:1}
 .pv-h{display:flex;flex-wrap:wrap;align-items:flex-start;gap:var(--sp-3);padding:var(--sp-3) var(--sp-4);border-bottom:1px solid var(--border)}
 .pv-t{flex:1 1 0;min-width:0}
@@ -12,6 +12,7 @@
 .pv-note strong{color:var(--text);font-weight:var(--fw-semibold)}
 .pv-b{--pv-md-max:720px;flex:1;min-height:0;overflow:auto;padding:var(--sp-4) var(--sp-5) var(--sp-6)}
 .pv-b > .md{max-width:var(--pv-md-max)}
+.pv-b[data-fill]{display:flex;flex-direction:column}
 .pv-actbar{display:none;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);gap:var(--sp-2);padding:var(--sp-2) var(--gutter) var(--sp-3);border-top:1px solid var(--border);background:var(--bg);flex:none}
 @container fa (max-width:720px){
   .pv-acts{display:none}

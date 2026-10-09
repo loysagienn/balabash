@@ -57,6 +57,11 @@ export function FileListHead() {
   );
 }
 
+// A banner above the rows (a refresh that failed behind the shown listing).
+export function FaNote({ children }: { children: ReactNode }) {
+  return <div className="fa-note">{children}</div>;
+}
+
 export function FaRows({ children, busy, className }: { children: ReactNode; busy?: boolean; className?: string }) {
   return (
     <div className={className ? `fa-rows ${className}` : 'fa-rows'} aria-busy={busy ? 'true' : undefined}>

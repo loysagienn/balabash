@@ -16,6 +16,9 @@ export function parseDelimited(text: string, delimiter: ',' | '\t', maxRows: num
   let record: string[] = [];
   let field = '';
   let quoted = false;
+  // The current record has begun: a character, a delimiter or an opening
+  // quote — so `""` alone is a record of one empty field, not nothing.
+  let started = false;
   let i = 0;
   let total = 0;
   let kept = 0;
@@ -39,6 +42,7 @@ export function parseDelimited(text: string, delimiter: ',' | '\t', maxRows: num
     }
 
     record = [];
+    started = false;
   };
 
   while (i < text.length) {
@@ -64,11 +68,13 @@ export function parseDelimited(text: string, delimiter: ',' | '\t', maxRows: num
 
     if (ch === '"' && field === '') {
       quoted = true;
+      started = true;
       i += 1;
       continue;
     }
     if (ch === delimiter) {
       endField();
+      started = true;
       i += 1;
       continue;
     }
@@ -83,12 +89,13 @@ export function parseDelimited(text: string, delimiter: ',' | '\t', maxRows: num
     }
 
     field += ch;
+    started = true;
     i += 1;
   }
 
   // A last record without a trailing newline; a trailing newline leaves
   // nothing behind.
-  if (field !== '' || record.length > 0) {
+  if (started) {
     endRecord();
   }
 

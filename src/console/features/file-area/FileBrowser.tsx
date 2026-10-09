@@ -4,6 +4,8 @@
 // the list of its folder with the row selected and the preview beside it
 // (one pane at a time when the area is narrow, FileArea). Links are routes
 // the owner builds (routeFor), so the same component serves both roots.
+// Query keeps older data through a failed refetch: a 404 still means the
+// path is gone, any other failure keeps the rows under a banner with Retry.
 
 import type { ReactNode } from 'react';
 import type { WorkspaceFileMeta } from '../../../api/contract.ts';
@@ -16,16 +18,17 @@ import { useNow } from '../../lib/format/useNow.ts';
 import { Crumbs } from '../../ui/Crumbs/Crumbs.tsx';
 import type { Crumb } from '../../ui/Crumbs/Crumbs.tsx';
 import { Empty } from '../../ui/Empty/Empty.tsx';
-import { FaBar, FaFoot, FaList, FaPreview, FaRows, FileArea, FileListHead } from '../../ui/FileArea/FileArea.tsx';
+import { FaBar, FaFoot, FaList, FaNote, FaPreview, FaRows, FileArea, FileListHead } from '../../ui/FileArea/FileArea.tsx';
 import { FileRow } from '../../ui/FileRow/FileRow.tsx';
 import type { IconName } from '../../ui/Icon/Icon.tsx';
+import { Note } from '../../ui/Note/Note.tsx';
 import { SkelRow } from '../../ui/Skel/Skel.tsx';
 import { fileIcon } from '../../ui/atoms/fileIcon.ts';
 import { FileMenu } from './FileMenu.tsx';
 import { FilePreview } from './FilePreview.tsx';
-import { crumbSegments, joinPath, listingSummary, nameOf, parentOf } from './node.ts';
+import { crumbSegments, isNotFound, joinPath, listingSummary, nameOf, nodeOf, parentOf } from './node.ts';
 import type { DirListing } from './node.ts';
-import { isNotFound, useWorkspaceNode } from './queries.ts';
+import { useWorkspaceNode } from './queries.ts';
 
 export type FileBrowserProps = {
   // The folder the area cannot leave ('' — the whole file area).
@@ -101,13 +104,21 @@ export function FileBrowser({ root, rootLabel, lead, path, routeFor, pins, class
   const dispatch = useAppDispatch();
   const linkTarget = useLinkTargets();
   const node = useWorkspaceNode(path);
-  const kind = node.data?.kind ?? null;
+  const answer = nodeOf(node);
   // A file's list is its folder's listing — a second node, shared with the
   // folder's own screen through the query key.
-  const parent = useWorkspaceNode(parentOf(path), kind === 'file');
+  const parent = useWorkspaceNode(parentOf(path), answer?.kind === 'file');
+  // The path is gone (a 404 of the node or of a file's folder) whatever
+  // Query still holds from before.
+  const gone = answer === null ? isNotFound(node.error) : answer.kind === 'file' && isNotFound(parent.error);
+  const file = !gone && answer?.kind === 'file' ? answer.file : null;
+  const kind = gone ? null : answer?.kind ?? null;
   const listPath = kind === 'file' ? parentOf(path) : path;
   const listQuery = kind === 'file' ? parent : node;
-  const listing = listQuery.data?.kind === 'dir' ? listQuery.data : null;
+  const listing = !gone && listQuery.data?.kind === 'dir' ? listQuery.data : null;
+  // A refetch that failed behind the shown listing (Query keeps the data):
+  // the rows stay, a banner says so and retries the query that failed.
+  const stale = listing ? (listQuery.error ? listQuery : kind === 'file' && node.error ? node : null) : null;
   // The breadcrumbs: the root, then the folders above the current one.
   const segments = crumbSegments(root, listPath);
   const current = segments[segments.length - 1] ?? rootLabel;
@@ -119,14 +130,16 @@ export function FileBrowser({ root, rootLabel, lead, path, routeFor, pins, class
 
   let body;
 
-  if (listing) {
+  if (gone) {
+    body = (
+      <Empty icon="folder-open" state="err" title="Not found" action={rootLabel} actionIcon="arrow-left" onAction={() => dispatch(routeTo(routeFor(root)))}>
+        There is no <code className="code">{path}</code> in the file area.
+      </Empty>
+    );
+  } else if (listing) {
     body = <Rows listing={listing} selectedPath={kind === 'file' ? path : null} now={now} routeFor={routeFor} />;
   } else if (listQuery.error) {
-    body = isNotFound(listQuery.error) ? (
-      <Empty icon="folder-open" state="err" title="Not found" action={rootLabel} actionIcon="arrow-left" onAction={() => dispatch(routeTo(routeFor(root)))}>
-        There is no <code className="code">{listPath}</code> in the file area.
-      </Empty>
-    ) : (
+    body = (
       <Empty icon="cloud-off" state="err" title="Couldn’t load the folder" action="Retry" actionIcon="refresh-cw" onAction={() => void listQuery.refetch()}>
         {listQuery.error.message}
       </Empty>
@@ -148,14 +161,21 @@ export function FileBrowser({ root, rootLabel, lead, path, routeFor, pins, class
           <Crumbs items={crumbs} current={current} lead={lead} fa />
         </FaBar>
         {pins}
+        {stale ? (
+          <FaNote>
+            <Note state="err" icon="cloud-off" role="alert" action="Retry" actionIcon="refresh-cw" onAction={() => void stale.refetch()}>
+              Couldn’t refresh: {stale.error?.message}
+            </Note>
+          </FaNote>
+        ) : null}
         {body}
       </FaList>
-      {kind === 'file' && node.data?.kind === 'file' ? (
+      {file ? (
         <FaPreview>
-          <FilePreview file={node.data.file} now={now} />
+          {/* keyed by the file and its version: the preview's own state (the image's size, a failed load) belongs to one file */}
+          <FilePreview key={`${file.path}@${file.modifiedAt ?? ''}`} file={file} now={now} />
         </FaPreview>
       ) : null}
     </FileArea>
   );
 }
-

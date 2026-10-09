@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { isNumeric, parseDelimited } from './csv.ts';
 import { codeLines, splitHighlighted } from './codeLines.ts';
-import { crumbSegments, listingSummary, nameOf, parentOf, viewerFor, TEXT_PREVIEW_MAX } from './node.ts';
+import { ApiError } from '../../lib/api/index.ts';
+import { crumbSegments, isNotFound, listingSummary, nameOf, nodeOf, parentOf, viewerFor, TEXT_PREVIEW_MAX } from './node.ts';
 
 const file = (path: string, mediaType: string, sizeBytes = 100) => ({ path, mediaType, sizeBytes });
 
@@ -31,6 +32,18 @@ describe('file area — node rules', () => {
     assert.deepEqual(viewerFor(file('a.mp4', 'video/mp4')), { kind: 'none', reason: 'type' });
     assert.deepEqual(viewerFor(file('server.log', 'text/plain', TEXT_PREVIEW_MAX + 1)), { kind: 'none', reason: 'size' });
     assert.deepEqual(viewerFor(file('huge.png', 'image/png', TEXT_PREVIEW_MAX * 10)), { kind: 'image' });
+  });
+
+  it('answers a node from a query: the data stays through any failure but a 404', () => {
+    const data = { kind: 'dir' as const };
+
+    assert.equal(nodeOf({ data, error: null }), data);
+    assert.equal(nodeOf({ data, error: new ApiError(500, 'internal', 'boom') }), data);
+    assert.equal(nodeOf({ data, error: new Error('network') }), data);
+    assert.equal(nodeOf({ data, error: new ApiError(404, 'not_found', 'gone') }), null);
+    assert.equal(nodeOf({ data: undefined, error: null }), null);
+    assert.equal(isNotFound(new ApiError(404, 'not_found', 'gone')), true);
+    assert.equal(isNotFound(new ApiError(403, 'forbidden', 'no')), false);
   });
 
   it('sums the footer', () => {
@@ -63,6 +76,14 @@ describe('file area — delimited text', () => {
     ]);
     assert.equal(table.truncated, false);
     assert.deepEqual(parseDelimited('', ',', 10), { header: [], rows: [], total: 0, truncated: false });
+  });
+
+  it('keeps a last record that is one empty quoted field, with or without a trailing line break', () => {
+    assert.deepEqual(parseDelimited('name\r\n""', ',', 10), { header: ['name'], rows: [['']], total: 1, truncated: false });
+    assert.deepEqual(parseDelimited('name\r\n""\r\n', ',', 10), { header: ['name'], rows: [['']], total: 1, truncated: false });
+    assert.deepEqual(parseDelimited('""', ',', 10).header, ['']);
+    assert.deepEqual(parseDelimited('a,b\n1,', ',', 10).rows, [['1', '']]);
+    assert.deepEqual(parseDelimited('a\n', ',', 10), { header: ['a'], rows: [], total: 0, truncated: false });
   });
 
   it('tells numbers from text', () => {

@@ -4,6 +4,7 @@
 // /files/<rel> only when a viewer reads it.
 
 import type { WorkspaceFileMeta, WorkspaceNodeResponse } from '../../../api/contract.ts';
+import { ApiError } from '../../lib/api/index.ts';
 import { countOf, fileSize } from '../../lib/format/index.ts';
 
 // Text larger than this is a download, not a preview (the design's "a 48 MB
@@ -139,4 +140,15 @@ export function crumbSegments(root: string, path: string): string[] {
 
 export function joinPath(...parts: string[]): string {
   return parts.filter(Boolean).join('/');
+}
+
+export function isNotFound(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 404;
+}
+
+// The node a query answers now. Query keeps the older data through a
+// failed refetch; a 404 outranks it — the path is gone, whatever was
+// there before.
+export function nodeOf<T>(query: { data: T | undefined; error: Error | null }): T | null {
+  return isNotFound(query.error) ? null : query.data ?? null;
 }

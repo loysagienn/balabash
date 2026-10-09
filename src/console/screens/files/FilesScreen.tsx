@@ -7,13 +7,14 @@
 import type { FilesRoute } from '../../lib/router/routes.ts';
 import { Shell } from '../../features/shell/Shell.tsx';
 import { FileBrowser } from '../../features/file-area/FileBrowser.tsx';
+import { nodeOf } from '../../features/file-area/node.ts';
 import { useWorkspaceNode } from '../../features/file-area/queries.ts';
 import { filesRoute, filesShell } from './FilesScreen.logic.ts';
 import './FilesScreen.css';
 
 export function FilesScreen({ route }: { route: FilesRoute }) {
   const node = useWorkspaceNode(route.path);
-  const shell = filesShell(route.path, node.data?.kind ?? null);
+  const shell = filesShell(route.path, nodeOf(node)?.kind ?? null);
 
   return (
     <Shell current="files" title={shell.title} titleNarrow={shell.titleNarrow} crumb={shell.crumb} back={shell.back} detail={shell.detail}>
