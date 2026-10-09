@@ -3,7 +3,7 @@
 // session (session.tool.*), a bridge function (tool.call.*), a Codex
 // command or file change. Pure, tested without the DOM.
 
-import type { JsonObject, JsonValue } from '../../../core/contract.ts';
+import type { JsonObject, JsonValue, ToolResult } from '../../../core/contract.ts';
 import type { IconName } from '../../ui/Icon/Icon.tsx';
 
 export type ActionLabel = {
@@ -20,8 +20,9 @@ export type ActionLabel = {
 export type ActionDetail =
   // A command and what it printed (Bash, Shell).
   | { kind: 'terminal'; command: string; output: string }
-  // A file change as a unified diff (Edit, Write, MultiEdit, FileChange).
-  | { kind: 'diff'; diff: string }
+  // A file change as a unified diff (Edit, Write, MultiEdit) — the change
+  // as requested; error — why the tool refused it.
+  | { kind: 'diff'; diff: string; error?: string }
   // Markdown text (thinking).
   | { kind: 'md'; text: string }
   // The input and the result of any other tool, as text.
@@ -89,6 +90,33 @@ export function resultText(result: JsonValue | undefined): string {
   return JSON.stringify(result, null, 2);
 }
 
+// The text of a bridge function's result (tool.call.completed): the content
+// blocks when there are any, else the structured content — the platform's
+// own tools answer with `content: []` and the data in structuredContent, an
+// error as { error: { message, details? } }.
+export function bridgeOutput(result: ToolResult | undefined): string {
+  if (!result) {
+    return '';
+  }
+  if (result.content && result.content.length > 0) {
+    return resultText(result.content as JsonValue);
+  }
+
+  const structured = result.structuredContent;
+
+  if (!structured) {
+    return '';
+  }
+
+  const error = structured.error;
+
+  if (result.isError && error && typeof error === 'object' && !Array.isArray(error) && typeof error.message === 'string') {
+    return error.details === undefined ? error.message : `${error.message}\n${JSON.stringify(error.details, null, 2)}`;
+  }
+
+  return resultText(structured);
+}
+
 // A unified-diff body for the Markdown renderer's diff grammar.
 function diffOf(path: string, removed: string, added: string): string {
   const lines = [`--- ${path}`, `+++ ${path}`];
@@ -106,11 +134,14 @@ function diffOf(path: string, removed: string, added: string): string {
 export type NativeAction = { label: ActionLabel; detail: ActionDetail | null; add?: number; del?: number };
 
 // A native tool of the session journal (Claude: Bash, Read, Edit, …;
-// Codex: Shell, FileChange, WebSearch, mcp__<server>__<tool>).
-export function nativeAction(name: string, input: JsonObject, result?: JsonValue): NativeAction {
+// Codex: Shell, FileChange, WebSearch, mcp__<server>__<tool>). result —
+// what the tool answered, once it has; failed — the answer is an error,
+// which a file change shows next to the requested diff.
+export function nativeAction(name: string, input: JsonObject, result?: JsonValue, failed = false): NativeAction {
   const output = result === undefined ? null : resultText(result);
   const command = str(input.command);
   const path = str(input.file_path) ?? str(input.path) ?? str(input.notebook_path);
+  const diff = (text: string): ActionDetail => ({ kind: 'diff', diff: text, ...(failed && output ? { error: output } : {}) });
 
   if ((name === 'Bash' || name === 'Shell') && command) {
     return { label: { icon: 'square-terminal', tool: name, arg: clipLine(command) }, detail: { kind: 'terminal', command, output: output ?? '' } };
@@ -122,7 +153,7 @@ export function nativeAction(name: string, input: JsonObject, result?: JsonValue
 
     return {
       label: { icon: 'file-pen-line', tool: name, arg: shortPath(path) },
-      detail: { kind: 'diff', diff: diffOf(shortPath(path), removed, added) },
+      detail: diff(diffOf(shortPath(path), removed, added)),
       add: lineCount(added),
       del: lineCount(removed),
     };
@@ -144,13 +175,13 @@ export function nativeAction(name: string, input: JsonObject, result?: JsonValue
       }
     }
 
-    return { label: { icon: 'file-pen-line', tool: 'Edit', arg: shortPath(path) }, detail: { kind: 'diff', diff: chunks.join('\n') }, add, del };
+    return { label: { icon: 'file-pen-line', tool: 'Edit', arg: shortPath(path) }, detail: diff(chunks.join('\n')), add, del };
   }
 
   if (name === 'Write' && path) {
     const content = typeof input.content === 'string' ? input.content : '';
 
-    return { label: { icon: 'file-pen-line', tool: name, arg: shortPath(path) }, detail: { kind: 'diff', diff: diffOf(shortPath(path), '', content) }, add: lineCount(content) };
+    return { label: { icon: 'file-pen-line', tool: name, arg: shortPath(path) }, detail: diff(diffOf(shortPath(path), '', content)), add: lineCount(content) };
   }
 
   if (name === 'FileChange' && Array.isArray(input.changes)) {
@@ -186,14 +217,16 @@ export function nativeAction(name: string, input: JsonObject, result?: JsonValue
   }
 
   const mcp = /^mcp__([^_]+(?:_[^_]+)*)__(.+)$/.exec(name);
+  // An end without its start has no input to show.
+  const inputText = Object.keys(input).length > 0 ? JSON.stringify(input, null, 2) : '';
 
   if (mcp) {
-    return { label: { icon: 'plug', tool: mcp[2]!, arg: clipLine(firstString(input) ?? mcp[1]!) }, detail: { kind: 'io', input: JSON.stringify(input, null, 2), output } };
+    return { label: { icon: 'plug', tool: mcp[2]!, arg: clipLine(firstString(input) ?? mcp[1]!) }, detail: { kind: 'io', input: inputText, output } };
   }
 
   const arg = firstString(input);
 
-  return { label: { icon: 'wrench', tool: name, ...(arg ? { arg: clipLine(arg) } : {}) }, detail: { kind: 'io', input: JSON.stringify(input, null, 2), output } };
+  return { label: { icon: 'wrench', tool: name, ...(arg ? { arg: clipLine(arg) } : {}) }, detail: { kind: 'io', input: inputText, output } };
 }
 
 const BRIDGE_ICONS: Record<string, IconName> = {

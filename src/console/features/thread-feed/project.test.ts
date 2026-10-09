@@ -195,6 +195,87 @@ describe('projectFeed — actions', () => {
     assert.deepEqual(rows[3]!.detail, { kind: 'io', input: '{\n  "seq": 5\n}', output: 'the event' });
     assert.equal(rows[4]!.detail?.kind === 'io' ? rows[4]!.detail.output : null, 'boom');
   });
+
+  it('shows the structured content of a bridge result that carries no content blocks, and the message of a structured error', () => {
+    resetSeq(35n);
+
+    const items = projectFeed(
+      [
+        own('tool.call.started', { callId: 'c1', functionName: 'get_event', input: { seq: 5 } }),
+        own('tool.call.completed', { callId: 'c1', functionName: 'get_event', serverName: 'balabash', toolName: 'get_event', result: { content: [], structuredContent: { text: 'important result' } } }),
+        own('tool.call.started', { callId: 'c2', functionName: 'get_thread', input: { threadId: 'nope' } }),
+        own('tool.call.completed', { callId: 'c2', functionName: 'get_thread', serverName: 'balabash', toolName: 'get_thread', result: { content: [], structuredContent: { error: { message: 'thread not found', details: { threadId: 'nope' } } }, isError: true } }),
+      ],
+      ctx,
+    );
+    const rows = (items[0] as ActionsItem).items;
+    const output = (row: (typeof rows)[number]) => (row.detail?.kind === 'io' ? row.detail.output : null);
+
+    assert.equal(rows[0]!.state, 'done');
+    assert.equal(output(rows[0]!), '{\n  "text": "important result"\n}');
+    assert.equal(rows[1]!.state, 'err');
+    assert.equal(output(rows[1]!), 'thread not found\n{\n  "threadId": "nope"\n}');
+  });
+
+  it('keeps the refusal of a failed file change next to the requested diff', () => {
+    resetSeq(37n);
+
+    const items = projectFeed(
+      [
+        own('session.tool.started', { toolUseId: 'e1', name: 'Edit', input: { file_path: 'a.ts', old_string: 'x', new_string: 'y' } }),
+        own('session.tool.completed', { toolUseId: 'e1', name: 'Edit', result: 'Permission denied: a.ts', isError: true }),
+        own('session.tool.started', { toolUseId: 'w1', name: 'Write', input: { file_path: 'b.ts', content: 'z' } }),
+        own('session.tool.completed', { toolUseId: 'w1', name: 'Write', result: 'File written', isError: false }),
+      ],
+      ctx,
+    );
+    const [edit, write] = (items[0] as ActionsItem).items;
+
+    assert.equal(edit!.state, 'err');
+    assert.deepEqual(edit!.detail, { kind: 'diff', diff: '--- a.ts\n+++ a.ts\n-x\n+y', error: 'Permission denied: a.ts' });
+    assert.deepEqual(write!.detail, { kind: 'diff', diff: '--- b.ts\n+++ b.ts\n+z' });
+  });
+
+  it('draws an end whose start lies before the loaded range: a tool row, a child card, a task card', () => {
+    resetSeq(38n);
+
+    const items = projectFeed(
+      [
+        own('session.tool.completed', { toolUseId: 'a', name: 'Bash', result: 'command failed', isError: true, exitCode: 1 }),
+        own('session.tool.completed', { toolUseId: 'p', name: 'TodoWrite', result: 'ok', isError: false }),
+        event({ type: 'thread.completed', threadId: 'c9', targetThreadId: 't1', agentName: 'browser', payload: { title: 'Page checked', summary: { text: 'all fine' } } }),
+        own('session.task.completed', { taskId: 'task1', status: 'failed', summary: 'background task failed' }),
+        own('session.task.completed', { taskId: 'task2', toolUseId: 'b', status: 'completed', summary: 'Run the tests' }),
+      ],
+      ctx,
+    );
+
+    assert.deepEqual(
+      items.map(item => item.kind),
+      ['actions', 'child', 'subtask'],
+    );
+
+    const row = (items[0] as ActionsItem).items[0]!;
+
+    assert.equal(row.label.tool, 'Bash');
+    assert.equal(row.state, 'err');
+    assert.equal(row.endNote, 'exit 1');
+    assert.equal(row.untimed, true);
+    assert.deepEqual(row.detail, { kind: 'io', input: '', output: 'command failed' });
+
+    const child = items[1] as ChildItem;
+
+    assert.equal(child.agent, 'browser');
+    assert.equal(child.title, 'Page checked');
+    assert.equal(child.state, 'done');
+    assert.equal(child.summary, 'all fine');
+    assert.equal(child.startedAt, null);
+
+    const task = items[2] as SubtaskItem;
+
+    assert.equal(task.state, 'err');
+    assert.equal(task.description, 'background task failed');
+  });
 });
 
 describe('projectFeed — threads, tasks and lines', () => {

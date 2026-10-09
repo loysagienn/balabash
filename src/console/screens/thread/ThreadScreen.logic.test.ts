@@ -3,7 +3,7 @@ import { describe, it } from 'node:test';
 import { emptyFeed } from '../../store/feed/reducer.ts';
 import { event, resetSeq, thread } from '../../store/fixtures.ts';
 import { compactionsLabel, railSessionInfo } from './rail.ts';
-import { composerLock, feedStage, feedTop, threadTimeLabel } from './ThreadScreen.logic.ts';
+import { anchorIndex, composerLock, feedScrollMove, feedStage, feedTop, threadTimeLabel } from './ThreadScreen.logic.ts';
 
 describe('thread page words', () => {
   it('labels the header time for an active and a closed thread', () => {
@@ -52,5 +52,33 @@ describe('thread page words', () => {
     assert.equal(compactionsLabel(1), 'compacted once');
     assert.equal(compactionsLabel(2), 'compacted twice');
     assert.equal(compactionsLabel(3), 'compacted 3 times');
+  });
+});
+
+describe('feed scroll', () => {
+  it('opens at the end, keeps the anchored item through an earlier chunk, follows the tail only from the end', () => {
+    const seen = { knownFrom: 500n, height: 2000 };
+
+    assert.deepEqual(feedScrollMove({ previous: null, knownFrom: null, atEnd: true, anchorShift: null, height: 900 }), { kind: 'open' });
+    // An earlier chunk: by the shift of the anchored item, whatever else
+    // changed height above it (the top line, re-keyed cards, opened details).
+    assert.deepEqual(feedScrollMove({ previous: seen, knownFrom: 1n, atEnd: false, anchorShift: 1000, height: 3600 }), { kind: 'by', px: 1000 });
+    // No measured item left in the DOM: the growth of the content.
+    assert.deepEqual(feedScrollMove({ previous: seen, knownFrom: 1n, atEnd: false, anchorShift: null, height: 3000 }), { kind: 'by', px: 1000 });
+    assert.equal(feedScrollMove({ previous: seen, knownFrom: 1n, atEnd: true, anchorShift: 0, height: 2000 }), null);
+    // The tail (a new item or a new row inside the last group): to the end when the end was in view.
+    assert.deepEqual(feedScrollMove({ previous: seen, knownFrom: 500n, atEnd: true, anchorShift: 0, height: 2100 }), { kind: 'end' });
+    assert.equal(feedScrollMove({ previous: seen, knownFrom: 500n, atEnd: false, anchorShift: 0, height: 2100 }), null);
+  });
+
+  it('anchors on the item under the top of the view', () => {
+    const offsets = [0, 120, 400, 900];
+
+    assert.equal(anchorIndex(offsets, 0), 0);
+    assert.equal(anchorIndex(offsets, 119), 0);
+    assert.equal(anchorIndex(offsets, 400), 2);
+    assert.equal(anchorIndex(offsets, 650), 2);
+    assert.equal(anchorIndex(offsets, 5000), 3);
+    assert.equal(anchorIndex([], 10), 0);
   });
 });

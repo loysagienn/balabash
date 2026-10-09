@@ -26,4 +26,3 @@ export function fence(lang: string, text: string): string {
 
   return `${ticks}${lang}\n${text}\n${ticks}`;
 }
-

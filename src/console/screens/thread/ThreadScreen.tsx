@@ -41,7 +41,9 @@ import { Code } from '../../ui/atoms/atoms.tsx';
 import { ThreadMore } from './ThreadMore.tsx';
 import { ThreadRail } from './ThreadRail.tsx';
 import { railSessionInfo } from './rail.ts';
-import { composerLock, feedStage, feedTop, threadTimeLabel } from './ThreadScreen.logic.ts';
+import { anchorIndex, composerLock, feedScrollMove, feedStage, feedTop, threadTimeLabel } from './ThreadScreen.logic.ts';
+import type { FeedScrollSeen } from './ThreadScreen.logic.ts';
+import type { FeedItem } from '../../features/thread-feed/project.ts';
 import './ThreadScreen.css';
 
 const SKELETON = [
@@ -88,13 +90,30 @@ function useTopSentinel(onVisible: () => void): (node: HTMLDivElement | null) =>
   }, []);
 }
 
-// Keeps the reader's place: the first view of a feed opens at its end; an
-// earlier chunk prepended above leaves the same event under the eye; a new
-// event appended while the end is in view scrolls to it.
-function useFeedScroll(feedRef: { current: HTMLDivElement | null }, ready: boolean, firstKey: string | null, lastKey: string | null, count: number): void {
-  const last = useRef<{ height: number; first: string | null; last: string | null } | null>(null);
+// The offset of a node from the top of the scroll box's content — the same
+// number wherever the box is scrolled.
+function offsetIn(box: HTMLElement, node: Element): number {
+  return node.getBoundingClientRect().top - box.getBoundingClientRect().top + box.scrollTop;
+}
+
+type FeedAnchor = { node: Element; offset: number };
+
+// Keeps the reader's place (the rule is feedScrollMove): the first view of a
+// feed opens at its end; an earlier chunk prepended above leaves the same
+// event under the eye — by the shift of the item under the top of the view
+// (anchorIndex), or the nearest one below it still in the DOM: the chunk
+// can re-key items between the top of the feed and the eye (older actions
+// merge into the first group, a card whose start arrives moves up to it),
+// so no item further up is a safe measure. The items are measured while
+// the chunk is in flight — the heights of the moment it lands, not of the
+// last change of the items (Markdown arriving, opened details, "Show more"
+// in between). A change while the end is in view scrolls to it, a new row
+// inside the last group included. Native scroll anchoring is off for the
+// feed (ThreadScreen.css), so this is the only hand on the box.
+function useFeedScroll(feedRef: { current: HTMLDivElement | null }, itemsRef: { current: HTMLDivElement | null }, ready: boolean, items: FeedItem[], knownFrom: bigint | null, requesting: boolean): void {
+  const seen = useRef<(FeedScrollSeen & { anchors: FeedAnchor[] }) | null>(null);
   const atEnd = useRef(true);
-  const opened = useRef(false);
+  const scrollTop = useRef(0);
 
   useEffect(() => {
     const box = scrollBox(feedRef.current);
@@ -104,6 +123,7 @@ function useFeedScroll(feedRef: { current: HTMLDivElement | null }, ready: boole
     }
 
     const onScroll = () => {
+      scrollTop.current = box.scrollTop;
       atEnd.current = box.scrollHeight - box.scrollTop - box.clientHeight < 48;
     };
 
@@ -119,23 +139,38 @@ function useFeedScroll(feedRef: { current: HTMLDivElement | null }, ready: boole
       return;
     }
 
-    const previous = last.current;
-
-    if (!opened.current) {
-      opened.current = true;
-      // After every effect of the shell (it resets a new screen to the top).
-      requestAnimationFrame(() => {
-        box.scrollTop = box.scrollHeight;
-        atEnd.current = true;
-      });
-    } else if (previous && previous.first !== firstKey && previous.last === lastKey) {
-      box.scrollTop += box.scrollHeight - previous.height;
-    } else if (previous && previous.last !== lastKey && atEnd.current) {
+    const previous = seen.current;
+    const anchors = previous?.anchors ?? [];
+    const anchor = anchors.slice(anchorIndex(anchors.map(candidate => candidate.offset), scrollTop.current)).find(candidate => candidate.node.isConnected);
+    const move = feedScrollMove({
+      previous,
+      knownFrom,
+      atEnd: atEnd.current,
+      anchorShift: anchor ? offsetIn(box, anchor.node) - anchor.offset : null,
+      height: box.scrollHeight,
+    });
+    const toEnd = () => {
       box.scrollTop = box.scrollHeight;
+      scrollTop.current = box.scrollTop;
+      atEnd.current = true;
+    };
+
+    if (move?.kind === 'open') {
+      toEnd();
+      // Again after every effect of the shell (it resets a new screen to the top).
+      requestAnimationFrame(toEnd);
+    } else if (move?.kind === 'end') {
+      toEnd();
+    } else if (move?.kind === 'by') {
+      box.scrollTop += move.px;
+      scrollTop.current = box.scrollTop;
     }
 
-    last.current = { height: box.scrollHeight, first: firstKey, last: lastKey };
-  }, [feedRef, ready, firstKey, lastKey, count]);
+    // Measured only while a chunk is in flight: it lands at the next change.
+    const measured = requesting ? Array.from(itemsRef.current?.children ?? []).map(node => ({ node, offset: offsetIn(box, node) })) : [];
+
+    seen.current = { knownFrom, height: box.scrollHeight, anchors: measured };
+  }, [feedRef, itemsRef, ready, items, knownFrom, requesting]);
 }
 
 function ThreadPage({ thread }: { thread: ThreadRecord }) {
@@ -176,8 +211,9 @@ function ThreadPage({ thread }: { thread: ThreadRecord }) {
   const retry = () => dispatch(loadThreadEvents(id, feed.knownFrom));
 
   const feedRef = useRef<HTMLDivElement>(null);
+  const itemsRef = useRef<HTMLDivElement>(null);
 
-  useFeedScroll(feedRef, ready, items[0]?.key ?? null, items[items.length - 1]?.key ?? null, items.length);
+  useFeedScroll(feedRef, itemsRef, ready, items, feed.knownFrom, feed.request !== null);
 
   const lock = composerLock(thread, headless);
   const title = threadTitle(thread);
@@ -253,7 +289,9 @@ function ThreadPage({ thread }: { thread: ThreadRecord }) {
                 {ready ? (
                   <>
                     {topLine}
-                    <FeedItems items={items} now={now} />
+                    <div ref={itemsRef} style={{ display: 'contents' }}>
+                      <FeedItems items={items} now={now} />
+                    </div>
                   </>
                 ) : null}
               </Feed>
@@ -290,7 +328,9 @@ export function ThreadScreen({ id }: { id: string }) {
   const lookup = useAppSelector(s => s.threads.lookup[id]);
 
   if (thread) {
-    return <ThreadPage thread={thread} />;
+    // Keyed by the thread: a step straight from one thread to another starts
+    // a fresh page — its own scroll place, feed opened at the end.
+    return <ThreadPage key={thread.id} thread={thread} />;
   }
 
   const shell = { current: 'threads' as const, title: 'Thread', crumb: { label: 'Threads', route: { key: 'threads' as const } }, back: { key: 'threads' as const }, detail: true, compact: true, pageHead: true };

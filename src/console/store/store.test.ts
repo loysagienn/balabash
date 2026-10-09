@@ -680,7 +680,7 @@ describe('thread page data', () => {
 
     const sending = dispatched(store, sendMessage('t1', 'hello'));
 
-    assert.equal(store.getState().ui.composerSending.t1, true);
+    assert.deepEqual(store.getState().ui.composerSending.t1, { draft: 'hello' });
     store.dispatch(sendMessage('t1', 'hello again'));
     assert.equal(calls.filter(call => call.name === 'threads.sendMessage').length, 1);
 
@@ -688,6 +688,18 @@ describe('thread page data', () => {
     await sending;
     assert.equal(store.getState().ui.composerSending.t1, undefined);
     assert.equal(store.getState().ui.composerDrafts.t1, undefined);
+
+    // The field stays editable while the message is on its way: what was
+    // typed meanwhile is the next draft, not the sent one — it stays.
+    store.dispatch(setComposerDraft('t1', 'second'));
+
+    const typing = dispatched(store, sendMessage('t1', 'second'));
+
+    store.dispatch(setComposerDraft('t1', 'third, still typing'));
+    resolveSend!();
+    await typing;
+    assert.equal(store.getState().ui.composerSending.t1, undefined);
+    assert.equal(store.getState().ui.composerDrafts.t1, 'third, still typing');
 
     store.dispatch(setComposerDraft('t1', 'later'));
     fail = true;

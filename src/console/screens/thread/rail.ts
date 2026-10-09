@@ -37,4 +37,3 @@ export function railSessionInfo(events: readonly Event[], live: { used: number; 
 export function compactionsLabel(n: number): string {
   return n === 0 ? 'not compacted' : n === 1 ? 'compacted once' : n === 2 ? 'compacted twice' : `compacted ${n} times`;
 }
-

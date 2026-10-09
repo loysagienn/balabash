@@ -12,13 +12,15 @@ export type UiState = {
   toasts: Toast[];
   nextToastId: number;
   composerDrafts: Record<string, string>;
-  // Threads whose composer message is on its way (SEND_MESSAGE).
-  composerSending: Record<string, true>;
+  // Threads whose composer message is on its way (SEND_MESSAGE), with the
+  // draft as it was at the send: the field stays editable meanwhile, so a
+  // success clears the draft only while it is still that one.
+  composerSending: Record<string, { draft: string }>;
 };
 
 export const initialUi: UiState = { moreSheet: false, toasts: [], nextToastId: 1, composerDrafts: {}, composerSending: {} };
 
-function withoutSending(state: UiState, threadId: string): Record<string, true> {
+function withoutSending(state: UiState, threadId: string): UiState['composerSending'] {
   const { [threadId]: dropped, ...rest } = state.composerSending;
 
   return dropped ? rest : state.composerSending;
@@ -38,13 +40,13 @@ export function uiReducer(state: UiState = initialUi, action: Action): UiState {
     case 'COMPOSER_DRAFT_SET':
       return { ...state, composerDrafts: { ...state.composerDrafts, [action.threadId]: action.text } };
     case 'SEND_MESSAGE':
-      return { ...state, composerSending: { ...state.composerSending, [action.threadId]: true } };
+      return { ...state, composerSending: { ...state.composerSending, [action.threadId]: { draft: state.composerDrafts[action.threadId] ?? '' } } };
     case 'SEND_MESSAGE_DONE': {
-      const { [action.threadId]: dropped, ...composerDrafts } = state.composerDrafts;
+      const sent = state.composerSending[action.threadId];
+      const { [action.threadId]: draft, ...composerDrafts } = state.composerDrafts;
+      const unchanged = sent === undefined || draft === undefined || draft === sent.draft;
 
-      void dropped;
-
-      return { ...state, composerDrafts, composerSending: withoutSending(state, action.threadId) };
+      return { ...state, composerDrafts: unchanged ? composerDrafts : state.composerDrafts, composerSending: withoutSending(state, action.threadId) };
     }
     case 'SEND_MESSAGE_FAIL':
       return { ...state, composerSending: withoutSending(state, action.threadId) };

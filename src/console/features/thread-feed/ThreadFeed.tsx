@@ -60,13 +60,15 @@ function FeedChild({ item, now }: { item: ChildItem; now: Date }) {
   const live = useAppSelector(s => selectThreadState(s, item.threadId));
   const link = useLinkProps({ key: 'thread', id: item.threadId });
   const state = item.state ?? live ?? 'wait';
-  const when = item.endedAt ? `${dateTimeLabel(item.startedAt, now)} → ${dateTimeLabel(item.endedAt, now)}` : dateTimeLabel(item.startedAt, now);
+  const sub = item.startedAt
+    ? `${item.agent} agent started · ${item.endedAt ? `${dateTimeLabel(item.startedAt, now)} → ${dateTimeLabel(item.endedAt, now)}` : dateTimeLabel(item.startedAt, now)}`
+    : `${item.agent} agent · ended ${item.endedAt ? dateTimeLabel(item.endedAt, now) : ''}`;
 
   return (
     <ChildThread
       agent={item.agent}
       title={item.title}
-      sub={`${item.agent} agent started · ${when}`}
+      sub={sub}
       state={state}
       href={link.href}
       onOpen={event => {

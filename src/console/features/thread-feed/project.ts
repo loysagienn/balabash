@@ -5,7 +5,9 @@
 // store's selector memoises it per thread on the seq list; the components
 // only draw the items. Pairs (a tool's start and end, a sub-agent task's
 // progress, a child thread's start and terminal, the plan) are folded into
-// one item that stays where it first appeared.
+// one item that stays where it first appeared; an end whose start lies
+// before the loaded range (the chunk boundary) stands on its own, where
+// it is — the result and the error are in the range, and they show.
 
 import type { Event, JsonObject } from '../../../core/contract.ts';
 import type { EventOf, EventPayloads, EventType, SessionPlanItem } from '../../../core/event-types.ts';
@@ -13,7 +15,7 @@ import { formatTokensK } from '../../ui/Ring/Ring.logic.ts';
 import type { IconName } from '../../ui/Icon/Icon.tsx';
 import type { StateName } from '../../ui/atoms/state.ts';
 import type { XpState } from '../../ui/Xp/Xp.tsx';
-import { actionDuration, bridgeAction, isPlanTool, nativeAction, resultText } from './actions.ts';
+import { actionDuration, bridgeAction, bridgeOutput, isPlanTool, nativeAction } from './actions.ts';
 import type { ActionDetail, ActionLabel } from './actions.ts';
 
 export type FeedContext = {
@@ -86,7 +88,8 @@ export type ChildItem = {
   threadId: string;
   agent: string;
   title: string;
-  startedAt: Date;
+  // null — the start is not in the loaded range, only the terminal is.
+  startedAt: Date | null;
   endedAt: Date | null;
   // The terminal's state; null while the child is active (the store knows its session).
   state: 'done' | 'err' | 'off' | null;
@@ -314,6 +317,25 @@ class Builder {
       }
 
       if (!own) {
+        if (event.threadId) {
+          // The child's start is before the loaded range: the terminal alone.
+          const agent = event.agentName ?? this.ctx.agentOf(event.threadId) ?? 'agent';
+          const orphan: ChildItem = {
+            kind: 'child',
+            key,
+            threadId: event.threadId,
+            agent,
+            title: (is(event, 'thread.completed') ? event.payload.title?.trim() : undefined) || agent,
+            startedAt: null,
+            endedAt: at,
+            state: terminalState(event.type),
+            summary: is(event, 'thread.completed') ? (event.payload.summary?.text ?? null) : is(event, 'thread.failed') ? event.payload.error : event.payload.reason || null,
+          };
+
+          this.children.set(event.threadId, orphan);
+          this.push(orphan);
+        }
+
         return;
       }
 
@@ -419,18 +441,28 @@ class Builder {
 
     if (is(event, 'session.tool.completed')) {
       const item = this.tools.get(event.payload.toolUseId);
+      const { exitCode, isError, result } = event.payload;
+      const failed = isError || (typeof exitCode === 'number' && exitCode !== 0);
+      const endNote = typeof exitCode === 'number' ? `exit ${exitCode}` : failed ? 'error' : null;
 
-      if (!item) {
+      if (item) {
+        item.state = failed ? 'err' : 'done';
+        item.endedAt = at;
+        item.endNote = endNote;
+        item.detail = nativeAction(event.payload.name, this.inputs.get(item) ?? {}, result, failed).detail ?? item.detail;
+
         return;
       }
 
-      const { exitCode, isError, result } = event.payload;
-      const failed = isError || (typeof exitCode === 'number' && exitCode !== 0);
+      if (isPlanTool(event.payload.name)) {
+        return;
+      }
 
-      item.state = failed ? 'err' : 'done';
-      item.endedAt = at;
-      item.endNote = typeof exitCode === 'number' ? `exit ${exitCode}` : failed ? 'error' : null;
-      item.detail = nativeAction(event.payload.name, this.inputs.get(item) ?? {}, result).detail ?? item.detail;
+      // The start is before the loaded range: a row of the end alone — the
+      // name and the result, no input and no duration.
+      const { label, detail } = nativeAction(event.payload.name, {}, result, failed);
+
+      this.action({ kind: 'action', key, at, state: failed ? 'err' : 'done', label, endedAt: at, untimed: true, endNote, detail, nested: [] }, event.payload.parentToolUseId);
 
       return;
     }
@@ -514,11 +546,21 @@ class Builder {
 
     if (is(event, 'session.task.completed')) {
       const item = this.tasks.get(event.payload.taskId);
+      const state: StateName = event.payload.status === 'completed' ? 'done' : event.payload.status === 'failed' ? 'err' : 'off';
 
       if (item) {
-        item.state = event.payload.status === 'completed' ? 'done' : event.payload.status === 'failed' ? 'err' : 'off';
+        item.state = state;
         item.meta = event.payload.usage ? taskMeta(event.payload.usage) : item.meta;
         item.summary = event.payload.summary || item.summary;
+
+        return;
+      }
+
+      // The start is before the loaded range. A task bound to a tool use is
+      // represented by that tool's row (an end alone when its start is out
+      // of range too); a task of its own gets its card from the end.
+      if (!event.payload.toolUseId) {
+        this.push({ kind: 'subtask', key, at, taskKind: 'task', description: event.payload.summary, state, meta: taskMeta(event.payload.usage), lastTool: null, summary: null });
       }
 
       return;
@@ -561,7 +603,7 @@ class Builder {
     if (is(event, 'tool.call.completed') || is(event, 'tool.call.failed')) {
       const item = this.tools.get(`call:${event.payload.callId}`);
       const failed = is(event, 'tool.call.failed');
-      const output = failed ? event.payload.error : resultText(event.payload.result?.content ?? event.payload.result?.structuredContent ?? null);
+      const output = failed ? event.payload.error : bridgeOutput(event.payload.result);
       const isError = failed || event.payload.result?.isError === true;
 
       if (item) {

@@ -4,4 +4,6 @@
 .ths{min-height:100%}
 .ths-skel{display:flex;flex-direction:column;gap:var(--sp-4)}
 .ths-top{align-self:center}
+/* The page keeps the reader's place itself (useFeedScroll); the browser's anchoring must not add its own shift. */
+.ths .feed{overflow-anchor:none}
 }

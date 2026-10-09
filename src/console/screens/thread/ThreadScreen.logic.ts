@@ -60,3 +60,45 @@ export function feedTop(feed: ThreadFeed): FeedTop {
 
   return feed.error ? 'error' : 'more';
 }
+
+// What the scroll box of the feed does after its items changed (the hook
+// measures, this decides). The first ready view opens at the end. An
+// earlier chunk — knownFrom moved — keeps the same element under the eye:
+// by the shift of an anchored item still in the DOM, else (the first items
+// re-keyed when older actions merged into their group) by the growth of
+// the content. Any other change while the end is in view follows it; a
+// reader up in the history is left in place.
+export type FeedScrollSeen = { knownFrom: bigint | null; height: number };
+export type FeedScrollMove = { kind: 'open' } | { kind: 'end' } | { kind: 'by'; px: number } | null;
+
+export function feedScrollMove(input: { previous: FeedScrollSeen | null; knownFrom: bigint | null; atEnd: boolean; anchorShift: number | null; height: number }): FeedScrollMove {
+  const { previous, knownFrom, atEnd, anchorShift, height } = input;
+
+  if (!previous) {
+    return { kind: 'open' };
+  }
+  if (previous.knownFrom !== knownFrom) {
+    const px = anchorShift ?? height - previous.height;
+
+    return px === 0 ? null : { kind: 'by', px };
+  }
+
+  return atEnd ? { kind: 'end' } : null;
+}
+
+// Which measured item the eye is on: the last one whose top is at or above
+// the scroll position (it straddles the top of the view), the first when
+// none is. offsets — the items' tops from the top of the content, ascending.
+export function anchorIndex(offsets: readonly number[], scrollTop: number): number {
+  let index = 0;
+
+  for (let i = 0; i < offsets.length; i++) {
+    if (offsets[i]! <= scrollTop) {
+      index = i;
+    } else {
+      break;
+    }
+  }
+
+  return index;
+}

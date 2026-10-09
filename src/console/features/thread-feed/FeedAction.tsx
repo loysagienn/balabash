@@ -1,7 +1,8 @@
 // One action of the feed as an Xp row: the words of the projection, the
 // time on the right (a live timer while it runs — `now` ticks every second
 // then), and the details that mount when the row opens: a terminal with
-// the command and its output, a diff, the thought as Markdown, the input
+// the command and its output, a diff (with the tool's refusal above it
+// when the change failed), the thought as Markdown, the input
 // and the result of any other tool — each cut to a readable size with an
 // honest notice. The frames of a native sub-agent render under the row.
 
@@ -40,9 +41,19 @@ function Details({ detail, error }: { detail: ActionDetail; error: boolean }) {
     }
     case 'diff': {
       const diff = cutText(detail.diff);
+      const failure = detail.error === undefined ? null : cutText(detail.error);
 
       return (
         <>
+          {failure ? (
+            <>
+              <Terminal className="tf-term-err">
+                <TermLine dim>error</TermLine>
+                {failure.text}
+              </Terminal>
+              <Notice cut={failure} />
+            </>
+          ) : null}
           <Md quiet source={fence('diff', diff.text)} />
           <Notice cut={diff} />
         </>
