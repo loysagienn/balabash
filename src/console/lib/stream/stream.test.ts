@@ -63,6 +63,7 @@ const api: Api = {
   auth: async () => ME,
   logout: async () => ({ ok: true as const }),
   snapshot: async () => snapshot({ asOfSeq: 50n, threads: [thread({ id: 'main', parentId: null }), thread({ id: 'a', createdSeq: 7n })] }),
+  settings: { update: async () => ({ settings: { workspaceName: 'Workspace', operatorName: null } }) },
   threads: {
     list: async () => ({ threads: [], nextCursor: null }),
     get: async () => ({ thread: thread({ id: 'a' }), headless: false }),

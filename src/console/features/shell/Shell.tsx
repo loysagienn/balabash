@@ -5,8 +5,8 @@
 // container width. Counts and attention marks come from the store: running
 // threads on "Threads", a dot on a section that awaits the user. The
 // toasts of the store stack in the corner of the shell (features/toasts).
-// The operator's name under the workspace name waits for its data (plan,
-// "Чего нет в данных").
+// The sidebar head names the workspace and, once Settings has it, the
+// operator under it.
 
 import { useEffect, useMemo, useRef } from 'react';
 import type { ReactNode } from 'react';
@@ -81,6 +81,7 @@ export function Shell({ current, detail, children, ...top }: ShellProps) {
   }, [mainRoute, dispatch]);
 
   const workspace = me?.workspaceName ?? 'Workspace';
+  const operator = me?.operatorName ?? null;
   const tabCurrent = section === null ? null : TABS.some(item => item.key === section) ? section : 'more';
   const moreAttention = MORE.some(item => attention.has(item.key));
 
@@ -92,6 +93,7 @@ export function Shell({ current, detail, children, ...top }: ShellProps) {
             <div className="shell-logo">{workspace.charAt(0).toUpperCase()}</div>
             <div>
               <b className="shell-ws-name">{workspace}</b>
+              {operator ? <small className="shell-ws-sub">{operator}</small> : null}
             </div>
           </div>
           <nav className="shell-nav" aria-label="Sections">

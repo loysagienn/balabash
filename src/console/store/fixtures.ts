@@ -48,7 +48,7 @@ export function thread(partial: Partial<Thread> & { id: string }): Thread {
   };
 }
 
-export const ME = { userId: 'u1', workspaceName: 'Workspace', mainThreadId: 'main' };
+export const ME = { userId: 'u1', workspaceName: 'Workspace', operatorName: null, mainThreadId: 'main' };
 
 export function snapshot(partial: Partial<SnapshotResponse> = {}): SnapshotResponse {
   return {

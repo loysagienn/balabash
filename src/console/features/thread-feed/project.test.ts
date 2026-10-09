@@ -4,7 +4,7 @@ import { event, resetSeq } from '../../store/fixtures.ts';
 import { projectFeed } from './project.ts';
 import type { ActionsItem, ChildItem, FeedContext, MessageItem, PlanItem, SubtaskItem } from './project.ts';
 
-const ctx: FeedContext = { threadId: 't1', agent: 'engineer', parentAgent: 'coordinator', agentOf: id => (id === 'c9' ? 'browser' : null) };
+const ctx: FeedContext = { threadId: 't1', agent: 'engineer', parentAgent: 'coordinator', agentOf: id => (id === 'c9' ? 'browser' : null), you: null };
 
 const own = (type: string, payload: object, extra: object = {}) => event({ type, threadId: 't1', payload: payload as never, ...extra });
 
@@ -360,5 +360,21 @@ describe('projectFeed — threads, tasks and lines', () => {
     );
     assert.equal(items[1]!.kind === 'sys' ? items[1]!.level : null, 'urgent');
     assert.equal(items[8]!.kind === 'sys' ? items[8]!.state : null, 'act');
+  });
+});
+
+describe('projectFeed — the operator in the system lines', () => {
+  it('names the operator when Settings has a name, says "You" otherwise; the messages keep the "you" party', () => {
+    const events = [
+      event({ type: 'user.message', threadId: 't1', actor: 'user', payload: { text: 'hi' } }),
+      event({ type: 'thread.cancel', threadId: 'main', targetThreadId: 't1', actor: 'user', payload: { reason: 'enough' } }),
+      event({ type: 'thread.cancelled', threadId: 't1', payload: { reason: 'enough', requestedBy: 'user' } }),
+    ];
+    const text = (items: ReturnType<typeof projectFeed>) => items.map(item => (item.kind === 'sys' ? item.text : item.kind === 'message' ? `${item.from} → ${item.to}` : item.kind));
+
+    resetSeq(1n);
+    assert.deepEqual(text(projectFeed(events, ctx)), ['you → engineer', 'You asked to cancel the thread — enough', 'Thread cancelled by you — enough']);
+    resetSeq(1n);
+    assert.deepEqual(text(projectFeed(events, { ...ctx, you: 'Vladimir' })), ['you → engineer', 'Vladimir asked to cancel the thread — enough', 'Thread cancelled by Vladimir — enough']);
   });
 });

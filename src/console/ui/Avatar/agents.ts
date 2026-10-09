@@ -1,8 +1,9 @@
 // Who is who in the avatar (design README, rule 6): the letter and the
 // identity color are fixed per agent of the catalog (agents/index.ts in
 // the repository; the coordinator is the secretary of the main thread,
-// "you" is the user). An agent outside the table gets its initial and the
-// neutral color.
+// "you" is the user — named, it keeps the user's color under its own
+// initial). An agent outside the table gets its initial and the neutral
+// color.
 
 export type AvatarId = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 'you';
 
@@ -23,14 +24,20 @@ export const AGENT_AVATARS: Record<string, readonly [letter: string, id: AvatarI
 
 export type AvatarVals = { letter: string; id: AvatarId | undefined; title: string };
 
-export function avatarVals(agent: string): AvatarVals {
+function initialOf(name: string): string {
+  return name.trim().charAt(0).toUpperCase();
+}
+
+export function avatarVals(agent: string, you?: string): AvatarVals {
+  if (agent === 'you' && you && initialOf(you)) {
+    return { letter: initialOf(you), id: 'you', title: you };
+  }
+
   const known = AGENT_AVATARS[agent];
 
   if (known) {
     return { letter: known[0], id: known[1], title: agent };
   }
 
-  const initial = agent.trim().charAt(0).toUpperCase();
-
-  return { letter: initial || '?', id: undefined, title: agent };
+  return { letter: initialOf(agent) || '?', id: undefined, title: agent };
 }

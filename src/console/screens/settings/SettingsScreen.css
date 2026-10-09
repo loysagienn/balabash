@@ -1,0 +1,7 @@
+@layer screens{
+/* Settings: one column of cards, each saving on its own (SettingsScreen.dc.html). */
+.set-col{--set-w:760px;display:flex;flex-direction:column;gap:var(--gap);width:100%;max-width:var(--set-w)}
+/* A field and its button on one line; the hint goes under both. */
+.set-inline{display:flex;gap:var(--sp-2)}
+.set-inline .inp{flex:1;min-width:0}
+}

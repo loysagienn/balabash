@@ -275,6 +275,7 @@ function RunningThread({ phone }: { phone?: boolean }) {
             <Message
               agent="engineer"
               to="you"
+              you="Vladimir"
               variant="ask"
               time="15:12"
               quick={['Right away', 'Hold 7 days']}
@@ -282,7 +283,7 @@ function RunningThread({ phone }: { phone?: boolean }) {
             >
               <Md source="Decision needed: on unpublish, free the slug right away or hold it for the app for 7 days, so old links don’t pass to someone else?" />
             </Message>
-            <Message agent="you" to="engineer" variant="user" time="15:20">
+            <Message agent="you" to="engineer" you="Vladimir" variant="user" time="15:20">
               <Md source="Hold it for 7 days, then free it automatically." />
             </Message>
             <MsgQuiet>

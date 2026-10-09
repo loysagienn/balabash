@@ -14,7 +14,7 @@ import type { Action, ActionHandlers, State } from './types.ts';
 import { createRouterReducer } from './router/reducer.ts';
 import { routeToHandler } from './router/handlers.ts';
 import { sessionReducer } from './session/reducer.ts';
-import { loginDoneHandler, loginHandler, logoutHandler, sessionCheckDoneHandler, sessionCheckHandler } from './session/handlers.ts';
+import { loginDoneHandler, loginHandler, logoutHandler, saveSettingsHandler, sessionCheckDoneHandler, sessionCheckHandler } from './session/handlers.ts';
 import { streamReducer } from './stream/reducer.ts';
 import { snapshotLoadDoneHandler, snapshotLoadHandler } from './stream/handlers.ts';
 import { threadsReducer } from './threads/reducer.ts';
@@ -37,6 +37,7 @@ export const handlers = {
   LOGIN: loginHandler,
   LOGIN_DONE: loginDoneHandler,
   LOGOUT: logoutHandler,
+  SAVE_SETTINGS: saveSettingsHandler,
   SNAPSHOT_LOAD: snapshotLoadHandler,
   SNAPSHOT_LOAD_DONE: snapshotLoadDoneHandler,
   LOAD_THREADS: loadThreadsHandler,

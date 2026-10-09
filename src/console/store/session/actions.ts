@@ -1,4 +1,4 @@
-import type { MeResponse } from '../../../api/contract.ts';
+import type { MeResponse, NamesView, SettingsPatchRequest } from '../../../api/contract.ts';
 import type { ApiFailure } from '../../lib/api/index.ts';
 
 export const sessionCheck = () => ({ type: 'SESSION_CHECK' }) as const;
@@ -13,6 +13,12 @@ export const loginFail = (error: ApiFailure) => ({ type: 'LOGIN_FAIL', error }) 
 export const logout = () => ({ type: 'LOGOUT' }) as const;
 export const logoutDone = () => ({ type: 'LOGOUT_DONE' }) as const;
 export const logoutFail = (error: ApiFailure) => ({ type: 'LOGOUT_FAIL', error }) as const;
+
+// The names of Settings (workspace, operator): each card saves on its own,
+// the answer updates `me` — the sidebar, the feed and the cards follow.
+export const saveSettings = (patch: SettingsPatchRequest) => ({ type: 'SAVE_SETTINGS', patch }) as const;
+export const saveSettingsDone = (patch: SettingsPatchRequest, settings: NamesView) => ({ type: 'SAVE_SETTINGS_DONE', patch, settings }) as const;
+export const saveSettingsFail = (patch: SettingsPatchRequest, error: ApiFailure) => ({ type: 'SAVE_SETTINGS_FAIL', patch, error }) as const;
 
 // A session-gated call answered 401: the session is gone.
 export const sessionLost = () => ({ type: 'SESSION_LOST' }) as const;

@@ -8,6 +8,7 @@ import type { MouseEvent } from 'react';
 import { dateTimeLabel, fileSize } from '../../lib/format/index.ts';
 import { isPlainLeftClick, useLinkProps } from '../../lib/router/Link.tsx';
 import { useAppSelector } from '../../store/hooks.ts';
+import { selectOperatorName } from '../../store/session/selectors.ts';
 import { selectThreadState } from '../../store/sessions/selectors.ts';
 import { Att, AttThumb, Atts } from '../../ui/Att/Att.tsx';
 import { ChildThread } from '../../ui/ChildThread/ChildThread.tsx';
@@ -48,8 +49,10 @@ export function Attachments({ atts }: { atts: Attachment[] }) {
 }
 
 function FeedMessage({ item, now }: { item: MessageItem; now: Date }) {
+  const you = useAppSelector(selectOperatorName) ?? undefined;
+
   return (
-    <Message agent={item.from} to={item.to} variant={item.variant} tag={item.tag} time={dateTimeLabel(item.at, now)} fold={item.fold}>
+    <Message agent={item.from} to={item.to} you={you} variant={item.variant} tag={item.tag} time={dateTimeLabel(item.at, now)} fold={item.fold}>
       {item.text ? <Md source={item.text} /> : null}
       <Attachments atts={item.atts} />
     </Message>

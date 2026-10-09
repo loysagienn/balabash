@@ -14,6 +14,7 @@ import { prisma } from '../db/client.ts';
 import { config } from '../config/index.ts';
 import { prepareObject } from '../utils/serialize-json.ts';
 import { parseJsonBody } from './json-body.ts';
+import { SettingsError, parseSettingsPatch } from './settings.ts';
 import { countThreadsAt, ensureOperatorWorkspace, getMainThread, getThread, isHeadlessThread, listThreads } from '../core/threads.ts';
 import { getEventsAfter, listThreadEvents } from '../core/events.ts';
 import { getLiveHub } from '../core/live.ts';
@@ -42,11 +43,13 @@ import type {
   LlmRequestsResponse,
   LogoutResponse,
   MeResponse,
+  NamesView,
   PostThreadMessageResponse,
   ThreadCommandResponse,
   ProvisionSecretsResponse,
   SecretRequestResponse,
   SecretRequestView,
+  SettingsResponse,
   ThreadEventsResponse,
   ThreadResponse,
   ThreadsResponse,
@@ -248,14 +251,59 @@ router.post('/auth', async ctx => {
   ctx.body = prepareObject(await buildMeResponse(userId));
 });
 
-async function buildMeResponse(userId: string): Promise<MeResponse> {
-  const [workspaceName, mainThread] = await Promise.all([getWorkspaceName(userId), getMainThread(userId)]);
+// The names as the console shows them: the stored workspace name wins over
+// the group's title (and spares the Bot API call); the operator's name is
+// the stored one or nothing.
+async function readNames(userId: string): Promise<NamesView> {
+  const user = await prisma.user.findUnique({ where: { id: userId }, select: { workspaceName: true, operatorName: true } });
+  const workspaceName = user?.workspaceName ?? (await getWorkspaceName(userId));
 
-  return { userId, workspaceName, mainThreadId: mainThread?.id ?? null };
+  return { workspaceName, operatorName: user?.operatorName ?? null };
+}
+
+async function buildMeResponse(userId: string): Promise<MeResponse> {
+  const [names, mainThread] = await Promise.all([readNames(userId), getMainThread(userId)]);
+
+  return { userId, ...names, mainThreadId: mainThread?.id ?? null };
 }
 
 router.get('/me', requireSession, async ctx => {
   ctx.body = prepareObject(await buildMeResponse(ctx.state.userId as string));
+});
+
+// The names of Settings. The rule of the body is parseSettingsPatch
+// (settings.ts, pure, tested); the row is the user's own, so there is no
+// ownership to check. No registry event: the names come with /api/me and
+// the answer of this call, nothing else folds them.
+router.patch('/settings', requireSession, async ctx => {
+  const userId = ctx.state.userId as string;
+  const body = await readJsonBody(ctx);
+
+  if (!body) {
+    return;
+  }
+
+  let patch;
+
+  try {
+    patch = parseSettingsPatch(body);
+  } catch (error) {
+    if (error instanceof SettingsError) {
+      sendError(ctx, 400, 'bad_request', error.message);
+
+      return;
+    }
+
+    throw error;
+  }
+
+  if (Object.keys(patch).length > 0) {
+    await prisma.user.update({ where: { id: userId }, data: patch });
+  }
+
+  const response: SettingsResponse = { settings: await readNames(userId) };
+
+  ctx.body = prepareObject(response);
 });
 
 router.post('/logout', requireSession, async ctx => {

@@ -20,11 +20,18 @@ export type AuthRequest = {
 // the code goes to the server's stdout, never over the wire. 429 when one
 // was printed moments ago.
 
-export type MeResponse = {
-  userId: string;
-  // Human-readable workspace name (the bound Telegram group's title when that
-  // channel is on; null otherwise).
+// The two names of Settings: the workspace's own and the operator's.
+export type NamesView = {
+  // The workspace's name: the stored one (Settings), else the bound Telegram
+  // group's title when that channel is on; null otherwise.
   workspaceName: string | null;
+  // The operator's name, null until set in Settings: the sidebar line under
+  // the workspace and "you" in the feed (never the agents' prompts).
+  operatorName: string | null;
+};
+
+export type MeResponse = NamesView & {
+  userId: string;
   // The workspace's main thread (the coordinator's root thread) — the
   // header's «to the coordinator» link target. Null only before activation.
   mainThreadId: string | null;
@@ -32,6 +39,19 @@ export type MeResponse = {
 
 export type LogoutResponse = {
   ok: true;
+};
+
+// PATCH /api/settings: a field absent — left alone; null, empty or blank —
+// cleared (the workspace goes by the group's title again, the operator has
+// no name); a string — trimmed, at most 100 chars. 400 for another type or
+// a longer name. The answer is the effective names, as /api/me reports them.
+export type SettingsPatchRequest = {
+  workspaceName?: string | null;
+  operatorName?: string | null;
+};
+
+export type SettingsResponse = {
+  settings: NamesView;
 };
 
 // ---------------------------------------------------------------------------

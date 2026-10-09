@@ -5,6 +5,8 @@
 import type {
   LogoutResponse,
   MeResponse,
+  SettingsPatchRequest,
+  SettingsResponse,
   SnapshotResponse,
   ThreadEventsResponse,
   ThreadResponse,
@@ -25,6 +27,11 @@ export type Api = {
   auth(code: string): Promise<MeResponse>;
   logout(): Promise<LogoutResponse>;
   snapshot(): Promise<SnapshotResponse>;
+  // The names of Settings: the answer carries the effective names as
+  // /api/me reports them.
+  settings: {
+    update(patch: SettingsPatchRequest): Promise<SettingsResponse>;
+  };
   threads: {
     list(query: ThreadsQuery, signal?: AbortSignal): Promise<ThreadsResponse>;
     get(id: string): Promise<ThreadResponse>;
@@ -66,6 +73,9 @@ export function createApi(options: FetchOptions = {}): Api {
     auth: code => apiFetch<MeResponse>('/api/auth', { method: 'POST', body: { code }, unauthenticated: true }),
     logout: () => apiFetch<LogoutResponse>('/api/logout', { method: 'POST', unauthenticated: true }),
     snapshot: () => apiFetch<SnapshotResponse>('/api/snapshot'),
+    settings: {
+      update: patch => apiFetch<SettingsResponse>('/api/settings', { method: 'PATCH', body: patch }),
+    },
     threads: {
       list: (query, signal) => apiFetch<ThreadsResponse>('/api/threads', { query, signal }),
       get: id => apiFetch<ThreadResponse>(thread(id)),

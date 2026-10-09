@@ -1,4 +1,4 @@
-import type { MeResponse } from '../../../api/contract.ts';
+import type { MeResponse, SettingsPatchRequest } from '../../../api/contract.ts';
 import type { ApiFailure } from '../../lib/api/index.ts';
 import type { Action } from '../types.ts';
 
@@ -11,7 +11,29 @@ export type SessionState = {
   error: ApiFailure | null;
   login: { pending: boolean; error: ApiFailure | null };
   logoutPending: boolean;
+  // The names of Settings in flight, by field: the card of a field saving
+  // is busy, the other card is not.
+  settingsSaving: SettingsSaving;
 };
+
+export type SettingsField = keyof SettingsPatchRequest;
+export type SettingsSaving = Record<SettingsField, boolean>;
+
+export const SETTINGS_FIELDS: readonly SettingsField[] = ['workspaceName', 'operatorName'];
+
+export function patchFields(patch: SettingsPatchRequest): SettingsField[] {
+  return SETTINGS_FIELDS.filter(field => patch[field] !== undefined);
+}
+
+function withSaving(state: SessionState, patch: SettingsPatchRequest, saving: boolean): SettingsSaving {
+  const next = { ...state.settingsSaving };
+
+  for (const field of patchFields(patch)) {
+    next[field] = saving;
+  }
+
+  return next;
+}
 
 export const initialSession: SessionState = {
   status: 'loading',
@@ -19,6 +41,7 @@ export const initialSession: SessionState = {
   error: null,
   login: { pending: false, error: null },
   logoutPending: false,
+  settingsSaving: { workspaceName: false, operatorName: false },
 };
 
 export function sessionReducer(state: SessionState = initialSession, action: Action): SessionState {
@@ -39,6 +62,12 @@ export function sessionReducer(state: SessionState = initialSession, action: Act
       return { ...state, logoutPending: true };
     case 'LOGOUT_FAIL':
       return { ...state, logoutPending: false };
+    case 'SAVE_SETTINGS':
+      return { ...state, settingsSaving: withSaving(state, action.patch, true) };
+    case 'SAVE_SETTINGS_DONE':
+      return { ...state, me: state.me ? { ...state.me, ...action.settings } : state.me, settingsSaving: withSaving(state, action.patch, false) };
+    case 'SAVE_SETTINGS_FAIL':
+      return { ...state, settingsSaving: withSaving(state, action.patch, false) };
     case 'LOGOUT_DONE':
     case 'SESSION_LOST':
       return { ...initialSession, status: 'anonymous' };

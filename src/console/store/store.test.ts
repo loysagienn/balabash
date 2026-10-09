@@ -15,7 +15,8 @@ import type { AppRoute } from '../lib/router/routes.ts';
 import type { Action, AppStore } from './index.ts';
 import { eventAction } from './events.ts';
 import { routeTo } from './router/actions.ts';
-import { login, logout, sessionCheck, sessionLost } from './session/actions.ts';
+import { login, logout, saveSettings, sessionCheck, sessionLost } from './session/actions.ts';
+import { selectOperatorName } from './session/selectors.ts';
 import { commandThread, loadThread, loadThreadEvents, loadThreads, sendMessage } from './threads/actions.ts';
 import { setComposerDraft } from './ui/actions.ts';
 import { hasLoadedPage, makeSelectAgentThreads, selectActiveCountIn, selectKnownAgents, selectLatestFinishedThread, selectListThreads, selectMainThread, selectRunningCount, selectRunningCountByAgent, selectRunningCountByProject } from './threads/selectors.ts';
@@ -28,7 +29,7 @@ import { ME, event, resetSeq, snapshot, thread } from './fixtures.ts';
 
 type Calls = { name: string; args: unknown[] }[];
 
-type ApiOverrides = Omit<Partial<Api>, 'threads' | 'workspace'> & { threads?: Partial<Api['threads']> };
+type ApiOverrides = Omit<Partial<Api>, 'threads' | 'workspace' | 'settings'> & { threads?: Partial<Api['threads']>; settings?: Partial<Api['settings']> };
 
 // The file area is Query, not the store: handlers never call it.
 const WORKSPACE: Api['workspace'] = {
@@ -44,12 +45,16 @@ function fakeApi(overrides: ApiOverrides = {}, calls: Calls = []): Api {
 
       return impl(...args);
     };
-  const base: Omit<Api, 'threads' | 'workspace'> = {
+  const base: Omit<Api, 'threads' | 'workspace' | 'settings'> = {
     me: async () => ME,
     auth: async () => ME,
     logout: async () => ({ ok: true as const }),
     snapshot: async () => snapshot(),
     ...overrides,
+  };
+  const settings: Api['settings'] = {
+    update: async patch => ({ settings: { workspaceName: patch.workspaceName ?? ME.workspaceName, operatorName: patch.operatorName ?? ME.operatorName } }),
+    ...overrides.settings,
   };
   const threads: Api['threads'] = {
     list: async () => ({ threads: [], nextCursor: null }),
@@ -66,6 +71,7 @@ function fakeApi(overrides: ApiOverrides = {}, calls: Calls = []): Api {
     auth: wrap('auth', base.auth),
     logout: wrap('logout', base.logout),
     snapshot: wrap('snapshot', base.snapshot),
+    settings: { update: wrap('settings.update', settings.update) },
     threads: {
       list: wrap('threads.list', threads.list),
       get: wrap('threads.get', threads.get),
@@ -179,6 +185,64 @@ describe('session start-up', () => {
     await dispatched(store, sessionCheck());
     assert.equal(store.getState().session.status, 'error');
     assert.equal(store.getState().session.error?.code, 'network');
+  });
+
+  it('saves the names of Settings one field at a time: me follows the answer, a toast confirms', async () => {
+    const calls: Calls = [];
+    const api = fakeApi({}, calls);
+    const store = createStore({ api, initialRoute: { key: 'settings' } });
+
+    await dispatched(store, sessionCheck());
+    await settle();
+    assert.equal(selectOperatorName(store.getState()), null);
+
+    const saving = store.dispatch(saveSettings({ operatorName: ' Vladimir ' }));
+
+    assert.deepEqual(store.getState().session.settingsSaving, { workspaceName: false, operatorName: true });
+    // A second press of the same card waits; the other card is free.
+    await dispatched(store, saveSettings({ operatorName: 'Other' }));
+    assert.equal(calls.filter(call => call.name === 'settings.update').length, 1);
+    await saving;
+
+    assert.deepEqual(store.getState().session.settingsSaving, { workspaceName: false, operatorName: false });
+    assert.equal(selectOperatorName(store.getState()), ' Vladimir ');
+    assert.equal(store.getState().session.me?.workspaceName, 'Workspace');
+    assert.deepEqual(
+      store.getState().ui.toasts.map(toast => [toast.title, toast.desc, toast.state]),
+      [['Saved', 'Your name: “ Vladimir ”', 'done']],
+    );
+
+    // Clearing: the answer carries the fallback (the group's title) — the
+    // toast says "cleared", not the fallback.
+    await dispatched(store, saveSettings({ workspaceName: null }));
+    assert.equal(store.getState().session.me?.workspaceName, 'Workspace');
+    assert.equal(store.getState().ui.toasts.at(-1)?.desc, 'Workspace name cleared');
+
+    // An empty patch is not a call.
+    await dispatched(store, saveSettings({}));
+    assert.equal(calls.filter(call => call.name === 'settings.update').length, 2);
+  });
+
+  it('reports a failed save and frees the card', async () => {
+    const api = fakeApi({
+      settings: {
+        update: async () => {
+          throw new ApiError(400, 'bad_request', 'operatorName must be at most 100 chars');
+        },
+      },
+    });
+    const store = createStore({ api, initialRoute: { key: 'settings' } });
+
+    await dispatched(store, sessionCheck());
+    await settle();
+    await dispatched(store, saveSettings({ operatorName: 'x' }));
+
+    assert.deepEqual(store.getState().session.settingsSaving, { workspaceName: false, operatorName: false });
+    assert.equal(selectOperatorName(store.getState()), null);
+    assert.deepEqual(
+      store.getState().ui.toasts.map(toast => [toast.title, toast.desc, toast.state]),
+      [['Couldn’t save', 'operatorName must be at most 100 chars', 'err']],
+    );
   });
 
   it('sign-out and a lost session reset everything but the route', async () => {

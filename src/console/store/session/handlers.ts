@@ -2,10 +2,13 @@
 // sign-out. A signed-in outcome cascades into SNAPSHOT_LOAD (the store
 // hydrates, the stream process opens the tail).
 
+import type { NamesView, SettingsPatchRequest } from '../../../api/contract.ts';
 import { toApiFailure } from '../../lib/api/index.ts';
 import type { ActionHandler } from '../types.ts';
 import { snapshotLoad } from '../stream/actions.ts';
-import { loginDone, loginFail, logoutDone, logoutFail, sessionCheckDone, sessionCheckFail } from './actions.ts';
+import { pushToast } from '../ui/actions.ts';
+import { loginDone, loginFail, logoutDone, logoutFail, saveSettingsDone, saveSettingsFail, sessionCheckDone, sessionCheckFail } from './actions.ts';
+import { patchFields } from './reducer.ts';
 
 export const sessionCheckHandler: ActionHandler<'SESSION_CHECK'> =
   ({ api, dispatch, next }) =>
@@ -67,5 +70,45 @@ export const logoutHandler: ActionHandler<'LOGOUT'> =
 
       // Already signed out on the server: the outcome is the same.
       dispatch(failure.status === 401 ? logoutDone() : logoutFail(failure));
+    }
+  };
+
+// What the "Saved" toast says: the effective name after the save, or that
+// the name is cleared (the workspace then shows the group's title, which
+// the answer carries).
+export function savedWords(patch: SettingsPatchRequest, settings: NamesView): string {
+  return patchFields(patch)
+    .map(field => {
+      const label = field === 'workspaceName' ? 'Workspace name' : 'Your name';
+      const value = settings[field];
+
+      return value !== null && patch[field] !== null ? `${label}: “${value}”` : `${label} cleared`;
+    })
+    .join(' · ');
+}
+
+// A card saves while no save of its field is in flight (a second press
+// waits for the answer); the answer updates `me` and a toast confirms.
+export const saveSettingsHandler: ActionHandler<'SAVE_SETTINGS'> =
+  ({ api, dispatch, getState, next }) =>
+  async action => {
+    const fields = patchFields(action.patch);
+
+    if (fields.length === 0 || fields.some(field => getState().session.settingsSaving[field])) {
+      return;
+    }
+
+    next(action);
+
+    try {
+      const { settings } = await api.settings.update(action.patch);
+
+      dispatch(saveSettingsDone(action.patch, settings));
+      dispatch(pushToast({ title: 'Saved', desc: savedWords(action.patch, settings), state: 'done' }));
+    } catch (error) {
+      const failure = toApiFailure(error);
+
+      dispatch(saveSettingsFail(action.patch, failure));
+      dispatch(pushToast({ title: 'Couldn’t save', desc: failure.message, state: 'err' }));
     }
   };

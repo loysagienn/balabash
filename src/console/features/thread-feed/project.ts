@@ -25,6 +25,10 @@ export type FeedContext = {
   parentAgent: string | null;
   // The agent of another thread the store knows (a child of this one), or null.
   agentOf: (threadId: string) => string | null;
+  // The operator's name for the system lines ("<name> asked to cancel the
+  // thread"); null — "You". The messages keep the "you" party and the
+  // Message block names it.
+  you: string | null;
 };
 
 export type Attachment = { key: string; href: string; name: string; image: boolean; size: number | null };
@@ -344,7 +348,7 @@ class Builder {
       } else if (is(event, 'thread.failed')) {
         this.push({ kind: 'error', key, at, icon: 'octagon-x', title: 'Thread crashed', text: event.payload.error });
       } else {
-        const by = event.payload.requestedBy;
+        const by = event.payload.requestedBy === 'user' ? (this.ctx.you ?? 'you') : event.payload.requestedBy;
 
         this.push({ kind: 'sys', key, at, icon: 'circle-slash', level: 'normal', text: `Thread cancelled${by ? ` by ${by}` : ''}${event.payload.reason ? ` — ${event.payload.reason}` : ''}` });
       }
@@ -353,7 +357,7 @@ class Builder {
     }
 
     if (is(event, 'thread.cancel')) {
-      this.push({ kind: 'sys', key, at, icon: 'circle-slash', text: `${who(event) === 'you' ? 'You' : who(event)} asked to cancel the thread${event.payload.reason ? ` — ${event.payload.reason}` : ''}` });
+      this.push({ kind: 'sys', key, at, icon: 'circle-slash', text: `${who(event) === 'you' ? (this.ctx.you ?? 'You') : who(event)} asked to cancel the thread${event.payload.reason ? ` — ${event.payload.reason}` : ''}` });
 
       return;
     }
