@@ -5,6 +5,7 @@
 
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import type { Thread } from '../../core/contract.ts';
 import type { Api } from '../lib/api/index.ts';
 import { ApiError } from '../lib/api/index.ts';
 import type { StoreEnhancer } from 'redux';
@@ -14,8 +15,8 @@ import type { Action, AppStore } from './index.ts';
 import { eventAction } from './events.ts';
 import { routeTo } from './router/actions.ts';
 import { login, logout, sessionCheck, sessionLost } from './session/actions.ts';
-import { loadThreadEvents } from './threads/actions.ts';
-import { selectKnownAgents, selectListThreads, selectRunningCount, selectVisibleListThreads } from './threads/selectors.ts';
+import { loadThreadEvents, loadThreads } from './threads/actions.ts';
+import { hasLoadedPage, selectKnownAgents, selectListThreads, selectRunningCount, selectVisibleListThreads } from './threads/selectors.ts';
 import { makeSelectThreadEvents } from './feed/selectors.ts';
 import { selectThreadState } from './sessions/selectors.ts';
 import { ME, event, resetSeq, snapshot, thread } from './fixtures.ts';
@@ -374,6 +375,57 @@ describe('route data', () => {
     assert.deepEqual(calls.at(-1)?.args, [{ limit: 50 }]);
   });
 
+  // Regression (review 080661d, R2): a status picked while the first page of
+  // the previous status was still in flight changed the route and the
+  // segment, but the list kept waiting for — and then showed — the old set.
+  it('retargets the list when the filters change during a request and drops the old answer', async () => {
+    const calls: Calls = [];
+    const answers: ((page: { threads: Thread[]; nextCursor: bigint | null }) => void)[] = [];
+    const api = fakeApi({ threads: { list: () => new Promise(resolve => answers.push(resolve)) } }, calls);
+    const store = createStore({ api, initialRoute: { key: 'threads', status: 'active' } });
+
+    await dispatched(store, sessionCheck());
+    await settle();
+    assert.equal(answers.length, 1);
+
+    await dispatched(store, routeTo({ key: 'threads', status: 'completed' }, { replace: true }));
+    await settle();
+    assert.equal(answers.length, 2);
+    assert.deepEqual(calls.filter(call => call.name === 'threads.list').map(call => call.args[0]), [
+      { status: 'active', limit: 50 },
+      { status: 'completed', limit: 50 },
+    ]);
+    assert.equal(store.getState().threads.list.filters?.status, 'completed');
+    assert.equal(store.getState().threads.list.loading, true);
+
+    // The late answer of the Active set is dropped; the list still waits for Completed.
+    answers[0]!({ threads: [thread({ id: 'a', createdSeq: 7n })], nextCursor: null });
+    await settle();
+    assert.equal(store.getState().threads.list.loading, true);
+    assert.deepEqual(store.getState().threads.list.ids, []);
+    assert.deepEqual(selectListThreads(store.getState()), []);
+
+    answers[1]!({ threads: [thread({ id: 'b', createdSeq: 5n, status: 'completed' })], nextCursor: null });
+    await settle();
+    assert.equal(store.getState().threads.list.loading, false);
+    assert.deepEqual(selectListThreads(store.getState()).map(t => t.id), ['b']);
+
+    // The same during a later page: the next set starts over from its first page.
+    await dispatched(store, routeTo({ key: 'threads' }, { replace: true }));
+    await settle();
+    answers[2]!({ threads: [thread({ id: 'c', createdSeq: 9n })], nextCursor: 9n });
+    await settle();
+    void store.dispatch(loadThreads(store.getState().threads.list.filters!, 9n));
+    await dispatched(store, routeTo({ key: 'threads', status: 'failed' }, { replace: true }));
+    await settle();
+    answers[3]!({ threads: [thread({ id: 'd', createdSeq: 3n })], nextCursor: null });
+    await settle();
+    assert.equal(calls.filter(call => call.name === 'threads.list').length, 5);
+    assert.deepEqual(calls.at(-1)?.args, [{ status: 'failed', limit: 50 }]);
+    assert.deepEqual(store.getState().threads.list.ids, []);
+    assert.equal(store.getState().threads.list.loading, true);
+  });
+
   // Regression: with the Redux DevTools extension installed, the console
   // showed SESSION_CHECK in the extension and nothing else happened — the
   // enhancer sat outside the middleware, which saw only PERFORM_ACTION.
@@ -485,6 +537,42 @@ describe('threads list projection', () => {
       selectListThreads(full.getState()).map(t => t.id),
       ['a', 'b', 'old', 'main'],
     );
+  });
+
+  // Regression (review 080661d, R3): a failed first page looked like an
+  // exhausted one — no ids, no cursor — and opened the range to the whole
+  // snapshot, shown under a "couldn't load earlier threads" note.
+  it('shows no rows after a failed first page until a retry lands', async () => {
+    let fail = true;
+    const api = fakeApi({
+      snapshot: async () => snapshot({ asOfSeq: 50n, threads: [thread({ id: 'old', createdSeq: 2n, status: 'completed' })] }),
+      threads: {
+        list: async () => {
+          if (fail) {
+            throw new ApiError(500, 'internal', 'boom');
+          }
+
+          return { threads: page, nextCursor: null };
+        },
+      },
+    });
+    const store = createStore({ api, initialRoute: { key: 'threads' } });
+
+    await dispatched(store, sessionCheck());
+    await settle();
+
+    const failed = store.getState().threads.list;
+
+    assert.equal(failed.error?.message, 'boom');
+    assert.deepEqual(failed.ids, []);
+    assert.equal(hasLoadedPage(failed), false);
+    assert.deepEqual(selectListThreads(store.getState()), []);
+
+    fail = false;
+    await dispatched(store, loadThreads(failed.filters!, null));
+    await settle();
+    assert.equal(hasLoadedPage(store.getState().threads.list), true);
+    assert.deepEqual(selectListThreads(store.getState()).map(t => t.id), ['a', 'b', 'old']);
   });
 
   it('lets the tail insert a new thread and move a finished one between status filters', async () => {

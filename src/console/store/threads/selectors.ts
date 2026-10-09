@@ -2,6 +2,7 @@ import { createSelector } from 'reselect';
 import type { Thread } from '../../../core/contract.ts';
 import type { State } from '../types.ts';
 import type { ThreadsListFilters } from './filters.ts';
+import type { ThreadsListState } from './reducer.ts';
 
 export const selectThreadsById = (state: State) => state.threads.byId;
 export const selectThreadsList = (state: State) => state.threads.list;
@@ -24,15 +25,26 @@ export function matchesFilters(thread: Thread, filters: ThreadsListFilters): boo
   return (filters.status === null || thread.status === filters.status) && (filters.projectId === null || thread.projectId === filters.projectId);
 }
 
+// Whether a page of the current filter set has landed. Rows in `ids` say so;
+// without them the request state decides: an empty first page (the set has
+// no threads at all) leaves the list quiet with no error, while a request
+// still in flight or one that failed before any page came has not covered
+// any range yet. (The server returns a cursor only with a full page, so an
+// empty `ids` never comes with a cursor.)
+export function hasLoadedPage(list: ThreadsListState): boolean {
+  return list.filters !== null && (list.ids.length > 0 || (!list.loading && list.error === null));
+}
+
 // The rows of the threads list: a projection of the store over the range
 // the pages have covered. The pages fix the floor — the oldest createdSeq
 // loaded (none once the cursor is exhausted); every thread the store knows
 // above it that matches the filters is a row, newest first. So a thread the
 // tail started appears at the top, one that finished moves between the
 // status filters, and a page never has to be refetched. Before the first
-// page lands there are no rows (the screen shows the skeleton).
+// page lands — or when it failed — there are no rows (the screen shows the
+// skeleton or the error).
 export const selectListThreads = createSelector([selectThreadsById, selectThreadsList], (byId, list): Thread[] => {
-  if (list.filters === null || (list.ids.length === 0 && list.nextCursor !== null) || (list.ids.length === 0 && list.loading)) {
+  if (list.filters === null || !hasLoadedPage(list)) {
     return [];
   }
 

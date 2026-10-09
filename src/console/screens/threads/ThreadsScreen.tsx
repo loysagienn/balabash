@@ -16,6 +16,7 @@ import { loadThreads } from '../../store/threads/actions.ts';
 import { threadsFiltersOf } from '../../store/threads/filters.ts';
 import { selectThreadsList, selectVisibleListThreads } from '../../store/threads/selectors.ts';
 import { Shell } from '../../features/shell/Shell.tsx';
+import { emptyMatchNote, threadsBody, threadsFoot } from './ThreadsScreen.logic.ts';
 import { ThreadFilters } from '../../features/thread-list/ThreadFilters.tsx';
 import { ThreadList } from '../../features/thread-list/ThreadList.tsx';
 import { hasFilters } from '../../features/thread-list/filters.ts';
@@ -98,13 +99,28 @@ export function ThreadsScreen({ route }: { route: ThreadsRoute }) {
     }
   }, [moreInView, loading, error, nextCursor, list.filters, dispatch]);
 
-  const firstPage = list.ids.length === 0 && threads.length === 0;
+  const stage = threadsBody(list, threads.length);
+  const firstPage = stage === 'skeleton' || stage === 'failed';
   const retry = () => dispatch(loadThreads(filters, firstPage ? null : nextCursor));
   const toTop = () => topNode.current?.closest('.shell-body')?.scrollTo({ top: 0, behavior: 'smooth' });
 
+  // The status line of the loaded range: under the rows, or under the empty
+  // state when the browser-side filters hide every loaded row.
+  const footKind = threadsFoot(list);
+  const foot =
+    footKind === 'retry' && error ? (
+      <Note state="err" icon="cloud-off" role="alert" action="Retry" actionIcon="refresh-cw" onAction={retry}>
+        Couldn’t load earlier threads: {error.message}
+      </Note>
+    ) : footKind === 'more' ? (
+      <div ref={moreRef}>
+        <LoadMore>{loading ? 'Loading earlier threads…' : 'Earlier threads'}</LoadMore>
+      </div>
+    ) : null;
+
   let body;
 
-  if (firstPage && loading) {
+  if (stage === 'skeleton') {
     body = (
       <Card narrow="bare">
         <List narrow="tiles" busy>
@@ -114,48 +130,33 @@ export function ThreadsScreen({ route }: { route: ThreadsRoute }) {
         </List>
       </Card>
     );
-  } else if (firstPage && error) {
+  } else if (stage === 'failed') {
     body = (
       <Card narrow="bare">
         <Empty icon="cloud-off" state="err" title="Couldn’t load threads" action="Retry" actionIcon="refresh-cw" onAction={retry}>
-          {error.message}
+          {error?.message}
         </Empty>
       </Card>
     );
-  } else if (threads.length === 0 && list.filters && !loading) {
+  } else if (stage === 'empty') {
     body = (
       <Card narrow="bare">
         {hasFilters(route) ? (
           <Empty icon="circle-check" title="No threads match" action="Reset filters" onAction={() => dispatch(routeTo({ key: 'threads' }, { replace: true }))}>
-            {nextCursor !== null ? 'Among the threads loaded so far; earlier ones may match.' : 'Nothing with these filters in the whole list.'}
+            {emptyMatchNote(footKind)}
           </Empty>
         ) : (
           <Empty icon="messages-square" title="No threads yet">
             Threads appear here as agents start working.
           </Empty>
         )}
+        {foot}
       </Card>
     );
   } else {
     body = (
       <Card narrow="bare">
-        <ThreadList
-          threads={rows}
-          now={now}
-          hit={route.q}
-          freshAfter={mountSeq.current}
-          foot={
-            error ? (
-              <Note state="err" icon="cloud-off" role="alert" action="Retry" actionIcon="refresh-cw" onAction={retry}>
-                Couldn’t load earlier threads: {error.message}
-              </Note>
-            ) : nextCursor !== null ? (
-              <div ref={moreRef}>
-                <LoadMore>{loading ? 'Loading earlier threads…' : 'Earlier threads'}</LoadMore>
-              </div>
-            ) : null
-          }
-        />
+        <ThreadList threads={rows} now={now} hit={route.q} freshAfter={mountSeq.current} foot={foot} />
       </Card>
     );
   }

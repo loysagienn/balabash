@@ -29,7 +29,10 @@ export function loadRouteData(route: AppRoute, dispatch: Dispatch, getState: () 
     case 'threads': {
       const filters = threadsFiltersOf(route, state.projects);
 
-      if (!state.threads.list.loading && !sameFilters(state.threads.list.filters, filters)) {
+      // A new filter set starts its first page at once, even while a page of
+      // the previous set is in flight: LOAD_THREADS retargets the list, and
+      // the handler drops the answer to the old set when it lands.
+      if (!sameFilters(state.threads.list.filters, filters)) {
         dispatch(loadThreads(filters, null));
       }
 
