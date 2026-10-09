@@ -2,8 +2,13 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaClient } from '../../prisma-generated/client.ts';
 import type { Prisma } from '../../prisma-generated/client.ts';
 import { config } from '../config/index.ts';
+import { testSafeDatabaseUrl } from './test-guard.ts';
 
-const adapter = new PrismaPg({ connectionString: config.databaseUrl });
+// Under node:test only a local test database may be reached (test-guard.ts);
+// everywhere else the configured one, required as before.
+const connectionString = testSafeDatabaseUrl(process.env.DATABASE_URL, process.env.NODE_TEST_CONTEXT) ?? config.databaseUrl;
+
+const adapter = new PrismaPg({ connectionString });
 
 export const prisma = new PrismaClient({ adapter });
 
