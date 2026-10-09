@@ -26,3 +26,32 @@ export async function getProject(userId: string, id: string): Promise<ProjectMod
 
   return project && project.userId === userId ? project : null;
 }
+
+// Workspace-scoped lookup by slug — the address agents name a project by
+// (spawn options, prompts). Same leak rule as getProject.
+export async function getProjectBySlug(userId: string, slug: string): Promise<ProjectModel | null> {
+  return slug ? prisma.project.findUnique({ where: { userId_slug: { userId, slug } } }) : null;
+}
+
+// The project link of a spawn: a slug named by the spawner becomes the
+// {id, slug} pair thread.started records. An unknown slug rejects the spawn
+// loudly — a silent null would quietly lose the link the spawner asked for.
+export async function resolveSpawnProject(userId: string, slug: string | undefined): Promise<{ id: string; slug: string } | undefined> {
+  if (slug === undefined) {
+    return undefined;
+  }
+
+  const trimmed = slug.trim();
+
+  if (!trimmed) {
+    return undefined;
+  }
+
+  const project = await getProjectBySlug(userId, trimmed);
+
+  if (!project) {
+    throw new Error(`Unknown project "${trimmed}" — name an existing project slug or omit the project`);
+  }
+
+  return { id: project.id, slug: project.slug };
+}

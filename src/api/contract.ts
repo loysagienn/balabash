@@ -59,6 +59,8 @@ export type ThreadsQuery = {
   status?: ThreadStatus;
   // A thread id, or the literal "null" for root threads.
   parentId?: string;
+  // A project id (Thread.projectId): threads spawned for that project.
+  projectId?: string;
   createdAtGte?: string; // ISO date-time
   createdAtLte?: string; // ISO date-time
   before?: string; // decimal createdSeq cursor
@@ -253,4 +255,103 @@ export type UnpublishAppRequest = {
 export type PublicationResponse = {
   slug: string;
   path: string;
+};
+
+// ---------------------------------------------------------------------------
+// The console's snapshot (GET /api/snapshot): the server-side projections
+// the store hydrates from, stamped with the log position they reflect. The
+// tail (GET /api/events/stream?after=<asOfSeq>) continues from there —
+// everything in here is derivable from events, so the tail keeps it fresh.
+
+export type SessionState = 'run' | 'wait' | 'act';
+
+// The SDK session behind an active thread, as the session.* events of the
+// log describe it. Empty until those events exist (console plan, stage 4).
+export type SessionView = {
+  state: SessionState;
+  context: { used: number; max: number } | null;
+};
+
+export type ProjectView = {
+  id: string;
+  title: string;
+  slug: string;
+  description: string;
+  archived: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+export type TaskView = {
+  id: string;
+  slug: string;
+  name: string;
+  description: string | null;
+  kind: string; // 'note' | 'code' | 'command'
+  cron: string | null;
+  at: Date | null;
+  note: string | null;
+  command: string | null;
+  cwd: string | null;
+  timeoutMs: number | null;
+  reportOnSuccess: boolean;
+  createdBy: string | null;
+  createdAt: Date;
+  // The next cron moment after now (config.scheduleTimezone), or the one-shot
+  // `at`; null for a task without a trigger.
+  nextRunAt: Date | null;
+};
+
+export type ConnectionView = {
+  id: string;
+  server: string;
+  accountKey: string;
+  displayName: string;
+  status: string; // 'pending' | 'connected' | 'reauthorization_required'
+  // The human-readable part of the provider identity (login/email), or null.
+  identity: string | null;
+  scope: string | null;
+  threadId: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+// A connectable service of the installation: the user-auth MCP servers of
+// the config (mcp-servers/*.json with auth: "user").
+export type ServiceView = {
+  name: string;
+  description: string | null;
+  // Whether the service can hold several accounts per user (identity probe).
+  multiAccount: boolean;
+  // Whether an installation-level OAuth client must be provisioned by hand.
+  manualClient: boolean;
+};
+
+export type AgentView = {
+  name: string;
+  description: string;
+  icon: string | null;
+  sdk: 'claude' | 'codex';
+  tools: string[];
+  agents: string[];
+  headless: boolean;
+  notification: string | null;
+  model: string | null;
+  effort: string | null;
+};
+
+export type SnapshotResponse = {
+  // seq of the last event of the log at the moment of reading, taken BEFORE
+  // the projections are read — the tail from here may overlap, never gap.
+  asOfSeq: bigint;
+  me: MeResponse;
+  // The window: every active thread plus the newest 200 by createdSeq.
+  threads: Thread[];
+  sessions: Record<string, SessionView>;
+  projects: ProjectView[];
+  apps: AppsResponse;
+  tasks: TaskView[];
+  connections: ConnectionView[];
+  services: ServiceView[];
+  agents: AgentView[];
 };

@@ -267,14 +267,21 @@ function createChildTools(
             'The task for the agent, with everything it should start from: the ask, known context, ' +
             'constraints, and references (thread ids, event seqs, fileIds) each with a one-line note.',
         },
+        project: {
+          type: ['string', 'null'],
+          description:
+            'The slug of the project the work concerns (as listed by projects_list), or null when it concerns ' +
+            'none. Links the child thread to the project — name it whenever the task is about a project.',
+        },
       },
-      required: ['agent', 'title', 'prompt'],
+      required: ['agent', 'title', 'prompt', 'project'],
       additionalProperties: false,
     },
     handler: async args => {
       const agentName = typeof args.agent === 'string' ? args.agent.trim() : '';
       const title = typeof args.title === 'string' && args.title.trim() ? args.title.trim() : undefined;
       const prompt = typeof args.prompt === 'string' ? args.prompt.trim() : '';
+      const project = typeof args.project === 'string' && args.project.trim() ? args.project.trim() : undefined;
 
       if (!agentName) {
         throw new Error('spawn_agent requires agent');
@@ -284,7 +291,7 @@ function createChildTools(
         throw new Error('spawn_agent requires a non-empty prompt');
       }
 
-      const child = await ctx.spawn(agentName, prompt, title ? { title } : undefined);
+      const child = await ctx.spawn(agentName, prompt, { ...(title ? { title } : {}), ...(project ? { project } : {}) });
 
       childThreadIds.add(child.threadId);
 

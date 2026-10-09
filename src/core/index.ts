@@ -26,6 +26,10 @@ export type { AppendInput } from './envelope.ts';
 
 export { getEventsAfter, getTranscript, getUserEvent, getUserEvents, listThreadEvents } from './events.ts';
 
+export { getLiveHub, notifyAppended } from './live.ts';
+export type { LiveHub, LiveListener } from './live.ts';
+export type * from './event-types.ts';
+
 export { startConsumer } from './consumers.ts';
 export type { Consumer } from './consumers.ts';
 

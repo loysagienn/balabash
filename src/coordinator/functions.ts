@@ -18,6 +18,7 @@ import {
 import { appendEvent } from '../core/append.ts';
 import { THREAD_CANCEL, THREAD_MESSAGE } from '../core/envelope.ts';
 import { startThread } from '../core/threads.ts';
+import { resolveSpawnProject } from '../projects/store.ts';
 import { getUserFile } from '../files/index.ts';
 import { getAgent, getAgents } from '../capabilities/agent-catalog.ts';
 import { RESTART_SERVER_NAME } from '../capabilities/restart-tools.ts';
@@ -164,8 +165,14 @@ const AGENT_SPAWN_PARAMETERS: Record<string, unknown> = {
         'Short human-readable title for the new thread, in the user’s language — it is what the user sees ' +
         `the thread as. ${THREAD_NAMING_NOTE}`,
     },
+    project: {
+      type: ['string', 'null'],
+      description:
+        'The slug of the project the work concerns (from your status block or projects_list), or null when ' +
+        'it concerns none. Links the new thread to the project — name it whenever the task is about a project.',
+    },
   },
-  required: ['prompt', 'thread_title'],
+  required: ['prompt', 'thread_title', 'project'],
   additionalProperties: false,
 };
 
@@ -290,6 +297,7 @@ async function executeSpawn(agentName: string, args: JsonObject, ctx: DispatchCo
   const threadTitle = args.thread_title;
   const title = typeof threadTitle === 'string' && threadTitle.trim() ? threadTitle.trim() : agentName;
   const declaration = getAgent(agentName);
+  const projectSlug = typeof args.project === 'string' && args.project.trim() ? args.project.trim() : undefined;
 
   if (!prompt) {
     throw new Error(`Spawning "${agentName}" requires a non-empty prompt`);
@@ -303,6 +311,7 @@ async function executeSpawn(agentName: string, args: JsonObject, ctx: DispatchCo
     input: prompt,
     icon: declaration?.icon,
     headless: declaration?.headless,
+    project: await resolveSpawnProject(ctx.userId, projectSlug),
     actor: 'agent',
     agentName: 'coordinator',
   });

@@ -3,6 +3,7 @@
 // to T, in global seq order.
 
 import { prisma } from '../db/client.ts';
+import { createLiveHub, installLiveHub } from './live.ts';
 import type { Event } from './contract.ts';
 import { toEvent } from './envelope.ts';
 
@@ -150,3 +151,17 @@ export async function getUserEvents(
 
   return rows.map(toEvent);
 }
+
+// The live tail over the real log (src/core/live.ts): one hub per process,
+// reading with the cursor reads above. Installed here, not in live.ts, so
+// append.ts → live.ts never pulls the database module into a cycle.
+installLiveHub(() =>
+  createLiveHub({
+    readAfter: (seq, limit) => getEventsAfter(seq, { limit }),
+    headSeq: async () => {
+      const { _max } = await prisma.event.aggregate({ _max: { seq: true } });
+
+      return _max.seq ?? 0n;
+    },
+  }),
+);

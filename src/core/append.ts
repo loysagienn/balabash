@@ -18,6 +18,8 @@ import {
   validateEnvelope,
 } from './envelope.ts';
 import type { AppendInput } from './envelope.ts';
+import { notifyAppended } from './live.ts';
+import { threadCompletionFields, threadStartFields } from '../projections/thread.ts';
 
 export type AppendResult =
   | { written: true; event: Event }
@@ -77,19 +79,30 @@ async function createEvent(tx: Tx, input: AppendInput): Promise<Event> {
 export async function appendEvent(input: AppendInput): Promise<AppendResult> {
   validateEnvelope(input);
 
-  if (input.type === THREAD_STARTED) {
-    return prisma.$transaction(tx => appendThreadStarted(tx, input));
+  const result = await prisma.$transaction(tx => {
+    if (input.type === THREAD_STARTED) {
+      return appendThreadStarted(tx, input);
+    }
+
+    if (TERMINAL_TYPES.has(input.type)) {
+      return appendTerminal(tx, input);
+    }
+
+    if (input.type === THREAD_CANCEL) {
+      return appendCancelCommand(tx, input);
+    }
+
+    return appendGeneric(tx, input);
+  });
+
+  // After the commit: the live tail (src/core/live.ts) learns that the log
+  // grew. A cascade wrote more than one event — the hub reads from the log
+  // anyway, the seq is only a hint.
+  if (result.written) {
+    notifyAppended(result.event.seq);
   }
 
-  if (TERMINAL_TYPES.has(input.type)) {
-    return prisma.$transaction(tx => appendTerminal(tx, input));
-  }
-
-  if (input.type === THREAD_CANCEL) {
-    return prisma.$transaction(tx => appendCancelCommand(tx, input));
-  }
-
-  return prisma.$transaction(tx => appendGeneric(tx, input));
+  return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -138,15 +151,16 @@ async function appendThreadStarted(tx: Tx, input: AppendInput): Promise<AppendRe
   }
 
   const event = await createEvent(tx, input);
-  const payload = input.payload as { agent: string; title?: string };
+  const { agent, title, projectId } = threadStartFields(input.payload);
 
   await tx.thread.create({
     data: {
       id: threadId,
       userId,
       parentId: targetThreadId ?? null,
-      agent: payload.agent,
-      title: payload.title ?? null,
+      agent,
+      title,
+      projectId,
       status: 'active',
       createdSeq: event.seq,
     },
@@ -200,21 +214,18 @@ async function appendTerminal(tx: Tx, input: AppendInput): Promise<AppendResult>
   return { written: true, event };
 }
 
-// Projection fields a thread.completed carries besides the terminal itself:
-// the summary, the retrospective description, and the one-time title
-// correction (the event stays the immutable fact — thread.started keeps the
-// starting title forever; the row is a projection of the current state).
-// Shared by the live append and the replay fold (threads.ts).
+// Projection fields a thread.completed carries besides the terminal itself
+// (src/projections/thread.ts), in the row's column types. Shared by the
+// live append and the replay fold (threads.ts).
 export function completionProjectionData(payload: JsonObject): {
   summary?: Prisma.InputJsonValue;
   title?: string;
   description?: string;
 } {
-  const title = typeof payload.title === 'string' && payload.title.trim() ? payload.title.trim() : undefined;
-  const description = typeof payload.description === 'string' ? payload.description : undefined;
+  const { summary, title, description } = threadCompletionFields(payload);
 
   return {
-    ...(payload.summary !== undefined ? { summary: payload.summary as Prisma.InputJsonValue } : {}),
+    ...(summary !== undefined ? { summary: summary as unknown as Prisma.InputJsonValue } : {}),
     ...(title !== undefined ? { title } : {}),
     ...(description !== undefined ? { description } : {}),
   };

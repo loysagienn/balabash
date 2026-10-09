@@ -12,6 +12,7 @@ import { appendEvent, completionProjectionData } from './append.ts';
 import type { AppendResult } from './append.ts';
 import { AppendError, TERMINAL_TYPES, THREAD_CANCELLED, THREAD_STARTED, toEvent } from './envelope.ts';
 import { config } from '../config/index.ts';
+import { threadStartFields } from '../projections/thread.ts';
 
 export const COORDINATOR_AGENT = 'coordinator';
 
@@ -25,6 +26,7 @@ function toThread(row: ThreadRow): Thread {
     description: row.description,
     status: row.status as ThreadStatus,
     summary: row.summary as ThreadSummary | null,
+    projectId: row.projectId,
     createdSeq: row.createdSeq,
     terminalSeq: row.terminalSeq,
     createdAt: row.createdAt,
@@ -41,6 +43,7 @@ export async function getThread(id: string): Promise<Thread | null> {
 type ListThreadsOptions = {
   status?: ThreadStatus;
   parentId?: string | null;
+  projectId?: string;
   createdAtGte?: Date;
   createdAtLte?: Date;
   // Cursor for newest-first pagination: only threads with
@@ -56,7 +59,7 @@ type ListThreadsOptions = {
 
 export async function listThreads(
   userId: string,
-  { status, parentId, createdAtGte, createdAtLte, beforeCreatedSeq, limit = 100, order = 'asc' }: ListThreadsOptions = {},
+  { status, parentId, projectId, createdAtGte, createdAtLte, beforeCreatedSeq, limit = 100, order = 'asc' }: ListThreadsOptions = {},
 ): Promise<Thread[]> {
   // The limit keeps the newest matching threads (the useful end of a growing
   // workspace) regardless of the output order.
@@ -65,6 +68,7 @@ export async function listThreads(
       userId,
       ...(status !== undefined ? { status } : {}),
       ...(parentId !== undefined ? { parentId } : {}),
+      ...(projectId !== undefined ? { projectId } : {}),
       ...(beforeCreatedSeq !== undefined ? { createdSeq: { lt: beforeCreatedSeq } } : {}),
       ...(createdAtGte !== undefined || createdAtLte !== undefined
         ? {
@@ -114,6 +118,7 @@ export async function activeSubtree(threadId: string): Promise<Thread[]> {
       SELECT t.id FROM threads t JOIN subtree s ON t.parent_id = s.id
     )
     SELECT id, user_id AS "userId", parent_id AS "parentId", agent, title, description, status, summary,
+           project_id AS "projectId",
            created_seq AS "createdSeq", terminal_seq AS "terminalSeq",
            created_at AS "createdAt", updated_at AS "updatedAt"
     FROM threads
@@ -229,6 +234,10 @@ type StartThreadInput = {
   // icon, the hint comes from the spawned agent's declaration and travels in
   // the event.
   headless?: boolean;
+  // The project the thread works for (resolved by the spawner): the id is
+  // what the projection stores and the console filters on, the slug is the
+  // human-readable address at spawn time.
+  project?: { id: string; slug: string };
   actor: 'system' | 'agent';
   agentName?: string; // the SPAWNING agent, not the spawned one
 };
@@ -259,6 +268,11 @@ export async function startThread(options: StartThreadInput): Promise<Thread> {
 
   if (options.headless !== undefined) {
     payload.headless = options.headless;
+  }
+
+  if (options.project !== undefined) {
+    payload.projectId = options.project.id;
+    payload.projectSlug = options.project.slug;
   }
 
   await appendEvent({
@@ -338,7 +352,7 @@ export async function rebuildThreadsProjection(db: DbClient = prisma): Promise<{
       const event = toEvent(row);
 
       if (event.type === THREAD_STARTED) {
-        const payload = event.payload as { agent: string; title?: string };
+        const { agent, title, projectId } = threadStartFields(event.payload);
 
         // Timestamps come from the log, not the clock: a rebuilt row must
         // date like the live one did (list_threads filters and pages on
@@ -348,8 +362,9 @@ export async function rebuildThreadsProjection(db: DbClient = prisma): Promise<{
             id: event.threadId!,
             userId: event.userId!,
             parentId: event.targetThreadId,
-            agent: payload.agent,
-            title: payload.title ?? null,
+            agent,
+            title,
+            projectId,
             status: 'active',
             createdSeq: event.seq,
             createdAt: event.createdAt,

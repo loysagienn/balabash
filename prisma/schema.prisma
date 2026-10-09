@@ -60,6 +60,9 @@ model Thread {
   description String?
   status   String // 'active' | 'completed' | 'failed' | 'cancelled'
   summary  Json? // terminal summary {text, fileIds?, refs?} for completed threads
+  // The project the thread works for — named at spawn (thread.started
+  // payload projectId); null for threads outside any project.
+  projectId String? @map("project_id")
 
   createdSeq  BigInt  @map("created_seq") // seq of thread.started
   terminalSeq BigInt? @map("terminal_seq") // seq of the terminal event
@@ -70,6 +73,7 @@ model Thread {
   @@index([userId, status])
   @@index([parentId, status])
   @@index([userId, parentId])
+  @@index([userId, projectId])
   @@map("threads")
 }
 

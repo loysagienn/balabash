@@ -57,7 +57,8 @@ confidential from them.
 - Database schema changes ride the same restart: edit `prisma/schema.prisma`,
   author an SQL migration into
   `prisma/migrations/<timestamp>_<name>/migration.sql`
-  (`npx prisma migrate diff --from-url "$DATABASE_URL" --to-schema-datamodel prisma/schema.prisma --script`),
+  (`npx prisma migrate diff --from-config-datasource --to-schema prisma/schema.prisma --script`
+  — the datasource comes from `prisma.config.ts`),
   and let the boot-time `prisma migrate deploy` apply it — never apply
   schema changes to the live database by hand, never edit an already-applied
   migration. Migrations must be additive and backward-compatible (new

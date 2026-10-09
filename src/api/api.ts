@@ -14,7 +14,8 @@ import { prisma } from '../db/client.ts';
 import { config } from '../config/index.ts';
 import { parseJson, prepareObject } from '../utils/serialize-json.ts';
 import { ensureOperatorWorkspace, getMainThread, getThread, isHeadlessThread, listThreads } from '../core/threads.ts';
-import { listThreadEvents } from '../core/events.ts';
+import { getEventsAfter, listThreadEvents } from '../core/events.ts';
+import { getLiveHub } from '../core/live.ts';
 import { appendEvent } from '../core/append.ts';
 import type { FileRef, Thread, ThreadStatus } from '../core/contract.ts';
 import { WorkspacePathError, listDir, resolveFilePath, sanitizeRelPath, statFile } from '../workspace/files.ts';
@@ -26,6 +27,8 @@ import { AppManagementError, listApps, publishApp, unpublishApp } from '../apps/
 import { publicAppsBase } from '../apps/urls.ts';
 import { consumeAuthCode, createAuthCode } from './auth-codes.ts';
 import { createUserSession, destroySession, getSession } from './session.ts';
+import { createEventStreamHandler } from './event-stream.ts';
+import { buildSnapshot } from './snapshot.ts';
 import type {
   AppsResponse,
   PublicationResponse,
@@ -248,6 +251,24 @@ router.post('/logout', requireSession, async ctx => {
 });
 
 // --------------------------------------------------------------------------
+// The console's starting state and its live tail (src/api/snapshot.ts,
+// src/api/event-stream.ts): the store hydrates from the snapshot and follows
+// the log from asOfSeq through the stream.
+
+router.get('/snapshot', requireSession, async ctx => {
+  const userId = ctx.state.userId as string;
+
+  ctx.body = prepareObject(await buildSnapshot(userId, await buildMeResponse(userId)));
+});
+
+const eventStream = createEventStreamHandler({
+  hub: getLiveHub(),
+  readAfter: (seq, limit) => getEventsAfter(seq, { limit }),
+});
+
+router.get('/events/stream', requireSession, ctx => eventStream(ctx));
+
+// --------------------------------------------------------------------------
 // The workspace window (read-only): threads and their event feeds.
 
 router.get('/threads', requireSession, async ctx => {
@@ -262,6 +283,7 @@ router.get('/threads', requireSession, async ctx => {
   }
 
   const parentId = queryValue(ctx.query.parentId);
+  const projectId = queryValue(ctx.query.projectId);
   const createdAtGte = parseDateParam(queryValue(ctx.query.createdAtGte));
   const createdAtLte = parseDateParam(queryValue(ctx.query.createdAtLte));
 
@@ -293,6 +315,7 @@ router.get('/threads', requireSession, async ctx => {
     ...(status !== undefined ? { status: status as ThreadStatus } : {}),
     // The literal "null" selects root threads (no parent).
     ...(parentId !== undefined ? { parentId: parentId === 'null' ? null : parentId } : {}),
+    ...(projectId !== undefined ? { projectId } : {}),
     ...(createdAtGte !== undefined ? { createdAtGte } : {}),
     ...(createdAtLte !== undefined ? { createdAtLte } : {}),
     ...(before !== undefined ? { beforeCreatedSeq: BigInt(before) } : {}),

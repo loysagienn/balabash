@@ -27,6 +27,7 @@ import {
   THREAD_PROGRESS,
 } from '../core/envelope.ts';
 import { startThread } from '../core/threads.ts';
+import { resolveSpawnProject } from '../projects/store.ts';
 import { getUserFile, getFileDownloadUrl, ingestFile } from '../files/index.ts';
 import type { StorageBody } from '../files/storage.ts';
 import { createClaudeSession } from '../harness/claude-sdk/sdk-session.ts';
@@ -245,6 +246,7 @@ export async function spawnAgentRun(thread: Thread, startedEvent: Event): Promis
         tools: options?.tools,
         icon: childDeclaration.icon,
         headless: childDeclaration.headless,
+        project: await resolveSpawnProject(userId, options?.project),
         actor: 'agent',
         agentName,
       });
