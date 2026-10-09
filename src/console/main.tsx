@@ -15,6 +15,7 @@ import { ApiProvider } from './lib/api/context.tsx';
 import { connectStoreToHistory } from './lib/router/history.ts';
 import { readRoute } from './lib/router/routes.ts';
 import { connectStoreToStream } from './lib/stream/index.ts';
+import { installPinchGuard } from './lib/touch/pinch.ts';
 import { createStore } from './store/index.ts';
 import type { AppStore } from './store/index.ts';
 import { sessionCheck, sessionLost } from './store/session/actions.ts';
@@ -39,6 +40,8 @@ store = createStore({ api, initialRoute: readRoute(window.location.pathname + wi
 
 connectStoreToHistory(store);
 connectStoreToStream(store);
+// The phone's two-finger zoom is off (lib/touch/pinch.ts); desktop zoom is not.
+installPinchGuard(document, navigator);
 
 // The operator's console is the operator's: the store is reachable from the
 // browser console for debugging (window.__console.store.getState()).

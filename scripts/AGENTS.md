@@ -16,6 +16,22 @@ stopped.
 npm run build && npm run rebuild-threads
 ```
 
+## console-icons (`scripts/console-icons.mjs`)
+
+Renders the console's app icons (`src/console/public/*.png`: favicon 32/192,
+install icons 192/512 `any` and `maskable`, `apple-touch-icon` 180) from the
+approved service icon — the pair of 1254 px PNGs in the project library,
+`balabash/design/balabash-icon-transparent.png` and `balabash-icon-dark.png`
+(their `design/README.md` names them) — with headless Chromium (playwright, a
+devDependency): the `any` icons are the transparent one as is, the maskable
+ones put it at 86 % over `--bg` (the safe zone is the inner 80 % circle), the
+Apple icon is the dark one as is. Not bundled and not part of the build: the
+PNGs are committed, and the script runs again only when the icon changes.
+
+```
+node scripts/console-icons.mjs <balabash-icon-transparent.png> <balabash-icon-dark.png>
+```
+
 ## render-context (`scripts/render-context.ts`)
 
 The instruction-layer showcase: materializes, per model, what that model

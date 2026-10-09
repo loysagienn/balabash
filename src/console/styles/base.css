@@ -13,6 +13,12 @@
 *,*::before,*::after{box-sizing:border-box}
 html,body{margin:0}
 html,body,#root{height:100%}
+/* Touch gestures: panning only — no pinch-to-zoom and no double-tap zoom on a phone (Vladimir's
+   rule). touch-action governs touch input alone, so the desktop browser's zoom (⌘±, Ctrl+wheel)
+   is untouched. iOS Safari ignores the viewport's user-scalable but honours this since 13;
+   lib/touch (gesture events) backs it up where it does not. No block may set pinch-zoom or
+   manipulation: iOS re-enables zoom for the whole page when one does. */
+html,body{touch-action:pan-x pan-y}
 body{background:var(--bg);color:var(--text);font:var(--fs-body)/var(--lh-body) var(--font);letter-spacing:var(--tracking);-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
 :where(h1,h2,h3,h4,h5,h6,p,ul,ol,dl,dd,figure,blockquote,pre){margin:0}
 :where(ul,ol){padding:0}

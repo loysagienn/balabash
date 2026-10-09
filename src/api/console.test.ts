@@ -54,6 +54,9 @@ before(async () => {
   await fs.mkdir(path.join(root, 'assets'), { recursive: true });
   await fs.writeFile(path.join(root, 'assets', 'main-ABC123.js'), 'console.log("hi")');
   await fs.writeFile(path.join(root, 'assets', 'main-DEF456.css'), 'body{}');
+  await fs.mkdir(path.join(root, 'public'), { recursive: true });
+  await fs.writeFile(path.join(root, 'public', 'manifest.webmanifest'), '{"name":"Balabash"}');
+  await fs.writeFile(path.join(root, 'public', 'icon-192.png'), Buffer.from('89504e47', 'hex'));
 
   process.env.CONSOLE_DOMAIN = CONSOLE_HOST;
 
@@ -114,6 +117,43 @@ describe('console host branch', () => {
       assert.match(html, /<link rel="stylesheet" href="\/assets\/main-DEF456\.css">/);
       assert.match(html, /<meta name="console-build" content="2026-10-08T00:00:00\.000Z">/);
     }
+  });
+
+  test('the shell forbids the phone zoom and names the web app manifest and icons', async () => {
+    const html = await (await request('/')).text();
+
+    // The phone's pinch is off; the desktop ignores a viewport meta altogether.
+    assert.match(html, /<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">/);
+    assert.match(html, /<link rel="manifest" href="\/static\/manifest\.webmanifest">/);
+    assert.match(html, /<link rel="apple-touch-icon" href="\/static\/apple-touch-icon\.png">/);
+    assert.match(html, /<link rel="icon" type="image\/png" sizes="32x32" href="\/static\/icon-32\.png">/);
+    assert.match(html, /<meta name="theme-color" content="#0c0d0f">/);
+    assert.match(html, /<meta name="mobile-web-app-capable" content="yes">/);
+    assert.match(html, /<meta name="apple-mobile-web-app-capable" content="yes">/);
+    assert.match(html, /<meta name="apple-mobile-web-app-title" content="Balabash">/);
+  });
+
+  test('public files are served under /static by name with a short cache; unknown and walking names are 404', async () => {
+    const manifest = await request('/static/manifest.webmanifest');
+
+    assert.equal(manifest.status, 200);
+    assert.match(manifest.headers['content-type'] ?? '', /application\/manifest\+json/);
+    assert.equal(manifest.headers['cache-control'], 'public, max-age=3600');
+    assert.equal(await manifest.text(), '{"name":"Balabash"}');
+
+    const icon = await request('/static/icon-192.png', { method: 'HEAD' });
+
+    assert.equal(icon.status, 200);
+    assert.match(icon.headers['content-type'] ?? '', /image\/png/);
+    assert.equal(icon.headers['content-length'], '4');
+
+    assert.equal((await request('/static/missing.png')).status, 404);
+    assert.equal((await request('/static/..%2Fmanifest.json')).status, 404);
+    // The public directory is not the assets directory and vice versa.
+    assert.equal((await request('/static/main-ABC123.js')).status, 404);
+    assert.equal((await request('/assets/manifest.webmanifest')).status, 404);
+    // A navigation to /static itself is still the SPA's (the shell).
+    assert.equal((await request('/static')).status, 200);
   });
 
   test('a new manifest is picked up without a restart', async () => {

@@ -7,6 +7,9 @@
 //   main chain — the same API, the same host-only session cookie (set here
 //   by POST /api/auth, read here by everything else);
 // - /assets/<name>: the content-addressed bundle files, immutable;
+// - /static/<name>: the files of src/console/public under their own stable
+//   names (dist/console/public) — the web app manifest and the icons that
+//   make the console installable on a phone's home screen; a short cache;
 // - anything else that is a GET/HEAD: the shell — one HTML page pointing at
 //   the assets named by dist/console/manifest.json. The in-page router owns
 //   the path, so a reload on /threads/42 answers the same shell.
@@ -25,6 +28,20 @@ import { config } from '../config/index.ts';
 // repo root, like dist/apps-vendor) — overridable for tests.
 const DEFAULT_CONSOLE_DIR = path.resolve('dist', 'console');
 const ASSETS_PREFIX = '/assets/';
+const STATIC_PREFIX = '/static/';
+
+// The manifest and the icons are addressed by name, so their cache is short:
+// an edited icon reaches a phone within the hour (Chrome re-reads the
+// manifest of an installed app on its own schedule anyway).
+const STATIC_CACHE_CONTROL = 'public, max-age=3600';
+// What the shell points at (src/console/public; made by scripts/console-icons.mjs
+// from the approved service icon).
+const WEB_APP_MANIFEST = `${STATIC_PREFIX}manifest.webmanifest`;
+const FAVICON_32 = `${STATIC_PREFIX}icon-32.png`;
+const FAVICON_192 = `${STATIC_PREFIX}icon-192.png`;
+const APPLE_TOUCH_ICON = `${STATIC_PREFIX}apple-touch-icon.png`;
+// tokens.css --bg: the status bar of the installed app and the browser's chrome take it.
+const THEME_COLOR = '#0c0d0f';
 
 // Paths that belong to the shared surfaces, not to the SPA.
 const PASS_THROUGH_PREFIXES = ['/api', '/files'];
@@ -49,6 +66,7 @@ const ASSET_TYPES: Record<string, string> = {
   '.svg': 'image/svg+xml',
   '.png': 'image/png',
   '.json': 'application/json; charset=utf-8',
+  '.webmanifest': 'application/manifest+json; charset=utf-8',
 };
 
 function escapeHtml(value: string): string {
@@ -62,10 +80,10 @@ function isPassThrough(urlPath: string): boolean {
 // --------------------------------------------------------------------------
 // Manifest: read on demand, re-read when the file's mtime changes.
 
-type ConsoleDir = { assetsDir: string; manifestPath: string };
+type ConsoleDir = { assetsDir: string; publicDir: string; manifestPath: string };
 
 function consoleDir(root: string): ConsoleDir {
-  return { assetsDir: path.join(root, 'assets'), manifestPath: path.join(root, 'manifest.json') };
+  return { assetsDir: path.join(root, 'assets'), publicDir: path.join(root, 'public'), manifestPath: path.join(root, 'manifest.json') };
 }
 
 let cachedManifest: { path: string; mtimeMs: number; manifest: ConsoleManifest } | null = null;
@@ -124,14 +142,31 @@ export function renderConsoleShell(manifest: ConsoleManifest): string {
     .map(name => `\n  <link rel="preload" as="font" type="font/woff2" crossorigin href="${escapeHtml(`${ASSETS_PREFIX}${name}`)}">`)
     .join('');
 
+  // The viewport forbids the phone's pinch-to-zoom (Vladimir's rule) — a
+  // viewport meta is a mobile browser's business, the desktop's zoom is
+  // untouched; iOS Safari ignores user-scalable and is handled by CSS
+  // touch-action and lib/touch instead. The manifest, the icons and the
+  // apple-/mobile-web-app-* metas make the console installable on the home
+  // screen: Android Chrome from its manifest (no service worker is required
+  // since Chrome 108 for the install from the menu), iOS Safari from the
+  // manifest's display plus apple-touch-icon for the icon.
   return `<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
   <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="${THEME_COLOR}">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Balabash">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="console-build" content="${escapeHtml(manifest.builtAt)}">
-  <title>Balabash</title>${fontLinks}${cssLink}
+  <title>Balabash</title>
+  <link rel="manifest" href="${WEB_APP_MANIFEST}">
+  <link rel="icon" type="image/png" sizes="32x32" href="${FAVICON_32}">
+  <link rel="icon" type="image/png" sizes="192x192" href="${FAVICON_192}">
+  <link rel="apple-touch-icon" href="${APPLE_TOUCH_ICON}">${fontLinks}${cssLink}
   <script type="module" src="${escapeHtml(`${ASSETS_PREFIX}${manifest.js}`)}"></script>
 </head>
 <body>
@@ -159,11 +194,13 @@ function renderNotBuiltPage(): string {
 }
 
 // --------------------------------------------------------------------------
-// Assets: one flat directory, names are content-addressed.
+// Files by name: the assets (one flat directory, names content-addressed,
+// cached forever) and the public files (stable names, cached briefly).
 
-async function serveAsset(ctx: Context, assetsDir: string, name: string): Promise<void> {
-  // A single path segment, nothing that walks: the build names files
-  // [name]-[hash].ext, nothing else lives there.
+async function serveFile(ctx: Context, dir: string, name: string, cacheControl: string): Promise<void> {
+  // A single path segment, nothing that walks: the build names assets
+  // [name]-[hash].ext and copies public files as they are; nothing else
+  // lives in either directory.
   if (!/^[A-Za-z0-9_.-]+$/.test(name) || name.startsWith('.')) {
     ctx.status = 404;
     ctx.body = 'Not found';
@@ -171,7 +208,7 @@ async function serveAsset(ctx: Context, assetsDir: string, name: string): Promis
     return;
   }
 
-  const file = path.join(assetsDir, name);
+  const file = path.join(dir, name);
   const stats = await fs.stat(file).catch(() => null);
 
   if (!stats || !stats.isFile()) {
@@ -184,7 +221,7 @@ async function serveAsset(ctx: Context, assetsDir: string, name: string): Promis
   ctx.status = 200;
   ctx.type = ASSET_TYPES[path.extname(name)] ?? 'application/octet-stream';
   ctx.length = stats.size;
-  ctx.set('cache-control', 'public, max-age=31536000, immutable');
+  ctx.set('cache-control', cacheControl);
 
   if (ctx.method === 'HEAD') {
     return;
@@ -202,7 +239,7 @@ async function serveAsset(ctx: Context, assetsDir: string, name: string): Promis
  * is the SPA. Other hosts are untouched.
  */
 export function createConsoleMiddleware(root: string = DEFAULT_CONSOLE_DIR): (ctx: Context, next: Next) => Promise<void> {
-  const { assetsDir, manifestPath } = consoleDir(root);
+  const { assetsDir, publicDir, manifestPath } = consoleDir(root);
 
   return async (ctx, next) => {
     const consoleDomain = config.consoleDomain;
@@ -229,7 +266,13 @@ export function createConsoleMiddleware(root: string = DEFAULT_CONSOLE_DIR): (ct
 
     try {
       if (ctx.path.startsWith(ASSETS_PREFIX)) {
-        await serveAsset(ctx, assetsDir, ctx.path.slice(ASSETS_PREFIX.length));
+        await serveFile(ctx, assetsDir, ctx.path.slice(ASSETS_PREFIX.length), 'public, max-age=31536000, immutable');
+
+        return;
+      }
+
+      if (ctx.path.startsWith(STATIC_PREFIX)) {
+        await serveFile(ctx, publicDir, ctx.path.slice(STATIC_PREFIX.length), STATIC_CACHE_CONTROL);
 
         return;
       }

@@ -6,6 +6,9 @@
 //
 // Layout of dist/console:
 //   assets/<name>-<hash>.{js,css,…}  content-addressed, served immutable;
+//   public/<name>                    src/console/public as is — the web app
+//                                    manifest and the icons, stable names
+//                                    (served at /static/<name>, short cache);
 //   manifest.json                    which assets the shell points at NOW.
 //
 // The manifest is the switch: it is written (atomically, tmp + rename) only
@@ -19,8 +22,10 @@ import path from 'node:path';
 
 const OUT_DIR = path.resolve('dist', 'console');
 const ASSETS_DIR = path.join(OUT_DIR, 'assets');
+const PUBLIC_DIR = path.join(OUT_DIR, 'public');
 const MANIFEST_PATH = path.join(OUT_DIR, 'manifest.json');
 const ENTRY = './src/console/main.tsx';
+const PUBLIC_SRC = path.resolve('src', 'console', 'public');
 
 const PRUNE_AFTER_MS = 24 * 60 * 60 * 1000;
 
@@ -108,6 +113,17 @@ async function pruneOldAssets(keep) {
 }
 
 /**
+ * Publishes src/console/public as dist/console/public: the files the host
+ * serves under stable names (/static/<name>) — the web app manifest and the
+ * icons. Copied whole on every build; a file removed from the source is
+ * removed from the output.
+ */
+async function publishPublic() {
+  await fs.rm(PUBLIC_DIR, { recursive: true, force: true });
+  await fs.cp(PUBLIC_SRC, PUBLIC_DIR, { recursive: true });
+}
+
+/**
  * @param {esbuild.BuildResult} result
  */
 async function publish(result) {
@@ -117,6 +133,8 @@ async function publish(result) {
 
   const manifest = manifestFromMetafile(result.metafile);
   const produced = new Set(Object.keys(result.metafile.outputs).map(p => path.relative(ASSETS_DIR, path.resolve(p))));
+
+  await publishPublic();
 
   // Atomic switch: write beside, then rename over.
   const tmp = `${MANIFEST_PATH}.${process.pid}.tmp`;
