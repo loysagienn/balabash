@@ -116,6 +116,22 @@ export type PostThreadMessageResponse = {
   event: Event;
 };
 
+// POST /api/threads/:id/interrupt — a soft stop of the turn in flight (the
+// run stays, waits for the next message); POST /api/threads/:id/cancel —
+// ends the thread (the router aborts the run, thread.cancelled follows in
+// the log). Both answer with the command event as written; the outcome
+// itself arrives through the event stream. 409 thread_closed for a thread
+// that is not active, 409 thread_main for the main thread (eternal —
+// nothing addresses it from above). Mutations under the session are refused
+// from another origin (403 cross_site — src/api/origin.ts).
+export type CancelThreadRequest = {
+  reason?: string; // ≤ 1 000 chars; default "cancelled by the operator"
+};
+
+export type ThreadCommandResponse = {
+  event: Event;
+};
+
 // ---------------------------------------------------------------------------
 // The workspace file area (read-only): the user's window into
 // data/workspace/<userId>/files. GET /api/workspace/node?path=<rel> answers

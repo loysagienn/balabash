@@ -9,28 +9,20 @@
 // code task without a body in the running bundle sleeps: never armed, never
 // noisy — the boot sweep already journaled the gap loudly.
 
-import { Cron } from 'croner';
 import { prisma } from '../db/client.ts';
 import { appendEvent } from '../core/append.ts';
 import { SYSTEM_EXCEPTION } from '../core/envelope.ts';
 import { getMainThread } from '../core/threads.ts';
-import { config } from '../config/index.ts';
 import type { ScheduledTaskModel } from '../../prisma-generated/models.ts';
 import { hasTaskBody, workspaceTaskFile } from './catalog.ts';
 import { fireTask, sweepAbortedJobRuns } from './engine.ts';
+import { cronNextRun } from './cron.ts';
+import { journalRegistryEvent } from '../core/registry-events.ts';
+import { taskRecord } from './view.ts';
+
+export { assertValidCron, cronNextRun } from './cron.ts';
 
 const POLL_INTERVAL_MS = 5_000;
-
-// The next moment of a cron expression strictly after `from`, in the
-// configured timezone; null when the expression yields none.
-export function cronNextRun(expression: string, from: Date): Date | null {
-  return new Cron(expression, { timezone: config.scheduleTimezone }).nextRun(from);
-}
-
-// Validation surface for create_task: throws on a malformed expression.
-export function assertValidCron(expression: string): void {
-  new Cron(expression, { timezone: config.scheduleTimezone });
-}
 
 // Boot sweep — the loud registry-vs-catalog reconciliation: every registered
 // code task without a body (neither bundled nor a workspace file) gets a
@@ -145,6 +137,7 @@ export function startScheduleHeart(): { name: string; stop: () => void } {
       return;
     }
 
+    await journalRegistryEvent('schedule.task.cancelled', { ...taskRecord(row, now), reason: 'consumed' }, { kind: 'system', userId: row.userId });
     await fireTask(row, 'at');
   };
 

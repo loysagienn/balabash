@@ -68,6 +68,8 @@ const api: Api = {
     get: async () => ({ thread: thread({ id: 'a' }), headless: false }),
     events: async () => ({ events: [], nextCursor: null }),
     sendMessage: async () => ({}),
+    interrupt: async () => ({}),
+    cancel: async () => ({}),
   },
   workspace: {
     node: async () => ({ kind: 'dir', path: '', directories: [], files: [] }),

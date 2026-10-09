@@ -1,8 +1,10 @@
 // Interface state that is not data: the "More" sheet on the phone, toasts,
-// composer drafts per thread and whether a thread's message is on its way.
+// composer drafts per thread, whether a thread's message or command is on
+// its way.
 // Navigation closes the sheet.
 
 import type { Action } from '../types.ts';
+import type { ThreadCommand } from '../threads/actions.ts';
 import type { ToastInput } from './actions.ts';
 
 export type Toast = ToastInput & { id: number };
@@ -16,9 +18,28 @@ export type UiState = {
   // draft as it was at the send: the field stays editable meanwhile, so a
   // success clears the draft only while it is still that one.
   composerSending: Record<string, { draft: string }>;
+  // Thread commands on their way (COMMAND_THREAD): the button stays busy
+  // until the server answered — the outcome itself comes with the tail.
+  threadCommands: Record<string, Partial<Record<ThreadCommand, true>>>;
 };
 
-export const initialUi: UiState = { moreSheet: false, toasts: [], nextToastId: 1, composerDrafts: {}, composerSending: {} };
+export const initialUi: UiState = { moreSheet: false, toasts: [], nextToastId: 1, composerDrafts: {}, composerSending: {}, threadCommands: {} };
+
+function withCommand(state: UiState, threadId: string, command: ThreadCommand, pending: boolean): UiState['threadCommands'] {
+  const { [command]: current, ...rest } = state.threadCommands[threadId] ?? {};
+
+  if (pending) {
+    return { ...state.threadCommands, [threadId]: { ...rest, [command]: true } };
+  }
+
+  if (!current) {
+    return state.threadCommands;
+  }
+
+  const { [threadId]: dropped, ...others } = state.threadCommands;
+
+  return Object.keys(rest).length ? { ...others, [threadId]: rest } : others;
+}
 
 function withoutSending(state: UiState, threadId: string): UiState['composerSending'] {
   const { [threadId]: dropped, ...rest } = state.composerSending;
@@ -50,6 +71,11 @@ export function uiReducer(state: UiState = initialUi, action: Action): UiState {
     }
     case 'SEND_MESSAGE_FAIL':
       return { ...state, composerSending: withoutSending(state, action.threadId) };
+    case 'COMMAND_THREAD':
+      return { ...state, threadCommands: withCommand(state, action.threadId, action.command, true) };
+    case 'COMMAND_THREAD_DONE':
+    case 'COMMAND_THREAD_FAIL':
+      return { ...state, threadCommands: withCommand(state, action.threadId, action.command, false) };
     default:
       return state;
   }

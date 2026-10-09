@@ -14,10 +14,10 @@ import { selectAgent } from '../../store/agents/selectors.ts';
 import { makeSelectThreadEvents, selectThreadFeed } from '../../store/feed/selectors.ts';
 import { selectMe } from '../../store/session/selectors.ts';
 import { selectSession, selectThreadState } from '../../store/sessions/selectors.ts';
-import { loadThread, loadThreadEvents, sendMessage } from '../../store/threads/actions.ts';
+import { commandThread, loadThread, loadThreadEvents, sendMessage } from '../../store/threads/actions.ts';
 import { selectThread } from '../../store/threads/selectors.ts';
 import { setComposerDraft } from '../../store/ui/actions.ts';
-import { selectComposerDraft, selectComposerSending } from '../../store/ui/selectors.ts';
+import { selectComposerDraft, selectComposerSending, selectThreadCommandPending } from '../../store/ui/selectors.ts';
 import { Shell } from '../../features/shell/Shell.tsx';
 import { threadTitle, ctxOf } from '../../features/thread-list/rowData.ts';
 import { Attachments, FeedItems, hasRunningAction } from '../../features/thread-feed/ThreadFeed.tsx';
@@ -25,6 +25,7 @@ import { fileHref } from '../../features/thread-feed/project.ts';
 import { makeSelectFeedItems, makeSelectStartedHeadless } from '../../features/thread-feed/selectors.ts';
 import { Composer } from '../../ui/Composer/Composer.tsx';
 import { ComposerLock } from '../../ui/Composer/ComposerLock.tsx';
+import { Confirm } from '../../ui/Confirm/Confirm.tsx';
 import { Empty } from '../../ui/Empty/Empty.tsx';
 import { Feed } from '../../ui/Feed/Feed.tsx';
 import { Icon } from '../../ui/Icon/Icon.tsx';
@@ -42,7 +43,7 @@ import { Code } from '../../ui/atoms/atoms.tsx';
 import { ThreadMore } from './ThreadMore.tsx';
 import { ThreadRail } from './ThreadRail.tsx';
 import { railSessionInfo } from './rail.ts';
-import { anchorIndex, composerLock, feedScrollMove, feedStage, feedTop, threadTimeLabel } from './ThreadScreen.logic.ts';
+import { anchorIndex, cancelWords, composerLock, feedScrollMove, feedStage, feedTop, threadCommands, threadTimeLabel } from './ThreadScreen.logic.ts';
 import type { FeedScrollSeen } from './ThreadScreen.logic.ts';
 import type { FeedItem } from '../../features/thread-feed/project.ts';
 import './ThreadScreen.css';
@@ -197,6 +198,26 @@ function ThreadPage({ thread }: { thread: ThreadRecord }) {
   const now = useNow(running ? 1000 : undefined);
   const [moreOpen, setMoreOpen] = useState(false);
 
+  // "Stop turn" and "Cancel thread": the commands go up as COMMAND_THREAD,
+  // the outcome comes back with the tail (thread.cancelled ends the thread
+  // and the buttons with it). A cancel asks first (rule 13).
+  const commands = threadCommands(thread, state);
+  const stopping = useAppSelector(s => selectThreadCommandPending(s, id, 'interrupt'));
+  const cancelling = useAppSelector(s => selectThreadCommandPending(s, id, 'cancel'));
+  const [confirmCancel, setConfirmCancel] = useState(false);
+  const stop = () => dispatch(commandThread(id, 'interrupt'));
+  const askCancel = () => setConfirmCancel(true);
+  const cancel = () => {
+    setConfirmCancel(false);
+    dispatch(commandThread(id, 'cancel'));
+  };
+
+  useEffect(() => {
+    if (!commands.running) {
+      setConfirmCancel(false);
+    }
+  }, [commands.running]);
+
   const headless = startedHeadless ?? agentView?.headless ?? false;
   const info = useMemo(() => railSessionInfo(events, session?.context ?? null), [events, session]);
   const stage = feedStage(feed, events.length);
@@ -269,8 +290,28 @@ function ThreadPage({ thread }: { thread: ThreadRecord }) {
             ) : undefined
           }
           meta={meta}
-          more={<ThreadMore thread={thread} parent={parent} childIds={childIds} open={moreOpen} onOpenChange={setMoreOpen} />}
+          running={commands.running}
+          onStop={stop}
+          stopBusy={stopping}
+          stopDisabled={!commands.stopEnabled}
+          onCancel={askCancel}
+          cancelBusy={cancelling}
+          more={
+            <ThreadMore
+              thread={thread}
+              parent={parent}
+              childIds={childIds}
+              open={moreOpen}
+              onOpenChange={setMoreOpen}
+              commands={commands.running ? { onStop: stop, stopDisabled: !commands.stopEnabled || stopping, onCancel: askCancel, cancelDisabled: cancelling } : null}
+            />
+          }
         />
+        {confirmCancel ? (
+          <Confirm title="Cancel thread?" confirm="Cancel thread" confirmIcon="circle-stop" cancel="Keep running" onConfirm={cancel} onClose={() => setConfirmCancel(false)}>
+            {cancelWords(thread)}
+          </Confirm>
+        ) : null}
         <ThreadBody>
           <ThreadMain>
             <div ref={feedRef} style={{ display: 'contents' }}>

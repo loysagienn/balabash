@@ -25,6 +25,11 @@ export const SECRETS_PROVISIONED = 'secrets.provisioned';
 export const CONNECTION_COMPLETED = 'connection.completed';
 export const CONNECTION_FAILED = 'connection.failed';
 export const CONNECTION_REAUTHORIZATION_REQUIRED = 'connection.reauthorization_required';
+// The registry side of a connection (the console's projection follows these
+// by connectionId): a link issued → the row exists; renamed; the row gone.
+export const CONNECTION_PENDING = 'connection.pending';
+export const CONNECTION_RENAMED = 'connection.renamed';
+export const CONNECTION_DISCONNECTED = 'connection.disconnected';
 export const SCHEDULE_FIRED = 'schedule.fired';
 
 // A thread is terminated by exactly one of these; the first one wins.
@@ -59,11 +64,14 @@ const CANONICAL_TYPES: ReadonlySet<string> = new Set([
 ]);
 
 // Open families: sanitized integration lifecycle events (connection.*,
-// concrete suffixes belong to the connections layer) and the SDK-session
+// concrete suffixes belong to the connections layer), the SDK-session
 // journal (session.*, the course of a thread's inner session — suffixes
-// belong to the harness journals, src/harness/*/session-journal.ts; the
-// payload forms are typed in event-types.ts).
-const CANONICAL_FAMILIES = ['connection.', 'session.'];
+// belong to the harness journals, src/harness/*/session-journal.ts) and
+// the registry events (project.*, schedule.task.*, app.* — written where
+// the registry tables change, so that a projection of the log, the
+// console's snapshot, stays derivable; src/core/registry-events.ts). The
+// payload forms are typed in event-types.ts.
+const CANONICAL_FAMILIES = ['connection.', 'session.', 'project.', 'schedule.task.', 'app.'];
 export const SESSION_EVENT_PREFIX = 'session.';
 
 // First segments owned by the canonical vocabulary. A domain event's first
@@ -80,6 +88,8 @@ export const RESERVED_DOMAINS: ReadonlySet<string> = new Set([
   'secrets',
   'schedule',
   'session',
+  'project',
+  'app',
 ]);
 
 const DOMAIN_TYPE_RE = /^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$/;

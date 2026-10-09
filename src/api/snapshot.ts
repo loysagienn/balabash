@@ -15,12 +15,11 @@ import type { JsonObject, Thread } from '../core/contract.ts';
 import { SESSION_VIEW_TYPES, foldSession } from '../projections/session.ts';
 import type { SessionView } from '../projections/session.ts';
 import { listThreads } from '../core/threads.ts';
-import { listProjects } from '../projects/store.ts';
+import { listProjects, projectView } from '../projects/store.ts';
 import { listApps } from '../apps/management.ts';
 import { publicAppsBase } from '../apps/urls.ts';
-import { cronNextRun } from '../schedule/heart.ts';
-import { listUserConnections } from '../capabilities/connections/index.ts';
-import { identityLabel } from '../capabilities/connections/identity.ts';
+import { taskView } from '../schedule/view.ts';
+import { connectionView, listUserConnections } from '../capabilities/connections/index.ts';
 import { listUserAuthServers } from '../capabilities/tool-manager.ts';
 import { getAgents } from '../capabilities/agent-catalog.ts';
 import type { AgentView, ConnectionView, MeResponse, ServiceView, SnapshotResponse, TaskView } from './contract.ts';
@@ -28,10 +27,6 @@ import type { AgentView, ConnectionView, MeResponse, ServiceView, SnapshotRespon
 // The newest threads kept in the snapshot next to every active one; older
 // history pages in through GET /api/threads.
 export const SNAPSHOT_THREAD_WINDOW = 200;
-
-function isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
 
 async function readHeadSeq(): Promise<bigint> {
   const { _max } = await prisma.event.aggregate({ _max: { seq: true } });
@@ -85,48 +80,11 @@ async function readSessions(threads: Thread[]): Promise<Record<string, SessionVi
 async function readTasks(userId: string, now: Date): Promise<TaskView[]> {
   const rows = await prisma.scheduledTask.findMany({ where: { userId }, orderBy: { createdAt: 'asc' } });
 
-  return rows.map(row => ({
-    id: row.id,
-    slug: row.slug,
-    name: row.name,
-    description: row.description,
-    kind: row.kind,
-    cron: row.cron,
-    at: row.at,
-    note: row.note,
-    command: row.command,
-    cwd: row.cwd,
-    timeoutMs: row.timeoutMs,
-    reportOnSuccess: row.reportOnSuccess,
-    createdBy: row.createdBy,
-    createdAt: row.createdAt,
-    nextRunAt: row.cron ? safeNextRun(row.cron, now) : row.at,
-  }));
-}
-
-function safeNextRun(cron: string, now: Date): Date | null {
-  try {
-    return cronNextRun(cron, now);
-  } catch {
-    return null;
-  }
+  return rows.map(row => taskView(row, now));
 }
 
 async function readConnections(userId: string): Promise<ConnectionView[]> {
-  const rows = await listUserConnections(userId);
-
-  return rows.map(row => ({
-    id: row.id,
-    server: row.server,
-    accountKey: row.accountKey,
-    displayName: row.displayName,
-    status: row.status,
-    identity: identityLabel(row.identity),
-    scope: isObject(row.metadata) && typeof row.metadata.scope === 'string' ? row.metadata.scope : null,
-    threadId: row.threadId,
-    createdAt: row.createdAt,
-    updatedAt: row.updatedAt,
-  }));
+  return (await listUserConnections(userId)).map(connectionView);
 }
 
 function readServices(): ServiceView[] {
@@ -173,15 +131,7 @@ export async function buildSnapshot(userId: string, me: MeResponse): Promise<Sna
     me,
     threads,
     sessions,
-    projects: projects.map(project => ({
-      id: project.id,
-      title: project.title,
-      slug: project.slug,
-      description: project.description,
-      archived: project.archived,
-      createdAt: project.createdAt,
-      updatedAt: project.updatedAt,
-    })),
+    projects: projects.map(projectView),
     apps: { apps, publicAppsBase: publicAppsBase() },
     tasks,
     connections,

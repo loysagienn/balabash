@@ -17,6 +17,20 @@ export function threadTimeLabel(thread: Thread, state: StateName, now: Date): st
   return `${rangeLabel(thread.createdAt, thread.updatedAt, now)}, ${durationLabel(thread.updatedAt.getTime() - thread.createdAt.getTime())}`;
 }
 
+// The commands of the header: an active thread with a parent takes "Stop
+// turn" and "Cancel thread" (the main thread is eternal and takes neither);
+// a stop needs a turn in flight.
+export function threadCommands(thread: Thread, state: StateName): { running: boolean; stopEnabled: boolean } {
+  const running = thread.status === 'active' && thread.parentId !== null;
+
+  return { running, stopEnabled: running && state === 'run' };
+}
+
+// The words of the cancel confirmation (design: ThreadScreen, modal).
+export function cancelWords(thread: Thread): string {
+  return `The “${thread.agent}” agent will stop and the thread will end without a summary. The parent thread will be notified. This can’t be undone.`;
+}
+
 export type ComposerLockWords = { icon: IconName; text: string; strong?: string };
 
 // Why there is no composer: the thread is headless, or it is over.

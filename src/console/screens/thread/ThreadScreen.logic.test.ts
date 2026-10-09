@@ -3,7 +3,7 @@ import { describe, it } from 'node:test';
 import { emptyFeed } from '../../store/feed/reducer.ts';
 import { event, resetSeq, thread } from '../../store/fixtures.ts';
 import { compactionsLabel, railSessionInfo } from './rail.ts';
-import { anchorIndex, composerLock, feedScrollMove, feedStage, feedTop, threadTimeLabel } from './ThreadScreen.logic.ts';
+import { anchorIndex, cancelWords, composerLock, feedScrollMove, feedStage, feedTop, threadCommands, threadTimeLabel } from './ThreadScreen.logic.ts';
 
 describe('thread page words', () => {
   it('labels the header time for an active and a closed thread', () => {
@@ -12,6 +12,14 @@ describe('thread page words', () => {
 
     assert.equal(threadTimeLabel(thread({ id: 't', createdAt }), 'run', now), 'since 14:02, running 2h 36m');
     assert.equal(threadTimeLabel(thread({ id: 't', createdAt, updatedAt: new Date(2026, 9, 9, 14, 44), status: 'completed' }), 'done', now), '14:02 → 14:44, 42m');
+  });
+
+  it('offers the commands to an active child thread; a stop needs a turn in flight', () => {
+    assert.deepEqual(threadCommands(thread({ id: 't' }), 'run'), { running: true, stopEnabled: true });
+    assert.deepEqual(threadCommands(thread({ id: 't' }), 'wait'), { running: true, stopEnabled: false });
+    assert.deepEqual(threadCommands(thread({ id: 't', status: 'completed' }), 'done'), { running: false, stopEnabled: false });
+    assert.deepEqual(threadCommands(thread({ id: 'main', parentId: null }), 'run'), { running: false, stopEnabled: false });
+    assert.match(cancelWords(thread({ id: 't', agent: 'engineer' })), /^The “engineer” agent will stop/);
   });
 
   it('locks the composer for a finished or headless thread only', () => {

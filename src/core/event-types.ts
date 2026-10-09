@@ -41,9 +41,12 @@ export type EventPayloads = {
   'thread.notification': { text: string; level: NotificationLevel };
   'thread.completed': { summary: ThreadSummary; title?: string; description?: string };
   'thread.failed': { error: string };
-  'thread.cancel': { reason: string };
+  // The commands from above (the parent authors them, one hop down): the
+  // coordinator's cancel, a surface's Stop/Cancel button (identity and
+  // source of the human behind it).
+  'thread.cancel': { reason: string; identity?: UserIdentity; source?: string };
   'thread.cancelled': { reason: string; requestedBy?: string; cascadeFromThreadId?: string };
-  'thread.interrupt': JsonObject;
+  'thread.interrupt': { reason?: string; identity?: UserIdentity; source?: string } & JsonObject;
 
   // Dialogue.
   'user.message': {
@@ -161,9 +164,12 @@ export type EventPayloads = {
   'session.compaction': { trigger: 'manual' | 'auto'; preTokens: number; postTokens?: number; durationMs?: number };
   'session.retry': { attempt: number; maxRetries: number; retryDelayMs: number; errorStatus: number | null; error?: string };
 
-  // Integrations.
-  'connection.completed': { server: string; account: string; name: string; identity?: string | null };
-  'connection.failed': { server: string; account: string; name: string; error: string };
+  // Integrations. The lifecycle events of a connection carry the row's id
+  // (connectionId) so a projection keyed by id (the console's connections
+  // domain) follows them; events recorded before the id was added lack it.
+  'connection.pending': ConnectionRecord;
+  'connection.completed': { server: string; account: string; name: string; identity?: string | null; connectionId?: string };
+  'connection.failed': { server: string; account: string; name: string; error: string; connectionId?: string };
   'connection.reauthorization_required': {
     server: string;
     account: string;
@@ -171,9 +177,76 @@ export type EventPayloads = {
     identity?: string | null;
     error: string;
     redirectedFromThreadId?: string;
+    connectionId?: string;
   };
+  'connection.renamed': { connectionId: string; server: string; account: string; name: string; previousName: string };
+  // The row is gone: the user disconnected the account, or a flow's newborn
+  // row turned out to be a twin of an established one (reason 'duplicate').
+  'connection.disconnected': { connectionId: string; server: string; account: string; name: string; reason?: 'disconnected' | 'duplicate' };
   'oauth_client.provisioned': { server: string; fields: string[] };
   'secrets.provisioned': { server: string; fields: string[] };
+
+  // Registry events (src/core/registry-events.ts): written where the
+  // registry tables change, the payload is the row as the console's
+  // snapshot shows it (src/api/contract.ts views, dates as ISO strings) —
+  // the reducers upsert it as a whole.
+  'project.created': ProjectRecord;
+  'project.updated': ProjectRecord;
+  'project.archived': ProjectRecord;
+  'project.unarchived': ProjectRecord;
+  'schedule.task.created': TaskRecord;
+  // The task left the registry: cancelled by a tool, or a one-shot task
+  // fired and was consumed (reason 'consumed').
+  'schedule.task.cancelled': TaskRecord & { reason?: 'cancelled' | 'consumed' };
+  'app.published': { path: string; slug: string; name: string | null; description: string | null };
+  'app.unpublished': { path: string; slug: string };
+};
+
+// The project row as the registry events carry it (ProjectView of the
+// snapshot with ISO dates).
+export type ProjectRecord = {
+  id: string;
+  title: string;
+  slug: string;
+  description: string;
+  archived: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+// The scheduled task as the registry events carry it (TaskView with ISO
+// dates; nextRunAt as of the event).
+export type TaskRecord = {
+  id: string;
+  slug: string;
+  name: string;
+  description: string | null;
+  kind: string;
+  cron: string | null;
+  at: string | null;
+  note: string | null;
+  command: string | null;
+  cwd: string | null;
+  timeoutMs: number | null;
+  reportOnSuccess: boolean;
+  createdBy: string | null;
+  createdAt: string;
+  nextRunAt: string | null;
+};
+
+// The connection row as connection.pending carries it (ConnectionView with
+// ISO dates; never tokens).
+export type ConnectionRecord = {
+  connectionId: string;
+  server: string;
+  account: string;
+  name: string;
+  status: string;
+  identity: string | null;
+  scope: string | null;
+  threadId: string | null;
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type EventType = keyof EventPayloads;

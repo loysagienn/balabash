@@ -15,10 +15,11 @@ import type { Action, AppStore } from './index.ts';
 import { eventAction } from './events.ts';
 import { routeTo } from './router/actions.ts';
 import { login, logout, sessionCheck, sessionLost } from './session/actions.ts';
-import { loadThread, loadThreadEvents, loadThreads, sendMessage } from './threads/actions.ts';
+import { commandThread, loadThread, loadThreadEvents, loadThreads, sendMessage } from './threads/actions.ts';
 import { setComposerDraft } from './ui/actions.ts';
 import { hasLoadedPage, makeSelectAgentThreads, selectKnownAgents, selectLatestFinishedThread, selectListThreads, selectRunningCount, selectRunningCountByAgent, selectRunningCountByProject, selectVisibleListThreads } from './threads/selectors.ts';
 import { selectActiveProjects, selectArchivedProjectCount } from './projects/selectors.ts';
+import { selectConnections, selectConnectionsNeedingAction } from './connections/selectors.ts';
 import { makeSelectThreadEvents } from './feed/selectors.ts';
 import { selectThreadState } from './sessions/selectors.ts';
 import { ME, event, resetSeq, snapshot, thread } from './fixtures.ts';
@@ -53,6 +54,8 @@ function fakeApi(overrides: ApiOverrides = {}, calls: Calls = []): Api {
     get: async () => ({ thread: thread({ id: 't1' }), headless: false }),
     events: async () => ({ events: [], nextCursor: null }),
     sendMessage: async () => ({}),
+    interrupt: async () => ({}),
+    cancel: async () => ({}),
     ...overrides.threads,
   };
 
@@ -66,6 +69,8 @@ function fakeApi(overrides: ApiOverrides = {}, calls: Calls = []): Api {
       get: wrap('threads.get', threads.get),
       events: wrap('threads.events', threads.events),
       sendMessage: wrap('threads.sendMessage', threads.sendMessage),
+      interrupt: wrap('threads.interrupt', threads.interrupt),
+      cancel: wrap('threads.cancel', threads.cancel),
     },
     workspace: WORKSPACE,
   };
@@ -849,5 +854,163 @@ describe('agents screen', () => {
     // A thread the tail starts counts at once.
     store.dispatch(eventAction(event({ seq: 52n, type: 'thread.started', threadId: 'b2', targetThreadId: 'main', agentName: 'browser', payload: { agent: 'browser', title: 'x', headless: true, input: 'go' } })));
     assert.deepEqual(selectRunningCountByAgent(store.getState()), { engineer: 1, browser: 2 });
+  });
+});
+
+describe('registry events', () => {
+  const ISO = '2026-10-09T10:00:00.000Z';
+  const LATER = '2026-10-09T12:00:00.000Z';
+
+  it('keeps the projects of the snapshot up to date from project.* events', async () => {
+    resetSeq(300n);
+
+    const store = createStore({ api: fakeApi({ snapshot: async () => snapshot({ projects: [{ id: 'p1', title: 'One', slug: 'one', description: 'd', archived: false, createdAt: new Date(ISO), updatedAt: new Date(ISO) }] }) }), initialRoute: { key: 'home' } });
+
+    await dispatched(store, sessionCheck());
+    await settle();
+
+    store.dispatch(eventAction(event({ type: 'project.created', actor: 'user', payload: { id: 'p2', title: 'Two', slug: 'two', description: 'd2', archived: false, createdAt: LATER, updatedAt: LATER } })));
+    assert.deepEqual(selectActiveProjects(store.getState()).map(project => project.id), ['p2', 'p1']);
+
+    store.dispatch(eventAction(event({ type: 'project.updated', threadId: 'main', payload: { id: 'p1', title: 'One renamed', slug: 'one', description: 'd', archived: false, createdAt: ISO, updatedAt: '2026-10-09T13:00:00.000Z' } })));
+    assert.equal(store.getState().projects.byId.p1.title, 'One renamed');
+    assert.deepEqual(selectActiveProjects(store.getState()).map(project => project.id), ['p1', 'p2']);
+
+    store.dispatch(eventAction(event({ type: 'project.archived', threadId: 'main', payload: { id: 'p2', title: 'Two', slug: 'two', description: 'd2', archived: true, createdAt: LATER, updatedAt: LATER } })));
+    assert.equal(selectArchivedProjectCount(store.getState()), 1);
+    assert.deepEqual(store.getState().projects.ids, ['p1', 'p2']);
+
+    // A record without its id is not folded in.
+    const before = store.getState().projects;
+
+    store.dispatch(eventAction(event({ type: 'project.updated', threadId: 'main', payload: { title: 'ghost' } })));
+    assert.equal(store.getState().projects, before);
+  });
+
+  it('adds and drops scheduled tasks', async () => {
+    resetSeq(320n);
+
+    const store = createStore({ api: fakeApi(), initialRoute: { key: 'home' } });
+
+    await dispatched(store, sessionCheck());
+    await settle();
+
+    const record = { id: 'k1', slug: 'backup', name: 'Backup', description: null, kind: 'command', cron: '0 3 * * *', at: null, note: null, command: 'pg_dump', cwd: null, timeoutMs: null, reportOnSuccess: false, createdBy: 'scheduler', createdAt: ISO, nextRunAt: LATER };
+
+    store.dispatch(eventAction(event({ type: 'schedule.task.created', threadId: 'main', payload: record })));
+    assert.deepEqual(store.getState().schedule.ids, ['k1']);
+    assert.equal(store.getState().schedule.tasks.k1.nextRunAt?.toISOString(), LATER);
+
+    store.dispatch(eventAction(event({ type: 'schedule.task.cancelled', actor: 'system', payload: { ...record, reason: 'consumed' } })));
+    assert.deepEqual(store.getState().schedule.ids, []);
+    assert.equal(store.getState().schedule.tasks.k1, undefined);
+  });
+
+  it('flips the publication of an app and learns a folder the snapshot did not list', async () => {
+    resetSeq(340n);
+
+    const store = createStore({ api: fakeApi({ snapshot: async () => snapshot({ apps: { apps: [{ path: 'b/tracker', name: 'Tracker', description: null, manifestError: null, slug: null }], publicAppsBase: 'https://apps.example' } }) }), initialRoute: { key: 'home' } });
+
+    await dispatched(store, sessionCheck());
+    await settle();
+
+    store.dispatch(eventAction(event({ type: 'app.published', actor: 'user', payload: { path: 'b/tracker', slug: 'tracker', name: 'Tracker', description: null } })));
+    assert.equal(store.getState().apps.items[0].slug, 'tracker');
+
+    store.dispatch(eventAction(event({ type: 'app.published', actor: 'user', payload: { path: 'a/new', slug: 'new-app', name: 'New', description: 'fresh' } })));
+    assert.deepEqual(store.getState().apps.items.map(item => [item.path, item.slug, item.name]), [['a/new', 'new-app', 'New'], ['b/tracker', 'tracker', 'Tracker']]);
+
+    store.dispatch(eventAction(event({ type: 'app.unpublished', actor: 'user', payload: { path: 'b/tracker', slug: 'tracker' } })));
+    assert.equal(store.getState().apps.items[1].slug, null);
+    assert.equal(store.getState().apps.items[1].name, 'Tracker');
+  });
+
+  it('follows a connection through its life by connectionId; events without one are left alone', async () => {
+    resetSeq(360n);
+
+    const store = createStore({ api: fakeApi(), initialRoute: { key: 'home' } });
+
+    await dispatched(store, sessionCheck());
+    await settle();
+
+    store.dispatch(eventAction(event({ type: 'connection.pending', actor: 'system', targetThreadId: 't1', payload: { connectionId: 'c1', server: 'notion', account: 'default', name: 'Notion', status: 'pending', identity: null, scope: null, threadId: 't1', createdAt: ISO, updatedAt: ISO } })));
+    assert.deepEqual(selectConnections(store.getState()).map(connection => [connection.id, connection.status]), [['c1', 'pending']]);
+
+    const completed = event({ type: 'connection.completed', actor: 'system', targetThreadId: 't1', payload: { connectionId: 'c1', server: 'notion', account: 'default', name: 'Notion', identity: 'me@example.com' } });
+
+    store.dispatch(eventAction(completed));
+    assert.equal(store.getState().connections.byId.c1.status, 'connected');
+    assert.equal(store.getState().connections.byId.c1.identity, 'me@example.com');
+    assert.equal(store.getState().connections.byId.c1.updatedAt, completed.createdAt);
+
+    store.dispatch(eventAction(event({ type: 'connection.renamed', actor: 'system', targetThreadId: 't1', payload: { connectionId: 'c1', server: 'notion', account: 'default', name: 'Work Notion', previousName: 'Notion' } })));
+    assert.equal(store.getState().connections.byId.c1.displayName, 'Work Notion');
+
+    store.dispatch(eventAction(event({ type: 'connection.reauthorization_required', actor: 'system', targetThreadId: 't1', payload: { connectionId: 'c1', server: 'notion', account: 'default', name: 'Work Notion', error: 'token revoked' } })));
+    assert.deepEqual(selectConnectionsNeedingAction(store.getState()).map(connection => connection.id), ['c1']);
+
+    // An old-style event names the account only: nothing to key it by.
+    const before = store.getState().connections;
+
+    store.dispatch(eventAction(event({ type: 'connection.completed', actor: 'system', targetThreadId: 't1', payload: { server: 'notion', account: 'default', name: 'Work Notion' } })));
+    assert.equal(store.getState().connections, before);
+
+    store.dispatch(eventAction(event({ type: 'connection.disconnected', actor: 'system', targetThreadId: 't1', payload: { connectionId: 'c1', server: 'notion', account: 'default', name: 'Work Notion', reason: 'disconnected' } })));
+    assert.deepEqual(store.getState().connections.ids, []);
+    assert.equal(store.getState().connections.byId.c1, undefined);
+  });
+});
+
+describe('thread commands', () => {
+  it('sends a stop or a cancel once at a time; the button frees on the answer, a failure reports', async () => {
+    resetSeq(1n);
+
+    const calls: Calls = [];
+    const pending: (() => void)[] = [];
+    let fail = false;
+    const command = () =>
+      new Promise<unknown>((resolve, reject) => {
+        pending.push(() => (fail ? reject(new ApiError(409, 'thread_closed', 'The thread is no longer active')) : resolve({})));
+      });
+    const answer = () => {
+      for (const settle of pending.splice(0)) {
+        settle();
+      }
+    };
+    const api = fakeApi({ snapshot: async () => snapshot({ asOfSeq: 20n, threads: [thread({ id: 't1' })] }), threads: { interrupt: command, cancel: command } }, calls);
+    const store = createStore({ api, initialRoute: { key: 'thread', id: 't1' } });
+
+    await dispatched(store, sessionCheck());
+    await settle();
+
+    const stopping = dispatched(store, commandThread('t1', 'interrupt'));
+
+    assert.deepEqual(store.getState().ui.threadCommands.t1, { interrupt: true });
+    store.dispatch(commandThread('t1', 'interrupt'));
+    assert.equal(calls.filter(call => call.name === 'threads.interrupt').length, 1);
+
+    // A cancel is a different command: it goes while the stop is in flight.
+    const cancelling = dispatched(store, commandThread('t1', 'cancel', 'enough'));
+
+    assert.deepEqual(store.getState().ui.threadCommands.t1, { interrupt: true, cancel: true });
+    assert.deepEqual(calls.find(call => call.name === 'threads.cancel')?.args, ['t1', 'enough']);
+
+    answer();
+    await stopping;
+    await cancelling;
+    assert.equal(store.getState().ui.threadCommands.t1, undefined);
+    assert.deepEqual(store.getState().ui.toasts, []);
+
+    fail = true;
+
+    const failing = dispatched(store, commandThread('t1', 'cancel'));
+
+    answer();
+    await failing;
+    assert.equal(store.getState().ui.threadCommands.t1, undefined);
+    assert.deepEqual(
+      store.getState().ui.toasts.map(toast => [toast.title, toast.desc]),
+      [['Couldn’t cancel the thread', 'The thread is no longer active']],
+    );
   });
 });

@@ -411,14 +411,14 @@ export function createAuthToolServer(): BuiltinToolServer {
       if (toolName === RENAME_CONNECTION_FUNCTION_NAME) {
         const account = requireStringArg(args, 'account');
         const name = requireStringArg(args, 'name');
-        const result = await renameConnection(ctx.userId, server, account, name);
+        const result = await renameConnection(ctx.userId, server, account, name, ctx.threadId);
 
         return `Account "${result.accountKey}" of "${server}" renamed: "${result.previousName}" → "${result.name}". The slug stays "${result.accountKey}".`;
       }
 
       if (toolName === DISCONNECT_CONNECTION_FUNCTION_NAME) {
         const account = requireStringArg(args, 'account');
-        const result = await disconnectConnection(ctx.userId, server, account);
+        const result = await disconnectConnection(ctx.userId, server, account, ctx.threadId);
 
         return `Account "${result.accountKey}" ("${result.name}") of "${server}" is disconnected and its stored tokens are deleted. If the user wants a full revocation, remind them to also revoke Balabash's access in the provider's security settings.`;
       }

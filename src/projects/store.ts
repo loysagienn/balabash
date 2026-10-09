@@ -5,8 +5,28 @@
 
 import { prisma } from '../db/client.ts';
 import type { ProjectModel } from '../../prisma-generated/models.ts';
+import type { ProjectView } from '../api/contract.ts';
+import type { ProjectRecord } from '../core/event-types.ts';
 
 export type { ProjectModel };
+
+// The row as the console sees it: in the snapshot (ProjectView) and in the
+// project.* events (ProjectRecord — the same fields, dates as ISO strings).
+export function projectView(project: ProjectModel): ProjectView {
+  return {
+    id: project.id,
+    title: project.title,
+    slug: project.slug,
+    description: project.description,
+    archived: project.archived,
+    createdAt: project.createdAt,
+    updatedAt: project.updatedAt,
+  };
+}
+
+export function projectRecord(project: ProjectModel): ProjectRecord {
+  return { ...projectView(project), createdAt: project.createdAt.toISOString(), updatedAt: project.updatedAt.toISOString() };
+}
 
 // Live projects first, most recently touched on top; archived tail after.
 export function listProjects(userId: string, options?: { archived?: boolean }): Promise<ProjectModel[]> {

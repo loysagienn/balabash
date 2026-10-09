@@ -17,11 +17,16 @@ import { Prisma } from '../../../prisma-generated/client.ts';
 import type { ConnectionModel } from '../../../prisma-generated/models.ts';
 import { prisma } from '../../db/client.ts';
 import type { JsonObject } from '../../core/contract.ts';
+import type { ConnectionView } from '../../api/contract.ts';
+import type { ConnectionRecord } from '../../core/event-types.ts';
 import { appendEvent } from '../../core/append.ts';
 import {
   CONNECTION_COMPLETED,
+  CONNECTION_DISCONNECTED,
   CONNECTION_FAILED,
+  CONNECTION_PENDING,
   CONNECTION_REAUTHORIZATION_REQUIRED,
+  CONNECTION_RENAMED,
   OAUTH_CLIENT_PROVISIONED,
 } from '../../core/envelope.ts';
 import { config } from '../../config/index.ts';
@@ -88,6 +93,58 @@ export async function listUserConnections(userId: string) {
   return prisma.connection.findMany({ where: { userId }, orderBy: { createdAt: 'asc' } });
 }
 
+// The row as the console sees it — in the snapshot (ConnectionView) and in
+// connection.pending (ConnectionRecord: the same fields under the names of
+// the other connection.* events, dates as ISO strings). Never the tokens.
+export function connectionView(row: ConnectionModel): ConnectionView {
+  return {
+    id: row.id,
+    server: row.server,
+    accountKey: row.accountKey,
+    displayName: row.displayName,
+    status: row.status,
+    identity: identityLabel(row.identity),
+    scope: isObject(row.metadata) && typeof row.metadata.scope === 'string' ? row.metadata.scope : null,
+    threadId: row.threadId,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
+}
+
+function connectionRecord(row: ConnectionModel): ConnectionRecord {
+  const view = connectionView(row);
+
+  return {
+    connectionId: view.id,
+    server: view.server,
+    account: view.accountKey,
+    name: view.displayName,
+    status: view.status,
+    identity: view.identity,
+    scope: view.scope,
+    threadId: view.threadId,
+    createdAt: view.createdAt.toISOString(),
+    updatedAt: view.updatedAt.toISOString(),
+  };
+}
+
+// The lifecycle events of a connection: actor system, addressed to the
+// thread that drives the account (the auth agent's; append redirects to
+// the main thread when it is gone). A failure to journal is logged — the
+// row has already changed.
+async function journalConnectionEvent(type: string, row: { userId: string; threadId: string | null; server: string }, payload: JsonObject): Promise<void> {
+  await appendEvent({
+    type,
+    actor: 'system',
+    userId: row.userId,
+    threadId: null,
+    targetThreadId: row.threadId,
+    payload,
+  }).catch(error => {
+    console.error(`[connections] failed to journal ${type} for "${row.server}":`, error);
+  });
+}
+
 async function requireConnection(userId: string, serverName: string, accountKey: string): Promise<ConnectionModel> {
   const row = await prisma.connection.findUnique({
     where: { userId_server_accountKey: { userId, server: serverName, accountKey } },
@@ -110,6 +167,8 @@ export async function renameConnection(
   serverName: string,
   accountKey: string,
   name: string,
+  // The calling thread (the auth agent's) — the addressee of the event.
+  threadId?: string,
 ): Promise<{ accountKey: string; previousName: string; name: string }> {
   const row = await requireConnection(userId, serverName, accountKey);
   const trimmed = name.trim();
@@ -128,6 +187,13 @@ export async function renameConnection(
   }
 
   await prisma.connection.update({ where: { id: row.id }, data: { displayName: trimmed } });
+  await journalConnectionEvent(CONNECTION_RENAMED, { ...row, threadId: threadId ?? row.threadId }, {
+    connectionId: row.id,
+    server: row.server,
+    account: row.accountKey,
+    name: trimmed,
+    previousName: row.displayName,
+  });
 
   return { accountKey: row.accountKey, previousName: row.displayName, name: trimmed };
 }
@@ -139,11 +205,19 @@ export async function disconnectConnection(
   userId: string,
   serverName: string,
   accountKey: string,
+  threadId?: string,
 ): Promise<{ accountKey: string; name: string }> {
   const row = await requireConnection(userId, serverName, accountKey);
 
   await prisma.connection.delete({ where: { id: row.id } });
   dropUserClient(row.server, userId, row.accountKey);
+  await journalConnectionEvent(CONNECTION_DISCONNECTED, { ...row, threadId: threadId ?? row.threadId }, {
+    connectionId: row.id,
+    server: row.server,
+    account: row.accountKey,
+    name: row.displayName,
+    reason: 'disconnected',
+  });
 
   return { accountKey: row.accountKey, name: row.displayName };
 }
@@ -206,8 +280,10 @@ export async function requestAuthorization(
   const connectNonce = randomToken();
   const pending = { expiresAt: new Date(Date.now() + CONNECT_LINK_TTL_MS).toISOString() };
 
+  let row: ConnectionModel;
+
   if (existing) {
-    await prisma.connection.update({
+    row = await prisma.connection.update({
       where: { id: existing.id },
       data: {
         threadId,
@@ -220,7 +296,7 @@ export async function requestAuthorization(
       },
     });
   } else {
-    await prisma.connection.create({
+    row = await prisma.connection.create({
       data: {
         userId,
         threadId,
@@ -235,6 +311,10 @@ export async function requestAuthorization(
       },
     });
   }
+
+  // The link exists: the row is (or stays) in the registry — the event
+  // carries it whole, the nonce and the tokens stay out of the log.
+  await journalConnectionEvent(CONNECTION_PENDING, row, connectionRecord(row));
 
   return `https://${config.domain}/connect/${server.name}?nonce=${connectNonce}`;
 }
@@ -419,7 +499,7 @@ export async function handleOauthCallback(query: Record<string, unknown>): Promi
 
   const fail = async (error: string): Promise<OauthCallbackResult> => {
     await prisma.connection.update({ where: { id: row.id }, data: { pendingState: null } });
-    await journal(CONNECTION_FAILED, { server: row.server, account: row.accountKey, name: row.displayName, error });
+    await journal(CONNECTION_FAILED, { connectionId: row.id, server: row.server, account: row.accountKey, name: row.displayName, error });
 
     return { ok: false, error };
   };
@@ -480,6 +560,7 @@ export async function handleOauthCallback(query: Record<string, unknown>): Promi
 
     if (outcome.kind === 'wrong-account') {
       await journal(CONNECTION_FAILED, {
+        connectionId: row.id,
         server: row.server,
         account: row.accountKey,
         name: row.displayName,
@@ -493,7 +574,20 @@ export async function handleOauthCallback(query: Record<string, unknown>): Promi
       // The consent landed on an already-connected provider account; its row
       // took the fresh tokens, so its live client is stale too.
       dropUserClient(row.server, row.userId, outcome.twinAccountKey);
+
+      if (bornHere) {
+        // The newborn row died in establishIdentity: the registry lost it.
+        await journal(CONNECTION_DISCONNECTED, {
+          connectionId: row.id,
+          server: row.server,
+          account: row.accountKey,
+          name: row.displayName,
+          reason: 'duplicate',
+        });
+      }
+
       await journal(CONNECTION_COMPLETED, {
+        connectionId: outcome.twinId,
         server: row.server,
         account: outcome.twinAccountKey,
         name: outcome.twinName,
@@ -510,6 +604,7 @@ export async function handleOauthCallback(query: Record<string, unknown>): Promi
     }
 
     await journal(CONNECTION_COMPLETED, {
+      connectionId: row.id,
       server: row.server,
       account: row.accountKey,
       name: row.displayName,
@@ -519,7 +614,7 @@ export async function handleOauthCallback(query: Record<string, unknown>): Promi
     return { ok: true, server: row.server };
   }
 
-  await journal(CONNECTION_COMPLETED, { server: row.server, account: row.accountKey, name: row.displayName });
+  await journal(CONNECTION_COMPLETED, { connectionId: row.id, server: row.server, account: row.accountKey, name: row.displayName });
 
   return { ok: true, server: row.server };
 }
@@ -529,7 +624,7 @@ type IdentityOutcome =
   // The probe could not answer; the connection stays identity-less and the
   // lazy backfill retries on later connects.
   | { kind: 'unknown'; reason: string }
-  | { kind: 'twin'; twinAccountKey: string; twinName: string; label: string | null }
+  | { kind: 'twin'; twinId: string; twinAccountKey: string; twinName: string; label: string | null }
   | { kind: 'wrong-account'; error: string };
 
 // Puts the flow's row back exactly as it was before the exchange: the old
@@ -617,7 +712,7 @@ async function establishIdentity(
     await restorePreFlowState(preFlow);
   }
 
-  return { kind: 'twin', twinAccountKey: twin.accountKey, twinName: twin.displayName, label: identity.label };
+  return { kind: 'twin', twinId: twin.id, twinAccountKey: twin.accountKey, twinName: twin.displayName, label: identity.label };
 }
 
 // Marks a previously connected connection as needing reauthorization —
@@ -639,6 +734,7 @@ export async function markReauthorizationRequired(connectionId: string, error: s
     threadId: null,
     targetThreadId: row.threadId,
     payload: {
+      connectionId: row.id,
       server: row.server,
       account: row.accountKey,
       name: row.displayName,

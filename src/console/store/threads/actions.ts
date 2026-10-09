@@ -32,3 +32,13 @@ export const loadThreadFail = (id: string, error: ApiFailure) => ({ type: 'LOAD_
 export const sendMessage = (threadId: string, text: string) => ({ type: 'SEND_MESSAGE', threadId, text }) as const;
 export const sendMessageDone = (threadId: string) => ({ type: 'SEND_MESSAGE_DONE', threadId }) as const;
 export const sendMessageFail = (threadId: string, error: ApiFailure) => ({ type: 'SEND_MESSAGE_FAIL', threadId, error }) as const;
+
+// The commands of the thread header: "Stop turn" (thread.interrupt — the
+// run stays and waits) and "Cancel thread" (thread.cancel → the thread
+// ends). The outcome is the event the tail brings back; _DONE only frees
+// the button, _FAIL frees it and reports.
+export type ThreadCommand = 'interrupt' | 'cancel';
+
+export const commandThread = (threadId: string, command: ThreadCommand, reason?: string) => ({ type: 'COMMAND_THREAD', threadId, command, reason }) as const;
+export const commandThreadDone = (threadId: string, command: ThreadCommand) => ({ type: 'COMMAND_THREAD_DONE', threadId, command }) as const;
+export const commandThreadFail = (threadId: string, command: ThreadCommand, error: ApiFailure) => ({ type: 'COMMAND_THREAD_FAIL', threadId, command, error }) as const;

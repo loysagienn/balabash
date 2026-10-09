@@ -18,7 +18,7 @@ import { loginDoneHandler, loginHandler, logoutHandler, sessionCheckDoneHandler,
 import { streamReducer } from './stream/reducer.ts';
 import { snapshotLoadDoneHandler, snapshotLoadHandler } from './stream/handlers.ts';
 import { threadsReducer } from './threads/reducer.ts';
-import { loadThreadEventsHandler, loadThreadHandler, loadThreadsHandler, sendMessageHandler } from './threads/handlers.ts';
+import { commandThreadHandler, loadThreadEventsHandler, loadThreadHandler, loadThreadsHandler, sendMessageHandler } from './threads/handlers.ts';
 import { feedReducer } from './feed/reducer.ts';
 import { sessionsReducer } from './sessions/reducer.ts';
 import { projectsReducer } from './projects/reducer.ts';
@@ -43,6 +43,7 @@ export const handlers = {
   LOAD_THREAD_EVENTS: loadThreadEventsHandler,
   LOAD_THREAD: loadThreadHandler,
   SEND_MESSAGE: sendMessageHandler,
+  COMMAND_THREAD: commandThreadHandler,
 } satisfies ActionHandlers;
 
 export type AppStore = Store<State, Action>;

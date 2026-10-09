@@ -17,6 +17,7 @@ import { ensureOperatorWorkspace, getMainThread, getThread, isHeadlessThread, li
 import { getEventsAfter, listThreadEvents } from '../core/events.ts';
 import { getLiveHub } from '../core/live.ts';
 import { appendEvent } from '../core/append.ts';
+import { THREAD_CANCEL, THREAD_INTERRUPT } from '../core/envelope.ts';
 import type { FileRef, Thread, ThreadStatus } from '../core/contract.ts';
 import { WorkspacePathError, listDir, resolveFilePath, sanitizeRelPath, statFile } from '../workspace/files.ts';
 import { getFile, getUserFile, openFileContent } from '../files/index.ts';
@@ -29,6 +30,7 @@ import { consumeAuthCode, createAuthCode } from './auth-codes.ts';
 import { createUserSession, destroySession, getSession } from './session.ts';
 import { createEventStreamHandler } from './event-stream.ts';
 import { buildSnapshot } from './snapshot.ts';
+import { checkMutationOrigin } from './origin.ts';
 import type {
   AppsResponse,
   PublicationResponse,
@@ -36,6 +38,7 @@ import type {
   LogoutResponse,
   MeResponse,
   PostThreadMessageResponse,
+  ThreadCommandResponse,
   ProvisionSecretsResponse,
   SecretRequestResponse,
   SecretRequestView,
@@ -454,6 +457,103 @@ router.post('/threads/:id/messages', requireSession, async ctx => {
 });
 
 // --------------------------------------------------------------------------
+// The thread commands of the console: a soft stop of the turn in flight
+// (thread.interrupt — the run stays and waits for the next message) and a
+// cancel (thread.cancel → the router aborts the run and writes
+// thread.cancelled). Both are one-hop-down commands authored at the parent,
+// exactly as the coordinator and the CCR adapter write them; the operator's
+// identity rides in the payload. The main thread takes neither: it is
+// eternal and nothing addresses it from above.
+
+const CANCEL_REASON_MAX_CHARS = 1_000;
+
+// The active child thread a command may address, or the refusal.
+async function requireCommandableThread(ctx: Context, id: string): Promise<(Thread & { parentId: string }) | null> {
+  const thread = await requireOwnThread(ctx, id);
+
+  if (!thread) {
+    return null;
+  }
+
+  if (thread.status !== 'active') {
+    sendError(ctx, 409, 'thread_closed', 'The thread is no longer active');
+
+    return null;
+  }
+
+  if (!thread.parentId) {
+    sendError(ctx, 409, 'thread_main', 'The main thread is eternal — it takes no stop or cancel');
+
+    return null;
+  }
+
+  return thread as Thread & { parentId: string };
+}
+
+router.post('/threads/:id/interrupt', requireSession, async ctx => {
+  const thread = await requireCommandableThread(ctx, ctx.params.id);
+
+  if (!thread) {
+    return;
+  }
+
+  const result = await appendEvent({
+    type: THREAD_INTERRUPT,
+    actor: 'user',
+    userId: thread.userId,
+    threadId: thread.parentId,
+    targetThreadId: thread.id,
+    payload: { reason: 'interrupted_by_user', identity: WEB_IDENTITY, source: 'web' },
+  });
+
+  if (!result.written) {
+    sendError(ctx, 409, 'thread_closed', 'The thread is no longer active');
+
+    return;
+  }
+
+  const response: ThreadCommandResponse = { event: result.event };
+
+  ctx.body = prepareObject(response);
+});
+
+router.post('/threads/:id/cancel', requireSession, async ctx => {
+  const thread = await requireCommandableThread(ctx, ctx.params.id);
+
+  if (!thread) {
+    return;
+  }
+
+  const body = await readJsonBody(ctx);
+  const reason = typeof body.reason === 'string' && body.reason.trim() ? body.reason.trim() : 'cancelled by the operator';
+
+  if (reason.length > CANCEL_REASON_MAX_CHARS) {
+    sendError(ctx, 400, 'bad_request', `reason must be at most ${CANCEL_REASON_MAX_CHARS} characters`);
+
+    return;
+  }
+
+  const result = await appendEvent({
+    type: THREAD_CANCEL,
+    actor: 'user',
+    userId: thread.userId,
+    threadId: thread.parentId,
+    targetThreadId: thread.id,
+    payload: { reason, identity: WEB_IDENTITY, source: 'web' },
+  });
+
+  if (!result.written) {
+    sendError(ctx, 409, 'thread_closed', 'The thread is no longer active');
+
+    return;
+  }
+
+  const response: ThreadCommandResponse = { event: result.event };
+
+  ctx.body = prepareObject(response);
+});
+
+// --------------------------------------------------------------------------
 // Stored files of the workspace (the attachments of messages), by id, under
 // the session: the same ownership rule as the model-facing lookup — a
 // foreign file and a missing one answer the same 404. Stored files are
@@ -746,6 +846,26 @@ filesRouter.get('/files/*path', requireSession, async ctx => {
   }
 });
 
+// The cross-site guard of every mutation under the session (src/api/origin.ts):
+// a page of another origin holding the browser's cookie is refused before any
+// route runs. True for the error reply already sent.
+function refuseCrossSite(ctx: Context): boolean {
+  const verdict = checkMutationOrigin({
+    method: ctx.method,
+    host: ctx.host,
+    secFetchSite: ctx.get('sec-fetch-site') || undefined,
+    origin: ctx.get('origin') || undefined,
+  });
+
+  if (verdict === 'ok') {
+    return false;
+  }
+
+  sendError(ctx, 403, 'cross_site', 'Cross-site requests are not accepted');
+
+  return true;
+}
+
 export function createFilesMiddleware(): (ctx: Context, next: Next) => Promise<void> {
   const routes = filesRouter.routes() as unknown as (ctx: Context, next: () => Promise<void>) => Promise<void>;
 
@@ -753,6 +873,10 @@ export function createFilesMiddleware(): (ctx: Context, next: Next) => Promise<v
     if (ctx.path !== '/files' && !ctx.path.startsWith('/files/')) {
       await next();
 
+      return;
+    }
+
+    if (refuseCrossSite(ctx)) {
       return;
     }
 
@@ -887,6 +1011,10 @@ export function createApiMiddleware(): (ctx: Context, next: Next) => Promise<voi
     if (ctx.path !== '/api' && !ctx.path.startsWith('/api/')) {
       await next();
 
+      return;
+    }
+
+    if (refuseCrossSite(ctx)) {
       return;
     }
 

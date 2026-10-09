@@ -18,7 +18,8 @@ import { prisma } from '../db/client.ts';
 import type { ToolFunction } from '../capabilities/mcp-client.ts';
 import type { BuiltinServerCallContext, BuiltinToolServer } from '../capabilities/tool-manager.ts';
 import { workspaceFilesDir } from '../workspace/layout.ts';
-import { getProject, listProjects } from './store.ts';
+import { journalRegistryEvent } from '../core/registry-events.ts';
+import { getProject, listProjects, projectRecord } from './store.ts';
 import type { ProjectModel } from './store.ts';
 
 export const PROJECTS_SERVER_NAME = 'projects';
@@ -287,6 +288,8 @@ async function executeCreate(args: JsonObject, ctx: BuiltinServerCallContext): P
     throw error;
   }
 
+  await journalRegistryEvent('project.created', projectRecord(project), { kind: 'thread', userId: ctx.userId, threadId: ctx.threadId });
+
   return {
     project: projectToJson(project),
     folder: `${slug}/`,
@@ -386,6 +389,8 @@ async function executeUpdate(args: JsonObject, ctx: BuiltinServerCallContext): P
     throw error;
   }
 
+  await journalRegistryEvent('project.updated', projectRecord(updated), { kind: 'thread', userId: ctx.userId, threadId: ctx.threadId });
+
   return {
     project: projectToJson(updated),
     ...(slug ? { folder: `${updated.slug}/`, note: `folder renamed: ${project.slug}/ → ${updated.slug}/` } : {}),
@@ -400,7 +405,9 @@ async function executeArchive(args: JsonObject, ctx: BuiltinServerCallContext): 
     return `Project "${project.title}" is already archived.`;
   }
 
-  await prisma.project.update({ where: { id: project.id }, data: { archived: true } });
+  const archived = await prisma.project.update({ where: { id: project.id }, data: { archived: true } });
+
+  await journalRegistryEvent('project.archived', projectRecord(archived), { kind: 'thread', userId: ctx.userId, threadId: ctx.threadId });
 
   return `Project "${project.title}" archived. Nothing was deleted: the record and the folder "${project.slug}/" stay; projects_unarchive brings it back.`;
 }
@@ -412,7 +419,9 @@ async function executeUnarchive(args: JsonObject, ctx: BuiltinServerCallContext)
     return `Project "${project.title}" is not archived.`;
   }
 
-  await prisma.project.update({ where: { id: project.id }, data: { archived: false } });
+  const unarchived = await prisma.project.update({ where: { id: project.id }, data: { archived: false } });
+
+  await journalRegistryEvent('project.unarchived', projectRecord(unarchived), { kind: 'thread', userId: ctx.userId, threadId: ctx.threadId });
 
   return `Project "${project.title}" is back on the live list. Its folder "${project.slug}/" was never touched.`;
 }

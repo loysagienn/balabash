@@ -30,6 +30,10 @@ export type Api = {
     get(id: string): Promise<ThreadResponse>;
     events(id: string, query: ThreadEventsQuery): Promise<ThreadEventsResponse>;
     sendMessage(id: string, text: string): Promise<unknown>;
+    // The commands from above: a soft stop of the turn in flight, the end
+    // of the thread. The outcome arrives through the event stream.
+    interrupt(id: string): Promise<unknown>;
+    cancel(id: string, reason?: string): Promise<unknown>;
   };
   // The file area (the second data layer — TanStack Query in
   // features/file-area, not the store): a node is a directory listing or
@@ -67,6 +71,8 @@ export function createApi(options: FetchOptions = {}): Api {
       get: id => apiFetch<ThreadResponse>(thread(id)),
       events: (id, query) => apiFetch<ThreadEventsResponse>(`${thread(id)}/events`, { query }),
       sendMessage: (id, text) => apiFetch(`${thread(id)}/messages`, { method: 'POST', body: { text } }),
+      interrupt: id => apiFetch(`${thread(id)}/interrupt`, { method: 'POST', body: {} }),
+      cancel: (id, reason) => apiFetch(`${thread(id)}/cancel`, { method: 'POST', body: reason ? { reason } : {} }),
     },
     workspace: {
       node: path => apiFetch<WorkspaceNodeResponse>('/api/workspace/node', { query: { path } }),

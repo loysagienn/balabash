@@ -5,7 +5,7 @@
 import { toApiFailure } from '../../lib/api/index.ts';
 import type { ActionHandler } from '../types.ts';
 import { pushToast } from '../ui/actions.ts';
-import { loadThreadDone, loadThreadEventsDone, loadThreadEventsFail, loadThreadFail, loadThreadsDone, loadThreadsFail, sendMessageDone, sendMessageFail } from './actions.ts';
+import { commandThreadDone, commandThreadFail, loadThreadDone, loadThreadEventsDone, loadThreadEventsFail, loadThreadFail, loadThreadsDone, loadThreadsFail, sendMessageDone, sendMessageFail } from './actions.ts';
 
 export const THREADS_PAGE = 50;
 export const FEED_CHUNK = 500;
@@ -98,5 +98,34 @@ export const sendMessageHandler: ActionHandler<'SEND_MESSAGE'> =
 
       dispatch(sendMessageFail(action.threadId, failure));
       dispatch(pushToast({ title: 'Message not sent', desc: failure.message, state: 'err' }));
+    }
+  };
+
+const COMMAND_FAILED_WORDS = { interrupt: 'Couldn’t stop the turn', cancel: 'Couldn’t cancel the thread' };
+
+export const commandThreadHandler: ActionHandler<'COMMAND_THREAD'> =
+  ({ api, dispatch, getState, next }) =>
+  async action => {
+    const { threadId, command } = action;
+
+    if (getState().ui.threadCommands[threadId]?.[command]) {
+      return;
+    }
+
+    next(action);
+
+    try {
+      if (command === 'interrupt') {
+        await api.threads.interrupt(threadId);
+      } else {
+        await api.threads.cancel(threadId, action.reason);
+      }
+
+      dispatch(commandThreadDone(threadId, command));
+    } catch (error) {
+      const failure = toApiFailure(error);
+
+      dispatch(commandThreadFail(threadId, command, failure));
+      dispatch(pushToast({ title: COMMAND_FAILED_WORDS[command], desc: failure.message, state: 'err' }));
     }
   };

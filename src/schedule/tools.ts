@@ -22,6 +22,8 @@ import {
   isTaskRunning,
 } from './engine.ts';
 import { assertValidCron, cronNextRun } from './heart.ts';
+import { journalRegistryEvent } from '../core/registry-events.ts';
+import { taskRecord } from './view.ts';
 
 export const SCHEDULE_SERVER_NAME = 'schedule';
 
@@ -369,6 +371,8 @@ async function createTask(args: JsonObject, ctx: BuiltinServerCallContext): Prom
     },
   });
 
+  await journalRegistryEvent('schedule.task.created', taskRecord(task, new Date()), { kind: 'thread', userId: ctx.userId, threadId: ctx.threadId });
+
   const lines = [`Task "${slug}" (${kind}) registered. Trigger: ${describeTrigger(task)}.`];
 
   if (at && at.getTime() <= Date.now()) {
@@ -448,11 +452,15 @@ async function listTasks(ctx: BuiltinServerCallContext): Promise<string> {
 
 async function cancelTask(args: JsonObject, ctx: BuiltinServerCallContext): Promise<string> {
   const slug = requireSlug(args);
-  const { count } = await prisma.scheduledTask.deleteMany({ where: { slug, userId: ctx.userId } });
+  const task = await prisma.scheduledTask.findFirst({ where: { slug, userId: ctx.userId } });
+  // deleteMany: idempotent against the heart consuming the same one-shot row.
+  const { count } = task ? await prisma.scheduledTask.deleteMany({ where: { id: task.id } }) : { count: 0 };
 
-  if (count === 0) {
+  if (!task || count === 0) {
     throw new Error(`no task with slug "${slug}" in this workspace`);
   }
+
+  await journalRegistryEvent('schedule.task.cancelled', { ...taskRecord(task, new Date()), reason: 'cancelled' }, { kind: 'thread', userId: ctx.userId, threadId: ctx.threadId });
 
   return `Task "${slug}" deleted; its trigger is disarmed.`;
 }

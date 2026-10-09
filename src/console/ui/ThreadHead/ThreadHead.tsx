@@ -31,6 +31,8 @@ export type ThreadHeadProps = {
   running?: boolean;
   onStop?: () => void;
   stopBusy?: boolean;
+  // No turn in flight to stop (the session waits) — the button stays, inert.
+  stopDisabled?: boolean;
   onCancel?: () => void;
   cancelBusy?: boolean;
   more?: ReactNode;
@@ -49,6 +51,7 @@ export function ThreadHead({
   running,
   onStop,
   stopBusy,
+  stopDisabled,
   onCancel,
   cancelBusy,
   more,
@@ -73,7 +76,7 @@ export function ThreadHead({
       <div className="th-acts">
         {running ? (
           <>
-            <Btn label="Stop turn" icon="pause" size="sm" className="th-act" busy={stopBusy} onClick={onStop} />
+            <Btn label="Stop turn" icon="pause" size="sm" className="th-act" busy={stopBusy} disabled={stopDisabled} onClick={onStop} />
             <Btn
               label="Cancel thread"
               icon="circle-stop"
