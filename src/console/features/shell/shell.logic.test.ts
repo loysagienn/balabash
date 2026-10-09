@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { isMainThreadOpen, isMainThreadShortcut, mainThreadRoute, mainThreadShortcutLabel } from './shell.logic.ts';
+import { isMainThreadOpen, isMainThreadShortcut, keepsScrollPlace, mainThreadRoute, mainThreadShortcutLabel } from './shell.logic.ts';
 
 const press = (key: string, mods: Partial<Omit<import('./shell.logic.ts').KeyPress, 'key'>> = {}) => ({ key, metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, ...mods });
 
@@ -51,5 +51,17 @@ describe('main thread route', () => {
     assert.equal(isMainThreadOpen({ key: 'thread', id: 'other' }, 'main'), false);
     assert.equal(isMainThreadOpen({ key: 'threads' }, 'main'), false);
     assert.equal(isMainThreadOpen({ key: 'thread', id: 'main' }, null), false);
+  });
+});
+
+describe('scroll place across routes', () => {
+  it('is kept inside one project page, reset between pages', () => {
+    assert.equal(keepsScrollPlace({ key: 'project', slug: 'p' }, { key: 'project', slug: 'p', path: 'docs' }), true);
+    assert.equal(keepsScrollPlace({ key: 'project', slug: 'p', path: 'docs/a.md' }, { key: 'project', slug: 'p' }), true);
+    assert.equal(keepsScrollPlace({ key: 'project', slug: 'p', path: 'a' }, { key: 'project', slug: 'p', path: 'b' }), true);
+    assert.equal(keepsScrollPlace({ key: 'project', slug: 'p' }, { key: 'project', slug: 'q' }), false);
+    assert.equal(keepsScrollPlace({ key: 'projects' }, { key: 'project', slug: 'p' }), false);
+    assert.equal(keepsScrollPlace({ key: 'project', slug: 'p', path: 'a' }, { key: 'projects' }), false);
+    assert.equal(keepsScrollPlace({ key: 'files', path: '' }, { key: 'files', path: 'a' }), false);
   });
 });

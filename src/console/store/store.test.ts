@@ -1332,6 +1332,69 @@ describe('project registry changes', () => {
     assert.deepEqual(store.getState().projects.ids, ['p9']);
   });
 
+  it('does not pull the operator back to a project created after they left the Projects screen', async () => {
+    let answer: (value: Awaited<ReturnType<Api['projects']['create']>>) => void = () => undefined;
+    const api = fakeApi({ projects: { create: () => new Promise(resolve => (answer = resolve)) } });
+    const store = createStore({ api, initialRoute: { key: 'projects' } });
+
+    await dispatched(store, sessionCheck());
+    await settle();
+
+    const creating = store.dispatch(createProject({ title: 'Nine', slug: 'nine', description: 'ninth' }));
+
+    // The form was closed and Settings opened while the call ran.
+    store.dispatch(routeTo({ key: 'settings' }));
+    answer({ project: row('p9', { title: 'Nine', slug: 'nine', description: 'ninth' }), adopted: false });
+    await creating;
+
+    const state = store.getState();
+
+    assert.deepEqual(state.router.route, { key: 'settings' });
+    assert.equal(state.projects.byId.p9?.slug, 'nine');
+    assert.deepEqual(selectProjectCreate(state), { pending: false, error: null, done: 1 });
+    // The toast offers the page instead.
+    assert.deepEqual(state.ui.toasts.map(toast => [toast.title, toast.action]), [['Project created', { label: 'Open', route: { key: 'project', slug: 'nine' } }]]);
+  });
+
+  it('folds a row only when it is at least as new as the one held — the answer and the tail may cross', async () => {
+    const T1 = new Date('2026-10-09T10:01:00.000Z');
+    const T2 = new Date('2026-10-09T10:02:00.000Z');
+    let answer: (value: Awaited<ReturnType<Api['projects']['update']>>) => void = () => undefined;
+    const api = fakeApi({
+      snapshot: async () => snapshot({ projects: [row('p1')] }),
+      projects: { update: () => new Promise(resolve => (answer = resolve)), archive: async id => ({ project: row(id, { archived: true, updatedAt: T2 }) }) },
+    });
+    const store = createStore({ api, initialRoute: { key: 'project', slug: 'one' } });
+
+    await dispatched(store, sessionCheck());
+    await settle();
+
+    // The edit's answer (version T1) is delayed; the tail brings the archiving (T2) first.
+    const saving = store.dispatch(updateProject('p1', { title: 'Renamed' }));
+
+    store.dispatch(eventAction(event({ type: 'project.archived', threadId: 'main', payload: { id: 'p1', title: 'Renamed', slug: 'one', description: 'd', archived: true, createdAt: ISO, updatedAt: T2.toISOString() } })));
+    answer({ project: row('p1', { title: 'Renamed', archived: false, updatedAt: T1 }) });
+    await saving;
+
+    assert.equal(store.getState().projects.byId.p1?.archived, true, 'the late answer does not put the project back among the active ones');
+    assert.equal(store.getState().projects.byId.p1?.updatedAt.getTime(), T2.getTime());
+    assert.deepEqual(selectProjectEdit(store.getState(), 'p1'), { pending: false, error: null, done: 1 }, 'the form still counts its accepted call');
+
+    // The other way round: the answer of the archiving (T2) landed, the tail's older event (T1) trails.
+    await dispatched(store, setProjectArchived('p1', true));
+    store.dispatch(eventAction(event({ type: 'project.updated', threadId: 'main', payload: { id: 'p1', title: 'Renamed', slug: 'one', description: 'd', archived: false, createdAt: ISO, updatedAt: T1.toISOString() } })));
+    assert.equal(store.getState().projects.byId.p1?.archived, true);
+
+    // The same version again (the tail's event of the answer's own row) is folded as before: idempotent.
+    store.dispatch(eventAction(event({ type: 'project.archived', threadId: 'main', payload: { id: 'p1', title: 'Renamed', slug: 'one', description: 'd', archived: true, createdAt: ISO, updatedAt: T2.toISOString() } })));
+    assert.equal(store.getState().projects.byId.p1?.title, 'Renamed');
+    // A newer version is taken.
+    const T3 = '2026-10-09T10:03:00.000Z';
+
+    store.dispatch(eventAction(event({ type: 'project.unarchived', threadId: 'main', payload: { id: 'p1', title: 'Renamed', slug: 'one', description: 'd', archived: false, createdAt: ISO, updatedAt: T3 } })));
+    assert.equal(store.getState().projects.byId.p1?.archived, false);
+  });
+
   it('keeps a refused creation in the form, without a toast or a route change', async () => {
     const api = fakeApi({
       projects: {

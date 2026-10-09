@@ -48,11 +48,17 @@ body{background:var(--bg);color:var(--text);font:var(--fs-body)/var(--lh-body) v
 
 /* ── Touch density ── */
 [data-density="touch"]{--ctl-h-sm:var(--ctl-h-sm-touch);--ctl-h:var(--ctl-h-touch);--ctl-h-lg:var(--ctl-h-lg-touch);--fs-input:var(--fs-input-touch);--hit-ext:calc((var(--ctl-h-sm-touch) - var(--hit)) / 2)}
+
+} /* @layer base */
+
+/* Touch density of a coarse pointer at the root — outside the layer on purpose: tokens.css sets the
+   same properties on :root unlayered, and an unlayered rule beats any layered one, so inside
+   @layer base this override never applied (the shell got its touch sizes from its own width rule,
+   the portals in document.body — dialogs, sheets, menus — none). Here, later in the same unlayered
+   origin, it wins. */
 @media (pointer:coarse){
   :root{--ctl-h-sm:var(--ctl-h-sm-touch);--ctl-h:var(--ctl-h-touch);--ctl-h-lg:var(--ctl-h-lg-touch);--fs-input:var(--fs-input-touch);--hit-ext:calc((var(--ctl-h-sm-touch) - var(--hit)) / 2)}
 }
-
-} /* @layer base */
 
 /* ── Animations ── */
 @keyframes bb-pulse{0%,100%{box-shadow:0 0 0 0 var(--st-run-bg)}50%{box-shadow:0 0 0 5px transparent}}

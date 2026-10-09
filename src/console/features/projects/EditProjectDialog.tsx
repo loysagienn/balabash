@@ -1,8 +1,11 @@
 // "Edit project" (design: ProjectScreen modal): the name and the
-// description over UPDATE_PROJECT; the folder is shown fixed. Nothing
-// changed — the dialog just closes, no call.
+// description over UPDATE_PROJECT; the folder is shown fixed. The patch is
+// what the operator changed against the values the dialog opened with
+// (projectPatch), so a field they left alone never goes back — the row
+// may have moved from the tail meanwhile. Nothing changed — the dialog
+// just closes, no call.
 
-import { useCallback } from 'react';
+import { useCallback, useState } from 'react';
 import type { ProjectView } from '../../../api/contract.ts';
 import { useAppDispatch, useAppSelector } from '../../store/hooks.ts';
 import { updateProject } from '../../store/projects/actions.ts';
@@ -18,7 +21,9 @@ export function EditProjectDialog({ project, onClose }: { project: ProjectView; 
   const dispatch = useAppDispatch();
   const form = useAppSelector(s => selectProjectEdit(s, project.id));
   const done = useCallback(() => onClose(), [onClose]);
-  const { values, errors, failure, busy, change, submit } = useProjectForm({ title: project.title, slug: project.slug, description: project.description }, 'edit', form, done);
+  // The values at opening — the base the patch is measured against.
+  const [base] = useState(() => ({ title: project.title, slug: project.slug, description: project.description }));
+  const { values, errors, failure, busy, change, submit } = useProjectForm(base, 'edit', form, done);
 
   return (
     <Dialog title="Edit project" confirm="Save" form={FORM_ID} busy={busy} onClose={onClose}>
@@ -34,7 +39,7 @@ export function EditProjectDialog({ project, onClose }: { project: ProjectView; 
             return;
           }
 
-          const patch = projectPatch(project, values);
+          const patch = projectPatch(base, values);
 
           if (patch) {
             dispatch(updateProject(project.id, patch));

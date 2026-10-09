@@ -1,10 +1,15 @@
 // The project registry: the snapshot's list, then every project.* event
 // of the tail upserts the row it carries (the server writes them where the
 // table changes — src/core/registry-events.ts), and the answer of the
-// operator's own change does the same at once. Idempotent: the same row
-// folded twice is the same state. Beside the rows — the state of the forms
-// that change the registry (the "New project" and "Edit project" dialogs)
-// and the archive flips in flight.
+// operator's own change does the same at once. The two paths are
+// independent, so a row may arrive after a newer version of itself (an
+// answer delayed past the tail's event of a later change, or the other
+// way round): a row is folded only when it is at least as new as the one
+// held — every change of the registry moves updatedAt (Prisma @updatedAt,
+// an explicit touch), so the stamp orders the versions; the same stamp is
+// the same row, folded again idempotently. Beside the rows — the state of
+// the forms that change the registry (the "New project" and "Edit project"
+// dialogs) and the archive flips in flight.
 
 import type { ProjectView } from '../../../api/contract.ts';
 import type { ApiFailure } from '../../lib/api/index.ts';
@@ -30,7 +35,17 @@ export const idleForm: ProjectFormState = { pending: false, error: null, done: 0
 
 export const initialProjects: ProjectsState = { byId: {}, ids: [], create: idleForm, edit: {}, flagging: {} };
 
+// Whether the incoming row is at least as new as the one held (a row not
+// held yet is new). Pure, tested with store.test.ts.
+export function isNewerOrSame(held: ProjectView | undefined, incoming: ProjectView): boolean {
+  return held === undefined || incoming.updatedAt.getTime() >= held.updatedAt.getTime();
+}
+
 function upsert(state: ProjectsState, project: ProjectView): ProjectsState {
+  if (!isNewerOrSame(state.byId[project.id], project)) {
+    return state;
+  }
+
   return {
     ...state,
     byId: { ...state.byId, [project.id]: project },

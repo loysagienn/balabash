@@ -1,6 +1,7 @@
-// Pure rules of the shell's main-thread access (design: Shell "Main
-// thread", ShellTop main button): which key press is the shortcut, how it
-// is labelled, and whether the current route is the main thread itself.
+// Pure rules of the shell (design: Shell): the main-thread access ("Main
+// thread" item, ShellTop main button — which key press is the shortcut,
+// how it is labelled, whether the current route is the main thread
+// itself) and which route changes keep the body's scroll place.
 
 import type { AppRoute } from '../../lib/router/routes.ts';
 
@@ -51,4 +52,13 @@ export function mainThreadRoute(mainThreadId: string | null | undefined): AppRou
 
 export function isMainThreadOpen(route: AppRoute, mainThreadId: string | null | undefined): boolean {
   return route.key === 'thread' && !!mainThreadId && route.id === mainThreadId;
+}
+
+// A new screen starts at the top of the body; moving inside one page keeps
+// the place: the file area of a project page sits below its header and
+// threads, and a folder, a file or a crumb opened there changes the route
+// without changing the page (the screen itself brings the file area into
+// view). Same route — nothing changed at all.
+export function keepsScrollPlace(from: AppRoute, to: AppRoute): boolean {
+  return from.key === 'project' && to.key === 'project' && from.slug === to.slug;
 }

@@ -25,7 +25,7 @@ import { SectionGrid } from '../../ui/SectionGrid/SectionGrid.tsx';
 import { Sheet } from '../../ui/Sheet/Sheet.tsx';
 import { Toasts } from '../toasts/Toasts.tsx';
 import { MORE, NAV, TABS } from './nav.ts';
-import { isMainThreadOpen, isMainThreadShortcut, mainThreadRoute, mainThreadShortcutLabel } from './shell.logic.ts';
+import { isMainThreadOpen, isMainThreadShortcut, keepsScrollPlace, mainThreadRoute, mainThreadShortcutLabel } from './shell.logic.ts';
 import { ShellTop } from './ShellTop.tsx';
 import type { ShellTopProps } from './ShellTop.tsx';
 import './Shell.css';
@@ -54,9 +54,16 @@ export function Shell({ current, detail, children, ...top }: ShellProps) {
   // On the main thread no section is current: it has its own item.
   const section = mainOpen ? null : current;
 
-  // A new screen starts at the top; history navigation keeps its place.
+  // A new screen starts at the top; history navigation and a move inside
+  // the same page (keepsScrollPlace) keep their place.
+  const previous = useRef<AppRoute | null>(null);
+
   useEffect(() => {
-    if (source === 'app' && body.current) {
+    const from = previous.current;
+
+    previous.current = route;
+
+    if (source === 'app' && body.current && !(from && keepsScrollPlace(from, route))) {
       body.current.scrollTop = 0;
     }
   }, [route, source]);

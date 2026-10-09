@@ -6,6 +6,8 @@
 // tested.
 
 import type { ProjectView, UpdateProjectRequest } from '../../../api/contract.ts';
+import type { ApiFailure } from '../../lib/api/index.ts';
+import type { ProjectFormState } from '../../store/projects/reducer.ts';
 
 export const TITLE_MAX_LENGTH = 200;
 export const SLUG_MAX_LENGTH = 64;
@@ -90,17 +92,44 @@ export function fieldOfFailure(message: string): ProjectFormField | null {
   return fields.length === 1 ? (fields[0] as ProjectFormField) : null;
 }
 
-// The patch of an edit: only what differs from the row, trimmed; null when
-// nothing does (no call then).
-export function projectPatch(project: Pick<ProjectView, 'title' | 'description'>, values: ProjectFormValues): UpdateProjectRequest | null {
+// The patch of an edit: only the fields the operator changed against the
+// values the form opened with (its base), trimmed; null when none did (no
+// call then). The base, not the row of the moment: while the dialog is
+// open the row may change from the tail (an agent renames the project),
+// and a field the operator never touched must not go back carrying the
+// old value. A field they did change is sent as typed — the operator's
+// word wins over a change that came meanwhile; the server treats a value
+// equal to the row's as "keep".
+export function projectPatch(base: Pick<ProjectFormValues, 'title' | 'description'>, values: ProjectFormValues): UpdateProjectRequest | null {
   const patch: UpdateProjectRequest = {};
   const title = values.title.trim();
   const description = values.description.trim();
 
-  if (title !== project.title) patch.title = title;
-  if (description !== project.description) patch.description = description;
+  if (title !== base.title) patch.title = title;
+  if (description !== base.description) patch.description = description;
 
   return Object.keys(patch).length > 0 ? patch : null;
+}
+
+// One submit of a dialog is an attempt: the store's accepted count at the
+// moment of the submit. The attempt is over when the count moved (the
+// dialog closes — that very call was accepted) or when the store holds a
+// refusal and no call is in flight (the dialog shows it). Input typed
+// while the call is still running belongs to the same attempt — its
+// answer is still owed, a refusal must show; input typed after a refusal
+// dismisses it (a new attempt begins with the next submit).
+export type FormAttempt = { done: number };
+
+export function attemptAccepted(attempt: FormAttempt | null, form: Pick<ProjectFormState, 'done'>): boolean {
+  return attempt !== null && form.done !== attempt.done;
+}
+
+export function attemptRefusal(attempt: FormAttempt | null, form: Pick<ProjectFormState, 'pending' | 'error'>): ApiFailure | null {
+  return attempt !== null && !form.pending ? form.error : null;
+}
+
+export function attemptAfterInput(attempt: FormAttempt | null, form: Pick<ProjectFormState, 'pending'>): FormAttempt | null {
+  return form.pending ? attempt : null;
 }
 
 // The search of the Projects screen looks through the name, the folder

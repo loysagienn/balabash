@@ -1,7 +1,10 @@
 @layer components{
-/* ── Bottom sheet ──  <div class="sheet" role="dialog" data-dock="bottom"> .sheet-grab .sheet-t .sheet-d … */
-.sheet{display:flex;flex-direction:column;gap:var(--sp-2);width:100%;padding:var(--sp-2) var(--m-gutter) calc(var(--sp-4) + env(safe-area-inset-bottom,0px));background:var(--surface);border-radius:var(--r-lg) var(--r-lg) 0 0;box-shadow:var(--shadow-modal)}
+/* ── Bottom sheet ──  <div class="sheet" role="dialog" data-dock="bottom"> .sheet-grab .sheet-t .sheet-d .sheet-b … */
+/* The sheet never grows past the window: at most the viewport minus a strip of scrim above; the body (.sheet-b — a form, a grid) scrolls inside, the title and the buttons stay */
+.sheet{display:flex;flex-direction:column;gap:var(--sp-2);width:100%;max-height:calc(100% - var(--sp-8));padding:var(--sp-2) var(--m-gutter) calc(var(--sp-4) + env(safe-area-inset-bottom,0px));background:var(--surface);border-radius:var(--r-lg) var(--r-lg) 0 0;box-shadow:var(--shadow-modal)}
 .sheet[data-dock="bottom"]{position:absolute;left:0;right:0;bottom:0;z-index:var(--z-modal)}
+.sheet-b{flex:0 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain;margin:0 calc(-1 * var(--sp-1));padding:0 var(--sp-1)}
+.sheet>:not(.sheet-b){flex-shrink:0} /* only the body gives way; the title and the buttons keep their height */
 .sheet-grab{--grab-w:36px;--grab-h:4px;width:var(--grab-w);height:var(--grab-h);border-radius:var(--r-pill);background:var(--border-strong);margin:var(--sp-0h) auto var(--sp-1)}
 .sheet-t{margin:0;font-size:var(--fs-h2);line-height:var(--lh-h2);font-weight:var(--fw-semibold)}
 .sheet-d{margin:0 0 var(--sp-2);font-size:var(--fs-body);line-height:var(--lh-body);color:var(--text-2)}

@@ -4,7 +4,7 @@
 // The link slot takes an anchor with the `link` class: ActionLink for a
 // plain href, or the router's <Link className="link"> from a feature.
 
-import type { ReactNode } from 'react';
+import type { ReactNode, Ref } from 'react';
 import { Count, Tag } from '../atoms/atoms.tsx';
 import './Card.css';
 
@@ -14,11 +14,14 @@ export type CardProps = {
   className?: string;
   as?: 'section' | 'div' | 'article';
   label?: string;
+  // The card's element, for a screen that scrolls it into view.
+  ref?: Ref<HTMLElement>;
 };
 
-export function Card({ children, narrow, className, as: Tag = 'section', label }: CardProps) {
+export function Card({ children, narrow, className, as: Tag = 'section', label, ref }: CardProps) {
   return (
-    <Tag className={className ? `card ${className}` : 'card'} data-narrow={narrow} aria-label={label}>
+    // One of three block tags; to the caller the element is an HTMLElement.
+    <Tag ref={ref as Ref<HTMLDivElement> | undefined} className={className ? `card ${className}` : 'card'} data-narrow={narrow} aria-label={label}>
       {children}
     </Tag>
   );

@@ -3,7 +3,9 @@
 // so it docks to the window wherever it is opened from; the rest of the
 // page is inert, the focus stays inside, Escape and the scrim close it.
 // Buttons are full width, the main one on top. It can submit a form in
-// its body (form="<id>"), like the Modal.
+// its body (form="<id>"), like the Modal. The sheet is never taller than
+// the window: a long body (a form with its errors on a short phone screen)
+// scrolls inside .sheet-b while the title and the buttons stay in reach.
 
 import type { ReactNode } from 'react';
 import { Btn } from '../Btn/Btn.tsx';
@@ -36,7 +38,7 @@ export function Sheet({ label, title, desc, confirm, confirmVariant = 'primary',
         <div className="sheet-grab" />
         {title ? <h3 className="sheet-t">{title}</h3> : null}
         {desc ? <p className="sheet-d">{desc}</p> : null}
-        {children}
+        {children ? <div className="sheet-b">{children}</div> : null}
         {confirm ? <Btn label={confirm} icon={confirmIcon} variant={confirmVariant} block busy={busy} disabled={confirmDisabled} type={form ? 'submit' : 'button'} form={form} onClick={form ? undefined : onConfirm} /> : null}
         {cancel ? <Btn label={cancel} variant="ghost" block onClick={onClose} /> : null}
       </div>

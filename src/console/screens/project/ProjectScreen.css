@@ -3,6 +3,8 @@
    (its rows and the preview scroll inside), the plain list to the screen edges on the phone */
 .proj-fa{--proj-fa-h:620px;height:var(--proj-fa-h);border:1px solid var(--border);border-radius:var(--r-lg);overflow:hidden}
 .proj-fa-wrap{padding:0 var(--sp-4) var(--sp-4)}
+/* The header's actions in one box (a ref for the focus after Archive / Unarchive), laid out by .phead-acts as before */
+.proj-acts{display:contents}
 @container shell (max-width:720px){
   .proj-fa{height:auto;border:0;border-radius:0}
   .proj-fa-wrap{padding:0}

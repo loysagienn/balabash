@@ -7,7 +7,7 @@
 // the dialog over UPDATE_PROJECT; archiving flips the flag at once
 // (reversible — no confirmation, rule 13 is for the irreversible).
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ProjectView } from '../../../api/contract.ts';
 import type { ProjectRoute } from '../../lib/router/routes.ts';
 import { Link, useLinkTargets } from '../../lib/router/Link.tsx';
@@ -70,6 +70,51 @@ function ProjectPage({ project, route }: { project: ProjectView; route: ProjectR
   const flagging = useAppSelector(s => selectProjectFlagging(s, project.id));
   const [editing, setEditing] = useState(false);
   const path = joinPath(project.slug, route.path ?? '');
+  const files = useRef<HTMLElement>(null);
+  const acts = useRef<HTMLSpanElement>(null);
+
+  // A move inside the folder keeps the body's scroll place (Shell); when
+  // the file card is then out of view — its head scrolled past above, or
+  // still below — it comes to the top, so the rows or the opened file are
+  // where the eye is, not the project header. Not on the first render:
+  // a page opened at a path starts at the top as any screen.
+  const firstPath = useRef(true);
+
+  useEffect(() => {
+    if (firstPath.current) {
+      firstPath.current = false;
+      return;
+    }
+
+    const card = files.current;
+    const box = card?.closest('.shell-body');
+
+    if (!card || !box) {
+      return;
+    }
+
+    const top = card.getBoundingClientRect().top;
+    const view = box.getBoundingClientRect();
+
+    if (top < view.top || top > view.bottom - 1) {
+      card.scrollIntoView({ block: 'start' });
+    }
+  }, [route.path]);
+
+  // Archive / Unarchive replace the button that held the focus; a keyboard
+  // user keeps their place — the focus moves to the action that took it.
+  const firstFlag = useRef(true);
+
+  useEffect(() => {
+    if (firstFlag.current) {
+      firstFlag.current = false;
+      return;
+    }
+
+    if (document.activeElement === document.body || document.activeElement === null) {
+      acts.current?.querySelector('button')?.focus();
+    }
+  }, [project.archived]);
 
   return (
     <>
@@ -86,14 +131,16 @@ function ProjectPage({ project, route }: { project: ProjectView; route: ProjectR
         work={`last worked ${agoLabel(project.updatedAt, now)}`}
         archived={project.archived}
       >
-        {project.archived ? (
-          <Btn label="Unarchive" icon="archive-restore" busy={flagging} onClick={() => dispatch(setProjectArchived(project.id, false))} />
-        ) : (
-          <>
-            <Btn label="Edit" icon="pencil" onClick={() => setEditing(true)} />
-            <Btn label="Archive" icon="archive" variant="ghost" busy={flagging} onClick={() => dispatch(setProjectArchived(project.id, true))} />
-          </>
-        )}
+        <span ref={acts} className="proj-acts">
+          {project.archived ? (
+            <Btn label="Unarchive" icon="archive-restore" busy={flagging} onClick={() => dispatch(setProjectArchived(project.id, false))} />
+          ) : (
+            <>
+              <Btn label="Edit" icon="pencil" onClick={() => setEditing(true)} />
+              <Btn label="Archive" icon="archive" variant="ghost" busy={flagging} onClick={() => dispatch(setProjectArchived(project.id, true))} />
+            </>
+          )}
+        </span>
       </PageHead>
       <Card narrow="bare">
         <CardHead
@@ -114,7 +161,7 @@ function ProjectPage({ project, route }: { project: ProjectView; route: ProjectR
           </Empty>
         )}
       </Card>
-      <Card narrow="bare">
+      <Card narrow="bare" ref={files}>
         <CardHead title="Project files" />
         <div className="proj-fa-wrap">
           <FileBrowser root={project.slug} rootLabel={project.title} lead="folder" path={path} routeFor={absolute => projectRoute(project.slug, absolute)} pins={<ProjectPins project={project} now={now} />} className="proj-fa" />

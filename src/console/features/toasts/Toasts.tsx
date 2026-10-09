@@ -1,9 +1,12 @@
 // The toasts of the screen from the store (ui.toasts): every pushToast
 // becomes a Toast in the stack at the corner of the shell; "Close" and the
-// timer (toasts.logic.ts) dismiss it. The icon follows the state.
+// timer (toasts.logic.ts) dismiss it. The icon follows the state. A toast
+// with an action shows its button: pressing it opens the route and
+// dismisses the toast.
 
 import { useEffect } from 'react';
 import { useAppDispatch, useAppSelector } from '../../store/hooks.ts';
+import { routeTo } from '../../store/router/actions.ts';
 import { dismissToast } from '../../store/ui/actions.ts';
 import type { Toast as ToastData } from '../../store/ui/reducer.ts';
 import { selectToasts } from '../../store/ui/selectors.ts';
@@ -50,8 +53,24 @@ function ToastItem({ toast }: { toast: ToastData }) {
     return () => window.clearTimeout(timer);
   }, [dispatch, toast.id, ttl]);
 
+  const action = toast.action;
+
   return (
-    <Toast state={toast.state} icon={toast.state ? ICON[toast.state] : 'info'} title={toast.title} onClose={() => dispatch(dismissToast(toast.id))}>
+    <Toast
+      state={toast.state}
+      icon={toast.state ? ICON[toast.state] : 'info'}
+      title={toast.title}
+      action={action?.label}
+      onAction={
+        action
+          ? () => {
+              dispatch(routeTo(action.route));
+              dispatch(dismissToast(toast.id));
+            }
+          : undefined
+      }
+      onClose={() => dispatch(dismissToast(toast.id))}
+    >
       {toast.desc}
     </Toast>
   );
