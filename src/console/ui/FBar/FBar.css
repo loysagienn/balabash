@@ -1,0 +1,19 @@
+@layer patterns{
+/* ── Filter bar ──  .fbar (container “fbar”) > .fbar-filters (.seg, .tabs, .fchip…) + .fbar-search (.inp [+ .btn “Create”])
+   Wide: filters on the left, search on the right (first shrinks to --fbar-search-min, then wraps).
+   Narrower than 640px: full-width search on top, filters in a scrolling strip; on phone the strip runs to the screen edges. */
+.fbar{--fbar-search-w:360px;--fbar-search-min:220px;container:fbar / inline-size;display:flex;flex-wrap:wrap;align-items:center;gap:var(--sp-2) var(--sp-3)}
+.fbar-filters{display:flex;flex-wrap:wrap;align-items:center;gap:var(--sp-2);min-width:0;flex:0 1 auto}
+.fbar-search{flex:1 1 var(--fbar-search-min);max-width:var(--fbar-search-w);min-width:0;margin-left:auto;display:flex;gap:var(--sp-2)}
+.fbar-search .inp{flex:1;min-width:0}
+.fbar-search .btn{flex:none}
+@container fbar (max-width:640px){
+  .fbar-search{order:-1;flex:1 1 100%;max-width:none;margin-left:0}
+  .fbar-filters{flex:1 1 100%;flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none}
+  .fbar-filters > *{flex:none}
+  .fbar-search .kbd{display:none}
+}
+@container shell (max-width:720px){
+  .fbar-filters{flex-basis:calc(100% + 2 * var(--gutter));margin:0 calc(-1 * var(--gutter));padding:0 var(--gutter)}
+}
+}

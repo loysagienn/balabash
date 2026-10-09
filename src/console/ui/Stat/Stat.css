@@ -1,0 +1,9 @@
+@layer components{
+/* ── Stats ──  .stats > .stat[data-state] (.stat-l label, .stat-v value, .stat-d note) */
+.stats{--stat-min:140px;display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,var(--stat-min)),1fr));gap:var(--sp-2)}
+.stat{display:flex;flex-direction:column;gap:var(--sp-0h);min-width:0;padding:var(--sp-3) var(--sp-3h);border-radius:var(--r-md);background:var(--surface-2)}
+.stat-l{font-size:var(--fs-meta);line-height:var(--lh-meta);color:var(--text-3)}
+.stat-v{font-size:var(--fs-lg);line-height:var(--lh-lg);font-weight:var(--fw-semibold);color:var(--text);font-variant-numeric:tabular-nums;white-space:nowrap}
+.stat-d{font-size:var(--fs-micro);line-height:var(--lh-micro);color:var(--text-3)}
+.stat[data-state] .stat-v{color:var(--st-c)}
+}

@@ -39,9 +39,11 @@ import { SkelRow, SkelStack } from '../../ui/Skel/Skel.tsx';
 import { Status } from '../../ui/Status/Status.tsx';
 import { Tab, Tabs } from '../../ui/Tabs/Tabs.tsx';
 import { Toast } from '../../ui/Toast/Toast.tsx';
-import { Attn, Caption, Code, Count, Kbd, Pulse, Quiet, Tag } from '../../ui/atoms/atoms.tsx';
+import { ThreadRow } from '../../ui/ThreadRow/ThreadRow.tsx';
+import { Attn, Caption, Code, Count, ErrorLine, Hit, Kbd, Pulse, Quiet, Tag, Url } from '../../ui/atoms/atoms.tsx';
 import type { StateName } from '../../ui/atoms/atoms.tsx';
 import { DevUiFeed } from './DevUiFeed.tsx';
+import { DevUiSections } from './DevUiSections.tsx';
 import './DevUi.css';
 
 const STATES: StateName[] = ['run', 'wait', 'act', 'done', 'err', 'off'];
@@ -54,42 +56,7 @@ const STATE_LABEL: Record<StateName, string> = {
   off: 'cancelled',
 };
 const AGENTS = Object.keys(AGENT_AVATARS);
-
-// A sample thread row of the design, for the list blocks (ThreadRow itself
-// comes with the composites).
-function DemoRow({
-  agent,
-  title,
-  meta,
-  state,
-  time,
-  pip,
-  fresh,
-}: {
-  agent: string;
-  title: string;
-  meta: ReactNode;
-  state: StateName;
-  time: string;
-  pip?: 'run' | 'err';
-  fresh?: boolean;
-}) {
-  return (
-    <a className="row" href="#" data-fresh={fresh ? '' : undefined} onClick={event => event.preventDefault()}>
-      <Avatar agent={agent} pip={pip} />
-      <span className="row-main">
-        <span className="row-t">
-          <span className="row-t-text">{title}</span>
-        </span>
-        <span className="row-m">{meta}</span>
-      </span>
-      <span className="row-end">
-        <Badge state={state} label={STATE_LABEL[state]} />
-        <span className="row-time">{time}</span>
-      </span>
-    </a>
-  );
-}
+const stop = (event: { preventDefault: () => void }) => event.preventDefault();
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -237,6 +204,16 @@ export function DevUi() {
             <Tag>task</Tag>
             <Quiet>not published</Quiet>
           </Row>
+          <Row label="url (text · link) · hit · errline">
+            <Url>/p/kcal</Url>
+            <Url href="https://example.test/p/kcal">/p/kcal</Url>
+            <span>
+              publishing by <Hit>slug</Hit>
+            </span>
+            <ErrorLine>
+              Manifest error: <Code wrap>endpoints[2].sql: expected a string</Code>
+            </ErrorLine>
+          </Row>
         </Section>
 
         <Section title="Obj">
@@ -382,21 +359,16 @@ export function DevUi() {
           </Row>
           <div className="dev-box" style={{ width: 320 }}>
             <List>
-              <DemoRow
+              <ThreadRow
                 agent="engineer"
                 title="Narrow list: badges go compact"
-                meta="engineer · Balabash"
+                project="Balabash"
                 state="run"
                 time="since 14:02"
-                pip="run"
+                href="#"
+                onClick={stop}
               />
-              <DemoRow
-                agent="browser"
-                title="Checking /p/kcal"
-                meta="browser · Balabash"
-                state="off"
-                time="23:10 → 23:14"
-              />
+              <ThreadRow agent="browser" title="Checking /p/kcal" project="Balabash" state="off" time="23:10 → 23:14" href="#" onClick={stop} />
             </List>
           </div>
         </Section>
@@ -474,33 +446,27 @@ export function DevUi() {
               />
               <List timeW="96px">
                 <ListGroup end="7 threads">Today, October 8</ListGroup>
-                <DemoRow
+                <ThreadRow
                   agent="engineer"
                   title="Mini-apps: publishing by slug"
-                  meta={
-                    <>
-                      engineer · Balabash · <Code>Read src/api/apps.ts</Code>
-                    </>
-                  }
+                  project="Balabash"
+                  lastCode="Read src/api/apps.ts"
                   state="run"
                   time="since 14:02"
-                  pip="run"
+                  href="#"
+                  onClick={stop}
                   fresh
                 />
-                <DemoRow
-                  agent="coordinator"
-                  title="Sort contractor emails"
-                  meta="coordinator · Renovation"
-                  state="wait"
-                  time="16:42"
-                />
+                <ThreadRow agent="coordinator" title="Sort contractor emails" project="Renovation" state="wait" time="16:42" href="#" onClick={stop} />
                 <ListGroup end="5 threads">Yesterday, October 7</ListGroup>
-                <DemoRow
+                <ThreadRow
                   agent="browser"
                   title="Checking /p/kcal in the browser"
-                  meta="browser · Balabash"
+                  project="Balabash"
                   state="err"
                   time="23:10 → 23:14"
+                  href="#"
+                  onClick={stop}
                 />
                 <LoadMore>Loading earlier · showing 12 of 1,312</LoadMore>
               </List>
@@ -524,19 +490,22 @@ export function DevUi() {
             <Card narrow="bare">
               <CardHead title="Bare on the phone" count={2} />
               <List narrow="tiles">
-                <DemoRow
+                <ThreadRow
                   agent="gardener"
                   title="Rows become tiles on the phone"
-                  meta="gardener · Balabash"
+                  project="Balabash"
                   state="done"
                   time="12:40 → 12:52"
+                  href="#"
+                  onClick={stop}
                 />
-                <DemoRow
+                <ThreadRow
                   agent="scheduler"
                   title="A card without a frame when the shell is narrow"
-                  meta="scheduler"
                   state="wait"
                   time="09:00"
+                  href="#"
+                  onClick={stop}
                 />
               </List>
               <CardBody>
@@ -766,6 +735,7 @@ export function DevUi() {
           </div>
         </Section>
 
+        <DevUiSections />
         <DevUiFeed />
       </Screen>
     </Shell>

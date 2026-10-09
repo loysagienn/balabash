@@ -1,0 +1,20 @@
+@layer patterns{
+/* ── Tiles ──  .tiles > a.tile[data-size=sm] (.obj, .tile-t, .tile-d, .tile-f) — projects, apps, catalog
+   On phone — a single column, icon on the left. */
+.tiles{--tile-min:220px;display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,var(--tile-min)),1fr));gap:var(--sp-2h)}
+.tile{position:relative;display:flex;flex-direction:column;align-items:flex-start;gap:var(--sp-1h);min-width:0;padding:var(--sp-3h) var(--sp-4);border-radius:var(--r-md);background:var(--surface-2);color:inherit;text-decoration:none;transition:background-color var(--dur-1) var(--ease)}
+.tile:hover{background-image:var(--layer-hover)}
+.tile .obj{margin-bottom:var(--sp-1h)}
+.tile-t{max-width:100%;font-size:var(--fs-ui);font-weight:var(--fw-semibold);color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tile-d{font-size:var(--fs-meta);line-height:var(--lh-meta);color:var(--text-2);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;text-wrap:pretty}
+.tile-f{align-self:stretch;margin-top:auto;padding-top:var(--sp-2);display:flex;align-items:center;justify-content:space-between;gap:var(--sp-2);font-size:var(--fs-meta);line-height:var(--lh-meta);color:var(--text-3)}
+.tile-f > :first-child{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tile[data-size="sm"]{padding:var(--sp-3);gap:var(--sp-1)}
+.tile[data-size="sm"] .obj{margin-bottom:var(--sp-1)}
+@container shell (max-width:720px){
+  .tiles{grid-template-columns:minmax(0,1fr)}
+  .tile{display:grid;grid-template-columns:auto minmax(0,1fr);align-items:start;column-gap:var(--sp-3);padding:var(--sp-3)}
+  .tile .obj{grid-row:span 3;margin:0}
+  .tile-f{padding-top:var(--sp-1h)}
+}
+}

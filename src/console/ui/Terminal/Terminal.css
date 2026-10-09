@@ -1,0 +1,10 @@
+@layer components{
+/* ── Terminal ──  <pre class="term"><span class="term-ln term-dim">$ npm run types</span>…</pre> */
+.term{--term-max-h:220px;margin:0;font-family:var(--mono);letter-spacing:0;font-size:var(--fs-code-sm);line-height:var(--lh-code-sm);color:var(--text-2);background:var(--bg);border:1px solid var(--border);border-radius:var(--r-md);padding:var(--sp-2h) var(--sp-3);white-space:pre-wrap;overflow-wrap:anywhere;max-height:var(--term-max-h);overflow:auto}
+.term-ln{display:block;min-height:var(--lh-code-sm)}
+.term-dim{color:var(--text-4)}
+.term-err{color:var(--st-err)}
+/* honest truncation notice */
+.trunc{display:block;font-size:var(--fs-micro);line-height:var(--lh-micro);color:var(--text-3);text-wrap:pretty}   /* text and link wrap as one phrase */
+.trunc .ic{margin-right:var(--sp-1h);font-size:var(--ico-xs);vertical-align:-0.15em}
+}

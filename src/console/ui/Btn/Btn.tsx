@@ -26,6 +26,8 @@ export type BtnProps = {
   // Renders the button as a link; a Link of the router wraps a plain Btn
   // instead when the target is a route.
   href?: string;
+  // With href: opens in a new tab (an app at its own domain).
+  external?: boolean;
   className?: string;
   type?: 'button' | 'submit';
   expanded?: boolean;
@@ -45,6 +47,7 @@ export function Btn({
   iconOnly,
   ariaLabel,
   href,
+  external,
   className,
   type = 'button',
   expanded,
@@ -70,7 +73,16 @@ export function Btn({
 
   if (href !== undefined) {
     return (
-      <a {...data} className={classes} href={href} aria-label={ariaLabel} aria-disabled={disabled ? 'true' : undefined} onClick={onClick}>
+      <a
+        {...data}
+        className={classes}
+        href={href}
+        target={external ? '_blank' : undefined}
+        rel={external ? 'noreferrer' : undefined}
+        aria-label={ariaLabel}
+        aria-disabled={disabled ? 'true' : undefined}
+        onClick={onClick}
+      >
         {content}
       </a>
     );

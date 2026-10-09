@@ -1,0 +1,19 @@
+@layer patterns{
+/* ── Section links ──  nav.seclinks > a.seclink (.ic, .seclink-t, .seclink-m[data-state]) — with a section summary */
+.seclinks{--seclink-min:200px;--seclink-tile-h:76px;margin-inline:calc(-1 * var(--sp-2h));display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,var(--seclink-min)),1fr));gap:var(--sp-1)}
+/* the link padding is pulled past the edge (margin on .seclinks): icons align with the card text */
+.seclink{display:grid;grid-template-columns:auto minmax(0,1fr);align-items:center;gap:var(--sp-0h) var(--sp-2h);padding:var(--sp-2) var(--sp-2h);border-radius:var(--r-sm);color:inherit;text-decoration:none}
+.seclink .ic{grid-row:span 2;font-size:var(--ico-md);color:var(--accent)}
+.seclink:hover{background-image:var(--layer-hover)}
+.seclink-t{font-size:var(--fs-ui);font-weight:var(--fw-semibold);color:var(--text)}
+.seclink-m{font-size:var(--fs-meta);line-height:var(--lh-meta);color:var(--text-3);text-wrap:pretty}
+.seclink-m[data-state]{color:var(--st-c)}
+@container shell (max-width:720px){
+  .seclinks[data-narrow="tiles"]{grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--sp-2);margin-inline:0}
+  .seclinks[data-narrow="tiles"] .seclink{grid-template-columns:minmax(0,1fr);align-content:start;gap:var(--sp-1h);min-height:var(--seclink-tile-h);padding:var(--sp-3) var(--sp-2h);border-radius:var(--r-md);background:var(--surface)}
+  .seclinks[data-narrow="tiles"] .seclink .ic{grid-row:auto}
+  .seclinks[data-narrow="tiles"] .seclink-t{font-size:var(--fs-meta);line-height:var(--lh-meta)}
+  .seclinks[data-narrow="tiles"] .seclink-m:not([data-state]){display:none}
+  .seclinks[data-narrow="tiles"] .seclink-m{font-size:var(--fs-micro);line-height:var(--lh-micro)}
+}
+}

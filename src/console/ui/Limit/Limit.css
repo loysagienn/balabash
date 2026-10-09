@@ -1,0 +1,18 @@
+@layer patterns{
+/* ── Limit ──  .lims[data-layout=stack] > .lim (.gauge, .lim-main > .lim-t .lim-m .lim-s[data-level]) — Claude subscription windows
+   Default — in a row, as many as fit (no narrower than --lim-min); stack — in a column. Dividers — a hairline gap. */
+.lims{--lim-min:200px;display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,var(--lim-min)),1fr));gap:1px;background:var(--border)}
+.lim{display:grid;grid-template-columns:minmax(0,1fr);justify-items:start;align-items:center;gap:var(--sp-3h);padding:var(--sp-3) var(--sp-4h);background:var(--surface)}
+.lim-main{display:flex;flex-direction:column;gap:var(--sp-0h);min-width:0}
+.lim-t{font-size:var(--fs-ui);font-weight:var(--fw-semibold);color:var(--text)}
+.lim-m{font-size:var(--fs-meta);line-height:var(--lh-meta);color:var(--text-3);font-variant-numeric:tabular-nums}
+.lim-s{font-size:var(--fs-meta);line-height:var(--lh-meta);font-weight:var(--fw-semibold);color:var(--lvl-ok)}
+.lim-s[data-level="warn"]{color:var(--lvl-warn)}
+.lim-s[data-level="over"]{color:var(--lvl-over)}
+.lims[data-layout="stack"]{grid-template-columns:minmax(0,1fr)}
+.lims[data-layout="stack"] .lim{grid-template-columns:auto minmax(0,1fr);justify-items:stretch}
+@container shell (max-width:720px){
+  .lims[data-narrow="tiles"]{gap:var(--sp-2);background:none}
+  .lims[data-narrow="tiles"] .lim{grid-template-columns:auto minmax(0,1fr);justify-items:stretch;border-radius:var(--r-md);padding:var(--sp-3)}
+}
+}

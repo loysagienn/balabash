@@ -19,5 +19,7 @@
 /* thread frames of the feed showcase: a bordered box the .th container fills; the phone one is 390 wide with phone gutters and touch density */
 .dev-frame{border:1px solid var(--border);border-radius:var(--r-lg);overflow:hidden;min-width:0}
 .dev-frame > .th{min-height:100%}
+.dev-shell{container:shell / inline-size;flex:1;min-height:0;display:flex;flex-direction:column}
+.dev-shell > .screen{flex:1}
 .dev-phone{--gutter:var(--m-gutter);--gap:var(--m-gap);--top-h:var(--m-top-h);--ctl-h-sm:var(--ctl-h-sm-touch);--ctl-h:var(--ctl-h-touch);--ctl-h-lg:var(--ctl-h-lg-touch);--fs-input:var(--fs-input-touch);--hit-ext:calc((var(--ctl-h-sm-touch) - var(--hit)) / 2);width:390px;height:720px;max-width:100%;border:1px solid var(--border);border-radius:var(--r-lg);overflow:auto;display:flex;flex-direction:column}
 }

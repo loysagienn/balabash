@@ -1,0 +1,6 @@
+@layer components{
+/* ── Mini bars ──  <span class="spark" data-muted><i style="--v:40%"></i>…</span> — per core, traffic over an hour */
+.spark{--spark-h:28px;display:flex;align-items:flex-end;gap:var(--sp-0h);height:var(--spark-h)}
+.spark > i{flex:1;min-width:var(--sp-0h);height:max(var(--v),var(--sp-0h));border-radius:var(--r-xs) var(--r-xs) 0 0;background:var(--accent)}
+.spark[data-muted] > i{background:var(--text-4)}
+}

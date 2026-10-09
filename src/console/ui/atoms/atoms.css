@@ -14,10 +14,19 @@
 .attn{--attn:7px;width:var(--attn);height:var(--attn);border-radius:50%;background:var(--st-act);box-shadow:0 0 0 3px var(--st-act-bg);flex:none}
 .pulse{--pulse-size:8px;width:var(--pulse-size);height:var(--pulse-size);border-radius:50%;background:var(--st-run);flex:none;animation:bb-pulse var(--pulse) ease-in-out infinite}
 .pulse[data-state="off"]{background:var(--text-4);animation:none}
+.url{--url-h:22px;display:inline-flex;align-items:center;gap:var(--sp-1);height:var(--url-h);padding:0 var(--sp-2);border-radius:var(--r-pill);background:var(--accent-bg);color:var(--link);font-family:var(--mono);letter-spacing:0;font-size:var(--fs-code-sm);white-space:nowrap;text-decoration:none}
+.url .ic{font-size:var(--ico-xs)}
+
+/* ── Search match ──  <mark class="hit">slug</mark> */
+.hit{background:var(--accent-bg);color:var(--text);border-radius:var(--r-xs);padding:0 var(--sp-0h)}
 
 /* ── Quiet label ──  an “empty” in a row where a value usually sits */
 .quiet{font-size:var(--fs-meta);line-height:var(--lh-meta);color:var(--text-3);white-space:nowrap}
 
 /* ── Caption ──  a small note under data or in a card footer */
 .caption{font-size:var(--fs-micro);line-height:var(--lh-micro);color:var(--text-3)}
+
+/* ── Inline error ──  <span class="errline"><svg class="ic"></svg><span>text with .code</span></span> */
+.errline{display:flex;align-items:flex-start;gap:var(--sp-1h);color:var(--st-err);font-size:var(--fs-meta);line-height:var(--lh-meta)}
+.errline .ic{flex:none;margin-top:var(--sp-0h);font-size:var(--ico-sm)}
 }

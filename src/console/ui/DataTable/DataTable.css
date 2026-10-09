@@ -1,0 +1,16 @@
+@layer components{
+/* ── Data table ──  .dtable-wrap (container “dtable”) > table.dtable (th, td[data-num], [data-wide] — hidden when the wrapper is narrower than 520; .dtable-share > .dtable-bar[--v]; .dtable-who) */
+.dtable-wrap{container:dtable / inline-size;overflow-x:auto;min-width:0}
+.dtable{--dtable-edge:var(--sp-4h);width:100%;font-size:var(--fs-meta);line-height:var(--lh-meta);font-variant-numeric:tabular-nums}   /* --dtable-edge — padding at the outer columns (= card padding) */
+.dtable :is(th,td){padding:var(--sp-2) var(--sp-3);border-bottom:1px solid var(--border);text-align:left;white-space:nowrap}
+.dtable th{font-size:var(--fs-micro);line-height:var(--lh-micro);font-weight:var(--fw-semibold);color:var(--text-3)}
+.dtable td{color:var(--text)}
+.dtable :is(th,td):first-child{padding-left:var(--dtable-edge)}
+.dtable :is(th,td):last-child{padding-right:var(--dtable-edge)}
+.dtable :is(th,td)[data-num]{text-align:right}
+.dtable tr:last-child td{border-bottom:0}
+.dtable-share{--dtable-share-w:120px;display:flex;align-items:center;gap:var(--sp-2);min-width:var(--dtable-share-w)}
+.dtable-bar{display:block;height:var(--sp-1h);width:var(--v);border-radius:var(--r-xs);background:var(--accent)}
+.dtable-who{display:inline-flex;align-items:center;gap:var(--sp-2)}
+@container dtable (max-width:520px){ .dtable [data-wide]{display:none} .dtable :is(th,td):not(:first-child,:last-child){padding-inline:var(--sp-2)} }
+}

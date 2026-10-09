@@ -1,0 +1,17 @@
+@layer patterns{
+/* ── List and details ──  .split[data-view=list|detail] > .split-list + .split-detail
+   Wide — two panels side by side; on phone — one, the one in data-view (details as a separate screen). */
+.split{--split-list-w:44%;display:grid;grid-template-columns:minmax(0,var(--split-list-w)) minmax(0,1fr);gap:var(--gap);align-items:start;min-width:0}
+.split-list,.split-detail{min-width:0;display:flex;flex-direction:column;gap:var(--gap)}
+@container shell (max-width:720px){
+  .split{grid-template-columns:minmax(0,1fr)}
+  .split[data-view="list"] > .split-detail,.split[data-view="detail"] > .split-list{display:none}
+}
+
+/* ── Details section ──  .dsec > .dsec-h (h3.dsec-t, .dsec-end) + content; sections inside a card are separated by a line */
+.dsec{display:flex;flex-direction:column;gap:var(--sp-2h);padding:var(--sp-4) var(--sp-4h);border-top:1px solid var(--border)}
+.dsec:first-child{border-top:0}
+.dsec-h{display:flex;align-items:center;gap:var(--sp-2)}
+.dsec-t{margin:0;font-size:var(--fs-micro);line-height:var(--lh-micro);font-weight:var(--fw-semibold);color:var(--text-3)}
+.dsec-end{margin-left:auto;display:flex;align-items:center;gap:var(--sp-2)}
+}
