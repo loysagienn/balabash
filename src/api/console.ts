@@ -36,8 +36,11 @@ const STATIC_PREFIX = '/static/';
 const STATIC_CACHE_CONTROL = 'public, max-age=3600';
 // What the shell points at (src/console/public; made by scripts/console-icons.mjs
 // from the approved service icon). The tab's favicon is its own cut: the
-// mark cropped to its visible pixels, no margins (Vladimir's 29000); the
-// install icons of the manifest keep the mark's built-in padding.
+// mark cropped to its visible pixels and fitted into the square by its
+// height — it runs from the top edge to the bottom one, centered across
+// (Vladimir's 29000; the "b" is taller than wide, and a square canvas is the
+// one shape Chromium does not stretch); the install icons of the manifest
+// keep the mark's built-in padding.
 const WEB_APP_MANIFEST = `${STATIC_PREFIX}manifest.webmanifest`;
 const FAVICON_32 = `${STATIC_PREFIX}favicon-32.png`;
 const FAVICON_192 = `${STATIC_PREFIX}favicon-192.png`;

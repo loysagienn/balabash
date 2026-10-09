@@ -10,11 +10,22 @@
 //
 // What it writes (sizes per the install requirements of Chrome and Safari):
 //   favicon-32.png, favicon-192.png           the browser tab's <link rel="icon">: the
-//                                             transparent icon with its transparent
-//                                             margins cropped away, so the mark runs to
-//                                             the edges of the image (Vladimir's 29000;
-//                                             the mark is taller than wide, so it fills
-//                                             the height and is centered across)
+//                                             transparent icon with its own margins
+//                                             cropped away and the mark fitted into the
+//                                             square by its longer side (Vladimir's
+//                                             29000): the "b" is 771 × 975, so it runs
+//                                             from the top edge to the bottom one and is
+//                                             centered across, with (1 − 771/975) / 2 ≈
+//                                             10.5 % of the width clear at each side —
+//                                             the square canvas, not the source's
+//                                             padding. The canvas stays square on
+//                                             purpose: Chromium resizes a favicon to
+//                                             desired × desired pixels without keeping
+//                                             its aspect (favicon_base/
+//                                             select_favicon_frames.cc), so a 771 × 975
+//                                             file would be stretched in the tab, and
+//                                             stretching or cutting the approved mark
+//                                             ourselves is out.
 //   icon-192.png, icon-512.png                purpose "any": the transparent icon as is
 //                                             (launcher, Chrome's install dialog and
 //                                             splash over background_color)
@@ -68,15 +79,60 @@ function markup({ size, background }) {
 <body><img alt=""></body></html>`;
 }
 
-// Runs in the page: loads the source into the <img>, finds the box of its
-// visible pixels when cropping (the whole image otherwise) and lays the image
-// out so that this box is scaled to `size × scale` by its longer side and
-// centered on the canvas — the browser's image scaling does the resampling.
-// Returns the box, for the log.
+// Runs in the page: loads a PNG (a data URL) into a canvas and returns the box
+// of its pixels with at least `alpha` — the source's mark when cropping, the
+// rendered icon when checking the result.
 /**
- * @param {{ src: string, size: number, scale: number, crop: boolean, alpha: number }} input
+ * @param {{ src: string, alpha: number }} input
+ * @returns {Promise<{ x: number, y: number, w: number, h: number, width: number, height: number }>}
  */
-async function layOut({ src, size, scale, crop, alpha }) {
+async function visibleBox({ src, alpha }) {
+  const image = new Image();
+
+  image.src = src;
+  await image.decode();
+
+  const canvas = document.createElement('canvas');
+
+  canvas.width = image.naturalWidth;
+  canvas.height = image.naturalHeight;
+
+  const context = canvas.getContext('2d');
+
+  if (!context) throw new Error('no 2d context');
+
+  context.drawImage(image, 0, 0);
+
+  const { data, width, height } = context.getImageData(0, 0, canvas.width, canvas.height);
+  let left = width;
+  let top = height;
+  let right = -1;
+  let bottom = -1;
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      if (data[(y * width + x) * 4 + 3] >= alpha) {
+        if (x < left) left = x;
+        if (x > right) right = x;
+        if (y < top) top = y;
+        if (y > bottom) bottom = y;
+      }
+    }
+  }
+
+  if (right < 0) throw new Error('the image has no visible pixels');
+
+  return { x: left, y: top, w: right - left + 1, h: bottom - top + 1, width, height };
+}
+
+// Runs in the page: loads the source into the <img> and lays it out so that
+// `box` (a part of it, in source pixels; the whole image when null) is scaled
+// to `size × scale` by its longer side and centered on the canvas — the
+// browser's image scaling does the resampling.
+/**
+ * @param {{ src: string, size: number, scale: number, box: { x: number, y: number, w: number, h: number } | null }} input
+ */
+async function layOut({ src, size, scale, box: part }) {
   const img = document.querySelector('img');
 
   if (!(img instanceof HTMLImageElement)) throw new Error('no <img>');
@@ -84,50 +140,39 @@ async function layOut({ src, size, scale, crop, alpha }) {
   img.src = src;
   await img.decode();
 
-  let box = { x: 0, y: 0, w: img.naturalWidth, h: img.naturalHeight };
-
-  if (crop) {
-    const canvas = document.createElement('canvas');
-
-    canvas.width = img.naturalWidth;
-    canvas.height = img.naturalHeight;
-
-    const context = canvas.getContext('2d');
-
-    if (!context) throw new Error('no 2d context');
-
-    context.drawImage(img, 0, 0);
-
-    const { data, width, height } = context.getImageData(0, 0, canvas.width, canvas.height);
-    let left = width;
-    let top = height;
-    let right = -1;
-    let bottom = -1;
-
-    for (let y = 0; y < height; y += 1) {
-      for (let x = 0; x < width; x += 1) {
-        if (data[(y * width + x) * 4 + 3] >= alpha) {
-          if (x < left) left = x;
-          if (x > right) right = x;
-          if (y < top) top = y;
-          if (y > bottom) bottom = y;
-        }
-      }
-    }
-
-    if (right < 0) throw new Error('the image has no visible pixels');
-
-    box = { x: left, y: top, w: right - left + 1, h: bottom - top + 1 };
-  }
-
+  const box = part ?? { x: 0, y: 0, w: img.naturalWidth, h: img.naturalHeight };
   const k = (size * scale) / Math.max(box.w, box.h);
 
   img.style.width = `${img.naturalWidth * k}px`;
   img.style.height = `${img.naturalHeight * k}px`;
   img.style.left = `${(size - box.w * k) / 2 - box.x * k}px`;
   img.style.top = `${(size - box.h * k) / 2 - box.y * k}px`;
+}
 
-  return box;
+// The cropped icon as rendered: the mark's longer side runs from edge to edge
+// (no margin at either end), the shorter one is centered (the two margins
+// differ by a pixel at most) and no wider than the proportions allow. Catches
+// a crop that slipped (a changed source, a threshold that let noise hold a
+// margin, a layout error) at the only time the PNGs are made.
+/**
+ * @param {{ x: number, y: number, w: number, h: number }} source
+ * @param {{ x: number, y: number, w: number, h: number, width: number, height: number }} out
+ * @returns {string} the margins, for the log
+ */
+function checkCrop(source, out) {
+  const size = out.width;
+  const tall = source.h >= source.w;
+  const [longStart, longLength] = tall ? [out.y, out.h] : [out.x, out.w];
+  const [shortStart, shortLength] = tall ? [out.x, out.w] : [out.y, out.h];
+  const near = size - shortStart - shortLength;
+  const allowed = Math.ceil((size * (1 - Math.min(source.w, source.h) / Math.max(source.w, source.h))) / 2);
+  const where = `${out.w}×${out.h} at ${out.x},${out.y} in ${size}`;
+
+  if (longStart !== 0 || longLength !== size) throw new Error(`the mark does not reach both edges along its longer side: ${where}`);
+  if (Math.abs(shortStart - near) > 1) throw new Error(`the mark is off center across: ${where}`);
+  if (shortStart > allowed) throw new Error(`the margins across (${shortStart} px) exceed the proportions' ${allowed} px: ${where}`);
+
+  return tall ? `${out.y}/${near}/${size - out.y - out.h}/${shortStart} px top/right/bottom/left` : `${shortStart}/${size - out.x - out.w}/${near}/${out.x} px top/right/bottom/left`;
 }
 
 async function main() {
@@ -151,13 +196,22 @@ async function main() {
 
       await page.setContent(markup(icon));
 
-      const box = await page.evaluate(layOut, { src: sources[icon.source], size: icon.size, scale: icon.scale, crop: icon.crop, alpha: CROP_ALPHA });
+      const src = sources[icon.source];
+      const box = icon.crop ? await page.evaluate(visibleBox, { src, alpha: CROP_ALPHA }) : null;
+
+      await page.evaluate(layOut, { src, size: icon.size, scale: icon.scale, box });
+
       const png = await page.screenshot({ omitBackground: icon.background === 'transparent', type: 'png' });
+      let cropNote = '';
+
+      if (box) {
+        const out = await page.evaluate(visibleBox, { src: `data:image/png;base64,${png.toString('base64')}`, alpha: CROP_ALPHA });
+
+        cropNote = `, cropped to ${box.w}×${box.h} at ${box.x},${box.y}; ${checkCrop(box, out)}`;
+      }
 
       await fs.writeFile(path.join(OUT_DIR, icon.name), png);
       await page.close();
-
-      const cropNote = icon.crop ? `, cropped to ${box.w}×${box.h} at ${box.x},${box.y}` : '';
 
       console.log(`[console-icons] ${icon.name} (${icon.size} px, ${png.length} bytes${cropNote})`);
     }

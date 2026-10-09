@@ -24,12 +24,19 @@ Renders the console's app icons (`src/console/public/*.png`: the tab's
 PNGs in the project library, `balabash/design/balabash-icon-transparent.png`
 and `balabash-icon-dark.png` (their `design/README.md` names them) — with
 headless Chromium (playwright, a devDependency): the favicons are the
-transparent one cropped to its visible pixels (alpha ≥ 2, so the mark runs to
-the edges of the image, centered across its narrower side), the `any` icons
-are the transparent one as is, the maskable ones put it at 86 % over `--bg`
-(the safe zone is the inner 80 % circle), the Apple icon is the dark one as
-is. Not bundled and not part of the build: the
-PNGs are committed, and the script runs again only when the icon changes.
+transparent one cropped to its visible pixels (alpha ≥ 2) and fitted into the
+square by its longer side — the mark is 771 × 975, so it runs from the top
+edge to the bottom one and is centered across, ~10.5 % of the width clear at
+each side (the square canvas; Chromium stretches a non-square favicon to a
+square, so the canvas stays square) — the `any` icons are the transparent one
+as is, the maskable ones put it at 86 % over `--bg` (the safe zone is the
+inner 80 % circle), the Apple icon is the dark one as is. The script measures
+each favicon it rendered and fails before writing when the mark does not
+reach both edges along its longer side, is off center or holds a margin
+wider than the proportions allow; the log names the crop box and the
+margins. Not bundled and not part of the build: the PNGs are committed, and
+the script runs again only when the icon changes (a run on the approved pair
+reproduces the committed PNGs byte for byte).
 
 ```
 node scripts/console-icons.mjs <balabash-icon-transparent.png> <balabash-icon-dark.png>
