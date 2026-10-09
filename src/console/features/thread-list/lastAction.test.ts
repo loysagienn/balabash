@@ -52,6 +52,16 @@ describe('lastMessageOf', () => {
     assert.equal(lastMessageOf([]), null);
   });
 
+  it('words a message as plain text, its code and identifiers as they are', () => {
+    resetSeq();
+    const user = event({ type: 'user.message', threadId: 'main', payload: { text: 'Rename `foo__bar__baz` in **all** files' } });
+    const agent = event({ type: 'agent.message', threadId: 'main', payload: { content: [{ type: 'text', text: '## Done\nStatus: `a || b` | see [doc](https://x/a_(b))' }] } });
+
+    assert.equal(lastMessageOf([user])?.text, 'Rename foo__bar__baz in all files');
+    assert.equal(lastMessageOf([user, agent])?.text, 'Done');
+    assert.equal(lastMessageOf([event({ type: 'agent.message', threadId: 'main', payload: { content: [{ type: 'text', text: 'Status: `a || b` | see [doc](https://x/a_(b))' }] } })])?.text, 'Status: a || b | see doc');
+  });
+
   it('names the attachments of a message without text, in the writer\'s forms', () => {
     resetSeq();
     const user = event({ type: 'user.message', threadId: 'main', payload: { text: 'Old message' } });

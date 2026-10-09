@@ -75,6 +75,12 @@ describe('threadRowData', () => {
     assert.equal(threadRowData({ ...input, lastMessage: { text: 'Hi', at: new Date(2026, 9, 7, 9, 5) } }).time, 'Oct 7, 09:05');
   });
 
+  it('words a closed thread\'s description as plain text, its code as it is', () => {
+    const t = thread({ id: 't4', title: 'Preview', status: 'completed', createdAt: at(1, 0), updatedAt: at(1, 4), description: '**Done:** `a__b` | [doc](https://x/a_(b)) kept' });
+
+    assert.equal(threadRowData({ thread: t, state: 'done', session: null, project: null, kids: 0, headless: false, last: null, now: NOW }).desc, 'Done: a__b | doc kept');
+  });
+
   it('falls back to the summary text and the agent name', () => {
     const t = thread({ id: 't3', title: '  ', status: 'failed', summary: { text: 'Summary here' }, createdAt: at(1, 0), updatedAt: at(1, 4) });
 
