@@ -83,6 +83,10 @@ export type ThreadsResponse = {
   // fall under each status with the same filters, status aside — the
   // segments of the list. Absent on later pages.
   counts?: ThreadCounts;
+  // The log position the counts are exact at (read together under one
+  // snapshot of the database): a terminal with seq <= it is already in
+  // them, one above is not — the client folds the tail accordingly.
+  countsAsOfSeq?: bigint;
 };
 
 export type ThreadResponse = {

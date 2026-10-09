@@ -14,7 +14,8 @@ import { prisma } from '../db/client.ts';
 import type { JsonObject, Thread } from '../core/contract.ts';
 import { SESSION_VIEW_TYPES, foldSession } from '../projections/session.ts';
 import type { SessionView } from '../projections/session.ts';
-import { listThreads } from '../core/threads.ts';
+import { getThread, listThreads } from '../core/threads.ts';
+import { readThreadWindow } from './thread-window.ts';
 import { listProjects, projectView } from '../projects/store.ts';
 import { listApps } from '../apps/management.ts';
 import { publicAppsBase } from '../apps/urls.ts';
@@ -24,28 +25,12 @@ import { listUserAuthServers } from '../capabilities/tool-manager.ts';
 import { getAgents } from '../capabilities/agent-catalog.ts';
 import type { AgentView, ConnectionView, MeResponse, ServiceView, SnapshotResponse, TaskView } from './contract.ts';
 
-// The newest threads kept in the snapshot next to every active one; older
-// history pages in through GET /api/threads.
-export const SNAPSHOT_THREAD_WINDOW = 200;
+export { SNAPSHOT_THREAD_WINDOW } from './thread-window.ts';
 
 async function readHeadSeq(): Promise<bigint> {
   const { _max } = await prisma.event.aggregate({ _max: { seq: true } });
 
   return _max.seq ?? 0n;
-}
-
-async function readThreadWindow(userId: string): Promise<Thread[]> {
-  const [active, newest] = await Promise.all([
-    listThreads(userId, { status: 'active', limit: 500, order: 'desc' }),
-    listThreads(userId, { limit: SNAPSHOT_THREAD_WINDOW, order: 'desc' }),
-  ]);
-  const byId = new Map<string, Thread>();
-
-  for (const thread of [...active, ...newest]) {
-    byId.set(thread.id, thread);
-  }
-
-  return [...byId.values()].sort((a, b) => (a.createdSeq > b.createdSeq ? -1 : a.createdSeq < b.createdSeq ? 1 : 0));
 }
 
 // The sessions behind the active threads of the window: the newest
@@ -118,7 +103,7 @@ export async function buildSnapshot(userId: string, me: MeResponse): Promise<Sna
   const now = new Date();
 
   const [threads, projects, apps, tasks, connections] = await Promise.all([
-    readThreadWindow(userId),
+    readThreadWindow(userId, me.mainThreadId, { list: listThreads, get: getThread }),
     listProjects(userId),
     listApps(userId),
     readTasks(userId, now),

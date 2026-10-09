@@ -70,7 +70,10 @@ export function ThreadsScreen({ route }: { route: ThreadsRoute }) {
   const streamSeq = useAppSelector(s => s.stream.lastSeq ?? s.stream.asOfSeq);
   const filters = list.filters ?? threadsFiltersOf(route, projects);
   const active = useAppSelector(s => selectActiveCountIn(s, filters));
+  // The subtitle counts the whole set (All); the search caption counts the
+  // rows of the selected status.
   const total = segmentCount(undefined, list.counts, active);
+  const found = segmentCount(route.status, list.counts, active);
 
   // Rows above this seq are new to the screen: it opened with the store at streamSeq.
   const mountSeq = useRef<bigint | null>(null);
@@ -166,7 +169,7 @@ export function ThreadsScreen({ route }: { route: ThreadsRoute }) {
   } else {
     body = (
       <Card narrow="bare">
-        <ThreadList threads={rows} pinned={main} now={now} hit={route.q} hitTotal={total} freshAfter={mountSeq.current} foot={foot} />
+        <ThreadList threads={rows} pinned={main} now={now} hit={route.q} hitTotal={found} freshAfter={mountSeq.current} foot={foot} />
       </Card>
     );
   }

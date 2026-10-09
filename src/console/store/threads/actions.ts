@@ -6,10 +6,10 @@ import type { ThreadsListFilters } from './filters.ts';
 // A page of the threads list: before = the cursor of the previous page
 // (null — the first page). Filters travel with the action so a late answer
 // to an old filter set is recognised and dropped. The first page brings
-// the per-status counts of the set.
+// the per-status counts of the set with the log position they are exact at.
 export const loadThreads = (filters: ThreadsListFilters, before: bigint | null) => ({ type: 'LOAD_THREADS', filters, before }) as const;
-export const loadThreadsDone = (filters: ThreadsListFilters, before: bigint | null, threads: Thread[], nextCursor: bigint | null, counts: ThreadCounts | null = null) =>
-  ({ type: 'LOAD_THREADS_DONE', filters, before, threads, nextCursor, counts }) as const;
+export const loadThreadsDone = (filters: ThreadsListFilters, before: bigint | null, threads: Thread[], nextCursor: bigint | null, counts: ThreadCounts | null = null, countsAsOfSeq: bigint | null = null) =>
+  ({ type: 'LOAD_THREADS_DONE', filters, before, threads, nextCursor, counts, countsAsOfSeq }) as const;
 export const loadThreadsFail = (filters: ThreadsListFilters, before: bigint | null, error: ApiFailure) =>
   ({ type: 'LOAD_THREADS_FAIL', filters, before, error }) as const;
 

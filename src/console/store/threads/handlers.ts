@@ -14,14 +14,17 @@ export const SEARCH_DEBOUNCE_MS = 300;
 
 const pause = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
 
-// One page request in flight at a time: a new filter set aborts the
-// request of the old one (its answer would be dropped anyway), and the
-// first page of a search is sent only once the text has rested.
+// One page request in flight at a time: a new page request aborts the one
+// before it at once (the list is retargeted, its answer would be dropped
+// anyway — no point in letting it run while the search text is typed), and
+// the first page of a search is sent only once the text has rested.
 export const loadThreadsHandler: ActionHandler<'LOAD_THREADS'> = ({ api, dispatch, getState, next }) => {
   let inFlight: AbortController | null = null;
 
   return async action => {
     next(action);
+    inFlight?.abort();
+    inFlight = null;
 
     const { filters, before } = action;
 
@@ -32,8 +35,6 @@ export const loadThreadsHandler: ActionHandler<'LOAD_THREADS'> = ({ api, dispatc
         return;
       }
     }
-
-    inFlight?.abort();
 
     const controller = new AbortController();
 
@@ -56,7 +57,7 @@ export const loadThreadsHandler: ActionHandler<'LOAD_THREADS'> = ({ api, dispatc
         return;
       }
 
-      dispatch(loadThreadsDone(filters, before, page.threads, page.nextCursor, page.counts ?? null));
+      dispatch(loadThreadsDone(filters, before, page.threads, page.nextCursor, page.counts ?? null, page.countsAsOfSeq ?? null));
     } catch (error) {
       if (!controller.signal.aborted) {
         dispatch(loadThreadsFail(filters, before, toApiFailure(error)));

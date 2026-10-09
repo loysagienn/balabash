@@ -75,10 +75,12 @@ export async function listThreads(userId: string, { limit = 100, order = 'asc', 
   return rows.map(toThread);
 }
 
+export type ThreadCountFilters = Omit<ThreadFilters, 'status' | 'beforeCreatedSeq'>;
+
 // How many threads of the workspace fall under each status with the same
 // filters (status and cursor aside) — the segments of the threads list.
-export async function countThreads(userId: string, filters: Omit<ThreadFilters, 'status' | 'beforeCreatedSeq'>): Promise<ThreadCounts> {
-  const rows = await prisma.$queryRaw<{ status: string; n: number }[]>`
+export async function countThreads(userId: string, filters: ThreadCountFilters, db: DbClient = prisma): Promise<ThreadCounts> {
+  const rows = await db.$queryRaw<{ status: string; n: number }[]>`
     SELECT status, COUNT(*)::int AS n
     FROM threads
     WHERE ${threadsWhere(userId, filters)}
@@ -92,6 +94,24 @@ export async function countThreads(userId: string, filters: Omit<ThreadFilters, 
   }
 
   return counts;
+}
+
+// The counts stamped with the log position they are exact at: read in one
+// REPEATABLE READ transaction with the head of the log, so every terminal
+// with seq <= asOfSeq is in them and none above (the lifecycle events and
+// their projection rows commit together). The console folds the tail's
+// terminals above the stamp onto the counts and leaves those below alone —
+// whichever of the page and the tail lands first.
+export async function countThreadsAt(userId: string, filters: ThreadCountFilters): Promise<{ counts: ThreadCounts; asOfSeq: bigint }> {
+  return prisma.$transaction(
+    async tx => {
+      const { _max } = await tx.event.aggregate({ _max: { seq: true } });
+      const counts = await countThreads(userId, filters, tx);
+
+      return { counts, asOfSeq: _max.seq ?? 0n };
+    },
+    { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+  );
 }
 
 // Every active non-main thread across all workspaces — the restart module's

@@ -13,7 +13,7 @@ import type { Context, Next } from 'koa';
 import { prisma } from '../db/client.ts';
 import { config } from '../config/index.ts';
 import { parseJson, prepareObject } from '../utils/serialize-json.ts';
-import { countThreads, ensureOperatorWorkspace, getMainThread, getThread, isHeadlessThread, listThreads } from '../core/threads.ts';
+import { countThreadsAt, ensureOperatorWorkspace, getMainThread, getThread, isHeadlessThread, listThreads } from '../core/threads.ts';
 import { getEventsAfter, listThreadEvents } from '../core/events.ts';
 import { getLiveHub } from '../core/live.ts';
 import { appendEvent } from '../core/append.ts';
@@ -336,7 +336,7 @@ router.get('/threads', requireSession, async ctx => {
   };
   // The counts ride with the first page only: the set does not change
   // between pages, and later pages are the scroll of the same list.
-  const [threads, counts] = await Promise.all([
+  const [threads, counted] = await Promise.all([
     listThreads(userId, {
       ...filters,
       ...(status !== undefined ? { status: status as ThreadStatus } : {}),
@@ -344,13 +344,13 @@ router.get('/threads', requireSession, async ctx => {
       limit,
       order: 'desc',
     }),
-    before === undefined ? countThreads(userId, filters) : undefined,
+    before === undefined ? countThreadsAt(userId, filters) : undefined,
   ]);
 
   const response: ThreadsResponse = {
     threads,
     nextCursor: threads.length === limit ? threads[threads.length - 1]!.createdSeq : null,
-    ...(counts ? { counts } : {}),
+    ...(counted ? { counts: counted.counts, countsAsOfSeq: counted.asOfSeq } : {}),
   };
 
   ctx.body = prepareObject(response);

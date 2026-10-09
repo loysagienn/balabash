@@ -7,6 +7,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import type { Thread } from '../../core/contract.ts';
 import type { Api } from '../lib/api/index.ts';
+import type { ThreadsResponse } from '../../api/contract.ts';
 import { ApiError } from '../lib/api/index.ts';
 import type { StoreEnhancer } from 'redux';
 import { createStore } from './index.ts';
@@ -631,7 +632,7 @@ describe('threads list projection', () => {
     const counts = { active: 9, completed: 1290, failed: 12, cancelled: 6 };
     const api = fakeApi({
       snapshot: async () => snapshot({ asOfSeq: 50n, threads: [thread({ id: 'main', parentId: null, agent: 'coordinator', createdSeq: 1n }), thread({ id: 'x', createdSeq: 9n, agent: 'designer' })] }),
-      threads: { list: async query => (query.before ? { threads: [], nextCursor: null } : { threads: page, nextCursor: 5n, counts }) },
+      threads: { list: async query => (query.before ? { threads: [], nextCursor: null } : { threads: page, nextCursor: 5n, counts, countsAsOfSeq: 50n }) },
     });
     const store = createStore({ api, initialRoute: { key: 'threads' } });
 
@@ -647,14 +648,68 @@ describe('threads list projection', () => {
     assert.equal(selectActiveCountIn(state, state.threads.list.filters!), 2);
     assert.equal(selectActiveCountIn(state, { ...state.threads.list.filters!, agent: 'designer' }), 1);
 
+    // A terminal above the stamp of the counts adds one under its status; the
+    // active number is the store's (one fewer now), `counts.active` stays the server's.
     store.dispatch(eventAction(event({ type: 'thread.failed', seq: 61n, threadId: 'x', payload: { error: 'boom' } })));
-    assert.deepEqual(store.getState().threads.list.counts, { ...counts, active: 8, failed: 13 });
+    assert.deepEqual(store.getState().threads.list.counts, { ...counts, failed: 13 });
+    assert.equal(selectActiveCountIn(store.getState(), state.threads.list.filters!), 1);
 
     // A later page keeps the counts of the set.
     await dispatched(store, loadThreads(store.getState().threads.list.filters!, 5n));
     await settle();
-    assert.deepEqual(store.getState().threads.list.counts, { ...counts, active: 8, failed: 13 });
+    assert.deepEqual(store.getState().threads.list.counts, { ...counts, failed: 13 });
+    assert.equal(store.getState().threads.list.countsAsOfSeq, 50n);
     assert.equal(store.getState().threads.list.nextCursor, null);
+  });
+
+  it('counts a terminal the tail brings while the first page is in flight, when the counts are older than it', async () => {
+    let release!: (page: ThreadsResponse) => void;
+    const pending = new Promise<ThreadsResponse>(resolve => {
+      release = resolve;
+    });
+    const api = fakeApi({
+      snapshot: async () => snapshot({ asOfSeq: 50n, threads: [thread({ id: 'main', parentId: null, agent: 'coordinator', createdSeq: 1n }), thread({ id: 'a', createdSeq: 9n, title: 'Review the list' })] }),
+      threads: { list: async query => (query.q ? pending : { threads: [], nextCursor: null }) },
+    });
+    const store = createStore({ api, initialRoute: { key: 'threads', q: 'review' } });
+
+    await dispatched(store, sessionCheck());
+    await settle();
+    await new Promise(resolve => setTimeout(resolve, SEARCH_DEBOUNCE_MS + 20));
+    assert.equal(store.getState().threads.list.loading, true);
+
+    // The thread of the set ends while the page is in flight; the page's counts were taken before that.
+    store.dispatch(eventAction(event({ type: 'thread.completed', seq: 61n, threadId: 'a', payload: { summary: { text: 'done' } } })));
+    release({ threads: [], nextCursor: null, counts: { active: 1, completed: 0, failed: 0, cancelled: 0 }, countsAsOfSeq: 50n });
+    await settle();
+    assert.deepEqual(store.getState().threads.list.counts, { active: 1, completed: 1, failed: 0, cancelled: 0 });
+    assert.deepEqual(selectListThreads(store.getState()).map(t => t.id), ['a']);
+
+    // The same terminal replayed changes nothing.
+    store.dispatch(eventAction(event({ type: 'thread.completed', seq: 61n, threadId: 'a', payload: { summary: { text: 'done' } } })));
+    assert.equal(store.getState().threads.list.counts?.completed, 1);
+  });
+
+  it('leaves a terminal the counts already hold alone: the Active page came after the thread ended, its row is not there, the tail delivers the terminal later', async () => {
+    const api = fakeApi({
+      snapshot: async () => snapshot({ asOfSeq: 50n, threads: [thread({ id: 'main', parentId: null, agent: 'coordinator', createdSeq: 1n }), thread({ id: 'a', createdSeq: 9n })] }),
+      threads: { list: async () => ({ threads: [], nextCursor: null, counts: { active: 0, completed: 1, failed: 0, cancelled: 0 }, countsAsOfSeq: 61n }) },
+    });
+    const store = createStore({ api, initialRoute: { key: 'threads', status: 'active' } });
+
+    await dispatched(store, sessionCheck());
+    await settle();
+    // The store still sees the thread active: the tail has not delivered the terminal yet.
+    assert.deepEqual(selectListThreads(store.getState()).map(t => t.id), ['a']);
+
+    store.dispatch(eventAction(event({ type: 'thread.completed', seq: 61n, threadId: 'a', payload: { summary: { text: 'done' } } })));
+    assert.deepEqual(store.getState().threads.list.counts, { active: 0, completed: 1, failed: 0, cancelled: 0 });
+    assert.deepEqual(selectListThreads(store.getState()), []);
+
+    // A terminal above the stamp counts.
+    store.dispatch(eventAction(event({ type: 'thread.started', seq: 62n, threadId: 'n', targetThreadId: 'main', payload: { agent: 'designer' } })));
+    store.dispatch(eventAction(event({ type: 'thread.failed', seq: 63n, threadId: 'n', payload: { error: 'boom' } })));
+    assert.deepEqual(store.getState().threads.list.counts, { active: 0, completed: 1, failed: 1, cancelled: 0 });
   });
 });
 

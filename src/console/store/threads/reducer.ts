@@ -19,9 +19,14 @@ export type ThreadsListState = {
   filters: ThreadsListFilters | null;
   error: ApiFailure | null;
   // How many threads of the set fall under each status, from the first
-  // page of the server; a terminal the tail brings moves one across. Null
-  // until the first page of the set lands.
+  // page of the server, exact at countsAsOfSeq (the server's stamp): a
+  // terminal above the stamp — whether the tail brings it or a row of a
+  // page shows it — adds one under its status, one below is already in.
+  // The screen reads the closed numbers here and the active one from the
+  // store, so `active` stays the server's at the stamp. Null until the
+  // first page of the set lands (a stamp is null when the server gave none).
   counts: ThreadCounts | null;
+  countsAsOfSeq: bigint | null;
 };
 
 // A thread asked for by id (LOAD_THREAD): in flight, or how it failed.
@@ -36,7 +41,7 @@ export type ThreadsState = {
 
 export const initialThreads: ThreadsState = {
   byId: {},
-  list: { ids: [], nextCursor: null, loading: false, filters: null, error: null, counts: null },
+  list: { ids: [], nextCursor: null, loading: false, filters: null, error: null, counts: null, countsAsOfSeq: null },
   childrenOf: {},
   lookup: {},
 };
@@ -100,7 +105,7 @@ export function threadsReducer(state: ThreadsState = initialThreads, action: Act
       return { ...state, byId, childrenOf: indexChildren(byId) };
     }
     case 'LOAD_THREADS':
-      return { ...state, list: { ...state.list, loading: true, error: null, filters: action.filters, ...(action.before === null ? { ids: [], nextCursor: null, counts: null } : {}) } };
+      return { ...state, list: { ...state.list, loading: true, error: null, filters: action.filters, ...(action.before === null ? { ids: [], nextCursor: null, counts: null, countsAsOfSeq: null } : {}) } };
     case 'LOAD_THREADS_DONE': {
       if (!sameRequest(state.list, action)) {
         return state;
@@ -115,7 +120,9 @@ export function threadsReducer(state: ThreadsState = initialThreads, action: Act
         }
       }
 
-      return { ...state, byId, childrenOf: indexChildren(byId), list: { ...state.list, ids, nextCursor: action.nextCursor, loading: false, error: null, counts: action.counts ?? state.list.counts } };
+      const counted = action.counts ? { counts: countsWithTail(action.counts, action.countsAsOfSeq, byId, action.filters), countsAsOfSeq: action.countsAsOfSeq } : {};
+
+      return { ...state, byId, childrenOf: indexChildren(byId), list: { ...state.list, ids, nextCursor: action.nextCursor, loading: false, error: null, ...counted } };
     }
     case 'LOAD_THREADS_FAIL':
       return sameRequest(state.list, action) ? { ...state, list: { ...state.list, loading: false, error: action.error } } : state;
@@ -164,7 +171,7 @@ export function threadsReducer(state: ThreadsState = initialThreads, action: Act
         ...(completion.description !== undefined ? { description: completion.description } : {}),
       };
 
-      return { ...state, byId: { ...state.byId, [known.id]: ended }, list: countEnded(state.list, known, ended) };
+      return { ...state, byId: { ...state.byId, [known.id]: ended }, list: countEnded(state.list, known, ended, event.seq) };
     }
     default: {
       // Any event of a thread at work is its activity. A finished thread
@@ -185,16 +192,39 @@ export function threadsReducer(state: ThreadsState = initialThreads, action: Act
   }
 }
 
-// A thread of the loaded set that just ended moves between the counts of
-// the segments: one fewer active, one more under its terminal status.
-function countEnded(list: ThreadsListState, before: Thread, after: Thread): ThreadsListState {
-  const { counts, filters } = list;
+// A thread of the set that just ended adds one under its terminal status —
+// unless the terminal is at or below the stamp of the counts, which have
+// it already (the page landed after the event committed; the tail is only
+// now delivering it).
+function countEnded(list: ThreadsListState, before: Thread, after: Thread, seq: bigint): ThreadsListState {
+  const { counts, countsAsOfSeq, filters } = list;
 
-  if (!counts || !filters || before.status !== 'active' || after.status === 'active' || !inFilterSet(after, filters)) {
+  if (!counts || !filters || before.status !== 'active' || after.status === 'active' || !inFilterSet(after, filters) || (countsAsOfSeq !== null && seq <= countsAsOfSeq)) {
     return list;
   }
 
-  return { ...list, counts: { ...counts, active: Math.max(0, counts.active - 1), [after.status]: counts[after.status] + 1 } };
+  return { ...list, counts: { ...counts, [after.status]: counts[after.status] + 1 } };
+}
+
+// The counts of a first page brought up to the store: a thread of the set
+// the store already knows closed above the stamp (its terminal arrived
+// through the tail while the page was in flight, or a row of the page is
+// newer than the stamp) is counted under its status here — the event has
+// been folded already, or will be skipped by countEnded as known.
+function countsWithTail(counts: ThreadCounts, asOfSeq: bigint | null, byId: Record<string, Thread>, filters: ThreadsListFilters): ThreadCounts {
+  if (asOfSeq === null) {
+    return counts;
+  }
+
+  const next = { ...counts };
+
+  for (const thread of Object.values(byId)) {
+    if (thread.status !== 'active' && thread.terminalSeq !== null && thread.terminalSeq > asOfSeq && inFilterSet(thread, filters)) {
+      next[thread.status] += 1;
+    }
+  }
+
+  return next;
 }
 
 function sameRequest(list: ThreadsListState, action: { filters: ThreadsListFilters; before: bigint | null }): boolean {

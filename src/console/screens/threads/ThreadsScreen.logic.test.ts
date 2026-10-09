@@ -4,7 +4,7 @@ import type { ThreadsListState } from '../../store/threads/reducer.ts';
 import { emptyMatchNote, threadsBody, threadsFoot } from './ThreadsScreen.logic.ts';
 
 const filters = { status: null, projectId: null, agent: null, q: null };
-const list = (partial: Partial<ThreadsListState>): ThreadsListState => ({ ids: [], nextCursor: null, loading: false, filters, error: null, counts: null, ...partial });
+const list = (partial: Partial<ThreadsListState>): ThreadsListState => ({ ids: [], nextCursor: null, loading: false, filters, error: null, counts: null, countsAsOfSeq: null, ...partial });
 const failure = { status: 0, code: 'network', message: 'offline' };
 
 describe('Threads screen body', () => {
