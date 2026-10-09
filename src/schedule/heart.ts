@@ -17,7 +17,7 @@ import type { ScheduledTaskModel } from '../../prisma-generated/models.ts';
 import { hasTaskBody, workspaceTaskFile } from './catalog.ts';
 import { fireTask, sweepAbortedJobRuns } from './engine.ts';
 import { cronNextRun } from './cron.ts';
-import { journalRegistryEvent } from '../core/registry-events.ts';
+import { registryMutation } from '../core/registry-events.ts';
 import { taskRecord } from './view.ts';
 
 export { assertValidCron, cronNextRun } from './cron.ts';
@@ -130,14 +130,22 @@ export function startScheduleHeart(): { name: string; stop: () => void } {
 
     // Consume the row BEFORE firing: once means once, even if the action
     // fails (no retries). deleteMany keeps the pass idempotent against a
-    // concurrent cancel_task — zero rows deleted, nothing to fire.
-    const { count } = await prisma.scheduledTask.deleteMany({ where: { id: row.id } });
+    // concurrent cancel_task — zero rows deleted, nothing to fire; the
+    // consumption is journaled with the delete.
+    const count = await registryMutation(async (tx, journal) => {
+      const deleted = await tx.scheduledTask.deleteMany({ where: { id: row.id } });
+
+      if (deleted.count > 0) {
+        await journal('schedule.task.cancelled', { ...taskRecord(row, now), reason: 'consumed' }, { kind: 'system', userId: row.userId });
+      }
+
+      return deleted.count;
+    });
 
     if (count === 0) {
       return;
     }
 
-    await journalRegistryEvent('schedule.task.cancelled', { ...taskRecord(row, now), reason: 'consumed' }, { kind: 'system', userId: row.userId });
     await fireTask(row, 'at');
   };
 

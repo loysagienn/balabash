@@ -10,7 +10,7 @@ import { prisma } from '../db/client.ts';
 import { WorkspacePathError, sanitizeRelPath } from '../workspace/files.ts';
 import { workspaceFilesDir } from '../workspace/layout.ts';
 import { APP_MANIFEST_FILENAME, readAppManifest } from './manifest.ts';
-import { journalRegistryEvent } from '../core/registry-events.ts';
+import { registryMutation } from '../core/registry-events.ts';
 
 // The user-facing message of a rejected management call (a 400, not a 500).
 export class AppManagementError extends Error {}
@@ -184,7 +184,19 @@ export async function publishApp(userId: string, rawPath: unknown, rawSlug: unkn
   let row;
 
   try {
-    row = await prisma.appPublication.create({ data: { userId, path: appPath, slug } });
+    row = await registryMutation(async (tx, journal) => {
+      const created = await tx.appPublication.create({ data: { userId, path: appPath, slug } });
+
+      // Publication is the operator's act from the owner edge (the session API
+      // is the only caller): the event is authored by the user.
+      await journal(
+        'app.published',
+        { path: created.path, slug: created.slug, name: manifest.manifest.name, description: manifest.manifest.description },
+        { kind: 'user', userId },
+      );
+
+      return created;
+    });
   } catch (error) {
     // The slug unique constraint: taken by any user (including a racing
     // publish). The message deliberately does not say by whom.
@@ -194,14 +206,6 @@ export async function publishApp(userId: string, rawPath: unknown, rawSlug: unkn
 
     throw error;
   }
-
-  // Publication is the operator's act from the owner edge (the session API
-  // is the only caller): the event is authored by the user.
-  await journalRegistryEvent(
-    'app.published',
-    { path: row.path, slug: row.slug, name: manifest.manifest.name, description: manifest.manifest.description },
-    { kind: 'user', userId },
-  );
 
   return { slug: row.slug, path: row.path };
 }
@@ -230,8 +234,10 @@ export async function unpublishApp(userId: string, rawPath: unknown, rawSlug: un
 }
 
 async function unpublishRow(userId: string, row: { id: string; slug: string; path: string }): Promise<{ slug: string; path: string }> {
-  await prisma.appPublication.delete({ where: { id: row.id } });
-  await journalRegistryEvent('app.unpublished', { path: row.path, slug: row.slug }, { kind: 'user', userId });
+  await registryMutation(async (tx, journal) => {
+    await tx.appPublication.delete({ where: { id: row.id } });
+    await journal('app.unpublished', { path: row.path, slug: row.slug }, { kind: 'user', userId });
+  });
 
   return { slug: row.slug, path: row.path };
 }

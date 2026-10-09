@@ -168,7 +168,19 @@ export type EventPayloads = {
   // (connectionId) so a projection keyed by id (the console's connections
   // domain) follows them; events recorded before the id was added lack it.
   'connection.pending': ConnectionRecord;
-  'connection.completed': { server: string; account: string; name: string; identity?: string | null; connectionId?: string };
+  // The row as it is after the flow (ConnectionRecord — the console folds it
+  // whole) plus the flow's outcome; the row's fields are absent on events
+  // recorded before the row was carried. The row may be another than the
+  // flow's own (alreadyConnected: the consent landed on a connected account
+  // — requestedAccount names the one asked for).
+  'connection.completed': Partial<ConnectionRecord> & {
+    server: string;
+    account: string;
+    name: string;
+    identity?: string | null;
+    alreadyConnected?: boolean;
+    requestedAccount?: string;
+  };
   'connection.failed': { server: string; account: string; name: string; error: string; connectionId?: string };
   'connection.reauthorization_required': {
     server: string;

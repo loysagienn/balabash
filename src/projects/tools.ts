@@ -18,7 +18,7 @@ import { prisma } from '../db/client.ts';
 import type { ToolFunction } from '../capabilities/mcp-client.ts';
 import type { BuiltinServerCallContext, BuiltinToolServer } from '../capabilities/tool-manager.ts';
 import { workspaceFilesDir } from '../workspace/layout.ts';
-import { journalRegistryEvent } from '../core/registry-events.ts';
+import { registryMutation } from '../core/registry-events.ts';
 import { getProject, listProjects, projectRecord } from './store.ts';
 import type { ProjectModel } from './store.ts';
 
@@ -277,8 +277,14 @@ async function executeCreate(args: JsonObject, ctx: BuiltinServerCallContext): P
   let project: ProjectModel;
 
   try {
-    project = await prisma.project.create({
-      data: { userId: ctx.userId, title, slug, description },
+    project = await registryMutation(async (tx, journal) => {
+      const created = await tx.project.create({
+        data: { userId: ctx.userId, title, slug, description },
+      });
+
+      await journal('project.created', projectRecord(created), { kind: 'thread', userId: ctx.userId, threadId: ctx.threadId });
+
+      return created;
     });
   } catch (error) {
     if (isUniqueViolation(error)) {
@@ -287,8 +293,6 @@ async function executeCreate(args: JsonObject, ctx: BuiltinServerCallContext): P
 
     throw error;
   }
-
-  await journalRegistryEvent('project.created', projectRecord(project), { kind: 'thread', userId: ctx.userId, threadId: ctx.threadId });
 
   return {
     project: projectToJson(project),
@@ -367,14 +371,20 @@ async function executeUpdate(args: JsonObject, ctx: BuiltinServerCallContext): P
   let updated: ProjectModel;
 
   try {
-    updated = await prisma.project.update({
-      where: { id: project.id },
-      // With no fields given the call is a "touch": prisma writes nothing on
-      // empty data, so updatedAt is set explicitly.
-      data:
-        title || description || slug
-          ? { ...(title ? { title } : {}), ...(description ? { description } : {}), ...(slug ? { slug } : {}) }
-          : { updatedAt: new Date() },
+    updated = await registryMutation(async (tx, journal) => {
+      const row = await tx.project.update({
+        where: { id: project.id },
+        // With no fields given the call is a "touch": prisma writes nothing on
+        // empty data, so updatedAt is set explicitly.
+        data:
+          title || description || slug
+            ? { ...(title ? { title } : {}), ...(description ? { description } : {}), ...(slug ? { slug } : {}) }
+            : { updatedAt: new Date() },
+      });
+
+      await journal('project.updated', projectRecord(row), { kind: 'thread', userId: ctx.userId, threadId: ctx.threadId });
+
+      return row;
     });
   } catch (error) {
     if (movedFromDir && slug) {
@@ -388,8 +398,6 @@ async function executeUpdate(args: JsonObject, ctx: BuiltinServerCallContext): P
 
     throw error;
   }
-
-  await journalRegistryEvent('project.updated', projectRecord(updated), { kind: 'thread', userId: ctx.userId, threadId: ctx.threadId });
 
   return {
     project: projectToJson(updated),
@@ -405,9 +413,11 @@ async function executeArchive(args: JsonObject, ctx: BuiltinServerCallContext): 
     return `Project "${project.title}" is already archived.`;
   }
 
-  const archived = await prisma.project.update({ where: { id: project.id }, data: { archived: true } });
+  await registryMutation(async (tx, journal) => {
+    const archived = await tx.project.update({ where: { id: project.id }, data: { archived: true } });
 
-  await journalRegistryEvent('project.archived', projectRecord(archived), { kind: 'thread', userId: ctx.userId, threadId: ctx.threadId });
+    await journal('project.archived', projectRecord(archived), { kind: 'thread', userId: ctx.userId, threadId: ctx.threadId });
+  });
 
   return `Project "${project.title}" archived. Nothing was deleted: the record and the folder "${project.slug}/" stay; projects_unarchive brings it back.`;
 }
@@ -419,9 +429,11 @@ async function executeUnarchive(args: JsonObject, ctx: BuiltinServerCallContext)
     return `Project "${project.title}" is not archived.`;
   }
 
-  const unarchived = await prisma.project.update({ where: { id: project.id }, data: { archived: false } });
+  await registryMutation(async (tx, journal) => {
+    const unarchived = await tx.project.update({ where: { id: project.id }, data: { archived: false } });
 
-  await journalRegistryEvent('project.unarchived', projectRecord(unarchived), { kind: 'thread', userId: ctx.userId, threadId: ctx.threadId });
+    await journal('project.unarchived', projectRecord(unarchived), { kind: 'thread', userId: ctx.userId, threadId: ctx.threadId });
+  });
 
   return `Project "${project.title}" is back on the live list. Its folder "${project.slug}/" was never touched.`;
 }

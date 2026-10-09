@@ -12,6 +12,7 @@ import {
   THREAD_CANCEL,
   THREAD_CANCELLED,
   THREAD_COMPLETED,
+  THREAD_INTERRUPT,
   THREAD_PROGRESS,
   THREAD_STARTED,
   toEvent,
@@ -27,7 +28,7 @@ export type AppendResult =
   // or a cancel whose target is already terminal — the goal is already met.
   | { written: false; reason: 'already_terminal' | 'target_already_terminal' };
 
-type Tx = Prisma.TransactionClient;
+export type Tx = Prisma.TransactionClient;
 
 // Row shape used for locking reads; column aliases match the Thread model.
 type ThreadRow = {
@@ -77,23 +78,7 @@ async function createEvent(tx: Tx, input: AppendInput): Promise<Event> {
 }
 
 export async function appendEvent(input: AppendInput): Promise<AppendResult> {
-  validateEnvelope(input);
-
-  const result = await prisma.$transaction(tx => {
-    if (input.type === THREAD_STARTED) {
-      return appendThreadStarted(tx, input);
-    }
-
-    if (TERMINAL_TYPES.has(input.type)) {
-      return appendTerminal(tx, input);
-    }
-
-    if (input.type === THREAD_CANCEL) {
-      return appendCancelCommand(tx, input);
-    }
-
-    return appendGeneric(tx, input);
-  });
+  const result = await prisma.$transaction(tx => appendEventIn(tx, input));
 
   // After the commit: the live tail (src/core/live.ts) learns that the log
   // grew. A cascade wrote more than one event — the hub reads from the log
@@ -103,6 +88,30 @@ export async function appendEvent(input: AppendInput): Promise<AppendResult> {
   }
 
   return result;
+}
+
+// The append inside a transaction the caller owns: a registry table changes
+// and the event recording the change commit together, or neither does
+// (src/core/registry-events.ts). The seq is allocated under the row locks
+// the caller holds, so the log's order is the mutations' order. The caller
+// tells the live tail after its commit (notifyAppended) — the hub reads the
+// log itself, so a missed hint only costs the safety poll's delay.
+export function appendEventIn(tx: Tx, input: AppendInput): Promise<AppendResult> {
+  validateEnvelope(input);
+
+  if (input.type === THREAD_STARTED) {
+    return appendThreadStarted(tx, input);
+  }
+
+  if (TERMINAL_TYPES.has(input.type)) {
+    return appendTerminal(tx, input);
+  }
+
+  if (input.type === THREAD_CANCEL || input.type === THREAD_INTERRUPT) {
+    return appendChildCommand(tx, input);
+  }
+
+  return appendGeneric(tx, input);
 }
 
 // ---------------------------------------------------------------------------
@@ -255,15 +264,16 @@ async function cascadeCancel(tx: Tx, root: ThreadRow, cascadeFromThreadId: strin
 }
 
 // ---------------------------------------------------------------------------
-// thread.cancel: a command from parent to direct child. A cancel for an
-// already-terminated child is a no-op — its goal is already met, and the
-// dead-target redirect would only spam the main thread.
+// thread.cancel and thread.interrupt: commands from parent to direct child.
+// A command for an already-terminated child is a no-op — its goal (no run,
+// no turn in flight) is already met, and the dead-target redirect would only
+// spam the main thread with a command nothing acts on.
 
-async function appendCancelCommand(tx: Tx, input: AppendInput): Promise<AppendResult> {
+async function appendChildCommand(tx: Tx, input: AppendInput): Promise<AppendResult> {
   const { threadId, targetThreadId } = input;
 
   if (!targetThreadId) {
-    throw new AppendError('target_required', 'thread.cancel requires targetThreadId');
+    throw new AppendError('target_required', `${input.type} requires targetThreadId`);
   }
 
   const target = await lockThread(tx, targetThreadId);
@@ -273,7 +283,7 @@ async function appendCancelCommand(tx: Tx, input: AppendInput): Promise<AppendRe
   }
 
   if (target.parentId !== threadId) {
-    throw new AppendError('one_hop', 'thread.cancel may only address a direct child');
+    throw new AppendError('one_hop', `${input.type} may only address a direct child`);
   }
 
   if (target.userId !== input.userId) {

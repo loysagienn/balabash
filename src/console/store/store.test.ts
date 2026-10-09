@@ -917,12 +917,30 @@ describe('registry events', () => {
     store.dispatch(eventAction(event({ type: 'app.published', actor: 'user', payload: { path: 'b/tracker', slug: 'tracker', name: 'Tracker', description: null } })));
     assert.equal(store.getState().apps.items[0].slug, 'tracker');
 
+    // The same publication again is the same state.
+    const published = store.getState().apps;
+
+    store.dispatch(eventAction(event({ type: 'app.published', actor: 'user', payload: { path: 'b/tracker', slug: 'tracker', name: 'Tracker', description: null } })));
+    assert.equal(store.getState().apps, published);
+
     store.dispatch(eventAction(event({ type: 'app.published', actor: 'user', payload: { path: 'a/new', slug: 'new-app', name: 'New', description: 'fresh' } })));
     assert.deepEqual(store.getState().apps.items.map(item => [item.path, item.slug, item.name]), [['a/new', 'new-app', 'New'], ['b/tracker', 'tracker', 'Tracker']]);
 
     store.dispatch(eventAction(event({ type: 'app.unpublished', actor: 'user', payload: { path: 'b/tracker', slug: 'tracker' } })));
     assert.equal(store.getState().apps.items[1].slug, null);
     assert.equal(store.getState().apps.items[1].name, 'Tracker');
+  });
+
+  it('publishing a folder the snapshot saw with a broken manifest takes the validated manifest and drops the error', async () => {
+    resetSeq(350n);
+
+    const store = createStore({ api: fakeApi({ snapshot: async () => snapshot({ apps: { apps: [{ path: 'b/tracker', name: null, description: null, manifestError: 'name is required', slug: null }], publicAppsBase: 'https://apps.example' } }) }), initialRoute: { key: 'home' } });
+
+    await dispatched(store, sessionCheck());
+    await settle();
+
+    store.dispatch(eventAction(event({ type: 'app.published', actor: 'user', payload: { path: 'b/tracker', slug: 'tracker', name: 'Tracker', description: 'fixed' } })));
+    assert.deepEqual(store.getState().apps.items, [{ path: 'b/tracker', slug: 'tracker', name: 'Tracker', description: 'fixed', manifestError: null }]);
   });
 
   it('follows a connection through its life by connectionId; events without one are left alone', async () => {
@@ -936,12 +954,27 @@ describe('registry events', () => {
     store.dispatch(eventAction(event({ type: 'connection.pending', actor: 'system', targetThreadId: 't1', payload: { connectionId: 'c1', server: 'notion', account: 'default', name: 'Notion', status: 'pending', identity: null, scope: null, threadId: 't1', createdAt: ISO, updatedAt: ISO } })));
     assert.deepEqual(selectConnections(store.getState()).map(connection => [connection.id, connection.status]), [['c1', 'pending']]);
 
-    const completed = event({ type: 'connection.completed', actor: 'system', targetThreadId: 't1', payload: { connectionId: 'c1', server: 'notion', account: 'default', name: 'Notion', identity: 'me@example.com' } });
-
-    store.dispatch(eventAction(completed));
+    // completed carries the row as the flow left it: scope and the exact updatedAt come from it.
+    store.dispatch(eventAction(event({ type: 'connection.completed', actor: 'system', targetThreadId: 't1', payload: { connectionId: 'c1', server: 'notion', account: 'default', name: 'Notion', status: 'connected', identity: 'me@example.com', scope: 'read write', threadId: 't1', createdAt: ISO, updatedAt: LATER } })));
     assert.equal(store.getState().connections.byId.c1.status, 'connected');
     assert.equal(store.getState().connections.byId.c1.identity, 'me@example.com');
-    assert.equal(store.getState().connections.byId.c1.updatedAt, completed.createdAt);
+    assert.equal(store.getState().connections.byId.c1.scope, 'read write');
+    assert.equal(store.getState().connections.byId.c1.updatedAt.toISOString(), LATER);
+
+    // A consent that landed on an already connected account completes that row — unknown to the snapshot, it joins whole.
+    store.dispatch(eventAction(event({ type: 'connection.completed', actor: 'system', targetThreadId: 't1', payload: { connectionId: 'c2', server: 'notion', account: 'work', name: 'Work', status: 'connected', identity: 'me@example.com', scope: 'read', threadId: 't1', createdAt: ISO, updatedAt: LATER, alreadyConnected: true, requestedAccount: 'default' } })));
+    assert.deepEqual(store.getState().connections.ids, ['c1', 'c2']);
+
+    // A completed recorded before the row was carried patches the status and identity, the time is the event's.
+    store.dispatch(eventAction(event({ type: 'connection.reauthorization_required', actor: 'system', targetThreadId: 't1', payload: { connectionId: 'c2', server: 'notion', account: 'work', name: 'Work', error: 'token revoked' } })));
+
+    const patched = event({ type: 'connection.completed', actor: 'system', targetThreadId: 't1', payload: { connectionId: 'c2', server: 'notion', account: 'work', name: 'Work', identity: null } });
+
+    store.dispatch(eventAction(patched));
+    assert.equal(store.getState().connections.byId.c2.status, 'connected');
+    assert.equal(store.getState().connections.byId.c2.identity, 'me@example.com');
+    assert.equal(store.getState().connections.byId.c2.scope, 'read');
+    assert.equal(store.getState().connections.byId.c2.updatedAt, patched.createdAt);
 
     store.dispatch(eventAction(event({ type: 'connection.renamed', actor: 'system', targetThreadId: 't1', payload: { connectionId: 'c1', server: 'notion', account: 'default', name: 'Work Notion', previousName: 'Notion' } })));
     assert.equal(store.getState().connections.byId.c1.displayName, 'Work Notion');
@@ -956,7 +989,7 @@ describe('registry events', () => {
     assert.equal(store.getState().connections, before);
 
     store.dispatch(eventAction(event({ type: 'connection.disconnected', actor: 'system', targetThreadId: 't1', payload: { connectionId: 'c1', server: 'notion', account: 'default', name: 'Work Notion', reason: 'disconnected' } })));
-    assert.deepEqual(store.getState().connections.ids, []);
+    assert.deepEqual(store.getState().connections.ids, ['c2']);
     assert.equal(store.getState().connections.byId.c1, undefined);
   });
 });

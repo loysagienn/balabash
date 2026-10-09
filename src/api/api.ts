@@ -852,6 +852,7 @@ filesRouter.get('/files/*path', requireSession, async ctx => {
 function refuseCrossSite(ctx: Context): boolean {
   const verdict = checkMutationOrigin({
     method: ctx.method,
+    protocol: ctx.protocol,
     host: ctx.host,
     secFetchSite: ctx.get('sec-fetch-site') || undefined,
     origin: ctx.get('origin') || undefined,

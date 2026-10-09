@@ -1,10 +1,14 @@
 // The connections: the snapshot's rows and the catalog of connectable
 // services, then the connection.* family of the tail keeps the rows: pending
 // (a link was issued — the row exists, whole in the payload), completed
-// (connected, with the identity), failed (touched), reauthorization_required
-// (the status), renamed (the name), disconnected (the row is gone). The
-// events carry the row's id (connectionId); an event recorded before the id
-// was added names the account only and is not folded.
+// (the row as it is after the flow — status, identity, scope, dates — whole
+// in the payload; the row it names may be another than the pending one when
+// the consent landed on an already connected account), failed (touched),
+// reauthorization_required (the status), renamed (the name), disconnected
+// (the row is gone). The events carry the row's id (connectionId); an event
+// recorded before the id was added names the account only and is not
+// folded; a completed recorded before it carried the row patches the status
+// and the identity.
 
 import type { ConnectionView, ServiceView } from '../../../api/contract.ts';
 import { connectionFromRecord } from '../records.ts';
@@ -45,6 +49,12 @@ export function connectionsReducer(state: ConnectionsState = { byId: {}, ids: []
       return { ...state, byId: { ...state.byId, [connection.id]: connection }, ids: state.ids.includes(connection.id) ? state.ids : [...state.ids, connection.id] };
     }
     case 'event/connection.completed': {
+      const record = connectionFromRecord(action.event.payload);
+
+      if (record) {
+        return { ...state, byId: { ...state.byId, [record.id]: record }, ids: state.ids.includes(record.id) ? state.ids : [...state.ids, record.id] };
+      }
+
       const { connectionId, identity } = action.event.payload;
       const updatedAt = action.event.createdAt;
 

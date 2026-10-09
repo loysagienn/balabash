@@ -22,7 +22,7 @@ import {
   isTaskRunning,
 } from './engine.ts';
 import { assertValidCron, cronNextRun } from './heart.ts';
-import { journalRegistryEvent } from '../core/registry-events.ts';
+import { registryMutation } from '../core/registry-events.ts';
 import { taskRecord } from './view.ts';
 
 export const SCHEDULE_SERVER_NAME = 'schedule';
@@ -351,27 +351,31 @@ async function createTask(args: JsonObject, ctx: BuiltinServerCallContext): Prom
 
   const thread = await getThread(ctx.threadId);
 
-  const task = await prisma.scheduledTask.create({
-    data: {
-      slug,
-      userId: ctx.userId,
-      name,
-      description,
-      kind,
-      cron,
-      at,
-      // note is meaningless for a code body or a command — the registry does
-      // not keep it there.
-      note: kind === 'note' ? note : null,
-      command: kind === 'command' ? command : null,
-      cwd,
-      timeoutMs,
-      reportOnSuccess,
-      createdBy: thread?.agent ?? null,
-    },
-  });
+  const task = await registryMutation(async (tx, journal) => {
+    const created = await tx.scheduledTask.create({
+      data: {
+        slug,
+        userId: ctx.userId,
+        name,
+        description,
+        kind,
+        cron,
+        at,
+        // note is meaningless for a code body or a command — the registry does
+        // not keep it there.
+        note: kind === 'note' ? note : null,
+        command: kind === 'command' ? command : null,
+        cwd,
+        timeoutMs,
+        reportOnSuccess,
+        createdBy: thread?.agent ?? null,
+      },
+    });
 
-  await journalRegistryEvent('schedule.task.created', taskRecord(task, new Date()), { kind: 'thread', userId: ctx.userId, threadId: ctx.threadId });
+    await journal('schedule.task.created', taskRecord(created, new Date()), { kind: 'thread', userId: ctx.userId, threadId: ctx.threadId });
+
+    return created;
+  });
 
   const lines = [`Task "${slug}" (${kind}) registered. Trigger: ${describeTrigger(task)}.`];
 
@@ -453,14 +457,23 @@ async function listTasks(ctx: BuiltinServerCallContext): Promise<string> {
 async function cancelTask(args: JsonObject, ctx: BuiltinServerCallContext): Promise<string> {
   const slug = requireSlug(args);
   const task = await prisma.scheduledTask.findFirst({ where: { slug, userId: ctx.userId } });
-  // deleteMany: idempotent against the heart consuming the same one-shot row.
-  const { count } = task ? await prisma.scheduledTask.deleteMany({ where: { id: task.id } }) : { count: 0 };
+  // deleteMany: idempotent against the heart consuming the same one-shot row —
+  // whoever deletes it journals it, the other sees zero rows.
+  const count = task
+    ? await registryMutation(async (tx, journal) => {
+        const deleted = await tx.scheduledTask.deleteMany({ where: { id: task.id } });
+
+        if (deleted.count > 0) {
+          await journal('schedule.task.cancelled', { ...taskRecord(task, new Date()), reason: 'cancelled' }, { kind: 'thread', userId: ctx.userId, threadId: ctx.threadId });
+        }
+
+        return deleted.count;
+      })
+    : 0;
 
   if (!task || count === 0) {
     throw new Error(`no task with slug "${slug}" in this workspace`);
   }
-
-  await journalRegistryEvent('schedule.task.cancelled', { ...taskRecord(task, new Date()), reason: 'cancelled' }, { kind: 'thread', userId: ctx.userId, threadId: ctx.threadId });
 
   return `Task "${slug}" deleted; its trigger is disarmed.`;
 }

@@ -12,15 +12,18 @@ const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
 export type OriginCheckInput = {
   method: string;
-  // The host the request was addressed to (Koa's ctx.host: Host or
-  // X-Forwarded-Host behind the proxy, with the port when there is one).
+  // The scheme and host the request was addressed to, as Koa sees them
+  // behind the trusted proxy (app.proxy): ctx.protocol from
+  // X-Forwarded-Proto, ctx.host from X-Forwarded-Host or Host, with the
+  // port when there is one. Together they are the request's own origin.
+  protocol: string;
   host: string;
   secFetchSite?: string | undefined;
   origin?: string | undefined;
 };
 
 // 'ok' — serve; 'cross-site' — refuse (403).
-export function checkMutationOrigin({ method, host, secFetchSite, origin }: OriginCheckInput): 'ok' | 'cross-site' {
+export function checkMutationOrigin({ method, protocol, host, secFetchSite, origin }: OriginCheckInput): 'ok' | 'cross-site' {
   if (SAFE_METHODS.has(method.toUpperCase())) {
     return 'ok';
   }
@@ -33,16 +36,23 @@ export function checkMutationOrigin({ method, host, secFetchSite, origin }: Orig
   }
 
   if (origin !== undefined) {
-    return originHost(origin) === host.toLowerCase() ? 'ok' : 'cross-site';
+    // The whole origin: an http page of this very host is another origin
+    // on an https API (and the other way round).
+    const own = canonicalOrigin(`${protocol}://${host}`);
+
+    return own !== null && canonicalOrigin(origin) === own ? 'ok' : 'cross-site';
   }
 
   return 'ok';
 }
 
-// The host[:port] of an Origin header value; null for "null" and garbage.
-function originHost(origin: string): string | null {
+// scheme://host[:port] in canonical form (lower case, a default port
+// dropped); null for "null", garbage and a non-http scheme.
+function canonicalOrigin(value: string): string | null {
   try {
-    return new URL(origin).host.toLowerCase() || null;
+    const url = new URL(value);
+
+    return (url.protocol === 'http:' || url.protocol === 'https:') && url.host ? url.origin.toLowerCase() : null;
   } catch {
     return null;
   }

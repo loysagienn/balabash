@@ -497,6 +497,17 @@ export async function handleOauthCallback(query: Record<string, unknown>): Promi
     });
   };
 
+  // The row as it is once the flow is over, whole (ConnectionRecord): the
+  // console folds the event into its copy of the registry, and scope,
+  // status, identity and dates come from the row, not from the flow's
+  // guesses. The id may name another row than the flow's own when the
+  // consent landed on an already connected account.
+  const completed = async (id: string, fallback: { account: string; name: string; identity: string | null }, outcome: JsonObject = {}): Promise<JsonObject> => {
+    const final = await prisma.connection.findUnique({ where: { id } });
+
+    return { connectionId: id, server: row.server, ...fallback, ...(final ? connectionRecord(final) : {}), ...outcome };
+  };
+
   const fail = async (error: string): Promise<OauthCallbackResult> => {
     await prisma.connection.update({ where: { id: row.id }, data: { pendingState: null } });
     await journal(CONNECTION_FAILED, { connectionId: row.id, server: row.server, account: row.accountKey, name: row.displayName, error });
@@ -586,15 +597,10 @@ export async function handleOauthCallback(query: Record<string, unknown>): Promi
         });
       }
 
-      await journal(CONNECTION_COMPLETED, {
-        connectionId: outcome.twinId,
-        server: row.server,
-        account: outcome.twinAccountKey,
-        name: outcome.twinName,
-        identity: outcome.label,
-        alreadyConnected: true,
-        requestedAccount: row.accountKey,
-      });
+      await journal(
+        CONNECTION_COMPLETED,
+        await completed(outcome.twinId, { account: outcome.twinAccountKey, name: outcome.twinName, identity: outcome.label }, { alreadyConnected: true, requestedAccount: row.accountKey }),
+      );
 
       return { ok: true, server: row.server };
     }
@@ -603,18 +609,12 @@ export async function handleOauthCallback(query: Record<string, unknown>): Promi
       console.error(`[connections] identity probe failed for "${row.server}" (${row.accountKey}): ${outcome.reason}`);
     }
 
-    await journal(CONNECTION_COMPLETED, {
-      connectionId: row.id,
-      server: row.server,
-      account: row.accountKey,
-      name: row.displayName,
-      identity: outcome.kind === 'ok' ? outcome.label : null,
-    });
+    await journal(CONNECTION_COMPLETED, await completed(row.id, { account: row.accountKey, name: row.displayName, identity: outcome.kind === 'ok' ? outcome.label : null }));
 
     return { ok: true, server: row.server };
   }
 
-  await journal(CONNECTION_COMPLETED, { connectionId: row.id, server: row.server, account: row.accountKey, name: row.displayName });
+  await journal(CONNECTION_COMPLETED, await completed(row.id, { account: row.accountKey, name: row.displayName, identity: null }));
 
   return { ok: true, server: row.server };
 }
