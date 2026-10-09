@@ -115,12 +115,39 @@ async function pruneOldAssets(keep) {
 /**
  * Publishes src/console/public as dist/console/public: the files the host
  * serves under stable names (/static/<name>) — the web app manifest and the
- * icons. Copied whole on every build; a file removed from the source is
- * removed from the output.
+ * icons. The live console keeps pointing at these names while a build runs,
+ * so nothing is removed before its replacement is ready: every file is
+ * written beside and renamed over its predecessor (a request during the
+ * build gets either the old file or the new one, never a 404 or a half),
+ * and the names the source no longer has are removed last. A copy that
+ * fails leaves the previous publication whole. The directory is flat — the
+ * host serves one name segment — and a dotted name is never served, so a
+ * temp file in flight is invisible.
+ * @param {string} src
+ * @param {string} dir
  */
-async function publishPublic() {
-  await fs.rm(PUBLIC_DIR, { recursive: true, force: true });
-  await fs.cp(PUBLIC_SRC, PUBLIC_DIR, { recursive: true });
+export async function publishPublic(src = PUBLIC_SRC, dir = PUBLIC_DIR) {
+  await fs.mkdir(dir, { recursive: true });
+
+  const published = new Set();
+
+  for (const entry of await fs.readdir(src, { withFileTypes: true })) {
+    if (!entry.isFile()) {
+      throw new Error(`console build: public/ is flat, ${entry.name} is not a file`);
+    }
+
+    const tmp = path.join(dir, `.${entry.name}.${process.pid}.tmp`);
+
+    await fs.copyFile(path.join(src, entry.name), tmp);
+    await fs.rename(tmp, path.join(dir, entry.name));
+    published.add(entry.name);
+  }
+
+  for (const name of await fs.readdir(dir)) {
+    if (!published.has(name)) {
+      await fs.rm(path.join(dir, name), { recursive: true, force: true });
+    }
+  }
 }
 
 /**

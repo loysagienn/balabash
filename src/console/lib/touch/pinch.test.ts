@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { guardsPinch, installPinchGuard, isPinchMove } from './pinch.ts';
+import { PHONE_MEDIA, guardsPinch, installPinchGuard, isPinchMove } from './pinch.ts';
 
 type Listener = (event: Event) => void;
 
@@ -10,6 +10,7 @@ function fakeTarget() {
 
   return {
     listeners,
+    count: () => [...listeners.values()].flat().length,
     addEventListener(type: string, fn: unknown, options?: unknown) {
       const list = listeners.get(type) ?? [];
 
@@ -32,10 +33,41 @@ function fakeTarget() {
   };
 }
 
+// A stand-in for window.matchMedia(PHONE_MEDIA): flips on demand, like a tablet
+// gaining a trackpad or a laptop losing its mouse.
+function fakeQuery(matches: boolean) {
+  const changes = new Set<() => void>();
+
+  return {
+    matches,
+    changes,
+    addEventListener(_type: string, fn: unknown) {
+      changes.add(fn as () => void);
+    },
+    removeEventListener(_type: string, fn: unknown) {
+      changes.delete(fn as () => void);
+    },
+    flip(next: boolean) {
+      this.matches = next;
+      for (const fn of changes) {
+        fn();
+      }
+    },
+  };
+}
+
 describe('pinch guard', () => {
-  it('guards only a device with a touch screen', () => {
-    assert.equal(guardsPinch({ maxTouchPoints: 5 }), true);
-    assert.equal(guardsPinch({ maxTouchPoints: 0 }), false);
+  it('the phone line is the primary input: a coarse pointer without hover', () => {
+    assert.equal(PHONE_MEDIA, '(pointer: coarse) and (hover: none)');
+  });
+
+  it('guards only a phone with a touch screen', () => {
+    assert.equal(guardsPinch({ maxTouchPoints: 5 }, true), true);
+    // A touch-capable desktop: a fine primary pointer with hover — its touch pinch stays.
+    assert.equal(guardsPinch({ maxTouchPoints: 10 }, false), false);
+    // No touch at all: nothing to guard whatever the query says.
+    assert.equal(guardsPinch({ maxTouchPoints: 0 }, true), false);
+    assert.equal(guardsPinch({ maxTouchPoints: 0 }, false), false);
   });
 
   it('a pinch is two or more fingers moving', () => {
@@ -46,15 +78,30 @@ describe('pinch guard', () => {
 
   it('installs nothing on a desktop without touch: the trackpad and the keyboard zoom stay', () => {
     const target = fakeTarget();
-    const off = installPinchGuard(target, { maxTouchPoints: 0 });
+    const phone = fakeQuery(false);
+    const off = installPinchGuard(target, { maxTouchPoints: 0 }, phone);
 
-    assert.equal(target.listeners.size, 0);
+    assert.equal(target.count(), 0);
+    assert.equal(phone.changes.size, 0);
     off();
   });
 
-  it('cancels gesture events and multi-touch moves on a touch device, with non-passive listeners', () => {
+  it('installs nothing on a touch-capable desktop (fine primary pointer with hover): its touch pinch stays', () => {
     const target = fakeTarget();
-    const off = installPinchGuard(target, { maxTouchPoints: 5 });
+    const phone = fakeQuery(false);
+    const off = installPinchGuard(target, { maxTouchPoints: 10 }, phone);
+
+    assert.equal(target.count(), 0);
+    assert.equal(target.dispatch('gesturestart', {}), false);
+    assert.equal(target.dispatch('touchmove', { touches: { length: 2 } }), false);
+    off();
+    assert.equal(phone.changes.size, 0);
+  });
+
+  it('cancels gesture events and multi-touch moves on a phone, with non-passive listeners', () => {
+    const target = fakeTarget();
+    const phone = fakeQuery(true);
+    const off = installPinchGuard(target, { maxTouchPoints: 5 }, phone);
 
     assert.equal(target.dispatch('gesturestart', {}), true);
     assert.equal(target.dispatch('gesturechange', {}), true);
@@ -66,6 +113,29 @@ describe('pinch guard', () => {
     assert.ok([...target.listeners.values()].flat().every(entry => entry.passive === false));
 
     off();
-    assert.ok([...target.listeners.values()].every(list => list.length === 0));
+    assert.equal(target.count(), 0);
+    assert.equal(phone.changes.size, 0);
+  });
+
+  it('follows the query: a tablet that gains a pointer frees its pinch, a laptop that loses its mouse guards it', () => {
+    const target = fakeTarget();
+    const phone = fakeQuery(true);
+    const off = installPinchGuard(target, { maxTouchPoints: 5 }, phone);
+
+    assert.equal(target.dispatch('gesturestart', {}), true);
+
+    phone.flip(false);
+    assert.equal(target.count(), 0);
+    assert.equal(target.dispatch('gesturestart', {}), false);
+
+    phone.flip(true);
+    assert.equal(target.dispatch('touchmove', { touches: { length: 2 } }), true);
+    // The same state again installs nothing twice.
+    phone.flip(true);
+    assert.equal(target.count(), 3);
+
+    off();
+    assert.equal(target.count(), 0);
+    assert.equal(phone.changes.size, 0);
   });
 });
