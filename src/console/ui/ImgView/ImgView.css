@@ -1,0 +1,5 @@
+@layer patterns{
+/* ── Image preview ──  .imgview > img — fits the width of the body and at most --img-max of the window's height */
+.imgview{--img-max:72vh;display:grid;place-items:center;min-height:240px;border-radius:var(--r-md);border:1px solid var(--border);background:var(--surface);overflow:hidden}
+.imgview > img{max-width:100%;max-height:var(--img-max);object-fit:contain}
+}

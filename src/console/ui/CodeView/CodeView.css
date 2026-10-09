@@ -1,0 +1,15 @@
+@layer patterns{
+/* ── Code with line numbers ──  .codeview > .codeview-ln (highlight.js classes, the same colors as code in .md) */
+.codeview{margin:0;padding:var(--sp-2h) 0;counter-reset:ln;font-family:var(--mono);letter-spacing:0;font-variant-ligatures:none;font-size:var(--fs-code-sm);line-height:var(--lh-code-sm);color:var(--text-2);background:var(--bg);border:1px solid var(--border);border-radius:var(--r-md);overflow:auto}
+.codeview-ln{display:block;min-width:max-content;padding-right:var(--sp-3h);white-space:pre}
+.codeview-ln::before{counter-increment:ln;content:counter(ln);display:inline-block;width:4ch;margin-right:var(--sp-3h);padding-right:var(--sp-2h);text-align:right;color:var(--text-4);border-right:1px solid var(--border);user-select:none}
+.codeview :is(.hljs-keyword,.hljs-selector-tag,.hljs-tag,.hljs-name,.hljs-literal,.hljs-built_in,.hljs-type,.hljs-doctag,.hljs-meta){color:var(--code-kw)}
+.codeview :is(.hljs-string,.hljs-regexp,.hljs-symbol,.hljs-selector-attr,.hljs-selector-pseudo,.hljs-template-tag,.hljs-bullet){color:var(--code-str)}
+.codeview :is(.hljs-title,.hljs-attr,.hljs-attribute,.hljs-variable,.hljs-section,.hljs-selector-class,.hljs-selector-id){color:var(--code-fn)}
+.codeview .hljs-number{color:var(--code-num)}
+.codeview :is(.hljs-comment,.hljs-quote){color:var(--code-com);font-style:italic}
+.codeview .hljs-addition{color:var(--diff-add)}
+.codeview .hljs-deletion{color:var(--diff-del)}
+.codeview .hljs-emphasis{font-style:italic}
+.codeview .hljs-strong{font-weight:var(--fw-semibold)}
+}

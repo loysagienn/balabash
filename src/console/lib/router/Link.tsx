@@ -24,9 +24,17 @@ export function isPlainLeftClick(event: MouseEvent<HTMLAnchorElement>): boolean 
 export type LinkTarget = { href: string; onClick: (event: MouseEvent<HTMLAnchorElement>) => void };
 
 export function useLinkProps(route: AppRoute, replace = false): LinkTarget {
+  const linkTarget = useLinkTargets();
+
+  return linkTarget(route, replace);
+}
+
+// The same pair for a list of routes known only at render (breadcrumbs):
+// one hook, a target per route.
+export function useLinkTargets(): (route: AppRoute, replace?: boolean) => LinkTarget {
   const dispatch = useAppDispatch();
 
-  return {
+  return (route, replace = false) => ({
     href: writeRoute(route),
     onClick: event => {
       if (isPlainLeftClick(event)) {
@@ -34,7 +42,7 @@ export function useLinkProps(route: AppRoute, replace = false): LinkTarget {
         dispatch(routeTo(route, { replace }));
       }
     },
-  };
+  });
 }
 
 export function Link({ route, replace = false, current, onClick, target, children, ...rest }: LinkProps) {

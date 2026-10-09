@@ -12,6 +12,10 @@ import { IconBtn } from '../../ui/IconBtn/IconBtn.tsx';
 
 export type ShellTopProps = {
   title: string;
+  // The title on the phone when it differs: a file's name on the file
+  // screen, where the wide header names the folder (the preview header
+  // already names the file there).
+  titleNarrow?: string;
   sub?: string;
   // The section above the page ("Threads") and where it leads.
   crumb?: { label: string; route: AppRoute };
@@ -23,7 +27,7 @@ export type ShellTopProps = {
   running: number;
 };
 
-export function ShellTop({ title, sub, crumb, back, pageHead, compact, running }: ShellTopProps) {
+export function ShellTop({ title, titleNarrow, sub, crumb, back, pageHead, compact, running }: ShellTopProps) {
   const dispatch = useAppDispatch();
 
   return (
@@ -37,7 +41,16 @@ export function ShellTop({ title, sub, crumb, back, pageHead, compact, running }
           <span className="shell-crumb-sep">/</span>
         </>
       ) : null}
-      <h1 className="shell-title">{title}</h1>
+      <h1 className="shell-title">
+        {titleNarrow === undefined ? (
+          title
+        ) : (
+          <>
+            <span className="shell-title-wide">{title}</span>
+            <span className="shell-title-narrow">{titleNarrow}</span>
+          </>
+        )}
+      </h1>
       {sub ? <span className="shell-sub">{sub}</span> : null}
       <div className="shell-top-end">
         <ActivityChip running={running} compact={compact} onClick={() => dispatch(routeTo({ key: 'threads', status: 'active' }))} />

@@ -25,7 +25,13 @@ import { ME, event, resetSeq, snapshot, thread } from './fixtures.ts';
 
 type Calls = { name: string; args: unknown[] }[];
 
-type ApiOverrides = Omit<Partial<Api>, 'threads'> & { threads?: Partial<Api['threads']> };
+type ApiOverrides = Omit<Partial<Api>, 'threads' | 'workspace'> & { threads?: Partial<Api['threads']> };
+
+// The file area is Query, not the store: handlers never call it.
+const WORKSPACE: Api['workspace'] = {
+  node: async () => ({ kind: 'dir', path: '', directories: [], files: [] }),
+  text: async () => '',
+};
 
 function fakeApi(overrides: ApiOverrides = {}, calls: Calls = []): Api {
   const wrap =
@@ -35,7 +41,7 @@ function fakeApi(overrides: ApiOverrides = {}, calls: Calls = []): Api {
 
       return impl(...args);
     };
-  const base: Omit<Api, 'threads'> = {
+  const base: Omit<Api, 'threads' | 'workspace'> = {
     me: async () => ME,
     auth: async () => ME,
     logout: async () => ({ ok: true as const }),
@@ -61,6 +67,7 @@ function fakeApi(overrides: ApiOverrides = {}, calls: Calls = []): Api {
       events: wrap('threads.events', threads.events),
       sendMessage: wrap('threads.sendMessage', threads.sendMessage),
     },
+    workspace: WORKSPACE,
   };
 }
 

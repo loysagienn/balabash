@@ -10,6 +10,7 @@ import { Placeholder } from '../screens/Placeholder.tsx';
 import { NotFound } from '../screens/outside/NotFound.tsx';
 import { SessionError } from '../screens/outside/SessionError.tsx';
 import { SignIn } from '../screens/outside/SignIn.tsx';
+import { FilesScreen } from '../screens/files/FilesScreen.tsx';
 import { HomeScreen } from '../screens/home/HomeScreen.tsx';
 import { ThreadScreen } from '../screens/thread/ThreadScreen.tsx';
 import { ThreadsScreen } from '../screens/threads/ThreadsScreen.tsx';
@@ -54,7 +55,7 @@ export function App() {
     case 'project':
       return <Placeholder current="projects" title={route.slug} crumb={{ label: 'Projects', route: { key: 'projects' } }} back={{ key: 'projects' }} icon="folder" what="The project page" />;
     case 'files':
-      return <Placeholder current="files" title="Files" icon="folder-tree" what="The file area" />;
+      return <FilesScreen route={route} />;
     case 'apps':
       return <Placeholder current="apps" title="Apps" icon="layout-grid" what="Apps" />;
     case 'schedule':

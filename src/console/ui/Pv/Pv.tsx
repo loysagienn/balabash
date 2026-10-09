@@ -49,12 +49,16 @@ export function PvHead({ icon = 'file-text', name, path, meta = [], children }: 
   );
 }
 
-export function PvNote({ agent, title, children }: { agent: string; title: string; children: ReactNode }) {
+// agent — who left the note; the file area has no author in its data and
+// leaves it out. children — the description; without it the title stands
+// alone.
+export function PvNote({ agent, title, children }: { agent?: string; title: string; children?: ReactNode }) {
   return (
     <div className="pv-note">
-      <Avatar agent={agent} size="sm" />
+      {agent ? <Avatar agent={agent} size="sm" /> : null}
       <div>
-        <strong>{title}</strong> — {children}
+        <strong>{title}</strong>
+        {children ? <> — {children}</> : null}
       </div>
     </div>
   );

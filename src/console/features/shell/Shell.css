@@ -36,6 +36,8 @@
 /* the page has its own titled header (.th-head, .phead): when wide, the shell header holds only “← Section”; the title appears once, in the page header */
 .shell-top[data-title="narrow"] .shell-title{display:none}
 .shell-top[data-title="narrow"] .shell-crumb-sep{display:none}
+/* a different title on the phone (titleNarrow): the wide one hides, the narrow one shows */
+.shell-title-narrow{display:none}
 
 .shell-tabs{display:none;grid-template-columns:repeat(5,minmax(0,1fr));min-height:calc(var(--tabs-h) + env(safe-area-inset-bottom,0px));padding-bottom:env(safe-area-inset-bottom,0px);border-top:1px solid var(--border);background:var(--bg);flex:none}
 .shell-tab{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:var(--sp-0h);font-size:var(--fs-micro);line-height:var(--lh-micro);font-weight:var(--fw-medium);color:var(--text-3);text-decoration:none}
@@ -56,6 +58,8 @@
   .shell-title{font-size:var(--fs-lg);line-height:var(--lh-lg)}
   .shell-sub,.shell-crumb,.shell-crumb-sep{display:none}
   .shell-top[data-title="narrow"] .shell-title{display:block}
+  .shell-title-wide{display:none}
+  .shell-title-narrow{display:inline}
   .shell-tabs{display:grid}
   .shell[data-detail] .shell-tabs{display:none}
 }

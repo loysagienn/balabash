@@ -50,6 +50,9 @@ export type FetchInit = {
   signal?: AbortSignal;
   // A 401 is an ordinary answer here (the auth endpoints), not a lost session.
   unauthenticated?: boolean;
+  // The body as text, not JSON — the raw byte surface of the file area
+  // (/files/<rel>): a failure there still carries the API's JSON error.
+  as?: 'text';
 };
 
 export type FetchOptions = {
@@ -89,10 +92,12 @@ export function createFetch({ onUnauthorized }: FetchOptions = {}) {
     const text = await response.text();
     let data: unknown = null;
 
-    try {
-      data = text ? parseJson(text) : null;
-    } catch {
-      data = null;
+    if (!response.ok || init?.as !== 'text') {
+      try {
+        data = text ? parseJson(text) : null;
+      } catch {
+        data = null;
+      }
     }
 
     if (!response.ok) {
@@ -105,6 +110,6 @@ export function createFetch({ onUnauthorized }: FetchOptions = {}) {
       throw new ApiError(response.status, error?.code ?? 'unknown', error?.message ?? `HTTP ${response.status}`);
     }
 
-    return data as T;
+    return (init?.as === 'text' ? text : data) as T;
   };
 }

@@ -15,6 +15,8 @@ export type IconBtnProps = {
   disabled?: boolean;
   busy?: boolean;
   expanded?: boolean;
+  // The same button as a link (a download).
+  href?: string;
   onClick?: (event: MouseEvent<HTMLElement>) => void;
 };
 
@@ -27,6 +29,7 @@ export function IconBtn({
   disabled,
   busy,
   expanded,
+  href,
   onClick,
 }: IconBtnProps) {
   return (
@@ -37,6 +40,7 @@ export function IconBtn({
       title={label}
       variant={variant === 'regular' ? undefined : variant}
       size={size}
+      href={href}
       className={className}
       disabled={disabled}
       busy={busy}

@@ -124,12 +124,15 @@ export const project = defineRoute<ProjectRoute>({
   },
 });
 
+// The Files section lives at /workspace: on the console host /files/* is
+// the byte surface of the file area itself (server.md), so the screen's
+// own URL cannot start there.
 export const files = defineRoute<FilesRoute>({
   key: 'files',
   readRoute: (path, params) => {
     const parts = segments(path);
 
-    if (parts.length < 1 || parts[0] !== 'files') {
+    if (parts.length < 1 || parts[0] !== 'workspace') {
       return null;
     }
 
@@ -141,7 +144,7 @@ export const files = defineRoute<FilesRoute>({
 
     return route;
   },
-  writeRoute: route => `/files${route.path ? `/${encodePath(route.path)}` : ''}${queryString({ view: route.view })}`,
+  writeRoute: route => `/workspace${route.path ? `/${encodePath(route.path)}` : ''}${queryString({ view: route.view })}`,
 });
 
 const simple = <K extends string>(key: K, segment: string) =>

@@ -1,0 +1,8 @@
+@layer patterns{
+/* ── Table viewer ──  table.csv > th / td[data-num] */
+.csv{width:100%;border-collapse:collapse;font-size:var(--fs-meta);line-height:var(--lh-meta);font-variant-numeric:tabular-nums}
+.csv :is(th,td){padding:var(--sp-1h) var(--sp-2h);border:1px solid var(--border);text-align:left;white-space:nowrap}
+.csv th{background:var(--surface);color:var(--text-2);font-weight:var(--fw-semibold)}
+.csv td{color:var(--text)}
+.csv td[data-num]{text-align:right}
+}

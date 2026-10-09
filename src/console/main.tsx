@@ -11,6 +11,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import './styles/index.css';
 import { App } from './app/App.tsx';
 import { createApi } from './lib/api/index.ts';
+import { ApiProvider } from './lib/api/context.tsx';
 import { connectStoreToHistory } from './lib/router/history.ts';
 import { readRoute } from './lib/router/routes.ts';
 import { connectStoreToStream } from './lib/stream/index.ts';
@@ -49,7 +50,9 @@ createRoot(root).render(
   <StrictMode>
     <Provider store={store}>
       <QueryClientProvider client={queryClient}>
-        <App />
+        <ApiProvider api={api}>
+          <App />
+        </ApiProvider>
       </QueryClientProvider>
     </Provider>
   </StrictMode>,

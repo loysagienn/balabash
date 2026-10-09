@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { agoLabel, clockLabel, countOf, dateTimeLabel, dayKey, dayLabel, durationLabel, fileSize, rangeLabel, shortDate, sinceLabel, startedLabel, timeOfDay } from './index.ts';
+import { agoLabel, clockLabel, countOf, dateTimeLabel, dayKey, dayLabel, durationLabel, fileSize, fileTimeLabel, rangeLabel, shortDate, sinceLabel, startedLabel, timeOfDay } from './index.ts';
 
 // Local-time constructors: the helpers format in the browser's zone.
 const at = (y: number, m: number, d: number, h = 0, min = 0, sec = 0) => new Date(y, m - 1, d, h, min, sec);
@@ -69,5 +69,14 @@ describe('format — feed times and sizes', () => {
     assert.equal(fileSize(4300), '4.2 KiB');
     assert.equal(fileSize(60207), '59 KiB');
     assert.equal(fileSize(1.5 * 1024 * 1024), '1.5 MiB');
+  });
+
+  it('labels a file’s modified time by the day', () => {
+    const now = new Date(2026, 9, 9, 16, 0);
+
+    assert.equal(fileTimeLabel(new Date(2026, 9, 9, 16, 51), now), '16:51');
+    assert.equal(fileTimeLabel(new Date(2026, 9, 8, 23, 59), now), 'yesterday');
+    assert.equal(fileTimeLabel(new Date(2026, 9, 2, 9, 0), now), 'Oct 2');
+    assert.equal(fileTimeLabel(new Date(2025, 9, 2, 9, 0), now), 'Oct 2, 2025');
   });
 });

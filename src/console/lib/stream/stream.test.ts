@@ -69,6 +69,10 @@ const api: Api = {
     events: async () => ({ events: [], nextCursor: null }),
     sendMessage: async () => ({}),
   },
+  workspace: {
+    node: async () => ({ kind: 'dir', path: '', directories: [], files: [] }),
+    text: async () => '',
+  },
 };
 
 const settle = () => new Promise(resolve => setTimeout(resolve, 0));

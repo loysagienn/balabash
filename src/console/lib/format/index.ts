@@ -132,6 +132,21 @@ export function startedLabel(date: Date, now: Date): string {
   return sameDay(date, now) ? `today, ${timeOfDay(date)}` : `${shortDate(date, now)}, ${timeOfDay(date)}`;
 }
 
+// "16:51" today, "yesterday", then "Oct 2" — when a file was modified, in
+// the file list's time column.
+export function fileTimeLabel(date: Date, now: Date): string {
+  const ago = daysAgo(date, now);
+
+  if (ago <= 0) {
+    return timeOfDay(date);
+  }
+  if (ago === 1) {
+    return 'yesterday';
+  }
+
+  return shortDate(date, now);
+}
+
 // "512 B", "4.2 KiB", "1.5 MiB" — binary units, one decimal above bytes.
 export function fileSize(bytes: number): string {
   if (bytes < 1024) {
