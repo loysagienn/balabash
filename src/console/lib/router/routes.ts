@@ -23,11 +23,12 @@ export type ThreadRoute = { key: 'thread'; id: string };
 export type ProjectsRoute = { key: 'projects'; archived?: boolean };
 export type ProjectRoute = { key: 'project'; slug: string; path?: string };
 export type FilesRoute = { key: 'files'; path: string; view?: 'edit' };
-export type AppsRoute = { key: 'apps' };
+export type AppsFilter = 'published' | 'errors';
+export type AppsRoute = { key: 'apps'; filter?: AppsFilter; q?: string };
 export type ScheduleRoute = { key: 'schedule'; taskId?: string };
 export type ConnectionsRoute = { key: 'connections' };
 export type SecretsRoute = { key: 'secrets'; id: string };
-export type AgentsRoute = { key: 'agents'; name?: string };
+export type AgentsRoute = { key: 'agents'; name?: string; q?: string };
 export type SystemRoute = { key: 'system' };
 export type SettingsRoute = { key: 'settings' };
 export type DevUiRoute = { key: 'dev_ui'; section?: string };
@@ -158,7 +159,33 @@ const simple = <K extends string>(key: K, segment: string) =>
     writeRoute: () => `/${segment}`,
   });
 
-export const apps = simple('apps', 'apps');
+const APPS_FILTERS: AppsFilter[] = ['published', 'errors'];
+
+// The Apps section: the segment (All · Published · With errors) and the
+// search are the route, like the filters of Threads.
+export const apps = defineRoute<AppsRoute>({
+  key: 'apps',
+  readRoute: (path, params) => {
+    const parts = segments(path);
+
+    if (parts.length !== 1 || parts[0] !== 'apps') {
+      return null;
+    }
+
+    const route: AppsRoute = { key: 'apps' };
+    const filter = param(params, 'filter');
+    const q = param(params, 'q');
+
+    if (filter && (APPS_FILTERS as string[]).includes(filter)) {
+      route.filter = filter as AppsFilter;
+    }
+    if (q) route.q = q;
+
+    return route;
+  },
+  writeRoute: route => `/apps${queryString({ filter: route.filter, q: route.q })}`,
+});
+
 export const connections = simple('connections', 'connections');
 export const system = simple('system', 'system');
 export const settings = simple('settings', 'settings');
@@ -187,18 +214,25 @@ export const secrets = defineRoute<SecretsRoute>({
   writeRoute: route => `/secrets/${encodeURIComponent(route.id)}`,
 });
 
+// The Agents section: the selected agent of the split view is the path,
+// the catalog search is the query.
 export const agents = defineRoute<AgentsRoute>({
   key: 'agents',
-  readRoute: path => {
+  readRoute: (path, params) => {
     const parts = segments(path);
 
     if (parts[0] !== 'agents' || parts.length > 2) {
       return null;
     }
 
-    return parts.length === 2 ? { key: 'agents', name: parts[1] } : { key: 'agents' };
+    const route: AgentsRoute = parts.length === 2 ? { key: 'agents', name: parts[1] } : { key: 'agents' };
+    const q = param(params, 'q');
+
+    if (q) route.q = q;
+
+    return route;
   },
-  writeRoute: route => `/agents${route.name ? `/${encodeURIComponent(route.name)}` : ''}`,
+  writeRoute: route => `/agents${route.name ? `/${encodeURIComponent(route.name)}` : ''}${queryString({ q: route.q })}`,
 });
 
 export const devUi = defineRoute<DevUiRoute>({

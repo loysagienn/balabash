@@ -16,12 +16,14 @@ const CASES: [string, AppRoute][] = [
   ['/workspace', { key: 'files', path: '' }],
   ['/workspace/a%20b/c.md?view=edit', { key: 'files', path: 'a b/c.md', view: 'edit' }],
   ['/apps', { key: 'apps' }],
+  ['/apps?filter=errors&q=wind', { key: 'apps', filter: 'errors', q: 'wind' }],
   ['/schedule', { key: 'schedule' }],
   ['/schedule/t1', { key: 'schedule', taskId: 't1' }],
   ['/connections', { key: 'connections' }],
   ['/secrets/abc', { key: 'secrets', id: 'abc' }],
   ['/agents', { key: 'agents' }],
   ['/agents/engineer', { key: 'agents', name: 'engineer' }],
+  ['/agents/engineer?q=en', { key: 'agents', name: 'engineer', q: 'en' }],
   ['/system', { key: 'system' }],
   ['/settings', { key: 'settings' }],
   ['/dev/ui', { key: 'dev_ui' }],
@@ -38,6 +40,7 @@ describe('routes', () => {
 
   it('ignores unknown filter values and trailing slashes', () => {
     assert.deepEqual(readRoute('/threads/?status=bogus'), { key: 'threads' });
+    assert.deepEqual(readRoute('/apps?filter=bogus'), { key: 'apps' });
     assert.deepEqual(readRoute('/threads/42/'), { key: 'thread', id: '42' });
   });
 

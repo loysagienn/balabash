@@ -12,7 +12,7 @@ import { useNow } from '../../lib/format/useNow.ts';
 import { useAppDispatch, useAppSelector } from '../../store/hooks.ts';
 import { selectConnections, selectConnectionsNeedingAction } from '../../store/connections/selectors.ts';
 import { selectActiveProjects, selectArchivedProjectCount, selectProjects } from '../../store/projects/selectors.ts';
-import { selectStream } from '../../store/stream/selectors.ts';
+import { selectStream, snapshotStage } from '../../store/stream/selectors.ts';
 import { snapshotLoad } from '../../store/stream/actions.ts';
 import { selectLatestFinishedThread, selectRunningCountByProject, selectRunningThreads } from '../../store/threads/selectors.ts';
 import { Shell } from '../../features/shell/Shell.tsx';
@@ -29,7 +29,8 @@ import { Obj } from '../../ui/Obj/Obj.tsx';
 import { Screen } from '../../ui/Screen/Screen.tsx';
 import { SectionLink, SectionLinks } from '../../ui/SectionLink/SectionLink.tsx';
 import { SkelRow } from '../../ui/Skel/Skel.tsx';
-import { appUrlText, homeAppLink, homeStage, nothingRunningNote, sectionSummary } from './HomeScreen.logic.ts';
+import { appLink, appTitle, appUrlText } from '../../features/apps/appLink.ts';
+import { nothingRunningNote, sectionSummary } from './HomeScreen.logic.ts';
 import './HomeScreen.css';
 
 // The projects card shows the most recently touched; the rest are a link away.
@@ -67,12 +68,11 @@ function ProjectRow({ project, running, now }: { project: ProjectView; running: 
 
 // A published app opens itself in a new tab; one without an address or
 // with a broken manifest leads to the Apps section, where it is managed
-// (homeAppLink).
+// (appLink).
 function HomeAppRow({ app, base }: { app: AppListingView; base: string }) {
   const section = useLinkProps({ key: 'apps' });
-  const { address, href } = homeAppLink(app, base);
-  const title = app.name ?? app.path.split('/').pop() ?? app.path;
-  const common = { title, desc: app.description ?? undefined, err: app.manifestError ?? undefined, url: address === null ? undefined : appUrlText(address) };
+  const { address, href } = appLink(app, base);
+  const common = { title: appTitle(app), desc: app.description ?? undefined, err: app.manifestError ?? undefined, url: address === null ? undefined : appUrlText(address) };
 
   return href ? <AppRow {...common} appHref={href} href={href} external /> : <AppRow {...common} {...section} />;
 }
@@ -110,7 +110,7 @@ export function HomeScreen() {
     mountSeq.current = streamSeq;
   }
 
-  const stage = homeStage(stream);
+  const stage = snapshotStage(stream);
   const loading = stage === 'loading';
   const offline = stage === 'ready' && stream.status === 'reconnecting';
 

@@ -2,18 +2,14 @@
 // currency agents, tools and URLs share — goes to the clipboard, the
 // outcome is a toast.
 
-import { useAppDispatch } from '../../store/hooks.ts';
-import { pushToast } from '../../store/ui/actions.ts';
+import { useCopy } from '../clipboard/useCopy.ts';
+
+const WORDS = { done: 'Path copied', fail: 'Couldn’t copy the path' };
 
 export function useCopyPath(): (path: string) => Promise<void> {
-  const dispatch = useAppDispatch();
+  const copy = useCopy();
 
   return async path => {
-    try {
-      await navigator.clipboard.writeText(path);
-      dispatch(pushToast({ title: 'Path copied', desc: path, state: 'done' }));
-    } catch {
-      dispatch(pushToast({ title: 'Couldn’t copy the path', desc: path, state: 'err' }));
-    }
+    await copy(path, WORDS);
   };
 }

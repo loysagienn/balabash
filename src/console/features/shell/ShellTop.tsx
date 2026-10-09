@@ -22,16 +22,19 @@ export type ShellTopProps = {
   // Where "back" leads; the browser's history when the screen was entered
   // from inside the app is the screen's own call (it passes a route here).
   back?: AppRoute;
+  // "Back" only on the phone: the detail of a split view, whose list stays
+  // beside it on a wide shell (Agents, Schedule).
+  backNarrow?: boolean;
   pageHead?: boolean;
   compact?: boolean;
   running: number;
 };
 
-export function ShellTop({ title, titleNarrow, sub, crumb, back, pageHead, compact, running }: ShellTopProps) {
+export function ShellTop({ title, titleNarrow, sub, crumb, back, backNarrow, pageHead, compact, running }: ShellTopProps) {
   const dispatch = useAppDispatch();
 
   return (
-    <header className="shell-top" data-title={pageHead ? 'narrow' : undefined}>
+    <header className="shell-top" data-title={pageHead ? 'narrow' : undefined} data-back={backNarrow ? 'narrow' : undefined}>
       {back ? <IconBtn icon="arrow-left" label="Back" size="sm" className="shell-back" onClick={() => dispatch(routeTo(back))} /> : null}
       {crumb ? (
         <>

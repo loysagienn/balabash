@@ -10,6 +10,8 @@ import { Placeholder } from '../screens/Placeholder.tsx';
 import { NotFound } from '../screens/outside/NotFound.tsx';
 import { SessionError } from '../screens/outside/SessionError.tsx';
 import { SignIn } from '../screens/outside/SignIn.tsx';
+import { AgentsScreen } from '../screens/agents/AgentsScreen.tsx';
+import { AppsScreen } from '../screens/apps/AppsScreen.tsx';
 import { FilesScreen } from '../screens/files/FilesScreen.tsx';
 import { HomeScreen } from '../screens/home/HomeScreen.tsx';
 import { ThreadScreen } from '../screens/thread/ThreadScreen.tsx';
@@ -57,7 +59,7 @@ export function App() {
     case 'files':
       return <FilesScreen route={route} />;
     case 'apps':
-      return <Placeholder current="apps" title="Apps" icon="layout-grid" what="Apps" />;
+      return <AppsScreen route={route} />;
     case 'schedule':
       return <Placeholder current="schedule" title="Schedule" icon="calendar-clock" what="Schedule" />;
     case 'connections':
@@ -65,7 +67,7 @@ export function App() {
     case 'secrets':
       return <Placeholder current={null} title="Secrets" icon="wrench" what="Secrets entry" />;
     case 'agents':
-      return <Placeholder current="agents" title="Agents" icon="bot" what="Agents" />;
+      return <AgentsScreen route={route} />;
     case 'system':
       return <Placeholder current="system" title="System" icon="activity" what="System" />;
     case 'settings':

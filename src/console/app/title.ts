@@ -30,6 +30,8 @@ export function selectTitle(state: State): string {
     title = state.projects.ids.map(id => state.projects.byId[id]).find(project => project?.slug === route.slug)?.title ?? route.slug;
   } else if (route.key === 'files' && route.path) {
     title = route.path.split('/').pop() ?? title;
+  } else if (route.key === 'agents' && route.name) {
+    title = route.name;
   }
 
   return route.key === 'home' ? 'Balabash' : `${title} · Balabash`;

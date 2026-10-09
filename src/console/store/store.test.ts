@@ -17,7 +17,7 @@ import { routeTo } from './router/actions.ts';
 import { login, logout, sessionCheck, sessionLost } from './session/actions.ts';
 import { loadThread, loadThreadEvents, loadThreads, sendMessage } from './threads/actions.ts';
 import { setComposerDraft } from './ui/actions.ts';
-import { hasLoadedPage, selectKnownAgents, selectLatestFinishedThread, selectListThreads, selectRunningCount, selectRunningCountByProject, selectVisibleListThreads } from './threads/selectors.ts';
+import { hasLoadedPage, makeSelectAgentThreads, selectKnownAgents, selectLatestFinishedThread, selectListThreads, selectRunningCount, selectRunningCountByAgent, selectRunningCountByProject, selectVisibleListThreads } from './threads/selectors.ts';
 import { selectActiveProjects, selectArchivedProjectCount } from './projects/selectors.ts';
 import { makeSelectThreadEvents } from './feed/selectors.ts';
 import { selectThreadState } from './sessions/selectors.ts';
@@ -793,5 +793,61 @@ describe('home overview', () => {
     await settle();
     assert.equal(selectLatestFinishedThread(store.getState()), null);
     assert.deepEqual(selectRunningCountByProject(store.getState()), {});
+  });
+});
+
+describe('agents screen', () => {
+  async function agentsStore() {
+    const api = fakeApi({
+      snapshot: async () =>
+        snapshot({
+          asOfSeq: 50n,
+          threads: [
+            thread({ id: 'main', parentId: null, agent: 'coordinator' }),
+            thread({ id: 'e1', createdSeq: 7n, agent: 'engineer' }),
+            thread({ id: 'e2', createdSeq: 9n, agent: 'engineer' }),
+            thread({ id: 'e0', createdSeq: 12n, agent: 'engineer', status: 'completed', terminalSeq: 20n }),
+            thread({ id: 'b1', createdSeq: 8n, agent: 'browser' }),
+          ],
+          agents: [
+            { name: 'engineer', description: 'code', icon: null, sdk: 'claude', tools: ['events'], agents: ['browser'], headless: false, notification: null, model: 'm', effort: 'high' },
+            { name: 'browser', description: 'web', icon: null, sdk: 'claude', tools: [], agents: [], headless: true, notification: null, model: null, effort: null },
+          ],
+        }),
+    });
+    const store = createStore({ api, initialRoute: { key: 'agents', name: 'engineer' } });
+
+    await dispatched(store, sessionCheck());
+    await settle();
+
+    return store;
+  }
+
+  it('counts the running threads per agent and lists an agent’s threads, active first, newest first', async () => {
+    const store = await agentsStore();
+    const selectThreads = makeSelectAgentThreads();
+
+    // The root thread is not work in progress: the coordinator has no count.
+    assert.deepEqual(selectRunningCountByAgent(store.getState()), { engineer: 2, browser: 1 });
+    assert.deepEqual(
+      selectThreads(store.getState(), 'engineer').map(t => t.id),
+      ['e2', 'e1', 'e0'],
+    );
+    assert.deepEqual(selectThreads(store.getState(), 'gardener'), []);
+
+    // The same answer while nothing changed; a thread ending moves it after the active ones.
+    const before = selectThreads(store.getState(), 'engineer');
+
+    assert.equal(selectThreads(store.getState(), 'engineer'), before);
+    store.dispatch(eventAction(event({ seq: 51n, type: 'thread.completed', threadId: 'e2', targetThreadId: 'main', payload: { summary: { text: 's' } } })));
+    assert.deepEqual(
+      selectThreads(store.getState(), 'engineer').map(t => t.id),
+      ['e1', 'e0', 'e2'],
+    );
+    assert.deepEqual(selectRunningCountByAgent(store.getState()), { engineer: 1, browser: 1 });
+
+    // A thread the tail starts counts at once.
+    store.dispatch(eventAction(event({ seq: 52n, type: 'thread.started', threadId: 'b2', targetThreadId: 'main', agentName: 'browser', payload: { agent: 'browser', title: 'x', headless: true, input: 'go' } })));
+    assert.deepEqual(selectRunningCountByAgent(store.getState()), { engineer: 1, browser: 2 });
   });
 });

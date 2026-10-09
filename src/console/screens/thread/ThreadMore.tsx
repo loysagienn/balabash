@@ -8,9 +8,11 @@ import type { Thread } from '../../../core/contract.ts';
 import { writeRoute } from '../../lib/router/routes.ts';
 import { useAppDispatch, useAppSelector } from '../../store/hooks.ts';
 import { routeTo } from '../../store/router/actions.ts';
-import { pushToast } from '../../store/ui/actions.ts';
+import { useCopy } from '../../features/clipboard/useCopy.ts';
 import { IconBtn } from '../../ui/IconBtn/IconBtn.tsx';
 import { Menu, MenuAnchor, MenuItem, MenuLabel, MenuSep } from '../../ui/Menu/Menu.tsx';
+
+const LINK_WORDS = { done: 'Link copied', fail: 'Couldn’t copy the link' };
 
 function ChildMenuItem({ id, onPick }: { id: string; onPick: () => void }) {
   const dispatch = useAppDispatch();
@@ -34,19 +36,14 @@ function ChildMenuItem({ id, onPick }: { id: string; onPick: () => void }) {
 
 export function ThreadMore({ thread, parent, childIds, open, onOpenChange }: { thread: Thread; parent: Thread | null; childIds: string[]; open: boolean; onOpenChange: (open: boolean) => void }) {
   const dispatch = useAppDispatch();
+  const copy = useCopy();
   const [copied, setCopied] = useState(false);
   const close = () => onOpenChange(false);
   const copyLink = async () => {
     close();
 
-    const href = `${window.location.origin}${writeRoute({ key: 'thread', id: thread.id })}`;
-
-    try {
-      await navigator.clipboard.writeText(href);
+    if (await copy(`${window.location.origin}${writeRoute({ key: 'thread', id: thread.id })}`, LINK_WORDS)) {
       setCopied(true);
-      dispatch(pushToast({ title: 'Link copied', desc: href, state: 'done' }));
-    } catch {
-      dispatch(pushToast({ title: 'Couldn’t copy the link', desc: href, state: 'err' }));
     }
   };
 

@@ -1,0 +1,11 @@
+@layer screens{
+/* Agents: model in the catalog, time in the activity — one column */
+.agt-list{--row-time-w:132px;--thl-time-w:132px}
+/* the selected agent's head: a large avatar beside the name and the description */
+.agt-head{display:grid;grid-template-columns:auto minmax(0,1fr);align-items:center;gap:var(--sp-1) var(--sp-3)}
+.agt-head .av{grid-row:span 2}
+.agt-desc{font-size:var(--fs-meta);line-height:var(--lh-meta);color:var(--text-2)}
+/* chips of tools and of the agents it launches */
+.agt-chips{display:flex;flex-wrap:wrap;gap:var(--sp-1)}
+.agt-who{display:inline-flex;align-items:center;gap:var(--sp-1h)}
+}

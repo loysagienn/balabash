@@ -126,3 +126,30 @@ export const selectKnownAgents = createSelector([(state: State) => state.agents.
 
   return [...set].sort();
 });
+
+// How many threads are at work for each agent (agent name → count): the
+// dot on the catalog's avatar and the "N active" badge of the Agents screen.
+export const selectRunningCountByAgent = createSelector([selectRunningThreads], threads => {
+  const counts: Record<string, number> = {};
+
+  for (const thread of threads) {
+    counts[thread.agent] = (counts[thread.agent] ?? 0) + 1;
+  }
+
+  return counts;
+});
+
+// The threads of one agent the store knows (the snapshot window plus the
+// tail): the active ones first, then newest first — the activity of the
+// agent's page. One instance per screen, memoized by the name.
+export const makeSelectAgentThreads = () =>
+  createSelector([selectThreadsById, (_state: State, name: string) => name], (byId, name): Thread[] =>
+    Object.values(byId)
+      .filter(thread => thread.agent === name)
+      .sort((a, b) => {
+        const liveA = a.status === 'active' ? 0 : 1;
+        const liveB = b.status === 'active' ? 0 : 1;
+
+        return liveA !== liveB ? liveA - liveB : newestFirst(a, b);
+      }),
+  );
