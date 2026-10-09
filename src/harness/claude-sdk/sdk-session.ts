@@ -19,7 +19,7 @@ import { createBridgeServer } from './bridge.ts';
 import type { BridgeServer } from './bridge.ts';
 import { mergeEnv } from '../env.ts';
 import { nativeMcpServers } from './native-servers.ts';
-import { emitSdkMessage } from './stream-tap.ts';
+import { emitSdkMessage, emitSdkSessionEnd } from './stream-tap.ts';
 import { registerContextUsageProvider } from './context-usage.ts';
 
 export type SdkSessionDeps = {
@@ -28,7 +28,8 @@ export type SdkSessionDeps = {
   cwd: string;
   // When set, every raw SDKMessage of the inner stream is published on the
   // stream tap under this thread — the feed of a surface adapter's live
-  // mirror (CCR), and the thread's context-usage provider is registered.
+  // mirror (CCR) and of the session journal, which also hears the session's
+  // end on close() — and the thread's context-usage provider is registered.
   threadId?: string;
 };
 
@@ -214,6 +215,10 @@ export function createClaudeSession(options: SdkSessionOptions, deps: SdkSession
       unregisterContextUsage?.();
       session?.close();
       // A session still starting is closed by the race check in setup.
+
+      if (deps.threadId) {
+        emitSdkSessionEnd(deps.threadId);
+      }
     },
   };
 }

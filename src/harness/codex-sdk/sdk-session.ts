@@ -17,14 +17,15 @@ import type { AgentSdkSession, SdkSessionOptions, SdkTurn, ToolsApi } from '../.
 import { createBridgeServer } from '../claude-sdk/bridge.ts';
 import { mergeEnv } from '../env.ts';
 import { ensureCodexHome } from './codex-home.ts';
-import { emitCodexEvent } from './stream-tap.ts';
+import { emitCodexEvent, emitCodexSessionEnd } from './stream-tap.ts';
 
 export type CodexSessionDeps = {
   tools: ToolsApi;
   // Fallback working directory — the run's stateDir; options.cwd wins.
   cwd: string;
   // When set, every ThreadEvent of the inner stream is published on the
-  // Codex stream tap under this thread (the session journal's feed).
+  // Codex stream tap under this thread (the session journal's feed), and
+  // the session's end on close().
   threadId?: string;
 };
 
@@ -288,6 +289,10 @@ export function createCodexSession(options: SdkSessionOptions, deps: CodexSessio
       closed = true;
       queue.end();
       activeTurn?.abort();
+
+      if (deps.threadId) {
+        emitCodexSessionEnd(deps.threadId);
+      }
     },
   };
 }

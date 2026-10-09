@@ -35,6 +35,24 @@ describe('mapCodexEvent', () => {
       mapCodexEvent(memory, ev({ type: 'item.completed', item: { id: 'm1', type: 'mcp_tool_call', server: 'balabash', tool: 'end_thread', arguments: {}, status: 'completed' } })),
       [],
     );
+    // An MCP call outside the bridge is a tool; its result carries no bytes.
+    const mcp = {
+      id: 'm2',
+      type: 'mcp_tool_call',
+      server: 'images',
+      tool: 'render',
+      arguments: { w: 1 },
+      status: 'completed',
+      result: { content: [{ type: 'image', mimeType: 'image/png', data: 'iVBORw0KGgo=' }], structured_content: { ok: true } },
+    };
+
+    assert.deepEqual(mapCodexEvent(memory, ev({ type: 'item.completed', item: mcp })), [
+      { type: 'session.tool.started', payload: { toolUseId: 'm2', name: 'mcp__images__render', input: { arguments: { w: 1 } } } },
+      {
+        type: 'session.tool.completed',
+        payload: { toolUseId: 'm2', name: 'mcp__images__render', result: { content: [{ type: 'image', omitted: true, mediaType: 'image/png' }], structuredContent: { ok: true } }, isError: false },
+      },
+    ]);
     assert.deepEqual(mapCodexEvent(memory, ev({ type: 'item.completed', item: { id: 'a1', type: 'agent_message', text: 'hello' } })), []);
     assert.deepEqual(mapCodexEvent(memory, ev({ type: 'item.started', item: { id: 'r1', type: 'reasoning', text: '' } })), []);
     assert.deepEqual(mapCodexEvent(memory, ev({ type: 'item.completed', item: { id: 'r1', type: 'reasoning', text: 'Thinking it over' } })), [

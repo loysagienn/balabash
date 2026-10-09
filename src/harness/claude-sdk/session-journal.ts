@@ -8,7 +8,11 @@
 //   publishes session_state_changed frames only under a flag the harness
 //   does not set, so the state is derived from the frames themselves (a turn
 //   frame → run, result → wait) and a state frame, when one arrives, is
-//   taken as authoritative (requires_action → act);
+//   taken as authoritative (requires_action → act). Every turn opens with a
+//   system/init frame — the CLI re-announces the session for each user
+//   message it takes, ~30 ms after the harness pushed it — so run is
+//   journaled as soon as the session has work; session.started only once,
+//   on the first init the journal sees;
 // - native tool uses (Bash, Read, Edit, Agent, …) with their results; the
 //   bridge's own tools (mcp__balabash__*) are already the tool.call.* events
 //   and are skipped; a result whose tool use the journal never saw is skipped
@@ -21,32 +25,36 @@
 //   of the thread), hooks and status chatter.
 //
 // Image bytes in tool results (a Read of a picture) are not journaled: the
-// block is kept with `omitted: true` — the log carries no base64.
+// block is kept with `omitted: true` — the log carries no base64
+// (sanitizeToolResult, the rule shared with the Codex journal).
 
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
-import type { JsonObject, JsonValue } from '../../core/contract.ts';
+import type { JsonObject } from '../../core/contract.ts';
 import type { SessionPlanItem, SessionTaskUsage } from '../../core/event-types.ts';
 import type { SessionState } from '../../projections/session.ts';
-import { createJournalWriter } from '../session-journal.ts';
+import { createJournalWriter, sanitizeToolResult } from '../session-journal.ts';
 import type { JournalEntry, JournalWriter } from '../session-journal.ts';
 import { getThreadContextUsage } from './context-usage.ts';
-import { subscribeSdkStream } from './stream-tap.ts';
+import { subscribeSdkSessionEnd, subscribeSdkStream } from './stream-tap.ts';
 
 export const BRIDGE_TOOL_PREFIX = 'mcp__balabash__';
 
 type PendingText = { text: string; parentToolUseId: string | null };
 
-// The journal's memory of one session from the start of a turn to its
-// result: the state last recorded, the native tool uses awaiting their
-// result, the assistant text not yet known to be intermediate.
+// The journal's memory of one session, from its first frame until the
+// harness closes it: whether the start was journaled, the state last
+// recorded, the native tool uses awaiting their result, the assistant text
+// not yet known to be intermediate (the last two are a turn's and clear at
+// its result).
 export type TurnMemory = {
+  started: boolean;
   state: SessionState;
   tools: Map<string, { name: string; parentToolUseId: string | null }>;
   pendingText: PendingText | null;
 };
 
 export function createTurnMemory(): TurnMemory {
-  return { state: 'wait', tools: new Map(), pendingText: null };
+  return { started: false, state: 'wait', tools: new Map(), pendingText: null };
 }
 
 const STATE_OF_FRAME: Record<string, SessionState> = { idle: 'wait', running: 'run', requires_action: 'act' };
@@ -84,36 +92,9 @@ function planItems(input: unknown): SessionPlanItem[] | null {
   });
 }
 
-// The tool_result content as the model saw it, minus bytes: text stays,
-// images and documents keep their type and nothing else.
-export function sanitizeToolResult(content: unknown): JsonValue {
-  if (typeof content === 'string') {
-    return content;
-  }
-
-  if (!Array.isArray(content)) {
-    return content === undefined ? '' : (content as JsonValue);
-  }
-
-  return content.map((block): JsonValue => {
-    const { type } = asJsonObject(block);
-
-    if (type === 'text') {
-      return { type: 'text', text: typeof asJsonObject(block).text === 'string' ? (asJsonObject(block).text as string) : '' };
-    }
-
-    if (type === 'image' || type === 'document') {
-      const source = asJsonObject(asJsonObject(block).source);
-
-      return { type, omitted: true, ...(typeof source.media_type === 'string' ? { mediaType: source.media_type } : {}) };
-    }
-
-    return block as JsonValue;
-  });
-}
-
 // Folds one frame into the memory and returns the entries it produces, in
-// order. Pure over its arguments; the owner evicts the memory after a result.
+// order. Pure over its arguments; the owner evicts the memory when the
+// session ends.
 export function mapSdkMessage(memory: TurnMemory, message: SDKMessage): JournalEntry[] {
   const entries: JournalEntry[] = [];
 
@@ -135,18 +116,25 @@ export function mapSdkMessage(memory: TurnMemory, message: SDKMessage): JournalE
     case 'system':
       switch (message.subtype) {
         case 'init':
+          // The first init is the session's start; every later one opens a
+          // turn (the CLI re-announces the session for each user message).
           setState('run');
-          entries.push({
-            type: 'session.started',
-            payload: {
-              model: message.model,
-              tools: message.tools,
-              mcpServers: message.mcp_servers.map(({ name, status }) => ({ name, status })),
-              claudeCodeVersion: message.claude_code_version,
-              effort: message.effort ?? null,
-              cwd: message.cwd,
-            },
-          });
+
+          if (!memory.started) {
+            memory.started = true;
+            entries.push({
+              type: 'session.started',
+              payload: {
+                model: message.model,
+                tools: message.tools,
+                mcpServers: message.mcp_servers.map(({ name, status }) => ({ name, status })),
+                claudeCodeVersion: message.claude_code_version,
+                effort: message.effort ?? null,
+                cwd: message.cwd,
+              },
+            });
+          }
+
           break;
         case 'session_state_changed': {
           const state = STATE_OF_FRAME[message.state];
@@ -352,7 +340,9 @@ export type ClaudeSessionJournalDeps = {
   contextUsage?: typeof getThreadContextUsage;
 };
 
-// Subscribes the journal to the stream tap; returns the unsubscribe.
+// Subscribes the journal to the stream tap and to the end of sessions;
+// returns the unsubscribe. A thread's memory lives from its first frame
+// until the harness closes its session.
 export function startClaudeSessionJournal(deps: ClaudeSessionJournalDeps = {}): () => void {
   const writer = deps.writer ?? createJournalWriter();
   const contextUsage = deps.contextUsage ?? getThreadContextUsage;
@@ -370,7 +360,7 @@ export function startClaudeSessionJournal(deps: ClaudeSessionJournalDeps = {}): 
     }
   };
 
-  return subscribeSdkStream((threadId, message) => {
+  const unsubscribeStream = subscribeSdkStream((threadId, message) => {
     let memory = memories.get(threadId);
 
     if (!memory) {
@@ -385,8 +375,15 @@ export function startClaudeSessionJournal(deps: ClaudeSessionJournalDeps = {}): 
     }
 
     if (message.type === 'result') {
-      memories.delete(threadId);
       void writer.write(threadId, () => measureContext(threadId));
     }
   });
+  const unsubscribeEnd = subscribeSdkSessionEnd(threadId => {
+    memories.delete(threadId);
+  });
+
+  return () => {
+    unsubscribeStream();
+    unsubscribeEnd();
+  };
 }

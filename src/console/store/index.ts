@@ -1,7 +1,9 @@
 // createStore: the domain reducers combined, the action handlers of every
 // domain in one registry (a duplicate key is a type error), the injected
 // Api. Signing out resets everything but the route — the next sign-in
-// starts from a fresh snapshot.
+// starts from a fresh snapshot. The sessions domain is composed by hand:
+// it folds only for threads the threads domain knows as active, so it
+// runs after the others with their result in hand.
 
 import { applyMiddleware, combineReducers, legacy_createStore as createRedux } from 'redux';
 import type { Reducer, Store, StoreEnhancer } from 'redux';
@@ -50,28 +52,41 @@ export type CreateStoreOptions = {
   enhancer?: StoreEnhancer;
 };
 
+type Domains = Omit<State, 'sessions'>;
+
 export function createStore({ api, initialRoute, enhancer }: CreateStoreOptions): AppStore {
-  const combined = combineReducers({
+  const domains = combineReducers({
     router: createRouterReducer(initialRoute),
     session: sessionReducer,
     stream: streamReducer,
     threads: threadsReducer,
     feed: feedReducer,
-    sessions: sessionsReducer,
     projects: projectsReducer,
     apps: appsReducer,
     schedule: scheduleReducer,
     connections: connectionsReducer,
     agents: agentsReducer,
     ui: uiReducer,
-  }) as unknown as Reducer<State, Action>;
+  }) as unknown as Reducer<Domains, Action>;
+
+  const reduce = (state: State | undefined, action: Action): State => {
+    const { sessions, ...rest } = state ?? ({} as Partial<State>);
+    const nextDomains = domains(state ? (rest as Domains) : undefined, action);
+    const nextSessions = sessionsReducer(sessions, action, nextDomains.threads);
+
+    if (state && nextSessions === state.sessions && nextDomains === rest) {
+      return state;
+    }
+
+    return { ...nextDomains, sessions: nextSessions };
+  };
 
   const rootReducer = (state: State | undefined, action: Action): State => {
     if (state && (action.type === 'LOGOUT_DONE' || action.type === 'SESSION_LOST')) {
-      return combined({ router: state.router } as State, action);
+      return reduce({ router: state.router } as State, action);
     }
 
-    return combined(state, action);
+    return reduce(state, action);
   };
 
   const middleware = applyMiddleware(actionHandlersMiddleware(handlers, api));

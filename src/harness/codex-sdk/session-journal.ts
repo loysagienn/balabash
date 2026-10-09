@@ -6,17 +6,20 @@
 // patch (`FileChange`, the paths), a web search, an MCP call to a server
 // other than the bridge (the bridge's calls are the tool.call.* events);
 // reasoning is session.thinking, the to-do list is session.plan. No context
-// measurement (Codex offers none), no sub-agent frames, no init frame.
+// measurement (Codex offers none), no sub-agent frames, no init frame. The
+// content of an MCP result passes sanitizeToolResult: no bytes in the log.
 
 import type { ThreadEvent, ThreadItem } from '@openai/codex-sdk';
 import type { JsonObject, JsonValue } from '../../core/contract.ts';
 import type { SessionState } from '../../projections/session.ts';
-import { createJournalWriter } from '../session-journal.ts';
+import { createJournalWriter, sanitizeToolResult } from '../session-journal.ts';
 import type { JournalEntry, JournalWriter } from '../session-journal.ts';
-import { subscribeCodexStream } from './stream-tap.ts';
+import { subscribeCodexSessionEnd, subscribeCodexStream } from './stream-tap.ts';
 
 export const BRIDGE_SERVER = 'balabash';
 
+// The journal's memory of one session, from its first event until the
+// harness closes it.
 export type CodexTurnMemory = {
   state: SessionState;
   // Items already journaled as started (an item may complete without a
@@ -59,7 +62,9 @@ function completionOf(item: ThreadItem): { result: JsonValue; isError: boolean; 
       return { result: { status: item.status }, isError: item.status === 'failed' };
     case 'mcp_tool_call':
       return {
-        result: (item.result ? { content: item.result.content, structuredContent: item.result.structured_content ?? null } : (item.error ?? null)) as JsonValue,
+        result: item.result
+          ? { content: sanitizeToolResult(item.result.content), structuredContent: (item.result.structured_content ?? null) as JsonValue }
+          : ((item.error ?? null) as JsonValue),
         isError: item.status === 'failed',
       };
     default:
@@ -141,12 +146,13 @@ export function mapCodexEvent(memory: CodexTurnMemory, event: ThreadEvent): Jour
   return entries;
 }
 
-// Subscribes the journal to the Codex tap; returns the unsubscribe.
+// Subscribes the journal to the Codex tap and to the end of sessions;
+// returns the unsubscribe.
 export function startCodexSessionJournal(deps: { writer?: JournalWriter } = {}): () => void {
   const writer = deps.writer ?? createJournalWriter();
   const memories = new Map<string, CodexTurnMemory>();
 
-  return subscribeCodexStream((threadId, event) => {
+  const unsubscribeStream = subscribeCodexStream((threadId, event) => {
     let memory = memories.get(threadId);
 
     if (!memory) {
@@ -159,9 +165,13 @@ export function startCodexSessionJournal(deps: { writer?: JournalWriter } = {}):
     if (entries.length) {
       void writer.write(threadId, entries);
     }
-
-    if (event.type === 'turn.completed' || event.type === 'turn.failed') {
-      memories.delete(threadId);
-    }
   });
+  const unsubscribeEnd = subscribeCodexSessionEnd(threadId => {
+    memories.delete(threadId);
+  });
+
+  return () => {
+    unsubscribeStream();
+    unsubscribeEnd();
+  };
 }

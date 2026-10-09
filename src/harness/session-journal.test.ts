@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import type { AppendInput } from '../core/envelope.ts';
 import { validateEnvelope } from '../core/envelope.ts';
-import { createJournalWriter } from './session-journal.ts';
+import { createJournalWriter, sanitizeToolResult } from './session-journal.ts';
 
 const tick = () => new Promise(resolve => setTimeout(resolve, 0));
 
@@ -103,5 +103,35 @@ describe('createJournalWriter', () => {
     await writer.write('b', [{ type: 'session.state', payload: { state: 'run' } }]);
     await writer.write('late', [{ type: 'session.state', payload: { state: 'run' } }]);
     assert.deepEqual(lookups, ['late', 'late', 'a', 'b', 'late']);
+  });
+});
+
+describe('sanitizeToolResult', () => {
+  it('keeps no bytes of a tool result, in either block dialect', () => {
+    assert.equal(sanitizeToolResult('plain'), 'plain');
+    assert.equal(sanitizeToolResult(undefined), '');
+    assert.deepEqual(sanitizeToolResult({ ok: true }), { ok: true });
+    assert.deepEqual(
+      sanitizeToolResult([
+        { type: 'text', text: 'a picture' },
+        { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'iVBORw0KGgo=' } },
+        { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: 'JVBERi0=' } },
+        { type: 'image', mimeType: 'image/png', data: 'iVBORw0KGgo=' },
+        { type: 'audio', mimeType: 'audio/wav', data: 'UklGRg==' },
+        { type: 'resource', resource: { uri: 'file:///a.bin', mimeType: 'application/octet-stream', blob: 'AAAA' } },
+        { type: 'resource', resource: { uri: 'file:///a.txt', mimeType: 'text/plain', text: 'hello' } },
+        'odd',
+      ]),
+      [
+        { type: 'text', text: 'a picture' },
+        { type: 'image', omitted: true, mediaType: 'image/png' },
+        { type: 'document', omitted: true, mediaType: 'application/pdf' },
+        { type: 'image', omitted: true, mediaType: 'image/png' },
+        { type: 'audio', omitted: true, mediaType: 'audio/wav' },
+        { type: 'resource', omitted: true, uri: 'file:///a.bin', mediaType: 'application/octet-stream' },
+        { type: 'resource', resource: { uri: 'file:///a.txt', mimeType: 'text/plain', text: 'hello' } },
+        'odd',
+      ],
+    );
   });
 });

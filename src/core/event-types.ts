@@ -109,15 +109,20 @@ export type EventPayloads = {
     cwd?: string;
   };
   'session.state': { state: SessionState };
+  // A turn of the inner session (Claude: the result frame; Codex: the
+  // turn.completed/failed event). Claude's totalCostUsd is cumulative over
+  // the session; Codex's usage is the turn's; a failed Codex turn carries
+  // the error.
   'session.turn': {
     durationMs?: number;
     durationApiMs?: number;
     numTurns?: number;
-    costUsd?: number;
+    totalCostUsd?: number;
     usage?: JsonObject;
     stopReason?: string | null;
     isError?: boolean;
     subtype?: string;
+    error?: string;
   };
   'session.context': { totalTokens: number; maxTokens: number; percentage: number };
   'session.thinking': { text: string; parentToolUseId?: string | null };
@@ -172,6 +177,9 @@ export type EventPayloads = {
 };
 
 export type EventType = keyof EventPayloads;
+
+// The session journal's vocabulary (src/harness/session-journal.ts).
+export type SessionEventType = Extract<EventType, `session.${string}`>;
 
 // One event narrowed to a known type.
 export type EventOf<T extends EventType> = Omit<Event, 'type' | 'payload'> & { type: T; payload: EventPayloads[T] };

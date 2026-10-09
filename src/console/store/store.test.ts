@@ -239,6 +239,43 @@ describe('threads from events', () => {
   });
 });
 
+describe('sessions from events', () => {
+  it('folds the session of an active thread only; a late tail after the terminal is not a session', () => {
+    resetSeq(300n);
+
+    const store = createStore({ api: fakeApi(), initialRoute: { key: 'home' } });
+
+    store.dispatch(eventAction(event({ type: 'thread.started', threadId: 't9', targetThreadId: 'main', payload: { agent: 'engineer' } })));
+    assert.equal(selectThreadState(store.getState(), 't9'), 'wait');
+
+    store.dispatch(eventAction(event({ type: 'session.state', threadId: 't9', payload: { state: 'run' } })));
+    store.dispatch(eventAction(event({ type: 'session.context', threadId: 't9', payload: { totalTokens: 10, maxTokens: 100, percentage: 10 } })));
+    assert.deepEqual(store.getState().sessions.t9, { state: 'run', context: { used: 10, max: 100 } });
+    assert.equal(selectThreadState(store.getState(), 't9'), 'run');
+
+    // An event of the session that changes nothing keeps the domain's object.
+    const before = store.getState().sessions;
+
+    store.dispatch(eventAction(event({ type: 'session.tool.started', threadId: 't9', payload: { toolUseId: 'a', name: 'Bash', input: {} } })));
+    assert.equal(store.getState().sessions, before);
+
+    store.dispatch(eventAction(event({ type: 'thread.completed', threadId: 't9', targetThreadId: 'main', payload: { summary: { text: 'done' } } })));
+    assert.equal(store.getState().sessions.t9, undefined);
+    assert.equal(selectThreadState(store.getState(), 't9'), 'done');
+
+    // The journal's late tail (the log allows it) does not bring the session back.
+    store.dispatch(eventAction(event({ type: 'session.turn', threadId: 't9', payload: {} })));
+    store.dispatch(eventAction(event({ type: 'session.state', threadId: 't9', payload: { state: 'wait' } })));
+    store.dispatch(eventAction(event({ type: 'session.context', threadId: 't9', payload: { totalTokens: 12, maxTokens: 100, percentage: 12 } })));
+    assert.equal(store.getState().sessions.t9, undefined);
+    assert.equal(selectThreadState(store.getState(), 't9'), 'done');
+
+    // A thread the store does not know has no session either.
+    store.dispatch(eventAction(event({ type: 'session.state', threadId: 'unknown', payload: { state: 'run' } })));
+    assert.deepEqual(store.getState().sessions, {});
+  });
+});
+
 describe('thread events (feed)', () => {
   it('merges a loaded chunk below the tail, keeps order and drops a stale answer', async () => {
     resetSeq(10n);

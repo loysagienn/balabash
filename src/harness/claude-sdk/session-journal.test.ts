@@ -6,8 +6,8 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { JournalEntry, JournalInput, JournalWriter } from '../session-journal.ts';
-import { emitSdkMessage } from './stream-tap.ts';
-import { createTurnMemory, mapSdkMessage, sanitizeToolResult, startClaudeSessionJournal } from './session-journal.ts';
+import { emitSdkMessage, emitSdkSessionEnd } from './stream-tap.ts';
+import { createTurnMemory, mapSdkMessage, startClaudeSessionJournal } from './session-journal.ts';
 
 const SESSION = 'e5437102-a12e-4755-b766-849d949be319';
 
@@ -113,11 +113,12 @@ describe('mapSdkMessage', () => {
     assert.equal(memory.pendingText, null);
     assert.equal(memory.tools.size, 0);
 
-    // A state frame after the result changes nothing; the next turn's frame runs again.
+    // A state frame after the result changes nothing; the next turn opens
+    // with the init the CLI re-sends per user message — a run, not a start.
     assert.deepEqual(mapSdkMessage(memory, frame({ type: 'system', subtype: 'session_state_changed', state: 'idle' })), []);
-    assert.deepEqual(mapSdkMessage(memory, frame({ type: 'user', message: { role: 'user', content: 'next' }, parent_tool_use_id: null })), [
-      { type: 'session.state', payload: { state: 'run' } },
-    ]);
+    assert.deepEqual(mapSdkMessage(memory, init), [{ type: 'session.state', payload: { state: 'run' } }]);
+    assert.deepEqual(mapSdkMessage(memory, frame({ type: 'user', message: { role: 'user', content: 'next' }, parent_tool_use_id: null })), []);
+    assert.deepEqual(types(mapSdkMessage(memory, result)), ['session.turn', 'session.state']);
   });
 
   it('text followed by an action in the same turn is intermediate; a sub-agent text is journaled at once', () => {
@@ -212,23 +213,6 @@ describe('mapSdkMessage', () => {
     assert.deepEqual(mapSdkMessage(memory, frame({ type: 'stream_event', event: {} })), []);
     assert.deepEqual(mapSdkMessage(memory, frame({ type: 'system', subtype: 'status', status: 'compacting' })), []);
   });
-
-  it('keeps no bytes of a tool result', () => {
-    assert.equal(sanitizeToolResult('plain'), 'plain');
-    assert.equal(sanitizeToolResult(undefined), '');
-    assert.deepEqual(
-      sanitizeToolResult([
-        { type: 'text', text: 'a picture' },
-        { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'iVBORw0KGgo=' } },
-        { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: 'JVBERi0=' } },
-      ]),
-      [
-        { type: 'text', text: 'a picture' },
-        { type: 'image', omitted: true, mediaType: 'image/png' },
-        { type: 'document', omitted: true, mediaType: 'application/pdf' },
-      ],
-    );
-  });
 });
 
 describe('startClaudeSessionJournal', () => {
@@ -266,9 +250,15 @@ describe('startClaudeSessionJournal', () => {
       assert.deepEqual(await producer(), [{ type: 'session.context', payload: { totalTokens: 48_659, maxTokens: 1_000_000, percentage: 5 } }]);
       assert.deepEqual(measured, ['t1']);
 
-      // The memory of t1 ended with its result: the next frame starts a turn.
-      emitSdkMessage('t1', assistant([{ type: 'text', text: 'again' }]));
+      // The memory of t1 outlives its result: the next init is a turn, not a
+      // start. The session's end evicts it — a fresh session starts again.
+      emitSdkMessage('t1', init);
       assert.deepEqual(types(writes.at(-1)!.input as JournalEntry[]), ['session.state']);
+      emitSdkMessage('t1', assistant([{ type: 'text', text: 'again' }]));
+      assert.equal(writes.length, 6);
+      emitSdkSessionEnd('t1');
+      emitSdkMessage('t1', init);
+      assert.deepEqual(types(writes.at(-1)!.input as JournalEntry[]), ['session.state', 'session.started']);
     } finally {
       stop();
     }

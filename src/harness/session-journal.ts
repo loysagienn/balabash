@@ -8,13 +8,19 @@
 // own chain and the log keeps the order the harness saw. The thread's
 // identity (workspace, agent) is read once per thread into a small bounded
 // cache — the row exists before its session starts.
+//
+// The journal carries no bytes: sanitizeToolResult strips the binary blocks
+// of a tool result (the rule both journals apply before writing).
 
 import { appendEvent } from '../core/append.ts';
-import type { JsonObject } from '../core/contract.ts';
+import type { JsonObject, JsonValue } from '../core/contract.ts';
 import type { AppendInput } from '../core/envelope.ts';
+import type { EventPayloads, SessionEventType } from '../core/event-types.ts';
 import { getThread } from '../core/threads.ts';
 
-export type JournalEntry = { type: `session.${string}`; payload: JsonObject };
+// An entry is a session.* event in its typed payload form — a journal that
+// writes a field the contract does not declare fails `npm run types`.
+export type JournalEntry = { [T in SessionEventType]: { type: T; payload: EventPayloads[T] } }[SessionEventType];
 
 // Entries, or a producer that yields them when its turn in the chain comes
 // (a measurement taken only after the frames before it are written).
@@ -35,6 +41,55 @@ export type JournalWriter = {
 };
 
 const IDENTITY_CACHE_SIZE = 64;
+
+function asObject(value: unknown): Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
+
+// The content of a tool result as the model saw it, minus bytes: text
+// stays; an image, document or audio block keeps its type and media type
+// and nothing else; an embedded resource keeps its uri. Covers both block
+// dialects a journal meets — the Anthropic one (`source.media_type`,
+// `source.data`) and MCP's (`mimeType`, `data` / `resource.blob`).
+export function sanitizeToolResult(content: unknown): JsonValue {
+  if (typeof content === 'string') {
+    return content;
+  }
+
+  if (!Array.isArray(content)) {
+    return content === undefined ? '' : (content as JsonValue);
+  }
+
+  return content.map((block): JsonValue => {
+    const view = asObject(block);
+    const { type } = view;
+
+    if (type === 'text') {
+      return { type: 'text', text: typeof view.text === 'string' ? view.text : '' };
+    }
+
+    if (type === 'image' || type === 'document' || type === 'audio') {
+      const mediaType = asObject(view.source).media_type ?? view.mimeType;
+
+      return { type, omitted: true, ...(typeof mediaType === 'string' ? { mediaType } : {}) };
+    }
+
+    if (type === 'resource') {
+      const resource = asObject(view.resource);
+
+      if (typeof resource.blob === 'string') {
+        return {
+          type,
+          omitted: true,
+          ...(typeof resource.uri === 'string' ? { uri: resource.uri } : {}),
+          ...(typeof resource.mimeType === 'string' ? { mediaType: resource.mimeType } : {}),
+        };
+      }
+    }
+
+    return block as JsonValue;
+  });
+}
 
 async function readIdentity(threadId: string): Promise<JournalIdentity | null> {
   const thread = await getThread(threadId);
@@ -109,7 +164,7 @@ export function createJournalWriter(deps: JournalWriterDeps = {}): JournalWriter
           agentName: who.agentName,
           userId: who.userId,
           threadId,
-          payload: entry.payload,
+          payload: entry.payload as JsonObject,
         });
       } catch (error) {
         console.error(`[session-journal] append failed thread=${threadId} type=${entry.type}:`, error);
