@@ -1,8 +1,8 @@
 // The /api namespace over the stand (src/test-support/stand.ts): the
 // projects endpoints write the row, the folder and the project.* event
 // together and answer the console's shapes and refusals; PATCH /settings
-// stores the names; a cross-site mutation is refused; a race of two
-// creations leaves one row.
+// stores the names; a cross-site mutation is refused and the browser's
+// own-origin one passes; a race of two creations leaves one row.
 //
 // Run: npm test  (node:test, native type stripping — no build needed).
 
@@ -10,7 +10,7 @@ import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { startStand } from '../test-support/stand.ts';
+import { STAND_HOST, startStand } from '../test-support/stand.ts';
 import type { Stand } from '../test-support/stand.ts';
 import type { CreateProjectResponse, ProjectResponse, SettingsResponse, MeResponse } from './contract.ts';
 
@@ -196,6 +196,23 @@ describe('the api as a whole', () => {
     const own = await stand.request('GET', '/api/me', { headers: { origin: 'https://evil.example' } });
 
     assert.equal(own.status, 200);
+  });
+
+  test('a mutation the browser marks as the api’s own passes; one it marks cross-site is refused', async () => {
+    // The stand's requests carry neither header by default (a script
+    // holding the cookie on purpose); these are the browser's branches.
+    const fetchMetadata = await stand.request('PATCH', '/api/settings', { body: {}, headers: { 'sec-fetch-site': 'same-origin', origin: `https://${STAND_HOST}` } });
+
+    assert.equal(fetchMetadata.status, 200, fetchMetadata.text);
+
+    const originOnly = await stand.request('PATCH', '/api/settings', { body: {}, headers: { origin: `https://${STAND_HOST}` } });
+
+    assert.equal(originOnly.status, 200, originOnly.text);
+
+    const crossSite = await stand.request('PATCH', '/api/settings', { body: {}, headers: { 'sec-fetch-site': 'cross-site', origin: `https://${STAND_HOST}` } });
+
+    assert.equal(crossSite.status, 403);
+    assert.equal(crossSite.json<ErrorBody>().error.code, 'cross_site');
   });
 
   test('an unknown endpoint answers JSON 404', async () => {

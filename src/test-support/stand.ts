@@ -30,6 +30,10 @@
 // of db/test-guard.ts), and the stand's own check below fails with a hint
 // before any test runs. One stand per file: the client is one per process,
 // and node:test runs each file in a process of its own.
+//
+// stop() releases what the stand acquired whatever state a test left it in:
+// the listener's connections are cut (an event stream left open is no
+// hold), and every step runs even when another failed.
 
 import fs from 'node:fs/promises';
 import http from 'node:http';
@@ -87,6 +91,9 @@ export type RequestOptions = {
   // The Cookie header; the stand's session by default, null for none.
   cookie?: string | null;
   headers?: Record<string, string>;
+  // Aborting it rejects the request with the signal's reason (an
+  // AbortError) — the way to leave an open stream.
+  signal?: AbortSignal;
 };
 
 export type Stand = {
@@ -94,11 +101,19 @@ export type Stand = {
   // The temporary directory the process runs in: data/workspace/<userId>
   // and the local file storage live under it.
   dir: string;
+  // The listener's port on 127.0.0.1 — for a raw node:http client where
+  // request() does not fit (a stream read as it flows).
+  port: number;
   userId: string;
   mainThreadId: string;
   // The web session of the operator: `session_id=<token>`.
   cookie: string;
   request(method: string, urlPath: string, options?: RequestOptions): Promise<Reply>;
+  // Releases everything the stand acquired — the listener and its open
+  // connections (a stream the test left open does not hold it), the live
+  // hub and the client, the cwd, the copy and the directory — each step on
+  // its own; what failed is reported together once all of them ran. A
+  // second call is a no-op.
   stop(): Promise<void>;
 };
 
@@ -111,37 +126,32 @@ export async function startStand(): Promise<Stand> {
 
   started = true;
 
-  const db = await createTestDatabase();
-  const originalCwd = process.cwd();
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'balabash-stand-'));
-
-  for (const name of INHERITED_ENV) {
-    delete process.env[name];
-  }
-
-  process.env.DATABASE_URL = db.url;
-  process.env.SESSION_PEPPER = SESSION_PEPPER;
-  process.env.FILE_STORAGE = 'local';
-  process.chdir(dir);
-
-  let server: http.Server | null = null;
-  let disconnect: (() => Promise<void>) | null = null;
-
-  const stop = async () => {
-    if (server) {
-      const listening = server;
-      await new Promise<void>(resolve => listening.close(() => resolve()));
-      server = null;
-    }
-
-    await disconnect?.();
-    disconnect = null;
-    process.chdir(originalCwd);
-    await db.drop();
-    await fs.rm(dir, { recursive: true, force: true });
-  };
+  // Every resource goes on the cleanup the moment it is acquired, so a
+  // failure anywhere below releases exactly what was taken by then.
+  const cleanup = createCleanup();
 
   try {
+    const db = await createTestDatabase();
+
+    cleanup.add('drop the database copy', () => db.drop());
+
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'balabash-stand-'));
+
+    cleanup.add('remove the directory', () => fs.rm(dir, { recursive: true, force: true }));
+
+    for (const name of INHERITED_ENV) {
+      delete process.env[name];
+    }
+
+    process.env.DATABASE_URL = db.url;
+    process.env.SESSION_PEPPER = SESSION_PEPPER;
+    process.env.FILE_STORAGE = 'local';
+
+    const originalCwd = process.cwd();
+
+    process.chdir(dir);
+    cleanup.add('restore cwd', () => process.chdir(originalCwd));
+
     // The app's modules, after the environment is in place (the import
     // order above). The client is the one every module of the app shares.
     const { prisma } = await import('../db/client.ts');
@@ -150,10 +160,10 @@ export async function startStand(): Promise<Stand> {
     const { createApiMiddleware } = await import('../api/api.ts');
     const { createAuthCode } = await import('../api/auth-codes.ts');
 
-    disconnect = async () => {
+    cleanup.add('disconnect', async () => {
       getLiveHub().close();
       await prisma.$disconnect();
-    };
+    });
 
     await checkDatabase(prisma, db.name);
 
@@ -166,9 +176,10 @@ export async function startStand(): Promise<Stand> {
       ctx.body = 'Not found';
     });
 
-    server = app.listen(0, '127.0.0.1');
-    await new Promise<void>(resolve => server!.once('listening', () => resolve()));
-    const { port } = server.address() as AddressInfo;
+    const server = http.createServer(app.callback());
+    const { port } = await listen(server, 0, '127.0.0.1');
+
+    cleanup.add('close the server', () => closeServer(server));
 
     const mainThread = await ensureOperatorWorkspace();
     const userId = mainThread.userId;
@@ -185,11 +196,93 @@ export async function startStand(): Promise<Stand> {
 
     cookie = sessionCookie(signedIn.headers['set-cookie'] ?? []);
 
-    return { db, dir, userId, mainThreadId: mainThread.id, cookie, request, stop };
+    return { db, dir, port, userId, mainThreadId: mainThread.id, cookie, request, stop: () => cleanup.run() };
   } catch (error) {
-    await stop();
+    // The failure of the start is the error; a failure of the cleanup
+    // rides along with it rather than replacing it.
+    try {
+      await cleanup.run();
+    } catch (cleanupError) {
+      throw new AggregateError([error, cleanupError], `${describe(error)} — and the stand's cleanup failed: ${describe(cleanupError)}`);
+    }
+
     throw error;
   }
+}
+
+// Everything acquired, released in the reverse order of acquisition, each
+// step on its own: a step that fails never skips the ones after it, and
+// the failures come back together once every step has run. run() empties
+// the list — a second run() releases nothing twice.
+export type Cleanup = {
+  add(name: string, release: () => void | Promise<void>): void;
+  run(): Promise<void>;
+};
+
+export function createCleanup(): Cleanup {
+  const steps: { name: string; release: () => void | Promise<void> }[] = [];
+
+  return {
+    add(name, release) {
+      steps.push({ name, release });
+    },
+
+    async run() {
+      const failures: Error[] = [];
+
+      while (steps.length) {
+        const { name, release } = steps.pop()!;
+
+        try {
+          await release();
+        } catch (error) {
+          failures.push(new Error(`${name}: ${describe(error)}`, { cause: error }));
+        }
+      }
+
+      if (failures.length) {
+        throw new AggregateError(failures, `the stand's cleanup failed — ${failures.map(failure => failure.message).join('; ')}`);
+      }
+    },
+  };
+}
+
+// Both outcomes of a listen: `listening`, or the `error` of a bind that did
+// not happen (EADDRINUSE, EACCES, EMFILE — asynchronous, on the server
+// object). Waiting for the first alone leaves the second an unhandled
+// 'error' event, and the caller's cleanup never runs. Neither handler stays
+// on the server afterwards.
+export function listen(server: http.Server, port: number, host: string): Promise<AddressInfo> {
+  return new Promise((resolve, reject) => {
+    const onListening = () => {
+      server.off('error', onError);
+      resolve(server.address() as AddressInfo);
+    };
+    const onError = (error: Error) => {
+      server.off('listening', onListening);
+      reject(error);
+    };
+
+    server.once('listening', onListening);
+    server.once('error', onError);
+    server.listen(port, host);
+  });
+}
+
+// server.close() alone waits for the active connections to end — and an
+// event stream (GET /api/events/stream) never ends on its own; the idle
+// ones it closes itself. The connections are the stand's: cut them, and
+// the handlers see the close they wait for (the stream clears its
+// heartbeat and unsubscribes from the hub).
+export function closeServer(server: http.Server): Promise<void> {
+  return new Promise(resolve => {
+    server.close(() => resolve());
+    server.closeAllConnections();
+  });
+}
+
+function describe(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 // The second lock, before the first write: the client the app's modules
@@ -239,7 +332,7 @@ function send(port: number, method: string, urlPath: string, options: RequestOpt
   }
 
   return new Promise((resolve, reject) => {
-    const req = http.request({ host: '127.0.0.1', port, path: urlPath, method, headers }, res => {
+    const req = http.request({ host: '127.0.0.1', port, path: urlPath, method, headers, signal: options.signal }, res => {
       const chunks: Buffer[] = [];
 
       res.on('data', chunk => chunks.push(chunk as Buffer));
