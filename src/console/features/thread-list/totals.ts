@@ -4,7 +4,8 @@
 // position they are exact at (frontend.md, "Второй слой данных"). The store
 // holds only a window of threads, so the number comes from the server; the
 // tail brings it up to date — a thread of the set started above the stamp
-// is counted here. Pure, tested.
+// is counted here; a request that failed is named with its retry. Pure,
+// tested.
 
 import type { Thread, ThreadCounts } from '../../../core/contract.ts';
 
@@ -45,13 +46,42 @@ export function totalWithTail(total: ThreadTotal, threads: readonly Pick<Thread,
   return n;
 }
 
+const HOUR = 3_600_000;
+
 // The start of the recent window: RECENT_DAYS back, at the hour — so the
 // query key holds still across renders and minutes, and the window moves
-// (and is requested again) once an hour at most.
+// (and is requested again) once an hour at most. The hour is the epoch's
+// (UTC), not the local clock's: a local setter would read a moment inside
+// the repeated hour of a DST fall-back as the first of the two and move the
+// start a whole hour further back — the boundary is a server filter, no one
+// reads it as a local time.
 export function recentSince(now: Date): Date {
-  const since = new Date(now.getTime() - RECENT_DAYS * 86_400_000);
+  return new Date(Math.floor((now.getTime() - RECENT_DAYS * 86_400_000) / HOUR) * HOUR);
+}
 
-  since.setMinutes(0, 0, 0);
+// What a consumer sees of a request of the count (a Query result).
+export type TotalQuery = { isError: boolean; error: Error | null; isFetching: boolean; refetch: () => Promise<unknown> };
 
-  return since;
+export type TotalFailure = { message: string; pending: boolean; retry: () => void };
+
+// The failure of a set's requests, when one of them ended in one: the first
+// error's words (there is one line's room), whether a new attempt is in
+// flight, and the retry — of the requests that failed, not of those that
+// answered. A failed count must not look like one still loading.
+export function failureOf(queries: readonly TotalQuery[]): TotalFailure | null {
+  const failed = queries.filter(query => query.isError);
+
+  if (failed.length === 0) {
+    return null;
+  }
+
+  return {
+    message: failed[0].error?.message ?? 'request failed',
+    pending: failed.some(query => query.isFetching),
+    retry: () => {
+      for (const query of failed) {
+        void query.refetch();
+      }
+    },
+  };
 }

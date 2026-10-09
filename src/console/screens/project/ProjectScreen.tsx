@@ -28,6 +28,7 @@ import { useWorkspaceNode } from '../../features/file-area/queries.ts';
 import { EditProjectDialog } from '../../features/projects/EditProjectDialog.tsx';
 import { ThreadList } from '../../features/thread-list/ThreadList.tsx';
 import { useThreadTotal } from '../../features/thread-list/queries.ts';
+import { TotalFailure } from '../../features/thread-list/TotalFailure.tsx';
 import { totalWithTail } from '../../features/thread-list/totals.ts';
 import { Btn } from '../../ui/Btn/Btn.tsx';
 import { Card, CardHead } from '../../ui/Card/Card.tsx';
@@ -71,7 +72,8 @@ function ProjectPage({ project, route }: { project: ProjectView; route: ProjectR
   const threads = useAppSelector(s => selectThreads(s, project.id));
   const running = useAppSelector(selectRunningCountByProject)[project.id] ?? 0;
   // The project's whole count of threads from the server, brought up to
-  // the tail the store has folded since.
+  // the tail the store has folded since; a failed request is named beside
+  // the link with its Retry (the link stays — "All" is a route either way).
   const all = useThreadTotal({ projectId: project.id });
   const total = all.data ? totalWithTail(all.data, threads) : null;
   const flagging = useAppSelector(s => selectProjectFlagging(s, project.id));
@@ -159,7 +161,9 @@ function ProjectPage({ project, route }: { project: ProjectView; route: ProjectR
               {allThreadsLabel(total)}
             </Link>
           }
-        />
+        >
+          <TotalFailure queries={[all]} />
+        </CardHead>
         {threads.length > 0 ? (
           <ThreadList threads={threads.slice(0, PROJECT_THREADS)} now={now} flat />
         ) : (

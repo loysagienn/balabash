@@ -1,0 +1,6 @@
+@layer patterns{
+/* ── A count that failed ── .ttl-fail: the error line and its Retry on one row, in a header's end slot (.dsec-end, .card-h-end) */
+.ttl-fail{display:inline-flex;align-items:center;gap:var(--sp-1h);white-space:nowrap}
+.ttl-fail .errline{align-items:center}
+.ttl-fail .errline .ic{margin-top:0}
+}
