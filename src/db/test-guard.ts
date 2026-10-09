@@ -14,31 +14,40 @@
 // today; the name is the contract, the value is not), so the lock is on
 // `npm test` and `node --test <file>`, not on `node <file>`.
 
+import pg from 'pg';
+
 export const BLOCKED_DATABASE_URL = 'postgresql://blocked:blocked@127.0.0.1:1/blocked_test';
 
-const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
+const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
 
+// The decision is on where the driver would dial, not on URL.hostname: pg
+// reads the string through pg-connection-string, which lets `?host=` and
+// `?port=` in the query override the authority, percent-decodes them, takes
+// a socket path for a host and falls back to PGHOST and `localhost` when the
+// authority is empty — so a loopback authority proves nothing. A pg.Client
+// built on the string resolves all of that the way PrismaPg's pool will and
+// opens nothing until connect(); any string it cannot read (a malformed
+// percent-encoding, a bad port, an unreadable ssl file) is refused.
 export function isLocalTestDatabaseUrl(url: string): boolean {
-  let parsed: URL;
-
   try {
-    parsed = new URL(url);
+    const parsed = new URL(url);
+
+    if (parsed.protocol !== 'postgresql:' && parsed.protocol !== 'postgres:') {
+      return false;
+    }
+
+    const { host, database } = new pg.Client({ connectionString: url });
+
+    return LOCAL_HOSTS.has(host) && typeof database === 'string' && database.endsWith('_test');
   } catch {
     return false;
   }
-
-  if (parsed.protocol !== 'postgresql:' && parsed.protocol !== 'postgres:') {
-    return false;
-  }
-
-  const database = decodeURIComponent(parsed.pathname.replace(/^\//, ''));
-
-  return LOCAL_HOSTS.has(parsed.hostname) && database.endsWith('_test');
 }
 
 // The connection string the Prisma client may use, given the environment:
-// outside a test child the configured one (`undefined` keeps the config's
-// own "is not set" refusal), inside one only a local test database.
+// outside a test child the configured one, untouched (client.ts falls back
+// to the config's own "is not set" refusal for an unset or empty variable),
+// inside one only a local test database.
 export function testSafeDatabaseUrl(url: string | undefined, testContext: string | undefined): string | undefined {
   if (!testContext) {
     return url;

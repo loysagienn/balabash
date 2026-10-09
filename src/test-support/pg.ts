@@ -30,10 +30,15 @@ const TEMPLATE = 'balabash_template_test';
 const USER = 'balabash';
 const PASSWORD = 'balabash';
 const START_TIMEOUT_MS = 60_000;
+const STOP_TIMEOUT_MS = 15_000;
 
 const repoRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', '..');
 
 export type TestPostgres = { url: string; stop(): Promise<void> };
+
+// What startTestPostgres drives — embedded-postgres, or a stand-in in the
+// tests of the lifecycle itself (pg.lifecycle.test.ts).
+export type Cluster = Pick<EmbeddedPostgres, 'initialise' | 'start' | 'createDatabase' | 'stop'>;
 
 // Start a cluster, deploy the migrations into the template. One per `npm
 // test`, by the global setup only.
@@ -55,20 +60,12 @@ export async function startTestPostgres(): Promise<TestPostgres> {
     onError: keep,
   });
   const stop = async () => {
-    await cluster.stop().catch(() => {});
+    await stopCluster(cluster, STOP_TIMEOUT_MS);
     await fs.rm(dir, { recursive: true, force: true });
   };
 
   try {
-    await withTimeout(
-      (async () => {
-        await cluster.initialise();
-        await cluster.start();
-        await cluster.createDatabase(TEMPLATE);
-      })(),
-      START_TIMEOUT_MS,
-      `the test PostgreSQL did not start in ${START_TIMEOUT_MS / 1000} s`,
-    );
+    await bootCluster(cluster, START_TIMEOUT_MS);
     const url = databaseUrl(port, TEMPLATE);
     await deployMigrations(url);
     const client = new pg.Client({ connectionString: databaseUrl(port, 'postgres') });
@@ -81,6 +78,39 @@ export async function startTestPostgres(): Promise<TestPostgres> {
     await stop();
     throw new Error(`${error instanceof Error ? error.message : String(error)}\n${log.join('\n')}`);
   }
+}
+
+// initdb, the server, the template — under one timeout. The timeout cancels
+// the chain as well as giving up on it: a step that comes back after the
+// deadline does not start the next one, so no server is spawned into a
+// directory the caller is already removing. A server that exits before it
+// is ready makes start() reject with nothing (embedded-postgres: a bare
+// reject on `close`); that is named here, the server's own words are in the
+// log the caller keeps.
+export async function bootCluster(cluster: Cluster, timeoutMs: number): Promise<void> {
+  let cancelled = false;
+  const boot = (async () => {
+    await cluster.initialise();
+    if (cancelled) return;
+    await cluster.start();
+    if (cancelled) return;
+    await cluster.createDatabase(TEMPLATE);
+  })();
+
+  try {
+    await withTimeout(boot, timeoutMs, `the test PostgreSQL did not start in ${timeoutMs / 1000} s`);
+  } catch (error) {
+    cancelled = true;
+    throw error ?? new Error('the test PostgreSQL exited before it was ready to accept connections');
+  }
+}
+
+// embedded-postgres's stop() waits for the server's `exit` event — and waits
+// forever when the server already exited before start() gave up on it (the
+// listener is registered after the event). Bounded, and never a throw: what
+// is gone is gone, the caller goes on to remove the directory either way.
+export async function stopCluster(cluster: Cluster, timeoutMs: number): Promise<void> {
+  await withTimeout(cluster.stop(), timeoutMs, 'the test PostgreSQL did not stop').catch(() => {});
 }
 
 export type TestDatabase = { name: string; url: string; drop(): Promise<void> };
