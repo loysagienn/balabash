@@ -9,8 +9,11 @@
 // tail keep it fresh. Measurements (telemetry, file listings, usage) are
 // not in the snapshot; they have their own endpoints.
 
+import { Prisma } from '../../prisma-generated/client.ts';
 import { prisma } from '../db/client.ts';
-import type { Thread } from '../core/contract.ts';
+import type { JsonObject, Thread } from '../core/contract.ts';
+import { SESSION_VIEW_TYPES, foldSession } from '../projections/session.ts';
+import type { SessionView } from '../projections/session.ts';
 import { listThreads } from '../core/threads.ts';
 import { listProjects } from '../projects/store.ts';
 import { listApps } from '../apps/management.ts';
@@ -48,6 +51,35 @@ async function readThreadWindow(userId: string): Promise<Thread[]> {
   }
 
   return [...byId.values()].sort((a, b) => (a.createdSeq > b.createdSeq ? -1 : a.createdSeq < b.createdSeq ? 1 : 0));
+}
+
+// The sessions behind the active threads of the window: the newest
+// session.state and session.context of each, folded like the console folds
+// the tail (src/projections/session.ts). A thread without session events
+// has no entry — the client derives a state from the thread then.
+async function readSessions(threads: Thread[]): Promise<Record<string, SessionView>> {
+  const activeIds = threads.filter(thread => thread.status === 'active').map(thread => thread.id);
+  const sessions: Record<string, SessionView> = {};
+
+  if (!activeIds.length) {
+    return sessions;
+  }
+
+  const rows = await prisma.$queryRaw<Array<{ threadId: string; type: string; payload: JsonObject }>>`
+    SELECT DISTINCT ON (thread_id, type) thread_id AS "threadId", type, payload
+    FROM events
+    WHERE thread_id IN (${Prisma.join(activeIds)}) AND type IN (${Prisma.join([...SESSION_VIEW_TYPES])})
+    ORDER BY thread_id, type, seq DESC`;
+
+  for (const row of rows) {
+    const view = foldSession(sessions[row.threadId] ?? null, row.type, row.payload);
+
+    if (view) {
+      sessions[row.threadId] = view;
+    }
+  }
+
+  return sessions;
 }
 
 async function readTasks(userId: string, now: Date): Promise<TaskView[]> {
@@ -134,14 +166,13 @@ export async function buildSnapshot(userId: string, me: MeResponse): Promise<Sna
     readTasks(userId, now),
     readConnections(userId),
   ]);
+  const sessions = await readSessions(threads);
 
   return {
     asOfSeq,
     me,
     threads,
-    // Filled by the session.* events of the log once they exist (console
-    // plan, stage 4); until then the client derives a state from the thread.
-    sessions: {},
+    sessions,
     projects: projects.map(project => ({
       id: project.id,
       title: project.title,

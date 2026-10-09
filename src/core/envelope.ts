@@ -58,9 +58,13 @@ const CANONICAL_TYPES: ReadonlySet<string> = new Set([
   SCHEDULE_FIRED,
 ]);
 
-// Sanitized integration lifecycle events (connection.connected, …) form an
-// open family: concrete suffixes belong to the connections layer (stage 4).
-const CANONICAL_FAMILIES = ['connection.'];
+// Open families: sanitized integration lifecycle events (connection.*,
+// concrete suffixes belong to the connections layer) and the SDK-session
+// journal (session.*, the course of a thread's inner session — suffixes
+// belong to the harness journals, src/harness/*/session-journal.ts; the
+// payload forms are typed in event-types.ts).
+const CANONICAL_FAMILIES = ['connection.', 'session.'];
+export const SESSION_EVENT_PREFIX = 'session.';
 
 // First segments owned by the canonical vocabulary. A domain event's first
 // segment (= agent name) must not collide with them.
@@ -75,6 +79,7 @@ export const RESERVED_DOMAINS: ReadonlySet<string> = new Set([
   'oauth_client',
   'secrets',
   'schedule',
+  'session',
 ]);
 
 const DOMAIN_TYPE_RE = /^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$/;
@@ -221,10 +226,13 @@ function validateCanonicalActor(input: AppendInput): void {
 
   const requiresThread = ['user.message', 'agent.message', THREAD_NOTIFICATION, THREAD_PROGRESS, THREAD_MESSAGE];
   const isToolCall = type.startsWith('tool.call.');
+  // The session journal is authored by the thread whose session it is.
+  const isSessionEvent = type.startsWith(SESSION_EVENT_PREFIX);
 
   if (
     (requiresThread.includes(type) ||
       isToolCall ||
+      isSessionEvent ||
       TERMINAL_TYPES.has(type) ||
       type === THREAD_STARTED ||
       type === THREAD_CANCEL ||

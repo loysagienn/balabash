@@ -299,12 +299,13 @@ export async function spawnAgentRun(thread: Thread, startedEvent: Event): Promis
     },
 
     harness: {
+      // threadId feeds the stream taps: the session journal (session.*
+      // events) observes both SDKs, a surface adapter (CCR) mirrors the raw
+      // inner stream of claude-sdk threads.
       sdkSession: options =>
         declaration.sdk === 'codex'
-          ? createCodexSession(options, { tools, cwd: stateDir })
-          : // threadId feeds the stream tap: a surface adapter (CCR) mirrors the
-            // raw inner stream of claude-sdk threads.
-            createClaudeSession(options, { tools, cwd: stateDir, threadId }),
+          ? createCodexSession(options, { tools, cwd: stateDir, threadId })
+          : createClaudeSession(options, { tools, cwd: stateDir, threadId }),
     },
 
     tools,

@@ -5,7 +5,8 @@
 // field is optional wherever some recorded event lacks it. Types only — the
 // console imports this file (src/console/tsconfig.json).
 
-import type { ContentBlock, Event, JsonObject, NotificationLevel, ThreadSummary, ToolResult } from './contract.ts';
+import type { ContentBlock, Event, JsonObject, JsonValue, NotificationLevel, ThreadSummary, ToolResult } from './contract.ts';
+import type { SessionState } from '../projections/session.ts';
 
 // The human behind a user.message, as the channel knew them.
 export type UserIdentity = { firstName?: string; lastName?: string; username?: string };
@@ -13,6 +14,12 @@ export type UserIdentity = { firstName?: string; lastName?: string; username?: s
 // A file that arrived with a user.message (stored by the channel adapter):
 // the fileId points into file storage, the rest describes it.
 export type InboundFile = { fileId: string; contentType?: string | null; originalFilename?: string | null; sizeBytes?: number | null };
+
+// What a native sub-agent or background task of a session has consumed.
+export type SessionTaskUsage = { totalTokens: number; toolUses: number; durationMs: number };
+
+// One item of the session's live plan (TodoWrite / todo list).
+export type SessionPlanItem = { content: string; status: string; activeForm?: string };
 
 export type EventPayloads = {
   // Lifecycle. thread.started is authored by the new thread itself
@@ -85,6 +92,69 @@ export type EventPayloads = {
     rollbackReason?: string;
     migrationsFailed?: string[];
   };
+
+  // The SDK-session journal (src/harness/claude-sdk/session-journal.ts,
+  // src/harness/codex-sdk/session-journal.ts): the course of a thread's
+  // inner session, authored by the thread itself. camelCase views of the SDK
+  // frames; nothing here is read back by a model. `parentToolUseId` ties the
+  // frames of a native sub-agent (Agent tool) to the tool use that spawned
+  // it; the bridge's own tools (mcp__balabash__*) are not here — they are
+  // the tool.call.* events.
+  'session.started': {
+    model: string;
+    tools: string[];
+    mcpServers: { name: string; status: string }[];
+    claudeCodeVersion?: string;
+    effort?: string | null;
+    cwd?: string;
+  };
+  'session.state': { state: SessionState };
+  'session.turn': {
+    durationMs?: number;
+    durationApiMs?: number;
+    numTurns?: number;
+    costUsd?: number;
+    usage?: JsonObject;
+    stopReason?: string | null;
+    isError?: boolean;
+    subtype?: string;
+  };
+  'session.context': { totalTokens: number; maxTokens: number; percentage: number };
+  'session.thinking': { text: string; parentToolUseId?: string | null };
+  // Assistant text followed by more actions in the same turn (the final
+  // text of a turn is the agent.message the runner delivers).
+  'session.text': { text: string; parentToolUseId?: string | null };
+  'session.tool.started': { toolUseId: string; name: string; input: JsonObject; parentToolUseId?: string | null };
+  'session.tool.completed': {
+    toolUseId: string;
+    name: string;
+    // The tool_result content as the model saw it (string or blocks; image
+    // bytes replaced by { type: 'image', omitted: true }).
+    result: JsonValue;
+    isError: boolean;
+    exitCode?: number;
+    parentToolUseId?: string | null;
+  };
+  'session.tool.summary': { summary: string; precedingToolUseIds: string[] };
+  'session.plan': { items: SessionPlanItem[] };
+  'session.task.started': { taskId: string; toolUseId?: string; description: string; subagentType?: string; backgrounded?: boolean };
+  'session.task.progress': {
+    taskId: string;
+    toolUseId?: string;
+    description: string;
+    usage: SessionTaskUsage;
+    lastToolName?: string;
+    summary?: string;
+  };
+  'session.task.completed': {
+    taskId: string;
+    toolUseId?: string;
+    status: 'completed' | 'failed' | 'stopped';
+    summary: string;
+    usage?: SessionTaskUsage;
+  };
+  'session.compaction': { trigger: 'manual' | 'auto'; preTokens: number; postTokens?: number; durationMs?: number };
+  'session.retry': { attempt: number; maxRetries: number; retryDelayMs: number; errorStatus: number | null; error?: string };
 
   // Integrations.
   'connection.completed': { server: string; account: string; name: string; identity?: string | null };

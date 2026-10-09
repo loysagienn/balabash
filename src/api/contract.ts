@@ -263,14 +263,12 @@ export type PublicationResponse = {
 // tail (GET /api/events/stream?after=<asOfSeq>) continues from there —
 // everything in here is derivable from events, so the tail keeps it fresh.
 
-export type SessionState = 'run' | 'wait' | 'act';
-
 // The SDK session behind an active thread, as the session.* events of the
-// log describe it. Empty until those events exist (console plan, stage 4).
-export type SessionView = {
-  state: SessionState;
-  context: { used: number; max: number } | null;
-};
+// log describe it — the fold lives in src/projections/session.ts, shared
+// with the console's reducer.
+import type { SessionState, SessionView } from '../projections/session.ts';
+
+export type { SessionState, SessionView };
 
 export type ProjectView = {
   id: string;

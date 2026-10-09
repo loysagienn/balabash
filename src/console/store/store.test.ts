@@ -16,6 +16,7 @@ import { login, logout, sessionCheck, sessionLost } from './session/actions.ts';
 import { loadThreadEvents } from './threads/actions.ts';
 import { selectRunningCount } from './threads/selectors.ts';
 import { makeSelectThreadEvents } from './feed/selectors.ts';
+import { selectThreadState } from './sessions/selectors.ts';
 import { ME, event, resetSeq, snapshot, thread } from './fixtures.ts';
 
 type Calls = { name: string; args: unknown[] }[];
@@ -359,5 +360,46 @@ describe('route data', () => {
     store.dispatch(routeTo({ key: 'apps' }));
     assert.equal(store.getState().ui.moreSheet, false);
     assert.deepEqual(store.getState().router, { route: { key: 'apps' }, source: 'app', replace: false });
+  });
+});
+
+describe('sessions from events', () => {
+  it('folds session.state and session.context per thread; a terminal drops the session; the snapshot seeds it', async () => {
+    resetSeq(300n);
+
+    const api = fakeApi({
+      snapshot: async () =>
+        snapshot({
+          threads: [thread({ id: 't1' }), thread({ id: 't2' }), thread({ id: 'done', status: 'completed' })],
+          sessions: { t1: { state: 'run', context: { used: 10_000, max: 200_000 } } },
+        }),
+    });
+    const store = createStore({ api, initialRoute: { key: 'home' } });
+
+    await dispatched(store, sessionCheck());
+    await settle();
+    assert.deepEqual(store.getState().sessions, { t1: { state: 'run', context: { used: 10_000, max: 200_000 } } });
+    assert.equal(selectThreadState(store.getState(), 't1'), 'run');
+    assert.equal(selectThreadState(store.getState(), 't2'), 'wait');
+    assert.equal(selectThreadState(store.getState(), 'done'), 'done');
+    assert.equal(selectThreadState(store.getState(), 'nope'), null);
+
+    store.dispatch(eventAction(event({ type: 'session.state', threadId: 't2', payload: { state: 'run' } })));
+    assert.deepEqual(store.getState().sessions.t2, { state: 'run', context: null });
+
+    const before = store.getState().sessions;
+
+    store.dispatch(eventAction(event({ type: 'session.tool.started', threadId: 't2', payload: { toolUseId: 'a', name: 'Bash', input: {} } })));
+    assert.equal(store.getState().sessions, before);
+
+    store.dispatch(eventAction(event({ type: 'session.context', threadId: 't2', payload: { totalTokens: 48_659, maxTokens: 1_000_000, percentage: 5 } })));
+    store.dispatch(eventAction(event({ type: 'session.state', threadId: 't2', payload: { state: 'wait' } })));
+    assert.deepEqual(store.getState().sessions.t2, { state: 'wait', context: { used: 48_659, max: 1_000_000 } });
+    assert.equal(selectThreadState(store.getState(), 't2'), 'wait');
+
+    store.dispatch(eventAction(event({ type: 'thread.completed', threadId: 't2', targetThreadId: 'main', payload: { summary: { text: 'ok' } } })));
+    assert.equal(store.getState().sessions.t2, undefined);
+    assert.equal(selectThreadState(store.getState(), 't2'), 'done');
+    assert.deepEqual(store.getState().sessions, { t1: { state: 'run', context: { used: 10_000, max: 200_000 } } });
   });
 });

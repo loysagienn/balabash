@@ -5,7 +5,7 @@
 import { prisma } from '../db/client.ts';
 import { createLiveHub, installLiveHub } from './live.ts';
 import type { Event } from './contract.ts';
-import { toEvent } from './envelope.ts';
+import { SESSION_EVENT_PREFIX, toEvent } from './envelope.ts';
 
 type GetEventsAfterOptions = {
   types?: string[];
@@ -60,13 +60,18 @@ type TranscriptOptions = {
 
 // The thread's transcript. Both sides of every inter-thread fact see it via
 // this formula: the child authored it (threadId), the parent was addressed
-// (targetThreadId) — each fact recorded exactly once.
+// (targetThreadId) — each fact recorded exactly once. The session journal
+// (session.*) is not part of it: a transcript is what a model reads of a
+// thread, and the inner course of an SDK session is that session's own
+// memory — it would only crowd the window (the console reads it through
+// listThreadEvents).
 export async function getTranscript(
   threadId: string,
   { afterSeq, limit, last }: TranscriptOptions = {},
 ): Promise<Event[]> {
   const where = {
     OR: [{ threadId }, { targetThreadId: threadId }],
+    NOT: { type: { startsWith: SESSION_EVENT_PREFIX } },
     ...(afterSeq !== undefined ? { seq: { gt: afterSeq } } : {}),
   };
 
