@@ -8,6 +8,7 @@ import type { AgentView } from '../../../api/contract.ts';
 import type { AgentsRoute, AppRoute } from '../../lib/router/routes.ts';
 import { countOf } from '../../lib/format/index.ts';
 import type { SnapshotStage } from '../../store/stream/selectors.ts';
+import { RECENT_DAYS } from '../../features/thread-list/totals.ts';
 
 // The search looks through the name and the description, case-insensitive.
 export function agentMatches(agent: Pick<AgentView, 'name' | 'description'>, q: string | undefined): boolean {
@@ -36,6 +37,29 @@ export function modeLabel(headless: boolean): string {
 // "11 agents · 4 active threads" above the catalog.
 export function agentsSummary(agents: number, running: number): string {
   return `${countOf(agents, 'agent')} · ${countOf(running, 'active thread')}`;
+}
+
+// "214 threads · 61 in 30 days · 2 running" over the activity: the whole
+// count and the recent one come by place (features/thread-list/totals.ts),
+// the running ones are the store's. Until the whole count is known only the
+// running ones are named; a caption with nothing to say is none — the empty
+// activity speaks for itself.
+export function activityCaption(total: number | null, recent: number | null, running: number): string | undefined {
+  const parts: string[] = [];
+
+  if (total !== null && total > 0) {
+    parts.push(countOf(total, 'thread'));
+
+    if (recent !== null) {
+      parts.push(`${recent.toLocaleString('en-US')} in ${RECENT_DAYS} days`);
+    }
+  }
+
+  if (running > 0) {
+    parts.push(`${running} running`);
+  }
+
+  return parts.length > 0 ? parts.join(' · ') : undefined;
 }
 
 export type AgentsFilterPatch = Partial<Omit<AgentsRoute, 'key'>>;

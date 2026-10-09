@@ -1,6 +1,7 @@
 // Project (design: ProjectScreen): the header — name, description, folder,
 // dates, "Edit" and "Archive" (or "Unarchive") — the project's threads the
-// store knows, and the whole file area rooted at the project folder with
+// store knows under the link to all of them with their whole count (read
+// by place: features/thread-list/queries.ts), and the whole file area rooted at the project folder with
 // AGENTS.md / inbox.md / journal.md pinned above the rows (design rule 17;
 // the same FileBrowser as Files). The project is the registry row by the
 // route's slug; the path inside the folder is the route too. Editing is
@@ -26,6 +27,8 @@ import { joinPath, nodeOf } from '../../features/file-area/node.ts';
 import { useWorkspaceNode } from '../../features/file-area/queries.ts';
 import { EditProjectDialog } from '../../features/projects/EditProjectDialog.tsx';
 import { ThreadList } from '../../features/thread-list/ThreadList.tsx';
+import { useThreadTotal } from '../../features/thread-list/queries.ts';
+import { totalWithTail } from '../../features/thread-list/totals.ts';
 import { Btn } from '../../ui/Btn/Btn.tsx';
 import { Card, CardHead } from '../../ui/Card/Card.tsx';
 import { Empty } from '../../ui/Empty/Empty.tsx';
@@ -34,7 +37,7 @@ import { PageHead } from '../../ui/PageHead/PageHead.tsx';
 import { Pin, Pins } from '../../ui/Pins/Pins.tsx';
 import { Screen } from '../../ui/Screen/Screen.tsx';
 import { Skel, SkelStack } from '../../ui/Skel/Skel.tsx';
-import { pinsOf, projectRoute, projectShell, projectStage } from './ProjectScreen.logic.ts';
+import { allThreadsLabel, pinsOf, projectRoute, projectShell, projectStage } from './ProjectScreen.logic.ts';
 import './ProjectScreen.css';
 
 // The card shows the newest threads; the rest are a link away.
@@ -67,6 +70,10 @@ function ProjectPage({ project, route }: { project: ProjectView; route: ProjectR
   const selectThreads = useMemo(makeSelectProjectThreads, []);
   const threads = useAppSelector(s => selectThreads(s, project.id));
   const running = useAppSelector(selectRunningCountByProject)[project.id] ?? 0;
+  // The project's whole count of threads from the server, brought up to
+  // the tail the store has folded since.
+  const all = useThreadTotal({ projectId: project.id });
+  const total = all.data ? totalWithTail(all.data, threads) : null;
   const flagging = useAppSelector(s => selectProjectFlagging(s, project.id));
   const [editing, setEditing] = useState(false);
   const path = joinPath(project.slug, route.path ?? '');
@@ -149,7 +156,7 @@ function ProjectPage({ project, route }: { project: ProjectView; route: ProjectR
           countState="run"
           link={
             <Link className="link" route={{ key: 'threads', project: project.slug }}>
-              All project threads
+              {allThreadsLabel(total)}
             </Link>
           }
         />

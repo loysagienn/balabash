@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { pinsOf, projectRoute, projectShell, projectStage } from './ProjectScreen.logic.ts';
+import { allThreadsLabel, pinsOf, projectRoute, projectShell, projectStage } from './ProjectScreen.logic.ts';
 
 describe('project page', () => {
   it('tells the stage of the page', () => {
@@ -8,6 +8,12 @@ describe('project page', () => {
     assert.equal(projectStage(false, 'failed'), 'failed');
     assert.equal(projectStage(false, 'ready'), 'unknown');
     assert.equal(projectStage(true, 'ready'), 'project');
+  });
+
+  it('names the link to all project threads with their count once known', () => {
+    assert.equal(allThreadsLabel(null), 'All');
+    assert.equal(allThreadsLabel(0), 'All · 0');
+    assert.equal(allThreadsLabel(1234), 'All · 1,234');
   });
 
   it('routes the file area at the project folder', () => {

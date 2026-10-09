@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { agentMatches, agentsDetail, agentsShell, agentsSummary, engineLabel, engineName, modeLabel, withAgentsFilters } from './AgentsScreen.logic.ts';
+import { activityCaption, agentMatches, agentsDetail, agentsShell, agentsSummary, engineLabel, engineName, modeLabel, withAgentsFilters } from './AgentsScreen.logic.ts';
 
 describe('agents screen rules', () => {
   it('matches the search against the name and the description, case-insensitive', () => {
@@ -26,6 +26,15 @@ describe('agents screen rules', () => {
     assert.equal(agentsSummary(11, 4), '11 agents · 4 active threads');
     assert.equal(agentsSummary(1, 1), '1 agent · 1 active thread');
     assert.equal(agentsSummary(0, 0), '0 agents · 0 active threads');
+  });
+
+  it('captions the activity with the whole count, the recent one and the running ones, each when known', () => {
+    assert.equal(activityCaption(214, 61, 2), '214 threads · 61 in 30 days · 2 running');
+    assert.equal(activityCaption(1214, 0, 0), '1,214 threads · 0 in 30 days');
+    assert.equal(activityCaption(1, null, 0), '1 thread');
+    assert.equal(activityCaption(null, 61, 1), '1 running');
+    assert.equal(activityCaption(null, null, 0), undefined);
+    assert.equal(activityCaption(0, 0, 0), undefined);
   });
 
   it('writes the next route of a filter change without empty keys', () => {

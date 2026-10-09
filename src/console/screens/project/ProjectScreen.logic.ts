@@ -62,6 +62,13 @@ export function projectShell(title: string, slug: string, path: string | undefin
   return { title, titleNarrow: nameOf(path), crumb: PROJECTS_CRUMB, back, detail: false, pageHead: true };
 }
 
+// The link of the "Project threads" card: "All · 23" once the project's
+// whole count is known (features/thread-list/totals.ts), "All" before —
+// the way Home names all projects.
+export function allThreadsLabel(total: number | null): string {
+  return total === null ? 'All' : `All · ${total.toLocaleString('en-US')}`;
+}
+
 export type PinData = { icon: IconName; name: string; desc: string; path: string };
 
 const PINS: { name: string; icon: IconName; role: string }[] = [

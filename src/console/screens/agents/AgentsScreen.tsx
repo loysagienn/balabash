@@ -1,11 +1,14 @@
 // Agents — the catalog from the snapshot and the selected agent: its
 // settings (engine, model, effort, mode, whom it launches), its tool
 // servers (the passport names the servers, not the single tools) and its
-// activity — the threads of the agent the store knows, active first.
+// activity — the threads of the agent the store knows, active first, under
+// the agent's whole count and its count of the last 30 days, read by place
+// (features/thread-list/queries.ts — the store holds only a window).
 // A split view: the catalog beside the details when wide, one of them on
 // the phone (the selected agent is a detail screen there). The selection
-// and the search are the route. Nothing is requested: the catalog and the
-// threads are the snapshot and its tail. A failed first snapshot replaces
+// and the search are the route. The catalog and the threads are the
+// snapshot and its tail; the two counts are the one request of the
+// screen. A failed first snapshot replaces
 // the split view (Home does the same): the error and Retry must be in
 // sight on the phone too, where the named agent hides the catalog.
 
@@ -23,6 +26,8 @@ import { selectStream, snapshotStage } from '../../store/stream/selectors.ts';
 import { makeSelectAgentThreads, selectRunningCount, selectRunningCountByAgent } from '../../store/threads/selectors.ts';
 import { Shell } from '../../features/shell/Shell.tsx';
 import { ThreadList } from '../../features/thread-list/ThreadList.tsx';
+import { useThreadTotal } from '../../features/thread-list/queries.ts';
+import { recentSince, totalWithTail } from '../../features/thread-list/totals.ts';
 import { Avatar } from '../../ui/Avatar/Avatar.tsx';
 import { Badge } from '../../ui/Badge/Badge.tsx';
 import { Card } from '../../ui/Card/Card.tsx';
@@ -36,7 +41,7 @@ import { Screen } from '../../ui/Screen/Screen.tsx';
 import { Skel, SkelRow, SkelStack } from '../../ui/Skel/Skel.tsx';
 import { DetailSection, Split, SplitDetail, SplitList } from '../../ui/Split/Split.tsx';
 import { Code, Quiet, Tag } from '../../ui/atoms/atoms.tsx';
-import { agentMatches, agentsDetail, agentsShell, agentsSummary, engineLabel, engineName, modeLabel, withAgentsFilters } from './AgentsScreen.logic.ts';
+import { activityCaption, agentMatches, agentsDetail, agentsShell, agentsSummary, engineLabel, engineName, modeLabel, withAgentsFilters } from './AgentsScreen.logic.ts';
 import './AgentsScreen.css';
 
 // The activity shows the newest threads; the rest are a link away.
@@ -58,6 +63,12 @@ function AgentDetail({ agent, running }: { agent: AgentView; running: number }) 
   const now = useNow();
   const selectThreads = useMemo(makeSelectAgentThreads, []);
   const threads = useAppSelector(s => selectThreads(s, agent.name));
+  // The counts of the agent's threads — all time and the recent window —
+  // from the server, brought up to the tail the store has folded since.
+  const since = recentSince(now);
+  const all = useThreadTotal({ agent: agent.name });
+  const recent = useThreadTotal({ agent: agent.name, createdAtGte: since.toISOString() });
+  const caption = activityCaption(all.data ? totalWithTail(all.data, threads) : null, recent.data ? totalWithTail(recent.data, threads, since) : null, running);
 
   return (
     <Card narrow="bare">
@@ -100,7 +111,7 @@ function AgentDetail({ agent, running }: { agent: AgentView; running: number }) 
           <Quiet>no tool servers</Quiet>
         )}
       </DetailSection>
-      <DetailSection title="Activity" end={running > 0 ? <Quiet>{`${running} running`}</Quiet> : undefined}>
+      <DetailSection title="Activity" end={caption ? <Quiet>{caption}</Quiet> : undefined}>
         {threads.length > 0 ? (
           <ThreadList className="agt-list" threads={threads.slice(0, AGENT_THREADS)} now={now} noAgent flat />
         ) : (
