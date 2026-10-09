@@ -1,0 +1,284 @@
+// The routing table of the console (frontend.md, "Роутер"). Everything the
+// URL says is in the route object, search params included: list filters,
+// the selected item of a split view, the editor mode. readRoute and
+// writeRoute are inverses (routes.test.ts).
+
+import type { ThreadStatus } from '../../../core/contract.ts';
+import { defineRoute, encodePath, initRouter, queryString, segments } from './types.ts';
+import type { InferRoute } from './types.ts';
+
+const THREAD_STATUSES: ThreadStatus[] = ['active', 'completed', 'failed', 'cancelled'];
+
+export type ThreadsFilters = {
+  status?: ThreadStatus;
+  agent?: string;
+  // A project slug (the snapshot maps it to the projectId).
+  project?: string;
+  q?: string;
+};
+
+export type HomeRoute = { key: 'home' };
+export type ThreadsRoute = { key: 'threads' } & ThreadsFilters;
+export type ThreadRoute = { key: 'thread'; id: string };
+export type ProjectsRoute = { key: 'projects'; archived?: boolean };
+export type ProjectRoute = { key: 'project'; slug: string; path?: string };
+export type FilesRoute = { key: 'files'; path: string; view?: 'edit' };
+export type AppsRoute = { key: 'apps' };
+export type ScheduleRoute = { key: 'schedule'; taskId?: string };
+export type ConnectionsRoute = { key: 'connections' };
+export type SecretsRoute = { key: 'secrets'; id: string };
+export type AgentsRoute = { key: 'agents'; name?: string };
+export type SystemRoute = { key: 'system' };
+export type SettingsRoute = { key: 'settings' };
+export type DevUiRoute = { key: 'dev_ui'; section?: string };
+export type NotFoundRoute = { key: 'not_found'; url: string };
+
+const param = (params: URLSearchParams, name: string): string | undefined => {
+  const value = params.get(name);
+
+  return value ? value : undefined;
+};
+
+export const home = defineRoute<HomeRoute>({
+  key: 'home',
+  readRoute: path => (segments(path).length === 0 ? { key: 'home' } : null),
+  writeRoute: () => '/',
+});
+
+export const threads = defineRoute<ThreadsRoute>({
+  key: 'threads',
+  readRoute: (path, params) => {
+    const parts = segments(path);
+
+    if (parts.length !== 1 || parts[0] !== 'threads') {
+      return null;
+    }
+
+    const status = param(params, 'status');
+    const route: ThreadsRoute = { key: 'threads' };
+
+    if (status && (THREAD_STATUSES as string[]).includes(status)) {
+      route.status = status as ThreadStatus;
+    }
+
+    const agent = param(params, 'agent');
+    const project = param(params, 'project');
+    const q = param(params, 'q');
+
+    if (agent) route.agent = agent;
+    if (project) route.project = project;
+    if (q) route.q = q;
+
+    return route;
+  },
+  writeRoute: route => `/threads${queryString({ status: route.status, agent: route.agent, project: route.project, q: route.q })}`,
+});
+
+export const thread = defineRoute<ThreadRoute>({
+  key: 'thread',
+  readRoute: path => {
+    const parts = segments(path);
+
+    return parts.length === 2 && parts[0] === 'threads' ? { key: 'thread', id: parts[1] } : null;
+  },
+  writeRoute: route => `/threads/${encodeURIComponent(route.id)}`,
+});
+
+export const projects = defineRoute<ProjectsRoute>({
+  key: 'projects',
+  readRoute: (path, params) => {
+    const parts = segments(path);
+
+    if (parts.length !== 1 || parts[0] !== 'projects') {
+      return null;
+    }
+
+    return params.get('archived') === '1' ? { key: 'projects', archived: true } : { key: 'projects' };
+  },
+  writeRoute: route => `/projects${route.archived ? '?archived=1' : ''}`,
+});
+
+export const project = defineRoute<ProjectRoute>({
+  key: 'project',
+  readRoute: path => {
+    const parts = segments(path);
+
+    if (parts.length < 2 || parts[0] !== 'projects') {
+      return null;
+    }
+
+    if (parts.length === 2) {
+      return { key: 'project', slug: parts[1] };
+    }
+
+    if (parts[2] === 'files') {
+      return { key: 'project', slug: parts[1], path: parts.slice(3).join('/') };
+    }
+
+    return null;
+  },
+  writeRoute: route => {
+    const base = `/projects/${encodeURIComponent(route.slug)}`;
+
+    return route.path === undefined ? base : `${base}/files${route.path ? `/${encodePath(route.path)}` : ''}`;
+  },
+});
+
+export const files = defineRoute<FilesRoute>({
+  key: 'files',
+  readRoute: (path, params) => {
+    const parts = segments(path);
+
+    if (parts.length < 1 || parts[0] !== 'files') {
+      return null;
+    }
+
+    const route: FilesRoute = { key: 'files', path: parts.slice(1).join('/') };
+
+    if (params.get('view') === 'edit') {
+      route.view = 'edit';
+    }
+
+    return route;
+  },
+  writeRoute: route => `/files${route.path ? `/${encodePath(route.path)}` : ''}${queryString({ view: route.view })}`,
+});
+
+const simple = <K extends string>(key: K, segment: string) =>
+  defineRoute<{ key: K }>({
+    key,
+    readRoute: path => {
+      const parts = segments(path);
+
+      return parts.length === 1 && parts[0] === segment ? { key } : null;
+    },
+    writeRoute: () => `/${segment}`,
+  });
+
+export const apps = simple('apps', 'apps');
+export const connections = simple('connections', 'connections');
+export const system = simple('system', 'system');
+export const settings = simple('settings', 'settings');
+
+export const schedule = defineRoute<ScheduleRoute>({
+  key: 'schedule',
+  readRoute: path => {
+    const parts = segments(path);
+
+    if (parts[0] !== 'schedule' || parts.length > 2) {
+      return null;
+    }
+
+    return parts.length === 2 ? { key: 'schedule', taskId: parts[1] } : { key: 'schedule' };
+  },
+  writeRoute: route => `/schedule${route.taskId ? `/${encodeURIComponent(route.taskId)}` : ''}`,
+});
+
+export const secrets = defineRoute<SecretsRoute>({
+  key: 'secrets',
+  readRoute: path => {
+    const parts = segments(path);
+
+    return parts.length === 2 && parts[0] === 'secrets' ? { key: 'secrets', id: parts[1] } : null;
+  },
+  writeRoute: route => `/secrets/${encodeURIComponent(route.id)}`,
+});
+
+export const agents = defineRoute<AgentsRoute>({
+  key: 'agents',
+  readRoute: path => {
+    const parts = segments(path);
+
+    if (parts[0] !== 'agents' || parts.length > 2) {
+      return null;
+    }
+
+    return parts.length === 2 ? { key: 'agents', name: parts[1] } : { key: 'agents' };
+  },
+  writeRoute: route => `/agents${route.name ? `/${encodeURIComponent(route.name)}` : ''}`,
+});
+
+export const devUi = defineRoute<DevUiRoute>({
+  key: 'dev_ui',
+  readRoute: (path, params) => {
+    const parts = segments(path);
+
+    if (parts.length !== 2 || parts[0] !== 'dev' || parts[1] !== 'ui') {
+      return null;
+    }
+
+    const section = param(params, 'section');
+
+    return section ? { key: 'dev_ui', section } : { key: 'dev_ui' };
+  },
+  writeRoute: route => `/dev/ui${queryString({ section: route.section })}`,
+});
+
+export const notFound = defineRoute<NotFoundRoute>({
+  key: 'not_found',
+  readRoute: (path, params) => {
+    const search = params.toString();
+
+    return { key: 'not_found', url: search ? `${path}?${search}` : path };
+  },
+  writeRoute: route => route.url,
+});
+
+export const router = initRouter([
+  home,
+  threads,
+  thread,
+  projects,
+  project,
+  files,
+  apps,
+  schedule,
+  connections,
+  secrets,
+  agents,
+  system,
+  settings,
+  devUi,
+  notFound,
+] as const);
+
+export type AppRoute = ReturnType<typeof router.readRoute>;
+
+export const { readRoute, writeRoute } = router;
+
+// The shell's sections: which route keys belong to which navigation item.
+export type NavKey =
+  | 'home'
+  | 'threads'
+  | 'projects'
+  | 'files'
+  | 'apps'
+  | 'schedule'
+  | 'connections'
+  | 'agents'
+  | 'system'
+  | 'settings';
+
+export function navKeyOf(route: AppRoute): NavKey | null {
+  switch (route.key) {
+    case 'home':
+      return 'home';
+    case 'threads':
+    case 'thread':
+      return 'threads';
+    case 'projects':
+    case 'project':
+      return 'projects';
+    case 'files':
+      return 'files';
+    case 'apps':
+    case 'schedule':
+    case 'connections':
+    case 'agents':
+    case 'system':
+    case 'settings':
+      return route.key;
+    default:
+      return null;
+  }
+}

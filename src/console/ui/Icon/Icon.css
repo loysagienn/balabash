@@ -1,0 +1,10 @@
+@layer components{
+/* ── Icon ──  <svg class="ic" data-size="xs|sm|md|lg|xl" data-spin> — sized by font-size, like the design's icon font */
+.ic{display:inline-block;width:1em;height:1em;font-size:var(--ico);line-height:1;flex:none;font-style:normal}
+.ic[data-size="xs"]{font-size:var(--ico-xs)}
+.ic[data-size="sm"]{font-size:var(--ico-sm)}
+.ic[data-size="md"]{font-size:var(--ico-md)}
+.ic[data-size="lg"]{font-size:var(--ico-lg)}
+.ic[data-size="xl"]{font-size:var(--ico-xl)}
+.ic[data-spin]{animation:bb-spin var(--spin) linear infinite}
+}

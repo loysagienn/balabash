@@ -1,0 +1,94 @@
+// Button (design: Btn). variant: primary (one per screen or form) · regular
+// (default) · ghost (toolbars, rows) · danger (irreversible). busy — a
+// spinner instead of the icon; href — the same button as a link.
+
+import type { ButtonHTMLAttributes, MouseEvent, ReactNode } from 'react';
+import { Icon } from '../Icon/Icon.tsx';
+import type { IconName } from '../Icon/Icon.tsx';
+import { Kbd } from '../atoms/atoms.tsx';
+import './Btn.css';
+
+export type BtnVariant = 'primary' | 'ghost' | 'danger';
+export type BtnSize = 'sm' | 'lg';
+
+export type BtnProps = {
+  label?: ReactNode;
+  icon?: IconName;
+  iconAfter?: IconName;
+  variant?: BtnVariant;
+  size?: BtnSize;
+  block?: boolean;
+  busy?: boolean;
+  disabled?: boolean;
+  kbd?: string;
+  iconOnly?: boolean;
+  ariaLabel?: string;
+  // Renders the button as a link; a Link of the router wraps a plain Btn
+  // instead when the target is a route.
+  href?: string;
+  className?: string;
+  type?: 'button' | 'submit';
+  expanded?: boolean;
+  onClick?: (event: MouseEvent<HTMLElement>) => void;
+} & Pick<ButtonHTMLAttributes<HTMLButtonElement>, 'id' | 'title' | 'autoFocus' | 'tabIndex' | 'form'>;
+
+export function Btn({
+  label,
+  icon,
+  iconAfter,
+  variant,
+  size,
+  block,
+  busy,
+  disabled,
+  kbd,
+  iconOnly,
+  ariaLabel,
+  href,
+  className,
+  type = 'button',
+  expanded,
+  onClick,
+  ...rest
+}: BtnProps) {
+  const lead = busy ? 'loader-circle' : icon;
+  const classes = className ? `btn ${className}` : 'btn';
+  const content = (
+    <>
+      {lead ? <Icon name={lead} spin={busy} /> : null}
+      {label}
+      {iconAfter ? <Icon name={iconAfter} /> : null}
+      {kbd ? <Kbd>{kbd}</Kbd> : null}
+    </>
+  );
+  const data = {
+    'data-variant': variant,
+    'data-size': size,
+    'data-icon-only': iconOnly ? '' : undefined,
+    'data-block': block ? '' : undefined,
+  };
+
+  if (href !== undefined) {
+    return (
+      <a {...data} className={classes} href={href} aria-label={ariaLabel} aria-disabled={disabled ? 'true' : undefined} onClick={onClick}>
+        {content}
+      </a>
+    );
+  }
+
+  return (
+    <button
+      {...rest}
+      {...data}
+      type={type}
+      className={classes}
+      aria-label={ariaLabel}
+      aria-busy={busy ? 'true' : undefined}
+      aria-expanded={expanded}
+      disabled={disabled}
+      onClick={onClick}
+    >
+      {content}
+    </button>
+  );
+}

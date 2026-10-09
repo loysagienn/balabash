@@ -69,11 +69,18 @@ function manifestFromMetafile(metafile) {
 
   const [jsPath, output] = entryOutput;
   const toAsset = p => path.relative(ASSETS_DIR, path.resolve(p));
+  // The font files of this build (styles/fonts.css → file loader): the shell
+  // preloads the main faces by these names.
+  const fonts = Object.keys(metafile.outputs)
+    .filter(p => p.endsWith('.woff2'))
+    .map(toAsset)
+    .sort();
 
   return {
     builtAt: new Date().toISOString(),
     js: toAsset(jsPath),
     css: output.cssBundle ? toAsset(output.cssBundle) : null,
+    fonts,
   };
 }
 

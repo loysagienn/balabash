@@ -1,0 +1,11 @@
+@layer components{
+/* ── Object icon ──  <span class="obj" data-size="sm|md|lg|xl" data-state="err" data-kind="dir"><svg class="ic"></svg></span> */
+.obj{--obj-size:var(--obj);width:var(--obj-size);height:var(--obj-size);border-radius:var(--r-av);display:grid;place-items:center;flex:none;background:var(--surface-3);color:var(--text-2);font-size:var(--ico)}
+.obj .ic{font-size:inherit}
+.obj[data-size="sm"]{--obj-size:var(--obj-sm);border-radius:var(--r-inner);font-size:var(--ico-xs)}
+.obj[data-size="md"]{--obj-size:var(--obj-md);border-radius:var(--r-inner)}
+.obj[data-size="lg"]{--obj-size:var(--obj-lg);border-radius:var(--r-md);font-size:var(--ico-md)}
+.obj[data-size="xl"]{--obj-size:var(--obj-xl);border-radius:var(--r-md);font-size:var(--ico-xl)}
+.obj[data-state]{background:var(--st-bg);color:var(--st-c)}
+.obj[data-kind="dir"]{background:transparent;font-size:var(--ico-md)}
+}

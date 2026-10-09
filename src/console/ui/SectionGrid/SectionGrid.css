@@ -1,0 +1,10 @@
+@layer patterns{
+/* Section tiles  .secgrid > a.secgrid-i[aria-current] (.ic, label, .secgrid-badge) */
+.secgrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--sp-1h)}
+.secgrid-i{--secgrid-h:76px;position:relative;display:flex;flex-direction:column;align-items:flex-start;gap:var(--sp-2);min-height:var(--secgrid-h);padding:var(--sp-3) var(--sp-2) var(--sp-3) var(--sp-2h);border-radius:var(--r-md);background:var(--surface-2);color:var(--text);font-size:var(--fs-micro);line-height:var(--lh-micro);font-weight:var(--fw-semibold);letter-spacing:0;text-decoration:none}
+.secgrid-i .ic{font-size:var(--ico-md);color:var(--text-2)}
+.secgrid-i:hover{background-image:var(--layer-hover)}
+.secgrid-i[aria-current="page"]{background-image:var(--layer-press)}
+.secgrid-i[aria-current="page"] .ic{color:var(--accent)}
+.secgrid-badge{position:absolute;top:var(--sp-2h);right:var(--sp-2h)}
+}

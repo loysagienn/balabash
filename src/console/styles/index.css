@@ -1,0 +1,10 @@
+/* The console's stylesheet root (imported first by main.tsx). The cascade
+   layers of the design, in order: base (reset, contexts) → components
+   (ui/ blocks) → patterns (composite blocks: shell, thread, file area) →
+   screens (screen-local classes). Component CSS files declare their rules
+   inside their layer; nothing styles tags outside a layer. */
+@layer base, components, patterns, screens;
+
+@import './fonts.css';
+@import './tokens.css';
+@import './base.css';

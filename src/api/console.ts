@@ -33,7 +33,12 @@ type ConsoleManifest = {
   builtAt: string;
   js: string;
   css: string | null;
+  // Font asset names of the build (woff2); absent in older manifests.
+  fonts?: string[];
 };
+
+// The faces worth a preload: what the first paint of any screen uses.
+const PRELOAD_FONTS = ['Inter-Regular', 'Inter-Medium', 'Inter-SemiBold', 'JetBrainsMono-Regular'];
 
 const ASSET_TYPES: Record<string, string> = {
   '.js': 'text/javascript; charset=utf-8',
@@ -109,17 +114,24 @@ async function readManifest(manifestPath: string): Promise<ConsoleManifest | nul
 // --------------------------------------------------------------------------
 // The shell.
 
+export function preloadedFonts(manifest: ConsoleManifest): string[] {
+  return (manifest.fonts ?? []).filter(name => PRELOAD_FONTS.some(face => name.startsWith(`${face}-`)));
+}
+
 export function renderConsoleShell(manifest: ConsoleManifest): string {
   const cssLink = manifest.css ? `\n  <link rel="stylesheet" href="${escapeHtml(`${ASSETS_PREFIX}${manifest.css}`)}">` : '';
+  const fontLinks = preloadedFonts(manifest)
+    .map(name => `\n  <link rel="preload" as="font" type="font/woff2" crossorigin href="${escapeHtml(`${ASSETS_PREFIX}${name}`)}">`)
+    .join('');
 
   return `<!doctype html>
-<html lang="ru">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="color-scheme" content="dark">
   <meta name="console-build" content="${escapeHtml(manifest.builtAt)}">
-  <title>Balabash</title>${cssLink}
+  <title>Balabash</title>${fontLinks}${cssLink}
   <script type="module" src="${escapeHtml(`${ASSETS_PREFIX}${manifest.js}`)}"></script>
 </head>
 <body>

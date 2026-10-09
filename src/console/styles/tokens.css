@@ -1,0 +1,168 @@
+/* Balabash console — tokens (dark theme).
+   The only place where values are written. Components and screens take them via var(--…).
+   Light theme = a [data-theme="light"] block with the same names; only these groups need
+   overriding: “Surfaces”, “State layers”, “Lines”, “Text”, “Accent”, “Primary button”,
+   “Statuses”, “Identifiers”, “Code highlighting”, “Depth” — everything else is theme-independent.
+
+   Carried over from design/design-system/tokens.css with the same names; fonts
+   are local (fonts.css). */
+
+:root{
+  color-scheme: dark;
+
+  /* ── Surfaces: from deepest to topmost ── */
+  --bg:#0c0d0f;            /* app background, sidebar, wells (terminal, code) */
+  --surface:#131417;       /* cards, fields, controls */
+  --surface-2:#18191d;     /* overlays (menus, popovers, toasts) and insets inside a card */
+  --surface-3:#222329;     /* chips, counters, ring track; text on it — no darker than --text-2 */
+  --overlay:rgba(5,6,8,.72);  /* backdrop of modals and sheets */
+
+  /* ── State layers: translucent fill over any surface ── */
+  --hover:rgba(255,255,255,.045);
+  --selected:rgba(255,255,255,.07);
+  --press:rgba(255,255,255,.09);
+  --layer-hover:linear-gradient(var(--hover),var(--hover));
+  --layer-selected:linear-gradient(var(--selected),var(--selected));
+  --layer-press:linear-gradient(var(--press),var(--press));
+
+  /* ── Lines ── */
+  --border:#232429;        /* dividers, card and control outline at rest */
+  --border-strong:#2e3036; /* outline on hover, “cancelled” outline, overlay layers */
+  --border-ctl:#393b42;    /* input, checkbox outline, filter dashed line — 1.65:1 to --surface */
+  --border-hover:#45474f;  /* field outline on hover */
+  --focus:#7d86ff;         /* focus ring (= accent) */
+
+  /* ── Text (contrast given against --surface) ── */
+  --text:#ebecef;          /* primary             15.6:1 */
+  --text-2:#9a9da6;        /* secondary            6.8:1 */
+  --text-3:#83868f;        /* meta: time, captions 5.1:1 (on --surface-2 4.8:1; do not use on --surface-3) */
+  --text-4:#62656f;        /* disabled and decorative only, no contrast requirement */
+
+  /* ── Accent: links, active items, focus, capacity rings, section icons ── */
+  --accent:#7d86ff;
+  --accent-2:#56b6ff;      /* only the second stop of the logo gradient */
+  --accent-bg:color-mix(in srgb,var(--accent) 12%,transparent);
+  --accent-line:color-mix(in srgb,var(--accent) 35%,transparent);
+  --accent-ink:#ffffff;    /* text and icons on an accent fill */
+  --link:#9ea5ff;
+
+  /* ── Primary button: light neutral fill ── */
+  --primary-bg:var(--text);
+  --primary-bg-hover:#ffffff;
+  --primary-bg-press:#cfd1d6;
+  --primary-ink:var(--bg);
+
+  /* ── Statuses: one palette for threads, sessions, runs, connections, actions ── */
+  --st-run:#4ccf8e;        /* work in progress — the only thing that moves */
+  --st-wait:#5cb8f0;       /* waiting */
+  --st-act:#f2b33d;        /* user action needed */
+  --st-done:#9a9da6;       /* done — neutral */
+  --st-err:#f0645a;        /* error */
+  --st-off:#83868f;        /* cancelled, off */
+  --st-run-bg:color-mix(in srgb,var(--st-run) 12%,transparent);
+  --st-wait-bg:color-mix(in srgb,var(--st-wait) 12%,transparent);
+  --st-act-bg:color-mix(in srgb,var(--st-act) 13%,transparent);
+  --st-done-bg:color-mix(in srgb,var(--st-done) 12%,transparent);
+  --st-err-bg:color-mix(in srgb,var(--st-err) 11%,transparent);
+  --st-err-bg-strong:color-mix(in srgb,var(--st-err) 18%,transparent);
+  --st-err-bg-press:color-mix(in srgb,var(--st-err) 26%,transparent);
+  --st-off-bg:transparent;
+  --on-act:#1a1200;        /* text on a solid --st-act fill */
+  --on-err:#1f0605;        /* text on a solid --st-err fill */
+
+  /* ── Fill levels (rings): context, limits, disk, memory ── */
+  --lvl-ok:var(--accent);     /* below 80% */
+  --lvl-warn:var(--st-act);   /* 80–99% */
+  --lvl-over:var(--st-err);   /* 100% and overage */
+  --lvl-track:var(--surface-3);
+
+  /* ── Identifiers: who it is (agents, projects). Equal L and C in oklch, only the hue changes ── */
+  --id-1:oklch(0.78 0.12 255);  /* blue   */
+  --id-2:oklch(0.78 0.12 75);   /* amber  */
+  --id-3:oklch(0.78 0.12 345);  /* pink   */
+  --id-4:oklch(0.78 0.12 165);  /* mint   */
+  --id-5:oklch(0.78 0.12 295);  /* violet */
+  --id-6:oklch(0.78 0.12 215);  /* sky    */
+  --id-7:oklch(0.78 0.12 35);   /* coral  */
+  --id-8:oklch(0.78 0.12 125);  /* olive  */
+  --id-tint:15%;                /* avatar background = identifier color at 15% */
+
+  /* ── Code highlighting: its own palette, not the identifier colors ── */
+  --code-kw:oklch(0.78 0.12 295);   /* keywords, tags */
+  --code-str:oklch(0.80 0.11 165);  /* strings, attribute values */
+  --code-fn:oklch(0.80 0.10 245);   /* functions, attributes */
+  --code-num:oklch(0.80 0.12 75);   /* numbers */
+  --code-com:var(--text-3);         /* comments */
+  --diff-add:var(--st-run);
+  --diff-del:var(--st-err);
+
+  /* ── Typography ── */
+  --font:'Inter',system-ui,sans-serif;
+  --mono:'JetBrains Mono',ui-monospace,monospace;
+  --tracking:0.012em;            /* for --font; --mono is always 0 */
+  --fs-display:28px; --lh-display:34px;   /* large metric figures */
+  --fs-h1:20px;      --lh-h1:28px;        /* page and thread title */
+  --fs-lg:16px;      --lh-lg:22px;        /* header title on phone, Markdown heading */
+  --fs-h2:15px;      --lh-h2:22px;        /* header, modal, viewer title */
+  --fs-body:14px;    --lh-body:21px;      /* message text, descriptions */
+  --fs-ui:13.5px;    --lh-ui:20px;        /* rows, menus, buttons, fields */
+  --fs-meta:12px;    --lh-meta:17px;      /* time, captions, meta line */
+  --fs-micro:11px;   --lh-micro:15px;     /* counters, tags, tab labels */
+  --fs-code:12.5px;  --lh-code:21px;      /* monospace: blocks, source */
+  --fs-code-sm:11.5px; --lh-code-sm:18px; /* monospace: chips, terminal, code */
+  --fw-regular:400; --fw-medium:500; --fw-semibold:600; --fw-bold:700;
+
+  /* ── Icons (Lucide, outline) ── */
+  --ico-xs:13px; --ico-sm:14px; --ico:16px; --ico-md:18px; --ico-lg:20px; --ico-xl:24px;
+
+  /* ── Spacing: 4px step, “h” — half step (+2px) ── */
+  --sp-0h:2px; --sp-1:4px; --sp-1h:6px; --sp-2:8px; --sp-2h:10px; --sp-3:12px; --sp-3h:14px;
+  --sp-4:16px; --sp-4h:18px; --sp-5:20px; --sp-6:24px; --sp-7:28px; --sp-8:32px; --sp-10:40px; --sp-12:48px;
+
+  /* ── Layout frame ── */
+  --side-w:236px; --top-h:56px; --tabs-h:60px;
+  --gutter:28px;  --gap:16px;  --tile-gap:8px;       /* desktop: gutters, gap, 12 columns */
+  --m-gutter:16px; --m-gap:12px; --m-top-h:52px;      /* phone: substituted for --gutter/--gap/--top-h */
+  --content-max:1600px; --feed-max:800px; --rail-w:300px;
+  --hit:44px;                                         /* minimum hit area on a touch screen */
+  --hit-ext:0px;                                      /* how far to extend the hit area of small controls (< 0 in touch) */
+
+  /* ── Controls ── */
+  --ctl-h-sm:28px; --ctl-h:32px; --ctl-h-lg:40px;              /* desktop */
+  --ctl-h-sm-touch:36px; --ctl-h-touch:44px; --ctl-h-lg-touch:48px; /* touch; small controls still get a 44 hit area */
+  --fs-input:var(--fs-ui); --fs-input-touch:16px;              /* 16px: iOS does not zoom the page on focus */
+  --nav-h:36px; --row-h:56px; --xp-h:38px;
+
+  /* ── Avatars and object icons ── */
+  --av-xs:16px; --av-sm:24px; --av:34px; --av-lg:44px;
+  --av-fs-xs:9px; --av-fs-sm:11px; --av-fs:14px; --av-fs-lg:18px;
+  --obj-sm:24px; --obj-md:28px; --obj:34px; --obj-lg:40px; --obj-xl:48px;
+  --ring-sm:22px; --ring-lg:56px;
+
+  /* ── Radii: grow with the container ── */
+  --r-xs:5px;     /* code chips, tags, kbd, avatar xs */
+  --r-inner:7px;  /* small controls, menu item, segment, tooltip, icons up to 28px */
+  --r-sm:9px;     /* buttons, fields */
+  --r-av:11px;    /* avatars, object icons */
+  --r-md:12px;    /* tiles, card rows, popovers, feed groups */
+  --r-lg:16px;    /* cards, modals, sheets */
+  --r-pill:999px; /* badges, counters */
+
+  /* ── Depth: layers differ by background and line; only overlays get a shadow ── */
+  --shadow-pop:0 0 0 1px var(--border-strong), 0 12px 32px -8px rgba(0,0,0,.6);
+  --shadow-modal:0 0 0 1px var(--border-strong), 0 24px 64px -12px rgba(0,0,0,.7);
+  --ring-focus:0 0 0 2px var(--bg), 0 0 0 4px var(--focus);   /* buttons and tiles */
+  --ring-field:0 0 0 3px var(--accent-bg);                   /* focused field */
+  --ring-field-err:0 0 0 3px var(--st-err-bg);               /* field with an error */
+  --z-raised:1; --z-sticky:10; --z-drop:20; --z-pop:40; --z-scrim:50; --z-modal:60; --z-toast:80;
+
+  /* ── Motion ── */
+  --ease:cubic-bezier(.2,0,0,1); --ease-out:cubic-bezier(0,0,.2,1);
+  --dur-1:120ms;  /* hover, press */
+  --dur-2:200ms;  /* row expand, popover */
+  --dur-3:320ms;  /* sheet, modal, toast */
+  --pulse:1.6s;   /* global “work in progress” indicator */
+  --blink:1.4s;   /* dot of a running object */
+  --spin:0.9s;    /* loading indicator */
+  --flash:2.4s;   /* highlight of a new item */
+}

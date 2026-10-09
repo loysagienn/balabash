@@ -1,0 +1,8 @@
+@layer patterns{
+/* “N threads running” indicator  <button class="actchip" aria-expanded="false" data-state="off" data-compact> */
+.actchip{display:inline-flex;align-items:center;gap:var(--sp-2);height:var(--ctl-h);padding:0 var(--sp-3);border-radius:var(--r-sm);border:1px solid var(--border);background-color:var(--surface);color:var(--text-2);font-size:var(--fs-ui);font-weight:var(--fw-medium);white-space:nowrap}
+.actchip:is(:hover,[aria-expanded="true"]){background-image:var(--layer-hover);border-color:var(--border-strong);color:var(--text)}
+.actchip-n{color:var(--text);font-weight:var(--fw-semibold);font-variant-numeric:tabular-nums}
+.actchip[data-compact] .actchip-l{display:none}
+@container shell (max-width:720px){ .actchip-l{display:none} }
+}

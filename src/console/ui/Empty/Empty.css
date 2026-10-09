@@ -1,0 +1,8 @@
+@layer components{
+/* ── Empty / load error ──  .empty > .obj.empty-ic + .empty-t + .empty-d + .empty-acts */
+.empty{--empty-w:320px;display:flex;flex-direction:column;align-items:center;gap:var(--sp-1);padding:var(--sp-8) var(--sp-6);text-align:center}
+.empty-ic{margin-bottom:var(--sp-2)}
+.empty-t{font-size:var(--fs-ui);font-weight:var(--fw-semibold);color:var(--text)}
+.empty-d{max-width:var(--empty-w);font-size:var(--fs-meta);line-height:var(--lh-meta);color:var(--text-3);text-wrap:pretty}
+.empty-acts{display:flex;gap:var(--sp-2);margin-top:var(--sp-3)}
+}

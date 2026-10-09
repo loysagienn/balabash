@@ -1,0 +1,26 @@
+@layer components{
+/* ── Input ──  <div class="inp" data-variant="mono"> [.ic] <input|textarea|select> [.inp-end] </div> */
+.inp{
+  --inp-area-h:72px;
+  display:flex;align-items:center;gap:var(--sp-2);min-height:var(--ctl-h);padding:0 var(--sp-2h);min-width:0;
+  border:1px solid var(--border-ctl);border-radius:var(--r-sm);background:var(--surface);color:var(--text);
+  font-size:var(--fs-input);line-height:var(--lh-ui);
+  transition:border-color var(--dur-1) var(--ease),box-shadow var(--dur-1) var(--ease)}
+.inp > :is(input,textarea,select){flex:1;min-width:0;align-self:stretch;margin:0;padding:0;border:0;background:transparent;color:inherit;font:inherit;outline:none;appearance:none}
+.inp > :is(input,textarea)::placeholder{color:var(--text-3)}
+.inp > .ic{color:var(--text-3)}
+.inp-pre{flex:none;color:var(--text-3)}
+.inp-end{margin-left:auto;display:flex;align-items:center;gap:var(--sp-1h);flex:none;color:var(--text-3)}
+.inp:has(> select) .inp-end{pointer-events:none}
+.inp:hover{border-color:var(--border-hover)}
+.inp:focus-within{border-color:var(--accent);box-shadow:var(--ring-field)}
+.inp:has([aria-invalid="true"]){border-color:var(--st-err);box-shadow:var(--ring-field-err)}
+.inp:has(> :disabled){background:var(--bg);border-color:var(--border);color:var(--text-4);pointer-events:none}
+.inp:has(> :disabled) :is(.ic,.inp-pre,.inp-end){color:var(--text-4)}
+.inp[data-variant="mono"]{font-family:var(--mono);letter-spacing:0}
+.inp:has(> textarea){align-items:flex-start;padding:var(--sp-2) var(--sp-2h)}
+.inp > textarea{min-height:var(--inp-area-h);resize:vertical;line-height:var(--lh-body)}
+
+/* ── Form ──  .form > .fld… — vertical rhythm of fields in a modal, sheet, card */
+.form{display:flex;flex-direction:column;gap:var(--sp-3h)}
+}

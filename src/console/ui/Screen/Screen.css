@@ -1,0 +1,4 @@
+@layer patterns{
+/* Section screen: gutters and vertical rhythm of content */
+.screen{display:flex;flex-direction:column;gap:var(--gap);min-width:0;max-width:var(--content-max);padding:var(--gap) var(--gutter) var(--sp-8)}
+}

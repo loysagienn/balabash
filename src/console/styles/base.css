@@ -1,0 +1,66 @@
+/* Balabash console — base: reset, default text, focus, shared contexts.
+   Carried over from design/design-system/base.css. Requires tokens.css.
+
+   Shared contexts — attributes every component understands:
+   data-state="run|wait|act|done|err|off"  object state → --st-c (color), --st-bg (tinted background)
+   data-id="1…8|you"                       identifier (agent, project) → --id-c
+   data-density="touch"                    touch density for a subtree (controls 36/44/48, fields 16px)
+
+   Layer order (declared in index.css): base → components → patterns → screens. */
+
+@layer base{
+
+*,*::before,*::after{box-sizing:border-box}
+html,body{margin:0}
+html,body,#root{height:100%}
+body{background:var(--bg);color:var(--text);font:var(--fs-body)/var(--lh-body) var(--font);letter-spacing:var(--tracking);-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+:where(h1,h2,h3,h4,h5,h6,p,ul,ol,dl,dd,figure,blockquote,pre){margin:0}
+:where(ul,ol){padding:0}
+:where(button){font:inherit;letter-spacing:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer;text-align:inherit}
+:where(input,textarea,select){font:inherit;letter-spacing:inherit;color:inherit}
+:where(a){color:var(--link);text-decoration:none}
+:where(a:hover){color:var(--text)}
+:where(code,kbd,samp,pre){font-family:var(--mono);letter-spacing:0}
+:where(small){font-size:inherit}   /* the component sets the size; the browser’s “smaller” would give an off-scale 10px */
+:where(img,svg,video){display:block;max-width:100%}
+:where(table){border-collapse:collapse}
+[hidden]{display:none !important}
+
+/* Keyboard focus — the same for everything interactive. A component may refine it. */
+:where(a,button,input,select,textarea,summary,[tabindex]):focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+:where(input,textarea,select):focus-visible{outline:none}   /* for fields, the .inp wrapper draws the focus */
+
+/* Screen reader only */
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+
+/* ── State context ── */
+[data-state="run"]{--st-c:var(--st-run);--st-bg:var(--st-run-bg)}
+[data-state="wait"]{--st-c:var(--st-wait);--st-bg:var(--st-wait-bg)}
+[data-state="act"]{--st-c:var(--st-act);--st-bg:var(--st-act-bg)}
+[data-state="done"]{--st-c:var(--st-done);--st-bg:var(--st-done-bg)}
+[data-state="err"]{--st-c:var(--st-err);--st-bg:var(--st-err-bg)}
+[data-state="off"]{--st-c:var(--st-off);--st-bg:var(--st-off-bg)}
+
+/* ── Identifier context ── */
+[data-id="1"]{--id-c:var(--id-1)} [data-id="2"]{--id-c:var(--id-2)} [data-id="3"]{--id-c:var(--id-3)} [data-id="4"]{--id-c:var(--id-4)}
+[data-id="5"]{--id-c:var(--id-5)} [data-id="6"]{--id-c:var(--id-6)} [data-id="7"]{--id-c:var(--id-7)} [data-id="8"]{--id-c:var(--id-8)}
+[data-id="you"]{--id-c:var(--text-2)}
+
+/* ── Touch density ── */
+[data-density="touch"]{--ctl-h-sm:var(--ctl-h-sm-touch);--ctl-h:var(--ctl-h-touch);--ctl-h-lg:var(--ctl-h-lg-touch);--fs-input:var(--fs-input-touch);--hit-ext:calc((var(--ctl-h-sm-touch) - var(--hit)) / 2)}
+@media (pointer:coarse){
+  :root{--ctl-h-sm:var(--ctl-h-sm-touch);--ctl-h:var(--ctl-h-touch);--ctl-h-lg:var(--ctl-h-lg-touch);--fs-input:var(--fs-input-touch);--hit-ext:calc((var(--ctl-h-sm-touch) - var(--hit)) / 2)}
+}
+
+} /* @layer base */
+
+/* ── Animations ── */
+@keyframes bb-pulse{0%,100%{box-shadow:0 0 0 0 var(--st-run-bg)}50%{box-shadow:0 0 0 5px transparent}}
+@keyframes bb-blink{50%{opacity:.3}}
+@keyframes bb-spin{to{transform:rotate(360deg)}}
+@keyframes bb-shimmer{0%{background-position:-200px 0}100%{background-position:200px 0}}
+@keyframes bb-indet{0%{transform:translateX(-100%)}100%{transform:translateX(340%)}}
+@keyframes bb-flash{0%{background-color:var(--accent-bg)}100%{background-color:transparent}}
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{transition-duration:0ms !important;animation-duration:0ms !important;animation-iteration-count:1 !important}
+}

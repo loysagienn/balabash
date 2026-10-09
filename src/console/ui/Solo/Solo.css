@@ -1,0 +1,22 @@
+@layer patterns{
+/* ── Signed-out screen ──  .solo > .solo-wrap > .solo-card (.solo-brand > .solo-logo, .obj.solo-ic, h1.solo-t, .solo-d, content, .solo-f)
+   Its own “shell” container: on a narrow screen the card loses its frame and the fields take the touch density. */
+.solo{--solo-w:440px;container:shell / inline-size;height:100%;overflow:auto;background:var(--bg)}
+.solo-wrap{min-height:100%;display:grid;grid-template-columns:minmax(0,1fr);place-items:center;padding:var(--sp-10) var(--sp-4)}
+.solo-card{width:min(var(--solo-w),100%);min-width:0;display:flex;flex-direction:column;gap:var(--sp-4);padding:var(--sp-7) var(--sp-7) var(--sp-6);border-radius:var(--r-lg);background:var(--surface);border:1px solid var(--border)}
+.solo-brand{display:flex;align-items:center;gap:var(--sp-2);font-size:var(--fs-meta);line-height:var(--lh-meta);font-weight:var(--fw-medium);color:var(--text-3)}
+.solo-logo{width:var(--obj-sm);height:var(--obj-sm);flex:none;display:grid;place-items:center;border-radius:var(--r-inner);background:linear-gradient(135deg,var(--accent),var(--accent-2));color:var(--accent-ink);font-weight:var(--fw-bold);font-size:var(--fs-meta);line-height:var(--lh-meta)}
+.solo-t{margin:0;font-size:var(--fs-h1);line-height:var(--lh-h1);font-weight:var(--fw-semibold);text-wrap:pretty}
+.solo-d{margin:0;color:var(--text-2);font-size:var(--fs-ui);line-height:var(--lh-ui);text-wrap:pretty}
+.solo-f{display:flex;align-items:center;gap:var(--sp-1h);padding-top:var(--sp-3);border-top:1px solid var(--border);font-size:var(--fs-meta);line-height:var(--lh-meta);color:var(--text-3)}
+.solo-ic{align-self:flex-start}
+@container shell (max-width:720px){
+  .solo-wrap{--gutter:var(--m-gutter);--gap:var(--m-gap);--top-h:var(--m-top-h);
+    --ctl-h-sm:var(--ctl-h-sm-touch);--ctl-h:var(--ctl-h-touch);--ctl-h-lg:var(--ctl-h-lg-touch);--fs-input:var(--fs-input-touch);
+    --hit-ext:calc((var(--ctl-h-sm-touch) - var(--hit)) / 2)}
+}
+@container shell (max-width:520px){
+  .solo-wrap{place-items:start stretch;padding:var(--sp-6) var(--gutter)}
+  .solo-card{padding:0;border:0;background:none}
+}
+}

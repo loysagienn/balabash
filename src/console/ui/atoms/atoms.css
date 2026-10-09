@@ -1,0 +1,23 @@
+@layer components{
+/* ── Counter ──  <span class="count" data-state="run|act|err" data-size="sm">4</span> */
+.count{--count-h:20px;display:inline-block;flex:none;min-width:var(--count-h);height:var(--count-h);padding:0 var(--sp-1h);border-radius:var(--r-pill);background:var(--surface-3);color:var(--text-2);font-size:var(--fs-micro);font-weight:var(--fw-semibold);line-height:var(--count-h);text-align:center;font-variant-numeric:tabular-nums}
+.count[data-state]{background:var(--st-bg);color:var(--st-c)}
+.count[data-state="act"]{background:var(--st-act);color:var(--on-act);font-weight:var(--fw-bold)}
+.count[data-state="err"]{background:var(--st-err);color:var(--on-err);font-weight:var(--fw-bold)}
+.count[data-size="sm"]{--count-h:16px;padding:0 var(--sp-1)}
+
+/* ── Small labels ── */
+.tag{--tag-h:18px;display:inline-flex;align-items:center;height:var(--tag-h);padding:0 var(--sp-1h);border-radius:var(--r-xs);background:var(--surface-3);color:var(--text-2);font-size:var(--fs-micro);line-height:var(--lh-micro);font-weight:var(--fw-medium);white-space:nowrap;flex:none}
+.code{font-family:var(--mono);letter-spacing:0;font-size:var(--fs-code-sm);color:var(--text-2);background:var(--surface-3);border-radius:var(--r-xs);padding:1px var(--sp-1);white-space:nowrap}
+.code[data-wrap]{white-space:normal;overflow-wrap:anywhere}
+.kbd{--kbd-h:18px;display:inline-flex;align-items:center;justify-content:center;min-width:var(--kbd-h);height:var(--kbd-h);padding:0 var(--sp-1);border-radius:var(--r-xs);background:var(--surface-3);box-shadow:inset 0 -1px 0 var(--border-strong);color:var(--text-2);font:var(--fw-medium) var(--fs-micro) var(--font);letter-spacing:0}
+.attn{--attn:7px;width:var(--attn);height:var(--attn);border-radius:50%;background:var(--st-act);box-shadow:0 0 0 3px var(--st-act-bg);flex:none}
+.pulse{--pulse-size:8px;width:var(--pulse-size);height:var(--pulse-size);border-radius:50%;background:var(--st-run);flex:none;animation:bb-pulse var(--pulse) ease-in-out infinite}
+.pulse[data-state="off"]{background:var(--text-4);animation:none}
+
+/* ── Quiet label ──  an “empty” in a row where a value usually sits */
+.quiet{font-size:var(--fs-meta);line-height:var(--lh-meta);color:var(--text-3);white-space:nowrap}
+
+/* ── Caption ──  a small note under data or in a card footer */
+.caption{font-size:var(--fs-micro);line-height:var(--lh-micro);color:var(--text-3)}
+}

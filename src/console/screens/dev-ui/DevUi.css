@@ -1,0 +1,14 @@
+@layer screens{
+/* /dev/ui scaffolding — not product blocks */
+.dev-sec{display:flex;flex-direction:column;gap:var(--sp-3);padding:var(--sp-4h);border:1px solid var(--border);border-radius:var(--r-lg);background:var(--surface)}
+.dev-sec-t{margin:0;font-size:var(--fs-ui);font-weight:var(--fw-semibold);color:var(--text-2)}
+.dev-row{display:flex;flex-wrap:wrap;align-items:center;gap:var(--sp-3)}
+.dev-row > .caption{flex-basis:100%}
+.dev-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,280px),1fr));gap:var(--sp-4)}
+.dev-box{border:1px solid var(--border);border-radius:var(--r-md);background:var(--bg)}
+.dev-state{padding:var(--sp-1h) var(--sp-3);border-radius:var(--r-inner);background:var(--st-bg);color:var(--st-c);font-size:var(--fs-meta);line-height:var(--lh-meta);font-weight:var(--fw-semibold)}
+.dev-state[data-state="off"]{box-shadow:inset 0 0 0 1px var(--border-strong)}
+.dev-id{width:var(--av);height:var(--av);display:grid;place-items:center;border-radius:var(--r-av);color:var(--id-c);background:color-mix(in srgb,var(--id-c) var(--id-tint),transparent);font-size:var(--fs-meta);font-weight:var(--fw-bold)}
+.dev-icon{display:inline-flex;flex-direction:column;align-items:center;gap:var(--sp-1);width:92px;padding:var(--sp-2) 0;color:var(--text-2)}
+.dev-icon .caption{font-family:var(--mono);letter-spacing:0}
+}
