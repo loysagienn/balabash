@@ -1,0 +1,14 @@
+@layer patterns{
+/* ── Pinned project files ──  .pins > a.pin (.pin-t > .ic, .pin-d) */
+.pins{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--sp-2);padding:var(--sp-3) var(--sp-4);border-bottom:1px solid var(--border)}
+.pin{display:flex;flex-direction:column;gap:var(--sp-1);min-width:0;padding:var(--sp-2h) var(--sp-3);border-radius:var(--r-md);background:var(--surface);border:1px solid var(--border);color:inherit;text-decoration:none}
+.pin:hover{border-color:var(--border-strong);color:inherit}
+.pin-t{display:flex;align-items:center;gap:var(--sp-2);font-family:var(--mono);letter-spacing:0;font-size:var(--fs-code-sm);font-weight:var(--fw-medium);color:var(--text)}
+.pin-t .ic{font-size:var(--ico-sm);color:var(--text-2)}
+.pin-d{font-size:var(--fs-meta);line-height:var(--lh-meta);color:var(--text-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+@container fa (max-width:520px){
+  .pins{gap:var(--sp-1h)}
+  .pin{padding:var(--sp-2) var(--sp-2h)}
+  .pin-d{white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}   /* three in a row: the caption wraps to two lines, not cut mid-word */
+}
+}

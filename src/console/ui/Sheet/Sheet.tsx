@@ -19,21 +19,22 @@ export type SheetProps = {
   confirmVariant?: BtnVariant;
   confirmIcon?: IconName;
   confirmDisabled?: boolean;
+  busy?: boolean;
   onConfirm?: () => void;
   cancel?: string;
   onClose: () => void;
   children?: ReactNode;
 };
 
-export function Sheet({ label, title, desc, confirm, confirmVariant = 'primary', confirmIcon, confirmDisabled, onConfirm, cancel, onClose, children }: SheetProps) {
+export function Sheet({ label, title, desc, confirm, confirmVariant = 'primary', confirmIcon, confirmDisabled, busy, onConfirm, cancel, onClose, children }: SheetProps) {
   return (
     <Overlay onClose={onClose}>
-      <div className="sheet" role="dialog" aria-modal="true" aria-label={label} data-dock="bottom" tabIndex={-1}>
+      <div className="sheet" role="dialog" aria-modal="true" aria-label={label} aria-busy={busy ? 'true' : undefined} data-dock="bottom" tabIndex={-1}>
         <div className="sheet-grab" />
         {title ? <h3 className="sheet-t">{title}</h3> : null}
         {desc ? <p className="sheet-d">{desc}</p> : null}
         {children}
-        {confirm ? <Btn label={confirm} icon={confirmIcon} variant={confirmVariant} block disabled={confirmDisabled} onClick={onConfirm} /> : null}
+        {confirm ? <Btn label={confirm} icon={confirmIcon} variant={confirmVariant} block busy={busy} disabled={confirmDisabled} onClick={onConfirm} /> : null}
         {cancel ? <Btn label={cancel} variant="ghost" block onClick={onClose} /> : null}
       </div>
     </Overlay>

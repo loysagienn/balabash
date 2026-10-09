@@ -15,7 +15,8 @@ import type { CtxInput } from '../Ring/Ring.logic.ts';
 import { threadStateLabel } from '../ThreadHead/ThreadHead.logic.ts';
 import { Code, Hit, Tag } from '../atoms/atoms.tsx';
 import type { StateName } from '../atoms/state.ts';
-import { highlightParts, isActiveState, threadRowMeta } from './ThreadRow.logic.ts';
+import { highlightParts } from '../atoms/highlight.ts';
+import { isActiveState, threadRowMeta } from './ThreadRow.logic.ts';
 import type { ThreadRowMetaItem } from './ThreadRow.logic.ts';
 
 export type ThreadRowProps = {

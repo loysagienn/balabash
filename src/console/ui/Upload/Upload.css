@@ -1,0 +1,11 @@
+@layer patterns{
+/* ── Upload panel ──  .upl > .upl-h (.code, .upl-h-end) + .upl-i[data-state=done|err] (.obj.upl-ic, .upl-n, .upl-s, .prog.upl-prog) */
+.upl{--upl-w:380px;width:min(var(--upl-w),100%);background:var(--surface-2);border-radius:var(--r-md);box-shadow:var(--shadow-pop);overflow:hidden}
+.upl-h{display:flex;align-items:center;gap:var(--sp-2);padding:var(--sp-2h) var(--sp-3h);border-bottom:1px solid var(--border);font-size:var(--fs-ui);font-weight:var(--fw-semibold)}
+.upl-h-end{margin-left:auto;display:flex;gap:var(--sp-1)}
+.upl-i{display:grid;grid-template-columns:var(--obj-sm) minmax(0,1fr) auto;align-items:center;gap:var(--sp-1) var(--sp-2h);padding:var(--sp-2) var(--sp-3h)}
+.upl-ic{grid-row:1 / span 2}
+.upl-n{min-width:0;font-size:var(--fs-meta);line-height:var(--lh-meta);font-weight:var(--fw-medium);color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.upl-s{font-size:var(--fs-micro);line-height:var(--lh-micro);color:var(--st-c,var(--text-3));font-variant-numeric:tabular-nums;white-space:nowrap}
+.upl-prog{grid-column:2 / span 2}
+}

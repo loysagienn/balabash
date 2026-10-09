@@ -1,0 +1,21 @@
+@layer patterns{
+/* ── Markdown editing ──  .ed (container “ed”) [data-view=source|preview] > .ed-bar (.obj, .code.ed-path, .ed-dirty, .ed-bar-end > .seg.ed-mode + .btn) + .ed-panes (textarea.ed-src, .ed-pre > .md) */
+.ed{--ed-h:300px;--ed-h-narrow:220px;container:ed / inline-size;display:flex;flex-direction:column;min-width:0;border:1px solid var(--border);border-radius:var(--r-lg);overflow:hidden;background:var(--bg)}
+.ed-bar{display:flex;flex-wrap:wrap;align-items:center;gap:var(--sp-2);padding:var(--sp-2) var(--sp-3);border-bottom:1px solid var(--border);background:var(--surface)}
+.ed-path{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.ed-dirty{--dot:7px;display:inline-flex;align-items:center;gap:var(--sp-1h);font-size:var(--fs-meta);line-height:var(--lh-meta);color:var(--st-act)}
+.ed-dirty::before{content:"";width:var(--dot);height:var(--dot);border-radius:50%;background:currentColor}
+.ed-mode{display:none}
+.ed-bar-end{margin-left:auto;display:flex;align-items:center;gap:var(--sp-1h)}
+.ed-panes{flex:1;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);min-height:var(--ed-h)}   /* stretched editor — panels at full height */
+.ed-src{width:100%;margin:0;padding:var(--sp-3h) var(--sp-4);border:0;border-right:1px solid var(--border);background:transparent;outline:none;resize:none;font-family:var(--mono);letter-spacing:0;font-variant-ligatures:none;font-size:var(--fs-code);line-height:var(--lh-code);color:var(--text);white-space:pre-wrap}
+.ed-pre{padding:var(--sp-3h) var(--sp-4h)}
+@container ed (max-width:640px){
+  .ed-panes{grid-template-columns:minmax(0,1fr);min-height:var(--ed-h-narrow)}
+  .ed-src{border-right:0}
+  .ed:not([data-view="preview"]) .ed-pre,.ed[data-view="preview"] .ed-src{display:none}
+  .ed-mode{display:inline-flex;margin-right:auto}
+  .ed-bar-end{width:100%;flex-wrap:wrap;justify-content:flex-end}
+  .ed-bar-end .kbd{display:none}
+}
+}

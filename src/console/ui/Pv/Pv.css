@@ -1,0 +1,28 @@
+@layer patterns{
+/* ── File preview ──  .pv > .pv-h (.obj, .pv-t > .pv-name + .pv-m, .pv-acts) + .pv-note + .pv-b + .pv-actbar (narrow only) */
+.pv{display:flex;flex-direction:column;min-width:0;min-height:0;flex:1}
+.pv-h{display:flex;flex-wrap:wrap;align-items:flex-start;gap:var(--sp-3);padding:var(--sp-3) var(--sp-4);border-bottom:1px solid var(--border)}
+.pv-t{flex:1 1 0;min-width:0}
+.pv-name{display:block;font-size:var(--fs-h2);line-height:var(--lh-h2);font-weight:var(--fw-semibold);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pv-m{display:flex;flex-wrap:wrap;align-items:center;gap:var(--sp-1) var(--sp-2h);margin-top:var(--sp-1);font-size:var(--fs-meta);line-height:var(--lh-meta);color:var(--text-3)}
+.pv-acts{display:flex;align-items:center;gap:var(--sp-1h);flex:none}
+/* both panels side by side: the line under the preview header continues the line under the list headings */
+.fa[data-split] .pv-h{min-height:calc(var(--fa-bar-h) + var(--fa-head-h))}
+.pv-note{display:flex;align-items:flex-start;gap:var(--sp-2h);margin:var(--sp-3) var(--sp-4) 0;padding:var(--sp-2h) var(--sp-3);border-radius:var(--r-md);background:var(--surface);border:1px solid var(--border);font-size:var(--fs-meta);line-height:var(--lh-meta);color:var(--text-2)}
+.pv-note strong{color:var(--text);font-weight:var(--fw-semibold)}
+.pv-b{--pv-md-max:720px;flex:1;min-height:0;overflow:auto;padding:var(--sp-4) var(--sp-5) var(--sp-6)}
+.pv-b > .md{max-width:var(--pv-md-max)}
+.pv-actbar{display:none;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);gap:var(--sp-2);padding:var(--sp-2) var(--gutter) var(--sp-3);border-top:1px solid var(--border);background:var(--bg);flex:none}
+@container fa (max-width:720px){
+  .pv-acts{display:none}
+  .pv-actbar{display:grid}
+  .fa[data-split] .pv-h{min-height:0}
+  .pv-b{padding:var(--sp-3) var(--gutter) var(--sp-4)}
+  .pv-note{margin:var(--sp-3) var(--gutter) 0}
+}
+/* on phone the file name is already in the detail screen header — the preview keeps only the details */
+@container shell (max-width:720px){
+  .pv-h .obj,.pv-name{display:none}
+  .pv-m{margin-top:0}
+}
+}

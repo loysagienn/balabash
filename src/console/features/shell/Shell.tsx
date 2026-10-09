@@ -2,7 +2,8 @@
 // header (ShellTop), the screen's body, bottom tabs and the "More" sheet on
 // the phone — one markup, reflowing by the `shell` container width. Counts
 // and attention marks come from the store: running threads on "Threads",
-// a dot on a section that awaits the user.
+// a dot on a section that awaits the user. The toasts of the store stack
+// in the corner of the shell (features/toasts).
 
 import { useEffect, useRef } from 'react';
 import type { ReactNode } from 'react';
@@ -18,6 +19,7 @@ import { Icon } from '../../ui/Icon/Icon.tsx';
 import { Attn, Count } from '../../ui/atoms/atoms.tsx';
 import { SectionGrid } from '../../ui/SectionGrid/SectionGrid.tsx';
 import { Sheet } from '../../ui/Sheet/Sheet.tsx';
+import { Toasts } from '../toasts/Toasts.tsx';
 import { MORE, NAV, TABS } from './nav.ts';
 import { ShellTop } from './ShellTop.tsx';
 import type { ShellTopProps } from './ShellTop.tsx';
@@ -113,6 +115,7 @@ export function Shell({ current, detail, children, ...top }: ShellProps) {
           </nav>
         </div>
       </div>
+      <Toasts tabs={!detail} />
       {moreOpen ? (
         <Sheet label="More sections" onClose={() => dispatch(closeMoreSheet())}>
           <SectionGrid label="More sections">

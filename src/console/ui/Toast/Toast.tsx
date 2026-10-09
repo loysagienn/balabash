@@ -1,6 +1,9 @@
 // Toast (design: Toast): the result of an action or a background event.
 // children — the explanation; action / action2 — what can be done;
 // progress — a bar for a process with an end (then there is no "Close").
+// ToastStack — the host of the screen's toasts: the bottom-right corner
+// of the shell, on the phone the full width above the bottom tabs (tabs)
+// or at the very bottom of a detail screen.
 
 import type { ReactNode } from 'react';
 import { Btn } from '../Btn/Btn.tsx';
@@ -42,6 +45,14 @@ export function Toast({ state, icon = 'circle-check', title, action, onAction, a
         {hasProgress ? <Prog value={progress} className="toast-prog" label={title} /> : null}
       </div>
       {!hasProgress && onClose ? <IconBtn icon="x" label="Close" size="sm" className="toast-close" onClick={onClose} /> : null}
+    </div>
+  );
+}
+
+export function ToastStack({ children, tabs }: { children: ReactNode; tabs?: boolean }) {
+  return (
+    <div className="toasts" data-tabs={tabs ? '' : undefined}>
+      {children}
     </div>
   );
 }

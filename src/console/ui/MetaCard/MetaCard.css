@@ -1,0 +1,8 @@
+@layer patterns{
+/* ── Metadata card ──  .metacard > .obj.metacard-ic + .metacard-t + .metacard-d + .metacard-acts */
+.metacard{--metacard-d-w:320px;display:flex;flex-direction:column;align-items:center;gap:var(--sp-1h);padding:var(--sp-7) var(--sp-5);text-align:center;border:1px dashed var(--border-strong);border-radius:var(--r-lg)}
+.metacard-ic{margin-bottom:var(--sp-1h)}
+.metacard-t{font-size:var(--fs-ui);font-weight:var(--fw-semibold)}
+.metacard-d{max-width:var(--metacard-d-w);margin:0;font-size:var(--fs-meta);line-height:var(--lh-meta);color:var(--text-3)}
+.metacard-acts{margin-top:var(--sp-2h)}
+}

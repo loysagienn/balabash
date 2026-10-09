@@ -9,3 +9,12 @@
 .toast-prog{margin-top:var(--sp-2)}
 .toast-close{margin:calc(-1 * var(--sp-1)) calc(-1 * var(--sp-1)) 0 auto}
 }
+@layer patterns{
+/* ── Toast stack ──  .toasts[data-tabs] — the host of the toasts inside .app (position: relative): bottom right; on the phone — full width, above the bottom tabs when the screen has them */
+.toasts{position:absolute;right:var(--sp-5);bottom:var(--sp-5);z-index:var(--z-toast);display:flex;flex-direction:column;align-items:flex-end;gap:var(--sp-2);pointer-events:none}
+.toasts > *{pointer-events:auto}
+@container shell (max-width:720px){
+  .toasts{left:var(--sp-3);right:var(--sp-3);bottom:var(--sp-3);align-items:stretch}
+  .toasts[data-tabs]{bottom:calc(var(--tabs-h) + env(safe-area-inset-bottom,0px) + var(--sp-3))}
+}
+}

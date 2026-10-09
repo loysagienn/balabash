@@ -1,0 +1,6 @@
+@layer patterns{
+/* ── Bell ──  a button with a mixin class:  <button class="btn bell" data-icon-only> svg.ic <span class="count bell-count" data-state="act">3</span> */
+.bell{flex:none}
+/* the counter sits on the icon's top-right corner at any button size */
+.bell-count{--count-h:18px;position:absolute;top:calc(50% - var(--ico) / 2 - var(--count-h) + var(--sp-1h));left:calc(50% + var(--ico) / 2 - var(--sp-1h));box-shadow:0 0 0 2px var(--bg)}
+}

@@ -23,3 +23,7 @@
 .dev-shell > .screen{flex:1}
 .dev-phone{--gutter:var(--m-gutter);--gap:var(--m-gap);--top-h:var(--m-top-h);--ctl-h-sm:var(--ctl-h-sm-touch);--ctl-h:var(--ctl-h-touch);--ctl-h-lg:var(--ctl-h-lg-touch);--fs-input:var(--fs-input-touch);--hit-ext:calc((var(--ctl-h-sm-touch) - var(--hit)) / 2);width:390px;height:720px;max-width:100%;border:1px solid var(--border);border-radius:var(--r-lg);overflow:auto;display:flex;flex-direction:column}
 }
+@layer screens{
+/* a block at a fixed width (--dev-w): the palette at phone width, the editor below its narrow breakpoint */
+.dev-w{width:var(--dev-w);max-width:100%}
+}

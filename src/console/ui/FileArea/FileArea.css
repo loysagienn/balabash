@@ -1,0 +1,21 @@
+@layer patterns{
+/* ── File area ──  .fa (container “fa”) [data-view=list|preview] [data-split] > .fa-list (.fa-bar > .crumbs.fa-path + .fa-bar-end; .fa-head > .fa-head-r; .pins; .fa-rows > .fr; .fa-foot) + .fa-preview (.pv)
+   data-split — when wide, both panels are visible; when narrow (or without data-split) — only the one in data-view. */
+.fa{--fa-bar-h:52px;--fa-head-h:40px;--fa-cols:var(--obj-md) minmax(0,1fr) var(--fa-size-w,72px) var(--fa-time-w,92px) var(--ctl-h-sm);container:fa / inline-size;position:relative;display:flex;gap:1px;min-height:0;background:var(--border)}
+.fa-list,.fa-preview{flex:1 1 0;display:flex;flex-direction:column;min-width:0;min-height:0;background:var(--bg)}
+.fa-preview{flex-grow:1.1}
+.fa:not([data-split])[data-view="list"] .fa-preview,.fa:not([data-split])[data-view="preview"] .fa-list{display:none}
+@container fa (max-width:720px){
+  .fa[data-view="list"] .fa-preview,.fa[data-view="preview"] .fa-list{display:none}
+}
+.fa-bar{display:flex;align-items:center;gap:var(--sp-2);min-height:var(--fa-bar-h);padding:var(--sp-2) var(--sp-4);border-bottom:1px solid var(--border)}
+.fa-path{flex:1}
+.fa-bar-end{margin-left:auto;display:flex;align-items:center;gap:var(--sp-1h);flex:none}
+.fa-head{display:grid;grid-template-columns:var(--fa-cols);align-items:center;gap:var(--sp-2h);min-height:var(--fa-head-h);padding:var(--sp-2) var(--sp-4);border-bottom:1px solid var(--border);font-size:var(--fs-micro);line-height:var(--lh-micro);font-weight:var(--fw-semibold);color:var(--text-3)}
+.fa-head-r{text-align:right}
+.fa-rows{display:flex;flex-direction:column;flex:1;min-height:0;overflow:auto}
+.fa-foot{display:flex;align-items:center;gap:var(--sp-2);padding:var(--sp-2h) var(--sp-4);font-size:var(--fs-meta);line-height:var(--lh-meta);color:var(--text-3)}
+@container fa (max-width:520px){
+  .fa-head{display:none}
+}
+}

@@ -3,6 +3,8 @@
 // each block that lands in ui/.
 
 import { useState } from 'react';
+import { useAppDispatch } from '../../store/hooks.ts';
+import { pushToast } from '../../store/ui/actions.ts';
 import type { ReactNode } from 'react';
 import { Shell } from '../../features/shell/Shell.tsx';
 import { ActivityChip } from '../../ui/ActivityChip/ActivityChip.tsx';
@@ -11,6 +13,7 @@ import { AGENT_AVATARS } from '../../ui/Avatar/agents.ts';
 import { Badge } from '../../ui/Badge/Badge.tsx';
 import { ActionLink, Btn } from '../../ui/Btn/Btn.tsx';
 import { Card, CardBody, CardFoot, CardHead } from '../../ui/Card/Card.tsx';
+import { Confirm } from '../../ui/Confirm/Confirm.tsx';
 import { Check } from '../../ui/Check/Check.tsx';
 import { Crumbs } from '../../ui/Crumbs/Crumbs.tsx';
 import { Empty } from '../../ui/Empty/Empty.tsx';
@@ -43,7 +46,9 @@ import { ThreadRow } from '../../ui/ThreadRow/ThreadRow.tsx';
 import { Attn, Caption, Code, Count, ErrorLine, Hit, Kbd, Pulse, Quiet, Tag, Url } from '../../ui/atoms/atoms.tsx';
 import type { StateName } from '../../ui/atoms/atoms.tsx';
 import { DevUiFeed } from './DevUiFeed.tsx';
+import { DevUiFiles } from './DevUiFiles.tsx';
 import { DevUiSections } from './DevUiSections.tsx';
+import { DevUiShell } from './DevUiShell.tsx';
 import './DevUi.css';
 
 const STATES: StateName[] = ['run', 'wait', 'act', 'done', 'err', 'off'];
@@ -86,6 +91,8 @@ export function DevUi() {
   const [menu, setMenu] = useState(false);
   const [cardMenu, setCardMenu] = useState(false);
   const [toasts, setToasts] = useState([1, 2, 3, 4]);
+  const [confirm, setConfirm] = useState(false);
+  const dispatch = useAppDispatch();
 
   return (
     <Shell current={null} title="UI kit" sub="/dev/ui · blocks of the design system in code">
@@ -735,7 +742,23 @@ export function DevUi() {
           </div>
         </Section>
 
+        <Section title="Confirm: a Modal in a wide shell, a Sheet in a narrow one · toasts of the store stack in the corner of the shell">
+          <Row>
+            <Btn label="Cancel thread…" variant="danger" icon="trash-2" onClick={() => setConfirm(true)} />
+            <Btn label="Toast: saved" onClick={() => dispatch(pushToast({ state: 'done', title: 'Saved', desc: 'balabash/inbox.md' }))} />
+            <Btn label="Toast: error (stays)" onClick={() => dispatch(pushToast({ state: 'err', title: 'Task didn’t start', desc: '“DB backup”: the command exited with code 127.' }))} />
+            <Btn label="Toast: plain" onClick={() => dispatch(pushToast({ title: 'Copied', desc: 'The path is in the clipboard.' }))} />
+          </Row>
+          {confirm ? (
+            <Confirm title="Cancel thread?" confirm="Cancel thread" cancel="Keep running" onConfirm={() => setConfirm(false)} onClose={() => setConfirm(false)}>
+              The “engineer” agent will stop and the thread will end without a summary. This can’t be undone.
+            </Confirm>
+          ) : null}
+        </Section>
+
+        <DevUiShell />
         <DevUiSections />
+        <DevUiFiles />
         <DevUiFeed />
       </Screen>
     </Shell>
