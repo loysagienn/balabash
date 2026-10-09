@@ -320,11 +320,14 @@ export type ProjectView = {
 // /unarchive flip the flag (already in that state — the row as is, no event).
 // Every change journals its project.* event in the row's transaction
 // (actor user, no thread), so the console learns of it through the stream.
-// 400 bad_request (the input: a blank title or description, a slug outside
-// /^[a-z][a-z0-9-]*$/ or over 64 chars), 404 not_found (a foreign or
-// missing project), 409 conflict (the title, the slug or the folder path is
-// taken; archived projects keep theirs). Same rules as the projects_* tools
-// of the agents — one implementation (src/projects/mutations.ts).
+// 400 bad_request (a body that is not a JSON object or not valid JSON, a
+// field of another type, a blank title or description on create, a slug
+// outside /^[a-z][a-z0-9-]*$/ or over 64 chars, a title over 200 or a
+// description over 2 000 chars; in a PATCH a blank or null field keeps the
+// current value), 404 not_found (a foreign or missing project), 409
+// conflict (the title, the slug or the folder path is taken; archived
+// projects keep theirs). Same rules as the projects_* tools of the agents —
+// one implementation (src/projects/mutations.ts).
 
 export type CreateProjectRequest = {
   title: string;

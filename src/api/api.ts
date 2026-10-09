@@ -12,7 +12,8 @@ import { Api } from 'grammy';
 import type { Context, Next } from 'koa';
 import { prisma } from '../db/client.ts';
 import { config } from '../config/index.ts';
-import { parseJson, prepareObject } from '../utils/serialize-json.ts';
+import { prepareObject } from '../utils/serialize-json.ts';
+import { parseJsonBody } from './json-body.ts';
 import { countThreadsAt, ensureOperatorWorkspace, getMainThread, getThread, isHeadlessThread, listThreads } from '../core/threads.ts';
 import { getEventsAfter, listThreadEvents } from '../core/events.ts';
 import { getLiveHub } from '../core/live.ts';
@@ -57,25 +58,27 @@ function sendError(ctx: Context, status: number, code: string, message: string):
   ctx.body = prepareObject({ error: { code, message } });
 }
 
-async function readJsonBody(ctx: Context): Promise<Record<string, unknown>> {
+// The JSON body of a mutation, or null after a 400 was sent: an empty body
+// is {}, a JSON object passes, malformed JSON and a non-object body
+// (array, null, scalar) are refused — a corrupted body must not read as an
+// empty one (an empty PATCH /projects/:id is a legitimate touch). The rule
+// itself is parseJsonBody (json-body.ts, pure, tested).
+async function readJsonBody(ctx: Context): Promise<Record<string, unknown> | null> {
   const chunks: Buffer[] = [];
 
   for await (const chunk of ctx.req) {
     chunks.push(chunk as Buffer);
   }
 
-  try {
-    const raw = Buffer.concat(chunks).toString('utf8');
-    const parsed = raw ? parseJson(raw) : {};
+  const result = parseJsonBody(Buffer.concat(chunks).toString('utf8'));
 
-    if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
-      return parsed as Record<string, unknown>;
-    }
+  if (!result.ok) {
+    sendError(ctx, 400, 'bad_request', result.message);
 
-    return {};
-  } catch {
-    return {};
+    return null;
   }
+
+  return result.body;
 }
 
 // Session gate for every endpoint except the code exchange itself. The
@@ -227,6 +230,10 @@ router.post('/auth/console-code', async ctx => {
 
 router.post('/auth', async ctx => {
   const body = await readJsonBody(ctx);
+
+  if (!body) {
+    return;
+  }
   const code = typeof body.code === 'string' ? body.code : '';
   const userId = code ? consumeAuthCode(code) : null;
 
@@ -449,6 +456,10 @@ router.post('/threads/:id/messages', requireSession, async ctx => {
   }
 
   const body = await readJsonBody(ctx);
+
+  if (!body) {
+    return;
+  }
   const text = typeof body.text === 'string' ? body.text.trim() : '';
 
   if (!text) {
@@ -551,6 +562,10 @@ router.post('/threads/:id/cancel', requireSession, async ctx => {
   }
 
   const body = await readJsonBody(ctx);
+
+  if (!body) {
+    return;
+  }
   const reason = typeof body.reason === 'string' && body.reason.trim() ? body.reason.trim() : 'cancelled by the operator';
 
   if (reason.length > CANCEL_REASON_MAX_CHARS) {
@@ -650,11 +665,19 @@ async function handleManagementCall(ctx: Context, call: () => Promise<Publicatio
 router.post('/apps/publish', requireSession, async ctx => {
   const body = await readJsonBody(ctx);
 
+  if (!body) {
+    return;
+  }
+
   await handleManagementCall(ctx, () => publishApp(ctx.state.userId as string, body.path, body.slug));
 });
 
 router.post('/apps/unpublish', requireSession, async ctx => {
   const body = await readJsonBody(ctx);
+
+  if (!body) {
+    return;
+  }
 
   await handleManagementCall(ctx, () => unpublishApp(ctx.state.userId as string, body.path, body.slug));
 });
@@ -687,6 +710,10 @@ router.post('/projects', requireSession, async ctx => {
   const userId = ctx.state.userId as string;
   const body = await readJsonBody(ctx);
 
+  if (!body) {
+    return;
+  }
+
   await handleProjectCall(ctx, async () => {
     const { project, adopted } = await createProject(userId, parseProjectInput(body), { kind: 'user', userId });
     const response: CreateProjectResponse = { project: projectView(project), adopted };
@@ -698,6 +725,10 @@ router.post('/projects', requireSession, async ctx => {
 router.patch('/projects/:id', requireSession, async ctx => {
   const userId = ctx.state.userId as string;
   const body = await readJsonBody(ctx);
+
+  if (!body) {
+    return;
+  }
 
   await handleProjectCall(ctx, async () => {
     const { project } = await updateProject(userId, ctx.params.id as string, parseProjectPatch(body), { kind: 'user', userId });
@@ -1068,6 +1099,10 @@ router.post('/secret-requests/:id', requireSession, async ctx => {
   }
 
   const body = await readJsonBody(ctx);
+
+  if (!body) {
+    return;
+  }
   const rawValues = body.values;
   const values: Record<string, string> = {};
 

@@ -20,11 +20,12 @@ import type { RegistryAuthor } from '../core/registry-events.ts';
 import { listProjects } from './store.ts';
 import type { ProjectModel } from './store.ts';
 import {
+  DESCRIPTION_MAX_LENGTH,
   SLUG_MAX_LENGTH,
   SLUG_PATTERN,
+  TITLE_MAX_LENGTH,
   archiveProject,
   createProject,
-  isTouch,
   parseProjectInput,
   parseProjectPatch,
   requireProject,
@@ -83,14 +84,17 @@ const FUNCTIONS: ToolFunction[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        title: { type: 'string', description: 'Human-readable project title, unique within the workspace (archived projects included).' },
+        title: {
+          type: 'string',
+          description: `Human-readable project title, at most ${TITLE_MAX_LENGTH} chars, unique within the workspace (archived projects included).`,
+        },
         slug: {
           type: 'string',
           description: `Folder name in the workspace file area, ${String(SLUG_PATTERN)}, at most ${SLUG_MAX_LENGTH} chars; unique. Changing it later (projects_update) renames the folder too.`,
         },
         description: {
           type: 'string',
-          description: 'What the project is about (~300 chars) — the scent used to match conversations to it.',
+          description: `What the project is about (~300 chars, at most ${DESCRIPTION_MAX_LENGTH}) — the scent used to match conversations to it.`,
         },
       },
       required: ['title', 'slug', 'description'],
@@ -111,8 +115,11 @@ const FUNCTIONS: ToolFunction[] = [
       type: 'object',
       properties: {
         id: { type: 'string', description: 'The project id.' },
-        title: { type: ['string', 'null'], description: 'New title, or null to keep the current one.' },
-        description: { type: ['string', 'null'], description: 'New description, or null to keep the current one.' },
+        title: { type: ['string', 'null'], description: `New title (at most ${TITLE_MAX_LENGTH} chars), or null to keep the current one.` },
+        description: {
+          type: ['string', 'null'],
+          description: `New description (at most ${DESCRIPTION_MAX_LENGTH} chars), or null to keep the current one.`,
+        },
         slug: {
           type: ['string', 'null'],
           description:
@@ -219,13 +226,12 @@ async function executeCreate(args: JsonObject, ctx: BuiltinServerCallContext): P
 }
 
 async function executeUpdate(args: JsonObject, ctx: BuiltinServerCallContext): Promise<JsonValue> {
-  const patch = parseProjectPatch(args);
-  const { project, renamedFrom } = await updateProject(ctx.userId, requireId(args), patch, author(ctx));
+  const { project, renamedFrom, touched } = await updateProject(ctx.userId, requireId(args), parseProjectPatch(args), author(ctx));
 
   return {
     project: projectToJson(project),
     ...(renamedFrom !== null ? { folder: `${project.slug}/`, note: `folder renamed: ${renamedFrom}/ → ${project.slug}/` } : {}),
-    ...(isTouch(patch) ? { note: 'touched — updatedAt bumped, nothing else changed' } : {}),
+    ...(touched ? { note: 'touched — updatedAt bumped, nothing else changed' } : {}),
   };
 }
 

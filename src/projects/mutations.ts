@@ -43,8 +43,21 @@ export type ProjectInput = { title: string; slug: string; description: string };
 // no-op, not an error (retries are idempotent).
 export type ProjectPatch = { title: string | null; description: string | null; slug: string | null };
 
-function text(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
+type Field = 'title' | 'slug' | 'description';
+
+// A field as given: a string trimmed, an absent or null one empty. Any other
+// type is the caller's mistake and a refusal — a wrong type must not pass as
+// "not given" (a PATCH with `title: 42` would then read as a touch).
+function text(field: Field, value: unknown): string {
+  if (value === undefined || value === null) {
+    return '';
+  }
+
+  if (typeof value !== 'string') {
+    throw new ProjectError('bad_request', `${field} must be a string`);
+  }
+
+  return value.trim();
 }
 
 function checkSlug(slug: string): void {
@@ -67,9 +80,9 @@ function checkDescription(description: string): void {
 
 // The input of a creation, trimmed and checked: every field required.
 export function parseProjectInput(raw: { title?: unknown; slug?: unknown; description?: unknown }): ProjectInput {
-  const title = text(raw.title);
-  const slug = text(raw.slug);
-  const description = text(raw.description);
+  const title = text('title', raw.title);
+  const slug = text('slug', raw.slug);
+  const description = text('description', raw.description);
 
   if (!title) {
     throw new ProjectError('bad_request', 'a non-empty title is required');
@@ -90,9 +103,9 @@ export function parseProjectInput(raw: { title?: unknown; slug?: unknown; descri
 // The input of an update: an absent, null or blank field keeps the current
 // value; a given one is checked. All three absent is a touch.
 export function parseProjectPatch(raw: { title?: unknown; slug?: unknown; description?: unknown }): ProjectPatch {
-  const title = text(raw.title) || null;
-  const description = text(raw.description) || null;
-  const slug = text(raw.slug) || null;
+  const title = text('title', raw.title) || null;
+  const description = text('description', raw.description) || null;
+  const slug = text('slug', raw.slug) || null;
 
   if (title) {
     checkTitle(title);
@@ -107,10 +120,6 @@ export function parseProjectPatch(raw: { title?: unknown; slug?: unknown; descri
   }
 
   return { title, description, slug };
-}
-
-export function isTouch(patch: ProjectPatch): boolean {
-  return patch.title === null && patch.description === null && patch.slug === null;
 }
 
 function isUniqueViolation(error: unknown): boolean {
@@ -200,16 +209,19 @@ export async function createProject(userId: string, input: ProjectInput, by: Reg
   }
 }
 
-// The previous slug when the folder was renamed, null otherwise.
-export type UpdatedProject = { project: ProjectModel; renamedFrom: string | null };
+// renamedFrom — the previous slug when the folder was renamed, null
+// otherwise; touched — nothing differed from the row, only updatedAt moved.
+export type UpdatedProject = { project: ProjectModel; renamedFrom: string | null; touched: boolean };
 
 export async function updateProject(userId: string, id: string, patch: ProjectPatch, by: RegistryAuthor): Promise<UpdatedProject> {
   const project = await requireProject(userId, id);
-  const title = patch.title;
-  const description = patch.description;
-  const slug = patch.slug && patch.slug !== project.slug ? patch.slug : null;
+  // A field equal to the row's value is "keep", like an absent one — so a
+  // repeated call is idempotent and the answer says what really changed.
+  const title = patch.title !== project.title ? patch.title : null;
+  const description = patch.description !== project.description ? patch.description : null;
+  const slug = patch.slug !== project.slug ? patch.slug : null;
 
-  if (title && title !== project.title) {
+  if (title) {
     const clash = await prisma.project.findFirst({ where: { userId, title, id: { not: project.id } } });
 
     if (clash) {
@@ -267,7 +279,7 @@ export async function updateProject(userId: string, id: string, patch: ProjectPa
       return row;
     });
 
-    return { project: updated, renamedFrom: slug ? project.slug : null };
+    return { project: updated, renamedFrom: slug ? project.slug : null, touched: !title && !description && !slug };
   } catch (error) {
     if (movedFromDir && slug) {
       // Roll the folder back so disk keeps matching the (unchanged) row.
