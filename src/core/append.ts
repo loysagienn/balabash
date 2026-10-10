@@ -28,6 +28,10 @@ import { threadCompletionFields, threadStartFields } from '../projections/thread
 // the append and the event would be lost (a Codex Shell whose end never
 // reached the log, 2026-10-10). The write point replaces it with U+FFFD in
 // every string, keys included; a payload without it is returned as is.
+// Two keys of one object that differ only in U+0000 against U+FFFD fold
+// into one (the later wins): keys come from code and from the model's
+// JSON, none carries U+0000 — a lookup by the original key would miss
+// either way, and an invented representation of both has no reader.
 export function storablePayload(payload: JsonObject): JsonObject {
   return storable(payload) as JsonObject;
 }

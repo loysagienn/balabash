@@ -520,6 +520,54 @@ describe('projectFeed — threads, tasks and lines', () => {
     assert.equal((cancelled[1] as SubtaskItem).state, 'off');
   });
 
+  it('a row starting after the thread’s own terminal is closed where it starts, a task announced again stays off, a real end that follows still brings its outcome', () => {
+    resetSeq(10n);
+
+    const t0 = new Date('2026-10-10T14:22:00Z');
+    const end = new Date(t0.getTime() + 5000);
+    const later = (ms: number) => new Date(end.getTime() + ms);
+    const items = projectFeed(
+      [
+        own('session.tool.started', { toolUseId: 'u1', name: 'Shell', input: { command: 'ls' } }, { createdAt: t0 }),
+        own('session.task.started', { taskId: 'k1', description: 'search', backgrounded: true }, { createdAt: new Date(t0.getTime() + 1000) }),
+        // A child's terminal is not this thread's: it closes nothing.
+        event({ type: 'thread.started', threadId: 'c9', targetThreadId: 't1', agentName: 'browser', payload: { agent: 'browser', title: 'look' }, createdAt: new Date(t0.getTime() + 2000) }),
+        event({ type: 'thread.completed', threadId: 'c9', targetThreadId: 't1', agentName: 'browser', payload: { title: 'looked', summary: { text: 'ok' } }, createdAt: new Date(t0.getTime() + 3000) }),
+        own('session.tool.started', { toolUseId: 'u2', name: 'Shell', input: { command: 'pwd' } }, { createdAt: new Date(t0.getTime() + 4000) }),
+        event({ type: 'thread.failed', threadId: 't1', targetThreadId: 'main', payload: { error: 'boom' }, createdAt: end }),
+        // The journal's tail after the terminal: a start that gets no end …
+        own('session.tool.started', { toolUseId: 'u3', name: 'Shell', input: { command: 'cat x' } }, { createdAt: later(1000) }),
+        // … a bridge call whose clock reads before the terminal …
+        own('tool.call.started', { callId: 'c1', functionName: 'get_event', input: { seq: 1 } }, { createdAt: new Date(end.getTime() - 500) }),
+        // … the backgrounded task announced again, a start whose real end follows, a task of the tail alone.
+        own('session.task.started', { taskId: 'k1', description: 'search', backgrounded: true }, { createdAt: later(2000) }),
+        own('session.tool.started', { toolUseId: 'u4', name: 'Shell', input: { command: 'echo' } }, { createdAt: later(3000) }),
+        own('session.task.started', { taskId: 'k2', description: 'index', backgrounded: true }, { createdAt: later(3500) }),
+        own('session.tool.completed', { toolUseId: 'u4', name: 'Shell', result: 'done', isError: false, exitCode: 0 }, { createdAt: later(4000) }),
+        own('session.tool.completed', { toolUseId: 'u1', name: 'Shell', result: '', isError: true }, { createdAt: later(5000) }),
+        own('session.task.completed', { taskId: 'k2', status: 'completed', summary: 'indexed' }, { createdAt: later(6000) }),
+      ],
+      ctx,
+    );
+
+    assert.deepEqual(items.map(item => item.kind), ['actions', 'subtask', 'child', 'actions', 'error', 'actions', 'subtask']);
+
+    const row = (item: ActionsItem) => item.items.map(r => [r.label.tool ?? r.label.text, r.state, r.endedAt?.getTime() ?? null, r.endNote]);
+
+    // The late real end replaces the terminal's close with its outcome.
+    assert.deepEqual(row(items[0] as ActionsItem), [['Shell', 'err', later(5000).getTime(), 'error']]);
+    assert.equal((items[1] as SubtaskItem).state, 'off');
+    assert.equal((items[2] as ChildItem).state, 'done');
+    // Closed by the own terminal, not by the child's.
+    assert.deepEqual(row(items[3] as ActionsItem), [['Shell', 'off', end.getTime(), null]]);
+    assert.deepEqual(row(items[5] as ActionsItem), [
+      ['Shell', 'off', later(1000).getTime(), null],
+      ['get_event', 'off', end.getTime(), null],
+      ['Shell', 'done', later(4000).getTime(), 'exit 0'],
+    ]);
+    assert.equal((items[6] as SubtaskItem).state, 'done');
+  });
+
   it('draws the thread’s own terminals, notifications, compaction, retries and system events as lines', () => {
     resetSeq(50n);
 

@@ -279,12 +279,19 @@ class Builder {
   // The thread's own terminal is the last word on its session: a row still
   // running at that point never gets its end — the completion was lost on
   // its way to the log, or the thread was cancelled mid-call — so it ends
-  // with the thread, without an outcome, instead of a timer ticking on.
+  // with the thread, without an outcome, instead of a timer ticking on. The
+  // journal's tail may land after the terminal (a closed author is legal,
+  // server.md): a row that starts there, or a task announced again, is
+  // closed the same way, where it starts; a real end that follows still
+  // brings its outcome.
+  private ended: Date | null = null;
+
   private endOpen(at: Date): void {
+    this.ended = at;
+
     for (const item of this.tools.values()) {
       if (item.state === 'run') {
-        item.state = 'off';
-        item.endedAt = at;
+        this.off(item, at);
       }
     }
 
@@ -293,6 +300,26 @@ class Builder {
         task.state = 'off';
       }
     }
+  }
+
+  private off(item: ActionItem, at: Date): void {
+    item.state = 'off';
+    item.endedAt = at;
+  }
+
+  // A row starting now: running, or — after the terminal — closed where it
+  // starts (the terminal's time when the start's clock reads earlier: a
+  // transaction's now() is its start, the terminal's is the later word).
+  private open(item: ActionItem): ActionItem {
+    if (this.ended) {
+      this.off(item, item.at.getTime() > this.ended.getTime() ? item.at : this.ended);
+    }
+
+    return item;
+  }
+
+  private get runState(): SubtaskItem['state'] {
+    return this.ended ? 'off' : 'run';
   }
 
   private quiet(item: QuietItem, parentToolUseId?: string | null): void {
@@ -478,7 +505,7 @@ class Builder {
       }
 
       const { label, detail, add, del } = nativeAction(event.payload.name, event.payload.input ?? {});
-      const item: ActionItem = { kind: 'action', key, at, state: 'run', label, endedAt: null, endNote: null, ...(add !== undefined ? { add } : {}), ...(del !== undefined ? { del } : {}), detail, nested: [] };
+      const item = this.open({ kind: 'action', key, at, state: 'run', label, endedAt: null, endNote: null, ...(add !== undefined ? { add } : {}), ...(del !== undefined ? { del } : {}), detail, nested: [] });
 
       this.tools.set(event.payload.toolUseId, item);
       this.toolIds.set(item, event.payload.toolUseId);
@@ -572,7 +599,7 @@ class Builder {
       const known = this.tasks.get(event.payload.taskId);
 
       if (known) {
-        known.state = 'run';
+        known.state = this.runState;
         known.taskKind = taskKind;
 
         // A card the end alone made (its start before the loaded range)
@@ -593,7 +620,7 @@ class Builder {
         at,
         taskKind,
         description: event.payload.description,
-        state: 'run',
+        state: this.runState,
         meta: [],
         lastTool: null,
         summary: null,
@@ -671,7 +698,7 @@ class Builder {
 
     if (is(event, 'tool.call.started')) {
       const { label, input } = bridgeAction(event.payload.functionName, event.payload.input ?? {});
-      const item: ActionItem = { kind: 'action', key, at, state: 'run', label, endedAt: null, endNote: null, detail: { kind: 'io', input, output: null }, nested: [] };
+      const item = this.open({ kind: 'action', key, at, state: 'run', label, endedAt: null, endNote: null, detail: { kind: 'io', input, output: null }, nested: [] });
 
       this.tools.set(`call:${event.payload.callId}`, item);
       this.action(item);
