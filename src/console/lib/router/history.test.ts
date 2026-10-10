@@ -1,5 +1,6 @@
 // The history process over a fake window: what the route and its fragment
-// become in history, and what a popstate brings back.
+// become in history, what a popstate brings back, and the scroll place an
+// entry keeps while it is away.
 
 import assert from 'node:assert/strict';
 import { afterEach, describe, it } from 'node:test';
@@ -37,6 +38,15 @@ function fakeWindow(pathname: string, search = '', hash = '') {
   return { win, entries, location, pop: (state: unknown) => listeners.forEach(listener => listener({ state })) };
 }
 
+// The entry's state is the route and an id; the id is the process's own.
+function stateOf(entry: Entry): { route: unknown; entry: string } {
+  const state = entry.state as { route: unknown; entry: unknown };
+
+  assert.equal(typeof state.entry, 'string');
+
+  return state as { route: unknown; entry: string };
+}
+
 describe('router — the history process', () => {
   afterEach(() => {
     delete (globalThis as { window?: unknown }).window;
@@ -51,28 +61,40 @@ describe('router — the history process', () => {
     const disconnect = connectStoreToHistory(store);
 
     // The first entry: the route in state, the fragment the tab opened with kept.
-    assert.deepEqual(entries, [{ method: 'replace', state: { route: { key: 'files', path: 'a.md' } }, url: '/workspace/a.md#top' }]);
+    assert.equal(entries.length, 1);
+    assert.equal(entries[0]!.method, 'replace');
+    assert.equal(entries[0]!.url, '/workspace/a.md#top');
+    assert.deepEqual(stateOf(entries[0]!).route, { key: 'files', path: 'a.md' });
 
-    // A link to a section of another file: one push, fragment and all.
+    const first = stateOf(entries[0]!);
+
+    // A link to a section of another file: one push, fragment and all, a new entry.
     store.dispatch(routeTo({ key: 'project', slug: 'proj', path: 'next.md' }, { hash: '#part' }));
-    assert.deepEqual(entries[1], { method: 'push', state: { route: { key: 'project', slug: 'proj', path: 'next.md' } }, url: '/projects/proj/files/next.md#part' });
+    assert.equal(entries[1]!.method, 'push');
+    assert.equal(entries[1]!.url, '/projects/proj/files/next.md#part');
+    assert.deepEqual(stateOf(entries[1]!).route, { key: 'project', slug: 'proj', path: 'next.md' });
+    assert.notEqual(stateOf(entries[1]!).entry, first.entry);
 
     // Another section of the same file: a new entry of the same route.
     store.dispatch(routeTo({ key: 'project', slug: 'proj', path: 'next.md' }, { hash: '#other' }));
-    assert.deepEqual(entries[2], { method: 'push', state: { route: { key: 'project', slug: 'proj', path: 'next.md' } }, url: '/projects/proj/files/next.md#other' });
+    assert.equal(entries[2]!.method, 'push');
+    assert.equal(entries[2]!.url, '/projects/proj/files/next.md#other');
+    assert.notEqual(stateOf(entries[2]!).entry, stateOf(entries[1]!).entry);
 
     // The same route and fragment again: nothing to write.
     store.dispatch(routeTo({ key: 'project', slug: 'proj', path: 'next.md' }, { hash: '#other' }));
     assert.equal(entries.length, 3);
 
-    // A replace keeps the entry; a route without a fragment drops it from the URL.
+    // A replace keeps the entry (the same page); a route without a fragment drops it from the URL.
     store.dispatch(routeTo({ key: 'project', slug: 'proj', path: 'next.md' }, { replace: true }));
-    assert.deepEqual(entries[3], { method: 'replace', state: { route: { key: 'project', slug: 'proj', path: 'next.md' } }, url: '/projects/proj/files/next.md' });
+    assert.equal(entries[3]!.method, 'replace');
+    assert.equal(entries[3]!.url, '/projects/proj/files/next.md');
+    assert.equal(stateOf(entries[3]!).entry, stateOf(entries[2]!).entry);
 
     // Back to the first entry: the route from its state, the fragment from the location; nothing written.
     Object.assign(location, { pathname: '/workspace/a.md', search: '', hash: '#top' });
-    pop({ route: { key: 'files', path: 'a.md' } });
-    assert.deepEqual(store.getState().router, { route: { key: 'files', path: 'a.md' }, source: 'history', replace: false, hash: '#top' });
+    pop(first);
+    assert.deepEqual(store.getState().router, { route: { key: 'files', path: 'a.md' }, source: 'history', replace: false, hash: '#top', scroll: null });
     assert.equal(entries.length, 4);
 
     // An entry without a state (the browser's own fragment navigation): the route from the location.
@@ -80,11 +102,84 @@ describe('router — the history process', () => {
     pop(null);
     assert.deepEqual(store.getState().router.route, { key: 'agents', name: 'engineer', q: 'en' });
     assert.equal(store.getState().router.hash, '#x');
+    assert.equal(store.getState().router.scroll, null);
     assert.equal(entries.length, 4);
 
     disconnect();
     store.dispatch(routeTo({ key: 'home' }));
     assert.equal(entries.length, 4);
+  });
+
+  it('keeps the scroll place of an entry while it is away and brings it back with the popstate', () => {
+    const { win, entries, location, pop } = fakeWindow('/threads');
+
+    (globalThis as { window?: unknown }).window = win;
+
+    let place: number | null = 0;
+    const store = createStore({ api: {} as Api, initialRoute: { key: 'threads' } });
+    const disconnect = connectStoreToHistory(store, { readScroll: () => place });
+    const list = stateOf(entries[0]!);
+
+    // The list is left at 480 for a thread; the thread at 1200 for the project.
+    place = 480;
+    store.dispatch(routeTo({ key: 'thread', id: 't1' }));
+    const thread = stateOf(entries[1]!);
+
+    place = 1200;
+    store.dispatch(routeTo({ key: 'project', slug: 'p' }));
+    const project = stateOf(entries[2]!);
+
+    // Back to the thread: its place comes with the route; the project's own place (90) is kept.
+    place = 90;
+    Object.assign(location, { pathname: '/threads/t1', search: '', hash: '' });
+    pop(thread);
+    assert.deepEqual(store.getState().router, { route: { key: 'thread', id: 't1' }, source: 'history', replace: false, hash: '', scroll: 1200 });
+
+    // Back again to the list: 480. The thread is left at 15 this time.
+    place = 15;
+    Object.assign(location, { pathname: '/threads', search: '', hash: '' });
+    pop(list);
+    assert.equal(store.getState().router.scroll, 480);
+
+    // Forward twice: the thread at 15 (not 1200), the project at 90.
+    Object.assign(location, { pathname: '/threads/t1', search: '', hash: '' });
+    pop(thread);
+    assert.equal(store.getState().router.scroll, 15);
+    Object.assign(location, { pathname: '/projects/p', search: '', hash: '' });
+    pop(project);
+    assert.equal(store.getState().router.scroll, 90);
+
+    // A replace is the same page: the place kept under the entry survives it.
+    store.dispatch(routeTo({ key: 'project', slug: 'p', path: 'docs' }, { replace: true }));
+    assert.equal(stateOf(entries[3]!).entry, project.entry);
+    place = 300;
+    store.dispatch(routeTo({ key: 'home' }));
+    Object.assign(location, { pathname: '/projects/p/files/docs', search: '', hash: '' });
+    pop(stateOf(entries[3]!));
+    assert.equal(store.getState().router.scroll, 300);
+
+    // No body to read (no shell on the screen): nothing new kept, the place known before stays.
+    place = null;
+    store.dispatch(routeTo({ key: 'home' }));
+    Object.assign(location, { pathname: '/projects/p/files/docs', search: '', hash: '' });
+    pop(stateOf(entries[3]!));
+    assert.equal(store.getState().router.scroll, 300);
+
+    // An entry the process did not write has no id: nothing is kept for it
+    // and nothing brought back; the entry left for it keeps its place as ever.
+    place = 50;
+    Object.assign(location, { pathname: '/agents', search: '', hash: '' });
+    pop(null);
+    assert.equal(store.getState().router.scroll, null);
+    place = 70;
+    Object.assign(location, { pathname: '/projects/p/files/docs', search: '', hash: '' });
+    pop(stateOf(entries[3]!));
+    assert.equal(store.getState().router.scroll, 50);
+    Object.assign(location, { pathname: '/agents', search: '', hash: '' });
+    pop(null);
+    assert.equal(store.getState().router.scroll, null);
+
+    disconnect();
   });
 
   it('composes the URL of an entry from the route and the fragment', () => {

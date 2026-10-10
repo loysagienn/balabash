@@ -76,20 +76,22 @@ export function feedTop(feed: ThreadFeed): FeedTop {
 }
 
 // What the scroll box of the feed does after its items changed (the hook
-// measures, this decides). The first ready view opens at the end. An
+// measures, this decides). The first ready view opens at the end — or, when
+// history brought the thread back with the place it was left at (`restore`,
+// the router's `scroll`), at that place. An
 // earlier chunk — knownFrom moved — keeps the same element under the eye:
 // by the shift of an anchored item still in the DOM, else (the first items
 // re-keyed when older actions merged into their group) by the growth of
 // the content. Any other change while the end is in view follows it; a
 // reader up in the history is left in place.
 export type FeedScrollSeen = { knownFrom: bigint | null; height: number };
-export type FeedScrollMove = { kind: 'open' } | { kind: 'end' } | { kind: 'by'; px: number } | null;
+export type FeedScrollMove = { kind: 'open' } | { kind: 'to'; px: number } | { kind: 'end' } | { kind: 'by'; px: number } | null;
 
-export function feedScrollMove(input: { previous: FeedScrollSeen | null; knownFrom: bigint | null; atEnd: boolean; anchorShift: number | null; height: number }): FeedScrollMove {
-  const { previous, knownFrom, atEnd, anchorShift, height } = input;
+export function feedScrollMove(input: { previous: FeedScrollSeen | null; knownFrom: bigint | null; atEnd: boolean; anchorShift: number | null; height: number; restore: number | null }): FeedScrollMove {
+  const { previous, knownFrom, atEnd, anchorShift, height, restore } = input;
 
   if (!previous) {
-    return { kind: 'open' };
+    return restore === null ? { kind: 'open' } : { kind: 'to', px: restore };
   }
   if (previous.knownFrom !== knownFrom) {
     const px = anchorShift ?? height - previous.height;

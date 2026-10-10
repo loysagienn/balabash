@@ -100,7 +100,8 @@ function offsetIn(box: HTMLElement, node: Element): number {
 type FeedAnchor = { node: Element; offset: number };
 
 // Keeps the reader's place (the rule is feedScrollMove): the first view of a
-// feed opens at its end; an earlier chunk prepended above leaves the same
+// feed opens at its end — at the place history brought back (`restore`)
+// when there is one; an earlier chunk prepended above leaves the same
 // event under the eye — by the shift of the item under the top of the view
 // (anchorIndex), or the nearest one below it still in the DOM: the chunk
 // can re-key items between the top of the feed and the eye (older actions
@@ -111,7 +112,7 @@ type FeedAnchor = { node: Element; offset: number };
 // in between). A change while the end is in view scrolls to it, a new row
 // inside the last group included. Native scroll anchoring is off for the
 // feed (ThreadScreen.css), so this is the only hand on the box.
-function useFeedScroll(feedRef: { current: HTMLDivElement | null }, itemsRef: { current: HTMLDivElement | null }, ready: boolean, items: FeedItem[], knownFrom: bigint | null, requesting: boolean): void {
+function useFeedScroll(feedRef: { current: HTMLDivElement | null }, itemsRef: { current: HTMLDivElement | null }, ready: boolean, items: FeedItem[], knownFrom: bigint | null, requesting: boolean, restore: number | null): void {
   const seen = useRef<(FeedScrollSeen & { anchors: FeedAnchor[] }) | null>(null);
   const atEnd = useRef(true);
   const scrollTop = useRef(0);
@@ -149,17 +150,26 @@ function useFeedScroll(feedRef: { current: HTMLDivElement | null }, itemsRef: { 
       atEnd: atEnd.current,
       anchorShift: anchor ? offsetIn(box, anchor.node) - anchor.offset : null,
       height: box.scrollHeight,
+      restore,
     });
     const toEnd = () => {
       box.scrollTop = box.scrollHeight;
       scrollTop.current = box.scrollTop;
       atEnd.current = true;
     };
+    const to = (px: number) => {
+      box.scrollTop = px;
+      scrollTop.current = box.scrollTop;
+      atEnd.current = box.scrollHeight - box.scrollTop - box.clientHeight < 48;
+    };
 
     if (move?.kind === 'open') {
       toEnd();
       // Again after every effect of the shell (it resets a new screen to the top).
       requestAnimationFrame(toEnd);
+    } else if (move?.kind === 'to') {
+      to(move.px);
+      requestAnimationFrame(() => to(move.px));
     } else if (move?.kind === 'end') {
       toEnd();
     } else if (move?.kind === 'by') {
@@ -171,7 +181,7 @@ function useFeedScroll(feedRef: { current: HTMLDivElement | null }, itemsRef: { 
     const measured = requesting ? Array.from(itemsRef.current?.children ?? []).map(node => ({ node, offset: offsetIn(box, node) })) : [];
 
     seen.current = { knownFrom, height: box.scrollHeight, anchors: measured };
-  }, [feedRef, itemsRef, ready, items, knownFrom, requesting]);
+  }, [feedRef, itemsRef, ready, items, knownFrom, requesting, restore]);
 }
 
 function ThreadPage({ thread }: { thread: ThreadRecord }) {
@@ -231,7 +241,11 @@ function ThreadPage({ thread }: { thread: ThreadRecord }) {
   const feedRef = useRef<HTMLDivElement>(null);
   const itemsRef = useRef<HTMLDivElement>(null);
 
-  useFeedScroll(feedRef, itemsRef, ready, items, feed.knownFrom, feed.request !== null);
+  // The place history brought the thread back with (the shell restores it
+  // for every screen; the feed opens there instead of at its end).
+  const restore = useAppSelector(s => (s.router.source === 'history' ? s.router.scroll : null));
+
+  useFeedScroll(feedRef, itemsRef, ready, items, feed.knownFrom, feed.request !== null, restore);
 
   const lock = composerLock(thread);
   const title = threadTitle(thread);

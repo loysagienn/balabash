@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { isMainThreadOpen, isMainThreadShortcut, keepsScrollPlace, mainThreadRoute, mainThreadShortcutLabel } from './shell.logic.ts';
+import { isMainThreadOpen, isMainThreadShortcut, keepsScrollPlace, mainThreadRoute, mainThreadShortcutLabel, restoreMove } from './shell.logic.ts';
 
 const press = (key: string, mods: Partial<Omit<import('./shell.logic.ts').KeyPress, 'key'>> = {}) => ({ key, metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, ...mods });
 
@@ -63,5 +63,24 @@ describe('scroll place across routes', () => {
     assert.equal(keepsScrollPlace({ key: 'projects' }, { key: 'project', slug: 'p' }), false);
     assert.equal(keepsScrollPlace({ key: 'project', slug: 'p', path: 'a' }, { key: 'projects' }), false);
     assert.equal(keepsScrollPlace({ key: 'files', path: '' }, { key: 'files', path: 'a' }), false);
+  });
+});
+
+describe('a place brought back by history', () => {
+  it('is reached at once when the content is tall enough, as far as it goes while it is not', () => {
+    assert.deepEqual(restoreMove({ target: 300, lastSet: null, scrollTop: 0, maxScroll: 1000 }), { to: 300, done: true });
+    assert.deepEqual(restoreMove({ target: 300, lastSet: null, scrollTop: 0, maxScroll: 120 }), { to: 120, done: false });
+    // The content grew: the box still where the last step put it — the next step.
+    assert.deepEqual(restoreMove({ target: 300, lastSet: 120, scrollTop: 120, maxScroll: 260 }), { to: 260, done: false });
+    assert.deepEqual(restoreMove({ target: 300, lastSet: 260, scrollTop: 260.5, maxScroll: 900 }), { to: 300, done: true });
+    // A box with no room at all, and a place of zero: done either way.
+    assert.deepEqual(restoreMove({ target: 300, lastSet: null, scrollTop: 0, maxScroll: 0 }), { to: 0, done: false });
+    assert.deepEqual(restoreMove({ target: 0, lastSet: null, scrollTop: 0, maxScroll: 0 }), { to: 0, done: true });
+  });
+
+  it('is left to whoever moved the box since the last step', () => {
+    // The reader scrolled, or the feed opened at its own place.
+    assert.equal(restoreMove({ target: 300, lastSet: 120, scrollTop: 80, maxScroll: 900 }), null);
+    assert.equal(restoreMove({ target: 300, lastSet: 120, scrollTop: 300, maxScroll: 900 }), null);
   });
 });

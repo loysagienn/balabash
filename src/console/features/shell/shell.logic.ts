@@ -1,7 +1,8 @@
 // Pure rules of the shell (design: Shell): the main-thread access ("Main
 // thread" item, ShellTop main button — which key press is the shortcut,
 // how it is labelled, whether the current route is the main thread
-// itself) and which route changes keep the body's scroll place.
+// itself), which route changes keep the body's scroll place, and how a
+// place brought back by history is reached (restoreMove).
 
 import type { AppRoute } from '../../lib/router/routes.ts';
 
@@ -61,4 +62,26 @@ export function isMainThreadOpen(route: AppRoute, mainThreadId: string | null | 
 // view). Same route — nothing changed at all.
 export function keepsScrollPlace(from: AppRoute, to: AppRoute): boolean {
   return from.key === 'project' && to.key === 'project' && from.slug === to.slug;
+}
+
+// One step of bringing the body back to the place a history entry was
+// left at (features/shell/scroll.ts runs it now and again as the screen
+// grows): null — the box has moved since the last step (the reader, or
+// the screen's own hand: the feed opening at its place), the place is
+// theirs now; else where to scroll — the target, or as far as the content
+// goes yet — and whether the target is reached (a later step is needed
+// only while it is not). A place is "the same" within a pixel: a box
+// reports fractions.
+export type RestoreMove = { to: number; done: boolean } | null;
+
+export function restoreMove(input: { target: number; lastSet: number | null; scrollTop: number; maxScroll: number }): RestoreMove {
+  const { target, lastSet, scrollTop, maxScroll } = input;
+
+  if (lastSet !== null && Math.abs(scrollTop - lastSet) > 1) {
+    return null;
+  }
+
+  const to = Math.max(0, Math.min(target, maxScroll));
+
+  return { to, done: to >= target };
 }

@@ -8,7 +8,7 @@
 // The sidebar head names the workspace and, once Settings has it, the
 // operator under it.
 
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import type { ReactNode } from 'react';
 import { Link } from '../../lib/router/Link.tsx';
 import type { AppRoute, NavKey } from '../../lib/router/routes.ts';
@@ -26,6 +26,7 @@ import { Sheet } from '../../ui/Sheet/Sheet.tsx';
 import { Toasts } from '../toasts/Toasts.tsx';
 import { MORE, NAV, TABS } from './nav.ts';
 import { isMainThreadOpen, isMainThreadShortcut, keepsScrollPlace, mainThreadRoute, mainThreadShortcutLabel } from './shell.logic.ts';
+import { restoreScroll } from './scroll.ts';
 import { ShellTop } from './ShellTop.tsx';
 import type { ShellTopProps } from './ShellTop.tsx';
 import './Shell.css';
@@ -45,6 +46,7 @@ export function Shell({ current, detail, children, ...top }: ShellProps) {
   const moreOpen = useAppSelector(selectMoreSheet);
   const route = useAppSelector(state => state.router.route);
   const source = useAppSelector(state => state.router.source);
+  const scroll = useAppSelector(state => state.router.scroll);
   const body = useRef<HTMLElement>(null);
   const mainThreadId = me?.mainThreadId ?? null;
   // One route object per id: the key listener below binds once, not per render.
@@ -54,19 +56,33 @@ export function Shell({ current, detail, children, ...top }: ShellProps) {
   // On the main thread no section is current: it has its own item.
   const section = mainOpen ? null : current;
 
-  // A new screen starts at the top; history navigation and a move inside
-  // the same page (keepsScrollPlace) keep their place.
+  // A new screen starts at the top; a move inside the same page
+  // (keepsScrollPlace) keeps its place; a history navigation brings back
+  // the place the entry was left at (restoreScroll: now, and again as the
+  // screen grows into it, until the reader or the screen moves the body
+  // itself). Before paint, so the body never shows at the top first.
   const previous = useRef<AppRoute | null>(null);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const from = previous.current;
+    const box = body.current;
 
     previous.current = route;
 
-    if (source === 'app' && body.current && !(from && keepsScrollPlace(from, route))) {
-      body.current.scrollTop = 0;
+    if (!box) {
+      return undefined;
     }
-  }, [route, source]);
+
+    if (source === 'history' && scroll !== null) {
+      return restoreScroll(box, scroll);
+    }
+
+    if (!(from && keepsScrollPlace(from, route))) {
+      box.scrollTop = 0;
+    }
+
+    return undefined;
+  }, [route, source, scroll]);
 
   // ⌘J / Ctrl+J opens the main thread from any screen (on the main thread
   // itself ROUTE_TO is a no-op: the route is the same).

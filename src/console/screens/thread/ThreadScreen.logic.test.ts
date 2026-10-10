@@ -67,16 +67,27 @@ describe('feed scroll', () => {
   it('opens at the end, keeps the anchored item through an earlier chunk, follows the tail only from the end', () => {
     const seen = { knownFrom: 500n, height: 2000 };
 
-    assert.deepEqual(feedScrollMove({ previous: null, knownFrom: null, atEnd: true, anchorShift: null, height: 900 }), { kind: 'open' });
+    assert.deepEqual(feedScrollMove({ previous: null, knownFrom: null, atEnd: true, anchorShift: null, height: 900, restore: null }), { kind: 'open' });
     // An earlier chunk: by the shift of the anchored item, whatever else
     // changed height above it (the top line, re-keyed cards, opened details).
-    assert.deepEqual(feedScrollMove({ previous: seen, knownFrom: 1n, atEnd: false, anchorShift: 1000, height: 3600 }), { kind: 'by', px: 1000 });
+    assert.deepEqual(feedScrollMove({ previous: seen, knownFrom: 1n, atEnd: false, anchorShift: 1000, height: 3600, restore: null }), { kind: 'by', px: 1000 });
     // No measured item left in the DOM: the growth of the content.
-    assert.deepEqual(feedScrollMove({ previous: seen, knownFrom: 1n, atEnd: false, anchorShift: null, height: 3000 }), { kind: 'by', px: 1000 });
-    assert.equal(feedScrollMove({ previous: seen, knownFrom: 1n, atEnd: true, anchorShift: 0, height: 2000 }), null);
+    assert.deepEqual(feedScrollMove({ previous: seen, knownFrom: 1n, atEnd: false, anchorShift: null, height: 3000, restore: null }), { kind: 'by', px: 1000 });
+    assert.equal(feedScrollMove({ previous: seen, knownFrom: 1n, atEnd: true, anchorShift: 0, height: 2000, restore: null }), null);
     // The tail (a new item or a new row inside the last group): to the end when the end was in view.
-    assert.deepEqual(feedScrollMove({ previous: seen, knownFrom: 500n, atEnd: true, anchorShift: 0, height: 2100 }), { kind: 'end' });
-    assert.equal(feedScrollMove({ previous: seen, knownFrom: 500n, atEnd: false, anchorShift: 0, height: 2100 }), null);
+    assert.deepEqual(feedScrollMove({ previous: seen, knownFrom: 500n, atEnd: true, anchorShift: 0, height: 2100, restore: null }), { kind: 'end' });
+    assert.equal(feedScrollMove({ previous: seen, knownFrom: 500n, atEnd: false, anchorShift: 0, height: 2100, restore: null }), null);
+  });
+
+  it('opens at the place history brought back instead of the end; the place says nothing after the first view', () => {
+    const seen = { knownFrom: 500n, height: 2000 };
+
+    assert.deepEqual(feedScrollMove({ previous: null, knownFrom: 500n, atEnd: true, anchorShift: null, height: 2000, restore: 320 }), { kind: 'to', px: 320 });
+    assert.deepEqual(feedScrollMove({ previous: null, knownFrom: 500n, atEnd: true, anchorShift: null, height: 2000, restore: 0 }), { kind: 'to', px: 0 });
+    // Once open, the feed keeps its own place: a chunk and the tail as ever.
+    assert.deepEqual(feedScrollMove({ previous: seen, knownFrom: 1n, atEnd: false, anchorShift: 700, height: 3000, restore: 320 }), { kind: 'by', px: 700 });
+    assert.equal(feedScrollMove({ previous: seen, knownFrom: 500n, atEnd: false, anchorShift: 0, height: 2100, restore: 320 }), null);
+    assert.deepEqual(feedScrollMove({ previous: seen, knownFrom: 500n, atEnd: true, anchorShift: 0, height: 2100, restore: 320 }), { kind: 'end' });
   });
 
   it('anchors on the item under the top of the view', () => {

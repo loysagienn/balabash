@@ -7,6 +7,9 @@
 // the scroll place. The fragment of the URL (`hash`) rides beside the route
 // — a new fragment of the same route is a new state with the same route
 // object, so the URL gets it and nothing keyed by the route moves.
+// `scroll` — the body's scroll place a history navigation brings back
+// (the shell restores it after the screen rendered); null for every other
+// change, which starts its screen at the top.
 
 import { writeRoute } from '../../lib/router/routes.ts';
 import type { AppRoute } from '../../lib/router/routes.ts';
@@ -18,6 +21,7 @@ export type RouterState = {
   source: RouteSource;
   replace: boolean;
   hash: string;
+  scroll: number | null;
 };
 
 // Two routes are the same when they say the same URL (readRoute and
@@ -28,7 +32,7 @@ export function sameRoute(a: AppRoute, b: AppRoute): boolean {
 
 export const createRouterReducer =
   (initialRoute: AppRoute, initialHash = '') =>
-  (state: RouterState = { route: initialRoute, source: 'app', replace: true, hash: initialHash }, action: Action): RouterState => {
+  (state: RouterState = { route: initialRoute, source: 'app', replace: true, hash: initialHash, scroll: null }, action: Action): RouterState => {
     switch (action.type) {
       case 'ROUTE_TO': {
         const same = sameRoute(state.route, action.route);
@@ -37,7 +41,7 @@ export const createRouterReducer =
           return state;
         }
 
-        return { route: same ? state.route : action.route, source: action.source, replace: action.replace, hash: action.hash };
+        return { route: same ? state.route : action.route, source: action.source, replace: action.replace, hash: action.hash, scroll: action.scroll };
       }
       default:
         return state;

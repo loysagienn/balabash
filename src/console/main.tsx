@@ -41,7 +41,8 @@ const devtools = window.__REDUX_DEVTOOLS_EXTENSION__?.({
 
 store = createStore({ api, initialRoute: readRoute(window.location.pathname + window.location.search), initialHash: window.location.hash, enhancer: devtools });
 
-connectStoreToHistory(store);
+// The body's scroll place an entry keeps when it is left (lib/router/history.ts).
+connectStoreToHistory(store, { readScroll: () => document.querySelector<HTMLElement>('main.shell-body')?.scrollTop ?? null });
 connectStoreToStream(store);
 connectStoreToVisibility(store);
 // The phone's two-finger zoom is off (lib/touch/pinch.ts); desktop zoom — a

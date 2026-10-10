@@ -946,7 +946,7 @@ describe('route data', () => {
     assert.equal(store.getState().ui.moreSheet, true);
     store.dispatch(routeTo({ key: 'apps' }));
     assert.equal(store.getState().ui.moreSheet, false);
-    assert.deepEqual(store.getState().router, { route: { key: 'apps' }, source: 'app', replace: false, hash: '' });
+    assert.deepEqual(store.getState().router, { route: { key: 'apps' }, source: 'app', replace: false, hash: '', scroll: null });
   });
 
   it('keeps the router state as is on ROUTE_TO to the current route', () => {
@@ -987,11 +987,15 @@ describe('route data', () => {
 
     // A route without a fragment drops the one before.
     store.dispatch(routeTo({ key: 'files', path: 'b.md' }));
-    assert.deepEqual(store.getState().router, { route: { key: 'files', path: 'b.md' }, source: 'app', replace: false, hash: '' });
+    assert.deepEqual(store.getState().router, { route: { key: 'files', path: 'b.md' }, source: 'app', replace: false, hash: '', scroll: null });
 
-    // history brings the location's fragment back.
-    store.dispatch(routeTo({ key: 'files', path: 'a.md' }, { source: 'history', hash: '#part' }));
-    assert.deepEqual(store.getState().router, { route: { key: 'files', path: 'a.md' }, source: 'history', replace: false, hash: '#part' });
+    // history brings the location's fragment back, and the place the entry was left at.
+    store.dispatch(routeTo({ key: 'files', path: 'a.md' }, { source: 'history', hash: '#part', scroll: 120 }));
+    assert.deepEqual(store.getState().router, { route: { key: 'files', path: 'a.md' }, source: 'history', replace: false, hash: '#part', scroll: 120 });
+
+    // An app navigation has no place to bring back: its screen starts at the top.
+    store.dispatch(routeTo({ key: 'files', path: 'b.md' }));
+    assert.equal(store.getState().router.scroll, null);
   });
 });
 

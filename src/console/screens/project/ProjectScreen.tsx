@@ -89,12 +89,19 @@ function ProjectPage({ project, route }: { project: ProjectView; route: ProjectR
   // the file card is then out of view — its head scrolled past above, or
   // still below — it comes to the top, so the rows or the opened file are
   // where the eye is, not the project header. Not on the first render:
-  // a page opened at a path starts at the top as any screen.
+  // a page opened at a path starts at the top as any screen. Not on a
+  // history navigation with a place to bring back: the shell restores it,
+  // wherever the card was then.
   const firstPath = useRef(true);
+  const fromHistory = useAppSelector(s => s.router.source === 'history' && s.router.scroll !== null);
 
   useEffect(() => {
     if (firstPath.current) {
       firstPath.current = false;
+      return;
+    }
+
+    if (fromHistory) {
       return;
     }
 
