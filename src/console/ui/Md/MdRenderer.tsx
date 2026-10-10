@@ -6,13 +6,16 @@
 // GitHub slug of the heading's text, fragment.ts: a namespace of the
 // document's own, apart from the ids of the interface, while a link
 // written for GitHub lands here too); a message of the feed does not: its
-// headings are not addresses. Loaded as its own chunk (Md.tsx).
+// headings are not addresses. With `breaks`, a newline of the source is a
+// line break on screen (remark-breaks: text nodes only — code is not
+// touched). Loaded as its own chunk (Md.tsx).
 
 import { createContext, useContext, useEffect, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import type { Components, Options } from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
 import rehypeSlug from 'rehype-slug';
+import remarkBreaks from 'remark-breaks';
 import remarkGfm from 'remark-gfm';
 import { HEADING_IDS, fragmentTarget } from './fragment.ts';
 import { ALIASES, LANGUAGES } from './languages.ts';
@@ -22,6 +25,7 @@ import { resolveRelative } from './relative.ts';
 type Plugins = NonNullable<Options['rehypePlugins']>;
 
 const REMARK: Plugins = [remarkGfm];
+const REMARK_BREAKS: Plugins = [...REMARK, remarkBreaks];
 const REHYPE: Plugins = [[rehypeHighlight, { languages: LANGUAGES, aliases: ALIASES }]];
 const REHYPE_PLACED: Plugins = [...REHYPE, [rehypeSlug, HEADING_IDS]];
 
@@ -119,7 +123,7 @@ function useReveal(root: { current: HTMLDivElement | null }, source: string, rev
   }, [root, source, reveal]);
 }
 
-export default function MdRenderer({ source, quiet, className, at, reveal }: MdProps) {
+export default function MdRenderer({ source, quiet, className, at, reveal, breaks }: MdProps) {
   const root = useRef<HTMLDivElement>(null);
 
   useReveal(root, source, reveal);
@@ -127,7 +131,7 @@ export default function MdRenderer({ source, quiet, className, at, reveal }: MdP
   return (
     <PlaceContext.Provider value={at ?? null}>
       <div ref={root} className={className ? `md ${className}` : 'md'} data-variant={quiet ? 'quiet' : undefined}>
-        <ReactMarkdown remarkPlugins={REMARK} rehypePlugins={at ? REHYPE_PLACED : REHYPE} components={COMPONENTS}>
+        <ReactMarkdown remarkPlugins={breaks ? REMARK_BREAKS : REMARK} rehypePlugins={at ? REHYPE_PLACED : REHYPE} components={COMPONENTS}>
           {source}
         </ReactMarkdown>
       </div>

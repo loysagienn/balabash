@@ -60,11 +60,14 @@ function Details({ detail, error }: { detail: ActionDetail; error: boolean }) {
       );
     }
     case 'md': {
+      // The thought keeps its lines: a Codex reasoning summary of several
+      // sections comes joined with single newlines (one headline per
+      // section), which Markdown alone would run into one line.
       const text = cutText(detail.text);
 
       return (
         <>
-          <Md quiet source={text.text} />
+          <Md quiet breaks source={text.text} />
           <Notice cut={text} />
         </>
       );

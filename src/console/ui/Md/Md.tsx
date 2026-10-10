@@ -8,6 +8,9 @@
 // carry ids, so a fragment of the URL can name a section. reveal — the
 // fragment to bring into view ('#part' or ''): once the document is
 // rendered, the element it names is scrolled to the top of the view.
+// breaks — a line break in the source is a line break on screen (a
+// thought of Codex: the CLI joins the sections of a reasoning summary
+// with one newline, which Markdown would fold into one line).
 
 import { Suspense, lazy } from 'react';
 import type { MouseEventHandler } from 'react';
@@ -34,13 +37,23 @@ export type MdProps = {
   className?: string;
   at?: MdPlace;
   reveal?: string;
+  breaks?: boolean;
 };
 
-function Plain({ source, quiet, className }: MdProps) {
+function Plain({ source, quiet, className, breaks }: MdProps) {
   return (
     <div className={className ? `md ${className}` : 'md'} data-variant={quiet ? 'quiet' : undefined} data-plain="">
       {source.split(/\n{2,}/).map((paragraph, i) => (
-        <p key={i}>{paragraph}</p>
+        <p key={i}>
+          {breaks
+            ? paragraph.split('\n').map((line, j) => (
+                <span key={j}>
+                  {j > 0 ? <br /> : null}
+                  {line}
+                </span>
+              ))
+            : paragraph}
+        </p>
       ))}
     </div>
   );

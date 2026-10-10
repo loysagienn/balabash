@@ -70,6 +70,10 @@ A wide table scrolls inside the message instead of widening the feed:
 
 ~~Old plan~~ replaced. See https://example.com/design for the live version.`;
 
+// A reasoning summary of Codex: one bold headline per section, the
+// sections joined with single newlines by the CLI.
+const SECTIONS = '**Refining review comments**\n**Locating current review thread**';
+
 const CODE = `Uniqueness is better enforced by a DB index than by a check in code: otherwise two parallel publishes can take the same slug.
 
 \`\`\`ts
@@ -457,7 +461,13 @@ export function DevUiFeed() {
                 <Label>thinking — expanded, with highlighted code</Label>
                 <ActGroup>
                   <Xp state="done" icon="brain" end="14s" defaultOpen text="Thought">
-                    <Md quiet source={CODE} />
+                    <Md quiet breaks source={CODE} />
+                  </Xp>
+                </ActGroup>
+                <Label>thinking — Codex, two sections on their own lines</Label>
+                <ActGroup>
+                  <Xp state="done" icon="brain" end="6.0s" defaultOpen text="Thought">
+                    <Md quiet breaks source={SECTIONS} />
                   </Xp>
                 </ActGroup>
                 <Label>batch summary — expanded</Label>
