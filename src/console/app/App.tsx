@@ -71,7 +71,9 @@ export function App() {
     case 'connections':
       return <Placeholder current="connections" title="Connections" icon="plug" what="Connections" />;
     case 'secrets':
-      return <Secrets id={route.id} />;
+      // One instance per id: the values typed and the call in flight belong
+      // to the request they were typed for, never to the next id.
+      return <Secrets key={route.id} id={route.id} />;
     case 'agents':
       return <AgentsScreen route={route} />;
     case 'system':

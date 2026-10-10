@@ -17,6 +17,7 @@ import { connectStoreToHistory } from './lib/router/history.ts';
 import { readRoute } from './lib/router/routes.ts';
 import { connectStoreToStream } from './lib/stream/index.ts';
 import { connectStoreToVisibility } from './lib/visibility/index.ts';
+import { connectQueryClientToSession } from './lib/query/session.ts';
 import { PHONE_MEDIA, installPinchGuard } from './lib/touch/pinch.ts';
 import { createStore } from './store/index.ts';
 import type { AppStore } from './store/index.ts';
@@ -47,11 +48,16 @@ connectStoreToVisibility(store);
 // touch screen beside a mouse included — is not.
 installPinchGuard(document, navigator, window.matchMedia(PHONE_MEDIA));
 
-// The operator's console is the operator's: the store is reachable from the
-// browser console for debugging (window.__console.store.getState()).
-window.__console = { store };
-
+// The second data layer (frontend.md): data of the session, cleared when
+// the session ends (lib/query/session.ts).
 const queryClient = new QueryClient({ defaultOptions: { queries: { retry: 1, staleTime: 10_000 } } });
+
+connectQueryClientToSession(store, queryClient);
+
+// The operator's console is the operator's: the store and the query client
+// are reachable from the browser console for debugging
+// (window.__console.store.getState(), window.__console.queryClient.getQueryCache()).
+window.__console = { store, queryClient };
 
 createRoot(root).render(
   <StrictMode>

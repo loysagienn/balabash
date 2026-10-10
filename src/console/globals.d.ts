@@ -5,6 +5,6 @@
 declare module '*.css';
 
 interface Window {
-  __console?: { store: import('./store/index.ts').AppStore };
+  __console?: { store: import('./store/index.ts').AppStore; queryClient: import('@tanstack/react-query').QueryClient };
   __REDUX_DEVTOOLS_EXTENSION__?: (options?: { name?: string; serialize?: { replacer?: (key: string, value: unknown) => unknown } }) => import('redux').StoreEnhancer;
 }
