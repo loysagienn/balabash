@@ -19,7 +19,8 @@ import { prisma } from '../../db/client.ts';
 import type { JsonObject } from '../../core/contract.ts';
 import type { ConnectionView } from '../../api/contract.ts';
 import type { ConnectionRecord } from '../../core/event-types.ts';
-import { appendEvent } from '../../core/append.ts';
+import { appendEvent, appendEventIn } from '../../core/append.ts';
+import { notifyAppended } from '../../core/live.ts';
 import { openSecretRequest } from '../secret-requests.ts';
 import {
   CONNECTION_COMPLETED,
@@ -378,8 +379,14 @@ export async function provisionOauthClient(
     throw new Error('Client ID is required');
   }
 
-  // Consume atomically: the request row dies with the client landing.
-  const consumed = await prisma.$transaction(async tx => {
+  // Consume atomically: the request row dies with the client landing, and
+  // the sanitized fact for the log — field names only (§2 ставка 4),
+  // addressed to the issuing thread (appendEventIn redirects to the main
+  // thread when it is gone) — commits with them or not at all: the row is
+  // a registry the console's snapshot shows (src/core/registry-events.ts).
+  // A refused journal refuses the POST; the row stays for another try. The
+  // live tail is told after the commit.
+  const seq = await prisma.$transaction(async tx => {
     const row = await tx.oauthClientRequest.findUnique({ where: { id: request.id } });
 
     if (!row || row.userId !== userId) {
@@ -399,24 +406,25 @@ export async function provisionOauthClient(
       update: { clientInformation },
     });
 
-    return row;
+    const appended = await appendEventIn(tx, {
+      type: OAUTH_CLIENT_PROVISIONED,
+      actor: 'system',
+      userId: row.userId,
+      threadId: null,
+      targetThreadId: row.threadId,
+      payload: {
+        requestId: row.id,
+        server: row.server,
+        fields: normalizedClientSecret ? ['client_id', 'client_secret'] : ['client_id'],
+      },
+    });
+
+    return appended.written ? appended.event.seq : null;
   });
 
-  // Sanitized fact for the log: field names only (§2 ставка 4).
-  await appendEvent({
-    type: OAUTH_CLIENT_PROVISIONED,
-    actor: 'system',
-    userId: consumed.userId,
-    threadId: null,
-    targetThreadId: consumed.threadId,
-    payload: {
-      requestId: consumed.id,
-      server: consumed.server,
-      fields: normalizedClientSecret ? ['client_id', 'client_secret'] : ['client_id'],
-    },
-  }).catch(error => {
-    console.error(`[connections] failed to journal oauth client provisioning for "${consumed.server}":`, error);
-  });
+  if (seq !== null) {
+    notifyAppended(seq);
+  }
 }
 
 // Handles a click on the one-time link: runs OAuth discovery (and dynamic

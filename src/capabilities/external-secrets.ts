@@ -7,7 +7,8 @@
 // issued the link.
 
 import { prisma } from '../db/client.ts';
-import { appendEvent } from '../core/append.ts';
+import { appendEventIn } from '../core/append.ts';
+import { notifyAppended } from '../core/live.ts';
 import { SECRETS_PROVISIONED } from '../core/envelope.ts';
 import { config } from '../config/index.ts';
 import { disconnectExternalServer, listExternalSecretTargets, type ExternalSecretTarget } from './tool-manager.ts';
@@ -144,11 +145,17 @@ export async function provisionExternalServerSecrets(
     throw new Error('External server credential form contains an unexpected field');
   }
 
-  // Consume atomically: the request row dies with the secrets landing. The
-  // log event goes through the append API afterwards — if that append fails,
-  // the state is still consistent: the manager reconnects the server on the
-  // next secretVersion check regardless of the event.
-  const consumed = await prisma.$transaction(async tx => {
+  // Consume atomically: the request row dies with the secrets landing, and
+  // the sanitized fact for the log — field names only, addressed to the
+  // issuing thread (§4.2; appendEventIn redirects to the main thread when
+  // it is gone) — commits with them or not at all. The row is a registry
+  // the console's snapshot shows (src/core/registry-events.ts): a change
+  // without its event would leave the bell showing a request already
+  // fulfilled until the next reload. A refused journal refuses the POST;
+  // the row stays, and the operator submits again. The live tail is told
+  // after the commit; the manager reconnects the server on its next
+  // secretVersion check regardless of the event.
+  const seq = await prisma.$transaction(async tx => {
     const row = await tx.externalServerSecretRequest.findUnique({ where: { id: request.id } });
 
     if (!row || row.userId !== userId) {
@@ -165,19 +172,19 @@ export async function provisionExternalServerSecrets(
       });
     }
 
-    return row;
+    const appended = await appendEventIn(tx, {
+      type: SECRETS_PROVISIONED,
+      actor: 'system',
+      userId: row.userId,
+      threadId: null,
+      targetThreadId: row.threadId,
+      payload: { requestId: row.id, server: row.server, fields: Object.keys(normalized) },
+    });
+
+    return appended.written ? appended.event.seq : null;
   });
 
-  // Sanitized fact for the log: field names only, addressed to the issuing
-  // thread (§4.2); append redirects to the main thread when it is gone.
-  await appendEvent({
-    type: SECRETS_PROVISIONED,
-    actor: 'system',
-    userId: consumed.userId,
-    threadId: null,
-    targetThreadId: consumed.threadId,
-    payload: { requestId: consumed.id, server: consumed.server, fields: Object.keys(normalized) },
-  }).catch(error => {
-    console.error(`[secrets] failed to journal provisioning for "${consumed.server}":`, error);
-  });
+  if (seq !== null) {
+    notifyAppended(seq);
+  }
 }
