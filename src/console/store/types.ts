@@ -17,6 +17,7 @@ import type { AppsState } from './apps/reducer.ts';
 import type { ScheduleState } from './schedule/reducer.ts';
 import type { ConnectionsState } from './connections/reducer.ts';
 import type { AgentsState } from './agents/reducer.ts';
+import type { NotificationsState } from './notifications/reducer.ts';
 import type { UiState } from './ui/reducer.ts';
 
 type Creators = typeof import('./actions.ts');
@@ -38,6 +39,7 @@ export type State = {
   schedule: ScheduleState;
   connections: ConnectionsState;
   agents: AgentsState;
+  notifications: NotificationsState;
   ui: UiState;
 };
 

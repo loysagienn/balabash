@@ -4,6 +4,7 @@
 
 export * from './apps/actions.ts';
 export * from './feed/actions.ts';
+export * from './notifications/actions.ts';
 export * from './router/actions.ts';
 export * from './projects/actions.ts';
 export * from './session/actions.ts';

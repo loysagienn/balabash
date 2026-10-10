@@ -28,6 +28,7 @@ import { loadAppsHandler, publishAppHandler, unpublishAppHandler } from './apps/
 import { scheduleReducer } from './schedule/reducer.ts';
 import { connectionsReducer } from './connections/reducer.ts';
 import { agentsReducer } from './agents/reducer.ts';
+import { notificationsReducer } from './notifications/reducer.ts';
 import { uiReducer } from './ui/reducer.ts';
 
 export type { Action, ActionOf, ActionType, State } from './types.ts';
@@ -83,6 +84,7 @@ export function createStore({ api, initialRoute, initialHash = '', enhancer }: C
     schedule: scheduleReducer,
     connections: connectionsReducer,
     agents: agentsReducer,
+    notifications: notificationsReducer,
     ui: uiReducer,
   }) as unknown as Reducer<Domains, Action>;
 

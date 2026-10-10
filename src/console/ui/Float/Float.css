@@ -1,0 +1,5 @@
+@layer components{
+/* ── Float layer ──  <div class="float-layer"> in document.body: a menu or a popover floating next to its button
+   (position: fixed at the button, so an overflow:hidden card does not clip it); the panel inside brings its own look */
+.float-layer{position:fixed;z-index:var(--z-pop);outline:none}
+}

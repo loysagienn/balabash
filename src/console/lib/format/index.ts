@@ -142,6 +142,30 @@ export function agoLabel(date: Date, now: Date): string {
   return shortDate(date, now);
 }
 
+// "now", "3 min", "12h", "yesterday", "3 days", then the date — how long
+// ago, in the narrow time column of a bell row (no "ago": the column says it).
+export function briefAgoLabel(date: Date, now: Date): string {
+  const ms = now.getTime() - date.getTime();
+
+  if (ms < MINUTE) {
+    return 'now';
+  }
+  if (ms < HOUR) {
+    return `${Math.floor(ms / MINUTE)} min`;
+  }
+  if (ms < DAY) {
+    return `${Math.floor(ms / HOUR)}h`;
+  }
+  if (sameDay(date, daysBefore(now, 1))) {
+    return 'yesterday';
+  }
+  if (ms < 7 * DAY) {
+    return `${Math.floor(ms / DAY)} days`;
+  }
+
+  return shortDate(date, now);
+}
+
 // "today", "yesterday", then "Oct 2" — when a folder changed, in the same
 // column: a folder's date is a day, not a time of day (the design's rows).
 // Only the calendar day itself is "today": a day ahead of now (a tree copied

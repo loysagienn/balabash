@@ -1,0 +1,8 @@
+@layer patterns{
+/* ── Notifications ──  .ntfs-anchor (the bell) · .float-layer.ntfs-layer > .pop.ntfs-pop > .pop-h + .ntfs-list (.ntfs-group > .pop-g + .ntf…, or .ntfs-empty) */
+.ntfs-anchor{display:inline-flex}
+.ntfs-layer{width:min(var(--pop-w,380px),calc(100vw - var(--sp-4)))}
+.ntfs-pop{max-height:calc(100dvh - var(--top-h) - var(--sp-4))}
+.ntfs-list{min-height:0;overflow:auto;overscroll-behavior:contain;padding-bottom:var(--sp-1)}
+.ntfs-empty{margin:0;padding:var(--sp-3) var(--sp-3h) var(--sp-4);font-size:var(--fs-meta);line-height:var(--lh-meta);color:var(--text-3)}
+}

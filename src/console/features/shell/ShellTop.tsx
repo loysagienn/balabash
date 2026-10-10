@@ -1,9 +1,9 @@
 // Shell header (design: ShellTop): "back" and the section above the page,
 // the title, a subtitle; on the right the main thread button (phone only,
 // on top-level screens — a page with "back" leaves the room to its title)
-// and the activity indicator. pageHead — the page has its own titled
-// header: on wide screens the shell header shows only "← Section". The
-// bell joins with notifications (plan, stage 7).
+// the activity indicator and the bell (features/notifications). pageHead —
+// the page has its own titled header: on wide screens the shell header
+// shows only "← Section".
 
 import { Link } from '../../lib/router/Link.tsx';
 import type { AppRoute } from '../../lib/router/routes.ts';
@@ -12,6 +12,7 @@ import { routeTo } from '../../store/router/actions.ts';
 import { ActivityChip } from '../../ui/ActivityChip/ActivityChip.tsx';
 import { Icon } from '../../ui/Icon/Icon.tsx';
 import { IconBtn } from '../../ui/IconBtn/IconBtn.tsx';
+import { NotificationsBell } from '../notifications/NotificationsBell.tsx';
 
 export type MainThreadLink = { route: AppRoute; current: boolean };
 
@@ -70,6 +71,7 @@ export function ShellTop({ title, titleNarrow, sub, crumb, back, backNarrow, pag
           </Link>
         ) : null}
         <ActivityChip running={running} compact={compact} onClick={() => dispatch(routeTo({ key: 'threads', status: 'active' }))} />
+        <NotificationsBell />
       </div>
     </header>
   );

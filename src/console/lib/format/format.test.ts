@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { agoLabel, clockLabel, countOf, dateTimeLabel, dayEnd, dayKey, dayLabel, daysBefore, dayStart, durationLabel, fileSize, fileTimeLabel, folderTimeLabel, isDayKey, rangeLabel, shortDate, sinceLabel, startedLabel, timeOfDay } from './index.ts';
+import { agoLabel, briefAgoLabel, clockLabel, countOf, dateTimeLabel, dayEnd, dayKey, dayLabel, daysBefore, dayStart, durationLabel, fileSize, fileTimeLabel, folderTimeLabel, isDayKey, rangeLabel, shortDate, sinceLabel, startedLabel, timeOfDay } from './index.ts';
 
 // Local-time constructors: the helpers format in the browser's zone.
 const at = (y: number, m: number, d: number, h = 0, min = 0, sec = 0) => new Date(y, m - 1, d, h, min, sec);
@@ -16,6 +16,18 @@ describe('format', () => {
   it('writes the time of day on a 24-hour clock', () => {
     assert.equal(timeOfDay(at(2026, 10, 9, 14, 2)), '14:02');
     assert.equal(timeOfDay(at(2026, 10, 9, 0, 5)), '00:05');
+  });
+
+  it('writes how long ago briefly, for a narrow time column', () => {
+    assert.equal(briefAgoLabel(at(2026, 10, 9, 17, 29, 40), NOW), 'now');
+    assert.equal(briefAgoLabel(at(2026, 10, 9, 17, 27), NOW), '3 min');
+    assert.equal(briefAgoLabel(at(2026, 10, 9, 5, 30), NOW), '12h');
+    // Yesterday by the calendar, past a whole day; within a day it is hours.
+    assert.equal(briefAgoLabel(at(2026, 10, 8, 20), NOW), '21h');
+    assert.equal(briefAgoLabel(at(2026, 10, 8, 9), NOW), 'yesterday');
+    assert.equal(briefAgoLabel(at(2026, 10, 6, 9), NOW), '3 days');
+    assert.equal(briefAgoLabel(at(2026, 10, 1, 9), NOW), 'Oct 1');
+    assert.equal(briefAgoLabel(at(2025, 9, 24), NOW), 'Sep 24, 2025');
   });
 
   it('labels days relative to now', () => {
