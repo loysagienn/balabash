@@ -13,11 +13,22 @@ describe('registrationServesRedirect', () => {
     );
   });
 
-  it('compares URIs as the browser reads them, not as strings', () => {
-    assert.equal(
-      registrationServesRedirect({ client_id: 'c', redirect_uris: ['HTTPS://Console.Example:443/oauth/callback'] }, REDIRECT),
-      true,
-    );
+  it('compares the registered string with the one the SDK sends — no URL normalization (RFC 6749 §3.1.2.3)', () => {
+    const variants = [
+      'https://console.example:443/oauth/callback',
+      'HTTPS://console.example/oauth/callback',
+      'https://Console.Example/oauth/callback',
+      'https://console.example/oauth/callback/',
+      'https://console.example/oauth/callback?x=1',
+      'https://console.example/oauth/callback#f',
+      'https://console.example/oauth/Callback',
+      'https://console.example/./oauth/callback',
+      ' https://console.example/oauth/callback',
+    ];
+
+    for (const uri of variants) {
+      assert.equal(registrationServesRedirect({ client_id: 'c', redirect_uris: [uri] }, REDIRECT), false, uri);
+    }
   });
 
   it('rejects a dynamic registration bound to another redirect URI', () => {

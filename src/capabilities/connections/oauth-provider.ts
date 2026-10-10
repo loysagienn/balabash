@@ -35,23 +35,23 @@ function redirectUrl(): string {
   return `https://${config.domain}/oauth/callback`;
 }
 
-function sameUrl(a: string, b: string): boolean {
-  try {
-    return new URL(a).href === new URL(b).href;
-  } catch {
-    return a === b;
-  }
-}
-
 // Whether a stored client registration serves the given redirect URI. A
 // dynamically registered client is bound to the redirect_uris it was
 // registered with (RFC 7591): the authorization server refuses a consent
 // request that names another one, so a redirect URI that changed (the web
 // moved to another domain) makes the stored registration useless for new
 // authorizations. The row keeps the DCR answer whole, so the registration
-// itself says which URIs it serves. A client the operator provisioned by hand
-// carries no redirect_uris in the row — its redirect URI lives in the
-// provider's own console — and is never judged here.
+// itself says which URIs it serves. The comparison is the one the
+// authorization server makes: the SDK sends redirectUrl() as the very string
+// it is (String(redirectUrl) in both the consent URL and the code exchange),
+// and a server given a full redirect URI at registration compares it by
+// simple string comparison (RFC 6749 §3.1.2.3) — so a registration that
+// differs by anything, a :443, the case of the host, a trailing slash, is a
+// registration the server would refuse, not a match. Whatever shape the
+// domain has, it has it consistently: the same string is registered, stored
+// and sent. A client the operator provisioned by hand carries no
+// redirect_uris in the row — its redirect URI lives in the provider's own
+// console — and is never judged here.
 export function registrationServesRedirect(info: OAuthClientInformationMixed, redirect: string): boolean {
   const uris = (info as { redirect_uris?: unknown }).redirect_uris;
 
@@ -59,7 +59,7 @@ export function registrationServesRedirect(info: OAuthClientInformationMixed, re
     return true;
   }
 
-  return uris.some(uri => typeof uri === 'string' && sameUrl(uri, redirect));
+  return uris.includes(redirect);
 }
 
 function clientMetadata(): OAuthClientMetadata {
