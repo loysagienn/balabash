@@ -39,19 +39,21 @@ const PlaceContext = createContext<MdPlace | null>(null);
 
 // Links to other sites open in a new tab; links into the console stay. In a
 // placed document a relative link leads to the path it names in the file
-// area — the owner's route, opened in place — and a relative image shows
-// the bytes of its path. A table sits in its own scroll area (.md-table), so
-// a wide one scrolls instead of widening the feed.
+// area — the owner's route with the link's fragment, opened in place — and
+// a relative image shows the bytes of its path, its fragment kept (an SVG's
+// view). A reference the file area cannot hold (relative.ts) stays as
+// written. A table sits in its own scroll area (.md-table), so a wide one
+// scrolls instead of widening the feed.
 const COMPONENTS: Components = {
   a: ({ node: _node, href, children, ...rest }) => {
     const place = useContext(PlaceContext);
     const target = place && href !== undefined ? resolveRelative(place.path, href) : null;
 
     if (place && target) {
-      const link = place.link(target.path);
+      const link = place.link(target.path, target.hash);
 
       return (
-        <a {...rest} href={`${link.href}${target.hash}`} onClick={link.onClick}>
+        <a {...rest} href={link.href} onClick={link.onClick}>
           {children}
         </a>
       );
@@ -69,7 +71,7 @@ const COMPONENTS: Components = {
     const place = useContext(PlaceContext);
     const target = place && typeof src === 'string' ? resolveRelative(place.path, src) : null;
 
-    return <img {...rest} src={place && target ? place.bytes(target.path) : src} />;
+    return <img {...rest} src={place && target ? `${place.bytes(target.path)}${target.hash}` : src} />;
   },
   table: ({ node: _node, ...rest }) => (
     <div className="md-table">

@@ -4,6 +4,11 @@ import { isNumeric, parseDelimited } from './csv.ts';
 import { codeLines, splitHighlighted } from './codeLines.ts';
 import { ApiError } from '../../lib/api/index.ts';
 import { crumbSegments, isNotFound, listingSummary, nameOf, nodeOf, parentOf, underRoot, viewerFor, TEXT_PREVIEW_MAX } from './node.ts';
+import { fileUrl } from '../../lib/api/index.ts';
+import { writeRoute } from '../../lib/router/routes.ts';
+import type { AppRoute } from '../../lib/router/routes.ts';
+import { resolveRelative } from '../../ui/Md/relative.ts';
+import { projectRoute } from '../../screens/project/ProjectScreen.logic.ts';
 
 const file = (path: string, mediaType: string, sizeBytes = 100) => ({ path, mediaType, sizeBytes });
 
@@ -26,6 +31,39 @@ describe('file area — node rules', () => {
     assert.equal(underRoot('proj', 'project-two/inbox.md'), false);
     assert.equal(underRoot('proj', 'other/proj/x.md'), false);
     assert.equal(underRoot('proj', ''), false);
+  });
+
+  it('leads a reference of a placed Markdown file to a URL of its root’s surface, or nowhere', () => {
+    // The owner's chain for a file of the project page (FileBrowser.linkRoute
+    // over projectRoute) and the image's bytes; a URL is compared normalized
+    // the way the browser would send it.
+    const normalized = (url: string) => new URL(url, 'https://console.test').pathname;
+    const chain = (document: string, reference: string) => {
+      const target = resolveRelative(document, reference);
+
+      if (!target) {
+        return null;
+      }
+
+      const route: AppRoute = underRoot('proj', target.path) ? projectRoute('proj', target.path) : { key: 'files', path: target.path };
+      const page = writeRoute(route);
+      const bytes = fileUrl(target.path);
+
+      assert.equal(normalized(page), page, `${reference}: the page URL is canonical`);
+      assert.equal(normalized(bytes), bytes, `${reference}: the bytes URL is canonical`);
+
+      return { page, bytes };
+    };
+
+    assert.deepEqual(chain('proj/readme.md', 'next.md'), { page: '/projects/proj/files/next.md', bytes: '/files/proj/next.md' });
+    assert.deepEqual(chain('proj/a#b/readme.md', 'next.md'), { page: '/projects/proj/files/a%23b/next.md', bytes: '/files/proj/a%23b/next.md' });
+    assert.deepEqual(chain('proj/readme.md', '../other.md'), { page: '/workspace/other.md', bytes: '/files/other.md' });
+    assert.deepEqual(chain('proj/readme.md', '../../../x.png'), { page: '/workspace/x.png', bytes: '/files/x.png' });
+    assert.deepEqual(chain('proj/readme.md', '../project-two/x.md'), { page: '/workspace/project-two/x.md', bytes: '/files/project-two/x.md' });
+    assert.deepEqual(chain('proj/readme.md', '.'), { page: '/projects/proj', bytes: '/files/proj' });
+    assert.equal(chain('proj/readme.md', '..%2Fother.md'), null);
+    assert.equal(chain('proj/readme.md', '..%2F..%2F..%2Fx.png'), null);
+    assert.equal(chain('proj/readme.md', 'a%5C..%5C..%5Cx.md'), null);
   });
 
   it('picks the viewer by type, extension and size', () => {

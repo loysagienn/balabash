@@ -2,7 +2,11 @@
 // left click (no modifiers, no target) becomes ROUTE_TO; anything else stays
 // with the browser (new tab, copy link). `current` marks aria-current="page".
 // useLinkProps gives the same href + onClick pair to a ui block that draws
-// its own anchor (ThreadRow, ChildThread, Att).
+// its own anchor (ThreadRow, ChildThread, Att); useLinkTargets gives it for
+// routes known only at render, with the fragment of the URL when the link
+// has one (a Markdown link to a section of a file) — the fragment goes with
+// the href and with the ROUTE_TO alike, so the click and the new tab land
+// on the same URL.
 
 import type { AnchorHTMLAttributes, MouseEvent, ReactNode } from 'react';
 import { useAppDispatch } from '../../store/hooks.ts';
@@ -29,17 +33,18 @@ export function useLinkProps(route: AppRoute, replace = false): LinkTarget {
   return linkTarget(route, replace);
 }
 
-// The same pair for a list of routes known only at render (breadcrumbs):
-// one hook, a target per route.
-export function useLinkTargets(): (route: AppRoute, replace?: boolean) => LinkTarget {
+// The same pair for a list of routes known only at render (breadcrumbs,
+// the links of a Markdown preview): one hook, a target per route; `hash` —
+// the fragment of the URL ('#part' or ''), carried beside the route.
+export function useLinkTargets(): (route: AppRoute, replace?: boolean, hash?: string) => LinkTarget {
   const dispatch = useAppDispatch();
 
-  return (route, replace = false) => ({
-    href: writeRoute(route),
+  return (route, replace = false, hash = '') => ({
+    href: `${writeRoute(route)}${hash}`,
     onClick: event => {
       if (isPlainLeftClick(event)) {
         event.preventDefault();
-        dispatch(routeTo(route, { replace }));
+        dispatch(routeTo(route, { replace, hash }));
       }
     },
   });

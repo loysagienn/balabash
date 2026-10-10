@@ -1,9 +1,11 @@
 // The history process: binds the store's route to the browser history. The
-// initial route is read from location when the store is created (main.tsx);
-// from then on every app-originated ROUTE_TO becomes pushState /
-// replaceState with the route in history.state, and popstate dispatches
-// ROUTE_TO back from history.state (or from location when the entry has
-// none). Lives for the tab, only dispatches — a process, not a handler.
+// initial route and fragment are read from location when the store is
+// created (main.tsx); from then on every app-originated ROUTE_TO becomes
+// pushState / replaceState of the route's URL with its fragment, the route
+// in history.state, and popstate dispatches ROUTE_TO back from
+// history.state (or from location when the entry has none) with the
+// fragment the location has. Lives for the tab, only dispatches — a
+// process, not a handler.
 
 import type { Store } from 'redux';
 import type { Action, State } from '../../store/types.ts';
@@ -27,28 +29,34 @@ function routeFromState(state: unknown): AppRoute | null {
   return null;
 }
 
+// The URL of an entry: the route's, with the fragment that rides beside it.
+export function urlOf(route: AppRoute, hash: string): string {
+  return `${writeRoute(route)}${hash}`;
+}
+
 export function connectStoreToHistory(store: Store<State, Action>): () => void {
-  let known = store.getState().router.route;
+  let known = store.getState().router;
 
   // The first entry gets its route too, so a popstate back to it restores it.
-  window.history.replaceState({ route: known }, '', writeRoute(known));
+  window.history.replaceState({ route: known.route }, '', urlOf(known.route, known.hash));
 
   const unsubscribe = store.subscribe(() => {
-    const { route, source, replace } = store.getState().router;
+    const router = store.getState().router;
 
-    if (route === known) {
+    if (router === known) {
       return;
     }
 
-    known = route;
+    known = router;
 
-    if (source === 'history') {
+    if (router.source === 'history') {
       return;
     }
 
-    const url = writeRoute(route);
+    const { route, hash } = router;
+    const url = urlOf(route, hash);
 
-    if (replace) {
+    if (router.replace) {
       window.history.replaceState({ route }, '', url);
     } else {
       window.history.pushState({ route }, '', url);
@@ -56,7 +64,7 @@ export function connectStoreToHistory(store: Store<State, Action>): () => void {
   });
 
   const onPopState = (event: PopStateEvent) => {
-    store.dispatch(routeTo(routeFromState(event.state) ?? routeFromLocation(), { source: 'history' }));
+    store.dispatch(routeTo(routeFromState(event.state) ?? routeFromLocation(), { source: 'history', hash: window.location.hash }));
   };
 
   window.addEventListener('popstate', onPopState);

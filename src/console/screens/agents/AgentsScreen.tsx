@@ -29,7 +29,7 @@ import { Shell } from '../../features/shell/Shell.tsx';
 import { ThreadList } from '../../features/thread-list/ThreadList.tsx';
 import { useThreadTotal } from '../../features/thread-list/queries.ts';
 import { TotalFailure } from '../../features/thread-list/TotalFailure.tsx';
-import { recentSince, totalWithTail } from '../../features/thread-list/totals.ts';
+import { knownTotal, recentSince } from '../../features/thread-list/totals.ts';
 import { Avatar } from '../../ui/Avatar/Avatar.tsx';
 import { Badge } from '../../ui/Badge/Badge.tsx';
 import { Card } from '../../ui/Card/Card.tsx';
@@ -66,12 +66,13 @@ function AgentDetail({ agent, running }: { agent: AgentView; running: number }) 
   const selectThreads = useMemo(makeSelectAgentThreads, []);
   const threads = useAppSelector(s => selectThreads(s, agent.name));
   // The counts of the agent's threads — all time and the recent window —
-  // from the server, brought up to the tail the store has folded since.
+  // from the server, brought up to the tail the store has folded since; a
+  // request that stands in error has no number, whatever Query kept.
   const since = recentSince(now);
   const all = useThreadTotal({ agent: agent.name });
   const recent = useThreadTotal({ agent: agent.name, createdAtGte: since.toISOString() });
-  const whole = all.data ? totalWithTail(all.data, threads) : null;
-  const caption = activityCaption(whole, recent.data ? totalWithTail(recent.data, threads, since) : null, running);
+  const whole = knownTotal(all, threads);
+  const caption = activityCaption(whole, knownTotal(recent, threads, since), running);
   // A request that failed takes the caption's place with its Retry: the
   // number it would complete is not known, and a stale one would pass for
   // current.

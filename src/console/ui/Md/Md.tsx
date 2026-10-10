@@ -12,16 +12,18 @@ import './Md.css';
 
 const Renderer = lazy(() => import('./MdRenderer.tsx'));
 
-// The link of a path of the file area as the owner builds it: the href and
-// the click that opens it in place — the pair the router's links carry.
+// The link of a path of the file area as the owner builds it: the href,
+// fragment included, and the click that opens it in place — the pair the
+// router's links carry, so a click and a new tab land on the same URL.
 export type MdLink = { href: string; onClick?: MouseEventHandler<HTMLAnchorElement> };
 
 // Where a document sits in the file area. A relative reference in it
 // resolves against the folder of `path` (relative.ts): a link becomes
-// `link(path)`, an image's src becomes `bytes(path)` — the URL of the
-// file's bytes. Messages of the feed have no place: their relative
-// references stay as written.
-export type MdPlace = { path: string; link: (path: string) => MdLink; bytes: (path: string) => string };
+// `link(path, hash)` — the fragment of the reference ('#part' or '') goes
+// with it — an image's src becomes `bytes(path)` — the URL of the file's
+// bytes (its fragment, an SVG's view, stays on the src). Messages of the
+// feed have no place: their relative references stay as written.
+export type MdPlace = { path: string; link: (path: string, hash: string) => MdLink; bytes: (path: string) => string };
 
 export type MdProps = {
   source: string;

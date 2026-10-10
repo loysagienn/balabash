@@ -53,7 +53,7 @@ function TextBody({ file, viewer, text, routeFor }: { file: WorkspaceFileMeta; v
   const table = useMemo(() => (viewer.kind === 'csv' ? parseDelimited(text, viewer.delimiter, CSV_ROWS) : null), [text, viewer]);
 
   if (viewer.kind === 'markdown') {
-    const place: MdPlace = { path: file.path, link: target => linkTarget(routeFor(target)), bytes: target => fileUrl(target) };
+    const place: MdPlace = { path: file.path, link: (target, hash) => linkTarget(routeFor(target), false, hash), bytes: target => fileUrl(target) };
 
     return <Md source={text} at={place} />;
   }

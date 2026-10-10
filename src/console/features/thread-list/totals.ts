@@ -46,6 +46,19 @@ export function totalWithTail(total: ThreadTotal, threads: readonly Pick<Thread,
   return n;
 }
 
+// What a screen sees of the count's request (a Query result): the total
+// read off the page, and whether the request stands in error.
+export type TotalResult = { data: ThreadTotal | null | undefined; isError: boolean };
+
+// The total a screen may show: the request's answer brought up to the tail,
+// none while the request stands in error. Query keeps the data of an earlier
+// answer through a failed refetch — a number from before the failure would
+// pass for current, and "No threads yet" or "7 threads" on it would be a
+// claim no one can back; the failure is named beside with its Retry.
+export function knownTotal(query: TotalResult, threads: readonly Pick<Thread, 'createdSeq' | 'createdAt'>[], since?: Date): number | null {
+  return query.isError || !query.data ? null : totalWithTail(query.data, threads, since);
+}
+
 const HOUR = 3_600_000;
 
 // The start of the recent window: RECENT_DAYS back, at the hour — so the

@@ -29,7 +29,7 @@ import { EditProjectDialog } from '../../features/projects/EditProjectDialog.tsx
 import { ThreadList } from '../../features/thread-list/ThreadList.tsx';
 import { useThreadTotal } from '../../features/thread-list/queries.ts';
 import { TotalFailure } from '../../features/thread-list/TotalFailure.tsx';
-import { totalWithTail } from '../../features/thread-list/totals.ts';
+import { knownTotal } from '../../features/thread-list/totals.ts';
 import { Btn } from '../../ui/Btn/Btn.tsx';
 import { Card, CardHead } from '../../ui/Card/Card.tsx';
 import { Empty } from '../../ui/Empty/Empty.tsx';
@@ -72,10 +72,11 @@ function ProjectPage({ project, route }: { project: ProjectView; route: ProjectR
   const threads = useAppSelector(s => selectThreads(s, project.id));
   const running = useAppSelector(selectRunningCountByProject)[project.id] ?? 0;
   // The project's whole count of threads from the server, brought up to
-  // the tail the store has folded since; a failed request is named beside
-  // the link with its Retry (the link stays — "All" is a route either way).
+  // the tail the store has folded since; a failed request has no number,
+  // whatever Query kept, and is named beside the link with its Retry (the
+  // link stays — "All" is a route either way).
   const all = useThreadTotal({ projectId: project.id });
-  const total = all.data ? totalWithTail(all.data, threads) : null;
+  const total = knownTotal(all, threads);
   // An empty card says whether the project has no threads or none recent.
   const empty = emptyProjectThreads(total);
   const flagging = useAppSelector(s => selectProjectFlagging(s, project.id));

@@ -679,7 +679,7 @@ describe('route data', () => {
     assert.equal(store.getState().ui.moreSheet, true);
     store.dispatch(routeTo({ key: 'apps' }));
     assert.equal(store.getState().ui.moreSheet, false);
-    assert.deepEqual(store.getState().router, { route: { key: 'apps' }, source: 'app', replace: false });
+    assert.deepEqual(store.getState().router, { route: { key: 'apps' }, source: 'app', replace: false, hash: '' });
   });
 
   it('keeps the router state as is on ROUTE_TO to the current route', () => {
@@ -695,6 +695,36 @@ describe('route data', () => {
     store.dispatch(routeTo({ key: 'thread', id: 'other' }));
     assert.notEqual(store.getState().router, before);
     assert.deepEqual(store.getState().router.route, { key: 'thread', id: 'other' });
+  });
+
+  it('carries the fragment of the URL beside the route: a new fragment of the same route is a new state with the same route object', () => {
+    const store = createStore({ api: fakeApi(), initialRoute: { key: 'files', path: 'a.md' }, initialHash: '#top' });
+
+    assert.equal(store.getState().router.hash, '#top');
+
+    store.dispatch(routeTo({ key: 'files', path: 'a.md' }, { hash: '#top' }));
+    const before = store.getState().router;
+
+    assert.equal(before.hash, '#top');
+    store.dispatch(routeTo({ key: 'files', path: 'a.md' }, { hash: '#part' }));
+
+    const next = store.getState().router;
+
+    assert.notEqual(next, before);
+    assert.equal(next.route, before.route);
+    assert.equal(next.hash, '#part');
+    assert.equal(next.replace, false);
+
+    store.dispatch(routeTo({ key: 'files', path: 'a.md' }, { hash: '#part' }));
+    assert.equal(store.getState().router, next);
+
+    // A route without a fragment drops the one before.
+    store.dispatch(routeTo({ key: 'files', path: 'b.md' }));
+    assert.deepEqual(store.getState().router, { route: { key: 'files', path: 'b.md' }, source: 'app', replace: false, hash: '' });
+
+    // history brings the location's fragment back.
+    store.dispatch(routeTo({ key: 'files', path: 'a.md' }, { source: 'history', hash: '#part' }));
+    assert.deepEqual(store.getState().router, { route: { key: 'files', path: 'a.md' }, source: 'history', replace: false, hash: '#part' });
   });
 });
 

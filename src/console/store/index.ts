@@ -56,15 +56,18 @@ export type AppStore = Store<State, Action>;
 export type CreateStoreOptions = {
   api: Api;
   initialRoute: AppRoute;
+  // The fragment of the URL the tab opened with ('#part' or ''), kept
+  // beside the route (store/router).
+  initialHash?: string;
   // An extra enhancer (Redux DevTools in the browser).
   enhancer?: StoreEnhancer;
 };
 
 type Domains = Omit<State, 'sessions'>;
 
-export function createStore({ api, initialRoute, enhancer }: CreateStoreOptions): AppStore {
+export function createStore({ api, initialRoute, initialHash = '', enhancer }: CreateStoreOptions): AppStore {
   const domains = combineReducers({
-    router: createRouterReducer(initialRoute),
+    router: createRouterReducer(initialRoute, initialHash),
     session: sessionReducer,
     stream: streamReducer,
     threads: threadsReducer,

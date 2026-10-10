@@ -37,7 +37,7 @@ const devtools = window.__REDUX_DEVTOOLS_EXTENSION__?.({
   serialize: { replacer: (_key: string, value: unknown) => (typeof value === 'bigint' ? `${value}n` : value) },
 });
 
-store = createStore({ api, initialRoute: readRoute(window.location.pathname + window.location.search), enhancer: devtools });
+store = createStore({ api, initialRoute: readRoute(window.location.pathname + window.location.search), initialHash: window.location.hash, enhancer: devtools });
 
 connectStoreToHistory(store);
 connectStoreToStream(store);

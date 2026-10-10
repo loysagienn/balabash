@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { RECENT_DAYS, failureOf, recentSince, totalOf, totalWithTail } from './totals.ts';
+import { QueryClient, QueryObserver } from '@tanstack/react-query';
+import { RECENT_DAYS, failureOf, knownTotal, recentSince, totalOf, totalWithTail } from './totals.ts';
 
 describe('thread totals', () => {
   const counts = { active: 3, completed: 200, failed: 7, cancelled: 4 };
@@ -56,6 +57,51 @@ describe('thread totals', () => {
         process.env.TZ = zone;
       }
     }
+  });
+
+  it('knows no total while the request stands in error, whatever Query kept from an earlier answer', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    let answer: () => { counts: typeof counts; countsAsOfSeq: bigint } = () => ({ counts, countsAsOfSeq: 900n });
+    const observer = new QueryObserver(client, { queryKey: ['thread-total', 'engineer'], queryFn: async () => answer(), select: totalOf });
+    const stop = observer.subscribe(() => {});
+    const threads = [{ createdSeq: 901n, createdAt: new Date('2026-10-09T11:00:00Z') }];
+
+    try {
+      await new Promise<void>(resolve => {
+        const unsubscribe = observer.subscribe(result => {
+          if (result.isSuccess) {
+            unsubscribe();
+            resolve();
+          }
+        });
+      });
+      // The answer, brought up to the tail.
+      assert.equal(knownTotal(observer.getCurrentResult(), threads), 215);
+
+      // The refetch fails; Query keeps the data beside the error.
+      answer = () => {
+        throw new Error('HTTP 500');
+      };
+      await observer.refetch();
+
+      const failed = observer.getCurrentResult();
+
+      assert.equal(failed.isError, true);
+      assert.deepEqual(failed.data, { total: 214, asOfSeq: 900n });
+      assert.equal(knownTotal(failed, threads), null);
+
+      // The next answer is the total again.
+      answer = () => ({ counts: { ...counts, completed: 201 }, countsAsOfSeq: 902n });
+      await observer.refetch();
+      assert.equal(knownTotal(observer.getCurrentResult(), threads), 215);
+    } finally {
+      stop();
+      client.clear();
+    }
+
+    // Before any answer there is none either.
+    assert.equal(knownTotal({ data: undefined, isError: false }, threads), null);
+    assert.equal(knownTotal({ data: null, isError: false }, threads), null);
   });
 
   it('names the failure of the set’s requests and retries only the ones that failed', () => {
