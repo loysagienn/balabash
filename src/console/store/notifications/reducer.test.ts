@@ -1,9 +1,13 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import type { ConnectionView } from '../../../api/contract.ts';
+import { notificationViews, unreadCount } from '../../features/notifications/notifications.logic.ts';
+import { connectionsReducer } from '../connections/reducer.ts';
+import type { ConnectionsState } from '../connections/reducer.ts';
 import { eventAction } from '../events.ts';
 import { event, resetSeq } from '../fixtures.ts';
 import { markNotificationsRead } from './actions.ts';
-import { KEEP, initialNotifications, notificationsReducer } from './reducer.ts';
+import { KEEP, connectionReadKey, initialNotifications, notificationsReducer } from './reducer.ts';
 import type { NotificationsState } from './reducer.ts';
 
 const reduce = (state: NotificationsState, ...events: Parameters<typeof event>[0][]) => events.reduce((acc, item) => notificationsReducer(acc, eventAction(event(item))), state);
@@ -109,6 +113,62 @@ describe('notifications reducer', () => {
     assert.equal(notificationsReducer(marked, markNotificationsRead(['1'])), marked);
     assert.equal(notificationsReducer(marked, markNotificationsRead([])), marked);
     assert.deepEqual(notificationsReducer(marked, markNotificationsRead(['1', '2'])).read, { '1': true, '2': true, 'connection:c1:5': true });
+  });
+
+  // The waiting row of a connection, through the real connections reducer
+  // and the rows of the bell: one read mark per episode of waiting.
+  it('keeps a connection read through a rename and a failed attempt, unread again on a new episode, pruned when the row goes', () => {
+    resetSeq(200n);
+
+    const c1: ConnectionView = { id: 'c1', server: 'notion', accountKey: 'work', displayName: 'Work Notion', status: 'connected', identity: 'v@example.com', scope: null, threadId: null, createdAt: new Date(1_700_000_000_000), updatedAt: new Date(1_700_000_000_000) };
+    const about = { connectionId: 'c1', server: 'notion', account: 'work', name: 'Work Notion' };
+    let connections: ConnectionsState = { byId: { c1 }, ids: ['c1'], catalog: [] };
+    let notifications = initialNotifications;
+    const step = (partial: Parameters<typeof event>[0]) => {
+      const action = eventAction(event(partial));
+
+      connections = connectionsReducer(connections, action);
+      notifications = notificationsReducer(notifications, action);
+    };
+    const rows = () => notificationViews({ items: notifications.items, read: notifications.read, connections: connections.ids.map(id => connections.byId[id]), threads: {}, mainThreadId: 'main' });
+
+    step({ type: 'connection.reauthorization_required', actor: 'system', agentName: null, payload: { ...about, error: 'token revoked' } });
+    assert.deepEqual(
+      rows().map(row => [row.key, row.unread]),
+      [['connection:c1', true]],
+    );
+
+    notifications = notificationsReducer(notifications, markNotificationsRead(['connection:c1']));
+    assert.equal(unreadCount(rows()), 0);
+
+    step({ type: 'connection.renamed', payload: { ...about, name: 'Work Notion (team)', previousName: 'Work Notion' } });
+    step({ type: 'connection.failed', payload: { ...about, name: 'Work Notion (team)', error: 'consent denied' } });
+    assert.equal(connections.byId.c1.displayName, 'Work Notion (team)');
+    assert.equal(connections.byId.c1.status, 'reauthorization_required');
+    assert.notEqual(connections.byId.c1.updatedAt.getTime(), c1.updatedAt.getTime());
+    assert.deepEqual(
+      rows().map(row => [row.title, row.unread]),
+      [['“Work Notion (team)” needs signing in again', false]],
+    );
+
+    step({ type: 'connection.completed', payload: { ...about, name: 'Work Notion (team)', identity: 'v@example.com' } });
+    assert.equal(connections.byId.c1.status, 'connected');
+    assert.deepEqual(rows(), []);
+    assert.deepEqual(notifications.read, {});
+
+    step({ type: 'connection.reauthorization_required', actor: 'system', agentName: null, payload: { ...about, error: 'token revoked again' } });
+    assert.deepEqual(
+      rows().map(row => [row.key, row.unread]),
+      [['connection:c1', true]],
+    );
+
+    notifications = notificationsReducer(notifications, markNotificationsRead([connectionReadKey('c1')]));
+    step({ type: 'connection.disconnected', payload: { ...about, name: 'Work Notion (team)' } });
+    assert.deepEqual(rows(), []);
+    assert.deepEqual(notifications.read, {});
+
+    // A boundary event of a row never marked changes nothing.
+    assert.equal(notificationsReducer(notifications, eventAction(event({ type: 'connection.completed', payload: { ...about, connectionId: 'c9' } }))), notifications);
   });
 
   it('leaves other events alone', () => {

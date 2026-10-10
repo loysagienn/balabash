@@ -3,18 +3,21 @@
 // count and actions on the right (PopHead), group labels (PopGroup), rows
 // and a footer (PopFoot). PopItem is the row of "Running now": agent,
 // thread, what it is doing (metaCode — as a command) and the live timer
-// with the state; a link as a whole. Where the panel floats — next to its
-// button, in a layer over the screen — is the feature's business.
+// with the state; a link as a whole. The panel is focusable (tabIndex -1)
+// and hands out its element: the feature focuses the named dialog on open
+// and whenever a control inside it is about to leave the DOM. Where the
+// panel floats — next to its button, in a layer over the screen — is the
+// feature's business.
 
-import type { MouseEvent, ReactNode } from 'react';
+import type { MouseEvent, ReactNode, Ref } from 'react';
 import { Avatar } from '../Avatar/Avatar.tsx';
 import { Status } from '../Status/Status.tsx';
 import { Code, Count } from '../atoms/atoms.tsx';
 import './Pop.css';
 
-export function Pop({ label, children, className }: { label: string; children: ReactNode; className?: string }) {
+export function Pop({ label, children, className, ref }: { label: string; children: ReactNode; className?: string; ref?: Ref<HTMLDivElement> }) {
   return (
-    <div className={className ? `pop ${className}` : 'pop'} role="dialog" aria-label={label}>
+    <div ref={ref} className={className ? `pop ${className}` : 'pop'} role="dialog" aria-label={label} tabIndex={-1}>
       {children}
     </div>
   );

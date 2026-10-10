@@ -55,7 +55,7 @@ describe('notifications', () => {
     assert.deepEqual(
       views.map(view => [view.group, view.key]),
       [
-        ['waiting', 'connection:c1:' + at(5).getTime()],
+        ['waiting', 'connection:c1'],
         ['errors', '4'],
         ['errors', '2'],
         ['agents', '3'],
@@ -118,7 +118,7 @@ describe('notifications', () => {
     assert.deepEqual(view.action, { label: 'Open thread', route: { key: 'thread', id: 'main' } });
   });
 
-  it('writes the waiting row of a connection that needs signing in again, keyed by the moment its row changed', () => {
+  it('writes the waiting row of a connection that needs signing in again, keyed by the connection', () => {
     const [view] = notificationViews({ ...base, items: [], connections: [connection(), connection({ id: 'c2', status: 'connected' })] });
 
     assert.equal(view.title, '“Work Notion” needs signing in again');
@@ -126,10 +126,10 @@ describe('notifications', () => {
     assert.equal(view.icon, 'key-round');
     assert.deepEqual(view.action, { label: 'Open connections', route: { key: 'connections' } });
     assert.equal(notificationViews({ ...base, items: [], connections: [connection({ identity: null })] })[0].desc, 'notion');
-    assert.equal(connectionKey(connection({ updatedAt: at(7) })), `connection:c1:${at(7).getTime()}`);
+    assert.equal(connectionKey(connection({ updatedAt: at(7) })), 'connection:c1');
   });
 
-  it('counts the unread: a read key is read, the same connection changed again is new', () => {
+  it('counts the unread: a read key is read, the same connection with its row changed stays read', () => {
     const key = connectionKey(connection());
     const views = notificationViews({ ...base, items: [note(1, 1, 'a'), note(2, 2, 'b')], connections: [connection()], read: { '1': true, [key]: true } });
 
@@ -144,9 +144,9 @@ describe('notifications', () => {
     assert.equal(unreadCount(views), 1);
     assert.deepEqual(unreadKeys(views), ['2']);
 
-    const changed = notificationViews({ ...base, items: [], connections: [connection({ updatedAt: at(9) })], read: { [key]: true } });
+    const changed = notificationViews({ ...base, items: [], connections: [connection({ updatedAt: at(9), displayName: 'Work Notion (team)' })], read: { [key]: true } });
 
-    assert.equal(changed[0].unread, true);
+    assert.equal(changed[0].unread, false);
   });
 
   it('clips a long line with an ellipsis', () => {

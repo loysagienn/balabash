@@ -1,6 +1,6 @@
 @layer patterns{
 /* ── Shell popover ──  .pop > .pop-h (.pop-h-end) · .pop-g · a.pop-i (.pop-i-main > .pop-i-t + .pop-i-m, .pop-i-end) · .ntf · .pop-f */
-.pop{--pop-w:380px;display:flex;flex-direction:column;width:min(var(--pop-w),100%);background:var(--surface-2);border-radius:var(--r-md);box-shadow:var(--shadow-pop);overflow:hidden}
+.pop{--pop-w:380px;display:flex;flex-direction:column;width:min(var(--pop-w),100%);background:var(--surface-2);border-radius:var(--r-md);box-shadow:var(--shadow-pop);overflow:hidden;outline:none}  /* focusable (tabIndex -1): the dialog takes the focus on open, no ring on the panel */
 .pop-h{display:flex;align-items:center;gap:var(--sp-2);padding:var(--sp-3) var(--sp-3h) var(--sp-2h);font-size:var(--fs-ui);font-weight:var(--fw-semibold)}
 .pop-h-end{margin-left:auto;display:flex;gap:var(--sp-1)}
 .pop-g{padding:var(--sp-2) var(--sp-3h) var(--sp-1);font-size:var(--fs-micro);line-height:var(--lh-micro);font-weight:var(--fw-semibold);color:var(--text-3);border-top:1px solid var(--border)}

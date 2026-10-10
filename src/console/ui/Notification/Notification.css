@@ -3,6 +3,7 @@
 .ntf{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:var(--sp-2h);align-items:start;padding:var(--sp-2h) var(--sp-3h)}
 .ntf:hover{background-image:var(--layer-selected)}
 .ntf-main{min-width:0}
+.ntf-t,.ntf-d{overflow-wrap:anywhere}  /* an error's path or URL, a token without spaces: wrapped, not over the time */
 .ntf-t{font-size:var(--fs-ui);line-height:var(--lh-ui);font-weight:var(--fw-medium);color:var(--text)}
 .ntf-d{margin-top:var(--sp-0h);font-size:var(--fs-meta);line-height:var(--lh-meta);color:var(--text-2)}
 .ntf-acts{display:flex;gap:var(--sp-1h);margin-top:var(--sp-2)}

@@ -6,13 +6,16 @@
 // system.exception of the tail; a message is a thread.notification, urgent
 // ones tinted. A row is unread until its action is pressed or "Mark all
 // read"; the count on the bell is the unread rows. The keys: an event's
-// seq, a connection's id with the moment its row changed — a connection
-// that needs signing in again after a reconnect is a new row.
+// seq, a connection's id — the row stays one while the connection keeps
+// waiting (a rename or a failed attempt in between is not a new row); the
+// read mark leaves with the episode (store/notifications), so a connection
+// that needs signing in again after a reconnect is unread anew.
 
 import type { ConnectionView } from '../../../api/contract.ts';
 import type { Thread } from '../../../core/contract.ts';
 import type { AppRoute } from '../../lib/router/routes.ts';
 import { plainLine } from '../../lib/format/plain.ts';
+import { connectionReadKey } from '../../store/notifications/reducer.ts';
 import type { NotificationItem } from '../../store/notifications/reducer.ts';
 import type { IconName } from '../../ui/Icon/Icon.tsx';
 
@@ -63,8 +66,8 @@ function openThread(threadId: string | null): NotificationView['action'] {
   return threadId ? { label: 'Open thread', route: { key: 'thread', id: threadId } } : null;
 }
 
-export function connectionKey(connection: ConnectionView): string {
-  return `connection:${connection.id}:${connection.updatedAt.getTime()}`;
+export function connectionKey(connection: Pick<ConnectionView, 'id'>): string {
+  return connectionReadKey(connection.id);
 }
 
 // "engineer · Mini-apps: publishing by slug" — who and where.

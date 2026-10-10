@@ -4,9 +4,12 @@
 // under the bell (ui/Float). A row's action opens its route and marks the
 // row read; "Mark all read" marks every row. The rows — store/notifications
 // and the connections (notifications.logic.ts); the time column ticks by
-// the minute while the popover is open.
+// the minute while the popover is open. The focus: on open it lands on the
+// named dialog (the Pop), and "Mark all read" hands it back there before
+// its button leaves the DOM — a keyboard user keeps a place in the popover.
 
 import { useMemo, useRef, useState } from 'react';
+import type { RefObject } from 'react';
 import { createSelector } from 'reselect';
 import { briefAgoLabel } from '../../lib/format/index.ts';
 import { useNow } from '../../lib/format/useNow.ts';
@@ -35,21 +38,22 @@ export function NotificationsBell() {
   const views = useAppSelector(selectNotificationViews);
   const [open, setOpen] = useState(false);
   const anchor = useRef<HTMLSpanElement>(null);
+  const pop = useRef<HTMLDivElement>(null);
   const unread = unreadCount(views);
 
   return (
     <span ref={anchor} className="ntfs-anchor">
       <Bell count={unread} expanded={open} onClick={() => setOpen(!open)} />
       {open ? (
-        <FloatLayer anchor={anchor} onClose={() => setOpen(false)} className="ntfs-layer">
-          <NotificationsPop views={views} unread={unread} onDone={() => setOpen(false)} />
+        <FloatLayer anchor={anchor} onClose={() => setOpen(false)} className="ntfs-layer" focus={() => pop.current?.focus()}>
+          <NotificationsPop ref={pop} views={views} unread={unread} onDone={() => setOpen(false)} />
         </FloatLayer>
       ) : null}
     </span>
   );
 }
 
-function NotificationsPop({ views, unread, onDone }: { views: NotificationView[]; unread: number; onDone: () => void }) {
+function NotificationsPop({ ref, views, unread, onDone }: { ref: RefObject<HTMLDivElement | null>; views: NotificationView[]; unread: number; onDone: () => void }) {
   const dispatch = useAppDispatch();
   const now = useNow();
   const groups = useMemo(() => GROUPS.map(group => ({ ...group, rows: views.filter(view => view.group === group.key) })).filter(group => group.rows.length > 0), [views]);
@@ -64,9 +68,15 @@ function NotificationsPop({ views, unread, onDone }: { views: NotificationView[]
     onDone();
   };
 
+  // The button goes with the last unread row: the focus moves to the dialog first.
+  const readAll = () => {
+    ref.current?.focus();
+    dispatch(markNotificationsRead(unreadKeys(views)));
+  };
+
   return (
-    <Pop label="Notifications" className="ntfs-pop">
-      <PopHead title="Notifications" count={unread} countState="act" end={unread > 0 ? <Btn label="Mark all read" variant="ghost" size="sm" onClick={() => dispatch(markNotificationsRead(unreadKeys(views)))} /> : undefined} />
+    <Pop ref={ref} label="Notifications" className="ntfs-pop">
+      <PopHead title="Notifications" count={unread} countState="act" end={unread > 0 ? <Btn label="Mark all read" variant="ghost" size="sm" onClick={readAll} /> : undefined} />
       <div className="ntfs-list">
         {groups.length === 0 ? <p className="ntfs-empty">Nothing new. Urgent notes from agents, system errors and sign-ins that await you will show up here.</p> : null}
         {groups.map(group => (

@@ -5,9 +5,13 @@
 // the tab and fills while it is open. The newest KEEP stay, in seq order,
 // a seq already held is ignored (a reconnected tail overlaps). What awaits
 // the user is not stored here: a connection that needs signing in again is
-// read from the connections domain (features/notifications). `read` — the
-// keys the user has seen (store/notifications/actions.ts), pruned with the
-// items that leave.
+// read from the connections domain (features/notifications); its row is
+// keyed by the connection's id, and its read mark lives one episode: the
+// connection.* events that open or close the waiting (reauthorization_required
+// — the server writes it on the connected → waiting transition only;
+// completed; disconnected) drop the mark, a rename or a failed attempt in
+// between keeps it. `read` — the keys the user has seen
+// (store/notifications/actions.ts), pruned with the items that leave.
 
 import type { NotificationLevel } from '../../../core/contract.ts';
 import { isEventAction } from '../events.ts';
@@ -37,6 +41,9 @@ export type NotificationsState = {
 
 export const KEEP = 50;
 
+// The key of a connection's waiting row (features/notifications/notifications.logic.ts).
+export const connectionReadKey = (connectionId: string) => `connection:${connectionId}`;
+
 export const initialNotifications: NotificationsState = { items: [], read: {} };
 
 // The item in seq order; the oldest beyond KEEP leave, their read marks with them.
@@ -60,6 +67,17 @@ function withItem(state: NotificationsState, item: NotificationItem): Notificati
   }
 
   return { items, read };
+}
+
+// The read mark of a connection's row leaves with its episode.
+function withoutRead(state: NotificationsState, connectionId: string | undefined): NotificationsState {
+  if (!connectionId || !state.read[connectionReadKey(connectionId)]) {
+    return state;
+  }
+
+  const { [connectionReadKey(connectionId)]: gone, ...read } = state.read;
+
+  return { ...state, read };
 }
 
 export function notificationsReducer(state: NotificationsState = initialNotifications, action: Action): NotificationsState {
@@ -86,6 +104,10 @@ export function notificationsReducer(state: NotificationsState = initialNotifica
 
       const { event } = action;
       const key = String(event.seq);
+
+      if (action.type === 'event/connection.reauthorization_required' || action.type === 'event/connection.completed' || action.type === 'event/connection.disconnected') {
+        return withoutRead(state, action.event.payload.connectionId);
+      }
 
       if (action.type === 'event/thread.notification') {
         const { level, text } = action.event.payload;
