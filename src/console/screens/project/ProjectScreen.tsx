@@ -185,7 +185,16 @@ function ProjectPage({ project, route }: { project: ProjectView; route: ProjectR
       <Card narrow="bare" ref={files}>
         <CardHead title="Project files" />
         <div className="proj-fa-wrap">
-          <FileBrowser root={project.slug} rootLabel={project.title} lead="folder" path={path} routeFor={absolute => projectRoute(project.slug, absolute)} pins={<ProjectPins project={project} now={now} />} className="proj-fa" />
+          <FileBrowser
+            root={project.slug}
+            rootLabel={project.title}
+            lead="folder"
+            path={path}
+            view={route.view}
+            routeFor={(absolute, view) => projectRoute(project.slug, absolute, view)}
+            pins={<ProjectPins project={project} now={now} />}
+            className="proj-fa"
+          />
         </div>
       </Card>
       {editing ? <EditProjectDialog project={project} onClose={() => setEditing(false)} /> : null}

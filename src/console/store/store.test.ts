@@ -51,7 +51,10 @@ const SECRET_REQUESTS: Api['secretRequests'] = {
 
 const WORKSPACE: Api['workspace'] = {
   node: async () => ({ kind: 'dir', path: '', directories: [], folders: [], files: [] }),
-  text: async () => '',
+  text: async () => ({ text: '', etag: null }),
+  write: async () => {
+    throw new Error('not here');
+  },
 };
 
 function fakeApi(overrides: ApiOverrides = {}, calls: Calls = []): Api {

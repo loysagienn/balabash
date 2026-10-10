@@ -24,11 +24,16 @@ export function projectStage(found: boolean, stage: SnapshotStage): ProjectStage
 }
 
 // The route of a path of the file area rooted at the project's folder:
-// the root is the project page itself, below it /projects/<slug>/files/….
-export function projectRoute(slug: string, absolutePath: string): AppRoute {
+// the root is the project page itself, below it /projects/<slug>/files/…;
+// view — the editor over the file at the path.
+export function projectRoute(slug: string, absolutePath: string, view?: 'edit'): AppRoute {
   const below = crumbSegments(slug, absolutePath).join('/');
 
-  return below ? { key: 'project', slug, path: below } : { key: 'project', slug };
+  if (!below) {
+    return { key: 'project', slug };
+  }
+
+  return view ? { key: 'project', slug, path: below, view } : { key: 'project', slug, path: below };
 }
 
 export type ProjectShell = {

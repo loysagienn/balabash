@@ -21,11 +21,13 @@ export type LinkProps = Omit<AnchorHTMLAttributes<HTMLAnchorElement>, 'href'> & 
   children?: ReactNode;
 };
 
-export function isPlainLeftClick(event: MouseEvent<HTMLAnchorElement>): boolean {
+export function isPlainLeftClick(event: MouseEvent<HTMLElement>): boolean {
   return event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey && !event.defaultPrevented;
 }
 
-export type LinkTarget = { href: string; onClick: (event: MouseEvent<HTMLAnchorElement>) => void };
+// The pair fits any block that draws an anchor — its own <a> or a Btn with
+// href (the event comes from the anchor either way).
+export type LinkTarget = { href: string; onClick: (event: MouseEvent<HTMLElement>) => void };
 
 export function useLinkProps(route: AppRoute, replace = false): LinkTarget {
   const linkTarget = useLinkTargets();

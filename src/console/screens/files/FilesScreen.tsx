@@ -18,7 +18,7 @@ export function FilesScreen({ route }: { route: FilesRoute }) {
 
   return (
     <Shell current="files" title={shell.title} titleNarrow={shell.titleNarrow} crumb={shell.crumb} back={shell.back} detail={shell.detail}>
-      <FileBrowser root="" rootLabel="Files" path={route.path} routeFor={filesRoute} className="fil-fa" />
+      <FileBrowser root="" rootLabel="Files" path={route.path} view={route.view} routeFor={filesRoute} className="fil-fa" />
     </Shell>
   );
 }

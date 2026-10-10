@@ -2,8 +2,10 @@
 // "Files", a project's folder on its page. The path is the route; the node
 // behind it (Query) decides what is shown — a folder is the list, a file is
 // the list of its folder with the row selected and the preview beside it
-// (one pane at a time when the area is narrow, FileArea). Links are routes
-// the owner builds (routeFor), so the same component serves both roots.
+// (one pane at a time when the area is narrow, FileArea); with `edit` in
+// the route a Markdown file is its editor at the full width (FileEditor).
+// Links are routes the owner builds (routeFor), so the same component
+// serves both roots.
 // Query keeps older data through a failed refetch: a 404 still means the
 // path is gone, any other failure keeps the rows under a banner with Retry.
 
@@ -24,6 +26,8 @@ import type { IconName } from '../../ui/Icon/Icon.tsx';
 import { Note } from '../../ui/Note/Note.tsx';
 import { SkelRow } from '../../ui/Skel/Skel.tsx';
 import { fileIcon } from '../../ui/atoms/fileIcon.ts';
+import { canEdit } from './editor.logic.ts';
+import { FileEditor } from './FileEditor.tsx';
 import { FileMenu } from './FileMenu.tsx';
 import { FilePreview } from './FilePreview.tsx';
 import { crumbSegments, folderCaption, isNotFound, joinPath, listingSummary, nameOf, nodeOf, parentOf, underRoot } from './node.ts';
@@ -37,7 +41,9 @@ export type FileBrowserProps = {
   lead?: IconName;
   // The current path (a folder or a file), at or below the root.
   path: string;
-  routeFor: (path: string) => AppRoute;
+  // The editor over the file at the path (ignored for a file it cannot edit).
+  view?: 'edit';
+  routeFor: (path: string, view?: 'edit') => AppRoute;
   // Pinned files of a project, above the rows.
   pins?: ReactNode;
   className?: string;
@@ -110,7 +116,7 @@ function Rows({ listing, selectedPath, now, routeFor }: { listing: DirListing; s
   );
 }
 
-export function FileBrowser({ root, rootLabel, lead, path, routeFor, pins, className }: FileBrowserProps) {
+export function FileBrowser({ root, rootLabel, lead, path, view, routeFor, pins, className }: FileBrowserProps) {
   const now = useNow();
   const dispatch = useAppDispatch();
   const linkTarget = useLinkTargets();
@@ -124,6 +130,7 @@ export function FileBrowser({ root, rootLabel, lead, path, routeFor, pins, class
   const gone = answer === null ? isNotFound(node.error) : answer.kind === 'file' && isNotFound(parent.error);
   const file = !gone && answer?.kind === 'file' ? answer.file : null;
   const kind = gone ? null : answer?.kind ?? null;
+  const editing = view === 'edit' && file !== null && canEdit(file);
   const listPath = kind === 'file' ? parentOf(path) : path;
   const listQuery = kind === 'file' ? parent : node;
   const listing = !gone && listQuery.data?.kind === 'dir' ? listQuery.data : null;
@@ -171,7 +178,7 @@ export function FileBrowser({ root, rootLabel, lead, path, routeFor, pins, class
   }
 
   return (
-    <FileArea view={kind === 'file' ? 'preview' : 'list'} split={kind === 'file'} className={className}>
+    <FileArea view={kind === 'file' ? 'preview' : 'list'} split={kind === 'file' && !editing} className={className}>
       <FaList>
         <FaBar>
           <Crumbs items={crumbs} current={current} lead={lead} fa />
@@ -188,8 +195,19 @@ export function FileBrowser({ root, rootLabel, lead, path, routeFor, pins, class
       </FaList>
       {file ? (
         <FaPreview>
-          {/* keyed by the file and its version: the preview's own state (the image's size, a failed load) belongs to one file */}
-          <FilePreview key={`${file.path}@${file.modifiedAt ?? ''}`} file={file} now={now} routeFor={linkRoute} />
+          {editing ? (
+            /* keyed by the path alone: the draft survives a new version of the file under it */
+            <FileEditor key={file.path} file={file} exitRoute={routeFor(file.path)} />
+          ) : (
+            /* keyed by the file and its version: the preview's own state (the image's size, a failed load) belongs to one file */
+            <FilePreview
+              key={`${file.path}@${file.modifiedAt ?? ''}`}
+              file={file}
+              now={now}
+              routeFor={linkRoute}
+              editRoute={canEdit(file) ? routeFor(file.path, 'edit') : undefined}
+            />
+          )}
         </FaPreview>
       ) : null}
     </FileArea>

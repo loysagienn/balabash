@@ -221,13 +221,14 @@ export type ThreadCommandResponse = {
 };
 
 // ---------------------------------------------------------------------------
-// The workspace file area (read-only): the user's window into
+// The workspace file area: the user's window into
 // data/workspace/<userId>/files. GET /api/workspace/node?path=<rel> answers
 // with a polymorphic node — a directory listing or one file's metadata — so
 // a deep link learns what it points at in one request. Raw content streams
 // from the root namespace instead: GET /files/<rel> (bytes + honest
 // content-type, no JSON envelope — not described here). Inline by default,
-// ?download=1 answers as an attachment.
+// ?download=1 answers as an attachment. The one write of the area is PUT
+// /files/<rel> (below, WorkspaceWriteResponse).
 
 export type WorkspaceFileMeta = {
   // Relative path inside the file area — the shared currency of the API,
@@ -273,6 +274,20 @@ export type WorkspaceNodeResponse =
       path: string;
       file: WorkspaceFileMeta;
     };
+
+// PUT /files/<rel> replaces the whole content of an existing Markdown file
+// with the request body (raw UTF-8 text, the console's editor). Markdown
+// only (400 `not_editable` for anything else), a missing path or a folder
+// is the GET's 404, a body over the editor's limit a 413 `too_large`. The
+// request may carry If-Match with the ETag the GET answered: 412
+// `precondition_failed` when the file changed since that read, so an
+// agent's write is never overwritten unseen; without If-Match the content
+// is replaced whatever is there. The answer is the file's node as the
+// listing reads it and the ETag of the new content (also the ETag header).
+export type WorkspaceWriteResponse = {
+  file: WorkspaceFileMeta;
+  etag: string;
+};
 
 // ---------------------------------------------------------------------------
 // A stored file's facts by id: GET /api/files/:fileId/meta, under the

@@ -26,7 +26,7 @@ export type HomeRoute = { key: 'home' };
 export type ThreadsRoute = { key: 'threads' } & ThreadsFilters;
 export type ThreadRoute = { key: 'thread'; id: string };
 export type ProjectsRoute = { key: 'projects'; archived?: boolean; q?: string };
-export type ProjectRoute = { key: 'project'; slug: string; path?: string };
+export type ProjectRoute = { key: 'project'; slug: string; path?: string; view?: 'edit' };
 export type FilesRoute = { key: 'files'; path: string; view?: 'edit' };
 export type AppsFilter = 'published' | 'errors';
 export type AppsRoute = { key: 'apps'; filter?: AppsFilter; q?: string };
@@ -120,7 +120,7 @@ export const projects = defineRoute<ProjectsRoute>({
 
 export const project = defineRoute<ProjectRoute>({
   key: 'project',
-  readRoute: path => {
+  readRoute: (path, params) => {
     const parts = segments(path);
 
     if (parts.length < 2 || parts[0] !== 'projects') {
@@ -132,7 +132,13 @@ export const project = defineRoute<ProjectRoute>({
     }
 
     if (parts[2] === 'files') {
-      return { key: 'project', slug: parts[1], path: parts.slice(3).join('/') };
+      const route: ProjectRoute = { key: 'project', slug: parts[1], path: parts.slice(3).join('/') };
+
+      if (params.get('view') === 'edit') {
+        route.view = 'edit';
+      }
+
+      return route;
     }
 
     return null;
@@ -140,7 +146,7 @@ export const project = defineRoute<ProjectRoute>({
   writeRoute: route => {
     const base = `/projects/${encodeURIComponent(route.slug)}`;
 
-    return route.path === undefined ? base : `${base}/files${route.path ? `/${encodePath(route.path)}` : ''}`;
+    return route.path === undefined ? base : `${base}/files${route.path ? `/${encodePath(route.path)}` : ''}${queryString({ view: route.view })}`;
   },
 });
 

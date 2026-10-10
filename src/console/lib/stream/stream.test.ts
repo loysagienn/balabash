@@ -103,7 +103,10 @@ const api: Api = {
   },
   workspace: {
     node: async () => ({ kind: 'dir', path: '', directories: [], folders: [], files: [] }),
-    text: async () => '',
+    text: async () => ({ text: '', etag: null }),
+    write: async () => {
+      throw new Error('not here');
+    },
   },
   files: {
     meta: async () => {

@@ -1,0 +1,9 @@
+@layer screens{
+/* The editor at the full height of the preview panel (design: FilesScreen, .fil-ed): a framed block inside the panel; on the phone the frame goes. The banner of a failed save sits above it. */
+.fil-ed{flex:1;min-height:0;margin:var(--sp-3) var(--sp-4);border-radius:var(--r-md)}
+.fil-ed-note{flex:none;margin:var(--sp-3) var(--sp-4) 0}
+@container shell (max-width:720px){
+  .fil-ed{margin:0;border:0;border-radius:0}
+  .fil-ed-note{margin:var(--sp-3) var(--sp-3) 0}
+}
+}

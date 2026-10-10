@@ -17,6 +17,7 @@ const CASES: [string, AppRoute][] = [
   ['/projects/balabash', { key: 'project', slug: 'balabash' }],
   ['/projects/balabash/files', { key: 'project', slug: 'balabash', path: '' }],
   ['/projects/balabash/files/console/plan.md', { key: 'project', slug: 'balabash', path: 'console/plan.md' }],
+  ['/projects/balabash/files/console/plan.md?view=edit', { key: 'project', slug: 'balabash', path: 'console/plan.md', view: 'edit' }],
   ['/workspace', { key: 'files', path: '' }],
   ['/workspace/a%20b/c.md?view=edit', { key: 'files', path: 'a b/c.md', view: 'edit' }],
   ['/apps', { key: 'apps' }],

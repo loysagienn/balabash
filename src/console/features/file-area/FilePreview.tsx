@@ -5,9 +5,10 @@
 // else or a text too large is a card with "Download". Text content comes
 // through Query by path and modification time (queries.ts). A Markdown file
 // is rendered at its place: relative links lead to the owner's route of the
-// path they name (routeFor), relative images to the bytes. The owner keys
-// the preview by the file and its version: the state here (the image's
-// size, a failed load) is one file's.
+// path they name (routeFor), relative images to the bytes; "Edit" leads to
+// the route the owner gives for it (editRoute — the editor in place of the
+// preview, FileEditor). The owner keys the preview by the file and its
+// version: the state here (the image's size, a failed load) is one file's.
 
 import { useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
@@ -84,13 +85,24 @@ type ImageLoad = { size: { width: number; height: number } | null; failed: boole
 
 const IMAGE_START: ImageLoad = { size: null, failed: false, attempt: 0 };
 
-export function FilePreview({ file, now, routeFor }: { file: WorkspaceFileMeta; now: Date; routeFor: (path: string) => AppRoute }) {
+export type FilePreviewProps = {
+  file: WorkspaceFileMeta;
+  now: Date;
+  routeFor: (path: string) => AppRoute;
+  // The editor over this file, when it can be edited.
+  editRoute?: AppRoute;
+};
+
+export function FilePreview({ file, now, routeFor, editRoute }: FilePreviewProps) {
   const name = nameOf(file.path);
   const { path, sizeBytes, mediaType } = file;
   // Stable while the file is: the text bodies memoize on it.
   const viewer = useMemo(() => viewerFor({ path, sizeBytes, mediaType }), [path, sizeBytes, mediaType]);
   const copyPath = useCopyPath();
   const queryClient = useQueryClient();
+  const linkTarget = useLinkTargets();
+  // The editor is a mode of this page: the entry replaces the history record.
+  const edit = editRoute ? linkTarget(editRoute, true) : null;
   const [image, setImage] = useState(IMAGE_START);
   const text = useWorkspaceText(file.path, file.modifiedAt, readsText(viewer));
   const icon = fileIcon(name, viewer.kind === 'image');
@@ -140,7 +152,7 @@ export function FilePreview({ file, now, routeFor }: { file: WorkspaceFileMeta; 
       </MetaCard>
     );
   } else if (text.data !== undefined) {
-    body = <TextBody file={file} viewer={viewer} text={text.data} routeFor={routeFor} />;
+    body = <TextBody file={file} viewer={viewer} text={text.data.text} routeFor={routeFor} />;
   } else if (text.error) {
     body = (
       <Note state="err" icon="cloud-off" role="alert" action="Retry" actionIcon="refresh-cw" onAction={() => void text.refetch()}>
@@ -158,12 +170,14 @@ export function FilePreview({ file, now, routeFor }: { file: WorkspaceFileMeta; 
   return (
     <Pv>
       <PvHead icon={icon} name={name} path={file.path} meta={meta}>
+        {edit ? <Btn label="Edit" icon="pencil" size="sm" {...edit} /> : null}
         <IconBtn icon="download" label="Download" size="sm" href={download} />
         <IconBtn icon="copy" label="Copy path" size="sm" onClick={() => void copyPath(file.path)} />
       </PvHead>
       {file.title || file.description ? <PvNote title={file.title ?? name}>{file.description}</PvNote> : null}
       <PvBody fill={viewer.kind === 'pdf'}>{body}</PvBody>
       <PvActBar>
+        {edit ? <Btn label="Edit" icon="pencil" {...edit} /> : null}
         <Btn label="Download" icon="download" href={download} />
         <Btn label="Path" icon="copy" onClick={() => void copyPath(file.path)} />
       </PvActBar>

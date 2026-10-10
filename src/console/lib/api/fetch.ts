@@ -46,14 +46,23 @@ function extractError(data: unknown): ApiErrorBody['error'] | null {
 export type FetchInit = {
   method?: string;
   body?: unknown;
+  // A raw text body instead of JSON (the editor's write to /files/<rel>):
+  // sent as text/plain in UTF-8.
+  text?: string;
+  // Headers beside the content type (a precondition, If-Match).
+  headers?: Record<string, string>;
   query?: Record<string, string | number | bigint | boolean | undefined>;
   signal?: AbortSignal;
   // A 401 is an ordinary answer here (the auth endpoints), not a lost session.
   unauthenticated?: boolean;
-  // The body as text, not JSON — the raw byte surface of the file area
+  // The answer as text, not JSON — the raw byte surface of the file area
   // (/files/<rel>): a failure there still carries the API's JSON error.
-  as?: 'text';
+  // 'etagged' — the text with the ETag of the answer, the validator a
+  // later write of the same file names (EtaggedText).
+  as?: 'text' | 'etagged';
 };
+
+export type EtaggedText = { text: string; etag: string | null };
 
 export type FetchOptions = {
   onUnauthorized?: () => void;
@@ -80,11 +89,16 @@ export function buildQuery(query: FetchInit['query']): string {
 export function createFetch({ onUnauthorized }: FetchOptions = {}) {
   return async function apiFetch<T>(path: string, init?: FetchInit): Promise<T> {
     const hasBody = init?.body !== undefined;
+    const hasText = init?.text !== undefined;
+    const headers: Record<string, string> = {
+      ...(hasBody ? { 'content-type': 'application/json' } : hasText ? { 'content-type': 'text/plain; charset=utf-8' } : {}),
+      ...init?.headers,
+    };
 
     const response = await fetch(path + buildQuery(init?.query), {
       method: init?.method ?? 'GET',
-      headers: hasBody ? { 'content-type': 'application/json' } : undefined,
-      body: hasBody ? stringifyJson(init.body) : undefined,
+      headers: Object.keys(headers).length ? headers : undefined,
+      body: hasBody ? stringifyJson(init.body) : init?.text,
       credentials: 'same-origin',
       signal: init?.signal,
     });
@@ -92,7 +106,7 @@ export function createFetch({ onUnauthorized }: FetchOptions = {}) {
     const text = await response.text();
     let data: unknown = null;
 
-    if (!response.ok || init?.as !== 'text') {
+    if (!response.ok || init?.as === undefined) {
       try {
         data = text ? parseJson(text) : null;
       } catch {
@@ -108,6 +122,12 @@ export function createFetch({ onUnauthorized }: FetchOptions = {}) {
       }
 
       throw new ApiError(response.status, error?.code ?? 'unknown', error?.message ?? `HTTP ${response.status}`);
+    }
+
+    if (init?.as === 'etagged') {
+      const etagged: EtaggedText = { text, etag: response.headers.get('etag') };
+
+      return etagged as T;
     }
 
     return (init?.as === 'text' ? text : data) as T;

@@ -16,7 +16,8 @@ export type FilesShell = {
   detail: boolean;
 };
 
-export const filesRoute = (path: string): AppRoute => ({ key: 'files', path });
+// view — the editor over the file at the path.
+export const filesRoute = (path: string, view?: 'edit'): AppRoute => (view ? { key: 'files', path, view } : { key: 'files', path });
 
 const ROOT_CRUMB = { label: 'Files', route: filesRoute('') };
 

@@ -27,11 +27,12 @@ import type {
   UnpublishAppRequest,
   UpdateProjectRequest,
   WorkspaceNodeResponse,
+  WorkspaceWriteResponse,
 } from '../../../api/contract.ts';
 import { createFetch } from './fetch.ts';
-import type { FetchOptions } from './fetch.ts';
+import type { EtaggedText, FetchOptions } from './fetch.ts';
 
-export type { ApiFailure } from './fetch.ts';
+export type { ApiFailure, EtaggedText } from './fetch.ts';
 export { ApiError, toApiFailure } from './fetch.ts';
 
 export type ThreadEventsQuery = { before?: bigint; after?: bigint; limit?: number };
@@ -83,10 +84,14 @@ export type Api = {
   // The file area (the second data layer — TanStack Query in
   // features/file-area, not the store): a node is a directory listing or
   // one file's metadata; text is the file's content from the root byte
-  // surface /files/<rel>.
+  // surface /files/<rel> with the ETag of that read; write is the editor's
+  // — the whole content of an existing Markdown file, etag naming the
+  // content it replaces (If-Match; null — whatever is there): a 412 is
+  // "changed since that read".
   workspace: {
     node(path: string): Promise<WorkspaceNodeResponse>;
-    text(path: string, signal?: AbortSignal): Promise<string>;
+    text(path: string, signal?: AbortSignal): Promise<EtaggedText>;
+    write(path: string, text: string, etag: string | null): Promise<WorkspaceWriteResponse>;
   };
   // A stored file's facts by id (the second data layer too): the name, type
   // and size of an attachment recorded by fileId alone. A 404 is the answer
@@ -158,7 +163,8 @@ export function createApi(options: FetchOptions = {}): Api {
     },
     workspace: {
       node: path => apiFetch<WorkspaceNodeResponse>('/api/workspace/node', { query: { path } }),
-      text: (path, signal) => apiFetch<string>(fileUrl(path), { as: 'text', signal }),
+      text: (path, signal) => apiFetch<EtaggedText>(fileUrl(path), { as: 'etagged', signal }),
+      write: (path, text, etag) => apiFetch<WorkspaceWriteResponse>(fileUrl(path), { method: 'PUT', text, headers: etag === null ? undefined : { 'if-match': etag } }),
     },
     files: {
       meta: (fileId, signal) => apiFetch<FileMetaResponse>(`/api/files/${encodeURIComponent(fileId)}/meta`, { signal }),

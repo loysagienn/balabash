@@ -25,7 +25,7 @@ import { appendEvent } from '../core/append.ts';
 import { registryMutation } from '../core/registry-events.ts';
 import { THREAD_CANCEL, THREAD_INTERRUPT } from '../core/envelope.ts';
 import type { FileRef, Thread, ThreadStatus } from '../core/contract.ts';
-import { WorkspacePathError, listDir, resolveFilePath, sanitizeRelPath, statFile } from '../workspace/files.ts';
+import { WorkspacePathError, listDir, replaceFileContent, resolveFilePath, sanitizeRelPath, statFile } from '../workspace/files.ts';
 import { FileNotFoundError, getFile, getUserFile, openFileContent } from '../files/index.ts';
 import { verifyDownloadLink } from '../files/storage/local.ts';
 import { getExternalServerSecretRequest, provisionExternalServerSecrets } from '../capabilities/external-secrets.ts';
@@ -63,6 +63,7 @@ import type {
   ThreadResponse,
   ThreadsResponse,
   WorkspaceNodeResponse,
+  WorkspaceWriteResponse,
 } from './contract.ts';
 
 function sendError(ctx: Context, status: number, code: string, message: string): void {
@@ -1071,11 +1072,10 @@ filesRouter.get('/files', requireSession, ctx => {
   sendError(ctx, 400, 'bad_request', 'The URL must name a file in the workspace file area');
 });
 
-filesRouter.get('/files/*path', requireSession, async ctx => {
-  const userId = ctx.state.userId as string;
-
-  // Decode the wildcard tail from the raw URL ourselves: the router's own
-  // decoding keeps a broken percent-escape silently, we answer 400 instead.
+// The path of the byte surface, or null after a 400 was sent. The wildcard
+// tail is decoded from the raw URL here: the router's own decoding keeps a
+// broken percent-escape silently, we answer 400 instead.
+function parseFilesPath(ctx: Context): string | null {
   const rawTail = ctx.path.slice('/files/'.length);
   let decoded: string;
 
@@ -1084,16 +1084,23 @@ filesRouter.get('/files/*path', requireSession, async ctx => {
   } catch {
     sendError(ctx, 400, 'bad_request', 'Malformed percent-encoding in the path');
 
-    return;
+    return null;
   }
 
-  let relPath: string;
-
   try {
-    relPath = sanitizeRelPath(decoded);
+    return sanitizeRelPath(decoded);
   } catch (error) {
     sendError(ctx, 400, 'bad_request', error instanceof WorkspacePathError ? error.message : 'Invalid path');
 
+    return null;
+  }
+}
+
+filesRouter.get('/files/*path', requireSession, async ctx => {
+  const userId = ctx.state.userId as string;
+  const relPath = parseFilesPath(ctx);
+
+  if (relPath === null) {
     return;
   }
 
@@ -1140,6 +1147,94 @@ filesRouter.get('/files/*path', requireSession, async ctx => {
 
   ctx.body = createReadStream(absPath);
   ctx.length = Number(stats.size);
+});
+
+// The one write of the byte surface: PUT /files/*path replaces the whole
+// content of an existing Markdown file with the request body — the editor
+// of the console (contract.ts, WorkspaceWriteResponse). Markdown is the
+// editable kind of the file area (400 for the rest); a missing path or a
+// folder is the GET's 404 — the editor edits what is there, it creates
+// nothing; a body over the limit the editor shares with the preview is a
+// 413, declared or counted (the rest of such a body is drained, so the
+// answer reaches the client instead of a reset). If-Match with the ETag of
+// the GET is the guard against overwriting what an agent wrote since that
+// read: 412 while the tag no longer holds; a request without it replaces
+// whatever is there (a script's own choice). The check and the write are
+// two steps — a write landing between them is the window of one rename.
+const MARKDOWN_MAX_BYTES = 2 * 1024 * 1024;
+const MARKDOWN_PATH = /\.(md|markdown)$/i;
+
+// The body up to the limit, or null once it is over (the stream is read to
+// its end either way).
+async function readBodyUpTo(ctx: Context, limit: number): Promise<Buffer | null> {
+  const chunks: Buffer[] = [];
+  let size = 0;
+
+  for await (const chunk of ctx.req) {
+    size += (chunk as Buffer).length;
+
+    if (size <= limit) {
+      chunks.push(chunk as Buffer);
+    }
+  }
+
+  return size > limit ? null : Buffer.concat(chunks);
+}
+
+filesRouter.put('/files/*path', requireSession, async ctx => {
+  const userId = ctx.state.userId as string;
+  const relPath = parseFilesPath(ctx);
+
+  if (relPath === null) {
+    return;
+  }
+
+  if (!MARKDOWN_PATH.test(relPath)) {
+    sendError(ctx, 400, 'not_editable', 'Only Markdown (.md) files can be edited');
+
+    return;
+  }
+
+  const declared = Number(ctx.get('content-length'));
+  const content = declared > MARKDOWN_MAX_BYTES ? null : await readBodyUpTo(ctx, MARKDOWN_MAX_BYTES);
+
+  if (content === null) {
+    sendError(ctx, 413, 'too_large', `The content is larger than ${MARKDOWN_MAX_BYTES / (1024 * 1024)} MiB`);
+
+    return;
+  }
+
+  const absPath = resolveFilePath(userId, relPath);
+  const before = await stat(absPath, { bigint: true }).catch(() => null);
+
+  if (!before?.isFile()) {
+    sendError(ctx, 404, 'not_found', 'No such file in the workspace file area');
+
+    return;
+  }
+
+  const ifMatch = ctx.get('if-match');
+
+  if (ifMatch && ifMatch !== workspaceFileEtag(before)) {
+    sendError(ctx, 412, 'precondition_failed', 'The file changed since it was read');
+
+    return;
+  }
+
+  await replaceFileContent(userId, relPath, content);
+
+  const [file, after] = await Promise.all([statFile(userId, relPath), stat(absPath, { bigint: true }).catch(() => null)]);
+
+  if (!file || !after?.isFile()) {
+    sendError(ctx, 404, 'not_found', 'No such file in the workspace file area');
+
+    return;
+  }
+
+  const response: WorkspaceWriteResponse = { file, etag: workspaceFileEtag(after) };
+
+  ctx.set('etag', response.etag);
+  ctx.body = prepareObject(response);
 });
 
 // The validator of the workspace bytes: the size and the inode's two times

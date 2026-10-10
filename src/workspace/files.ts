@@ -15,6 +15,7 @@
 
 import path from 'node:path';
 import fs from 'node:fs/promises';
+import { randomBytes } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import { workspaceDbPath, workspaceFilesDir } from './layout.ts';
 import { WorkspaceDbBusyError, inWriteTransaction, withWorkspaceDb, type WithDbOptions } from './sqlite.ts';
@@ -402,6 +403,29 @@ export async function listDir(userId: string, relDir: string): Promise<Workspace
   }
 
   return { directories, folders: await Promise.all(folders), files };
+}
+
+// ---------------------------------------------------------------------------
+// Write primitive: the whole content of one file replaced in a step.
+// ---------------------------------------------------------------------------
+
+// The bytes land in a sibling temp file and take the file's name by rename:
+// a reader sees the old content or the new one, never a half-written file,
+// and a failure leaves the file as it was (the temp file is removed; the
+// one a crash leaves behind is a dot-file beside it). What may be replaced is the
+// caller's rule (the web API: an existing Markdown file under a size limit,
+// under a precondition); here — a path inside the area whose folder exists.
+export async function replaceFileContent(userId: string, relPath: string, content: Buffer): Promise<void> {
+  const absPath = resolveFilePath(userId, relPath);
+  const temp = path.join(path.dirname(absPath), `.${path.basename(absPath)}.${randomBytes(6).toString('hex')}.tmp`);
+
+  try {
+    await fs.writeFile(temp, content, { flag: 'wx' });
+    await fs.rename(temp, absPath);
+  } catch (error) {
+    await fs.rm(temp, { force: true });
+    throw error;
+  }
 }
 
 /** The node of one file; null when the path is missing or not a file. */

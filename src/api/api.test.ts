@@ -12,10 +12,11 @@
 import { test, describe, before, after, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
+import http from 'node:http';
 import path from 'node:path';
 import { STAND_HOST, sessionCookie, startStand } from '../test-support/stand.ts';
 import type { Reply, Stand } from '../test-support/stand.ts';
-import type { CreateProjectResponse, FileMetaResponse, ProjectResponse, SettingsFactsResponse, SettingsResponse, MeResponse, WorkspaceNodeResponse } from './contract.ts';
+import type { CreateProjectResponse, FileMetaResponse, ProjectResponse, SettingsFactsResponse, SettingsResponse, MeResponse, WorkspaceNodeResponse, WorkspaceWriteResponse } from './contract.ts';
 
 type ErrorBody = { error: { code: string; message: string } };
 
@@ -744,6 +745,140 @@ describe('the workspace node over the api', () => {
       readdir.mock.restore();
       await fs.rm(root, { recursive: true, force: true });
     }
+  });
+});
+
+// PUT /files/<rel>: the editor's write — Markdown only, an existing file
+// only, the whole content in one step, under the ETag the GET answered.
+describe('editing a Markdown file over the api', () => {
+  const dir = 'edit-probe';
+  const put = (rel: string, text: string, headers: Record<string, string> = {}) =>
+    stand.request('PUT', `/files/${rel}`, { text, headers: { 'content-type': 'text/markdown; charset=utf-8', ...headers } });
+
+  before(async () => {
+    await fs.mkdir(path.join(filesDir, dir, 'sub'), { recursive: true });
+    await fs.writeFile(path.join(filesDir, dir, 'notes.md'), '# Notes\n');
+    await fs.writeFile(path.join(filesDir, dir, 'data.csv'), 'a,b\n');
+  });
+
+  after(() => fs.rm(path.join(filesDir, dir), { recursive: true, force: true }));
+
+  test('the content is replaced in one step and the answer names the new version: the node, the ETag the GET now answers, the listing', async () => {
+    const read = await stand.request('GET', `/files/${dir}/notes.md`);
+
+    assert.equal(read.status, 200, read.text);
+
+    const written = await put(`${dir}/notes.md`, '# Notes\n\n- one — «ё»\n', { 'if-match': read.headers.etag as string });
+
+    assert.equal(written.status, 200, written.text);
+    assert.equal(written.headers['cache-control'], 'no-store');
+
+    const { file, etag } = written.json<WorkspaceWriteResponse>();
+    const expected = Buffer.byteLength('# Notes\n\n- one — «ё»\n');
+
+    assert.equal(written.headers.etag, etag);
+    assert.notEqual(etag, read.headers.etag);
+    assert.deepEqual({ ...file, modifiedAt: typeof file.modifiedAt }, { path: `${dir}/notes.md`, sizeBytes: expected, modifiedAt: 'string', title: null, description: null, mediaType: 'text/markdown' });
+    assert.equal(await fs.readFile(path.join(filesDir, dir, 'notes.md'), 'utf8'), '# Notes\n\n- one — «ё»\n');
+
+    const again = await stand.request('GET', `/files/${dir}/notes.md`, { headers: { 'if-none-match': etag } });
+
+    assert.equal(again.status, 304);
+
+    const node = (await stand.request('GET', `/api/workspace/node?path=${dir}`)).json<WorkspaceNodeResponse>();
+
+    assert.equal(node.kind, 'dir');
+    if (node.kind !== 'dir') return;
+    assert.deepEqual(node.files.find(entry => entry.path === `${dir}/notes.md`), file);
+    // No temp file of the write is left beside it.
+    assert.deepEqual((await fs.readdir(path.join(filesDir, dir))).sort(), ['data.csv', 'notes.md', 'sub']);
+  });
+
+  test('a stale If-Match is refused and the file stays; without If-Match the content is replaced whatever is there', async () => {
+    const read = await stand.request('GET', `/files/${dir}/notes.md`);
+
+    await fs.writeFile(path.join(filesDir, dir, 'notes.md'), '# Notes\n\nan agent wrote this\n');
+
+    const stale = await put(`${dir}/notes.md`, '# Mine\n', { 'if-match': read.headers.etag as string });
+
+    assert.equal(stale.status, 412);
+    assert.equal(stale.json<ErrorBody>().error.code, 'precondition_failed');
+    assert.equal(await fs.readFile(path.join(filesDir, dir, 'notes.md'), 'utf8'), '# Notes\n\nan agent wrote this\n');
+
+    const forced = await put(`${dir}/notes.md`, '# Mine\n');
+
+    assert.equal(forced.status, 200, forced.text);
+    assert.equal(await fs.readFile(path.join(filesDir, dir, 'notes.md'), 'utf8'), '# Mine\n');
+  });
+
+  test('only an existing Markdown file: another kind, a folder, a missing path and a path outside the area are refused, and nothing is created', async () => {
+    const csv = await put(`${dir}/data.csv`, 'x,y\n');
+
+    assert.equal(csv.status, 400);
+    assert.equal(csv.json<ErrorBody>().error.code, 'not_editable');
+    assert.equal(await fs.readFile(path.join(filesDir, dir, 'data.csv'), 'utf8'), 'a,b\n');
+
+    const folder = await put(`${dir}/sub`, '# x\n');
+
+    assert.equal(folder.status, 400);
+
+    const missing = await put(`${dir}/sub/new.md`, '# New\n');
+
+    assert.equal(missing.status, 404);
+    assert.equal(missing.json<ErrorBody>().error.code, 'not_found');
+    assert.deepEqual(await fs.readdir(path.join(filesDir, dir, 'sub')), []);
+
+    const outside = await put(`${dir}/../escape.md`, '# x\n');
+
+    assert.equal(outside.status, 400);
+    assert.equal(await fs.stat(path.join(filesDir, 'escape.md')).catch(() => null), null);
+
+    const bare = await stand.request('PUT', '/files', { text: '# x\n' });
+
+    assert.equal(bare.status, 404);
+  });
+
+  test('a body over 2 MiB is refused — declared or counted — and the file stays', async () => {
+    const big = 'x'.repeat(2 * 1024 * 1024 + 1);
+    const declared = await put(`${dir}/notes.md`, big);
+
+    assert.equal(declared.status, 413);
+    assert.equal(declared.json<ErrorBody>().error.code, 'too_large');
+
+    // Chunked, no Content-Length: the limit is counted as the body flows,
+    // and the body is read to its end — the client gets the answer, not a
+    // reset.
+    const counted = await new Promise<{ status: number; body: string }>((resolve, reject) => {
+      const req = http.request(
+        { host: '127.0.0.1', port: stand.port, path: `/files/${dir}/notes.md`, method: 'PUT', headers: { host: STAND_HOST, 'x-forwarded-proto': 'https', cookie: stand.cookie, 'content-type': 'text/markdown' } },
+        res => {
+          const chunks: Buffer[] = [];
+
+          res.on('data', chunk => chunks.push(chunk as Buffer));
+          res.on('end', () => resolve({ status: res.statusCode ?? 0, body: Buffer.concat(chunks).toString('utf8') }));
+          res.on('error', reject);
+        },
+      );
+
+      req.on('error', reject);
+      req.write(big.slice(0, 1024 * 1024));
+      req.end(big.slice(1024 * 1024));
+    });
+
+    assert.equal(counted.status, 413, counted.body);
+    assert.equal(await fs.readFile(path.join(filesDir, dir, 'notes.md'), 'utf8'), '# Mine\n');
+  });
+
+  test('the write is a mutation under the session: signed out it is a 401, cross-site a 403', async () => {
+    const signedOut = await stand.request('PUT', `/files/${dir}/notes.md`, { text: '# x\n', cookie: '' });
+
+    assert.equal(signedOut.status, 401);
+
+    const crossSite = await put(`${dir}/notes.md`, '# x\n', { 'sec-fetch-site': 'cross-site', origin: `https://${STAND_HOST}` });
+
+    assert.equal(crossSite.status, 403);
+    assert.equal(crossSite.json<ErrorBody>().error.code, 'cross_site');
+    assert.equal(await fs.readFile(path.join(filesDir, dir, 'notes.md'), 'utf8'), '# Mine\n');
   });
 });
 
