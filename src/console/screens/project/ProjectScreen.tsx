@@ -38,7 +38,7 @@ import { PageHead } from '../../ui/PageHead/PageHead.tsx';
 import { Pin, Pins } from '../../ui/Pins/Pins.tsx';
 import { Screen } from '../../ui/Screen/Screen.tsx';
 import { Skel, SkelStack } from '../../ui/Skel/Skel.tsx';
-import { allThreadsLabel, emptyProjectThreads, pinsOf, projectRoute, projectShell, projectStage } from './ProjectScreen.logic.ts';
+import { allThreadsLabel, archivedNote, emptyProjectThreads, pinsOf, projectRoute, projectShell, projectStage } from './ProjectScreen.logic.ts';
 import './ProjectScreen.css';
 
 // The card shows the newest threads; the rest are a link away.
@@ -132,7 +132,7 @@ function ProjectPage({ project, route }: { project: ProjectView; route: ProjectR
     <>
       {project.archived ? (
         <Note state="off" icon="archive">
-          Archived. Agents don’t pick it up; files and threads stay available.
+          {archivedNote(project.archivedAt, now)}
         </Note>
       ) : null}
       <PageHead

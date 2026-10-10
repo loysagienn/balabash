@@ -19,13 +19,19 @@ export function projectView(project: ProjectModel): ProjectView {
     slug: project.slug,
     description: project.description,
     archived: project.archived,
+    archivedAt: project.archivedAt,
     createdAt: project.createdAt,
     updatedAt: project.updatedAt,
   };
 }
 
 export function projectRecord(project: ProjectModel): ProjectRecord {
-  return { ...projectView(project), createdAt: project.createdAt.toISOString(), updatedAt: project.updatedAt.toISOString() };
+  return {
+    ...projectView(project),
+    archivedAt: project.archivedAt?.toISOString() ?? null,
+    createdAt: project.createdAt.toISOString(),
+    updatedAt: project.updatedAt.toISOString(),
+  };
 }
 
 // Live projects first, most recently touched on top; archived tail after.

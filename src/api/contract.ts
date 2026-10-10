@@ -366,6 +366,10 @@ export type ProjectView = {
   slug: string;
   description: string;
   archived: boolean;
+  // When it was archived ("Archived since Oct 2"); null on a live project
+  // and on one archived before the date was kept — such a project reads
+  // as archived without a date.
+  archivedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
 };

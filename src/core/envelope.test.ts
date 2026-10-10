@@ -15,6 +15,12 @@ describe('registry events in the envelope', () => {
     assert.equal(isCanonicalType('scheduler.note'), false);
   });
 
+  test('the names of Settings changing is canonical, written by the operator', () => {
+    assert.equal(isCanonicalType('settings.updated'), true);
+    assert.equal(isCanonicalType('settings.cleared'), false);
+    validateEnvelope({ type: 'settings.updated', actor: 'user', userId: 'u', payload: { workspaceName: 'Home', operatorName: null } });
+  });
+
   test('any actor may write them; a thread needs its user', () => {
     validateEnvelope({ type: 'project.created', actor: 'agent', agentName: 'coordinator', userId: 'u', threadId: 'main', payload: {} });
     validateEnvelope({ type: 'app.published', actor: 'user', userId: 'u', payload: {} });
@@ -26,5 +32,6 @@ describe('registry events in the envelope', () => {
     assert.equal(RESERVED_DOMAINS.has('project'), true);
     assert.equal(RESERVED_DOMAINS.has('app'), true);
     assert.equal(RESERVED_DOMAINS.has('schedule'), true);
+    assert.equal(RESERVED_DOMAINS.has('settings'), true);
   });
 });

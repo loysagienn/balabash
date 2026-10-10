@@ -1,5 +1,6 @@
 // Registry events: the log's record of a registry table changing (projects,
-// scheduled tasks, app publications). The snapshot the console hydrates
+// scheduled tasks, app publications — and the names of Settings on the
+// user's row, settings.updated). The snapshot the console hydrates
 // from is a projection of the log, so every change of a table it shows
 // must be an event too, or the browser's copy goes stale until a reload.
 // They are journaled where the table changes (src/projects/mutations.ts,
@@ -19,7 +20,7 @@ import { notifyAppended } from './live.ts';
 import type { EventPayloads, EventType } from './event-types.ts';
 import type { JsonObject } from './contract.ts';
 
-export type RegistryEventType = Extract<EventType, `project.${string}` | `schedule.task.${string}` | `app.${string}`>;
+export type RegistryEventType = Extract<EventType, `project.${string}` | `schedule.task.${string}` | `app.${string}` | 'settings.updated'>;
 
 // Who changed the registry: an agent through a tool call (the event is
 // authored by its thread), the operator from the console (actor user, no

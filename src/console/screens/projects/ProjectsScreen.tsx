@@ -8,7 +8,6 @@
 import { useState } from 'react';
 import type { ProjectsRoute } from '../../lib/router/routes.ts';
 import { useLinkTargets } from '../../lib/router/Link.tsx';
-import { agoLabel } from '../../lib/format/index.ts';
 import { useNow } from '../../lib/format/useNow.ts';
 import { useAppDispatch, useAppSelector } from '../../store/hooks.ts';
 import { routeTo } from '../../store/router/actions.ts';
@@ -29,7 +28,7 @@ import { ProjectTile, Tiles } from '../../ui/ProjectTile/ProjectTile.tsx';
 import { Screen } from '../../ui/Screen/Screen.tsx';
 import { Seg, SegItem } from '../../ui/Seg/Seg.tsx';
 import { SkelRow } from '../../ui/Skel/Skel.tsx';
-import { matchesElsewhere, nothingFoundWords, projectsCounts, visibleProjects, withProjectsFilters } from './ProjectsScreen.logic.ts';
+import { matchesElsewhere, nothingFoundWords, projectsCounts, tileWhen, visibleProjects, withProjectsFilters } from './ProjectsScreen.logic.ts';
 
 const SKELETON = [[55, 70], [40, 62], [48, 75]];
 
@@ -77,7 +76,7 @@ export function ProjectsScreen({ route }: { route: ProjectsRoute }) {
             key={project.id}
             title={project.title}
             desc={project.description || undefined}
-            when={agoLabel(project.updatedAt, now)}
+            when={tileWhen(project, now)}
             slug={`${project.slug}/`}
             threads={runningByProject[project.id] ?? 0}
             archived={project.archived}

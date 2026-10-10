@@ -21,6 +21,7 @@ import { countThreadsAt, ensureOperatorWorkspace, getMainThread, getThread, list
 import { getEventsAfter, listThreadEvents } from '../core/events.ts';
 import { getLiveHub } from '../core/live.ts';
 import { appendEvent } from '../core/append.ts';
+import { registryMutation } from '../core/registry-events.ts';
 import { THREAD_CANCEL, THREAD_INTERRUPT } from '../core/envelope.ts';
 import type { FileRef, Thread, ThreadStatus } from '../core/contract.ts';
 import { WorkspacePathError, listDir, resolveFilePath, sanitizeRelPath, statFile } from '../workspace/files.ts';
@@ -256,11 +257,16 @@ router.post('/auth', async ctx => {
 // The names as the console shows them: the stored workspace name wins over
 // the group's title (and spares the Bot API call); the operator's name is
 // the stored one or nothing.
+type StoredNames = { workspaceName: string | null; operatorName: string | null };
+
+function namesOf(user: StoredNames | null, groupTitle: string | null): NamesView {
+  return { workspaceName: user?.workspaceName ?? groupTitle, operatorName: user?.operatorName ?? null };
+}
+
 async function readNames(userId: string): Promise<NamesView> {
   const user = await prisma.user.findUnique({ where: { id: userId }, select: { workspaceName: true, operatorName: true } });
-  const workspaceName = user?.workspaceName ?? (await getWorkspaceName(userId));
 
-  return { workspaceName, operatorName: user?.operatorName ?? null };
+  return namesOf(user, user?.workspaceName ? null : await getWorkspaceName(userId));
 }
 
 async function buildMeResponse(userId: string): Promise<MeResponse> {
@@ -275,8 +281,14 @@ router.get('/me', requireSession, async ctx => {
 
 // The names of Settings. The rule of the body is parseSettingsPatch
 // (settings.ts, pure, tested); the row is the user's own, so there is no
-// ownership to check. No registry event: the names come with /api/me and
-// the answer of this call, nothing else folds them.
+// ownership to check. A change journals settings.updated in the row's
+// transaction (registryMutation: the row and the event commit together,
+// seq under the row lock, so two saves reach the log in the order they
+// reached the row) with the effective names — the ones this call answers
+// — and every open tab folds them into its `me`; the group's title the
+// cleared workspace name falls back to is fetched before the transaction
+// (a Bot API call does not belong inside one). An empty patch changes
+// nothing and journals nothing.
 router.patch('/settings', requireSession, async ctx => {
   const userId = ctx.state.userId as string;
   const body = await readJsonBody(ctx);
@@ -299,11 +311,25 @@ router.patch('/settings', requireSession, async ctx => {
     throw error;
   }
 
+  let settings: NamesView;
+
   if (Object.keys(patch).length > 0) {
-    await prisma.user.update({ where: { id: userId }, data: patch });
+    // Needed unless the patch itself names the workspace.
+    const groupTitle = patch.workspaceName ? null : await getWorkspaceName(userId);
+
+    settings = await registryMutation(async (tx, journal) => {
+      const user = await tx.user.update({ where: { id: userId }, data: patch, select: { workspaceName: true, operatorName: true } });
+      const names = namesOf(user, groupTitle);
+
+      await journal('settings.updated', names, { kind: 'user', userId });
+
+      return names;
+    });
+  } else {
+    settings = await readNames(userId);
   }
 
-  const response: SettingsResponse = { settings: await readNames(userId) };
+  const response: SettingsResponse = { settings };
 
   ctx.body = prepareObject(response);
 });
@@ -324,7 +350,7 @@ router.post('/logout', requireSession, async ctx => {
 router.get('/snapshot', requireSession, async ctx => {
   const userId = ctx.state.userId as string;
 
-  ctx.body = prepareObject(await buildSnapshot(userId, await buildMeResponse(userId)));
+  ctx.body = prepareObject(await buildSnapshot(userId, () => buildMeResponse(userId)));
 });
 
 const eventStream = createEventStreamHandler({

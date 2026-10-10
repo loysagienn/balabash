@@ -78,7 +78,7 @@ function fakeApi(overrides: ApiOverrides = {}, calls: Calls = []): Api {
     update: async patch => ({ settings: { workspaceName: patch.workspaceName ?? ME.workspaceName, operatorName: patch.operatorName ?? ME.operatorName } }),
     ...overrides.settings,
   };
-  const projectRow = (id: string, patch: Partial<ProjectView> = {}): ProjectView => ({ id, title: 'Project', slug: 'project', description: 'd', archived: false, createdAt: new Date(ISO_NOW), updatedAt: new Date(ISO_NOW), ...patch });
+  const projectRow = (id: string, patch: Partial<ProjectView> = {}): ProjectView => ({ id, title: 'Project', slug: 'project', description: 'd', archived: false, archivedAt: null, createdAt: new Date(ISO_NOW), updatedAt: new Date(ISO_NOW), ...patch });
   const projects: Api['projects'] = {
     create: async input => ({ project: projectRow('new', { ...input }), adopted: false }),
     update: async (id, patch) => ({ project: projectRow(id, { title: patch.title ?? 'Project', description: patch.description ?? 'd' }) }),
@@ -380,6 +380,29 @@ describe('session start-up', () => {
     await dispatched(store, sessionCheck());
     assert.equal(store.getState().session.status, 'error');
     assert.equal(store.getState().session.error?.code, 'network');
+  });
+
+  it('follows the names of Settings changed elsewhere: settings.updated replaces both names of me', async () => {
+    const store = createStore({ api: fakeApi(), initialRoute: { key: 'settings' } });
+
+    // Nobody signed in yet: nothing to update.
+    store.dispatch(eventAction(event({ type: 'settings.updated', actor: 'user', payload: { workspaceName: 'Home', operatorName: 'Vladimir' } })));
+    assert.equal(store.getState().session.me, null);
+
+    await dispatched(store, sessionCheck());
+    await settle();
+    assert.deepEqual([store.getState().session.me?.workspaceName, selectOperatorName(store.getState())], [ME.workspaceName, null]);
+
+    store.dispatch(eventAction(event({ type: 'settings.updated', actor: 'user', payload: { workspaceName: 'Home', operatorName: 'Vladimir' } })));
+    assert.deepEqual([store.getState().session.me?.workspaceName, selectOperatorName(store.getState())], ['Home', 'Vladimir']);
+    assert.equal(store.getState().session.me?.userId, ME.userId, 'the rest of me is kept');
+
+    // Cleared on another device: the event carries the group's title and no operator.
+    store.dispatch(eventAction(event({ type: 'settings.updated', actor: 'user', payload: { workspaceName: 'Group', operatorName: null } })));
+    assert.deepEqual([store.getState().session.me?.workspaceName, selectOperatorName(store.getState())], ['Group', null]);
+    // The in-flight and accepted counters of the cards are not the event's business.
+    assert.deepEqual(store.getState().session.settingsSaving, { workspaceName: false, operatorName: false });
+    assert.deepEqual(store.getState().session.settingsSaved, { workspaceName: 0, operatorName: 0 });
   });
 
   it('saves the names of Settings one field at a time: me follows the answer, a toast confirms', async () => {
@@ -748,7 +771,7 @@ describe('route data', () => {
       {
         snapshot: async () =>
           snapshot({
-            projects: [{ id: 'p1', slug: 'balabash', title: 'Balabash', description: '', archived: false, createdAt: new Date(), updatedAt: new Date() }],
+            projects: [{ id: 'p1', slug: 'balabash', title: 'Balabash', description: '', archived: false, archivedAt: null, createdAt: new Date(), updatedAt: new Date() }],
           }),
         threads: { list: async () => ({ threads: [thread({ id: 'a', createdSeq: 7n }), thread({ id: 'b', createdSeq: 5n, status: 'completed' })], nextCursor: null }) },
       },
@@ -1255,7 +1278,7 @@ describe('thread page data', () => {
 });
 
 describe('home overview', () => {
-  const project = (id: string, updatedAt: Date, archived = false) => ({ id, title: id, slug: id, description: '', archived, createdAt: updatedAt, updatedAt });
+  const project = (id: string, updatedAt: Date, archived = false) => ({ id, title: id, slug: id, description: '', archived, archivedAt: archived ? updatedAt : null, createdAt: updatedAt, updatedAt });
 
   async function homeStore() {
     const api = fakeApi({
@@ -1432,7 +1455,7 @@ describe('registry events', () => {
   it('keeps the projects of the snapshot up to date from project.* events', async () => {
     resetSeq(300n);
 
-    const store = createStore({ api: fakeApi({ snapshot: async () => snapshot({ projects: [{ id: 'p1', title: 'One', slug: 'one', description: 'd', archived: false, createdAt: new Date(ISO), updatedAt: new Date(ISO) }] }) }), initialRoute: { key: 'home' } });
+    const store = createStore({ api: fakeApi({ snapshot: async () => snapshot({ projects: [{ id: 'p1', title: 'One', slug: 'one', description: 'd', archived: false, archivedAt: null, createdAt: new Date(ISO), updatedAt: new Date(ISO) }] }) }), initialRoute: { key: 'home' } });
 
     await dispatched(store, sessionCheck());
     await settle();
@@ -1444,9 +1467,14 @@ describe('registry events', () => {
     assert.equal(store.getState().projects.byId.p1.title, 'One renamed');
     assert.deepEqual(selectActiveProjects(store.getState()).map(project => project.id), ['p1', 'p2']);
 
-    store.dispatch(eventAction(event({ type: 'project.archived', threadId: 'main', payload: { id: 'p2', title: 'Two', slug: 'two', description: 'd2', archived: true, createdAt: LATER, updatedAt: LATER } })));
+    store.dispatch(eventAction(event({ type: 'project.archived', threadId: 'main', payload: { id: 'p2', title: 'Two', slug: 'two', description: 'd2', archived: true, archivedAt: LATER, createdAt: LATER, updatedAt: LATER } })));
     assert.equal(selectArchivedProjectCount(store.getState()), 1);
     assert.deepEqual(store.getState().projects.ids, ['p1', 'p2']);
+    assert.equal(store.getState().projects.byId.p2.archivedAt?.toISOString(), LATER);
+    // A record written before the date was kept folds in without one.
+    store.dispatch(eventAction(event({ type: 'project.archived', threadId: 'main', payload: { id: 'p1', title: 'One renamed', slug: 'one', description: 'd', archived: true, createdAt: ISO, updatedAt: '2026-10-09T14:00:00.000Z' } })));
+    assert.equal(store.getState().projects.byId.p1.archived, true);
+    assert.equal(store.getState().projects.byId.p1.archivedAt, null);
 
     // A record without its id is not folded in.
     const before = store.getState().projects;
@@ -1619,7 +1647,7 @@ describe('thread commands', () => {
 
 describe('project registry changes', () => {
   const ISO = '2026-10-09T10:00:00.000Z';
-  const row = (id: string, patch: Partial<ProjectView> = {}): ProjectView => ({ id, title: 'One', slug: 'one', description: 'd', archived: false, createdAt: new Date(ISO), updatedAt: new Date(ISO), ...patch });
+  const row = (id: string, patch: Partial<ProjectView> = {}): ProjectView => ({ id, title: 'One', slug: 'one', description: 'd', archived: false, archivedAt: null, createdAt: new Date(ISO), updatedAt: new Date(ISO), ...patch });
 
   it('creates a project: one call at a time, the row folded, a toast, the page opened', async () => {
     const calls: Calls = [];

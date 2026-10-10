@@ -3,7 +3,7 @@ import { describe, it } from 'node:test';
 import { thread } from '../fixtures.ts';
 import { inFilterSet, matchesFilters, sameFilters, threadMatches, threadsFiltersOf } from './filters.ts';
 
-const projects = { byId: { p1: { id: 'p1', slug: 'balabash', title: 'Balabash', description: '', archived: false, createdAt: new Date(), updatedAt: new Date() } }, ids: ['p1'] };
+const projects = { byId: { p1: { id: 'p1', slug: 'balabash', title: 'Balabash', description: '', archived: false, archivedAt: null, createdAt: new Date(), updatedAt: new Date() } }, ids: ['p1'] };
 
 describe('threads list filters', () => {
   const none = { status: null, projectId: null, agent: null, q: null, createdAtGte: null, createdAtLte: null };

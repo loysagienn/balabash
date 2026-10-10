@@ -406,6 +406,9 @@ model Project {
   slug        String
   description String
   archived    Boolean  @default(false)
+  // When the project was archived: set by archive, cleared by unarchive.
+  // Null on a live project — and on one archived before the date was kept.
+  archivedAt  DateTime? @map("archived_at")
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 

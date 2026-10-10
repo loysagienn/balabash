@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { allThreadsLabel, emptyProjectThreads, pinsOf, projectRoute, projectShell, projectStage } from './ProjectScreen.logic.ts';
+import { allThreadsLabel, archivedNote, emptyProjectThreads, pinsOf, projectRoute, projectShell, projectStage } from './ProjectScreen.logic.ts';
 
 describe('project page', () => {
   it('tells the stage of the page', () => {
@@ -8,6 +8,16 @@ describe('project page', () => {
     assert.equal(projectStage(false, 'failed'), 'failed');
     assert.equal(projectStage(false, 'ready'), 'unknown');
     assert.equal(projectStage(true, 'ready'), 'project');
+  });
+
+  it('words the archived note with the date where it is known', () => {
+    const now = new Date('2026-10-09T12:00:00Z');
+
+    assert.equal(archivedNote(new Date('2026-05-12T09:00:00Z'), now), 'Archived since May 12. Agents don’t pick it up; files and threads stay available.');
+    assert.equal(archivedNote(new Date('2025-05-12T09:00:00Z'), now), 'Archived since May 12, 2025. Agents don’t pick it up; files and threads stay available.');
+    assert.equal(archivedNote(null, now), 'Archived. Agents don’t pick it up; files and threads stay available.');
+    // A row from a server older than the bundle carries no field at all.
+    assert.equal(archivedNote(undefined, now), 'Archived. Agents don’t pick it up; files and threads stay available.');
   });
 
   it('names the link to all project threads with their count once known', () => {

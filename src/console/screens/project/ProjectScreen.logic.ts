@@ -7,7 +7,7 @@ import type { WorkspaceFileMeta } from '../../../api/contract.ts';
 import type { AppRoute } from '../../lib/router/routes.ts';
 import type { SnapshotStage } from '../../store/stream/selectors.ts';
 import { crumbSegments, joinPath, nameOf, parentOf } from '../../features/file-area/node.ts';
-import { countOf, fileTimeLabel } from '../../lib/format/index.ts';
+import { countOf, fileTimeLabel, shortDate } from '../../lib/format/index.ts';
 import type { IconName } from '../../ui/Icon/Icon.tsx';
 
 export type ProjectStage = 'loading' | 'failed' | 'unknown' | 'project';
@@ -87,6 +87,15 @@ export function emptyProjectThreads(total: number | null): EmptyWords {
     title: 'No recent threads',
     note: total === null ? 'Nothing recent for this project; its earlier threads are under All.' : `The project has ${countOf(total, 'thread')}, all older than the recent ones shown here; they are under All.`,
   };
+}
+
+// The note over an archived project: since when, where the date is known
+// ("Archived since May 12."); a project archived before the date was kept
+// reads "Archived." alone.
+export function archivedNote(archivedAt: Date | null | undefined, now: Date): string {
+  const since = archivedAt ? `Archived since ${shortDate(archivedAt, now)}.` : 'Archived.';
+
+  return `${since} Agents don’t pick it up; files and threads stay available.`;
 }
 
 export type PinData = { icon: IconName; name: string; desc: string; path: string };

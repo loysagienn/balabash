@@ -34,6 +34,8 @@ export function projectFromRecord(record: Partial<ProjectRecord>): ProjectView |
     slug: record.slug ?? '',
     description: record.description ?? '',
     archived: record.archived ?? false,
+    // A record written before the date was carried has none: no date.
+    archivedAt: date(record.archivedAt),
     createdAt,
     updatedAt,
   };

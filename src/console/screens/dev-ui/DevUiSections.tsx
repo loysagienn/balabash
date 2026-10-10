@@ -296,7 +296,7 @@ function ProjectTiles() {
         onClick={stop}
       />
       <ProjectTile title="Vacation 2027" desc="Japan in April: route, tickets, ryokans" when="3 days ago" slug="vacation-2027/" href="#" onClick={stop} />
-      <ProjectTile title="Old blog" desc="Archived with its drafts" when="Aug 2" slug="old-blog/" archived href="#" onClick={stop} />
+      <ProjectTile title="Old blog" desc="Archived with its drafts" when="archived since Aug 2" slug="old-blog/" archived href="#" onClick={stop} />
     </Tiles>
   );
 }

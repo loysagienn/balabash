@@ -212,6 +212,16 @@ export type EventPayloads = {
   'schedule.task.cancelled': TaskRecord & { reason?: 'cancelled' | 'consumed' };
   'app.published': { path: string; slug: string; name: string | null; description: string | null };
   'app.unpublished': { path: string; slug: string };
+  // The names of Settings changed (PATCH /api/settings): the effective
+  // names as /api/me reports them after the change — the stored workspace
+  // name or the bound group's title, the operator's name or null — so the
+  // console's session folds them in as a whole, and every open tab follows.
+  'settings.updated': SettingsRecord;
+};
+
+export type SettingsRecord = {
+  workspaceName: string | null;
+  operatorName: string | null;
 };
 
 // The project row as the registry events carry it (ProjectView of the
@@ -222,6 +232,9 @@ export type ProjectRecord = {
   slug: string;
   description: string;
   archived: boolean;
+  // When it was archived; null on a live project and on one archived
+  // before the date was kept.
+  archivedAt: string | null;
   createdAt: string;
   updatedAt: string;
 };

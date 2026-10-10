@@ -183,11 +183,14 @@ export async function readAgents(userId: string): Promise<AgentView[]> {
   return [coordinatorView(catalog), ...catalog.map(agent => agentView(agent, lastModels.get(agent.name) ?? null))];
 }
 
-export async function buildSnapshot(userId: string, me: MeResponse): Promise<SnapshotResponse> {
+export async function buildSnapshot(userId: string, readMe: () => Promise<MeResponse>): Promise<SnapshotResponse> {
   // The stamp first, the projections after: the tail from asOfSeq may
   // overlap with what the projections already reflect, never miss anything.
+  // `me` is a projection too (settings.updated changes its names), so it is
+  // read here, after the stamp — not by the caller before it.
   const asOfSeq = await readHeadSeq();
   const now = new Date();
+  const me = await readMe();
 
   const [threads, mainLastMessage, projects, apps, tasks, connections, agents] = await Promise.all([
     readThreadWindow(userId, me.mainThreadId, { list: listThreads, get: getThread, latestTerminal: getLatestTerminalThread }),

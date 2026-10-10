@@ -51,7 +51,7 @@ describe('projects over the api', () => {
     assert.equal(adopted, false);
     assert.deepEqual(
       { ...project, id: 'id', createdAt: project.createdAt instanceof Date, updatedAt: project.updatedAt instanceof Date },
-      { id: 'id', title: 'Renovation', slug: 'renovation', description: 'The flat.', archived: false, createdAt: true, updatedAt: true },
+      { id: 'id', title: 'Renovation', slug: 'renovation', description: 'The flat.', archived: false, archivedAt: null, createdAt: true, updatedAt: true },
     );
 
     const row = await prisma.project.findUnique({ where: { id } });
@@ -120,26 +120,43 @@ describe('projects over the api', () => {
     assert.equal(missing.json<ErrorBody>().error.code, 'not_found');
   });
 
-  test('archive flips the flag once and journals once; unarchive the same', async () => {
+  test('archive flips the flag once, stamps the date and journals once; unarchive clears the date the same way', async () => {
+    const before = Date.now();
     const archived = await stand.request('POST', `/api/projects/${id}/archive`);
 
     assert.equal(archived.status, 200, archived.text);
-    assert.equal(archived.json<ProjectResponse>().project.archived, true);
+
+    const stamped = archived.json<ProjectResponse>().project;
+
+    assert.equal(stamped.archived, true);
+    assert.ok(stamped.archivedAt instanceof Date && stamped.archivedAt.getTime() >= before - 1_000 && stamped.archivedAt.getTime() <= Date.now(), `archivedAt ${String(stamped.archivedAt)}`);
 
     const again = await stand.request('POST', `/api/projects/${id}/archive`);
 
     assert.equal(again.status, 200);
     assert.equal(again.json<ProjectResponse>().project.archived, true);
+    assert.equal(again.json<ProjectResponse>().project.archivedAt?.getTime(), stamped.archivedAt?.getTime(), 'already archived: the date is not re-stamped');
 
     const restored = await stand.request('POST', `/api/projects/${id}/unarchive`);
 
     assert.equal(restored.status, 200);
     assert.equal(restored.json<ProjectResponse>().project.archived, false);
+    assert.equal(restored.json<ProjectResponse>().project.archivedAt, null);
 
-    assert.equal((await prisma.project.findUniqueOrThrow({ where: { id } })).archived, false);
+    const row = await prisma.project.findUniqueOrThrow({ where: { id } });
+
+    assert.deepEqual({ archived: row.archived, archivedAt: row.archivedAt }, { archived: false, archivedAt: null });
     assert.deepEqual(
       (await projectEvents()).map(event => event.type),
       ['project.created', 'project.updated', 'project.updated', 'project.archived', 'project.unarchived'],
+    );
+
+    // The events carry the date as the row had it at each change.
+    const flips = await prisma.event.findMany({ where: { type: { in: ['project.archived', 'project.unarchived'] } }, orderBy: { seq: 'asc' } });
+
+    assert.deepEqual(
+      flips.map(event => (event.payload as { archived: boolean; archivedAt: string | null }).archivedAt),
+      [stamped.archivedAt?.toISOString(), null],
     );
   });
 
@@ -593,6 +610,21 @@ describe('settings over the api', () => {
     const user = await prisma.user.findUniqueOrThrow({ where: { id: stand.userId } });
 
     assert.deepEqual({ workspaceName: user.workspaceName, operatorName: user.operatorName }, { workspaceName: 'Home', operatorName: null });
+
+    // Each change journals settings.updated by the operator with the names
+    // the call answered — what every other tab folds into its `me`.
+    assert.deepEqual(await settingsEvents(), [
+      { actor: 'user', threadId: null, userId: stand.userId, payload: { workspaceName: 'Home', operatorName: 'Vladimir' } },
+      { actor: 'user', threadId: null, userId: stand.userId, payload: { workspaceName: 'Home', operatorName: null } },
+    ]);
+  });
+
+  test('an empty patch answers the names and journals nothing', async () => {
+    const reply = await stand.request('PATCH', '/api/settings', { body: {} });
+
+    assert.equal(reply.status, 200, reply.text);
+    assert.deepEqual(reply.json<SettingsResponse>(), { settings: { workspaceName: 'Home', operatorName: null } });
+    assert.equal((await settingsEvents()).length, 2);
   });
 
   test('a field of another type is refused and nothing is written', async () => {
@@ -601,8 +633,15 @@ describe('settings over the api', () => {
     assert.equal(reply.status, 400);
     assert.match(reply.json<ErrorBody>().error.message, /workspaceName must be a string/);
     assert.equal((await prisma.user.findUniqueOrThrow({ where: { id: stand.userId } })).workspaceName, 'Home');
+    assert.equal((await settingsEvents()).length, 2);
   });
 });
+
+async function settingsEvents(): Promise<{ actor: string; threadId: string | null; userId: string | null; payload: unknown }[]> {
+  const rows = await prisma.event.findMany({ where: { type: 'settings.updated' }, orderBy: { seq: 'asc' } });
+
+  return rows.map(row => ({ actor: row.actor, threadId: row.threadId, userId: row.userId, payload: row.payload }));
+}
 
 describe('the api as a whole', () => {
   test('a mutation from another origin is refused before any logic', async () => {

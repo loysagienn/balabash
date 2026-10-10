@@ -8,6 +8,9 @@ describe('registry records → views', () => {
 
     assert.equal(view?.updatedAt.toISOString(), '2026-10-09T11:00:00.000Z');
     assert.equal(view?.createdAt.toISOString(), '2026-10-09T10:00:00.000Z');
+    assert.equal(view?.archivedAt, null, 'a record written before the date was kept has none');
+    assert.equal(projectFromRecord({ id: 'p1', archived: true, archivedAt: '2026-10-09T12:00:00.000Z', createdAt: '2026-10-09T10:00:00.000Z', updatedAt: '2026-10-09T12:00:00.000Z' })?.archivedAt?.toISOString(), '2026-10-09T12:00:00.000Z');
+    assert.equal(projectFromRecord({ id: 'p1', archived: true, archivedAt: 'nope', createdAt: '2026-10-09T10:00:00.000Z', updatedAt: '2026-10-09T12:00:00.000Z' })?.archivedAt, null);
     assert.equal(projectFromRecord({ title: 'x' }), null);
     assert.equal(projectFromRecord({ id: 'p', createdAt: 'nope', updatedAt: '2026-10-09T11:00:00.000Z' }), null);
   });

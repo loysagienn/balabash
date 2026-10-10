@@ -121,6 +121,19 @@ export function sessionReducer(state: SessionState = initialSession, action: Act
       return { ...state, ...withSaved(state, action.patch, action.settings), settingsSaving: withSaving(state, action.patch, false) };
     case 'SAVE_SETTINGS_FAIL':
       return { ...state, settingsSaving: withSaving(state, action.patch, false) };
+    case 'event/settings.updated': {
+      // The names changed — here, in another tab or on another device: the
+      // event carries the effective names as a whole, `me` takes them (a
+      // card with a draft keeps it; one without follows). Nobody signed
+      // in — nothing to update.
+      if (!state.me) {
+        return state;
+      }
+
+      const { workspaceName, operatorName } = action.event.payload;
+
+      return { ...state, me: { ...state.me, workspaceName: workspaceName ?? null, operatorName: operatorName ?? null } };
+    }
     case 'LOGOUT_DONE':
     case 'SESSION_LOST':
       return { ...initialSession, status: 'anonymous' };

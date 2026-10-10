@@ -329,7 +329,9 @@ export async function updateProject(userId: string, id: string, patch: ProjectPa
 }
 
 // changed: false — the project already was in the asked state; no event
-// then (the goal is met, the log records changes only).
+// then (the goal is met, the log records changes only). Archiving stamps
+// archivedAt with the moment, unarchiving clears it — the row tells since
+// when a project is in the archive, not only that it is.
 export type FlaggedProject = { project: ProjectModel; changed: boolean };
 
 async function setArchived(userId: string, id: string, archived: boolean, by: RegistryAuthor): Promise<FlaggedProject> {
@@ -340,7 +342,7 @@ async function setArchived(userId: string, id: string, archived: boolean, by: Re
   }
 
   const updated = await registryMutation(async (tx, journal) => {
-    const row = await tx.project.update({ where: { id: project.id }, data: { archived } });
+    const row = await tx.project.update({ where: { id: project.id }, data: { archived, archivedAt: archived ? new Date() : null } });
 
     await journal(archived ? 'project.archived' : 'project.unarchived', projectRecord(row), by);
 

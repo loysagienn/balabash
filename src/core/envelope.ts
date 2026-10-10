@@ -31,6 +31,10 @@ export const CONNECTION_PENDING = 'connection.pending';
 export const CONNECTION_RENAMED = 'connection.renamed';
 export const CONNECTION_DISCONNECTED = 'connection.disconnected';
 export const SCHEDULE_FIRED = 'schedule.fired';
+// The names of Settings changed on the user's row (PATCH /api/settings):
+// written in the row's transaction like a registry event
+// (src/core/registry-events.ts), payload — the effective names.
+export const SETTINGS_UPDATED = 'settings.updated';
 
 // A thread is terminated by exactly one of these; the first one wins.
 export const TERMINAL_TYPES: ReadonlySet<string> = new Set([THREAD_COMPLETED, THREAD_FAILED, THREAD_CANCELLED]);
@@ -61,6 +65,7 @@ const CANONICAL_TYPES: ReadonlySet<string> = new Set([
   // no author thread) and addressed to the workspace's main thread — the
   // coordinator interprets the content.
   SCHEDULE_FIRED,
+  SETTINGS_UPDATED,
 ]);
 
 // Open families: sanitized integration lifecycle events (connection.*,
@@ -90,6 +95,7 @@ export const RESERVED_DOMAINS: ReadonlySet<string> = new Set([
   'session',
   'project',
   'app',
+  'settings',
 ]);
 
 const DOMAIN_TYPE_RE = /^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$/;

@@ -6,6 +6,7 @@
 import type { ProjectView } from '../../../api/contract.ts';
 import type { ProjectsRoute } from '../../lib/router/routes.ts';
 import { projectMatches } from '../../features/projects/projectForm.logic.ts';
+import { agoLabel, shortDate } from '../../lib/format/index.ts';
 
 export type ProjectsCounts = { active: number; archived: number };
 
@@ -16,6 +17,17 @@ export function projectsCounts(projects: Pick<ProjectView, 'archived'>[]): Proje
 }
 
 type Tile = Pick<ProjectView, 'title' | 'slug' | 'description' | 'archived' | 'updatedAt'>;
+
+// The tile's moment: a live project — when it was last worked on ("7 min
+// ago"); an archived one — since when ("archived since Aug 3", the design's
+// quiet tile); archived before the date was kept — its last change.
+export function tileWhen(project: Pick<ProjectView, 'archived' | 'archivedAt' | 'updatedAt'>, now: Date): string {
+  if (project.archived && project.archivedAt) {
+    return `archived since ${shortDate(project.archivedAt, now)}`;
+  }
+
+  return agoLabel(project.updatedAt, now);
+}
 
 export function visibleProjects<P extends Tile>(projects: P[], route: ProjectsRoute): P[] {
   return projects.filter(project => project.archived === Boolean(route.archived) && projectMatches(project, route.q)).sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime());
