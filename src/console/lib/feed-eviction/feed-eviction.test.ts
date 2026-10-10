@@ -86,6 +86,7 @@ const api: Api = {
     },
   },
   llmRequests: { list: async () => ({ requests: [] }) },
+  limits: { get: async () => ({ limits: null, liveSessions: 0, lastSessionAt: null }) },
   secretRequests: {
     get: async () => {
       throw new Error('not here');

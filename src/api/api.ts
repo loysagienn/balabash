@@ -38,6 +38,7 @@ import { consumeAuthCode, createAuthCode } from './auth-codes.ts';
 import { createUserSession, destroySession, getSession } from './session.ts';
 import type { SessionModel } from '../../prisma-generated/models.ts';
 import { createEventStreamHandler } from './event-stream.ts';
+import { planLimits } from '../harness/claude-sdk/plan-limits.ts';
 import { buildSnapshot } from './snapshot.ts';
 import { checkMutationOrigin } from './origin.ts';
 import type {
@@ -46,6 +47,7 @@ import type {
   FileMetaResponse,
   ProjectResponse,
   PublicationResponse,
+  LimitsResponse,
   LlmRequestsResponse,
   LogoutResponse,
   MeResponse,
@@ -904,6 +906,16 @@ router.post('/projects/:id/unarchive', requireSession, async ctx => {
 // reads the table directly — llm_requests is deliberately outside the event
 // log and has no core facade; this endpoint is its only reader. rawUsage
 // stays server-side (bulky and unneeded for the charts).
+
+// The plan's rate limits (contract: LimitsResponse): the newest measurement
+// a live Claude session took, refreshed through one when stale and one is
+// alive (src/harness/claude-sdk/plan-limits.ts). The account is the host's
+// Claude login — one for the process, not a fact of the user or a thread.
+router.get('/limits', requireSession, async ctx => {
+  const response: LimitsResponse = await planLimits.read();
+
+  ctx.body = prepareObject(response);
+});
 
 router.get('/llm-requests', requireSession, async ctx => {
   const userId = ctx.state.userId as string;

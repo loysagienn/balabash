@@ -4,7 +4,7 @@
 // shape lives in sdk-session.ts; this module owns only the SDK mechanics.
 
 import { query } from '@anthropic-ai/claude-agent-sdk';
-import type { SDKControlGetContextUsageResponse, SDKMessage, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
+import type { Query, SDKControlGetContextUsageResponse, SDKControlGetUsageResponse, SDKMessage, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 
 export type ClaudeSessionOptions = NonNullable<Parameters<typeof query>[0]['options']>;
 
@@ -20,6 +20,12 @@ export type ClaudeSession = {
   // Context-window occupancy as the inner CLI computes it (the /context
   // report, structured). Rejects when the session is gone.
   getContextUsage: (opts?: { detail?: 'summary' | 'full' }) => Promise<SDKControlGetContextUsageResponse>;
+  // The plan's rate-limit windows as the inner CLI reads them from the
+  // claude.ai usage endpoint (the /usage report, structured; the transcript
+  // scan skipped). The SDK marks the control experimental: a build without
+  // it, or a CLI refusing it, rejects — the caller treats that as "no
+  // measurement", never as a session failure.
+  getUsage: () => Promise<SDKControlGetUsageResponse>;
   // End the input queue and close the underlying session. Idempotent.
   close: () => void;
 };
@@ -119,6 +125,19 @@ export function startClaudeSession(initialText: string, options: ClaudeSessionOp
       }
 
       return session.getContextUsage(opts);
+    },
+    getUsage: async () => {
+      if (closed) {
+        throw new Error('Claude session is closed');
+      }
+
+      const control = (session as Partial<Query>).usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET;
+
+      if (typeof control !== 'function') {
+        throw new Error('this Claude Agent SDK has no usage control');
+      }
+
+      return control.call(session, { skipBehaviors: true });
     },
     close: () => {
       if (closed) {

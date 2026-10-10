@@ -32,8 +32,9 @@ import { Screen } from '../../ui/Screen/Screen.tsx';
 import { SkelRow, SkelStack } from '../../ui/Skel/Skel.tsx';
 import { Status } from '../../ui/Status/Status.tsx';
 import { useSettingsFacts } from './queries.ts';
-import { factsStage, sessionWords, telegramWords, timezoneWords } from './SettingsScreen.logic.ts';
-import type { FactsStage } from './SettingsScreen.logic.ts';
+import { factsStage } from '../../lib/query/stage.ts';
+import type { FactsStage } from '../../lib/query/stage.ts';
+import { sessionWords, telegramWords, timezoneWords } from './SettingsScreen.logic.ts';
 import './SettingsScreen.css';
 
 // A name of Settings: at most this long (the server's cap).

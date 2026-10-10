@@ -1,8 +1,10 @@
-// System (design: SystemScreen): for now the "Model usage" section's first
-// card, "Main thread · tokens per request" — the prompt cache of the main
-// thread per request (spec: design/main-thread-token-chart.md) over
-// GET /api/llm-requests. The machine, the process, restarts, limits and the
-// usage over time wait for their data (plan, "Чего нет в данных").
+// System (design: SystemScreen): the "Claude limits" card — every window of
+// the plan with the overage (features/limits, GET /api/limits) — and the
+// "Model usage" section's first card, "Main thread · tokens per request" —
+// the prompt cache of the main thread per request (spec:
+// design/main-thread-token-chart.md) over GET /api/llm-requests. The
+// machine, the process, restarts and the usage over time wait for their
+// data (backlog.md).
 
 import { useMemo, useState } from 'react';
 import { Link } from '../../lib/router/Link.tsx';
@@ -10,6 +12,7 @@ import { useNow } from '../../lib/format/useNow.ts';
 import { useAppSelector } from '../../store/hooks.ts';
 import { selectMe } from '../../store/session/selectors.ts';
 import { selectMainThread } from '../../store/threads/selectors.ts';
+import { ClaudeLimitsCard } from '../../features/limits/ClaudeLimitsCard.tsx';
 import { Shell } from '../../features/shell/Shell.tsx';
 import { Card, CardBody, CardFoot, CardHead } from '../../ui/Card/Card.tsx';
 import { Empty } from '../../ui/Empty/Empty.tsx';
@@ -131,6 +134,9 @@ export function SystemScreen() {
     <Shell current="system" title="System">
       <Screen>
         <Grid12>
+          <Grid12Col span={12}>
+            <ClaudeLimitsCard scope="system" />
+          </Grid12Col>
           <Grid12Col span={12} stack>
             <div className="sys-usage-h">
               <h2 className="sys-usage-t">Model usage</h2>

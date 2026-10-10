@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { browserWords, factsStage, loginSourceWords, sessionWords, telegramWords, timezoneWords } from './SettingsScreen.logic.ts';
+import { browserWords, loginSourceWords, sessionWords, telegramWords, timezoneWords } from './SettingsScreen.logic.ts';
 
 const NOW = new Date(2026, 9, 10, 16, 38); // October 10, local
 
@@ -61,18 +61,5 @@ describe('settings screen rules', () => {
     // No title (the channel is off, the Bot API failed): the kind is the
     // title and is not repeated below.
     assert.deepEqual(telegramWords({ chatId: -5254371562n, title: null, linkedAt: new Date(2025, 7, 12) }, NOW), { title: 'Telegram group', kind: null, chatId: '-5254371562', linked: 'linked Aug 12, 2025' });
-  });
-
-  it('stages the facts query: the skeleton, the failure, the facts — and a failed refetch over kept facts is stale, not fresh', () => {
-    const facts = { scheduleTimezone: 'UTC' };
-    const failure = new Error('Internal error');
-
-    // The course of a tab: the first read in flight, its failure, Retry
-    // succeeding, a refetch failing over the kept facts, Retry succeeding.
-    assert.deepEqual(factsStage({ data: undefined, error: null }), { kind: 'loading' });
-    assert.deepEqual(factsStage({ data: undefined, error: failure }), { kind: 'failed', error: failure });
-    assert.deepEqual(factsStage({ data: facts, error: null }), { kind: 'facts', data: facts, stale: null });
-    assert.deepEqual(factsStage({ data: facts, error: failure }), { kind: 'facts', data: facts, stale: failure });
-    assert.deepEqual(factsStage({ data: facts, error: null }), { kind: 'facts', data: facts, stale: null });
   });
 });

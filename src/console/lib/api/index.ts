@@ -7,6 +7,7 @@ import type {
   CreateProjectRequest,
   CreateProjectResponse,
   FileMetaResponse,
+  LimitsResponse,
   LlmRequestsQuery,
   LlmRequestsResponse,
   LogoutResponse,
@@ -104,6 +105,12 @@ export type Api = {
   llmRequests: {
     list(query: LlmRequestsQuery, signal?: AbortSignal): Promise<LlmRequestsResponse>;
   };
+  // The plan's rate limits (the second data layer too): the newest
+  // measurement a live Claude session took, with how many are alive to
+  // refresh it.
+  limits: {
+    get(signal?: AbortSignal): Promise<LimitsResponse>;
+  };
   // The trusted window of a one-time link (the second data layer too): the
   // field metadata of a secret request, and the values going to storage —
   // they never come back, not in the answer, not in an event. A 404 is the
@@ -171,6 +178,9 @@ export function createApi(options: FetchOptions = {}): Api {
     },
     llmRequests: {
       list: (query, signal) => apiFetch<LlmRequestsResponse>('/api/llm-requests', { query, signal }),
+    },
+    limits: {
+      get: signal => apiFetch<LimitsResponse>('/api/limits', { signal }),
     },
     secretRequests: {
       get: (id, signal) => apiFetch<SecretRequestResponse>(secretRequest(id), { signal }),

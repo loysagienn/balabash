@@ -21,6 +21,7 @@ import { mergeEnv } from '../env.ts';
 import { nativeMcpServers } from './native-servers.ts';
 import { emitSdkMessage, emitSdkSessionEnd } from './stream-tap.ts';
 import { registerContextUsageProvider } from './context-usage.ts';
+import { planLimits } from './plan-limits.ts';
 import { DEFAULT_EFFORT } from '../default-effort.ts';
 
 export type SdkSessionDeps = {
@@ -54,8 +55,9 @@ export function createClaudeSession(options: SdkSessionOptions, deps: SdkSession
   // the mirrored init frame: the inner CLI omits `effort` on the SDK path,
   // and the app reads the session's effort from its newest init frame.
   const effort = options.effort ?? DEFAULT_EFFORT;
-  // Undoes the thread's context-usage registration (deps.threadId sessions).
+  // Undoes the thread's context-usage and usage registrations (deps.threadId sessions).
   let unregisterContextUsage: (() => void) | null = null;
+  let unregisterUsage: (() => void) | null = null;
   // Set by interrupt(), consumed by the next result frame: an interrupted
   // turn may close with an error subtype — that is the expected outcome of
   // the stop, not a turn failure.
@@ -120,8 +122,11 @@ export function createClaudeSession(options: SdkSessionOptions, deps: SdkSession
 
     // A surface may ask for the context-window occupancy of this thread's
     // session (the CCR plane answers the app's get_context_usage with it).
+    // Likewise the plan's rate limits (plan-limits.ts): any live session
+    // measures them for the console.
     if (deps.threadId) {
       unregisterContextUsage = registerContextUsageProvider(deps.threadId, opts => created.getContextUsage(opts));
+      unregisterUsage = planLimits.registerProvider(deps.threadId, () => created.getUsage());
     }
 
     for (const text of pendingInputs.splice(0)) {
@@ -214,6 +219,7 @@ export function createClaudeSession(options: SdkSessionOptions, deps: SdkSession
 
       closed = true;
       unregisterContextUsage?.();
+      unregisterUsage?.();
       session?.close();
       // A session still starting is closed by the race check in setup.
 

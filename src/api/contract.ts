@@ -368,6 +368,68 @@ export type LlmRequestsResponse = {
 };
 
 // ---------------------------------------------------------------------------
+// Claude subscription limits (read-only, the second data layer): the plan's
+// rate-limit windows as the inner CLI of a live Claude session reads them
+// from the claude.ai usage endpoint (the SDK control `get_usage`), kept in
+// the process's memory — the newest measurement, whichever session made it.
+// Nothing here is an event of the log; the console reads it by place. The
+// account is the host's Claude login: one per process, so the measurement
+// is not scoped to a thread or a user.
+
+export type LimitWindowKind = 'five_hour' | 'seven_day' | 'seven_day_opus' | 'seven_day_sonnet' | 'seven_day_oauth_apps' | 'model';
+
+// How the API answered the last request against this window, as the
+// session's rate_limit_event reported it: a warning or a refusal shows
+// before the next measurement moves the percentage.
+export type LimitWindowStatus = 'allowed' | 'allowed_warning' | 'rejected';
+
+export type LimitWindowView = {
+  kind: LimitWindowKind;
+  // The server's label of a per-model weekly window ("Opus"); null for the
+  // plan-wide kinds.
+  model: string | null;
+  // Percent of the window used, 0–100; null when the endpoint did not say.
+  utilization: number | null;
+  resetsAt: Date | null;
+  status: LimitWindowStatus | null;
+};
+
+// Extra usage past the plan (billed at API rates): whether the account has
+// it on, whether the last requests went through it, the month's spend.
+export type LimitOverageView = {
+  enabled: boolean;
+  inUse: boolean;
+  usedCredits: number | null;
+  monthlyLimit: number | null;
+  utilization: number | null;
+  currency: string | null;
+};
+
+export type ClaudeLimitsView = {
+  // When the measurement was taken (the usage control answered).
+  measuredAt: Date;
+  // 'pro', 'max', 'team', 'enterprise' — or null for an API key / provider.
+  subscriptionType: string | null;
+  // False when plan limits do not apply to the account (API key, Bedrock,
+  // Vertex): no windows then.
+  available: boolean;
+  windows: LimitWindowView[];
+  overage: LimitOverageView | null;
+};
+
+// GET /api/limits — the newest measurement, or null when none was taken
+// since the process started (the limits are measured through a live Claude
+// session: none has run, or the control failed in every one). liveSessions —
+// the Claude sessions alive right now (zero explains a stale measurement:
+// nothing can refresh it until the next run); lastSessionAt — when the last
+// Claude session ended, null when none has since the process started.
+export type LimitsResponse = {
+  limits: ClaudeLimitsView | null;
+  liveSessions: number;
+  lastSessionAt: Date | null;
+};
+
+// ---------------------------------------------------------------------------
 // Secret provisioning (the trusted window): the API exposes field METADATA
 // only — submitted values go straight to storage and never come back, not in
 // responses, not in events, not in logs.

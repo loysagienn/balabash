@@ -1,10 +1,10 @@
 // Home — the overview: the threads at work (the coordinator's main thread
 // is reached from the shell, never listed here), every app, links to the
 // sections; on the right, the projects in work.
-// Everything on the screen is the snapshot and its tail: no request of its
-// own. The columns dissolve on
-// the phone and the cards line up by importance (HomeScreen.css). The
-// subscription limits card comes with GET /api/limits (plan, stage 6).
+// Everything on the screen is the snapshot and its tail, except the Claude
+// limits — a measurement read by place (features/limits). The columns
+// dissolve on the phone and the cards line up by importance
+// (HomeScreen.css).
 
 import { useRef } from 'react';
 import type { AppListingView, ProjectView } from '../../../api/contract.ts';
@@ -17,6 +17,7 @@ import { selectActiveProjects, selectArchivedProjectCount, selectProjects } from
 import { selectStream, snapshotStage } from '../../store/stream/selectors.ts';
 import { snapshotLoad } from '../../store/stream/actions.ts';
 import { selectLatestFinishedThread, selectRunningCountByProject, selectRunningThreads } from '../../store/threads/selectors.ts';
+import { ClaudeLimitsCard } from '../../features/limits/ClaudeLimitsCard.tsx';
 import { Shell } from '../../features/shell/Shell.tsx';
 import { NAV } from '../../features/shell/nav.ts';
 import { ThreadList } from '../../features/thread-list/ThreadList.tsx';
@@ -215,6 +216,7 @@ export function HomeScreen() {
             </Card>
           </Grid12Col>
           <Grid12Col span={4} stack className="home-col">
+            <ClaudeLimitsCard scope="home" className="home-o2" />
             <Card narrow="bare" className="home-o3">
               <CardHead
                 title="Active projects"

@@ -16,7 +16,7 @@ import http from 'node:http';
 import path from 'node:path';
 import { STAND_HOST, sessionCookie, startStand } from '../test-support/stand.ts';
 import type { Reply, Stand } from '../test-support/stand.ts';
-import type { CreateProjectResponse, FileMetaResponse, ProjectResponse, SettingsFactsResponse, SettingsResponse, MeResponse, WorkspaceNodeResponse, WorkspaceWriteResponse } from './contract.ts';
+import type { CreateProjectResponse, FileMetaResponse, LimitsResponse, ProjectResponse, SettingsFactsResponse, SettingsResponse, MeResponse, WorkspaceNodeResponse, WorkspaceWriteResponse } from './contract.ts';
 
 type ErrorBody = { error: { code: string; message: string } };
 
@@ -1157,6 +1157,67 @@ async function settingsEvents(): Promise<{ seq: bigint; actor: string; threadId:
 
   return rows.map(row => ({ seq: row.seq, actor: row.actor, threadId: row.threadId, userId: row.userId, payload: row.payload }));
 }
+
+describe('the plan limits over the api', () => {
+  test('GET /limits answers the process’s measurement: none without a Claude session, the view a live session’s control gives, the kept view once it is gone', async () => {
+    const { planLimits } = await import('../harness/claude-sdk/plan-limits.ts');
+
+    const none = await stand.request('GET', '/api/limits');
+
+    assert.equal(none.status, 200, none.text);
+    assert.deepEqual(none.json<LimitsResponse>(), { limits: null, liveSessions: 0, lastSessionAt: null });
+
+    // A live session's control, as sdk-session.ts registers it.
+    const unregister = planLimits.registerProvider('thread-limits', async () => ({
+      session: { total_cost_usd: 0, total_api_duration_ms: 0, total_duration_ms: 0, total_lines_added: 0, total_lines_removed: 0, model_usage: {} },
+      subscription_type: 'max',
+      rate_limits_available: true,
+      rate_limits: {
+        five_hour: { utilization: 47, resets_at: '2026-10-10T18:00:00Z' },
+        seven_day: { utilization: 81, resets_at: '2026-10-13T10:00:00Z' },
+        extra_usage: { is_enabled: false, monthly_limit: null, used_credits: null, utilization: null },
+      },
+      behaviors: null,
+    }));
+
+    try {
+      const live = await stand.request('GET', '/api/limits');
+
+      assert.equal(live.status, 200, live.text);
+
+      const body = live.json<LimitsResponse>();
+
+      assert.equal(body.liveSessions, 1);
+      assert.ok(body.limits && body.limits.measuredAt instanceof Date);
+      assert.deepEqual(
+        { ...body.limits, measuredAt: undefined },
+        {
+          measuredAt: undefined,
+          subscriptionType: 'max',
+          available: true,
+          windows: [
+            { kind: 'five_hour', model: null, utilization: 47, resetsAt: new Date('2026-10-10T18:00:00Z'), status: null },
+            { kind: 'seven_day', model: null, utilization: 81, resetsAt: new Date('2026-10-13T10:00:00Z'), status: null },
+          ],
+          overage: { enabled: false, inUse: false, usedCredits: null, monthlyLimit: null, utilization: null, currency: null },
+        },
+      );
+    } finally {
+      unregister();
+    }
+
+    planLimits.sessionEnded('thread-limits');
+
+    const after = (await stand.request('GET', '/api/limits')).json<LimitsResponse>();
+
+    assert.equal(after.liveSessions, 0);
+    assert.equal(after.limits?.subscriptionType, 'max');
+    assert.ok(after.lastSessionAt instanceof Date);
+
+    // A reading, not a mutation: the session is still required.
+    assert.equal((await stand.request('GET', '/api/limits', { cookie: null })).status, 401);
+  });
+});
 
 describe('the api as a whole', () => {
   test('a mutation from another origin is refused before any logic', async () => {

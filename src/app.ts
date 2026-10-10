@@ -33,6 +33,7 @@ import { initTelegramBot } from './adapters/telegram/bot.ts';
 import { startTelegramDelivery } from './adapters/telegram/delivery.ts';
 import { startCcrAdapter } from './adapters/ccr/index.ts';
 import { startClaudeSessionJournal } from './harness/claude-sdk/session-journal.ts';
+import { startPlanLimitsWatch } from './harness/claude-sdk/plan-limits.ts';
 import { startCodexSessionJournal } from './harness/codex-sdk/session-journal.ts';
 
 // Pending migrations are applied before anything else touches the database:
@@ -131,6 +132,9 @@ const consumers: Consumer[] = [];
 // no session starts unobserved. Not log consumers, but they stop like them.
 consumers.push({ name: 'claude-session-journal', stop: startClaudeSessionJournal() });
 consumers.push({ name: 'codex-session-journal', stop: startCodexSessionJournal() });
+// The plan's rate limits, measured through the live Claude sessions the tap
+// shows (the console's "Claude limits").
+consumers.push({ name: 'claude-plan-limits', stop: startPlanLimitsWatch() });
 
 // A main thread the previous process left in `run` (it died mid-turn) is
 // settled to `wait` before the router can rise a coordinator over it — after
