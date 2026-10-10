@@ -479,6 +479,47 @@ describe('projectFeed — threads, tasks and lines', () => {
     assert.equal((alone[0] as SubtaskItem).summary, null);
   });
 
+  it('the thread’s own terminal ends every row still running — a tool, a bridge call, a task — without an outcome', () => {
+    resetSeq(10n);
+
+    const t0 = new Date('2026-10-10T14:22:00Z');
+    const end = new Date(t0.getTime() + 9000);
+    const run = (terminal: string, payload: object) =>
+      projectFeed(
+        [
+          own('session.tool.started', { toolUseId: 'u1', name: 'Shell', input: { command: 'ls' } }, { createdAt: t0 }),
+          own('session.tool.completed', { toolUseId: 'u1', name: 'Shell', result: '', isError: false, exitCode: 0 }, { createdAt: new Date(t0.getTime() + 1000) }),
+          // The end of this one never reached the log.
+          own('session.tool.started', { toolUseId: 'u2', name: 'Shell', input: { command: 'python3 probe.py' } }, { createdAt: new Date(t0.getTime() + 2000) }),
+          own('tool.call.started', { callId: 'c1', functionName: 'get_event', input: { seq: 1 } }, { createdAt: new Date(t0.getTime() + 3000) }),
+          own('session.task.started', { taskId: 'k1', description: 'search', backgrounded: true }, { createdAt: new Date(t0.getTime() + 4000) }),
+          event({ type: terminal, threadId: 't1', targetThreadId: 'main', payload: payload as never, createdAt: end }),
+        ],
+        ctx,
+      );
+
+    const items = run('thread.completed', { title: 'Done', summary: { text: 'ok' } });
+
+    assert.deepEqual(items.map(item => item.kind), ['actions', 'subtask', 'sys']);
+
+    const rows = (items[0] as ActionsItem).items;
+
+    assert.deepEqual(
+      rows.map(row => [row.label.tool ?? row.label.text, row.state, row.endedAt?.getTime() ?? null, row.endNote]),
+      [
+        ['Shell', 'done', t0.getTime() + 1000, 'exit 0'],
+        ['Shell', 'off', end.getTime(), null],
+        ['get_event', 'off', end.getTime(), null],
+      ],
+    );
+    assert.equal((items[1] as SubtaskItem).state, 'off');
+
+    const cancelled = run('thread.cancelled', { requestedBy: 'user', reason: 'enough' });
+
+    assert.deepEqual((cancelled[0] as ActionsItem).items.map(row => row.state), ['done', 'off', 'off']);
+    assert.equal((cancelled[1] as SubtaskItem).state, 'off');
+  });
+
   it('draws the thread’s own terminals, notifications, compaction, retries and system events as lines', () => {
     resetSeq(50n);
 

@@ -5,7 +5,7 @@
 
 import type { Prisma } from '../../prisma-generated/client.ts';
 import { prisma } from '../db/client.ts';
-import type { Event, JsonObject } from './contract.ts';
+import type { Event, JsonObject, JsonValue } from './contract.ts';
 import {
   AppendError,
   TERMINAL_TYPES,
@@ -21,6 +21,51 @@ import {
 import type { AppendInput } from './envelope.ts';
 import { notifyAppended } from './live.ts';
 import { threadCompletionFields, threadStartFields } from '../projections/thread.ts';
+
+// jsonb and text cannot hold U+0000 (PostgreSQL 22P05 "unsupported Unicode
+// escape sequence" / "invalid byte sequence"): a payload carrying it — a
+// tool's output that read a binary, a page fetched as text — would fail
+// the append and the event would be lost (a Codex Shell whose end never
+// reached the log, 2026-10-10). The write point replaces it with U+FFFD in
+// every string, keys included; a payload without it is returned as is.
+export function storablePayload(payload: JsonObject): JsonObject {
+  return storable(payload) as JsonObject;
+}
+
+function storable(value: JsonValue): JsonValue {
+  if (typeof value === 'string') {
+    return value.includes('\u0000') ? value.replaceAll('\u0000', '\uFFFD') : value;
+  }
+
+  if (Array.isArray(value)) {
+    let changed = false;
+    const items = value.map(item => {
+      const next = storable(item);
+
+      changed ||= next !== item;
+
+      return next;
+    });
+
+    return changed ? items : value;
+  }
+
+  if (typeof value === 'object' && value !== null) {
+    let changed = false;
+    const entries = Object.entries(value).map(([key, item]) => {
+      const nextKey = storable(key) as string;
+      const next = storable(item);
+
+      changed ||= nextKey !== key || next !== item;
+
+      return [nextKey, next] as const;
+    });
+
+    return changed ? Object.fromEntries(entries) : value;
+  }
+
+  return value;
+}
 
 export type AppendResult =
   | { written: true; event: Event }
@@ -96,7 +141,10 @@ export async function appendEvent(input: AppendInput): Promise<AppendResult> {
 // the caller holds, so the log's order is the mutations' order. The caller
 // tells the live tail after its commit (notifyAppended) — the hub reads the
 // log itself, so a missed hint only costs the safety poll's delay.
-export function appendEventIn(tx: Tx, input: AppendInput): Promise<AppendResult> {
+export function appendEventIn(tx: Tx, raw: AppendInput): Promise<AppendResult> {
+  const payload = storablePayload(raw.payload);
+  const input = payload === raw.payload ? raw : { ...raw, payload };
+
   validateEnvelope(input);
 
   if (input.type === THREAD_STARTED) {

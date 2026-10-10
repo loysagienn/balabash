@@ -276,6 +276,25 @@ class Builder {
     this.group.items.push(item);
   }
 
+  // The thread's own terminal is the last word on its session: a row still
+  // running at that point never gets its end — the completion was lost on
+  // its way to the log, or the thread was cancelled mid-call — so it ends
+  // with the thread, without an outcome, instead of a timer ticking on.
+  private endOpen(at: Date): void {
+    for (const item of this.tools.values()) {
+      if (item.state === 'run') {
+        item.state = 'off';
+        item.endedAt = at;
+      }
+    }
+
+    for (const task of this.tasks.values()) {
+      if (task.state === 'run') {
+        task.state = 'off';
+      }
+    }
+  }
+
   private quiet(item: QuietItem, parentToolUseId?: string | null): void {
     const nested = this.nestedOf(parentToolUseId);
 
@@ -360,6 +379,8 @@ class Builder {
 
         return;
       }
+
+      this.endOpen(at);
 
       if (is(event, 'thread.completed')) {
         this.push({ kind: 'sys', key, at, icon: 'check', state: 'done', text: 'Thread completed' });

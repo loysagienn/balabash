@@ -293,3 +293,56 @@ describe('registryMutation', () => {
     assert.deepEqual(last?.payload, projectRecord(row));
   });
 });
+
+describe('the payload', () => {
+  test('a string carrying U+0000 — which jsonb cannot hold — is stored with U+FFFD in its place, keys included, the rest untouched', async () => {
+    const childId = await startChild();
+    const payload = {
+      toolUseId: 'x',
+      name: 'Shell',
+      isError: false,
+      exitCode: 0,
+      result: 'detailed \u0000\u0000\u0004 auto',
+      nested: { 'k\u0000ey': ['\u0000', 1, null, true, { deep: 'ok' }] },
+    };
+    const result = await appendEvent({ type: 'session.tool.completed', actor: 'agent', agentName: 'engineer', userId: stand.userId, threadId: childId, payload });
+
+    assert.ok(result.written);
+
+    const expected = {
+      toolUseId: 'x',
+      name: 'Shell',
+      isError: false,
+      exitCode: 0,
+      result: 'detailed \uFFFD\uFFFD\u0004 auto',
+      nested: { 'k\uFFFDey': ['\uFFFD', 1, null, true, { deep: 'ok' }] },
+    };
+    const row = await prisma.event.findUniqueOrThrow({ where: { seq: result.event.seq } });
+
+    assert.deepEqual(row.payload, expected);
+    assert.deepEqual(result.event.payload, expected);
+    // The caller's object is not rewritten under it.
+    assert.equal(payload.result, 'detailed \u0000\u0000\u0004 auto');
+  });
+
+  test('a terminal whose summary carries U+0000 closes the thread, and the projection row holds the stored text', async () => {
+    const childId = await startChild();
+    const result = await appendEvent({
+      type: 'thread.completed',
+      actor: 'agent',
+      agentName: 'engineer',
+      userId: stand.userId,
+      threadId: childId,
+      targetThreadId: stand.mainThreadId,
+      payload: { title: 'Done\u0000', description: 'd', summary: { text: 'sum\u0000mary' } },
+    });
+
+    assert.ok(result.written);
+
+    const thread = await prisma.thread.findUniqueOrThrow({ where: { id: childId } });
+
+    assert.equal(thread.status, 'completed');
+    assert.equal(thread.title, 'Done\uFFFD');
+    assert.deepEqual(thread.summary, { text: 'sum\uFFFDmary' });
+  });
+});
