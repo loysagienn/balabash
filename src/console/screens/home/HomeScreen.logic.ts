@@ -1,11 +1,11 @@
 // The words of the Home screen, computed from the store's domains: the
 // summary under each section link, the note of the empty "Active threads"
-// card. Pure, tested. Where an app row leads — features/apps/appLink.ts,
+// card, the banner of a tail that is not flowing. Pure, tested. Where an app row leads — features/apps/appLink.ts,
 // the stage of the screen — snapshotStage (store/stream): both shared with
 // the Apps section.
 
 import type { NavKey } from '../../lib/router/routes.ts';
-import { agoLabel, countOf, plural, shortDate, timeOfDay } from '../../lib/format/index.ts';
+import { agoLabel, countOf, dateTimeLabel, plural, shortDate, timeOfDay } from '../../lib/format/index.ts';
 
 export type SectionSummary = { meta: string; state?: 'act' };
 
@@ -75,4 +75,12 @@ export function nothingRunningNote(last: { title: string | null; agent: string; 
   }
 
   return `The last thread finished ${agoLabel(last.updatedAt, now)} — “${last.title ?? last.agent}”.`;
+}
+
+// The banner while the tail is not flowing (design: "No connection to the
+// server. Data as of 16:31, reconnecting…"): the moment the screen is known
+// current up to (stream.dataAt — the time of the break, with the date once
+// it is another day), or no moment when the tail never opened.
+export function offlineNote(dataAt: Date | null, now: Date): string {
+  return dataAt ? `No connection to the server. Data as of ${dateTimeLabel(dataAt, now)}, reconnecting…` : 'No connection to the server. The data on screen may be behind; reconnecting…';
 }

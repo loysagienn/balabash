@@ -33,5 +33,5 @@ export const snapshotLoadDoneHandler: ActionHandler<'SNAPSHOT_LOAD_DONE'> =
   ({ dispatch, getState, next }) =>
   action => {
     next(action);
-    loadRouteData(getState().router.route, dispatch, getState);
+    loadRouteData(getState().router.route, dispatch, getState, 'snapshot');
   };

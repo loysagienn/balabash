@@ -7,5 +7,7 @@ export const snapshotLoadFail = (error: ApiFailure) => ({ type: 'SNAPSHOT_LOAD_F
 
 export const streamConnecting = () => ({ type: 'STREAM_CONNECTING' }) as const;
 export const streamOpened = () => ({ type: 'STREAM_OPENED' }) as const;
-export const streamReconnecting = () => ({ type: 'STREAM_RECONNECTING' }) as const;
+// `at` — the moment the tail stopped flowing (the process's clock): the
+// data on screen is known current up to then.
+export const streamReconnecting = (at: Date) => ({ type: 'STREAM_RECONNECTING', at }) as const;
 export const streamClosed = () => ({ type: 'STREAM_CLOSED' }) as const;

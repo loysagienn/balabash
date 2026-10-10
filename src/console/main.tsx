@@ -1,6 +1,6 @@
 // Entry of the console SPA. The shell (src/api/console.ts) mounts it into
 // #root. Here the store is created with the route read from the location,
-// the two processes (history, event stream) are attached, React renders,
+// the processes (history, event stream, tab visibility) are attached, React renders,
 // and the session check starts everything else (frontend.md, "Снимок +
 // хвост").
 
@@ -16,6 +16,7 @@ import { ApiProvider } from './lib/api/context.tsx';
 import { connectStoreToHistory } from './lib/router/history.ts';
 import { readRoute } from './lib/router/routes.ts';
 import { connectStoreToStream } from './lib/stream/index.ts';
+import { connectStoreToVisibility } from './lib/visibility/index.ts';
 import { PHONE_MEDIA, installPinchGuard } from './lib/touch/pinch.ts';
 import { createStore } from './store/index.ts';
 import type { AppStore } from './store/index.ts';
@@ -41,6 +42,7 @@ store = createStore({ api, initialRoute: readRoute(window.location.pathname + wi
 
 connectStoreToHistory(store);
 connectStoreToStream(store);
+connectStoreToVisibility(store);
 // The phone's two-finger zoom is off (lib/touch/pinch.ts); desktop zoom — a
 // touch screen beside a mouse included — is not.
 installPinchGuard(document, navigator, window.matchMedia(PHONE_MEDIA));

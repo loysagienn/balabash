@@ -32,7 +32,7 @@ import { Screen } from '../../ui/Screen/Screen.tsx';
 import { SectionLink, SectionLinks } from '../../ui/SectionLink/SectionLink.tsx';
 import { SkelRow } from '../../ui/Skel/Skel.tsx';
 import { appLink, appTitle, appUrlText } from '../../features/apps/appLink.ts';
-import { nothingRunningNote, sectionSummary } from './HomeScreen.logic.ts';
+import { nothingRunningNote, offlineNote, sectionSummary } from './HomeScreen.logic.ts';
 import './HomeScreen.css';
 
 // The projects card shows the most recently touched; the rest are a link away.
@@ -159,7 +159,7 @@ export function HomeScreen() {
       <Screen>
         {offline ? (
           <Note state="err" icon="cloud-off" role="alert">
-            No connection to the server. The data on screen may be behind; reconnecting…
+            {offlineNote(stream.dataAt, now)}
           </Note>
         ) : null}
         <Grid12>

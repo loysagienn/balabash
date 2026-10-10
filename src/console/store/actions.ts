@@ -2,6 +2,7 @@
 // Action union (store/types.ts) is the return types of what is exported
 // here. A new creator anywhere joins the union by being re-exported.
 
+export * from './apps/actions.ts';
 export * from './router/actions.ts';
 export * from './projects/actions.ts';
 export * from './session/actions.ts';

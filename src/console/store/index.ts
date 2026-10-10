@@ -12,7 +12,7 @@ import type { AppRoute } from '../lib/router/routes.ts';
 import { actionHandlersMiddleware } from './middleware.ts';
 import type { Action, ActionHandlers, State } from './types.ts';
 import { createRouterReducer } from './router/reducer.ts';
-import { routeToHandler } from './router/handlers.ts';
+import { routeToHandler, tabVisibleHandler } from './router/handlers.ts';
 import { sessionReducer } from './session/reducer.ts';
 import { loginDoneHandler, loginHandler, logoutHandler, saveSettingsHandler, sessionCheckDoneHandler, sessionCheckHandler } from './session/handlers.ts';
 import { streamReducer } from './stream/reducer.ts';
@@ -24,6 +24,7 @@ import { sessionsReducer } from './sessions/reducer.ts';
 import { projectsReducer } from './projects/reducer.ts';
 import { createProjectHandler, setProjectArchivedHandler, updateProjectHandler } from './projects/handlers.ts';
 import { appsReducer } from './apps/reducer.ts';
+import { loadAppsHandler } from './apps/handlers.ts';
 import { scheduleReducer } from './schedule/reducer.ts';
 import { connectionsReducer } from './connections/reducer.ts';
 import { agentsReducer } from './agents/reducer.ts';
@@ -33,6 +34,7 @@ export type { Action, ActionOf, ActionType, State } from './types.ts';
 
 export const handlers = {
   ROUTE_TO: routeToHandler,
+  TAB_VISIBLE: tabVisibleHandler,
   SESSION_CHECK: sessionCheckHandler,
   SESSION_CHECK_DONE: sessionCheckDoneHandler,
   LOGIN: loginHandler,
@@ -49,6 +51,7 @@ export const handlers = {
   CREATE_PROJECT: createProjectHandler,
   UPDATE_PROJECT: updateProjectHandler,
   SET_PROJECT_ARCHIVED: setProjectArchivedHandler,
+  LOAD_APPS: loadAppsHandler,
 } satisfies ActionHandlers;
 
 export type AppStore = Store<State, Action>;

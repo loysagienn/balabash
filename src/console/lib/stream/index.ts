@@ -17,7 +17,12 @@ import { streamClosed, streamConnecting, streamOpened, streamReconnecting } from
 export const STREAM_PATH = '/api/events/stream';
 export const RETRY_AFTER_MS = 5_000;
 
-export function connectStoreToStream(store: Store<State, Action>): () => void {
+export type StreamOptions = {
+  // The clock that stamps the moment the tail stopped flowing (stream.dataAt).
+  now?: () => Date;
+};
+
+export function connectStoreToStream(store: Store<State, Action>, { now = () => new Date() }: StreamOptions = {}): () => void {
   let source: EventSource | null = null;
   let retry: ReturnType<typeof setTimeout> | null = null;
 
@@ -81,9 +86,9 @@ export function connectStoreToStream(store: Store<State, Action>): () => void {
           retry = null;
           sync();
         }, RETRY_AFTER_MS);
-        store.dispatch(streamReconnecting());
+        store.dispatch(streamReconnecting(now()));
       } else {
-        store.dispatch(streamReconnecting());
+        store.dispatch(streamReconnecting(now()));
       }
     };
   };

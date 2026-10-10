@@ -64,6 +64,7 @@ const api: Api = {
   logout: async () => ({ ok: true as const }),
   snapshot: async () => snapshot({ asOfSeq: 50n, threads: [thread({ id: 'main', parentId: null }), thread({ id: 'a', createdSeq: 7n })] }),
   settings: { update: async () => ({ settings: { workspaceName: 'Workspace', operatorName: null } }) },
+  apps: { list: async () => ({ apps: [], publicAppsBase: '' }) },
   projects: {
     create: async () => {
       throw new Error('not here');
@@ -95,6 +96,9 @@ const api: Api = {
 
 const settle = () => new Promise(resolve => setTimeout(resolve, 0));
 
+// The process's clock: the moment it stamps when the tail stops flowing.
+const BROKE_AT = new Date('2026-10-10T16:31:00.000Z');
+
 // A signed-in store with its snapshot landed and the process attached: the
 // first EventSource is open on the tail. Timers are mocked from here on, so
 // the retry pause is driven by hand.
@@ -106,7 +110,7 @@ async function connected(t: TestContext): Promise<{ store: AppStore; first: Fake
   });
 
   const store = createStore({ api, initialRoute: { key: 'home' } });
-  const disconnect = connectStoreToStream(store);
+  const disconnect = connectStoreToStream(store, { now: () => BROKE_AT });
 
   t.after(disconnect);
   store.dispatch(sessionCheck());
@@ -124,6 +128,7 @@ async function connected(t: TestContext): Promise<{ store: AppStore; first: Fake
 
   first.opened();
   assert.equal(status(), 'open');
+  assert.equal(store.getState().stream.dataAt, null);
   first.frame(52n);
   assert.equal(store.getState().stream.lastSeq, 52n);
 
@@ -132,21 +137,44 @@ async function connected(t: TestContext): Promise<{ store: AppStore; first: Fake
 
 describe('stream process', () => {
   it("says reconnecting while the browser retries by itself, open once it is back", async t => {
-    const { first, status, sources } = await connected(t);
+    const { store, first, status, sources } = await connected(t);
 
     first.broke();
     assert.equal(status(), 'reconnecting');
     assert.equal(sources().length, 1);
+    // The data is known current up to the break — the first one of the outage.
+    assert.equal(store.getState().stream.dataAt, BROKE_AT);
 
     first.opened();
     assert.equal(status(), 'open');
+    assert.equal(store.getState().stream.dataAt, null);
+  });
+
+  it('names no moment when the tail never opened: the snapshot is the data', async t => {
+    FakeEventSource.instances = [];
+    (globalThis as { EventSource?: unknown }).EventSource = FakeEventSource;
+    t.after(() => {
+      delete (globalThis as { EventSource?: unknown }).EventSource;
+    });
+
+    const store = createStore({ api, initialRoute: { key: 'home' } });
+
+    t.after(connectStoreToStream(store, { now: () => BROKE_AT }));
+    store.dispatch(sessionCheck());
+    await settle();
+    assert.equal(store.getState().stream.status, 'connecting');
+
+    FakeEventSource.instances[0].broke();
+    assert.equal(store.getState().stream.status, 'reconnecting');
+    assert.equal(store.getState().stream.dataAt, null);
   });
 
   it('waits out the pause after a give-up and keeps saying reconnecting until the reopened tail flows', async t => {
-    const { first, status, sources } = await connected(t);
+    const { store, first, status, sources } = await connected(t);
 
     first.gaveUp();
     assert.equal(status(), 'reconnecting');
+    assert.equal(store.getState().stream.dataAt, BROKE_AT);
     // Not reopened at once: the dispatch of "reconnecting" woke the process, which saw the pending retry.
     assert.equal(sources().length, 1);
     assert.equal(first.readyState, FakeEventSource.CLOSED);
@@ -160,9 +188,11 @@ describe('stream process', () => {
     assert.equal(sources()[1].url, `${STREAM_PATH}?after=52`);
     assert.equal(status(), 'reconnecting');
 
-    // The server is still down: the next attempt waits the pause again.
+    // The server is still down: the next attempt waits the pause again; the
+    // moment stays the first break's (the process's clock has moved on).
     sources()[1].gaveUp();
     assert.equal(status(), 'reconnecting');
+    assert.equal(store.getState().stream.dataAt, BROKE_AT);
     assert.equal(sources().length, 2);
     t.mock.timers.tick(RETRY_AFTER_MS);
     assert.equal(sources().length, 3);

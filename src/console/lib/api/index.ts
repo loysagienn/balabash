@@ -3,6 +3,7 @@
 // replaces it with plain fake functions and never touches the network.
 
 import type {
+  AppsResponse,
   CreateProjectRequest,
   CreateProjectResponse,
   LlmRequestsQuery,
@@ -46,6 +47,11 @@ export type Api = {
     update(id: string, patch: UpdateProjectRequest): Promise<ProjectResponse>;
     archive(id: string): Promise<ProjectResponse>;
     unarchive(id: string): Promise<ProjectResponse>;
+  };
+  // The apps listing as GET /api/apps reads it now — the snapshot's rows
+  // read again (store/apps).
+  apps: {
+    list(): Promise<AppsResponse>;
   };
   threads: {
     list(query: ThreadsQuery, signal?: AbortSignal): Promise<ThreadsResponse>;
@@ -102,6 +108,9 @@ export function createApi(options: FetchOptions = {}): Api {
       update: (id, patch) => apiFetch<ProjectResponse>(project(id), { method: 'PATCH', body: patch }),
       archive: id => apiFetch<ProjectResponse>(`${project(id)}/archive`, { method: 'POST', body: {} }),
       unarchive: id => apiFetch<ProjectResponse>(`${project(id)}/unarchive`, { method: 'POST', body: {} }),
+    },
+    apps: {
+      list: () => apiFetch<AppsResponse>('/api/apps'),
     },
     threads: {
       list: (query, signal) => apiFetch<ThreadsResponse>('/api/threads', { query, signal }),

@@ -1,12 +1,15 @@
-// Apps — every mini-app of the workspace from the snapshot: name,
-// description, folder, the public address or "not published", the manifest
-// error; "Open" and the "⋯" menu. The segment (All · Published · With
-// errors) and the search are the route. Nothing is requested: the list is
-// the snapshot and its tail.
+// Apps — every mini-app of the workspace: name, description, folder, the
+// public address or "not published", the manifest error; "Open" and the "⋯"
+// menu. The segment (All · Published · With errors) and the search are the
+// route. The list is the snapshot and its tail, read again on entering the
+// screen and on the tab's return (LOAD_APPS from the route's handler): a
+// new folder and an edited manifest have no event. A failed re-read keeps
+// the list and says so in a line with its Retry.
 
 import type { AppsFilter, AppsRoute } from '../../lib/router/routes.ts';
 import { useAppDispatch, useAppSelector } from '../../store/hooks.ts';
 import { routeTo } from '../../store/router/actions.ts';
+import { loadApps } from '../../store/apps/actions.ts';
 import { snapshotLoad } from '../../store/stream/actions.ts';
 import { selectStream, snapshotStage } from '../../store/stream/selectors.ts';
 import { Shell } from '../../features/shell/Shell.tsx';
@@ -18,6 +21,7 @@ import { FBar } from '../../ui/FBar/FBar.tsx';
 import { IconBtn } from '../../ui/IconBtn/IconBtn.tsx';
 import { Input } from '../../ui/Input/Input.tsx';
 import { List } from '../../ui/List/List.tsx';
+import { Note } from '../../ui/Note/Note.tsx';
 import { Screen } from '../../ui/Screen/Screen.tsx';
 import { Seg, SegItem } from '../../ui/Seg/Seg.tsx';
 import { SkelRow } from '../../ui/Skel/Skel.tsx';
@@ -37,7 +41,9 @@ export function AppsScreen({ route }: { route: AppsRoute }) {
   const stream = useAppSelector(selectStream);
   const apps = useAppSelector(s => s.apps.items);
   const base = useAppSelector(s => s.apps.publicAppsBase);
+  const refresh = useAppSelector(s => s.apps.refresh);
   const stage = snapshotStage(stream);
+  const refreshFailed = stage === 'ready' && refresh.error !== null;
   const counts = appsCounts(apps);
   const visible = visibleApps(apps, route);
   const go = (patch: Parameters<typeof withAppsFilters>[1]) => dispatch(routeTo(withAppsFilters(route, patch), { replace: true }));
@@ -117,6 +123,11 @@ export function AppsScreen({ route }: { route: AppsRoute }) {
             />
           }
         />
+        {refreshFailed ? (
+          <Note state="err" icon="cloud-off" role="status" action="Retry" actionIcon="refresh-cw" actionBusy={refresh.pending} onAction={() => dispatch(loadApps())}>
+            Couldn’t refresh the apps — {refresh.error?.message}. The list may be behind.
+          </Note>
+        ) : null}
         <Card narrow="bare">{body}</Card>
       </Screen>
     </Shell>

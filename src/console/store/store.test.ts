@@ -7,14 +7,15 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import type { Thread } from '../../core/contract.ts';
 import type { Api } from '../lib/api/index.ts';
-import type { ProjectView, ThreadsResponse } from '../../api/contract.ts';
+import type { AppsResponse, ProjectView, ThreadsResponse } from '../../api/contract.ts';
 import { ApiError } from '../lib/api/index.ts';
 import type { StoreEnhancer } from 'redux';
 import { createStore } from './index.ts';
 import type { AppRoute } from '../lib/router/routes.ts';
 import type { Action, AppStore } from './index.ts';
 import { eventAction } from './events.ts';
-import { routeTo } from './router/actions.ts';
+import { routeTo, tabVisible } from './router/actions.ts';
+import { loadApps } from './apps/actions.ts';
 import { login, logout, saveSettings, sessionCheck, sessionLost } from './session/actions.ts';
 import { selectOperatorName } from './session/selectors.ts';
 import { commandThread, loadThread, loadThreadEvents, loadThreads, sendMessage } from './threads/actions.ts';
@@ -34,7 +35,7 @@ type Calls = { name: string; args: unknown[] }[];
 
 const ISO_NOW = '2026-10-09T10:00:00.000Z';
 
-type ApiOverrides = Omit<Partial<Api>, 'threads' | 'workspace' | 'settings' | 'llmRequests' | 'projects'> & { threads?: Partial<Api['threads']>; settings?: Partial<Api['settings']>; projects?: Partial<Api['projects']> };
+type ApiOverrides = Omit<Partial<Api>, 'threads' | 'workspace' | 'settings' | 'llmRequests' | 'projects' | 'apps'> & { threads?: Partial<Api['threads']>; settings?: Partial<Api['settings']>; projects?: Partial<Api['projects']>; apps?: Partial<Api['apps']> };
 
 // The file area and the model requests are Query, not the store: handlers
 // never call them.
@@ -53,12 +54,16 @@ function fakeApi(overrides: ApiOverrides = {}, calls: Calls = []): Api {
 
       return impl(...args);
     };
-  const base: Omit<Api, 'threads' | 'workspace' | 'settings' | 'llmRequests' | 'projects'> = {
+  const base: Omit<Api, 'threads' | 'workspace' | 'settings' | 'llmRequests' | 'projects' | 'apps'> = {
     me: async () => ME,
     auth: async () => ME,
     logout: async () => ({ ok: true as const }),
     snapshot: async () => snapshot(),
     ...overrides,
+  };
+  const apps: Api['apps'] = {
+    list: async () => ({ apps: [], publicAppsBase: 'https://apps.example' }),
+    ...overrides.apps,
   };
   const settings: Api['settings'] = {
     update: async patch => ({ settings: { workspaceName: patch.workspaceName ?? ME.workspaceName, operatorName: patch.operatorName ?? ME.operatorName } }),
@@ -88,6 +93,7 @@ function fakeApi(overrides: ApiOverrides = {}, calls: Calls = []): Api {
     logout: wrap('logout', base.logout),
     snapshot: wrap('snapshot', base.snapshot),
     settings: { update: wrap('settings.update', settings.update) },
+    apps: { list: wrap('apps.list', apps.list) },
     projects: {
       create: wrap('projects.create', projects.create),
       update: wrap('projects.update', projects.update),
@@ -1616,5 +1622,171 @@ describe('project registry changes', () => {
 
     assert.deepEqual(select(store.getState(), 'p1').map(t => t.id), ['b', 'd', 'a']);
     assert.deepEqual(select(store.getState(), 'p3'), []);
+  });
+});
+
+describe('apps listing', () => {
+  const TRACKER = { path: 'b/tracker', name: 'Tracker', description: null, manifestError: null, slug: null };
+  const NEW_FOLDER = { path: 'a/new', name: 'New', description: 'written after the snapshot', manifestError: null, slug: null };
+  const listing = (apps: AppsResponse['apps']): AppsResponse => ({ apps, publicAppsBase: 'https://apps.example' });
+  const listCalls = (calls: Calls) => calls.filter(call => call.name === 'apps.list').length;
+
+  async function onApps(overrides: ApiOverrides = {}, calls: Calls = []): Promise<AppStore> {
+    const store = createStore({ api: fakeApi({ snapshot: async () => snapshot({ apps: listing([TRACKER]) }), ...overrides }, calls), initialRoute: { key: 'apps' } });
+
+    await dispatched(store, sessionCheck());
+    await settle();
+
+    return store;
+  }
+
+  it('reads the listing again on entering the screen and on the tab coming back, not for the snapshot that just brought the rows', async () => {
+    const calls: Calls = [];
+    const store = await onApps({ apps: { list: async () => listing([NEW_FOLDER, TRACKER]) } }, calls);
+
+    // The tab opened on /apps: the snapshot's rows are the data, no second read.
+    assert.deepEqual(store.getState().apps.items, [TRACKER]);
+    assert.equal(listCalls(calls), 0);
+
+    store.dispatch(routeTo({ key: 'home' }));
+    assert.equal(listCalls(calls), 0);
+
+    await dispatched(store, routeTo({ key: 'apps' }));
+    await settle();
+    assert.equal(listCalls(calls), 1);
+    assert.deepEqual(store.getState().apps.items, [NEW_FOLDER, TRACKER]);
+    assert.deepEqual(store.getState().apps.refresh, { pending: false, error: null });
+
+    await dispatched(store, tabVisible());
+    await settle();
+    assert.equal(listCalls(calls), 2);
+
+    store.dispatch(routeTo({ key: 'home' }));
+    await dispatched(store, tabVisible());
+    await settle();
+    assert.equal(listCalls(calls), 2);
+  });
+
+  it('keeps the rows as they are when the listing changed nothing, and one read at a time', async () => {
+    const calls: Calls = [];
+    let release: (() => void) | null = null;
+    const store = await onApps(
+      {
+        apps: {
+          list: () =>
+            new Promise<AppsResponse>(resolve => {
+              release = () => resolve(listing([{ ...TRACKER }]));
+            }),
+        },
+      },
+      calls,
+    );
+    const before = store.getState().apps.items;
+
+    store.dispatch(loadApps());
+    store.dispatch(loadApps());
+    assert.equal(listCalls(calls), 1);
+    assert.equal(store.getState().apps.refresh.pending, true);
+
+    release!();
+    await settle();
+    assert.equal(store.getState().apps.items, before);
+    assert.equal(store.getState().apps.refresh.pending, false);
+  });
+
+  it('keeps the rows and records the failure of a re-read; Retry reads again', async () => {
+    const calls: Calls = [];
+    let fail = true;
+    const store = await onApps(
+      {
+        apps: {
+          list: async () => {
+            if (fail) {
+              throw new ApiError(503, 'unavailable', 'down');
+            }
+
+            return listing([NEW_FOLDER, TRACKER]);
+          },
+        },
+      },
+      calls,
+    );
+
+    await dispatched(store, loadApps());
+    await settle();
+    assert.deepEqual(store.getState().apps.items, [TRACKER]);
+    assert.deepEqual(store.getState().apps.refresh, { pending: false, error: { status: 503, code: 'unavailable', message: 'down' } });
+
+    fail = false;
+    await dispatched(store, loadApps());
+    await settle();
+    assert.deepEqual(store.getState().apps.items, [NEW_FOLDER, TRACKER]);
+    assert.deepEqual(store.getState().apps.refresh, { pending: false, error: null });
+  });
+
+  it('does not apply a listing that an app event may have outrun, and reads once more after it', async () => {
+    resetSeq(360n);
+
+    const calls: Calls = [];
+    const answers: ((apps: AppsResponse) => void)[] = [];
+    const store = await onApps(
+      {
+        apps: {
+          list: () =>
+            new Promise<AppsResponse>(resolve => {
+              answers.push(resolve);
+            }),
+        },
+      },
+      calls,
+    );
+
+    store.dispatch(loadApps());
+    assert.equal(answers.length, 1);
+
+    // Published while the listing was in flight: the row knows the slug.
+    store.dispatch(eventAction(event({ type: 'app.published', actor: 'user', payload: { path: 'b/tracker', slug: 'tracker', name: 'Tracker', description: null } })));
+    assert.equal(store.getState().apps.items[0].slug, 'tracker');
+    assert.equal(store.getState().apps.eventSeq, 360n);
+
+    // The answer was read before the publish: it is not applied, the listing is asked for again.
+    answers[0](listing([NEW_FOLDER, TRACKER]));
+    await settle();
+    assert.deepEqual(store.getState().apps.items, [{ ...TRACKER, slug: 'tracker' }]);
+    assert.equal(answers.length, 2);
+    assert.equal(store.getState().apps.refresh.pending, true);
+
+    answers[1](listing([NEW_FOLDER, { ...TRACKER, slug: 'tracker' }]));
+    await settle();
+    assert.deepEqual(store.getState().apps.items, [NEW_FOLDER, { ...TRACKER, slug: 'tracker' }]);
+    assert.equal(answers.length, 2);
+    assert.equal(store.getState().apps.refresh.pending, false);
+
+    // An event that changes no row does not date the rows.
+    store.dispatch(eventAction(event({ type: 'app.published', actor: 'user', payload: { path: 'b/tracker', slug: 'tracker', name: 'Tracker', description: null } })));
+    assert.equal(store.getState().apps.eventSeq, 360n);
+  });
+
+  it('drops the answer of a read that outlives the session', async () => {
+    const calls: Calls = [];
+    let release: (() => void) | null = null;
+    const store = await onApps(
+      {
+        apps: {
+          list: () =>
+            new Promise<AppsResponse>(resolve => {
+              release = () => resolve(listing([NEW_FOLDER]));
+            }),
+        },
+      },
+      calls,
+    );
+
+    store.dispatch(loadApps());
+    store.dispatch(sessionLost());
+    release!();
+    await settle();
+    assert.deepEqual(store.getState().apps.items, []);
+    assert.equal(store.getState().apps.refresh.pending, false);
   });
 });
