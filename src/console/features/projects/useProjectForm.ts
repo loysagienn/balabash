@@ -4,12 +4,13 @@
 // and the accepted count of the form; a submit opens an attempt at the
 // count of that moment (lib/forms/attempt.ts), the dialog shows
 // the refusal of that attempt even when the operator typed on while the
-// call ran, and closes when the count moved past it. The fields stay live
-// during the call.
+// call ran, and closes when the count moved past it; a dialog opened over a
+// call still in flight adopts it (openAttempt). The fields stay live during
+// the call.
 
 import { useEffect, useState } from 'react';
 import type { ProjectFormState } from '../../store/projects/reducer.ts';
-import { attemptAccepted, attemptAfterInput, attemptRefusal } from '../../lib/forms/attempt.ts';
+import { attemptAccepted, attemptAfterInput, attemptRefusal, openAttempt } from '../../lib/forms/attempt.ts';
 import type { FormAttempt } from '../../lib/forms/attempt.ts';
 import { fieldOfFailure, validateProjectForm } from './projectForm.logic.ts';
 import type { ProjectFormErrors, ProjectFormField, ProjectFormValues } from './projectForm.logic.ts';
@@ -27,7 +28,7 @@ export type ProjectFormHook = {
 export function useProjectForm(initial: ProjectFormValues, mode: 'create' | 'edit', form: ProjectFormState, onDone: () => void, onChangeValues?: (field: ProjectFormField, value: string, values: ProjectFormValues) => ProjectFormValues): ProjectFormHook {
   const [values, setValues] = useState(initial);
   const [touched, setTouched] = useState(false);
-  const [attempt, setAttempt] = useState<FormAttempt | null>(null);
+  const [attempt, setAttempt] = useState<FormAttempt | null>(() => openAttempt(form));
 
   // The store counted the call of this attempt as accepted: the dialog's
   // work is done.

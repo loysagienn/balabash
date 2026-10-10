@@ -7,19 +7,24 @@
 // rows or the new request. The server reads the listing at some moment of
 // the request while the tail keeps flowing: an app.* event that arrived
 // during the flight may be newer than the listing (a publish right after
-// the scan), so the reducer leaves such an answer unapplied and the listing
-// is asked for once more, from after the event. PUBLISH_APP / UNPUBLISH_APP:
-// one call per app at a time (apps.calls[path]), the outcome applied by the
+// the scan) — and so may the answer of the operator's own call accepted
+// meanwhile (the listing read before the call's commit, the call's event
+// not yet in), so the reducer leaves such an answer unapplied (listingStale)
+// and the listing is asked for once more. PUBLISH_APP / UNPUBLISH_APP: one
+// call per app at a time (apps.calls[path], read by own key — a folder may
+// be named like a key of Object.prototype), the outcome applied by the
 // identity of that call; a publication's answer folds the slug into the row
-// and is told by a toast with the public address; a refusal of a publish
-// stays in the dialog's form (the dialog shows it under the field or above
-// the form), a refusal of an unpublish — a toast, there is no form.
+// (unless the tail outran it — reducer) and is told by a toast with the
+// public address; a refusal of a publish stays in the dialog's form (the
+// dialog shows it under the field or above the form), a refusal of an
+// unpublish — a toast, there is no form.
 
 import { toApiFailure } from '../../lib/api/index.ts';
 import { appTitle, appUrlText, publicAppAddress } from '../../lib/apps/appLink.ts';
 import type { ActionHandler } from '../types.ts';
 import { pushToast } from '../ui/actions.ts';
 import { loadApps, loadAppsDone, loadAppsFail, publishAppDone, publishAppFail, unpublishAppDone, unpublishAppFail } from './actions.ts';
+import { listingStale, own } from './reducer.ts';
 
 export const loadAppsHandler: ActionHandler<'LOAD_APPS'> =
   ({ api, dispatch, getState, next }) =>
@@ -45,7 +50,7 @@ export const loadAppsHandler: ActionHandler<'LOAD_APPS'> =
 
       dispatch(loadAppsDone(request, apps));
 
-      if (getState().apps.eventSeq !== request.since) {
+      if (listingStale(getState().apps, request)) {
         dispatch(loadApps());
       }
     } catch (error) {
@@ -63,13 +68,13 @@ const titleOf = (items: { path: string; name: string | null }[], path: string) =
 export const publishAppHandler: ActionHandler<'PUBLISH_APP'> =
   ({ api, dispatch, getState, next }) =>
   async action => {
-    if (getState().apps.calls[action.path]) {
+    if (own(getState().apps.calls, action.path)) {
       return;
     }
 
     next(action);
 
-    const request = getState().apps.calls[action.path];
+    const request = own(getState().apps.calls, action.path);
 
     if (!request) {
       return;
@@ -78,7 +83,7 @@ export const publishAppHandler: ActionHandler<'PUBLISH_APP'> =
     try {
       const publication = await api.apps.publish({ path: action.path, slug: action.slug });
 
-      if (getState().apps.calls[action.path] !== request) {
+      if (own(getState().apps.calls, action.path) !== request) {
         return;
       }
 
@@ -87,7 +92,7 @@ export const publishAppHandler: ActionHandler<'PUBLISH_APP'> =
       dispatch(publishAppDone(action.path, request, publication));
       dispatch(pushToast({ title: 'Published', desc: `“${titleOf(items, action.path)}” — ${appUrlText(publicAppAddress(publicAppsBase, publication.slug))}`, state: 'done' }));
     } catch (error) {
-      if (getState().apps.calls[action.path] !== request) {
+      if (own(getState().apps.calls, action.path) !== request) {
         return;
       }
 
@@ -98,13 +103,13 @@ export const publishAppHandler: ActionHandler<'PUBLISH_APP'> =
 export const unpublishAppHandler: ActionHandler<'UNPUBLISH_APP'> =
   ({ api, dispatch, getState, next }) =>
   async action => {
-    if (getState().apps.calls[action.path]) {
+    if (own(getState().apps.calls, action.path)) {
       return;
     }
 
     next(action);
 
-    const request = getState().apps.calls[action.path];
+    const request = own(getState().apps.calls, action.path);
 
     if (!request) {
       return;
@@ -113,7 +118,7 @@ export const unpublishAppHandler: ActionHandler<'UNPUBLISH_APP'> =
     try {
       const publication = await api.apps.unpublish({ path: action.path });
 
-      if (getState().apps.calls[action.path] !== request) {
+      if (own(getState().apps.calls, action.path) !== request) {
         return;
       }
 
@@ -122,7 +127,7 @@ export const unpublishAppHandler: ActionHandler<'UNPUBLISH_APP'> =
       dispatch(unpublishAppDone(action.path, request, publication));
       dispatch(pushToast({ title: 'Unpublished', desc: `“${titleOf(items, action.path)}” — the link ${appUrlText(publicAppAddress(publicAppsBase, publication.slug))} stopped working.`, state: 'off' }));
     } catch (error) {
-      if (getState().apps.calls[action.path] !== request) {
+      if (own(getState().apps.calls, action.path) !== request) {
         return;
       }
 

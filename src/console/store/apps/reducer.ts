@@ -17,22 +17,33 @@
 // (sign-out, a lost session, the next sign-in) neither touches the rows nor
 // frees the request of the new session. The operator's own changes — a
 // publication under a slug, its end — are one call per app at a time
-// (calls[path], by identity like the listing's request); the answer's slug
-// is folded into the row at once, the tail's app.* event confirms it. The
-// publish dialog's form keeps its refusal and accepted count per app
-// (publish[path], lib/forms/attempt.ts); an unpublish has no form — its
-// refusal is a toast (store/apps/handlers.ts).
+// (calls[path], by identity like the listing's request). Three sources
+// write the rows — the listing, the tail, the answers of the operator's
+// own calls — and each is applied only while nothing fresher has been seen
+// since it left: an answer folds its slug into the row only while the tail
+// brought no app.* event during the call (listingStale / callOutrun —
+// otherwise the tail's events are the newer word on the row, and the
+// call's own event is among them or on its way); `changes` counts the
+// answers accepted so far, and a listing that left before one of them is
+// stale as well (the listing may have been read before the call's commit,
+// and the call's event has not stamped eventSeq yet). The maps keyed by an
+// app path are read by own keys only (own): a folder may be named like a
+// key of Object.prototype. The publish dialog's form keeps its refusal and
+// accepted count per app (publish[path], lib/forms/attempt.ts); an
+// unpublish has no form — its refusal is a toast (store/apps/handlers.ts).
 
 import type { AppListingView } from '../../../api/contract.ts';
 import type { ApiFailure } from '../../lib/api/index.ts';
 import type { Action } from '../types.ts';
 
-// A read of the listing in flight: `since` — apps.eventSeq when it left.
-export type AppsRequest = { since: bigint | null };
+// A read of the listing in flight: `since` — apps.eventSeq when it left,
+// `changes` — apps.changes then.
+export type AppsRequest = { since: bigint | null; changes: number };
 
 // The operator's call in flight for one app: a publication under `slug` or
-// its end. One object per call — the outcome is applied by identity.
-export type AppCall = { kind: 'publish'; slug: string } | { kind: 'unpublish' };
+// its end; `since` — apps.eventSeq when it left. One object per call — the
+// outcome is applied by identity.
+export type AppCall = ({ kind: 'publish'; slug: string } | { kind: 'unpublish' }) & { since: bigint | null };
 
 // The publish dialog's form of one app: the refusal of the last call, how
 // many calls the server accepted (the dialog closes when the count moves);
@@ -44,6 +55,9 @@ export type AppsState = {
   publicAppsBase: string;
   eventSeq: bigint | null;
   refresh: { request: AppsRequest | null; error: ApiFailure | null };
+  // How many answers of the operator's own calls were accepted (a listing
+  // that left before one of them is stale).
+  changes: number;
   // By app path: the publish or unpublish call in flight.
   calls: Record<string, AppCall>;
   // By app path: the publish dialog's form.
@@ -52,7 +66,25 @@ export type AppsState = {
 
 export const idlePublishForm: AppPublishForm = { error: null, done: 0 };
 
-export const initialApps: AppsState = { items: [], publicAppsBase: '', eventSeq: null, refresh: { request: null, error: null }, calls: {}, publish: {} };
+export const initialApps: AppsState = { items: [], publicAppsBase: '', eventSeq: null, refresh: { request: null, error: null }, changes: 0, calls: {}, publish: {} };
+
+// The value a map keyed by an app path holds for the path itself — not
+// what Object.prototype would lend a folder named constructor or toString.
+export function own<T>(map: Record<string, T>, path: string): T | undefined {
+  return Object.hasOwn(map, path) ? map[path] : undefined;
+}
+
+// Whether a listing that left with `request` is stale: an app.* event or an
+// accepted answer of the operator's own call has been seen since.
+export function listingStale(state: Pick<AppsState, 'eventSeq' | 'changes'>, request: AppsRequest): boolean {
+  return request.since !== state.eventSeq || request.changes !== state.changes;
+}
+
+// Whether the tail brought an app.* event while the call was in flight:
+// its answer is then not the freshest word on the row.
+export function callOutrun(state: Pick<AppsState, 'eventSeq'>, call: AppCall): boolean {
+  return call.since !== state.eventSeq;
+}
 
 const byPath = (a: AppListingView, b: AppListingView) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
 
@@ -79,13 +111,26 @@ function withCall(state: AppsState, path: string, call: AppCall | null): AppsSta
     return { ...state, calls: { ...state.calls, [path]: call } };
   }
 
+  if (!Object.hasOwn(state.calls, path)) {
+    return state;
+  }
+
   const { [path]: dropped, ...rest } = state.calls;
 
-  return dropped ? { ...state, calls: rest } : state;
+  return { ...state, calls: rest };
 }
 
 function withPublishForm(state: AppsState, path: string, form: (current: AppPublishForm) => AppPublishForm): AppsState {
-  return { ...state, publish: { ...state.publish, [path]: form(state.publish[path] ?? idlePublishForm) } };
+  return { ...state, publish: { ...state.publish, [path]: form(own(state.publish, path) ?? idlePublishForm) } };
+}
+
+// The answer of the operator's own call accepted: the call is over, the
+// answer counted; the row takes the answer's slug (null — unpublished) only
+// while the tail brought nothing newer during the call.
+function withAnswer(state: AppsState, path: string, call: AppCall, slug: string | null): AppsState {
+  const ended = { ...withCall(state, path, null), changes: state.changes + 1 };
+
+  return callOutrun(state, call) ? ended : withSlug(ended, path, slug);
 }
 
 // The row's publication as the answer of the operator's own call says it:
@@ -102,7 +147,7 @@ export function appsReducer(state: AppsState = initialApps, action: Action): App
     case 'SNAPSHOT_LOAD_DONE':
       return { ...state, items: action.snapshot.apps.apps, publicAppsBase: action.snapshot.apps.publicAppsBase };
     case 'LOAD_APPS':
-      return { ...state, refresh: { request: { since: state.eventSeq }, error: null } };
+      return { ...state, refresh: { request: { since: state.eventSeq, changes: state.changes }, error: null } };
     case 'LOAD_APPS_DONE': {
       if (action.request !== state.refresh.request) {
         return state;
@@ -110,7 +155,7 @@ export function appsReducer(state: AppsState = initialApps, action: Action): App
 
       const refresh = { request: null, error: null };
 
-      if (action.request.since !== state.eventSeq) {
+      if (listingStale(state, action.request)) {
         return { ...state, refresh };
       }
 
@@ -121,26 +166,22 @@ export function appsReducer(state: AppsState = initialApps, action: Action): App
     case 'LOAD_APPS_FAIL':
       return action.request === state.refresh.request ? { ...state, refresh: { request: null, error: action.error } } : state;
     case 'PUBLISH_APP':
-      return withPublishForm(withCall(state, action.path, { kind: 'publish', slug: action.slug }), action.path, form => ({ ...form, error: null }));
+      return withPublishForm(withCall(state, action.path, { kind: 'publish', slug: action.slug, since: state.eventSeq }), action.path, form => ({ ...form, error: null }));
     case 'PUBLISH_APP_DONE': {
-      if (state.calls[action.path] !== action.request) {
+      if (own(state.calls, action.path) !== action.request) {
         return state;
       }
 
-      return withSlug(
-        withPublishForm(withCall(state, action.path, null), action.path, form => ({ error: null, done: form.done + 1 })),
-        action.path,
-        action.publication.slug,
-      );
+      return withPublishForm(withAnswer(state, action.path, action.request, action.publication.slug), action.path, form => ({ error: null, done: form.done + 1 }));
     }
     case 'PUBLISH_APP_FAIL':
-      return state.calls[action.path] === action.request ? withPublishForm(withCall(state, action.path, null), action.path, form => ({ ...form, error: action.error })) : state;
+      return own(state.calls, action.path) === action.request ? withPublishForm(withCall(state, action.path, null), action.path, form => ({ ...form, error: action.error })) : state;
     case 'UNPUBLISH_APP':
-      return withCall(state, action.path, { kind: 'unpublish' });
+      return withCall(state, action.path, { kind: 'unpublish', since: state.eventSeq });
     case 'UNPUBLISH_APP_DONE':
-      return state.calls[action.path] === action.request ? withSlug(withCall(state, action.path, null), action.path, null) : state;
+      return own(state.calls, action.path) === action.request ? withAnswer(state, action.path, action.request, null) : state;
     case 'UNPUBLISH_APP_FAIL':
-      return state.calls[action.path] === action.request ? withCall(state, action.path, null) : state;
+      return own(state.calls, action.path) === action.request ? withCall(state, action.path, null) : state;
     case 'event/app.published': {
       const { path, slug, name, description } = action.event.payload;
 

@@ -55,13 +55,38 @@ export function takenWords(app: Pick<AppListingView, 'name' | 'path'>): string {
   return `URL already taken by “${appTitle(app)}”`;
 }
 
-// A refusal about the slug shows under the field ("slug must be…", "the
-// slug "x" is taken", "already published as…"); anything else — the manifest,
-// the path — is the form's own line.
+// A refusal about the slug shows under the field; anything else — the
+// manifest, the path — is the form's own line. Known by the server's own
+// wording (src/apps/management.ts): the slug rule, a reserved name, a taken
+// slug, an app already published — not by the word "slug" anywhere in the
+// message, which the folder's path or the manifest's details may carry.
+const SLUG_REFUSALS = [/^slug must be /, /^"[a-z0-9-]*" is a reserved name/, /^the slug "[^"]*" is taken/, /^already published as /];
+
 export function publishFailureUnderField(message: string): boolean {
   const text = message.toLowerCase();
 
-  return text.includes('slug') || text.includes('already published');
+  return SLUG_REFUSALS.some(pattern => pattern.test(text));
+}
+
+// The publication dialogs the row's menu offers and shows: "Publish…" to an
+// unpublished row, "Unpublish…" to a published one. A dialog is shown only
+// while its offer stands — once the row's publication changed (the call's
+// answer, the tail's app.* from another tab or an agent, a listing), the
+// dialog is over, whatever instance of it was on the screen; the menu
+// forgets the choice, so the publication changing back does not bring the
+// dialog back by itself.
+export type PublicationDialog = 'publish' | 'unpublish' | null;
+
+export function publicationDialog(chosen: PublicationDialog, published: boolean): PublicationDialog {
+  if (chosen === 'publish') {
+    return published ? null : 'publish';
+  }
+
+  if (chosen === 'unpublish') {
+    return published ? 'unpublish' : null;
+  }
+
+  return null;
 }
 
 export function unpublishWords(address: string): string {

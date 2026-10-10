@@ -6,17 +6,21 @@
 // of the server about the slug — under the field, about anything else (a
 // broken manifest, the folder) — above the form. The dialog lives by an
 // attempt (lib/forms/attempt.ts): it closes when the store counted its own
-// call as accepted, the values stay live during the call.
+// call as accepted, the values stay live during the call; opened again
+// while the call of a closed instance is still in flight, it adopts that
+// call — the slug in flight in the field, busy, its answer shown or closing
+// the dialog. The row's menu shows the dialog only while the row is
+// unpublished (publicationDialog).
 
 import { useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import type { AppListingView } from '../../../api/contract.ts';
-import { attemptAccepted, attemptAfterInput, attemptRefusal } from '../../lib/forms/attempt.ts';
+import { attemptAccepted, attemptAfterInput, attemptRefusal, openAttempt } from '../../lib/forms/attempt.ts';
 import type { FormAttempt } from '../../lib/forms/attempt.ts';
 import { appTitle, appUrlText, publicAppAddress } from '../../lib/apps/appLink.ts';
 import { useAppDispatch, useAppSelector } from '../../store/hooks.ts';
 import { publishApp } from '../../store/apps/actions.ts';
-import { selectAppPublish } from '../../store/apps/selectors.ts';
+import { selectAppCall, selectAppPublish } from '../../store/apps/selectors.ts';
 import { Dialog } from '../../ui/Dialog/Dialog.tsx';
 import { Field, focusFirstInvalid } from '../../ui/Field/Field.tsx';
 import { Input } from '../../ui/Input/Input.tsx';
@@ -29,13 +33,14 @@ const FIELD_ID = `${FORM_ID}-slug`;
 export function PublishAppDialog({ app, onClose }: { app: AppListingView; onClose: () => void }) {
   const dispatch = useAppDispatch();
   const form = useAppSelector(s => selectAppPublish(s, app.path));
+  const call = useAppSelector(s => selectAppCall(s, app.path));
   const apps = useAppSelector(s => s.apps.items);
   const base = useAppSelector(s => s.apps.publicAppsBase);
   const formEl = useRef<HTMLFormElement>(null);
-  const [value, setValue] = useState(() => suggestedSlug(app));
+  const [value, setValue] = useState(() => (call?.kind === 'publish' ? call.slug : suggestedSlug(app)));
   const [touched, setTouched] = useState(false);
   const [attempts, setAttempts] = useState(0);
-  const [attempt, setAttempt] = useState<FormAttempt | null>(null);
+  const [attempt, setAttempt] = useState<FormAttempt | null>(() => openAttempt(form));
 
   // The store counted the call of this attempt as accepted: the dialog's
   // work is done.

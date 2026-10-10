@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { normalizeSlug, publishFailureUnderField, slugError, slugTakenBy, suggestedSlug, takenWords, unpublishWords } from './publishApp.logic.ts';
+import { normalizeSlug, publicationDialog, publishFailureUnderField, slugError, slugTakenBy, suggestedSlug, takenWords, unpublishWords } from './publishApp.logic.ts';
+import type { PublicationDialog } from './publishApp.logic.ts';
 
 const APPS = [
   { name: 'Calorie tracker', description: null, path: 'apps/kcal', slug: 'kcal', manifestError: null },
@@ -49,9 +50,56 @@ describe('publish dialog rules', () => {
     assert.equal(publishFailureUnderField('Already published as "kcal" — unpublish first to change the slug'), true);
     assert.equal(publishFailureUnderField('The app\'s manifest is broken — fix it before publishing: name is required'), false);
     assert.equal(publishFailureUnderField('apps/x is not an app: no balabash-app.json there'), false);
+    assert.equal(publishFailureUnderField('"apps" is a reserved name — pick another slug'), true);
+    assert.equal(publishFailureUnderField('Already published as "kcal"'), true);
+    // The word "slug" inside the folder's path or the manifest's details is not a refusal about the field.
+    assert.equal(publishFailureUnderField('apps/slug-demo is not an app: no balabash-app.json there'), false);
+    assert.equal(publishFailureUnderField('The app\'s manifest is broken — fix it before publishing: unknown key "slug"'), false);
+    assert.equal(publishFailureUnderField('Invalid path'), false);
   });
 
   it('words the unpublish question', () => {
     assert.equal(unpublishWords('apps.example/kcal'), 'The link apps.example/kcal will stop working, and the URL becomes free for any app.');
+  });
+
+  it('shows the chosen publication dialog only while the row still calls for it', () => {
+    assert.equal(publicationDialog('publish', false), 'publish');
+    assert.equal(publicationDialog('publish', true), null);
+    assert.equal(publicationDialog('unpublish', true), 'unpublish');
+    assert.equal(publicationDialog('unpublish', false), null);
+    assert.equal(publicationDialog(null, true), null);
+    assert.equal(publicationDialog(null, false), null);
+  });
+
+  it('lifecycle: the menu forgets a dialog whose offer ended, so the publication changing back does not bring it back', () => {
+    // The menu's state and the row's publication, scripted the way AppMenu
+    // runs them: `shown` is derived on every render, a chosen dialog no
+    // longer shown is forgotten (the effect).
+    let chosen: PublicationDialog = null;
+    const render = (slug: string | null) => {
+      const shown = publicationDialog(chosen, slug !== null);
+
+      if (chosen !== null && shown === null) {
+        chosen = null;
+      }
+
+      return shown;
+    };
+
+    // All segment, a published row: "Unpublish…" chosen, the Confirm is up.
+    chosen = 'unpublish';
+    assert.equal(render('kcal'), 'unpublish');
+    // The unpublish succeeded: the row has no address — the Confirm is gone and the choice with it.
+    assert.equal(render(null), null);
+    assert.equal(chosen, null);
+    // The publication comes back (another tab, an agent): no Confirm appears by itself.
+    assert.equal(render('kcal'), null);
+
+    // The mirror: "Publish…" chosen on an unpublished row; the row gets published (the call's answer, the tail): the dialog is over.
+    chosen = 'publish';
+    assert.equal(render(null), 'publish');
+    assert.equal(render('kcal'), null);
+    assert.equal(chosen, null);
+    assert.equal(render(null), null);
   });
 });

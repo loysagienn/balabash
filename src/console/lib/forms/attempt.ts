@@ -8,7 +8,11 @@
 // holds a refusal and no call is in flight (the dialog shows it). Input
 // typed while the call is still running belongs to the same attempt — its
 // answer is still owed, a refusal must show; input typed after a refusal
-// dismisses it (a new attempt begins with the next submit).
+// dismisses it (a new attempt begins with the next submit). A dialog
+// opened while the form's call is still in flight (the previous instance
+// was closed before the answer) adopts that call as its attempt: the answer
+// is still owed to the operator — a refusal shows, an acceptance closes
+// the dialog, and nothing is submitted twice.
 
 import type { ApiFailure } from '../api/index.ts';
 
@@ -28,4 +32,10 @@ export function attemptRefusal(attempt: FormAttempt | null, form: Pick<FormCallS
 
 export function attemptAfterInput(attempt: FormAttempt | null, form: Pick<FormCallState, 'pending'>): FormAttempt | null {
   return form.pending ? attempt : null;
+}
+
+// The attempt a dialog opens with: the call in flight, if any — its done
+// count is the one of the submit that sent the call — else none.
+export function openAttempt(form: Pick<FormCallState, 'pending' | 'done'>): FormAttempt | null {
+  return form.pending ? { done: form.done } : null;
 }

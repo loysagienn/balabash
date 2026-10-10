@@ -2,9 +2,11 @@
 // on this host — every app has that page, published or not), its folder in
 // Files, copy the public link; then publish (the slug dialog) or unpublish
 // (the confirmation) — the dialogs of features/apps over the app.* calls
-// of the store.
+// of the store. The chosen dialog is shown only while the row's publication
+// still calls for it (publicationDialog): the choice is forgotten the
+// moment the publication changed under it.
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { AppListingView } from '../../../api/contract.ts';
 import type { AppLink } from '../../lib/apps/appLink.ts';
 import { useAppDispatch } from '../../store/hooks.ts';
@@ -12,20 +14,27 @@ import { routeTo } from '../../store/router/actions.ts';
 import { useCopy } from '../../features/clipboard/useCopy.ts';
 import { PublishAppDialog } from '../../features/apps/PublishAppDialog.tsx';
 import { UnpublishAppDialog } from '../../features/apps/UnpublishAppDialog.tsx';
+import { publicationDialog } from '../../features/apps/publishApp.logic.ts';
+import type { PublicationDialog } from '../../features/apps/publishApp.logic.ts';
 import { IconBtn } from '../../ui/IconBtn/IconBtn.tsx';
 import { Menu, MenuAnchor, MenuItem, MenuSep } from '../../ui/Menu/Menu.tsx';
 
 const LINK_WORDS = { done: 'Link copied', fail: 'Couldn’t copy the link' };
 
-type AppDialog = 'publish' | 'unpublish' | null;
-
 export function AppMenu({ app, link }: { app: AppListingView; link: AppLink }) {
   const dispatch = useAppDispatch();
   const copy = useCopy();
   const [open, setOpen] = useState(false);
-  const [dialog, setDialog] = useState<AppDialog>(null);
+  const [dialog, setDialog] = useState<PublicationDialog>(null);
   const close = () => setOpen(false);
   const { address, href, owner } = link;
+  const shown = publicationDialog(dialog, address !== null);
+
+  useEffect(() => {
+    if (dialog !== null && shown === null) {
+      setDialog(null);
+    }
+  }, [dialog, shown]);
 
   return (
     <>
@@ -96,8 +105,8 @@ export function AppMenu({ app, link }: { app: AppListingView; link: AppLink }) {
       >
         <IconBtn icon="ellipsis" label="App actions" size="sm" expanded={open} onClick={() => setOpen(!open)} />
       </MenuAnchor>
-      {dialog === 'publish' ? <PublishAppDialog app={app} onClose={() => setDialog(null)} /> : null}
-      {dialog === 'unpublish' && address ? <UnpublishAppDialog app={app} address={address} onClose={() => setDialog(null)} /> : null}
+      {shown === 'publish' ? <PublishAppDialog app={app} onClose={() => setDialog(null)} /> : null}
+      {shown === 'unpublish' && address ? <UnpublishAppDialog app={app} address={address} onClose={() => setDialog(null)} /> : null}
     </>
   );
 }

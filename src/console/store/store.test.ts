@@ -1824,7 +1824,7 @@ describe('apps publication', () => {
     store.dispatch(publishApp('b/tracker', 'other'));
     assert.equal(answers.length, 1);
     assert.deepEqual(calls.filter(call => call.name === 'apps.publish').map(call => call.args), [[{ path: 'b/tracker', slug: 'tracker' }]]);
-    assert.deepEqual(selectAppCall(store.getState(), 'b/tracker'), { kind: 'publish', slug: 'tracker' });
+    assert.deepEqual(selectAppCall(store.getState(), 'b/tracker'), { kind: 'publish', slug: 'tracker', since: null });
     assert.deepEqual(selectAppPublish(store.getState(), 'b/tracker'), { pending: true, error: null, done: 0 });
     // Another app is free to be called meanwhile.
     assert.equal(selectAppCall(store.getState(), 'apps/kcal'), null);
@@ -1890,10 +1890,10 @@ describe('apps publication', () => {
     );
 
     store.dispatch(unpublishApp('apps/kcal'));
-    assert.deepEqual(selectAppCall(store.getState(), 'apps/kcal'), { kind: 'unpublish' });
+    assert.deepEqual(selectAppCall(store.getState(), 'apps/kcal'), { kind: 'unpublish', since: null });
     // A publish of the same app waits for the call in flight.
     store.dispatch(publishApp('apps/kcal', 'other'));
-    assert.deepEqual(selectAppCall(store.getState(), 'apps/kcal'), { kind: 'unpublish' });
+    assert.deepEqual(selectAppCall(store.getState(), 'apps/kcal'), { kind: 'unpublish', since: null });
     await settle();
     assert.deepEqual(calls.filter(call => call.name === 'apps.unpublish').map(call => call.args), [[{ path: 'apps/kcal' }]]);
     assert.equal(calls.filter(call => call.name === 'apps.publish').length, 0);
@@ -1923,7 +1923,7 @@ describe('apps publication', () => {
     assert.equal(answers.length, 2);
     answers[0].resolve({ path: 'b/tracker', slug: 'tracker' });
     await settle();
-    assert.deepEqual(selectAppCall(store.getState(), 'b/tracker'), { kind: 'publish', slug: 'fresh' });
+    assert.deepEqual(selectAppCall(store.getState(), 'b/tracker'), { kind: 'publish', slug: 'fresh', since: null });
     assert.equal(row(store, 'b/tracker')?.slug, null);
     assert.deepEqual(toasts(store), []);
 
@@ -1931,6 +1931,140 @@ describe('apps publication', () => {
     await settle();
     assert.equal(row(store, 'b/tracker')?.slug, 'fresh');
     assert.deepEqual(selectAppPublish(store.getState(), 'b/tracker'), { pending: false, error: null, done: 1 });
+  });
+
+  it('keeps the folded answer against a listing read before the call: the stale listing is not applied, the listing is read again', async () => {
+    const calls: Calls = [];
+    const lists: { resolve: (apps: AppsResponse) => void }[] = [];
+    const store = await onApps({ apps: { list: () => new Promise<AppsResponse>(resolve => lists.push({ resolve })) } }, calls);
+    const listCalls = () => calls.filter(call => call.name === 'apps.list').length;
+
+    // The Apps screen entered (or the tab back): a listing leaves, reading slug null.
+    store.dispatch(loadApps());
+    assert.equal(lists.length, 1);
+
+    // The publish answers first — before the tail's app.published.
+    await dispatched(store, publishApp('b/tracker', 'tracker'));
+    await settle();
+    assert.equal(row(store, 'b/tracker')?.slug, 'tracker');
+    assert.equal(store.getState().apps.eventSeq, null);
+
+    // The old listing lands: it predates the publish and is not applied; the listing is asked for again.
+    lists[0].resolve(listing([KCAL, TRACKER]));
+    await settle();
+    assert.equal(row(store, 'b/tracker')?.slug, 'tracker');
+    assert.equal(listCalls(), 2);
+    assert.equal(lists.length, 2);
+
+    lists[1].resolve(listing([KCAL, { ...TRACKER, slug: 'tracker' }]));
+    await settle();
+    assert.equal(row(store, 'b/tracker')?.slug, 'tracker');
+    assert.equal(store.getState().apps.refresh.request, null);
+    assert.equal(listCalls(), 2);
+
+    // The mirror: a listing in flight across an unpublish does not bring the slug back.
+    store.dispatch(loadApps());
+    await dispatched(store, unpublishApp('apps/kcal'));
+    await settle();
+    assert.equal(row(store, 'apps/kcal')?.slug, null);
+    lists[2].resolve(listing([KCAL, { ...TRACKER, slug: 'tracker' }]));
+    await settle();
+    assert.equal(row(store, 'apps/kcal')?.slug, null);
+    assert.equal(lists.length, 4);
+    lists[3].resolve(listing([{ ...KCAL, slug: null }, { ...TRACKER, slug: 'tracker' }]));
+    await settle();
+    assert.equal(row(store, 'apps/kcal')?.slug, null);
+    assert.equal(store.getState().apps.refresh.request, null);
+
+    // A refusal changed nothing on the server: a listing across it stands.
+    const refused = await onApps({ apps: { list: () => new Promise<AppsResponse>(resolve => lists.push({ resolve })), publish: async () => Promise.reject(new ApiError(400, 'bad_request', 'The slug "x" is taken — pick another one')) } });
+
+    refused.dispatch(loadApps());
+    await dispatched(refused, publishApp('b/tracker', 'x'));
+    await settle();
+    lists[4].resolve(listing([KCAL, TRACKER, { ...TRACKER, path: 'c/late' }]));
+    await settle();
+    assert.equal(refused.getState().apps.items.length, 3);
+    assert.equal(lists.length, 5);
+  });
+
+  it('does not fold an answer the tail has outrun: the newer app.* events keep the row', async () => {
+    resetSeq(500n);
+
+    const answers: Answer[] = [];
+    const store = await onApps({ apps: { publish: held(answers), unpublish: held(answers) } });
+
+    // This tab publishes; its answer is late. The tail brings its own
+    // app.published, then an unpublish from elsewhere (another tab, an agent).
+    store.dispatch(publishApp('b/tracker', 'tracker'));
+    assert.deepEqual(selectAppCall(store.getState(), 'b/tracker'), { kind: 'publish', slug: 'tracker', since: null });
+    store.dispatch(eventAction(event({ type: 'app.published', actor: 'user', payload: { path: 'b/tracker', slug: 'tracker', name: 'Tracker', description: null } })));
+    assert.equal(row(store, 'b/tracker')?.slug, 'tracker');
+    store.dispatch(eventAction(event({ type: 'app.unpublished', actor: 'user', payload: { path: 'b/tracker', slug: 'tracker' } })));
+    assert.equal(row(store, 'b/tracker')?.slug, null);
+
+    // The late 200: the call ends, the form counts it accepted, the toast tells it — the row keeps the tail's word.
+    answers[0].resolve({ path: 'b/tracker', slug: 'tracker' });
+    await settle();
+    assert.equal(row(store, 'b/tracker')?.slug, null);
+    assert.equal(selectAppCall(store.getState(), 'b/tracker'), null);
+    assert.deepEqual(selectAppPublish(store.getState(), 'b/tracker'), { pending: false, error: null, done: 1 });
+    assert.equal(toasts(store).at(-1)?.title, 'Published');
+    assert.equal(store.getState().apps.eventSeq, 501n);
+
+    // The mirror: a late unpublish answer against a newer publication under another slug.
+    store.dispatch(unpublishApp('apps/kcal'));
+    assert.deepEqual(selectAppCall(store.getState(), 'apps/kcal'), { kind: 'unpublish', since: 501n });
+    store.dispatch(eventAction(event({ type: 'app.unpublished', actor: 'user', payload: { path: 'apps/kcal', slug: 'kcal' } })));
+    store.dispatch(eventAction(event({ type: 'app.published', actor: 'user', payload: { path: 'apps/kcal', slug: 'kcal-2', name: 'Calorie tracker', description: null } })));
+    assert.equal(row(store, 'apps/kcal')?.slug, 'kcal-2');
+    answers[1].resolve({ path: 'apps/kcal', slug: 'kcal' });
+    await settle();
+    assert.equal(row(store, 'apps/kcal')?.slug, 'kcal-2');
+    assert.equal(selectAppCall(store.getState(), 'apps/kcal'), null);
+    assert.equal(toasts(store).at(-1)?.title, 'Unpublished');
+
+    // An event of another app during the call: the answer is not folded either — the call's own event is on its way and brings the row.
+    store.dispatch(publishApp('b/tracker', 'tracker'));
+    store.dispatch(eventAction(event({ type: 'app.published', actor: 'user', payload: { path: 'z/other', slug: 'other', name: null, description: null } })));
+    answers[2].resolve({ path: 'b/tracker', slug: 'tracker' });
+    await settle();
+    assert.equal(row(store, 'b/tracker')?.slug, null);
+    assert.deepEqual(selectAppPublish(store.getState(), 'b/tracker'), { pending: false, error: null, done: 2 });
+    store.dispatch(eventAction(event({ type: 'app.published', actor: 'user', payload: { path: 'b/tracker', slug: 'tracker', name: 'Tracker', description: null } })));
+    assert.equal(row(store, 'b/tracker')?.slug, 'tracker');
+
+    // Without a newer event the answer is the freshest word and is folded (the tail may be reconnecting).
+    store.dispatch(unpublishApp('b/tracker'));
+    answers[3].resolve({ path: 'b/tracker', slug: 'tracker' });
+    await settle();
+    assert.equal(row(store, 'b/tracker')?.slug, null);
+  });
+
+  it('serves app folders named like the keys of Object.prototype', async () => {
+    const calls: Calls = [];
+    const PROTO = ['constructor', 'toString', '__proto__', 'hasOwnProperty'].map(path => ({ path, name: null, description: null, manifestError: null, slug: null }));
+    const store = await onApps({ snapshot: async () => snapshot({ apps: listing(PROTO) }) }, calls);
+
+    for (const { path } of PROTO) {
+      assert.equal(selectAppCall(store.getState(), path), null, path);
+      assert.deepEqual(selectAppPublish(store.getState(), path), { pending: false, error: null, done: 0 }, path);
+
+      await dispatched(store, publishApp(path, 'x'));
+      await settle();
+      assert.equal(row(store, path)?.slug, 'x', path);
+      assert.equal(selectAppCall(store.getState(), path), null, path);
+      assert.deepEqual(selectAppPublish(store.getState(), path), { pending: false, error: null, done: 1 }, path);
+
+      await dispatched(store, unpublishApp(path));
+      await settle();
+      assert.equal(row(store, path)?.slug, null, path);
+      assert.equal(selectAppCall(store.getState(), path), null, path);
+    }
+
+    assert.equal(calls.filter(call => call.name === 'apps.publish').length, PROTO.length);
+    assert.equal(calls.filter(call => call.name === 'apps.unpublish').length, PROTO.length);
+    assert.deepEqual(Object.keys(store.getState().apps.calls), []);
   });
 });
 
@@ -2078,7 +2212,7 @@ describe('apps listing', () => {
 
     store.dispatch(loadApps());
     assert.equal(answers.length, 1);
-    assert.deepEqual(store.getState().apps.refresh.request, { since: null });
+    assert.deepEqual(store.getState().apps.refresh.request, { since: null, changes: 0 });
 
     // Published while the listing was in flight: the row knows the slug.
     store.dispatch(eventAction(event({ type: 'app.published', actor: 'user', payload: { path: 'b/tracker', slug: 'tracker', name: 'Tracker', description: null } })));
@@ -2090,7 +2224,7 @@ describe('apps listing', () => {
     await settle();
     assert.deepEqual(store.getState().apps.items, [{ ...TRACKER, slug: 'tracker' }]);
     assert.equal(answers.length, 2);
-    assert.deepEqual(store.getState().apps.refresh.request, { since: 360n });
+    assert.deepEqual(store.getState().apps.refresh.request, { since: 360n, changes: 0 });
 
     answers[1].resolve(listing([NEW_FOLDER, { ...TRACKER, slug: 'tracker' }]));
     await settle();
@@ -2135,7 +2269,7 @@ describe('apps listing', () => {
     await settle();
     assert.deepEqual(store.getState().apps.items, [TRACKER]);
     assert.equal(answers.length, 2);
-    assert.deepEqual(store.getState().apps.refresh.request, { since: 400n });
+    assert.deepEqual(store.getState().apps.refresh.request, { since: 400n, changes: 0 });
 
     answers[1].resolve(listing([TRACKER, { ...RESTORED, slug: null }]));
     await settle();
