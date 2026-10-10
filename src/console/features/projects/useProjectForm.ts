@@ -2,15 +2,17 @@
 // after the first submit, then kept current while typing), and the server's
 // answer to this dialog's own attempt — the store keeps the last failure
 // and the accepted count of the form; a submit opens an attempt at the
-// count of that moment (projectForm.logic.ts: attempt*), the dialog shows
+// count of that moment (lib/forms/attempt.ts), the dialog shows
 // the refusal of that attempt even when the operator typed on while the
 // call ran, and closes when the count moved past it. The fields stay live
 // during the call.
 
 import { useEffect, useState } from 'react';
 import type { ProjectFormState } from '../../store/projects/reducer.ts';
-import { attemptAccepted, attemptAfterInput, attemptRefusal, fieldOfFailure, validateProjectForm } from './projectForm.logic.ts';
-import type { FormAttempt, ProjectFormErrors, ProjectFormField, ProjectFormValues } from './projectForm.logic.ts';
+import { attemptAccepted, attemptAfterInput, attemptRefusal } from '../../lib/forms/attempt.ts';
+import type { FormAttempt } from '../../lib/forms/attempt.ts';
+import { fieldOfFailure, validateProjectForm } from './projectForm.logic.ts';
+import type { ProjectFormErrors, ProjectFormField, ProjectFormValues } from './projectForm.logic.ts';
 
 export type ProjectFormHook = {
   values: ProjectFormValues;

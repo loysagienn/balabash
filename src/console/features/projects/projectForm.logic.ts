@@ -6,8 +6,7 @@
 // tested.
 
 import type { ProjectView, UpdateProjectRequest } from '../../../api/contract.ts';
-import type { ApiFailure } from '../../lib/api/index.ts';
-import type { ProjectFormState } from '../../store/projects/reducer.ts';
+import { capSlug, slugWords } from '../../lib/text/slug.ts';
 
 export const TITLE_MAX_LENGTH = 200;
 export const SLUG_MAX_LENGTH = 64;
@@ -18,28 +17,12 @@ export type ProjectFormValues = { title: string; slug: string; description: stri
 export type ProjectFormField = keyof ProjectFormValues;
 export type ProjectFormErrors = Partial<Record<ProjectFormField, string>>;
 
-// Cyrillic letters to Latin for the folder name (a Russian title is the
-// usual case; the rest of Unicode is dropped by the slug rule).
-const CYRILLIC: Record<string, string> = {
-  а: 'a', б: 'b', в: 'v', г: 'g', д: 'd', е: 'e', ё: 'yo', ж: 'zh', з: 'z', и: 'i', й: 'y', к: 'k', л: 'l', м: 'm', н: 'n', о: 'o', п: 'p',
-  р: 'r', с: 's', т: 't', у: 'u', ф: 'f', х: 'kh', ц: 'ts', ч: 'ch', ш: 'sh', щ: 'shch', ъ: '', ы: 'y', ь: '', э: 'e', ю: 'yu', я: 'ya',
-  є: 'ye', і: 'i', ї: 'yi', ґ: 'g',
-};
-
 // "Bathroom renovation" → "bathroom-renovation", "Ремонт ванной" →
-// "remont-vannoy": lowercase, letters and digits, one dash between words,
+// "remont-vannoy" (lib/text/slug.ts: Latin words, one dash between them),
 // a letter first (the slug rule), at most 64 characters, never ending in
 // a dash.
 export function slugFromTitle(title: string): string {
-  // Cyrillic first: NFD would split й and ё into a base letter and a mark.
-  const latin = title
-    .toLowerCase()
-    .replace(/[\u0400-\u04ff]/g, letter => CYRILLIC[letter] ?? '')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '');
-  const words = latin.replace(/[^a-z0-9]+/g, '-').replace(/^[^a-z]+/, '');
-
-  return words.slice(0, SLUG_MAX_LENGTH).replace(/-+$/, '');
+  return capSlug(slugWords(title).replace(/^[^a-z]+/, ''), SLUG_MAX_LENGTH);
 }
 
 // What a form shows under its fields before the call: the same rules as
@@ -109,27 +92,6 @@ export function projectPatch(base: Pick<ProjectFormValues, 'title' | 'descriptio
   if (description !== base.description) patch.description = description;
 
   return Object.keys(patch).length > 0 ? patch : null;
-}
-
-// One submit of a dialog is an attempt: the store's accepted count at the
-// moment of the submit. The attempt is over when the count moved (the
-// dialog closes — that very call was accepted) or when the store holds a
-// refusal and no call is in flight (the dialog shows it). Input typed
-// while the call is still running belongs to the same attempt — its
-// answer is still owed, a refusal must show; input typed after a refusal
-// dismisses it (a new attempt begins with the next submit).
-export type FormAttempt = { done: number };
-
-export function attemptAccepted(attempt: FormAttempt | null, form: Pick<ProjectFormState, 'done'>): boolean {
-  return attempt !== null && form.done !== attempt.done;
-}
-
-export function attemptRefusal(attempt: FormAttempt | null, form: Pick<ProjectFormState, 'pending' | 'error'>): ApiFailure | null {
-  return attempt !== null && !form.pending ? form.error : null;
-}
-
-export function attemptAfterInput(attempt: FormAttempt | null, form: Pick<ProjectFormState, 'pending'>): FormAttempt | null {
-  return form.pending ? attempt : null;
 }
 
 // The search of the Projects screen looks through the name, the folder

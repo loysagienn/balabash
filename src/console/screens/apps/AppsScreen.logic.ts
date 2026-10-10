@@ -1,6 +1,6 @@
 // The rules of the Apps screen: the counts of the segments, the search,
 // the rows under the route's filter and the next route of a filter change.
-// Pure, tested. Where a row leads — features/apps/appLink.ts.
+// Pure, tested. Where a row leads — lib/apps/appLink.ts.
 
 import type { AppListingView } from '../../../api/contract.ts';
 import type { AppsFilter, AppsRoute } from '../../lib/router/routes.ts';

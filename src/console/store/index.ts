@@ -24,7 +24,7 @@ import { sessionsReducer } from './sessions/reducer.ts';
 import { projectsReducer } from './projects/reducer.ts';
 import { createProjectHandler, setProjectArchivedHandler, updateProjectHandler } from './projects/handlers.ts';
 import { appsReducer } from './apps/reducer.ts';
-import { loadAppsHandler } from './apps/handlers.ts';
+import { loadAppsHandler, publishAppHandler, unpublishAppHandler } from './apps/handlers.ts';
 import { scheduleReducer } from './schedule/reducer.ts';
 import { connectionsReducer } from './connections/reducer.ts';
 import { agentsReducer } from './agents/reducer.ts';
@@ -53,6 +53,8 @@ export const handlers = {
   UPDATE_PROJECT: updateProjectHandler,
   SET_PROJECT_ARCHIVED: setProjectArchivedHandler,
   LOAD_APPS: loadAppsHandler,
+  PUBLISH_APP: publishAppHandler,
+  UNPUBLISH_APP: unpublishAppHandler,
 } satisfies ActionHandlers;
 
 export type AppStore = Store<State, Action>;

@@ -15,7 +15,8 @@ import type { AppRoute } from '../lib/router/routes.ts';
 import type { Action, AppStore } from './index.ts';
 import { eventAction } from './events.ts';
 import { routeTo, tabVisible } from './router/actions.ts';
-import { loadApps } from './apps/actions.ts';
+import { loadApps, publishApp, unpublishApp } from './apps/actions.ts';
+import { selectAppCall, selectAppPublish } from './apps/selectors.ts';
 import { login, logout, requestConsoleCode, saveSettings, sessionCheck, sessionLost } from './session/actions.ts';
 import { selectOperatorName } from './session/selectors.ts';
 import { commandThread, loadThread, loadThreadEvents, loadThreads, sendMessage } from './threads/actions.ts';
@@ -69,6 +70,8 @@ function fakeApi(overrides: ApiOverrides = {}, calls: Calls = []): Api {
   };
   const apps: Api['apps'] = {
     list: async () => ({ apps: [], publicAppsBase: 'https://apps.example' }),
+    publish: async input => ({ path: input.path, slug: input.slug }),
+    unpublish: async input => ({ path: input.path ?? '', slug: input.slug ?? 'slug' }),
     ...overrides.apps,
   };
   const settings: Api['settings'] = {
@@ -100,7 +103,7 @@ function fakeApi(overrides: ApiOverrides = {}, calls: Calls = []): Api {
     logout: wrap('logout', base.logout),
     snapshot: wrap('snapshot', base.snapshot),
     settings: { update: wrap('settings.update', settings.update) },
-    apps: { list: wrap('apps.list', apps.list) },
+    apps: { list: wrap('apps.list', apps.list), publish: wrap('apps.publish', apps.publish), unpublish: wrap('apps.unpublish', apps.unpublish) },
     projects: {
       create: wrap('projects.create', projects.create),
       update: wrap('projects.update', projects.update),
@@ -1786,6 +1789,148 @@ describe('project registry changes', () => {
 
     assert.deepEqual(select(store.getState(), 'p1').map(t => t.id), ['b', 'd', 'a']);
     assert.deepEqual(select(store.getState(), 'p3'), []);
+  });
+});
+
+describe('apps publication', () => {
+  const TRACKER = { path: 'b/tracker', name: 'Tracker', description: null, manifestError: null, slug: null };
+  const KCAL = { path: 'apps/kcal', name: 'Calorie tracker', description: null, manifestError: null, slug: 'kcal' };
+  const listing = (apps: AppsResponse['apps']): AppsResponse => ({ apps, publicAppsBase: 'https://apps.example' });
+  const toasts = (store: AppStore) => store.getState().ui.toasts.map(toast => ({ title: toast.title, desc: toast.desc, state: toast.state }));
+  const row = (store: AppStore, path: string) => store.getState().apps.items.find(item => item.path === path);
+
+  type Answer = { resolve: (publication: { path: string; slug: string }) => void; reject: (error: unknown) => void };
+
+  const held = (answers: Answer[]) => () =>
+    new Promise<{ path: string; slug: string }>((resolve, reject) => {
+      answers.push({ resolve, reject });
+    });
+
+  async function onApps(overrides: ApiOverrides = {}, calls: Calls = []): Promise<AppStore> {
+    const store = createStore({ api: fakeApi({ snapshot: async () => snapshot({ apps: listing([KCAL, TRACKER]) }), ...overrides }, calls), initialRoute: { key: 'apps' } });
+
+    await dispatched(store, sessionCheck());
+    await settle();
+
+    return store;
+  }
+
+  it('publishes: one call per app, the slug folded from the answer, the form counted accepted, a toast with the address', async () => {
+    const calls: Calls = [];
+    const answers: Answer[] = [];
+    const store = await onApps({ apps: { publish: held(answers) } }, calls);
+
+    store.dispatch(publishApp('b/tracker', 'tracker'));
+    store.dispatch(publishApp('b/tracker', 'other'));
+    assert.equal(answers.length, 1);
+    assert.deepEqual(calls.filter(call => call.name === 'apps.publish').map(call => call.args), [[{ path: 'b/tracker', slug: 'tracker' }]]);
+    assert.deepEqual(selectAppCall(store.getState(), 'b/tracker'), { kind: 'publish', slug: 'tracker' });
+    assert.deepEqual(selectAppPublish(store.getState(), 'b/tracker'), { pending: true, error: null, done: 0 });
+    // Another app is free to be called meanwhile.
+    assert.equal(selectAppCall(store.getState(), 'apps/kcal'), null);
+
+    answers[0].resolve({ path: 'b/tracker', slug: 'tracker' });
+    await settle();
+    assert.equal(row(store, 'b/tracker')?.slug, 'tracker');
+    assert.equal(selectAppCall(store.getState(), 'b/tracker'), null);
+    assert.deepEqual(selectAppPublish(store.getState(), 'b/tracker'), { pending: false, error: null, done: 1 });
+    assert.deepEqual(toasts(store), [{ title: 'Published', desc: '“Tracker” — apps.example/tracker', state: 'done' }]);
+
+    // The tail's event of the same change is idempotent on the row.
+    const rows = store.getState().apps.items;
+
+    store.dispatch(eventAction(event({ type: 'app.published', actor: 'user', payload: { path: 'b/tracker', slug: 'tracker', name: 'Tracker', description: null } })));
+    assert.equal(store.getState().apps.items, rows);
+  });
+
+  it('keeps a refusal of a publish in the form, without a toast; the next call clears it', async () => {
+    let fail = true;
+    const store = await onApps({
+      apps: {
+        publish: async input => {
+          if (fail) {
+            throw new ApiError(400, 'bad_request', 'The slug "kcal" is taken — pick another one');
+          }
+
+          return { path: input.path, slug: input.slug };
+        },
+      },
+    });
+
+    await dispatched(store, publishApp('b/tracker', 'kcal'));
+    await settle();
+    assert.equal(row(store, 'b/tracker')?.slug, null);
+    assert.deepEqual(selectAppPublish(store.getState(), 'b/tracker'), { pending: false, error: { status: 400, code: 'bad_request', message: 'The slug "kcal" is taken — pick another one' }, done: 0 });
+    assert.deepEqual(toasts(store), []);
+
+    fail = false;
+    store.dispatch(publishApp('b/tracker', 'tracker'));
+    assert.equal(selectAppPublish(store.getState(), 'b/tracker').error, null);
+    await settle();
+    assert.equal(row(store, 'b/tracker')?.slug, 'tracker');
+    assert.deepEqual(selectAppPublish(store.getState(), 'b/tracker'), { pending: false, error: null, done: 1 });
+  });
+
+  it('unpublishes: the slug dropped from the answer, a toast; a refusal is a toast', async () => {
+    const calls: Calls = [];
+    let fail = false;
+    const store = await onApps(
+      {
+        apps: {
+          unpublish: async input => {
+            if (fail) {
+              throw new ApiError(400, 'bad_request', 'apps/kcal is not published');
+            }
+
+            return { path: input.path ?? '', slug: 'kcal' };
+          },
+        },
+      },
+      calls,
+    );
+
+    store.dispatch(unpublishApp('apps/kcal'));
+    assert.deepEqual(selectAppCall(store.getState(), 'apps/kcal'), { kind: 'unpublish' });
+    // A publish of the same app waits for the call in flight.
+    store.dispatch(publishApp('apps/kcal', 'other'));
+    assert.deepEqual(selectAppCall(store.getState(), 'apps/kcal'), { kind: 'unpublish' });
+    await settle();
+    assert.deepEqual(calls.filter(call => call.name === 'apps.unpublish').map(call => call.args), [[{ path: 'apps/kcal' }]]);
+    assert.equal(calls.filter(call => call.name === 'apps.publish').length, 0);
+    assert.equal(row(store, 'apps/kcal')?.slug, null);
+    assert.equal(selectAppCall(store.getState(), 'apps/kcal'), null);
+    assert.deepEqual(toasts(store), [{ title: 'Unpublished', desc: '“Calorie tracker” — the link apps.example/kcal stopped working.', state: 'off' }]);
+
+    fail = true;
+    await dispatched(store, unpublishApp('apps/kcal'));
+    await settle();
+    assert.equal(selectAppCall(store.getState(), 'apps/kcal'), null);
+    assert.deepEqual(toasts(store).at(-1), { title: 'Couldn’t unpublish', desc: 'apps/kcal is not published', state: 'err' });
+  });
+
+  it('drops an answer that outlived its session', async () => {
+    const answers: Answer[] = [];
+    const store = await onApps({ apps: { publish: held(answers) } });
+
+    store.dispatch(publishApp('b/tracker', 'tracker'));
+    store.dispatch(sessionLost());
+    await dispatched(store, sessionCheck());
+    await settle();
+    assert.equal(selectAppCall(store.getState(), 'b/tracker'), null);
+
+    // The new session's own call on the same app.
+    store.dispatch(publishApp('b/tracker', 'fresh'));
+    assert.equal(answers.length, 2);
+    answers[0].resolve({ path: 'b/tracker', slug: 'tracker' });
+    await settle();
+    assert.deepEqual(selectAppCall(store.getState(), 'b/tracker'), { kind: 'publish', slug: 'fresh' });
+    assert.equal(row(store, 'b/tracker')?.slug, null);
+    assert.deepEqual(toasts(store), []);
+
+    answers[1].resolve({ path: 'b/tracker', slug: 'fresh' });
+    await settle();
+    assert.equal(row(store, 'b/tracker')?.slug, 'fresh');
+    assert.deepEqual(selectAppPublish(store.getState(), 'b/tracker'), { pending: false, error: null, done: 1 });
   });
 });
 

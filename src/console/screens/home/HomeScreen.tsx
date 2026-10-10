@@ -31,7 +31,7 @@ import { Obj } from '../../ui/Obj/Obj.tsx';
 import { Screen } from '../../ui/Screen/Screen.tsx';
 import { SectionLink, SectionLinks } from '../../ui/SectionLink/SectionLink.tsx';
 import { SkelRow } from '../../ui/Skel/Skel.tsx';
-import { appLink, appTitle, appUrlText } from '../../features/apps/appLink.ts';
+import { appLink, appTitle, appUrlText } from '../../lib/apps/appLink.ts';
 import { nothingRunningNote, offlineNote, sectionSummary } from './HomeScreen.logic.ts';
 import './HomeScreen.css';
 

@@ -12,14 +12,15 @@
 // dialogs) and the archive flips in flight.
 
 import type { ProjectView } from '../../../api/contract.ts';
-import type { ApiFailure } from '../../lib/api/index.ts';
+import type { FormCallState } from '../../lib/forms/attempt.ts';
+import { idleForm } from '../../lib/forms/attempt.ts';
 import { projectFromRecord } from '../records.ts';
 import type { Action } from '../types.ts';
 
 // A form's call: in flight, the failure of the last call (the dialog shows
 // it), how many calls the server accepted (the dialog closes when the
-// count moves).
-export type ProjectFormState = { pending: boolean; error: ApiFailure | null; done: number };
+// count moves) — lib/forms/attempt.ts.
+export type ProjectFormState = FormCallState;
 
 export type ProjectsState = {
   byId: Record<string, ProjectView>;
@@ -31,7 +32,7 @@ export type ProjectsState = {
   flagging: Record<string, true>;
 };
 
-export const idleForm: ProjectFormState = { pending: false, error: null, done: 0 };
+export { idleForm };
 
 export const initialProjects: ProjectsState = { byId: {}, ids: [], create: idleForm, edit: {}, flagging: {} };
 

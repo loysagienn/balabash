@@ -65,7 +65,15 @@ const api: Api = {
   logout: async () => ({ ok: true as const }),
   snapshot: async () => snapshot({ asOfSeq: 50n, threads: [thread({ id: 'main', parentId: null }), thread({ id: 'a', createdSeq: 7n })] }),
   settings: { update: async () => ({ settings: { workspaceName: 'Workspace', operatorName: null } }) },
-  apps: { list: async () => ({ apps: [], publicAppsBase: '' }) },
+  apps: {
+    list: async () => ({ apps: [], publicAppsBase: '' }),
+    publish: async () => {
+      throw new Error('not here');
+    },
+    unpublish: async () => {
+      throw new Error('not here');
+    },
+  },
   projects: {
     create: async () => {
       throw new Error('not here');

@@ -4,7 +4,9 @@
 // route. The list is the snapshot and its tail, read again on entering the
 // screen and on the tab's return (LOAD_APPS from the route's handler): a
 // new folder and an edited manifest have no event. A failed re-read keeps
-// the list and says so in a line with its Retry.
+// the list and says so in a line with its Retry. "Open" leads to the public
+// app when it opens there, else to the owner page of the app (appLink);
+// publishing and unpublishing are the menu's dialogs (features/apps).
 
 import type { AppsFilter, AppsRoute } from '../../lib/router/routes.ts';
 import { useAppDispatch, useAppSelector } from '../../store/hooks.ts';
@@ -13,7 +15,7 @@ import { loadApps } from '../../store/apps/actions.ts';
 import { snapshotLoad } from '../../store/stream/actions.ts';
 import { selectStream, snapshotStage } from '../../store/stream/selectors.ts';
 import { Shell } from '../../features/shell/Shell.tsx';
-import { appLink, appTitle, appUrlText } from '../../features/apps/appLink.ts';
+import { appLink, appTitle, appUrlText } from '../../lib/apps/appLink.ts';
 import { AppRow } from '../../ui/AppRow/AppRow.tsx';
 import { Card } from '../../ui/Card/Card.tsx';
 import { Empty } from '../../ui/Empty/Empty.tsx';
@@ -81,7 +83,7 @@ export function AppsScreen({ route }: { route: AppsRoute }) {
     body = (
       <List narrow="tiles">
         {visible.map(app => {
-          const { address, href } = appLink(app, base);
+          const link = appLink(app, base);
 
           return (
             <AppRow
@@ -89,11 +91,11 @@ export function AppsScreen({ route }: { route: AppsRoute }) {
               actions
               title={appTitle(app)}
               desc={app.description ?? undefined}
-              url={address === null ? undefined : appUrlText(address)}
-              appHref={href ?? undefined}
+              url={link.address === null ? undefined : appUrlText(link.address)}
+              appHref={link.open ?? undefined}
               err={app.manifestError ?? undefined}
               folder={app.path}
-              more={<AppMenu app={app} address={address} href={href} />}
+              more={<AppMenu app={app} link={link} />}
             />
           );
         })}

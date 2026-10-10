@@ -1,6 +1,6 @@
 // The words of the Home screen, computed from the store's domains: the
 // summary under each section link, the note of the empty "Active threads"
-// card, the banner of a tail that is not flowing. Pure, tested. Where an app row leads — features/apps/appLink.ts,
+// card, the banner of a tail that is not flowing. Pure, tested. Where an app row leads — lib/apps/appLink.ts,
 // the stage of the screen — snapshotStage (store/stream): both shared with
 // the Apps section.
 

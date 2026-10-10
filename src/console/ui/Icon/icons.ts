@@ -49,6 +49,7 @@ import {
   FolderTree,
   GitFork,
   Globe,
+  GlobeLock,
   History,
   Hourglass,
   House,
@@ -89,6 +90,7 @@ import {
   Trash2,
   TriangleAlert,
   Upload,
+  UserRound,
   Wrench,
   X,
 } from 'lucide-react';
@@ -141,6 +143,7 @@ export const ICONS = {
   'folder-tree': FolderTree,
   'git-fork': GitFork,
   globe: Globe,
+  'globe-lock': GlobeLock,
   history: History,
   hourglass: Hourglass,
   house: House,
@@ -181,6 +184,7 @@ export const ICONS = {
   'trash-2': Trash2,
   'triangle-alert': TriangleAlert,
   upload: Upload,
+  'user-round': UserRound,
   wrench: Wrench,
   x: X,
 } as const;

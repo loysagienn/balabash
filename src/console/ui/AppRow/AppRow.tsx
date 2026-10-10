@@ -17,7 +17,8 @@ export type AppRowProps = {
   desc?: string;
   // The published address, shown as the chip's text ("/p/kcal" or a host).
   url?: string;
-  // Where the published app opens; the chip and "Open" lead there.
+  // Where "Open" leads — and the chip, when the app is published: the
+  // public app, or the owner page of an unpublished one (lib/apps/appLink).
   appHref?: string;
   // The manifest error text.
   err?: string;

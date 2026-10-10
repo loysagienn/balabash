@@ -12,6 +12,8 @@ import type {
   MeResponse,
   ProjectResponse,
   ProvisionSecretsResponse,
+  PublicationResponse,
+  PublishAppRequest,
   SecretRequestResponse,
   SettingsPatchRequest,
   SettingsResponse,
@@ -20,6 +22,7 @@ import type {
   ThreadResponse,
   ThreadsQuery,
   ThreadsResponse,
+  UnpublishAppRequest,
   UpdateProjectRequest,
   WorkspaceNodeResponse,
 } from '../../../api/contract.ts';
@@ -54,9 +57,13 @@ export type Api = {
     unarchive(id: string): Promise<ProjectResponse>;
   };
   // The apps listing as GET /api/apps reads it now — the snapshot's rows
-  // read again (store/apps).
+  // read again (store/apps); the publication of an app folder and its end
+  // (the answer names the slug and the path; the same change arrives as an
+  // app.* event of the tail). A refusal is a 400 with the server's reason.
   apps: {
     list(): Promise<AppsResponse>;
+    publish(input: PublishAppRequest): Promise<PublicationResponse>;
+    unpublish(input: UnpublishAppRequest): Promise<PublicationResponse>;
   };
   threads: {
     list(query: ThreadsQuery, signal?: AbortSignal): Promise<ThreadsResponse>;
@@ -126,6 +133,8 @@ export function createApi(options: FetchOptions = {}): Api {
     },
     apps: {
       list: () => apiFetch<AppsResponse>('/api/apps'),
+      publish: input => apiFetch<PublicationResponse>('/api/apps/publish', { method: 'POST', body: input }),
+      unpublish: input => apiFetch<PublicationResponse>('/api/apps/unpublish', { method: 'POST', body: input }),
     },
     threads: {
       list: (query, signal) => apiFetch<ThreadsResponse>('/api/threads', { query, signal }),

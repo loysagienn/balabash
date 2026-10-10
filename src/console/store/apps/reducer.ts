@@ -15,7 +15,13 @@
 // flight, by identity: an answer is applied only while the store waits for
 // exactly that request, so an answer of a read that outlived its session
 // (sign-out, a lost session, the next sign-in) neither touches the rows nor
-// frees the request of the new session.
+// frees the request of the new session. The operator's own changes — a
+// publication under a slug, its end — are one call per app at a time
+// (calls[path], by identity like the listing's request); the answer's slug
+// is folded into the row at once, the tail's app.* event confirms it. The
+// publish dialog's form keeps its refusal and accepted count per app
+// (publish[path], lib/forms/attempt.ts); an unpublish has no form — its
+// refusal is a toast (store/apps/handlers.ts).
 
 import type { AppListingView } from '../../../api/contract.ts';
 import type { ApiFailure } from '../../lib/api/index.ts';
@@ -24,14 +30,29 @@ import type { Action } from '../types.ts';
 // A read of the listing in flight: `since` — apps.eventSeq when it left.
 export type AppsRequest = { since: bigint | null };
 
+// The operator's call in flight for one app: a publication under `slug` or
+// its end. One object per call — the outcome is applied by identity.
+export type AppCall = { kind: 'publish'; slug: string } | { kind: 'unpublish' };
+
+// The publish dialog's form of one app: the refusal of the last call, how
+// many calls the server accepted (the dialog closes when the count moves);
+// whether a call is in flight — calls[path].
+export type AppPublishForm = { error: ApiFailure | null; done: number };
+
 export type AppsState = {
   items: AppListingView[];
   publicAppsBase: string;
   eventSeq: bigint | null;
   refresh: { request: AppsRequest | null; error: ApiFailure | null };
+  // By app path: the publish or unpublish call in flight.
+  calls: Record<string, AppCall>;
+  // By app path: the publish dialog's form.
+  publish: Record<string, AppPublishForm>;
 };
 
-export const initialApps: AppsState = { items: [], publicAppsBase: '', eventSeq: null, refresh: { request: null, error: null } };
+export const idlePublishForm: AppPublishForm = { error: null, done: 0 };
+
+export const initialApps: AppsState = { items: [], publicAppsBase: '', eventSeq: null, refresh: { request: null, error: null }, calls: {}, publish: {} };
 
 const byPath = (a: AppListingView, b: AppListingView) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
 
@@ -51,6 +72,29 @@ function stamped(state: AppsState, items: AppListingView[], seq: bigint): AppsSt
   const eventSeq = state.eventSeq !== null && seq <= state.eventSeq ? state.eventSeq : seq;
 
   return items === state.items && eventSeq === state.eventSeq ? state : { ...state, items, eventSeq };
+}
+
+function withCall(state: AppsState, path: string, call: AppCall | null): AppsState {
+  if (call) {
+    return { ...state, calls: { ...state.calls, [path]: call } };
+  }
+
+  const { [path]: dropped, ...rest } = state.calls;
+
+  return dropped ? { ...state, calls: rest } : state;
+}
+
+function withPublishForm(state: AppsState, path: string, form: (current: AppPublishForm) => AppPublishForm): AppsState {
+  return { ...state, publish: { ...state.publish, [path]: form(state.publish[path] ?? idlePublishForm) } };
+}
+
+// The row's publication as the answer of the operator's own call says it:
+// the slug (null — unpublished). A row the listing does not know yet stays
+// unknown — the tail's app.published brings the folder's identity.
+function withSlug(state: AppsState, path: string, slug: string | null): AppsState {
+  const known = state.items.find(item => item.path === path);
+
+  return known && known.slug !== slug ? { ...state, items: state.items.map(item => (item === known ? { ...item, slug } : item)) } : state;
 }
 
 export function appsReducer(state: AppsState = initialApps, action: Action): AppsState {
@@ -76,6 +120,27 @@ export function appsReducer(state: AppsState = initialApps, action: Action): App
     }
     case 'LOAD_APPS_FAIL':
       return action.request === state.refresh.request ? { ...state, refresh: { request: null, error: action.error } } : state;
+    case 'PUBLISH_APP':
+      return withPublishForm(withCall(state, action.path, { kind: 'publish', slug: action.slug }), action.path, form => ({ ...form, error: null }));
+    case 'PUBLISH_APP_DONE': {
+      if (state.calls[action.path] !== action.request) {
+        return state;
+      }
+
+      return withSlug(
+        withPublishForm(withCall(state, action.path, null), action.path, form => ({ error: null, done: form.done + 1 })),
+        action.path,
+        action.publication.slug,
+      );
+    }
+    case 'PUBLISH_APP_FAIL':
+      return state.calls[action.path] === action.request ? withPublishForm(withCall(state, action.path, null), action.path, form => ({ ...form, error: action.error })) : state;
+    case 'UNPUBLISH_APP':
+      return withCall(state, action.path, { kind: 'unpublish' });
+    case 'UNPUBLISH_APP_DONE':
+      return state.calls[action.path] === action.request ? withSlug(withCall(state, action.path, null), action.path, null) : state;
+    case 'UNPUBLISH_APP_FAIL':
+      return state.calls[action.path] === action.request ? withCall(state, action.path, null) : state;
     case 'event/app.published': {
       const { path, slug, name, description } = action.event.payload;
 
