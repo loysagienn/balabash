@@ -18,9 +18,10 @@ import type { JsonObject, JsonValue } from '../../core/contract.ts';
 import type { SessionState } from '../../projections/session.ts';
 import { createJournalWriter, sanitizeToolResult } from '../session-journal.ts';
 import type { JournalEntry, JournalWriter } from '../session-journal.ts';
+import { BRIDGE_SERVER } from './session-config.ts';
 import { subscribeCodexSessionEnd, subscribeCodexStream } from './stream-tap.ts';
 
-export const BRIDGE_SERVER = 'balabash';
+export { BRIDGE_SERVER };
 
 // The journal's memory of one session, from its first event until the
 // harness closes it.

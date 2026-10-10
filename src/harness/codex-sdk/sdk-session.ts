@@ -17,6 +17,7 @@ import type { AgentSdkSession, SdkSessionOptions, SdkTurn, ToolsApi } from '../.
 import { createBridgeServer } from '../claude-sdk/bridge.ts';
 import { mergeEnv } from '../env.ts';
 import { ensureCodexHome } from './codex-home.ts';
+import { codexSessionConfig } from './session-config.ts';
 import { emitCodexEvent, emitCodexSessionEnd } from './stream-tap.ts';
 import { DEFAULT_EFFORT } from '../default-effort.ts';
 
@@ -191,34 +192,10 @@ export function createCodexSession(options: SdkSessionOptions, deps: CodexSessio
         // the app's isolated home, never the host user's ~/.codex.
         env: mergeEnv({ ...options.env, CODEX_HOME: codexHome }),
         // Every override rides each `codex exec` invocation (a turn is one
-        // invocation, resumed by thread id), so the whole session sees them.
-        config: {
-          // The brief is a developer message ahead of the conversation — the
-          // system-prompt position — not a prefix of the first user turn.
-          developer_instructions: options.instructions,
-          mcp_servers: {
-            balabash: {
-              url: bridge.url,
-              required: true,
-              default_tools_approval_mode: 'approve',
-            },
-          },
-          // Codex reads AGENTS.md from the git root down to cwd; the workbench
-          // lives inside the Balabash repository, so that chain would inject
-          // the repo's own AGENTS.md into a workbench session. Project docs
-          // are off: the brief tells the agent which AGENTS.md to read.
-          project_doc_max_bytes: 0,
-          // ChatGPT apps/connectors, plugins and the memories store are not
-          // part of the Balabash tool set: integrations are the run's tool
-          // bundle, memory is the workspace. Codex's own agent team
-          // (multi_agent) stays on — its native sub-agents work inside the
-          // session, next to the bridge's Balabash sub-agents (spawn_agent).
-          features: {
-            apps: false,
-            plugins: false,
-            memories: false,
-          },
-        },
+        // invocation, resumed by thread id), so the whole session sees them
+        // (session-config.ts: the brief, the bridge, reasoning summaries on,
+        // the host layer off).
+        config: codexSessionConfig(options.instructions, bridge.url),
       });
       const thread = codex.startThread({
         ...(options.model ? { model: options.model } : {}),
