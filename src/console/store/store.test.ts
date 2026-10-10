@@ -949,7 +949,7 @@ describe('route data', () => {
     assert.deepEqual(store.getState().router, { route: { key: 'apps' }, source: 'app', replace: false, hash: '', scroll: null });
   });
 
-  it('keeps the router state as is on ROUTE_TO to the current route', () => {
+  it('keeps the router state as is on ROUTE_TO from the app to the current route', () => {
     const store = createStore({ api: fakeApi(), initialRoute: { key: 'thread', id: 'main' } });
     const before = store.getState().router;
 
@@ -957,11 +957,45 @@ describe('route data', () => {
     store.dispatch(routeTo({ key: 'thread', id: 'main' }));
     assert.equal(store.getState().router, before);
     assert.equal(store.getState().ui.moreSheet, false);
-    store.dispatch(routeTo({ key: 'thread', id: 'main' }, { source: 'history' }));
+    store.dispatch(routeTo({ key: 'thread', id: 'main' }, { replace: true }));
     assert.equal(store.getState().router, before);
     store.dispatch(routeTo({ key: 'thread', id: 'other' }));
     assert.notEqual(store.getState().router, before);
     assert.deepEqual(store.getState().router.route, { key: 'thread', id: 'other' });
+  });
+
+  it('takes a ROUTE_TO from history as a new state even at the current URL: a popstate is a move between two entries', () => {
+    const store = createStore({ api: fakeApi(), initialRoute: { key: 'threads', agent: 'engineer' } });
+    const before = store.getState().router;
+
+    // Back from a neighbour that a replace gave the same URL: the entry's own place comes with it.
+    store.dispatch(routeTo({ key: 'threads', agent: 'engineer' }, { source: 'history', scroll: 600 }));
+
+    const back = store.getState().router;
+
+    assert.notEqual(back, before);
+    assert.equal(back.route, before.route);
+    assert.deepEqual(back, { route: { key: 'threads', agent: 'engineer' }, source: 'history', replace: false, hash: '', scroll: 600 });
+
+    // Forward to the neighbour, left at the same place: equal fields, another state.
+    store.dispatch(routeTo({ key: 'threads', agent: 'engineer' }, { source: 'history', scroll: 600 }));
+
+    const forward = store.getState().router;
+
+    assert.notEqual(forward, back);
+    assert.equal(forward.route, before.route);
+    assert.deepEqual(forward, back);
+
+    // An entry without a place is a move too (the screen starts at the top).
+    store.dispatch(routeTo({ key: 'threads', agent: 'engineer' }, { source: 'history' }));
+    assert.notEqual(store.getState().router, forward);
+    assert.equal(store.getState().router.scroll, null);
+
+    // The app's own link to the current route still changes nothing.
+    const kept = store.getState().router;
+
+    store.dispatch(routeTo({ key: 'threads', agent: 'engineer' }));
+    assert.equal(store.getState().router, kept);
   });
 
   it('carries the fragment of the URL beside the route: a new fragment of the same route is a new state with the same route object', () => {

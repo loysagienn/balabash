@@ -44,9 +44,11 @@ export function Shell({ current, detail, children, ...top }: ShellProps) {
   const running = useAppSelector(selectRunningCount);
   const attention = useAppSelector(selectConnectionsNeedingAction).length > 0 ? new Set<NavKey>(['connections']) : new Set<NavKey>();
   const moreOpen = useAppSelector(selectMoreSheet);
-  const route = useAppSelector(state => state.router.route);
-  const source = useAppSelector(state => state.router.source);
-  const scroll = useAppSelector(state => state.router.scroll);
+  // The router state itself, not its fields: a history navigation between
+  // two entries can bring the same route, source and place (the reader may
+  // have moved the body since), and only the state's identity says it happened.
+  const router = useAppSelector(state => state.router);
+  const { route, source, scroll } = router;
   const body = useRef<HTMLElement>(null);
   const mainThreadId = me?.mainThreadId ?? null;
   // One route object per id: the key listener below binds once, not per render.
@@ -60,7 +62,8 @@ export function Shell({ current, detail, children, ...top }: ShellProps) {
   // (keepsScrollPlace) keeps its place; a history navigation brings back
   // the place the entry was left at (restoreScroll: now, and again as the
   // screen grows into it, until the reader or the screen moves the body
-  // itself). Before paint, so the body never shows at the top first.
+  // itself). Before paint, so the body never shows at the top first. Keyed
+  // by the router state: a new state is a navigation, a kept one is not.
   const previous = useRef<AppRoute | null>(null);
 
   useLayoutEffect(() => {
@@ -82,7 +85,7 @@ export function Shell({ current, detail, children, ...top }: ShellProps) {
     }
 
     return undefined;
-  }, [route, source, scroll]);
+  }, [router]);
 
   // ⌘J / Ctrl+J opens the main thread from any screen (on the main thread
   // itself ROUTE_TO is a no-op: the route is the same).

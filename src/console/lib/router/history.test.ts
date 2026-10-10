@@ -8,6 +8,7 @@ import type { Api } from '../api/index.ts';
 import { createStore } from '../../store/index.ts';
 import { routeTo } from '../../store/router/actions.ts';
 import { connectStoreToHistory, urlOf } from './history.ts';
+import { readRoute } from './routes.ts';
 
 type Entry = { method: 'push' | 'replace'; state: unknown; url: string };
 
@@ -178,6 +179,73 @@ describe('router — the history process', () => {
     Object.assign(location, { pathname: '/agents', search: '', hash: '' });
     pop(null);
     assert.equal(store.getState().router.scroll, null);
+
+    disconnect();
+  });
+
+  it('tells two entries of one URL apart: each brings back its own place', () => {
+    // A filtered list (A), the section's own link (B), the filter chosen again
+    // on B — a replace gives B the URL of A, under its own id.
+    const { win, entries, location, pop } = fakeWindow('/threads', '?agent=engineer');
+
+    (globalThis as { window?: unknown }).window = win;
+
+    let place: number | null = 0;
+    const store = createStore({ api: {} as Api, initialRoute: readRoute('/threads?agent=engineer') });
+    const disconnect = connectStoreToHistory(store, { readScroll: () => place });
+    const a = stateOf(entries[0]!);
+
+    place = 600;
+    store.dispatch(routeTo({ key: 'threads' }));
+    assert.equal(entries[1]!.method, 'push');
+    assert.equal(entries[1]!.url, '/threads');
+
+    store.dispatch(routeTo(readRoute('/threads?agent=engineer'), { replace: true }));
+    assert.equal(entries[2]!.method, 'replace');
+    assert.equal(entries[2]!.url, '/threads?agent=engineer');
+
+    const b = stateOf(entries[2]!);
+
+    assert.equal(b.entry, stateOf(entries[1]!).entry);
+    assert.notEqual(b.entry, a.entry);
+
+    // Back from B (left at 200) to A: the URL does not change, the state does — with A's 600.
+    place = 200;
+    const onB = store.getState().router;
+
+    pop(a);
+
+    const onA = store.getState().router;
+
+    assert.notEqual(onA, onB);
+    assert.equal(onA.route, onB.route);
+    assert.deepEqual(onA, { route: { key: 'threads', agent: 'engineer' }, source: 'history', replace: false, hash: '', scroll: 600 });
+    assert.equal(entries.length, 3);
+
+    // The reader moves A to 100; Forward brings B's own 200, not A's place.
+    place = 100;
+    pop(b);
+    assert.notEqual(store.getState().router, onA);
+    assert.equal(store.getState().router.scroll, 200);
+
+    // Both entries left at 200: Back and Forward bring equal places as two states.
+    place = 200;
+    pop(a);
+
+    const backAgain = store.getState().router;
+
+    assert.equal(backAgain.scroll, 100);
+    place = 200;
+    pop(b);
+
+    const forwardAgain = store.getState().router;
+
+    assert.equal(forwardAgain.scroll, 200);
+    pop(a);
+    assert.equal(store.getState().router.scroll, 200);
+    assert.notEqual(store.getState().router, forwardAgain);
+    assert.deepEqual(store.getState().router, forwardAgain);
+    assert.equal(location.search, '?agent=engineer');
 
     disconnect();
   });
