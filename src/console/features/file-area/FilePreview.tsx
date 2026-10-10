@@ -16,6 +16,7 @@ import { fileUrl } from '../../lib/api/index.ts';
 import { useLinkTargets } from '../../lib/router/Link.tsx';
 import type { AppRoute } from '../../lib/router/routes.ts';
 import { countOf, fileSize, startedLabel } from '../../lib/format/index.ts';
+import { useAppSelector } from '../../store/hooks.ts';
 import { Btn } from '../../ui/Btn/Btn.tsx';
 import { CodeView } from '../../ui/CodeView/CodeView.tsx';
 import { CsvView } from '../../ui/CsvView/CsvView.tsx';
@@ -46,6 +47,7 @@ function readsText(viewer: Viewer): boolean {
 
 function TextBody({ file, viewer, text, routeFor }: { file: WorkspaceFileMeta; viewer: Viewer; text: string; routeFor: (path: string) => AppRoute }) {
   const linkTarget = useLinkTargets();
+  const hash = useAppSelector(state => state.router.hash);
   const lines = useMemo(
     () => (viewer.kind === 'code' ? codeLines(text, viewer.language, (file.sizeBytes ?? 0) <= HIGHLIGHT_MAX) : null),
     [file.sizeBytes, text, viewer],
@@ -55,7 +57,7 @@ function TextBody({ file, viewer, text, routeFor }: { file: WorkspaceFileMeta; v
   if (viewer.kind === 'markdown') {
     const place: MdPlace = { path: file.path, link: (target, hash) => linkTarget(routeFor(target), false, hash), bytes: target => fileUrl(target) };
 
-    return <Md source={text} at={place} />;
+    return <Md source={text} at={place} reveal={hash} />;
   }
   if (lines) {
     return <CodeView lines={lines} />;

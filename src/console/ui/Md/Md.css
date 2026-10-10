@@ -7,6 +7,8 @@
 .md > * + *{margin-top:var(--sp-2)}
 .md > * + :is(h1,h2,h3){margin-top:var(--sp-4)}
 .md :is(h1,h2,h3,h4,h5,h6){font-weight:var(--fw-semibold);color:var(--text)}
+/* a heading brought into view by a fragment keeps the page's top rhythm instead of touching the edge of the scroll box */
+.md :is(h1,h2,h3,h4,h5,h6)[id]{scroll-margin-top:var(--sp-4)}
 .md h1{font-size:var(--fs-lg);line-height:var(--lh-lg)}
 .md h2{font-size:var(--fs-h2);line-height:var(--lh-h2)}
 .md h3{font-size:var(--fs-body);line-height:var(--lh-body)}

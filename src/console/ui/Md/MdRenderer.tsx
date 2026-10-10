@@ -1,14 +1,19 @@
 // The Markdown renderer behind <Md> — react-markdown with GitHub
 // extensions (tables, task lists, strikethrough, autolinks) and
 // rehype-highlight over the curated grammars, inside the .md block. Raw
-// HTML in the source is shown as text, never rendered. Loaded as its own
+// HTML in the source is shown as text, never rendered. A placed document
+// (`at`) gets ids on its headings (rehype-slug — the GitHub slug of the
+// heading's text, so a link written for GitHub lands here too); a message
+// of the feed does not: its headings are not addresses. Loaded as its own
 // chunk (Md.tsx).
 
-import { createContext, useContext } from 'react';
+import { createContext, useContext, useEffect, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import type { Components, Options } from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
+import rehypeSlug from 'rehype-slug';
 import remarkGfm from 'remark-gfm';
+import { fragmentTarget } from './fragment.ts';
 import { ALIASES, LANGUAGES } from './languages.ts';
 import type { MdPlace, MdProps } from './Md.tsx';
 import { resolveRelative } from './relative.ts';
@@ -17,6 +22,7 @@ type Plugins = NonNullable<Options['rehypePlugins']>;
 
 const REMARK: Plugins = [remarkGfm];
 const REHYPE: Plugins = [[rehypeHighlight, { languages: LANGUAGES, aliases: ALIASES }]];
+const REHYPE_PLACED: Plugins = [...REHYPE, rehypeSlug];
 
 // A link leads out of the console when, resolved against the page, it is an
 // http(s) URL of another origin — so "//host/…" and "https://<console host>.
@@ -80,11 +86,44 @@ const COMPONENTS: Components = {
   ),
 };
 
-export default function MdRenderer({ source, quiet, className, at }: MdProps) {
+// The fragment named by `reveal` comes to the top of the view once the
+// document is rendered — on arrival of the text and of this chunk, and
+// again when the fragment changes under the same document. The element is
+// looked up inside this document only (fragment.ts). scrollIntoView moves
+// the scroll box the document sits in and its scrolling ancestors (the
+// preview's own body, and on a project page the shell's body too — the
+// file card comes up, the screen's own rule for a move to a file); once
+// more on the next frame — after every effect of the shell, which resets
+// a new screen to the top after the children's effects ran (the feed's
+// own rule in ThreadScreen). A fragment naming nothing leaves the view
+// where it is.
+function useReveal(root: { current: HTMLDivElement | null }, source: string, reveal: string | undefined): void {
+  useEffect(() => {
+    const target = reveal && root.current ? fragmentTarget(root.current, reveal) : null;
+
+    if (!target) {
+      return undefined;
+    }
+
+    const show = () => target.scrollIntoView({ block: 'start' });
+
+    show();
+
+    const frame = requestAnimationFrame(show);
+
+    return () => cancelAnimationFrame(frame);
+  }, [root, source, reveal]);
+}
+
+export default function MdRenderer({ source, quiet, className, at, reveal }: MdProps) {
+  const root = useRef<HTMLDivElement>(null);
+
+  useReveal(root, source, reveal);
+
   return (
     <PlaceContext.Provider value={at ?? null}>
-      <div className={className ? `md ${className}` : 'md'} data-variant={quiet ? 'quiet' : undefined}>
-        <ReactMarkdown remarkPlugins={REMARK} rehypePlugins={REHYPE} components={COMPONENTS}>
+      <div ref={root} className={className ? `md ${className}` : 'md'} data-variant={quiet ? 'quiet' : undefined}>
+        <ReactMarkdown remarkPlugins={REMARK} rehypePlugins={at ? REHYPE_PLACED : REHYPE} components={COMPONENTS}>
           {source}
         </ReactMarkdown>
       </div>

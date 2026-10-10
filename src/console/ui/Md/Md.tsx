@@ -4,7 +4,10 @@
 // paragraphs in a block of the same class, so the text is readable at
 // once. quiet — intermediate agent text, one step quieter. at — the
 // document's place in the file area, when it has one: relative links and
-// images then lead into the file area from its folder.
+// images then lead into the file area from its folder, and the headings
+// carry ids, so a fragment of the URL can name a section. reveal — the
+// fragment to bring into view ('#part' or ''): once the document is
+// rendered, the element it names is scrolled to the top of the view.
 
 import { Suspense, lazy } from 'react';
 import type { MouseEventHandler } from 'react';
@@ -30,6 +33,7 @@ export type MdProps = {
   quiet?: boolean;
   className?: string;
   at?: MdPlace;
+  reveal?: string;
 };
 
 function Plain({ source, quiet, className }: MdProps) {
