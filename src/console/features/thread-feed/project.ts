@@ -434,7 +434,13 @@ class Builder {
     }
 
     if (is(event, 'session.thinking')) {
-      this.action({ kind: 'action', key, at, state: 'done', label: { icon: 'brain', text: 'Thought' }, endedAt: at, untimed: true, endNote: null, detail: { kind: 'md', text: event.payload.text }, nested: [] }, event.payload.parentToolUseId);
+      // The event is written when the thought ends; a measured one began
+      // durationMs earlier — the row's duration, as a tool's. Unmeasured
+      // (older history, nothing to measure from) — no time.
+      const { durationMs } = event.payload;
+      const timed = typeof durationMs === 'number' && Number.isFinite(durationMs) && durationMs >= 0;
+
+      this.action({ kind: 'action', key, at: timed ? new Date(at.getTime() - durationMs) : at, state: 'done', label: { icon: 'brain', text: 'Thought' }, endedAt: at, ...(timed ? {} : { untimed: true as const }), endNote: null, detail: { kind: 'md', text: event.payload.text }, nested: [] }, event.payload.parentToolUseId);
 
       return;
     }

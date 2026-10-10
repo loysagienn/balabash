@@ -87,6 +87,32 @@ describe('projectFeed — messages', () => {
 });
 
 describe('projectFeed — actions', () => {
+  it('a measured thought began durationMs before its event and shows the duration; an unmeasured one shows none', () => {
+    resetSeq(10n);
+
+    const t0 = new Date('2026-10-09T10:00:00Z');
+    const items = projectFeed(
+      [
+        own('session.thinking', { text: 'long', durationMs: 14_000 }, { createdAt: t0 }),
+        own('session.thinking', { text: 'instant', durationMs: 0 }, { createdAt: t0 }),
+        own('session.thinking', { text: 'old history' }, { createdAt: t0 }),
+        own('session.thinking', { text: 'nonsense', durationMs: -5 }, { createdAt: t0 }),
+      ],
+      ctx,
+    );
+    const [long, instant, old, nonsense] = (items[0] as ActionsItem).items;
+
+    assert.equal(long!.at.getTime(), t0.getTime() - 14_000);
+    assert.equal(long!.endedAt!.getTime(), t0.getTime());
+    assert.equal(long!.untimed, undefined);
+    assert.equal(long!.state, 'done');
+    assert.equal(instant!.at.getTime(), t0.getTime());
+    assert.equal(instant!.untimed, undefined);
+    assert.equal(old!.untimed, true);
+    assert.equal(nonsense!.untimed, true);
+    assert.equal(nonsense!.at.getTime(), t0.getTime());
+  });
+
   it('groups consecutive thinking and tool rows, pairs starts with ends, hides the plan tool', () => {
     resetSeq(10n);
 
@@ -122,6 +148,7 @@ describe('projectFeed — actions', () => {
       ],
     );
     assert.equal(first.items[0]!.untimed, true);
+    assert.equal(first.items[0]!.at.getTime(), t0.getTime());
     assert.equal(first.items[1]!.endedAt!.getTime() - first.items[1]!.at.getTime(), 4200);
     assert.deepEqual(first.items[1]!.detail, { kind: 'terminal', command: 'npm test', output: 'all green' });
 

@@ -5,7 +5,10 @@
 // give the actions — a command (name `Shell`, output and exit code), a
 // patch (`FileChange`, the paths), a web search, an MCP call to a server
 // other than the bridge (the bridge's calls are the tool.call.* events);
-// reasoning is session.thinking, the to-do list is session.plan. No context
+// reasoning is session.thinking with how long it took — its item.started /
+// item.completed pair, or the time since the turn's start or the previous
+// completed item when the start frame did not come; the to-do list is
+// session.plan. No context
 // measurement (Codex offers none), no sub-agent frames, no init frame. The
 // content of an MCP result passes sanitizeToolResult: no bytes in the log.
 
@@ -25,10 +28,15 @@ export type CodexTurnMemory = {
   // Items already journaled as started (an item may complete without a
   // start frame of its own).
   started: Set<string>;
+  // When each reasoning item started, by id, and the time of the last frame
+  // that bounds the model's output (the turn's start, a completed item) —
+  // what a reasoning item without a start frame is measured from.
+  reasoningFrom: Map<string, number>;
+  bound: number | null;
 };
 
 export function createCodexTurnMemory(): CodexTurnMemory {
-  return { state: 'wait', started: new Set() };
+  return { state: 'wait', started: new Set(), reasoningFrom: new Map(), bound: null };
 }
 
 type ToolView = { name: string; input: JsonObject } | null;
@@ -72,7 +80,9 @@ function completionOf(item: ThreadItem): { result: JsonValue; isError: boolean; 
   }
 }
 
-export function mapCodexEvent(memory: CodexTurnMemory, event: ThreadEvent): JournalEntry[] {
+// `at` — when the event arrived (ms since the epoch): the clock a thought's
+// duration is read from.
+export function mapCodexEvent(memory: CodexTurnMemory, event: ThreadEvent, at = Date.now()): JournalEntry[] {
   const entries: JournalEntry[] = [];
 
   const setState = (state: SessionState): void => {
@@ -85,6 +95,7 @@ export function mapCodexEvent(memory: CodexTurnMemory, event: ThreadEvent): Jour
   switch (event.type) {
     case 'turn.started':
       setState('run');
+      memory.bound = at;
       break;
 
     case 'item.started':
@@ -103,8 +114,17 @@ export function mapCodexEvent(memory: CodexTurnMemory, event: ThreadEvent): Jour
       }
 
       if (item.type === 'reasoning') {
-        if (event.type === 'item.completed' && item.text.trim()) {
-          entries.push({ type: 'session.thinking', payload: { text: item.text } });
+        if (event.type === 'item.started') {
+          memory.reasoningFrom.set(item.id, at);
+        } else if (event.type === 'item.completed') {
+          const from = memory.reasoningFrom.get(item.id) ?? memory.bound;
+
+          memory.reasoningFrom.delete(item.id);
+          memory.bound = at;
+
+          if (item.text.trim()) {
+            entries.push({ type: 'session.thinking', payload: { text: item.text, ...(from === null || from === undefined ? {} : { durationMs: Math.max(0, at - from) }) } });
+          }
         }
 
         break;
@@ -123,6 +143,7 @@ export function mapCodexEvent(memory: CodexTurnMemory, event: ThreadEvent): Jour
 
       if (event.type === 'item.completed') {
         memory.started.delete(item.id);
+        memory.bound = at;
         entries.push({ type: 'session.tool.completed', payload: { toolUseId: item.id, name: tool.name, ...completionOf(item) } });
       }
 
@@ -132,11 +153,15 @@ export function mapCodexEvent(memory: CodexTurnMemory, event: ThreadEvent): Jour
     case 'turn.completed':
       entries.push({ type: 'session.turn', payload: { usage: event.usage as unknown as JsonObject, isError: false } });
       setState('wait');
+      memory.reasoningFrom.clear();
+      memory.bound = null;
       break;
 
     case 'turn.failed':
       entries.push({ type: 'session.turn', payload: { isError: true, error: event.error.message } });
       setState('wait');
+      memory.reasoningFrom.clear();
+      memory.bound = null;
       break;
 
     default:
@@ -160,7 +185,7 @@ export function startCodexSessionJournal(deps: { writer?: JournalWriter } = {}):
       memories.set(threadId, memory);
     }
 
-    const entries = mapCodexEvent(memory, event);
+    const entries = mapCodexEvent(memory, event, Date.now());
 
     if (entries.length) {
       void writer.write(threadId, entries);

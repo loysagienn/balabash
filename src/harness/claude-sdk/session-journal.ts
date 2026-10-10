@@ -17,8 +17,13 @@
 //   bridge's own tools (mcp__balabash__*) are already the tool.call.* events
 //   and are skipped; a result whose tool use the journal never saw is skipped
 //   too (nothing to pair it with);
-// - thinking blocks, and assistant text followed by more actions in the
-//   same turn (the final text of a turn is the runner's agent.message);
+// - thinking blocks with how long they took — the time since the frame
+//   that bounds the model's output before them (the tool result they
+//   answer, the turn's init, the previous assistant block; per sub-agent,
+//   whose frames interleave with the parent's), or, when the CLI sends them,
+//   since the first thinking_tokens frame of the stretch — and assistant
+//   text followed by more actions in the same turn (the final text of a
+//   turn is the runner's agent.message);
 // - the turn itself, then the context window measured after it;
 // - sub-agent tasks, compaction, API retries, tool-use summaries;
 // - never: stream_event deltas, tool_progress ticks, rate limits (not a fact
@@ -45,16 +50,22 @@ type PendingText = { text: string; parentToolUseId: string | null };
 // harness closes it: whether the start was journaled, the state last
 // recorded, the native tool uses awaiting their result, the assistant text
 // not yet known to be intermediate (the last two are a turn's and clear at
-// its result).
+// its result), and the clocks a thought is measured from — the time of the
+// last frame that bounds the model's output, per parentToolUseId (null —
+// the session's own frames), and the first thinking_tokens frame since
+// that bound (the CLI's live estimate of a thinking stretch; it carries no
+// parent, so it times the session's own thoughts).
 export type TurnMemory = {
   started: boolean;
   state: SessionState;
   tools: Map<string, { name: string; parentToolUseId: string | null }>;
   pendingText: PendingText | null;
+  bounds: Map<string | null, number>;
+  thinkingFrom: number | null;
 };
 
 export function createTurnMemory(): TurnMemory {
-  return { started: false, state: 'wait', tools: new Map(), pendingText: null };
+  return { started: false, state: 'wait', tools: new Map(), pendingText: null, bounds: new Map(), thinkingFrom: null };
 }
 
 const STATE_OF_FRAME: Record<string, SessionState> = { idle: 'wait', running: 'run', requires_action: 'act' };
@@ -93,10 +104,28 @@ function planItems(input: unknown): SessionPlanItem[] | null {
 }
 
 // Folds one frame into the memory and returns the entries it produces, in
-// order. Pure over its arguments; the owner evicts the memory when the
-// session ends.
-export function mapSdkMessage(memory: TurnMemory, message: SDKMessage): JournalEntry[] {
+// order. `at` — when the frame arrived (ms since the epoch): the clock a
+// thought's duration is read from. Pure over its arguments; the owner
+// evicts the memory when the session ends.
+export function mapSdkMessage(memory: TurnMemory, message: SDKMessage, at = Date.now()): JournalEntry[] {
   const entries: JournalEntry[] = [];
+
+  // The frame bounds the model's output of this origin: the next thought
+  // of the origin is measured from it.
+  const bound = (parentToolUseId: string | null): void => {
+    memory.bounds.set(parentToolUseId, at);
+
+    if (parentToolUseId === null) {
+      memory.thinkingFrom = null;
+    }
+  };
+
+  // How long the thought that arrived now took; undefined before any bound.
+  const thoughtDuration = (parentToolUseId: string | null): number | undefined => {
+    const from = parentToolUseId === null && memory.thinkingFrom !== null ? memory.thinkingFrom : memory.bounds.get(parentToolUseId);
+
+    return from === undefined ? undefined : Math.max(0, at - from);
+  };
 
   const setState = (state: SessionState): void => {
     if (memory.state !== state) {
@@ -119,6 +148,7 @@ export function mapSdkMessage(memory: TurnMemory, message: SDKMessage): JournalE
           // The first init is the session's start; every later one opens a
           // turn (the CLI re-announces the session for each user message).
           setState('run');
+          bound(null);
 
           if (!memory.started) {
             memory.started = true;
@@ -149,6 +179,7 @@ export function mapSdkMessage(memory: TurnMemory, message: SDKMessage): JournalE
           const { trigger, pre_tokens: preTokens, post_tokens: postTokens, duration_ms: durationMs } = message.compact_metadata;
 
           setState('run');
+          bound(null);
           entries.push({
             type: 'session.compaction',
             payload: {
@@ -161,7 +192,9 @@ export function mapSdkMessage(memory: TurnMemory, message: SDKMessage): JournalE
           break;
         }
         case 'api_retry':
+          // The request starts over: so does the thought it will bring.
           setState('run');
+          bound(null);
           entries.push({
             type: 'session.retry',
             payload: {
@@ -210,6 +243,13 @@ export function mapSdkMessage(memory: TurnMemory, message: SDKMessage): JournalE
             },
           });
           break;
+        case 'thinking_tokens':
+          // The first estimate of a stretch marks where the thinking began.
+          if (memory.thinkingFrom === null) {
+            memory.thinkingFrom = at;
+          }
+
+          break;
         default:
           break;
       }
@@ -217,13 +257,17 @@ export function mapSdkMessage(memory: TurnMemory, message: SDKMessage): JournalE
 
     case 'assistant': {
       const parentToolUseId = message.parent_tool_use_id;
+      // The frame's first thought took the time since the bound; a second
+      // thinking block in the same frame has no measure of its own.
+      let durationMs = thoughtDuration(parentToolUseId);
 
       setState('run');
 
       for (const block of blocksOf(message.message?.content)) {
         if (block.type === 'thinking') {
           if (typeof block.thinking === 'string' && block.thinking.trim()) {
-            entries.push({ type: 'session.thinking', payload: { text: block.thinking, parentToolUseId } });
+            entries.push({ type: 'session.thinking', payload: { text: block.thinking, parentToolUseId, ...(durationMs !== undefined ? { durationMs } : {}) } });
+            durationMs = undefined;
           }
         } else if (block.type === 'text') {
           if (typeof block.text === 'string' && block.text.trim()) {
@@ -261,12 +305,14 @@ export function mapSdkMessage(memory: TurnMemory, message: SDKMessage): JournalE
         }
       }
 
+      bound(parentToolUseId);
       break;
     }
 
     case 'user': {
       setState('run');
       flushText();
+      bound(message.parent_tool_use_id);
 
       for (const block of blocksOf(message.message?.content) as ResultBlock[]) {
         if (block.type !== 'tool_result' || typeof block.tool_use_id !== 'string') {
@@ -308,6 +354,8 @@ export function mapSdkMessage(memory: TurnMemory, message: SDKMessage): JournalE
       // it as agent.message.
       memory.pendingText = null;
       memory.tools.clear();
+      memory.bounds.clear();
+      memory.thinkingFrom = null;
       entries.push({
         type: 'session.turn',
         payload: {
@@ -368,7 +416,7 @@ export function startClaudeSessionJournal(deps: ClaudeSessionJournalDeps = {}): 
       memories.set(threadId, memory);
     }
 
-    const entries = mapSdkMessage(memory, message);
+    const entries = mapSdkMessage(memory, message, Date.now());
 
     if (entries.length) {
       void writer.write(threadId, entries);

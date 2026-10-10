@@ -169,6 +169,53 @@ describe('mapSdkMessage', () => {
     });
   });
 
+  it('times a thought from the frame that bounds the output before it, per origin, or from the first thinking_tokens frame', () => {
+    const memory = createTurnMemory();
+    const thought = (text: string, parent: string | null = null) => assistant([{ type: 'thinking', thinking: text, signature: 's' }], parent);
+    const tokens = (estimated: number) => frame({ type: 'system', subtype: 'thinking_tokens', estimated_tokens: estimated, estimated_tokens_delta: estimated });
+
+    mapSdkMessage(memory, init, 1000);
+    // Chatter between the bound and the thought does not move the bound.
+    assert.deepEqual(mapSdkMessage(memory, frame({ type: 'rate_limit_event', rate_limit_info: { status: 'allowed' } }), 2000), []);
+    assert.deepEqual(mapSdkMessage(memory, thought('plan'), 6000), [{ type: 'session.thinking', payload: { text: 'plan', parentToolUseId: null, durationMs: 5000 } }]);
+
+    mapSdkMessage(memory, assistant([{ type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'ls' } }]), 6500);
+    mapSdkMessage(memory, frame({ type: 'tool_progress', tool_use_id: 't1', tool_name: 'Bash', parent_tool_use_id: null, elapsed_time_seconds: 1 }), 7500);
+    mapSdkMessage(memory, toolResult('t1', 'a b'), 9000);
+    // Measured from the tool result, not from the previous thought or the progress tick.
+    assert.deepEqual(mapSdkMessage(memory, thought('read it'), 12_000), [{ type: 'session.thinking', payload: { text: 'read it', parentToolUseId: null, durationMs: 3000 } }]);
+
+    // The CLI's live estimate marks where the thinking began; only the first frame of the stretch counts.
+    assert.deepEqual(mapSdkMessage(memory, tokens(40), 14_000), []);
+    assert.deepEqual(mapSdkMessage(memory, tokens(90), 15_000), []);
+    assert.deepEqual(mapSdkMessage(memory, thought('deeper'), 20_000), [{ type: 'session.thinking', payload: { text: 'deeper', parentToolUseId: null, durationMs: 6000 } }]);
+    assert.equal(memory.thinkingFrom, null);
+
+    // A sub-agent's frames interleave with the parent's: each origin has its own bound.
+    mapSdkMessage(memory, assistant([{ type: 'tool_use', id: 'ag', name: 'Agent', input: { prompt: 'go' } }]), 20_500);
+    assert.deepEqual(mapSdkMessage(memory, thought('child first', 'ag'), 23_000), [{ type: 'session.thinking', payload: { text: 'child first', parentToolUseId: 'ag' } }]);
+    mapSdkMessage(memory, assistant([{ type: 'tool_use', id: 't2', name: 'Read', input: { file_path: '/a' } }], 'ag'), 23_100);
+    mapSdkMessage(memory, toolResult('t2', 'x', false, 'ag'), 24_000);
+    assert.deepEqual(mapSdkMessage(memory, thought('child again', 'ag'), 27_000), [{ type: 'session.thinking', payload: { text: 'child again', parentToolUseId: 'ag', durationMs: 3000 } }]);
+    assert.deepEqual(mapSdkMessage(memory, thought('meanwhile', null), 28_000), [{ type: 'session.thinking', payload: { text: 'meanwhile', parentToolUseId: null, durationMs: 7500 } }]);
+
+    // A retry starts the request over; an empty block is nothing; a second block in one frame has no measure of its own.
+    mapSdkMessage(memory, frame({ type: 'system', subtype: 'api_retry', attempt: 1, max_retries: 3, retry_delay_ms: 10, error_status: 529, error: 'overloaded' }), 30_000);
+    assert.deepEqual(
+      mapSdkMessage(memory, assistant([{ type: 'thinking', thinking: '', signature: 'x' }, { type: 'thinking', thinking: 'one', signature: 'x' }, { type: 'thinking', thinking: 'two', signature: 'x' }]), 31_000),
+      [
+        { type: 'session.thinking', payload: { text: 'one', parentToolUseId: null, durationMs: 1000 } },
+        { type: 'session.thinking', payload: { text: 'two', parentToolUseId: null } },
+      ],
+    );
+
+    // The result ends the turn's clocks; the next turn's init starts them again.
+    mapSdkMessage(memory, result, 32_000);
+    assert.equal(memory.bounds.size, 0);
+    mapSdkMessage(memory, init, 40_000);
+    assert.deepEqual(mapSdkMessage(memory, thought('next'), 40_800), [{ type: 'session.thinking', payload: { text: 'next', parentToolUseId: null, durationMs: 800 } }]);
+  });
+
   it('maps state frames, compaction, retries, tasks and summaries', () => {
     const memory = createTurnMemory();
 

@@ -54,9 +54,9 @@ describe('mapCodexEvent', () => {
       },
     ]);
     assert.deepEqual(mapCodexEvent(memory, ev({ type: 'item.completed', item: { id: 'a1', type: 'agent_message', text: 'hello' } })), []);
-    assert.deepEqual(mapCodexEvent(memory, ev({ type: 'item.started', item: { id: 'r1', type: 'reasoning', text: '' } })), []);
-    assert.deepEqual(mapCodexEvent(memory, ev({ type: 'item.completed', item: { id: 'r1', type: 'reasoning', text: 'Thinking it over' } })), [
-      { type: 'session.thinking', payload: { text: 'Thinking it over' } },
+    assert.deepEqual(mapCodexEvent(memory, ev({ type: 'item.started', item: { id: 'r1', type: 'reasoning', text: '' } }), 10_000), []);
+    assert.deepEqual(mapCodexEvent(memory, ev({ type: 'item.completed', item: { id: 'r1', type: 'reasoning', text: 'Thinking it over' } }), 13_200), [
+      { type: 'session.thinking', payload: { text: 'Thinking it over', durationMs: 3200 } },
     ]);
     assert.deepEqual(
       mapCodexEvent(memory, ev({ type: 'item.updated', item: { id: 't1', type: 'todo_list', items: [{ text: 'Fix', completed: true }, { text: 'Test', completed: false }] } })),
@@ -69,6 +69,43 @@ describe('mapCodexEvent', () => {
       { type: 'session.turn', payload: { usage, isError: false } },
       { type: 'session.state', payload: { state: 'wait' } },
     ]);
+  });
+
+  it('times a thought without a start frame from the turn start or the previous completed item; nothing before a turn', () => {
+    const memory = createCodexTurnMemory();
+    const reasoning = (id: string, text: string) => ({ id, type: 'reasoning', text });
+
+    // Between turns there is no bound to measure from.
+    assert.deepEqual(mapCodexEvent(memory, ev({ type: 'item.completed', item: reasoning('r0', 'stray') }), 500), [
+      { type: 'session.state', payload: { state: 'run' } },
+      { type: 'session.thinking', payload: { text: 'stray' } },
+    ]);
+
+    mapCodexEvent(memory, ev({ type: 'turn.started' }), 1000);
+    assert.deepEqual(mapCodexEvent(memory, ev({ type: 'item.completed', item: reasoning('r1', 'first') }), 5000), [
+      { type: 'session.thinking', payload: { text: 'first', durationMs: 4000 } },
+    ]);
+
+    const command = { id: 'c1', type: 'command_execution', command: 'ls', aggregated_output: '', status: 'in_progress' };
+
+    mapCodexEvent(memory, ev({ type: 'item.started', item: command }), 5100);
+    mapCodexEvent(memory, ev({ type: 'item.completed', item: { ...command, aggregated_output: 'a', exit_code: 0, status: 'completed' } }), 9000);
+    // Measured from the command's end, not from the previous thought.
+    assert.deepEqual(mapCodexEvent(memory, ev({ type: 'item.completed', item: reasoning('r2', 'second') }), 11_500), [
+      { type: 'session.thinking', payload: { text: 'second', durationMs: 2500 } },
+    ]);
+    // A start frame wins over the bound; an empty thought is nothing but moves the bound.
+    mapCodexEvent(memory, ev({ type: 'item.started', item: reasoning('r3', '') }), 12_000);
+    assert.deepEqual(mapCodexEvent(memory, ev({ type: 'item.completed', item: reasoning('r3', '  ') }), 12_400), []);
+    assert.deepEqual(mapCodexEvent(memory, ev({ type: 'item.completed', item: reasoning('r4', 'third') }), 13_000), [
+      { type: 'session.thinking', payload: { text: 'third', durationMs: 600 } },
+    ]);
+
+    const usage = { input_tokens: 1, cached_input_tokens: 0, cache_write_input_tokens: 0, output_tokens: 1, reasoning_output_tokens: 0 };
+
+    mapCodexEvent(memory, ev({ type: 'turn.completed', usage }), 14_000);
+    assert.equal(memory.bound, null);
+    assert.equal(memory.reasoningFrom.size, 0);
   });
 
   it('a failed turn is a turn with an error', () => {
