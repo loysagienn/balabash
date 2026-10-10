@@ -7,7 +7,7 @@
 // Mounted before any session machinery: these hits come from one-time links,
 // redirect chains and link previews — the nonce and the OAuth state are the
 // credentials BY NATURE of the flow. The secret forms that used to live here
-// moved behind the session: /secrets/<requestId> (Next page) over
+// moved behind the session: the /secrets/<requestId> screen over
 // /api/secret-requests.
 
 import type { Context, Next } from 'koa';

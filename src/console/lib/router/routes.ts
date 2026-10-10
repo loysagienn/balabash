@@ -333,7 +333,28 @@ export const router = initRouter([
 
 export type AppRoute = ReturnType<typeof router.readRoute>;
 
-export const { readRoute, writeRoute } = router;
+// The addresses of the old web interface, read as the console's routes: an
+// old bookmark or a link in an old chat message lands on the same screen, and
+// the history process writes the console's own URL over it (writeRoute, as
+// the first replaceState). Path only — the old pages had no filters to carry.
+const OLD_WEB_PATHS: Record<string, string> = {
+  '/thread': '/threads',
+  '/applications': '/apps',
+  '/llm-usage': '/system',
+};
+
+export function fromOldWeb(url: string): string {
+  const first = /^\/[^/?#]+/.exec(url)?.[0];
+
+  if (!first || !Object.hasOwn(OLD_WEB_PATHS, first)) {
+    return url;
+  }
+
+  return `${OLD_WEB_PATHS[first]}${url.slice(first.length)}`;
+}
+
+export const readRoute = (url: string): AppRoute => router.readRoute(fromOldWeb(url));
+export const { writeRoute } = router;
 
 // The shell's sections: which route keys belong to which navigation item.
 export type NavKey =

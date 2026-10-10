@@ -35,6 +35,33 @@ function redirectUrl(): string {
   return `https://${config.domain}/oauth/callback`;
 }
 
+function sameUrl(a: string, b: string): boolean {
+  try {
+    return new URL(a).href === new URL(b).href;
+  } catch {
+    return a === b;
+  }
+}
+
+// Whether a stored client registration serves the given redirect URI. A
+// dynamically registered client is bound to the redirect_uris it was
+// registered with (RFC 7591): the authorization server refuses a consent
+// request that names another one, so a redirect URI that changed (the web
+// moved to another domain) makes the stored registration useless for new
+// authorizations. The row keeps the DCR answer whole, so the registration
+// itself says which URIs it serves. A client the operator provisioned by hand
+// carries no redirect_uris in the row — its redirect URI lives in the
+// provider's own console — and is never judged here.
+export function registrationServesRedirect(info: OAuthClientInformationMixed, redirect: string): boolean {
+  const uris = (info as { redirect_uris?: unknown }).redirect_uris;
+
+  if (!Array.isArray(uris)) {
+    return true;
+  }
+
+  return uris.some(uri => typeof uri === 'string' && sameUrl(uri, redirect));
+}
+
 function clientMetadata(): OAuthClientMetadata {
   return {
     client_name: 'Balabash',
@@ -83,7 +110,26 @@ export function createInteractiveAuthProvider(
 
       return connection.pendingState;
     },
-    clientInformation: () => loadClientInformation(connection.server),
+    // A registration that no longer serves the current redirect URI is
+    // reported as no client: the SDK registers anew (saveClientInformation
+    // replaces the row), and the new client's redirect URI is the current
+    // one. Connections of the replaced client keep working until their
+    // refresh tokens are refused; they re-authorize then. Only the
+    // interactive flow judges the registration — a background refresh does
+    // not involve the redirect URI and must not replace the client.
+    clientInformation: async () => {
+      const info = await loadClientInformation(connection.server);
+
+      if (info && !registrationServesRedirect(info, redirectUrl())) {
+        console.log(
+          `[oauth] the "${connection.server}" client is registered for another redirect URI — registering anew for ${redirectUrl()}`,
+        );
+
+        return undefined;
+      }
+
+      return info;
+    },
     saveClientInformation: info => saveClientInformation(connection.server, info),
     tokens: () => undefined,
     saveTokens: async tokens => {

@@ -1,7 +1,7 @@
 // Status pages of the OAuth landing (§11.4): plain HTML, no templating —
 // escapeHtml is the whole engine. Error pages expose only error.message,
 // never a stack. The secret forms that used to live here moved behind the
-// session into the Next.js app (/secrets/<requestId>).
+// session: the /secrets/<requestId> screen over /api/secret-requests.
 
 function escapeHtml(text: string): string {
   return text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');

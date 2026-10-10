@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { localPath, navKeyOf, readRoute, writeRoute } from './routes.ts';
+import { fromOldWeb, localPath, navKeyOf, readRoute, writeRoute } from './routes.ts';
 import type { AppRoute } from './routes.ts';
 
 const CASES: [string, AppRoute][] = [
@@ -73,6 +73,21 @@ describe('routes', () => {
     assert.deepEqual(readRoute('/login?next=%2F%0A%5Cevil.example%2Fx'), { key: 'login' });
     assert.deepEqual(readRoute('/login?next=threads'), { key: 'login' });
     assert.deepEqual(readRoute('/login?next=%2F.%2Fthreads%3Fstatus%3Dactive'), { key: 'login', next: '/threads?status=active' });
+  });
+
+  it('reads the addresses of the old web as the console routes they became', () => {
+    assert.deepEqual(readRoute('/thread/4f1c-aa'), { key: 'thread', id: '4f1c-aa' });
+    assert.deepEqual(readRoute('/thread/4f1c-aa/'), { key: 'thread', id: '4f1c-aa' });
+    assert.deepEqual(readRoute('/applications'), { key: 'apps' });
+    assert.deepEqual(readRoute('/applications?x=1'), { key: 'apps' });
+    assert.deepEqual(readRoute('/llm-usage'), { key: 'system' });
+    assert.equal(fromOldWeb('/thread/1?x=1'), '/threads/1?x=1');
+    assert.equal(fromOldWeb('/threads/1'), '/threads/1');
+    assert.equal(fromOldWeb('/thread'), '/threads');
+    assert.equal(fromOldWeb('/threading/1'), '/threading/1');
+    assert.equal(fromOldWeb('/thread-x'), '/thread-x');
+    assert.deepEqual(readRoute('/thread'), { key: 'threads' });
+    assert.deepEqual(readRoute('/thread/1/2'), { key: 'not_found', url: '/threads/1/2' });
   });
 
   it('catches everything else as not_found with the URL kept', () => {
