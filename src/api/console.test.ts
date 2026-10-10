@@ -1,6 +1,7 @@
-// The console host branch (console.ts): host gating, the /api and /files
-// pass-through, immutable assets, the no-store shell from the manifest and
-// its absence, method and path refusals. A real Koa listener on an ephemeral
+// The console host branch (console.ts): host gating, the pass-through of
+// the shared surfaces (/api, /files, /connect, /oauth, /apps/<path>),
+// immutable assets, the no-store shell from the manifest and its absence,
+// method and path refusals. A real Koa listener on an ephemeral
 // port over a scratch dist/console — nothing of the live app is touched.
 //
 // Run: npm test  (node:test, native type stripping — no build needed).
@@ -91,6 +92,29 @@ describe('console host branch', () => {
     assert.equal(await (await request('/files/x/y')).text(), 'fell through: GET /files/x/y');
     // Only the exact prefixes: /apix is the SPA's business.
     assert.equal((await request('/apix')).status, 503);
+  });
+
+  test('the connection surfaces pass through: /connect/<server> and /oauth/callback, whatever the method', async () => {
+    assert.equal(await (await request('/connect/notion?nonce=abc')).text(), 'fell through: GET /connect/notion');
+    assert.equal(await (await request('/connect')).text(), 'fell through: GET /connect');
+    assert.equal(await (await request('/oauth/callback?code=1&state=2')).text(), 'fell through: GET /oauth/callback');
+    assert.equal(await (await request('/oauth')).text(), 'fell through: GET /oauth');
+    // The main chain answers a wrong method itself; the SPA's 405 is not its business.
+    assert.equal(await (await request('/oauth/callback', { method: 'POST' })).text(), 'fell through: POST /oauth/callback');
+    // Names that merely start alike are the SPA's.
+    assert.equal((await request('/connected')).status, 503);
+    assert.equal((await request('/oauth2')).status, 503);
+  });
+
+  test('the owner page of an app passes through, the Apps screen does not', async () => {
+    assert.equal(await (await request('/apps/tracker')).text(), 'fell through: GET /apps/tracker');
+    assert.equal(await (await request('/apps/tools/tracker/page?x=1')).text(), 'fell through: GET /apps/tools/tracker/page');
+    assert.equal(await (await request('/apps/tracker', { method: 'HEAD' })).status, 200);
+    // The bare section — with or without its trailing slash, with its own query — is the SPA's shell.
+    assert.equal((await request('/apps')).status, 503);
+    assert.equal((await request('/apps/')).status, 503);
+    assert.equal((await request('/apps?filter=published')).status, 503);
+    assert.equal((await request('/appsx')).status, 503);
   });
 
   test('without a manifest the shell answers 503 "not built"', async () => {

@@ -37,8 +37,9 @@ export function startWebServer(): void {
   // below exist there (src/apps/index.ts).
   app.use(createAppsMiddleware());
 
-  // The console host next: on CONSOLE_DOMAIN only /api and /files of the
-  // surfaces below exist (they fall through), everything else is the SPA —
+  // The console host next: on CONSOLE_DOMAIN only the shared surfaces below
+  // exist — /api and /files, the /connect and /oauth of a connection and the
+  // /apps/<path> handoff (they fall through); everything else is the SPA —
   // its assets and its shell (src/api/console.ts).
   app.use(createConsoleMiddleware());
 

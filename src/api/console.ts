@@ -6,6 +6,13 @@
 // - /api/* and /files/*: fall through to the session-gated surfaces of the
 //   main chain — the same API, the same host-only session cookie (set here
 //   by POST /api/auth, read here by everything else);
+// - /connect/*, /oauth/* and /apps/<path>: fall through as well — the
+//   one-time links and the OAuth redirect of a connection (src/api/connect.ts,
+//   authenticated by their nonce and state, no session) and the owner page of
+//   an app, where the handoff turns this host's session into a one-time
+//   token for the apps domain (src/apps/handoff.ts; without a session it
+//   sends the browser to /login?next=…, the SPA's door). The bare /apps is
+//   the SPA's Apps screen;
 // - /assets/<name>: the content-addressed bundle files, immutable;
 // - /static/<name>: the files of src/console/public under their own stable
 //   names (dist/console/public) — the web app manifest and the icons that
@@ -48,8 +55,13 @@ const APPLE_TOUCH_ICON = `${STATIC_PREFIX}apple-touch-icon.png`;
 // tokens.css --bg: the status bar of the installed app and the browser's chrome take it.
 const THEME_COLOR = '#0c0d0f';
 
-// Paths that belong to the shared surfaces, not to the SPA.
-const PASS_THROUGH_PREFIXES = ['/api', '/files'];
+// Paths that belong to the shared surfaces of the main chain, not to the
+// SPA: the whole prefix (the path itself and anything under it)…
+const PASS_THROUGH_PREFIXES = ['/api', '/files', '/connect', '/oauth'];
+// …or only what lies under it, the prefix itself (and its empty trailing
+// slash) staying the SPA's: /apps is the Apps screen, /apps/<path> the
+// owner page of an app.
+const PASS_THROUGH_UNDER_PREFIXES = ['/apps'];
 
 type ConsoleManifest = {
   builtAt: string;
@@ -79,7 +91,10 @@ function escapeHtml(value: string): string {
 }
 
 function isPassThrough(urlPath: string): boolean {
-  return PASS_THROUGH_PREFIXES.some(prefix => urlPath === prefix || urlPath.startsWith(`${prefix}/`));
+  return (
+    PASS_THROUGH_PREFIXES.some(prefix => urlPath === prefix || urlPath.startsWith(`${prefix}/`)) ||
+    PASS_THROUGH_UNDER_PREFIXES.some(prefix => urlPath.startsWith(`${prefix}/`) && urlPath.length > prefix.length + 1)
+  );
 }
 
 // --------------------------------------------------------------------------
@@ -240,7 +255,8 @@ async function serveFile(ctx: Context, dir: string, name: string, cacheControl: 
 
 /**
  * The host-aware branch of the console: when the request addresses
- * CONSOLE_DOMAIN, /api and /files pass to the main chain and everything else
+ * CONSOLE_DOMAIN, the shared surfaces (/api, /files, /connect, /oauth and
+ * the owner pages /apps/<path>) pass to the main chain and everything else
  * is the SPA. Other hosts are untouched.
  */
 export function createConsoleMiddleware(root: string = DEFAULT_CONSOLE_DIR): (ctx: Context, next: Next) => Promise<void> {
