@@ -15,6 +15,7 @@ const SECTION_TITLES: Record<string, string> = {
   system: 'System',
   settings: 'Settings',
   dev_ui: 'UI kit',
+  login: 'Sign in',
   not_found: 'Not found',
 };
 

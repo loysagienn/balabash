@@ -32,6 +32,10 @@ export type AgentsRoute = { key: 'agents'; name?: string; q?: string };
 export type SystemRoute = { key: 'system' };
 export type SettingsRoute = { key: 'settings' };
 export type DevUiRoute = { key: 'dev_ui'; section?: string };
+// The sign-in door with a way back: `next` is where to go once signed in —
+// a path of this host, SPA route or not (the owner page of an app under
+// /apps/<path> sends the browser here when the session is missing).
+export type LoginRoute = { key: 'login'; next?: string };
 export type NotFoundRoute = { key: 'not_found'; url: string };
 
 const param = (params: URLSearchParams, name: string): string | undefined => {
@@ -257,6 +261,29 @@ export const devUi = defineRoute<DevUiRoute>({
   writeRoute: route => `/dev/ui${queryString({ section: route.section })}`,
 });
 
+// A post-sign-in destination survives only as a path of this host: it must
+// start with one slash — "//host" is another origin, and "/\host" is the
+// same thing to a browser, which reads a backslash as a slash in a URL.
+export function isLocalPath(value: string): boolean {
+  return /^\/(?![/\\])/.test(value);
+}
+
+export const login = defineRoute<LoginRoute>({
+  key: 'login',
+  readRoute: (path, params) => {
+    const parts = segments(path);
+
+    if (parts.length !== 1 || parts[0] !== 'login') {
+      return null;
+    }
+
+    const next = param(params, 'next');
+
+    return next && isLocalPath(next) ? { key: 'login', next } : { key: 'login' };
+  },
+  writeRoute: route => `/login${queryString({ next: route.next })}`,
+});
+
 export const notFound = defineRoute<NotFoundRoute>({
   key: 'not_found',
   readRoute: (path, params) => {
@@ -282,6 +309,7 @@ export const router = initRouter([
   system,
   settings,
   devUi,
+  login,
   notFound,
 ] as const);
 

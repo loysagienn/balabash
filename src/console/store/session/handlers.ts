@@ -7,7 +7,7 @@ import { toApiFailure } from '../../lib/api/index.ts';
 import type { ActionHandler } from '../types.ts';
 import { snapshotLoad } from '../stream/actions.ts';
 import { pushToast } from '../ui/actions.ts';
-import { loginDone, loginFail, logoutDone, logoutFail, saveSettingsDone, saveSettingsFail, sessionCheckDone, sessionCheckFail } from './actions.ts';
+import { consoleCodeDone, consoleCodeFail, loginDone, loginFail, logoutDone, logoutFail, saveSettingsDone, saveSettingsFail, sessionCheckDone, sessionCheckFail } from './actions.ts';
 import { patchFields } from './reducer.ts';
 
 export const sessionCheckHandler: ActionHandler<'SESSION_CHECK'> =
@@ -47,6 +47,25 @@ export const loginHandler: ActionHandler<'LOGIN'> =
       dispatch(loginDone(await api.auth(action.code)));
     } catch (error) {
       dispatch(loginFail(toApiFailure(error)));
+    }
+  };
+
+// The form waits for one thing at a time: a request while the code is
+// being checked, or a code while one is being printed, is dropped.
+export const consoleCodeHandler: ActionHandler<'CONSOLE_CODE_REQUEST'> =
+  ({ api, dispatch, getState, next }) =>
+  async action => {
+    if (getState().session.login.pending) {
+      return;
+    }
+
+    next(action);
+
+    try {
+      await api.consoleCode();
+      dispatch(consoleCodeDone());
+    } catch (error) {
+      dispatch(consoleCodeFail(toApiFailure(error)));
     }
   };
 

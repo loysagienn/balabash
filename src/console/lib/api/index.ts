@@ -32,6 +32,9 @@ export type ThreadEventsQuery = { before?: bigint; after?: bigint; limit?: numbe
 export type Api = {
   me(): Promise<MeResponse>;
   auth(code: string): Promise<MeResponse>;
+  // POST /api/auth/console-code: the server prints a one-time code into its
+  // log; 204 — nothing comes back; 429 when one was printed moments ago.
+  consoleCode(): Promise<null>;
   logout(): Promise<LogoutResponse>;
   snapshot(): Promise<SnapshotResponse>;
   // The names of Settings: the answer carries the effective names as
@@ -98,6 +101,7 @@ export function createApi(options: FetchOptions = {}): Api {
   return {
     me: () => apiFetch<MeResponse>('/api/me', { unauthenticated: true }),
     auth: code => apiFetch<MeResponse>('/api/auth', { method: 'POST', body: { code }, unauthenticated: true }),
+    consoleCode: () => apiFetch<null>('/api/auth/console-code', { method: 'POST', unauthenticated: true }),
     logout: () => apiFetch<LogoutResponse>('/api/logout', { method: 'POST', unauthenticated: true }),
     snapshot: () => apiFetch<SnapshotResponse>('/api/snapshot'),
     settings: {

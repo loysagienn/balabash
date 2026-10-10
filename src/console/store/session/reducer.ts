@@ -4,12 +4,24 @@ import type { Action } from '../types.ts';
 
 export type SessionStatus = 'loading' | 'anonymous' | 'signed-in' | 'error';
 
+// What the sign-in form waits for: the code's check, or the server
+// printing a code into its log.
+export type LoginPending = 'sign-in' | 'console-code' | null;
+
+export type LoginState = {
+  pending: LoginPending;
+  error: ApiFailure | null;
+  // The server has printed a code into its log (the word "console" was
+  // sent): the field says where to read it until the next attempt.
+  codePrinted: boolean;
+};
+
 export type SessionState = {
   status: SessionStatus;
   me: MeResponse | null;
   // The failure of the session check itself (network, 5xx) — retryable.
   error: ApiFailure | null;
-  login: { pending: boolean; error: ApiFailure | null };
+  login: LoginState;
   logoutPending: boolean;
   // The names of Settings in flight, by field: the card of a field saving
   // is busy, the other card is not.
@@ -61,7 +73,7 @@ export const initialSession: SessionState = {
   status: 'loading',
   me: null,
   error: null,
-  login: { pending: false, error: null },
+  login: { pending: null, error: null, codePrinted: false },
   logoutPending: false,
   settingsSaving: { workspaceName: false, operatorName: false },
   settingsSaved: { workspaceName: 0, operatorName: 0 },
@@ -76,11 +88,19 @@ export function sessionReducer(state: SessionState = initialSession, action: Act
     case 'SESSION_CHECK_FAIL':
       return { ...state, status: 'error', me: null, error: action.error };
     case 'LOGIN':
-      return { ...state, login: { pending: true, error: null } };
+      // The hint stays through a code's check: a mistyped code is still in
+      // the log.
+      return { ...state, login: { ...state.login, pending: 'sign-in', error: null } };
     case 'LOGIN_DONE':
-      return { ...state, status: 'signed-in', me: action.me, error: null, login: { pending: false, error: null } };
+      return { ...state, status: 'signed-in', me: action.me, error: null, login: { pending: null, error: null, codePrinted: false } };
     case 'LOGIN_FAIL':
-      return { ...state, login: { pending: false, error: action.error } };
+      return { ...state, login: { ...state.login, pending: null, error: action.error } };
+    case 'CONSOLE_CODE_REQUEST':
+      return { ...state, login: { pending: 'console-code', error: null, codePrinted: false } };
+    case 'CONSOLE_CODE_DONE':
+      return { ...state, login: { pending: null, error: null, codePrinted: true } };
+    case 'CONSOLE_CODE_FAIL':
+      return { ...state, login: { pending: null, error: action.error, codePrinted: false } };
     case 'LOGOUT':
       return { ...state, logoutPending: true };
     case 'LOGOUT_FAIL':

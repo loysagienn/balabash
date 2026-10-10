@@ -1,6 +1,7 @@
 // The root: the session gate and the route switch. Anonymous — the sign-in
 // card over any route (the route stays; after sign-in the screen the link
-// led to appears). The document title follows the route and its data.
+// led to appears; the /login door itself leads on to its `next`). The
+// document title follows the route and its data.
 
 import { useEffect } from 'react';
 import { useAppSelector } from '../store/hooks.ts';
@@ -9,6 +10,7 @@ import { selectSession } from '../store/session/selectors.ts';
 import { Placeholder } from '../screens/Placeholder.tsx';
 import { ProjectScreen } from '../screens/project/ProjectScreen.tsx';
 import { ProjectsScreen } from '../screens/projects/ProjectsScreen.tsx';
+import { LoginLanding } from '../screens/outside/LoginLanding.tsx';
 import { NotFound } from '../screens/outside/NotFound.tsx';
 import { SessionError } from '../screens/outside/SessionError.tsx';
 import { SignIn } from '../screens/outside/SignIn.tsx';
@@ -77,5 +79,7 @@ export function App() {
       return <SettingsScreen />;
     case 'dev_ui':
       return <DevUi />;
+    case 'login':
+      return <LoginLanding next={route.next} />;
   }
 }

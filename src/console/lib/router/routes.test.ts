@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { navKeyOf, readRoute, writeRoute } from './routes.ts';
+import { isLocalPath, navKeyOf, readRoute, writeRoute } from './routes.ts';
 import type { AppRoute } from './routes.ts';
 
 const CASES: [string, AppRoute][] = [
@@ -30,6 +30,8 @@ const CASES: [string, AppRoute][] = [
   ['/settings', { key: 'settings' }],
   ['/dev/ui', { key: 'dev_ui' }],
   ['/dev/ui?section=Btn', { key: 'dev_ui', section: 'Btn' }],
+  ['/login', { key: 'login' }],
+  ['/login?next=%2Fapps%2Fnotes%3Ftab%3D1', { key: 'login', next: '/apps/notes?tab=1' }],
 ];
 
 describe('routes', () => {
@@ -44,6 +46,18 @@ describe('routes', () => {
     assert.deepEqual(readRoute('/threads/?status=bogus'), { key: 'threads' });
     assert.deepEqual(readRoute('/apps?filter=bogus'), { key: 'apps' });
     assert.deepEqual(readRoute('/threads/42/'), { key: 'thread', id: '42' });
+  });
+
+  it('keeps only a path of this host as the sign-in destination', () => {
+    assert.ok(isLocalPath('/threads/1'));
+    assert.ok(isLocalPath('/'));
+    assert.equal(isLocalPath('//evil.example/x'), false);
+    assert.equal(isLocalPath('/\\evil.example/x'), false);
+    assert.equal(isLocalPath('https://evil.example/'), false);
+    assert.equal(isLocalPath('threads'), false);
+    assert.equal(isLocalPath(''), false);
+    assert.deepEqual(readRoute('/login?next=%2F%2Fevil.example'), { key: 'login' });
+    assert.deepEqual(readRoute('/login?next=threads'), { key: 'login' });
   });
 
   it('catches everything else as not_found with the URL kept', () => {

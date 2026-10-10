@@ -16,7 +16,7 @@ import type { Action, AppStore } from './index.ts';
 import { eventAction } from './events.ts';
 import { routeTo, tabVisible } from './router/actions.ts';
 import { loadApps } from './apps/actions.ts';
-import { login, logout, saveSettings, sessionCheck, sessionLost } from './session/actions.ts';
+import { login, logout, requestConsoleCode, saveSettings, sessionCheck, sessionLost } from './session/actions.ts';
 import { selectOperatorName } from './session/selectors.ts';
 import { commandThread, loadThread, loadThreadEvents, loadThreads, sendMessage } from './threads/actions.ts';
 import { setComposerDraft } from './ui/actions.ts';
@@ -57,6 +57,7 @@ function fakeApi(overrides: ApiOverrides = {}, calls: Calls = []): Api {
   const base: Omit<Api, 'threads' | 'workspace' | 'settings' | 'llmRequests' | 'projects' | 'apps'> = {
     me: async () => ME,
     auth: async () => ME,
+    consoleCode: async () => null,
     logout: async () => ({ ok: true as const }),
     snapshot: async () => snapshot(),
     ...overrides,
@@ -90,6 +91,7 @@ function fakeApi(overrides: ApiOverrides = {}, calls: Calls = []): Api {
   return {
     me: wrap('me', base.me),
     auth: wrap('auth', base.auth),
+    consoleCode: wrap('consoleCode', base.consoleCode),
     logout: wrap('logout', base.logout),
     snapshot: wrap('snapshot', base.snapshot),
     settings: { update: wrap('settings.update', settings.update) },
@@ -201,6 +203,60 @@ describe('session start-up', () => {
     assert.equal(store.getState().session.status, 'signed-in');
     assert.equal(store.getState().session.login.error, null);
     assert.equal(store.getState().stream.asOfSeq, 100n);
+  });
+
+  it('the word "console" asks the server to print a code; the field says so until the next attempt', async () => {
+    const calls: Calls = [];
+    let printing: (() => void) | null = null;
+    let refuse = false;
+    const api = fakeApi(
+      {
+        me: async () => {
+          throw new ApiError(401, 'unauthorized', 'No valid session');
+        },
+        auth: async () => {
+          throw new ApiError(401, 'invalid_code', 'The code is invalid or expired');
+        },
+        consoleCode: () =>
+          new Promise<null>((resolve, reject) => {
+            printing = () => (refuse ? reject(new ApiError(429, 'rate_limited', 'A login code was printed moments ago')) : resolve(null));
+          }),
+      },
+      calls,
+    );
+    const store = createStore({ api, initialRoute: { key: 'login', next: '/apps/notes' } });
+
+    await dispatched(store, sessionCheck());
+    assert.equal(store.getState().session.status, 'anonymous');
+
+    // One request at a time: the second press waits for the answer.
+    const first = dispatched(store, requestConsoleCode());
+
+    assert.deepEqual(store.getState().session.login, { pending: 'console-code', error: null, codePrinted: false });
+    await dispatched(store, requestConsoleCode());
+    await dispatched(store, login('K7QM2X'));
+    assert.equal(calls.filter(call => call.name === 'consoleCode').length, 1);
+    assert.equal(calls.filter(call => call.name === 'auth').length, 0);
+
+    printing!();
+    await first;
+    assert.deepEqual(store.getState().session.login, { pending: null, error: null, codePrinted: true });
+    assert.equal(store.getState().session.status, 'anonymous');
+
+    // A wrong code keeps the hint (the code is still in the log); the next
+    // request or sign-in starts over.
+    await dispatched(store, login('WRONG'));
+    assert.deepEqual(store.getState().session.login, { pending: null, error: { status: 401, code: 'invalid_code', message: 'The code is invalid or expired' }, codePrinted: true });
+
+    refuse = true;
+
+    const second = dispatched(store, requestConsoleCode());
+
+    assert.deepEqual(store.getState().session.login, { pending: 'console-code', error: null, codePrinted: false });
+    printing!();
+    await second;
+    assert.deepEqual(store.getState().session.login, { pending: null, error: { status: 429, code: 'rate_limited', message: 'A login code was printed moments ago' }, codePrinted: false });
+    assert.deepEqual(store.getState().router.route, { key: 'login', next: '/apps/notes' });
   });
 
   it('a network failure of the check is an error state, not anonymous', async () => {
