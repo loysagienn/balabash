@@ -191,8 +191,10 @@ export type WorkspaceFileMeta = {
 // A folder of a listing: its own modification time (a direct entry added,
 // removed or renamed — the files inside changing do not move it) and the
 // count of its direct children by the listing's rule (directories and
-// regular files). All null when the folder vanished between the listing and
-// its stat or cannot be read.
+// regular files). Two independent reads, each null on its own: modifiedAt
+// when the folder could not be stat'ed, both counts when it could not be
+// read into (unknown counts, the date kept); a folder that vanished between
+// the listing and its reads is all null.
 export type WorkspaceFolderMeta = {
   path: string;
   modifiedAt: string | null; // ISO date-time

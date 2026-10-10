@@ -467,8 +467,18 @@ describe('the workspace node over the api', () => {
       // Neither a directory nor a regular file: the listing's rule leaves it out of both counts.
       await fs.symlink(path.join(root, 'full', 'a.md'), path.join(root, 'full', 'link.md'));
       await fs.writeFile(path.join(root, 'top.md'), 'top\n');
+      // Times set apart on purpose, so that the answer tells the folder's own
+      // mtime from any child's whatever the clock's grain: the folder in
+      // March, a child in June — later than the folder.
+      const folderTime = new Date(2026, 2, 3, 10, 0, 0);
+      const childTime = new Date(2026, 5, 6, 12, 0, 0);
+
+      await fs.utimes(path.join(root, 'full', 'a.md'), childTime, childTime);
+      await fs.utimes(path.join(root, 'full'), folderTime, folderTime);
 
       const [empty, full] = await Promise.all([fs.stat(path.join(root, 'empty')), fs.stat(path.join(root, 'full'))]);
+
+      assert.equal(full.mtime.toISOString(), folderTime.toISOString());
       const reply = await stand.request('GET', '/api/workspace/node?path=node-probe');
 
       assert.equal(reply.status, 200, reply.text);
@@ -484,8 +494,11 @@ describe('the workspace node over the api', () => {
       ]);
       assert.deepEqual(node.files.map(file => file.path), ['node-probe/top.md']);
 
-      // A file changing inside a folder moves neither the folder's time nor its counts.
+      // A file changing inside a folder moves neither the folder's time nor
+      // its counts: the child's mtime is now the present, months past the
+      // folder's, and the folder still answers March.
       await fs.writeFile(path.join(root, 'full', 'a.md'), '# A\n\nmore\n');
+      assert.ok((await fs.stat(path.join(root, 'full', 'a.md'))).mtime.getTime() > folderTime.getTime());
       const again = (await stand.request('GET', '/api/workspace/node?path=node-probe')).json<WorkspaceNodeResponse>();
 
       assert.equal(again.kind, 'dir');
@@ -503,6 +516,60 @@ describe('the workspace node over the api', () => {
       assert.deepEqual({ directoryCount: probe.directoryCount, fileCount: probe.fileCount }, { directoryCount: 2, fileCount: 1 });
       assert.equal(top.directories.includes('node-probe'), true);
     } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  // The two reads of a folder fail into their own nulls — through the same
+  // fs.promises object listDir reads with, the failure by the folder's name,
+  // the other folders read as ever; restored whatever happens.
+  test('a folder’s facts are null each by its own failed read: no readdir — the date with unknown counts, no stat — the counts without a date, vanished — all null', async () => {
+    const root = path.join(filesDir, 'fail-probe');
+    const failing = (code: string, folders: Set<string>, original: (...args: unknown[]) => Promise<unknown>) =>
+      (file: unknown, ...rest: unknown[]) => {
+        if (typeof file === 'string' && path.dirname(file) === root && folders.has(path.basename(file))) {
+          return Promise.reject(Object.assign(new Error(`${code}: '${file}'`), { code }));
+        }
+
+        return original.call(fs, file, ...rest);
+      };
+    const originalStat = fs.stat as (...args: unknown[]) => Promise<unknown>;
+    const originalReaddir = fs.readdir as (...args: unknown[]) => Promise<unknown>;
+    const stat = mock.method(fs, 'stat', failing('ENOENT', new Set(['gone', 'unstatable']), originalStat) as typeof fs.stat);
+    const readdir = mock.method(fs, 'readdir', failing('EACCES', new Set(['gone', 'unreadable']), originalReaddir) as typeof fs.readdir);
+
+    try {
+      for (const name of ['gone', 'unreadable', 'unstatable', 'plain']) {
+        await fs.mkdir(path.join(root, name), { recursive: true });
+      }
+      await fs.writeFile(path.join(root, 'unreadable', 'hidden.md'), 'x');
+      await fs.writeFile(path.join(root, 'unstatable', 'seen.md'), 'x');
+      await fs.writeFile(path.join(root, 'plain', 'seen.md'), 'x');
+      const kept = new Date(2026, 0, 2, 3, 4, 5);
+
+      await fs.utimes(path.join(root, 'unreadable'), kept, kept);
+
+      const reply = await stand.request('GET', '/api/workspace/node?path=fail-probe');
+
+      assert.equal(reply.status, 200, reply.text);
+      const node = reply.json<WorkspaceNodeResponse>();
+
+      assert.equal(node.kind, 'dir');
+      if (node.kind !== 'dir') return;
+      assert.deepEqual(node.directories, ['gone', 'plain', 'unreadable', 'unstatable']);
+      const plain = await originalStat(path.join(root, 'plain')) as { mtime: Date };
+
+      assert.deepEqual(node.folders, [
+        { path: 'fail-probe/gone', modifiedAt: null, directoryCount: null, fileCount: null },
+        { path: 'fail-probe/plain', modifiedAt: plain.mtime.toISOString(), directoryCount: 0, fileCount: 1 },
+        { path: 'fail-probe/unreadable', modifiedAt: kept.toISOString(), directoryCount: null, fileCount: null },
+        { path: 'fail-probe/unstatable', modifiedAt: null, directoryCount: 0, fileCount: 1 },
+      ]);
+      // The failures were the folders' own, not the listing's.
+      assert.ok(stat.mock.calls.length >= 4 && readdir.mock.calls.length >= 4);
+    } finally {
+      stat.mock.restore();
+      readdir.mock.restore();
       await fs.rm(root, { recursive: true, force: true });
     }
   });

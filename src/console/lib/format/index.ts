@@ -144,10 +144,13 @@ export function agoLabel(date: Date, now: Date): string {
 
 // "today", "yesterday", then "Oct 2" — when a folder changed, in the same
 // column: a folder's date is a day, not a time of day (the design's rows).
+// Only the calendar day itself is "today": a day ahead of now (a tree copied
+// with its times kept, a source whose clock was wrong) reads as its date,
+// as dayLabel reads one.
 export function folderTimeLabel(date: Date, now: Date): string {
   const ago = daysAgo(date, now);
 
-  if (ago <= 0) {
+  if (ago === 0) {
     return 'today';
   }
   if (ago === 1) {

@@ -104,5 +104,8 @@ describe('format — feed times and sizes', () => {
     assert.equal(folderTimeLabel(new Date(2026, 9, 8, 23, 59), now), 'yesterday');
     assert.equal(folderTimeLabel(new Date(2026, 9, 2, 9, 0), now), 'Oct 2');
     assert.equal(folderTimeLabel(new Date(2025, 9, 2, 9, 0), now), 'Oct 2, 2025');
+    // A day ahead of now is its date, not "today" — only the calendar day itself is.
+    assert.equal(folderTimeLabel(new Date(2026, 9, 10, 0, 0), now), 'Oct 10');
+    assert.equal(folderTimeLabel(new Date(2027, 0, 1, 12, 0), now), 'Jan 1, 2027');
   });
 });

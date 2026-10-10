@@ -298,8 +298,11 @@ export type WorkspaceFileNode = {
 // A folder of a listing: its own modification time — moved by a direct
 // entry added, removed or renamed, not by the files inside changing (the
 // file manager's reading of a folder's date) — and the count of its direct
-// children by the listing's own rule (directories and regular files). All
-// null when the folder vanished between readdir and stat or cannot be read.
+// children by the listing's own rule (directories and regular files). The
+// two facts come from two independent reads and each is null on its own:
+// modifiedAt when the stat failed, both counts when the readdir failed — so
+// a folder nobody may look into keeps its date with unknown counts, and a
+// folder that vanished between the listing and its reads is all null.
 export type WorkspaceFolderNode = {
   path: string;
   modifiedAt: string | null; // ISO date-time
@@ -315,7 +318,7 @@ export type WorkspaceDirListing = {
 };
 
 // One stat and one readdir per folder — the counts come from the entry
-// types, no stat of the children.
+// types, no stat of the children. Each read fails into its own nulls.
 async function folderNode(absDir: string, relPath: string): Promise<WorkspaceFolderNode> {
   const [stats, entries] = await Promise.all([
     fs.stat(absDir).catch(() => null),
