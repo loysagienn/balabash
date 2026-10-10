@@ -10,7 +10,6 @@ import type { ToolFunction } from './mcp-client.ts';
 import type { BuiltinServerCallContext, BuiltinToolServer, UserAuthServer } from './tool-manager.ts';
 import { describeExternalServerStatuses, listExternalSecretTargets, listUserAuthServers } from './tool-manager.ts';
 import {
-  ACCOUNT_KEY_PATTERN,
   disconnectConnection,
   getOauthClient,
   listUserConnections,
@@ -19,6 +18,7 @@ import {
   requestOauthClientCredentials,
 } from './connections/index.ts';
 import { identityLabel } from './connections/identity.ts';
+import { DEFAULT_ACCOUNT_KEY, deriveAccountKey } from './connections/account-key.ts';
 import { forgetExternalServerSecrets, requestExternalServerCredentials } from './external-secrets.ts';
 
 export const AUTH_SERVER_NAME = 'auth';
@@ -29,42 +29,6 @@ export const REQUEST_EXTERNAL_SERVER_CREDENTIALS_FUNCTION_NAME = 'request_extern
 export const FORGET_EXTERNAL_SERVER_CREDENTIALS_FUNCTION_NAME = 'forget_external_server_credentials';
 export const RENAME_CONNECTION_FUNCTION_NAME = 'rename_connection';
 export const DISCONNECT_CONNECTION_FUNCTION_NAME = 'disconnect_connection';
-
-// ---------------------------------------------------------------------------
-// Account naming: the display name is the user's word, the slug is the
-// immutable mnemonic address derived from it at birth.
-
-const TRANSLIT: Record<string, string> = {
-  а: 'a', б: 'b', в: 'v', г: 'g', д: 'd', е: 'e', ё: 'e', ж: 'zh', з: 'z', и: 'i',
-  й: 'i', к: 'k', л: 'l', м: 'm', н: 'n', о: 'o', п: 'p', р: 'r', с: 's', т: 't',
-  у: 'u', ф: 'f', х: 'h', ц: 'ts', ч: 'ch', ш: 'sh', щ: 'sch', ъ: '', ы: 'y',
-  ь: '', э: 'e', ю: 'yu', я: 'ya',
-};
-
-function deriveAccountKey(name: string, taken: ReadonlySet<string>): string {
-  const base = name
-    .toLowerCase()
-    .split('')
-    .map(char => TRANSLIT[char] ?? char)
-    .join('')
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .replace(/^[^a-z]+/, '')
-    .slice(0, 40);
-  const root = base && ACCOUNT_KEY_PATTERN.test(base) ? base : 'account';
-
-  if (!taken.has(root)) {
-    return root;
-  }
-
-  for (let suffix = 2; ; suffix += 1) {
-    const candidate = `${root}-${suffix}`;
-
-    if (!taken.has(candidate)) {
-      return candidate;
-    }
-  }
-}
 
 function serverEnumFunction(
   toolName: string,
@@ -354,9 +318,7 @@ async function resolveAuthorizationTarget(
     }
 
     return {
-      // 'default' is reserved for the pre-multi-account singleton: a user
-      // named "Default" must not become indistinguishable from it.
-      accountKey: deriveAccountKey(name, new Set([...rows.map(row => row.accountKey), 'default'])),
+      accountKey: deriveAccountKey(name, new Set([...rows.map(row => row.accountKey), DEFAULT_ACCOUNT_KEY])),
       displayName: name,
     };
   }

@@ -755,6 +755,43 @@ export type DeleteTaskResponse = {
   task: TaskView;
 };
 
+// The operator's commands over the connections (the Connections screen),
+// the same implementation the auth agent's tools use
+// (src/capabilities/connections/index.ts). PATCH /connections/:id — the
+// account's name in Balabash (the address and the provider identity never
+// change); DELETE /connections/:id — the account is disconnected: the row
+// and its tokens are gone, access on the provider's side is revoked in the
+// provider's own settings. The answer is the row as the snapshot has it
+// (the row as it was, for a delete); the same change arrives as
+// connection.renamed / connection.disconnected of the tail.
+export type RenameConnectionRequest = {
+  name: string;
+};
+
+export type ConnectionResponse = {
+  connection: ConnectionView;
+};
+
+// POST /connections — a one-time sign-in link for a new account of a service
+// of the catalog: without a name the service's first account (refused once
+// it has one), with a name a new account named so (its address derived from
+// the name; a name in use is refused). POST /connections/:id/reconnect — the
+// link for an existing account (re-authorization). Both answer the link,
+// the row it belongs to (pending when new, otherwise as it was — a
+// connected account stays connected until the new flow completes) and the
+// moment the link expires; the link itself is never in the log. The flow's
+// events are addressed to the main thread.
+export type StartConnectionRequest = {
+  server: string;
+  name?: string;
+};
+
+export type ConnectLinkResponse = {
+  connection: ConnectionView;
+  url: string;
+  expiresAt: Date;
+};
+
 export type ConnectionView = {
   id: string;
   server: string;

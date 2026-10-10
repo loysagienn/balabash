@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import type { Thread } from '../../core/contract.ts';
 import type { Api } from '../lib/api/index.ts';
-import type { AppsResponse, ProjectView, TaskView, ThreadsResponse } from '../../api/contract.ts';
+import type { AppsResponse, ConnectionView, ProjectView, TaskView, ThreadsResponse } from '../../api/contract.ts';
 import { ApiError } from '../lib/api/index.ts';
 import type { StoreEnhancer } from 'redux';
 import { createStore } from './index.ts';
@@ -27,7 +27,8 @@ import { hasLoadedPage, makeSelectAgentThreads, makeSelectProjectThreads, select
 import { SEARCH_DEBOUNCE_MS } from './threads/handlers.ts';
 import { createProject, setProjectArchived, updateProject } from './projects/actions.ts';
 import { selectActiveProjects, selectArchivedProjectCount, selectArchivedProjects, selectProjectCreate, selectProjectEdit, selectProjectFlagging } from './projects/selectors.ts';
-import { selectConnections, selectConnectionsNeedingAction } from './connections/selectors.ts';
+import { selectConnectionCall, selectConnectionFailure, selectConnectionLink, selectConnectionRename, selectConnections, selectConnectionsNeedingAction, selectServiceConnect } from './connections/selectors.ts';
+import { connectService, disconnectConnection, reconnectConnection, renameConnection } from './connections/actions.ts';
 import { makeSelectThreadEvents } from './feed/selectors.ts';
 import { snapshotLoad, snapshotLoadDone } from './stream/actions.ts';
 import { makeSelectLastMessage } from '../features/thread-list/selectors.ts';
@@ -38,7 +39,7 @@ type Calls = { name: string; args: unknown[] }[];
 
 const ISO_NOW = '2026-10-09T10:00:00.000Z';
 
-type ApiOverrides = Omit<Partial<Api>, 'threads' | 'workspace' | 'files' | 'settings' | 'llmRequests' | 'limits' | 'secretRequests' | 'projects' | 'apps' | 'schedule'> & { threads?: Partial<Api['threads']>; settings?: Partial<Api['settings']>; projects?: Partial<Api['projects']>; apps?: Partial<Api['apps']>; schedule?: Partial<Api['schedule']> };
+type ApiOverrides = Omit<Partial<Api>, 'threads' | 'workspace' | 'files' | 'settings' | 'llmRequests' | 'limits' | 'secretRequests' | 'projects' | 'apps' | 'schedule' | 'connections'> & { threads?: Partial<Api['threads']>; settings?: Partial<Api['settings']>; projects?: Partial<Api['projects']>; apps?: Partial<Api['apps']>; schedule?: Partial<Api['schedule']>; connections?: Partial<Api['connections']> };
 
 // The file area, the stored files' facts, the model requests and the secret
 // requests are Query, not the store: handlers never call them.
@@ -68,7 +69,7 @@ function fakeApi(overrides: ApiOverrides = {}, calls: Calls = []): Api {
 
       return impl(...args);
     };
-  const base: Omit<Api, 'threads' | 'workspace' | 'files' | 'settings' | 'llmRequests' | 'limits' | 'secretRequests' | 'projects' | 'apps' | 'schedule'> = {
+  const base: Omit<Api, 'threads' | 'workspace' | 'files' | 'settings' | 'llmRequests' | 'limits' | 'secretRequests' | 'projects' | 'apps' | 'schedule' | 'connections'> = {
     me: async () => ME,
     auth: async () => ME,
     consoleCode: async () => null,
@@ -110,6 +111,15 @@ function fakeApi(overrides: ApiOverrides = {}, calls: Calls = []): Api {
     deleteTask: async slug => ({ task: taskRow(slug) }),
     ...overrides.schedule,
   };
+  const connectionRow = (id: string, patch: Partial<ConnectionView> = {}): ConnectionView => ({ id, server: 'notion', accountKey: 'default', displayName: 'notion', status: 'connected', identity: null, scope: null, threadId: 'main', createdAt: new Date(ISO_NOW), updatedAt: new Date(ISO_NOW), ...patch });
+  const link = (connection: ConnectionView) => ({ connection, url: `https://balabash.example/connect/${connection.server}?nonce=n-${connection.id}`, expiresAt: new Date(Date.parse(ISO_NOW) + 15 * 60_000) });
+  const connections: Api['connections'] = {
+    rename: async (id, name) => ({ connection: connectionRow(id, { displayName: name }) }),
+    disconnect: async id => ({ connection: connectionRow(id) }),
+    reconnect: async id => link(connectionRow(id)),
+    connect: async input => link(connectionRow('new', { server: input.server, accountKey: 'new', displayName: input.name ?? input.server, status: 'pending' })),
+    ...overrides.connections,
+  };
   const threads: Api['threads'] = {
     list: async () => ({ threads: [], nextCursor: null }),
     get: async () => ({ thread: thread({ id: 't1' }) }),
@@ -128,6 +138,12 @@ function fakeApi(overrides: ApiOverrides = {}, calls: Calls = []): Api {
     snapshot: wrap('snapshot', base.snapshot),
     settings: { get: wrap('settings.get', settings.get), update: wrap('settings.update', settings.update) },
     apps: { list: wrap('apps.list', apps.list), publish: wrap('apps.publish', apps.publish), unpublish: wrap('apps.unpublish', apps.unpublish) },
+    connections: {
+      rename: wrap('connections.rename', connections.rename),
+      disconnect: wrap('connections.disconnect', connections.disconnect),
+      reconnect: wrap('connections.reconnect', connections.reconnect),
+      connect: wrap('connections.connect', connections.connect),
+    },
     projects: {
       create: wrap('projects.create', projects.create),
       update: wrap('projects.update', projects.update),
@@ -2718,5 +2734,188 @@ describe('schedule commands', () => {
     assert.equal(selectRunsChanged(store.getState()), 0);
     assert.equal(stamp, 0);
     assert.deepEqual(store.getState().ui.toasts, []);
+  });
+});
+
+describe('connection commands', () => {
+  const toasts = (store: AppStore) => store.getState().ui.toasts.map(toast => ({ title: toast.title, state: toast.state }));
+
+  type Answer<T> = { resolve: (value: T) => void; reject: (error: unknown) => void };
+
+  const held =
+    <T,>(answers: Answer<T>[]) =>
+    () =>
+      new Promise<T>((resolve, reject) => {
+        answers.push({ resolve, reject });
+      });
+
+  const row = (id: string, patch: Partial<ConnectionView> = {}): ConnectionView => ({ id, server: 'notion', accountKey: id, displayName: id, status: 'connected', identity: `${id}@example.com`, scope: 'read_content', threadId: 'main', createdAt: new Date(ISO_NOW), updatedAt: new Date(ISO_NOW), ...patch });
+  const record = (connection: ConnectionView, patch: Record<string, unknown> = {}) => ({ connectionId: connection.id, server: connection.server, account: connection.accountKey, name: connection.displayName, status: connection.status, identity: connection.identity, scope: connection.scope, threadId: connection.threadId, createdAt: connection.createdAt.toISOString(), updatedAt: connection.updatedAt.toISOString(), ...patch });
+  const link = (connection: ConnectionView) => ({ connection, url: `https://b.example/connect/${connection.server}?nonce=${connection.id}`, expiresAt: new Date(Date.parse(ISO_NOW) + 15 * 60_000) });
+
+  async function onConnections(overrides: ApiOverrides = {}, calls: Calls = []): Promise<AppStore> {
+    const store = createStore({
+      api: fakeApi(
+        {
+          snapshot: async () => snapshot({ connections: [row('work'), row('home', { status: 'reauthorization_required' })], services: [{ name: 'notion', description: 'Pages', multiAccount: true, manualClient: false }] }),
+          ...overrides,
+        },
+        calls,
+      ),
+      initialRoute: { key: 'connections' },
+    });
+
+    await dispatched(store, sessionCheck());
+    await settle();
+
+    return store;
+  }
+
+  it('renames: one call per row, the answer’s row folded, a toast; a refusal stays in the form; an unchanged name is quiet', async () => {
+    const calls: Calls = [];
+    const answers: Answer<{ connection: ConnectionView }>[] = [];
+    const store = await onConnections({ connections: { rename: held(answers) } }, calls);
+
+    store.dispatch(renameConnection('work', 'Work Notion'));
+    store.dispatch(renameConnection('work', 'Again'));
+    assert.equal(selectConnectionRename(store.getState(), 'work').pending, true);
+    assert.deepEqual(
+      calls.filter(call => call.name === 'connections.rename').map(call => call.args),
+      [['work', 'Work Notion']],
+      'the second submit waits for the first',
+    );
+
+    answers[0]!.resolve({ connection: row('work', { displayName: 'Work Notion', updatedAt: new Date(Date.parse(ISO_NOW) + 1000) }) });
+    await settle();
+    assert.deepEqual(selectConnectionRename(store.getState(), 'work'), { pending: false, error: null, done: 1 });
+    assert.equal(selectConnections(store.getState()).find(connection => connection.id === 'work')?.displayName, 'Work Notion');
+    assert.deepEqual(toasts(store), [{ title: 'Account renamed', state: 'done' }]);
+
+    store.dispatch(renameConnection('home', 'Work Notion'));
+    answers[1]!.reject(new ApiError(409, 'conflict', 'Name "Work Notion" is already used by account "work" of "notion"'));
+    await settle();
+    assert.equal(selectConnectionRename(store.getState(), 'home').error?.message, 'Name "Work Notion" is already used by account "work" of "notion"');
+    assert.equal(selectConnections(store.getState()).find(connection => connection.id === 'home')?.displayName, 'home');
+    assert.equal(toasts(store).length, 1, 'a refusal is the dialog’s to show');
+
+    // The server answers the same name (whitespace trimmed away): no toast.
+    store.dispatch(renameConnection('home', 'home '));
+    answers[2]!.resolve({ connection: row('home', { status: 'reauthorization_required' }) });
+    await settle();
+    assert.equal(toasts(store).length, 1);
+  });
+
+  it('disconnects: one call per row, the row dropped at once and the tail’s event idempotent, a toast; a refusal keeps the row', async () => {
+    const calls: Calls = [];
+    const answers: Answer<{ connection: ConnectionView }>[] = [];
+    const store = await onConnections({ connections: { disconnect: held(answers) } }, calls);
+
+    store.dispatch(disconnectConnection('home'));
+    store.dispatch(disconnectConnection('home'));
+    assert.deepEqual(selectConnectionCall(store.getState(), 'home'), { kind: 'disconnect' });
+    assert.deepEqual(calls.filter(call => call.name === 'connections.disconnect').map(call => call.args), [['home']]);
+
+    answers[0]!.resolve({ connection: row('home', { status: 'reauthorization_required' }) });
+    await settle();
+    assert.deepEqual(selectConnections(store.getState()).map(connection => connection.id), ['work']);
+    assert.deepEqual(selectConnectionsNeedingAction(store.getState()), []);
+    assert.equal(selectConnectionCall(store.getState(), 'home'), null);
+    assert.deepEqual(toasts(store), [{ title: 'Account disconnected', state: 'off' }]);
+
+    const after = store.getState().connections;
+
+    store.dispatch(eventAction(event({ type: 'connection.disconnected', actor: 'system', targetThreadId: 'main', payload: { connectionId: 'home', server: 'notion', account: 'home', name: 'home', reason: 'disconnected' } })));
+    assert.equal(store.getState().connections, after);
+
+    store.dispatch(disconnectConnection('work'));
+    answers[1]!.reject(new ApiError(404, 'not_found', 'No such connection'));
+    await settle();
+    assert.deepEqual(selectConnections(store.getState()).map(connection => connection.id), ['work']);
+    assert.equal(selectConnectionCall(store.getState(), 'work'), null);
+    assert.deepEqual(toasts(store)[1], { title: 'Couldn’t disconnect “work”', state: 'err' });
+  });
+
+  it('reconnects: the link held beside the row until the flow ends or a newer link replaces it; a failure of the flow is kept beside the row', async () => {
+    resetSeq(500n);
+
+    const answers: Answer<ReturnType<typeof link>>[] = [];
+    const store = await onConnections({ connections: { reconnect: held(answers) } });
+    const issued = new Date(Date.parse(ISO_NOW) + 5_000);
+
+    store.dispatch(reconnectConnection('home'));
+    assert.deepEqual(selectConnectionCall(store.getState(), 'home'), { kind: 'reconnect' });
+    answers[0]!.resolve(link(row('home', { status: 'pending', updatedAt: issued })));
+    await settle();
+    assert.equal(selectConnectionCall(store.getState(), 'home'), null);
+    assert.equal(selectConnections(store.getState()).find(connection => connection.id === 'home')?.status, 'pending');
+    assert.deepEqual(selectConnectionLink(store.getState(), 'home'), { url: 'https://b.example/connect/notion?nonce=home', expiresAt: new Date(Date.parse(ISO_NOW) + 15 * 60_000), issuedAt: issued });
+    assert.deepEqual(toasts(store), [{ title: 'Sign-in link ready', state: 'act' }]);
+    assert.match(store.getState().ui.toasts[0]!.desc ?? '', /Open it from the “home” row/);
+
+    // The tail's connection.pending of this very issue keeps the link; a
+    // later issue (an agent's, another tab's) killed it.
+    store.dispatch(eventAction(event({ type: 'connection.pending', actor: 'system', targetThreadId: 'main', payload: record(row('home', { status: 'pending', updatedAt: issued })) })));
+    assert.ok(selectConnectionLink(store.getState(), 'home'));
+    store.dispatch(eventAction(event({ type: 'connection.failed', actor: 'system', targetThreadId: 'main', payload: { connectionId: 'home', server: 'notion', account: 'home', name: 'home', error: 'access_denied: the user cancelled' } })));
+    assert.equal(selectConnectionFailure(store.getState(), 'home')?.error, 'access_denied: the user cancelled');
+    assert.ok(selectConnectionLink(store.getState(), 'home'), 'a failed attempt leaves the link: a click restarts the flow');
+    store.dispatch(eventAction(event({ type: 'connection.pending', actor: 'system', targetThreadId: 'main', payload: record(row('home', { status: 'pending', updatedAt: new Date(issued.getTime() + 60_000) })) })));
+    assert.equal(selectConnectionLink(store.getState(), 'home'), null);
+
+    // Another link, then the flow completes: the link and the failure go.
+    store.dispatch(reconnectConnection('home'));
+    answers[1]!.resolve(link(row('home', { status: 'pending', updatedAt: new Date(issued.getTime() + 120_000) })));
+    await settle();
+    assert.ok(selectConnectionLink(store.getState(), 'home'));
+    store.dispatch(eventAction(event({ type: 'connection.completed', actor: 'system', targetThreadId: 'main', payload: record(row('home', { status: 'connected', scope: 'read_content update_content', updatedAt: new Date(issued.getTime() + 180_000) })) })));
+    assert.equal(selectConnectionLink(store.getState(), 'home'), null);
+    assert.equal(selectConnectionFailure(store.getState(), 'home'), null);
+    assert.equal(selectConnections(store.getState()).find(connection => connection.id === 'home')?.scope, 'read_content update_content');
+
+    store.dispatch(reconnectConnection('work'));
+    answers[2]!.reject(new ApiError(409, 'no_main_thread', 'workspace has no main thread to address the sign-in to'));
+    await settle();
+    assert.equal(selectConnectionLink(store.getState(), 'work'), null);
+    assert.deepEqual(toasts(store)[2], { title: 'Couldn’t get a sign-in link for “work”', state: 'err' });
+  });
+
+  it('connects a service: one call per service, the new row folded pending with its link, the dialog’s form counted; a refusal stays in the form', async () => {
+    const calls: Calls = [];
+    const answers: Answer<ReturnType<typeof link>>[] = [];
+    const store = await onConnections({ connections: { connect: held(answers) } }, calls);
+
+    store.dispatch(connectService('notion', 'Personal'));
+    store.dispatch(connectService('notion', null));
+    assert.equal(selectServiceConnect(store.getState(), 'notion').pending, true);
+    assert.deepEqual(
+      calls.filter(call => call.name === 'connections.connect').map(call => call.args),
+      [[{ server: 'notion', name: 'Personal' }]],
+    );
+
+    answers[0]!.resolve(link(row('personal', { displayName: 'Personal', status: 'pending', identity: null, scope: null })));
+    await settle();
+    assert.deepEqual(selectServiceConnect(store.getState(), 'notion'), { pending: false, error: null, done: 1 });
+    assert.deepEqual(selectConnections(store.getState()).map(connection => connection.id), ['work', 'home', 'personal']);
+    assert.ok(selectConnectionLink(store.getState(), 'personal'));
+    assert.deepEqual(toasts(store), [{ title: 'Sign-in link ready', state: 'act' }]);
+
+    store.dispatch(connectService('notion', null));
+    answers[1]!.reject(new ApiError(409, 'conflict', '"notion" already has an account — name the new one, or reconnect the existing account instead'));
+    await settle();
+    assert.match(selectServiceConnect(store.getState(), 'notion').error?.message ?? '', /already has an account/);
+    assert.equal(toasts(store).length, 1);
+    assert.deepEqual(calls.filter(call => call.name === 'connections.connect').at(-1)?.args, [{ server: 'notion' }], 'no name — no name field');
+  });
+
+  it('an answer that outlived its session touches nothing', async () => {
+    const answers: Answer<{ connection: ConnectionView }>[] = [];
+    const store = await onConnections({ connections: { disconnect: held(answers) } });
+
+    store.dispatch(disconnectConnection('work'));
+    store.dispatch(sessionLost());
+    answers[0]!.resolve({ connection: row('work') });
+    await settle();
+    assert.deepEqual(store.getState().ui.toasts, []);
+    assert.deepEqual(store.getState().connections.calls, {});
   });
 });

@@ -7,7 +7,6 @@ import { useEffect } from 'react';
 import { useAppSelector } from '../store/hooks.ts';
 import { selectRoute } from '../store/router/selectors.ts';
 import { selectSession } from '../store/session/selectors.ts';
-import { Placeholder } from '../screens/Placeholder.tsx';
 import { ProjectScreen } from '../screens/project/ProjectScreen.tsx';
 import { ProjectsScreen } from '../screens/projects/ProjectsScreen.tsx';
 import { LoginLanding } from '../screens/outside/LoginLanding.tsx';
@@ -16,6 +15,7 @@ import { Secrets } from '../screens/outside/Secrets.tsx';
 import { SessionError } from '../screens/outside/SessionError.tsx';
 import { SignIn } from '../screens/outside/SignIn.tsx';
 import { AgentsScreen } from '../screens/agents/AgentsScreen.tsx';
+import { ConnectionsScreen } from '../screens/connections/ConnectionsScreen.tsx';
 import { AppsScreen } from '../screens/apps/AppsScreen.tsx';
 import { FilesScreen } from '../screens/files/FilesScreen.tsx';
 import { HomeScreen } from '../screens/home/HomeScreen.tsx';
@@ -70,7 +70,7 @@ export function App() {
     case 'schedule':
       return <ScheduleScreen route={route} />;
     case 'connections':
-      return <Placeholder current="connections" title="Connections" icon="plug" what="Connections" />;
+      return <ConnectionsScreen />;
     case 'secrets':
       // One instance per id: the values typed and the call in flight belong
       // to the request they were typed for, never to the next id.

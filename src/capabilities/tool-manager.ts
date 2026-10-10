@@ -200,6 +200,14 @@ export function listUserAuthServers(): UserAuthServer[] {
   return [...userAuthServers.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
+// Registers one user-auth server outside loadToolServers — the test
+// stand's way to have a connectable service (loadToolServers connects the
+// installation's real servers, which a test must not touch). The next
+// loadToolServers replaces it like every other entry.
+export function registerUserAuthServer(server: UserAuthServer): void {
+  userAuthServers.set(server.name, server);
+}
+
 export function dropUserClient(serverName: string, userId: string, accountKey: string): void {
   const groups = userServers.get(userId);
   const accounts = groups?.get(serverName);

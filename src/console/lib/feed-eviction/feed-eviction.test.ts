@@ -25,6 +25,20 @@ const api: Api = {
   auth: async () => ME,
   consoleCode: async () => null,
   logout: async () => ({ ok: true as const }),
+  connections: {
+    rename: async () => {
+      throw new Error('not here');
+    },
+    disconnect: async () => {
+      throw new Error('not here');
+    },
+    reconnect: async () => {
+      throw new Error('not here');
+    },
+    connect: async () => {
+      throw new Error('not here');
+    },
+  },
   snapshot: async () =>
     snapshot({
       asOfSeq: 50n,

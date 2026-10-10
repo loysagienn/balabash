@@ -27,6 +27,7 @@ import { appsReducer } from './apps/reducer.ts';
 import { loadAppsHandler, publishAppHandler, unpublishAppHandler } from './apps/handlers.ts';
 import { scheduleReducer } from './schedule/reducer.ts';
 import { deleteTaskHandler, runTaskHandler } from './schedule/handlers.ts';
+import { connectServiceHandler, disconnectConnectionHandler, reconnectConnectionHandler, renameConnectionHandler } from './connections/handlers.ts';
 import { connectionsReducer } from './connections/reducer.ts';
 import { secretRequestsReducer } from './secret-requests/reducer.ts';
 import { agentsReducer } from './agents/reducer.ts';
@@ -60,6 +61,10 @@ export const handlers = {
   UNPUBLISH_APP: unpublishAppHandler,
   RUN_TASK: runTaskHandler,
   DELETE_TASK: deleteTaskHandler,
+  RENAME_CONNECTION: renameConnectionHandler,
+  DISCONNECT_CONNECTION: disconnectConnectionHandler,
+  RECONNECT_CONNECTION: reconnectConnectionHandler,
+  CONNECT_SERVICE: connectServiceHandler,
 } satisfies ActionHandlers;
 
 export type AppStore = Store<State, Action>;

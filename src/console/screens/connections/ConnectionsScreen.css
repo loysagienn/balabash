@@ -1,0 +1,11 @@
+@layer screens{
+/* Connections: the granted scopes as a row of chips; a chip wider than the column (a Google scope URL on the phone) is cut with an ellipsis, not clipped */
+.conn-scopes{display:flex;flex-wrap:wrap;gap:var(--sp-1);min-width:0}
+.conn-scopes .code{display:inline-block;max-width:100%;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:bottom}
+.conn-scopes + .quiet,.conn-scopes + .errline{display:block;margin-top:var(--sp-1)}
+/* a catalog tile that connects is a button: the tile's look, the button's reset */
+.conn-tile{appearance:none;border:0;margin:0;font:inherit;text-align:left;cursor:pointer}
+.conn-tile:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+/* the "Connect" dialog's note under the field */
+.conn-connect-note{margin:0;font-size:var(--fs-meta);line-height:var(--lh-meta);color:var(--text-3)}
+}

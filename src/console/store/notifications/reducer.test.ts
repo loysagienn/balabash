@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import type { ConnectionView } from '../../../api/contract.ts';
 import { notificationViews, unreadCount } from '../../features/notifications/notifications.logic.ts';
-import { connectionsReducer } from '../connections/reducer.ts';
+import { connectionsReducer, initialConnections } from '../connections/reducer.ts';
 import type { ConnectionsState } from '../connections/reducer.ts';
 import { eventAction } from '../events.ts';
 import { event, resetSeq } from '../fixtures.ts';
@@ -123,7 +123,7 @@ describe('notifications reducer', () => {
 
     const c1: ConnectionView = { id: 'c1', server: 'notion', accountKey: 'work', displayName: 'Work Notion', status: 'connected', identity: 'v@example.com', scope: null, threadId: null, createdAt: new Date(1_700_000_000_000), updatedAt: new Date(1_700_000_000_000) };
     const about = { connectionId: 'c1', server: 'notion', account: 'work', name: 'Work Notion' };
-    let connections: ConnectionsState = { byId: { c1 }, ids: ['c1'], catalog: [] };
+    let connections: ConnectionsState = { ...initialConnections, byId: { c1 }, ids: ['c1'] };
     let notifications = initialNotifications;
     const step = (partial: Parameters<typeof event>[0]) => {
       const action = eventAction(event(partial));

@@ -4,6 +4,8 @@
 
 import type {
   AppsResponse,
+  ConnectLinkResponse,
+  ConnectionResponse,
   CreateProjectRequest,
   CreateProjectResponse,
   DeleteTaskResponse,
@@ -21,12 +23,14 @@ import type {
   ProvisionSecretsResponse,
   PublicationResponse,
   PublishAppRequest,
+  RenameConnectionRequest,
   RunTaskResponse,
   SecretRequestResponse,
   SettingsFactsResponse,
   SettingsPatchRequest,
   SettingsResponse,
   SnapshotResponse,
+  StartConnectionRequest,
   TaskCommandRequest,
   ThreadEventsResponse,
   ThreadResponse,
@@ -133,6 +137,19 @@ export type Api = {
     runTask(slug: string, taskId: string): Promise<RunTaskResponse>;
     deleteTask(slug: string, taskId: string): Promise<DeleteTaskResponse>;
   };
+  // The operator's commands over the accounts of external services (the
+  // Connections screen): a rename and a disconnect answer the row (the same
+  // change arrives as connection.renamed / connection.disconnected of the
+  // tail); a sign-in link for an existing account (reconnect) and for a
+  // new one of a service of the catalog (connect) answer the link, the row
+  // it belongs to and the link's expiry — the link is never in the log,
+  // the flow's end arrives as connection.completed / connection.failed.
+  connections: {
+    rename(id: string, name: string): Promise<ConnectionResponse>;
+    disconnect(id: string): Promise<ConnectionResponse>;
+    reconnect(id: string): Promise<ConnectLinkResponse>;
+    connect(input: StartConnectionRequest): Promise<ConnectLinkResponse>;
+  };
   // The trusted window of a one-time link (the second data layer too): the
   // field metadata of a secret request, and the values going to storage —
   // they never come back, not in the answer, not in an event. A 404 is the
@@ -161,6 +178,7 @@ export function createApi(options: FetchOptions = {}): Api {
   const project = (id: string) => `/api/projects/${encodeURIComponent(id)}`;
   const secretRequest = (id: string) => `/api/secret-requests/${encodeURIComponent(id)}`;
   const task = (slug: string) => `/api/schedule/tasks/${encodeURIComponent(slug)}`;
+  const connection = (id: string) => `/api/connections/${encodeURIComponent(id)}`;
 
   return {
     me: () => apiFetch<MeResponse>('/api/me', { unauthenticated: true }),
@@ -211,6 +229,12 @@ export function createApi(options: FetchOptions = {}): Api {
       run: (id, signal) => apiFetch<JobRunResponse>(`/api/schedule/runs/${encodeURIComponent(id)}`, { signal }),
       runTask: (slug, taskId) => apiFetch<RunTaskResponse>(`${task(slug)}/run`, { method: 'POST', body: { taskId } satisfies TaskCommandRequest }),
       deleteTask: (slug, taskId) => apiFetch<DeleteTaskResponse>(task(slug), { method: 'DELETE', query: { taskId } satisfies TaskCommandRequest }),
+    },
+    connections: {
+      rename: (id, name) => apiFetch<ConnectionResponse>(connection(id), { method: 'PATCH', body: { name } satisfies RenameConnectionRequest }),
+      disconnect: id => apiFetch<ConnectionResponse>(connection(id), { method: 'DELETE' }),
+      reconnect: id => apiFetch<ConnectLinkResponse>(`${connection(id)}/reconnect`, { method: 'POST', body: {} }),
+      connect: input => apiFetch<ConnectLinkResponse>('/api/connections', { method: 'POST', body: input }),
     },
     secretRequests: {
       get: (id, signal) => apiFetch<SecretRequestResponse>(secretRequest(id), { signal }),

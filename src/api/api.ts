@@ -29,7 +29,7 @@ import { WorkspacePathError, fileNodeOf, listDir, replaceFileContent, resolveFil
 import { FileNotFoundError, getFile, getUserFile, openFileContent } from '../files/index.ts';
 import { verifyDownloadLink } from '../files/storage/local.ts';
 import { getExternalServerSecretRequest, provisionExternalServerSecrets } from '../capabilities/external-secrets.ts';
-import { getOauthClientRequest, provisionOauthClient } from '../capabilities/connections/index.ts';
+import { ConnectionError, disconnectConnection, getOauthClientRequest, getUserConnection, issueConnectLink, provisionOauthClient, renameConnection, startConnection, connectionView } from '../capabilities/connections/index.ts';
 import { AppManagementError, listApps, publishApp, unpublishApp } from '../apps/management.ts';
 import { ProjectError, archiveProject, createProject, parseProjectInput, parseProjectPatch, unarchiveProject, updateProject } from '../projects/mutations.ts';
 import { projectView } from '../projects/store.ts';
@@ -47,6 +47,8 @@ import { buildSnapshot } from './snapshot.ts';
 import { checkMutationOrigin } from './origin.ts';
 import type {
   AppsResponse,
+  ConnectLinkResponse,
+  ConnectionResponse,
   CreateProjectResponse,
   DeleteTaskResponse,
   FileMetaResponse,
@@ -1053,6 +1055,201 @@ router.delete('/schedule/tasks/:slug', requireSession, async ctx => {
   } catch (error) {
     if (error instanceof ScheduleError) {
       sendScheduleError(ctx, error);
+
+      return;
+    }
+
+    throw error;
+  }
+});
+
+// --------------------------------------------------------------------------
+// The connections (the Connections screen): the operator's commands over
+// the accounts of external services, the same implementation the auth
+// agent's tools use (src/capabilities/connections/index.ts) — a rename, a
+// disconnect, a sign-in link for an existing account (re-authorization)
+// and for a new one (the catalog's "Connect"). The rows and the catalog
+// are the snapshot's. A row is addressed by its id; another workspace's
+// row and a missing one are one 404. The lifecycle events keep their
+// addressee — the thread that drives the account (the auth agent's; the
+// main thread when the console issued the link): a rename and a
+// disconnect journal to the row's thread, a link from the console binds
+// the row to the main thread, so the flow's completion reaches the
+// secretary, who tells the user. A refusal is a ConnectionError whose
+// code maps to a status.
+
+const CONNECTION_ERROR_STATUS: Record<ConnectionError['code'], number> = { bad_request: 400, not_found: 404, conflict: 409 };
+const CONNECTION_NAME_MAX = 200;
+
+function sendConnectionError(ctx: Context, error: ConnectionError): void {
+  sendError(ctx, CONNECTION_ERROR_STATUS[error.code], error.code, error.message);
+}
+
+async function requireOwnConnection(ctx: Context, id: string) {
+  const row = await getUserConnection(ctx.state.userId as string, id);
+
+  if (!row) {
+    sendError(ctx, 404, 'not_found', 'No such connection');
+  }
+
+  return row;
+}
+
+// A link from the console is addressed to the main thread; a workspace
+// without one cannot be told the outcome — the link is not issued.
+async function requireMainThreadId(ctx: Context): Promise<string | null> {
+  const main = await getMainThread(ctx.state.userId as string);
+
+  if (!main) {
+    sendError(ctx, 409, 'no_main_thread', 'workspace has no main thread to address the sign-in to');
+
+    return null;
+  }
+
+  return main.id;
+}
+
+// A name of the body, or null after a 400: a string within the limit; the
+// emptiness rule is the command's (its 400 names it).
+function parseName(ctx: Context, raw: unknown, required: boolean): string | null | undefined {
+  if (raw === undefined && !required) {
+    return undefined;
+  }
+
+  if (typeof raw !== 'string' || raw.length > CONNECTION_NAME_MAX) {
+    sendError(ctx, 400, 'bad_request', `name must be a string of at most ${CONNECTION_NAME_MAX} characters`);
+
+    return null;
+  }
+
+  return raw;
+}
+
+router.patch('/connections/:id', requireSession, async ctx => {
+  const userId = ctx.state.userId as string;
+  const body = await readJsonBody(ctx);
+
+  if (!body) {
+    return;
+  }
+
+  const name = parseName(ctx, body.name, true);
+
+  if (name === null || name === undefined) {
+    return;
+  }
+
+  const row = await requireOwnConnection(ctx, ctx.params.id as string);
+
+  if (!row) {
+    return;
+  }
+
+  try {
+    await renameConnection(userId, row.server, row.accountKey, name);
+
+    const renamed = await getUserConnection(userId, row.id);
+    const response: ConnectionResponse = { connection: connectionView(renamed ?? row) };
+
+    ctx.body = prepareObject(response);
+  } catch (error) {
+    if (error instanceof ConnectionError) {
+      sendConnectionError(ctx, error);
+
+      return;
+    }
+
+    throw error;
+  }
+});
+
+router.delete('/connections/:id', requireSession, async ctx => {
+  const userId = ctx.state.userId as string;
+  const row = await requireOwnConnection(ctx, ctx.params.id as string);
+
+  if (!row) {
+    return;
+  }
+
+  try {
+    await disconnectConnection(userId, row.server, row.accountKey);
+
+    const response: ConnectionResponse = { connection: connectionView(row) };
+
+    ctx.body = prepareObject(response);
+  } catch (error) {
+    if (error instanceof ConnectionError) {
+      sendConnectionError(ctx, error);
+
+      return;
+    }
+
+    throw error;
+  }
+});
+
+router.post('/connections/:id/reconnect', requireSession, async ctx => {
+  const userId = ctx.state.userId as string;
+  const row = await requireOwnConnection(ctx, ctx.params.id as string);
+
+  if (!row) {
+    return;
+  }
+
+  const mainThreadId = await requireMainThreadId(ctx);
+
+  if (!mainThreadId) {
+    return;
+  }
+
+  try {
+    const response: ConnectLinkResponse = await issueConnectLink(userId, mainThreadId, row.server, row.accountKey);
+
+    ctx.body = prepareObject(response);
+  } catch (error) {
+    if (error instanceof ConnectionError) {
+      sendConnectionError(ctx, error);
+
+      return;
+    }
+
+    throw error;
+  }
+});
+
+router.post('/connections', requireSession, async ctx => {
+  const userId = ctx.state.userId as string;
+  const body = await readJsonBody(ctx);
+
+  if (!body) {
+    return;
+  }
+
+  if (typeof body.server !== 'string' || !body.server) {
+    sendError(ctx, 400, 'bad_request', 'server must be a non-empty string');
+
+    return;
+  }
+
+  const name = parseName(ctx, body.name, false);
+
+  if (name === null) {
+    return;
+  }
+
+  const mainThreadId = await requireMainThreadId(ctx);
+
+  if (!mainThreadId) {
+    return;
+  }
+
+  try {
+    const response: ConnectLinkResponse = await startConnection(userId, mainThreadId, body.server, name ?? null);
+
+    ctx.body = prepareObject(response);
+  } catch (error) {
+    if (error instanceof ConnectionError) {
+      sendConnectionError(ctx, error);
 
       return;
     }

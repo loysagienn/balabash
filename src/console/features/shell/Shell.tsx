@@ -116,7 +116,7 @@ export function Shell({ current, detail, children, ...top }: ShellProps) {
       <div className="shell" data-detail={detail ? '' : undefined}>
         <aside className="shell-side">
           <div className="shell-ws">
-            <div className="shell-logo">{workspace.charAt(0).toUpperCase()}</div>
+            <img className="shell-logo" src="/static/icon-192.png" alt="" width="192" height="192" />
             <div>
               <b className="shell-ws-name">{workspace}</b>
               {operator ? <small className="shell-ws-sub">{operator}</small> : null}

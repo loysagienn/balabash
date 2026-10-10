@@ -37,12 +37,27 @@ import { createInteractiveAuthProvider } from './oauth-provider.ts';
 import { backfillConnectionIdentity, getAccessToken, identityData, identityLabel, probeIdentity } from './identity.ts';
 import type { ProbedIdentity } from './identity.ts';
 import type { IdentityProbeConfig } from '../server-config.ts';
+import { ACCOUNT_KEY_PATTERN, DEFAULT_ACCOUNT_KEY, deriveAccountKey } from './account-key.ts';
 
 export { createTransportAuthProvider } from './oauth-provider.ts';
+export { ACCOUNT_KEY_PATTERN } from './account-key.ts';
 
-// Account slugs are immutable mnemonic addresses; the pattern keeps them
-// url- and enum-friendly.
-export const ACCOUNT_KEY_PATTERN = /^[a-z][a-z0-9-]*$/;
+// A refusal of a connection command, for the two callers alike: the auth
+// tools answer the model with the message, the console's endpoints map the
+// code to a status (src/api/api.ts) — 400 a malformed ask, 404 no such
+// service or account, 409 a rule of the registry (a name in use, a service
+// that holds one account, a manual OAuth client not provisioned yet).
+export type ConnectionErrorCode = 'bad_request' | 'not_found' | 'conflict';
+
+export class ConnectionError extends Error {
+  readonly code: ConnectionErrorCode;
+
+  constructor(code: ConnectionErrorCode, message: string) {
+    super(message);
+    this.name = 'ConnectionError';
+    this.code = code;
+  }
+}
 
 // The link survives Telegram preview fetches and stray clicks: it stays valid
 // until this TTL or a completed authorization, whichever comes first. Each
@@ -65,7 +80,7 @@ function getServer(serverName: string): UserAuthServer {
   const server = getUserAuthServer(serverName);
 
   if (!server) {
-    throw new Error(`Unknown integration "${serverName}"`);
+    throw new ConnectionError('not_found', `Unknown integration "${serverName}"`);
   }
 
   return server;
@@ -83,7 +98,8 @@ async function requireManualOauthClient(server: UserAuthServer): Promise<void> {
   }
 
   if (!(await getOauthClient(server.name))) {
-    throw new Error(
+    throw new ConnectionError(
+      'conflict',
       `Integration "${server.name}" needs installation OAuth client credentials before user authorization`,
     );
   }
@@ -93,6 +109,15 @@ async function requireManualOauthClient(server: UserAuthServer): Promise<void> {
 // canonical one in the client registry — never Postgres plan roulette.
 export async function listUserConnections(userId: string) {
   return prisma.connection.findMany({ where: { userId }, orderBy: { createdAt: 'asc' } });
+}
+
+// One row of the user by its id — the address the console's endpoints
+// use; a row of another user and a missing one are the same null (the
+// api's 404, no existence oracle).
+export async function getUserConnection(userId: string, id: string): Promise<ConnectionModel | null> {
+  const row = await prisma.connection.findUnique({ where: { id } });
+
+  return row && row.userId === userId ? row : null;
 }
 
 // The row as the console sees it — in the snapshot (ConnectionView) and in
@@ -156,7 +181,7 @@ async function requireConnection(userId: string, serverName: string, accountKey:
     const rows = await prisma.connection.findMany({ where: { userId, server: serverName } });
     const known = rows.map(candidate => `${candidate.accountKey} — "${candidate.displayName}"`).join('; ') || '(none)';
 
-    throw new Error(`No account "${accountKey}" of "${serverName}". Accounts: ${known}`);
+    throw new ConnectionError('not_found', `No account "${accountKey}" of "${serverName}". Accounts: ${known}`);
   }
 
   return row;
@@ -176,7 +201,7 @@ export async function renameConnection(
   const trimmed = name.trim();
 
   if (!trimmed) {
-    throw new Error('The new name must not be empty');
+    throw new ConnectionError('bad_request', 'The new name must not be empty');
   }
 
   // Case-insensitive, matching the name check at connect time.
@@ -185,7 +210,7 @@ export async function renameConnection(
   });
 
   if (clash) {
-    throw new Error(`Name "${trimmed}" is already used by account "${clash.accountKey}" of "${serverName}"`);
+    throw new ConnectionError('conflict', `Name "${trimmed}" is already used by account "${clash.accountKey}" of "${serverName}"`);
   }
 
   await prisma.connection.update({ where: { id: row.id }, data: { displayName: trimmed } });
@@ -224,11 +249,14 @@ export async function disconnectConnection(
   return { accountKey: row.accountKey, name: row.displayName };
 }
 
-// Issues a one-time authorization link for one account of the service.
-// threadId is the issuing thread (the auth agent's): the flow's connection.*
-// events are addressed to it. Passing an unknown accountKey starts a new
-// account — gated on the service declaring an identity probe and on every
-// existing account's identity being known (else the twin guard is blind).
+// The one-time link as issued: the address, the row it belongs to (as the
+// console sees it — the link is never in the log) and the moment the link
+// stops working (each click until then restarts the flow with a fresh
+// OAuth state).
+export type ConnectLink = { url: string; connection: ConnectionView; expiresAt: Date };
+
+// Issues a one-time authorization link for one account of the service and
+// answers only its address — the auth agent's request_authorization.
 export async function requestAuthorization(
   userId: string,
   threadId: string,
@@ -236,14 +264,30 @@ export async function requestAuthorization(
   requestedAccountKey?: string,
   displayName?: string,
 ): Promise<string> {
+  return (await issueConnectLink(userId, threadId, serverName, requestedAccountKey, displayName)).url;
+}
+
+// Issues a one-time authorization link for one account of the service.
+// threadId is the issuing thread — the auth agent's, or the main thread
+// when the operator asks from the console: the flow's connection.* events
+// are addressed to it. Passing an unknown accountKey starts a new
+// account — gated on the service declaring an identity probe and on every
+// existing account's identity being known (else the twin guard is blind).
+export async function issueConnectLink(
+  userId: string,
+  threadId: string,
+  serverName: string,
+  requestedAccountKey?: string,
+  displayName?: string,
+): Promise<ConnectLink> {
   const server = getServer(serverName);
 
   await requireManualOauthClient(server);
 
-  const accountKey = requestedAccountKey ?? 'default';
+  const accountKey = requestedAccountKey ?? DEFAULT_ACCOUNT_KEY;
 
   if (!ACCOUNT_KEY_PATTERN.test(accountKey)) {
-    throw new Error(`Account key "${accountKey}" must match ${ACCOUNT_KEY_PATTERN}`);
+    throw new ConnectionError('bad_request', `Account key "${accountKey}" must match ${ACCOUNT_KEY_PATTERN}`);
   }
 
   const rows = await prisma.connection.findMany({ where: { userId, server: server.name } });
@@ -252,7 +296,8 @@ export async function requestAuthorization(
   // The multiplicity gate.
   if (!existing && rows.length) {
     if (!server.identityProbe) {
-      throw new Error(
+      throw new ConnectionError(
+        'conflict',
         `Integration "${server.name}" declares no identity probe, so it holds at most one connected account`,
       );
     }
@@ -272,7 +317,8 @@ export async function requestAuthorization(
       const backfill = await backfillConnectionIdentity(server.identityProbe, row.id);
 
       if (!backfill.ok) {
-        throw new Error(
+        throw new ConnectionError(
+          'conflict',
           `Cannot add another "${server.name}" account yet: the identity of account "${row.accountKey}" is unknown (${backfill.reason}). Use that account once (a live call refreshes its token and records the identity), or re-authorize it, then retry.`,
         );
       }
@@ -280,7 +326,8 @@ export async function requestAuthorization(
   }
 
   const connectNonce = randomToken();
-  const pending = { expiresAt: new Date(Date.now() + CONNECT_LINK_TTL_MS).toISOString() };
+  const expiresAt = new Date(Date.now() + CONNECT_LINK_TTL_MS);
+  const pending = { expiresAt: expiresAt.toISOString() };
 
   let row: ConnectionModel;
 
@@ -306,7 +353,7 @@ export async function requestAuthorization(
         accountKey,
         // Proper naming at birth arrives with the lifecycle verbs; until then
         // the display name falls back to the address.
-        displayName: displayName?.trim() || (accountKey === 'default' ? server.name : accountKey),
+        displayName: displayName?.trim() || (accountKey === DEFAULT_ACCOUNT_KEY ? server.name : accountKey),
         status: 'pending',
         connectNonce,
         pending,
@@ -318,7 +365,37 @@ export async function requestAuthorization(
   // carries it whole, the nonce and the tokens stay out of the log.
   await journalConnectionEvent(CONNECTION_PENDING, row, connectionRecord(row));
 
-  return `https://${config.domain}/connect/${server.name}?nonce=${connectNonce}`;
+  return { url: `https://${config.domain}/connect/${server.name}?nonce=${connectNonce}`, connection: connectionView(row), expiresAt };
+}
+
+// The console's "Connect" on a service of the catalog: a link for a new
+// account. With a name — a new account named so (the address derived from
+// the name, as the auth agent derives it; a name in use is refused — that
+// account is re-authorized from its own row); without — the service's
+// first account under the default address, and a refusal once the service
+// has one (another account needs a name, an existing one its own
+// "Reconnect"). The link-issuing rules (one account without an identity
+// probe, a manual OAuth client not provisioned) are issueConnectLink's.
+export async function startConnection(userId: string, threadId: string, serverName: string, name: string | null): Promise<ConnectLink> {
+  const server = getServer(serverName);
+  const rows = await prisma.connection.findMany({ where: { userId, server: server.name } });
+  const trimmed = name?.trim() || null;
+
+  if (!trimmed) {
+    if (rows.length) {
+      throw new ConnectionError('conflict', `"${server.name}" already has an account — name the new one, or reconnect the existing account instead`);
+    }
+
+    return issueConnectLink(userId, threadId, server.name);
+  }
+
+  const clash = rows.find(row => row.displayName.trim().toLowerCase() === trimmed.toLowerCase());
+
+  if (clash) {
+    throw new ConnectionError('conflict', `Name "${trimmed}" is already used by account "${clash.accountKey}" of "${server.name}" — reconnect that account instead`);
+  }
+
+  return issueConnectLink(userId, threadId, server.name, deriveAccountKey(trimmed, new Set([...rows.map(row => row.accountKey), DEFAULT_ACCOUNT_KEY])), trimmed);
 }
 
 // Records a pending request for a manual installation OAuth client

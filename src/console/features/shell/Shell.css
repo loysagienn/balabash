@@ -5,9 +5,9 @@
 .shell{display:grid;grid-template-columns:var(--side-w) minmax(0,1fr);height:100%;min-height:0;background:var(--bg);color:var(--text)}
 
 .shell-side{display:flex;flex-direction:column;gap:var(--sp-3);min-width:0;padding:var(--sp-3h) var(--sp-2h);border-right:1px solid var(--border);background:var(--bg);overflow-y:auto}
-/* workspace: logo, name, product name */
+/* workspace: the service icon (the Balabash mark, its own colors and padding), name, operator */
 .shell-ws{display:flex;align-items:center;gap:var(--sp-2h);padding:var(--sp-1) var(--sp-1h)}
-.shell-logo{width:var(--ctl-h-sm);height:var(--ctl-h-sm);border-radius:var(--r-sm);flex:none;display:grid;place-items:center;background:linear-gradient(135deg,var(--accent),var(--accent-2));color:var(--accent-ink);font-weight:var(--fw-bold);font-size:var(--fs-body)}
+.shell-logo{width:var(--ctl-h-sm);height:var(--ctl-h-sm);flex:none;display:block;object-fit:contain}
 .shell-ws-name{display:block;font-size:var(--fs-body);line-height:var(--lh-meta);font-weight:var(--fw-semibold)}
 .shell-ws-sub{display:block;font-size:var(--fs-meta);line-height:var(--lh-meta);color:var(--text-3)}
 .shell-search{display:flex;align-items:center;gap:var(--sp-2);width:100%;height:var(--ctl-h);padding:0 var(--sp-2h) 0 var(--sp-3);border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface);color:var(--text-3);font-size:var(--fs-ui)}
