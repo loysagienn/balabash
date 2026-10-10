@@ -93,6 +93,14 @@ const api: Api = {
     text: async () => '',
   },
   llmRequests: { list: async () => ({ requests: [] }) },
+  secretRequests: {
+    get: async () => {
+      throw new Error('not here');
+    },
+    provision: async () => {
+      throw new Error('not here');
+    },
+  },
 };
 
 const settle = () => new Promise(resolve => setTimeout(resolve, 0));

@@ -11,6 +11,8 @@ import type {
   LogoutResponse,
   MeResponse,
   ProjectResponse,
+  ProvisionSecretsResponse,
+  SecretRequestResponse,
   SettingsPatchRequest,
   SettingsResponse,
   SnapshotResponse,
@@ -79,6 +81,14 @@ export type Api = {
   llmRequests: {
     list(query: LlmRequestsQuery, signal?: AbortSignal): Promise<LlmRequestsResponse>;
   };
+  // The trusted window of a one-time link (the second data layer too): the
+  // field metadata of a secret request, and the values going to storage —
+  // they never come back, not in the answer, not in an event. A 404 is the
+  // answer "used or expired".
+  secretRequests: {
+    get(id: string, signal?: AbortSignal): Promise<SecretRequestResponse>;
+    provision(id: string, values: Record<string, string>): Promise<ProvisionSecretsResponse>;
+  };
 };
 
 // The URL of a file's bytes (/files/<rel>): inline for viewers, an
@@ -97,6 +107,7 @@ export function createApi(options: FetchOptions = {}): Api {
   const apiFetch = createFetch(options);
   const thread = (id: string) => `/api/threads/${encodeURIComponent(id)}`;
   const project = (id: string) => `/api/projects/${encodeURIComponent(id)}`;
+  const secretRequest = (id: string) => `/api/secret-requests/${encodeURIComponent(id)}`;
 
   return {
     me: () => apiFetch<MeResponse>('/api/me', { unauthenticated: true }),
@@ -130,6 +141,10 @@ export function createApi(options: FetchOptions = {}): Api {
     },
     llmRequests: {
       list: (query, signal) => apiFetch<LlmRequestsResponse>('/api/llm-requests', { query, signal }),
+    },
+    secretRequests: {
+      get: (id, signal) => apiFetch<SecretRequestResponse>(secretRequest(id), { signal }),
+      provision: (id, values) => apiFetch<ProvisionSecretsResponse>(secretRequest(id), { method: 'POST', body: { values } }),
     },
   };
 }

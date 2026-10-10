@@ -12,6 +12,7 @@ import { ProjectScreen } from '../screens/project/ProjectScreen.tsx';
 import { ProjectsScreen } from '../screens/projects/ProjectsScreen.tsx';
 import { LoginLanding } from '../screens/outside/LoginLanding.tsx';
 import { NotFound } from '../screens/outside/NotFound.tsx';
+import { Secrets } from '../screens/outside/Secrets.tsx';
 import { SessionError } from '../screens/outside/SessionError.tsx';
 import { SignIn } from '../screens/outside/SignIn.tsx';
 import { AgentsScreen } from '../screens/agents/AgentsScreen.tsx';
@@ -70,7 +71,7 @@ export function App() {
     case 'connections':
       return <Placeholder current="connections" title="Connections" icon="plug" what="Connections" />;
     case 'secrets':
-      return <Placeholder current={null} title="Secrets" icon="wrench" what="Secrets entry" />;
+      return <Secrets id={route.id} />;
     case 'agents':
       return <AgentsScreen route={route} />;
     case 'system':
