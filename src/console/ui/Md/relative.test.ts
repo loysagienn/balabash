@@ -1,0 +1,50 @@
+import assert from 'node:assert/strict';
+import { describe, it } from 'node:test';
+import { isRelativeUrl, resolveRelative } from './relative.ts';
+
+describe('markdown — relative references of a placed document', () => {
+  it('tells a relative reference from a scheme, an absolute path and a fragment', () => {
+    assert.equal(isRelativeUrl('notes.md'), true);
+    assert.equal(isRelativeUrl('./notes.md'), true);
+    assert.equal(isRelativeUrl('../design/README.md'), true);
+    assert.equal(isRelativeUrl('design/'), true);
+    assert.equal(isRelativeUrl('a/b:c.md'), true);
+    assert.equal(isRelativeUrl('page?x=1:2'), true);
+    assert.equal(isRelativeUrl('https://example.com/x'), false);
+    assert.equal(isRelativeUrl('mailto:someone@example.com'), false);
+    assert.equal(isRelativeUrl('C:/x.md'), false);
+    assert.equal(isRelativeUrl('/files/a.png'), false);
+    assert.equal(isRelativeUrl('//host/a.png'), false);
+    assert.equal(isRelativeUrl('#section'), false);
+    assert.equal(isRelativeUrl(''), false);
+  });
+
+  it('resolves against the folder of the document', () => {
+    assert.deepEqual(resolveRelative('balabash/console/README.md', 'frontend.md'), { path: 'balabash/console/frontend.md', hash: '' });
+    assert.deepEqual(resolveRelative('balabash/console/README.md', './frontend.md'), { path: 'balabash/console/frontend.md', hash: '' });
+    assert.deepEqual(resolveRelative('balabash/console/README.md', '../design/README.md'), { path: 'balabash/design/README.md', hash: '' });
+    assert.deepEqual(resolveRelative('balabash/console/README.md', 'reviews/'), { path: 'balabash/console/reviews', hash: '' });
+    assert.deepEqual(resolveRelative('balabash/console/README.md', '.'), { path: 'balabash/console', hash: '' });
+    assert.deepEqual(resolveRelative('README.md', 'notes.md'), { path: 'notes.md', hash: '' });
+  });
+
+  it('keeps the fragment, drops the query and undoes the percent-encoding', () => {
+    assert.deepEqual(resolveRelative('a/b.md', 'c.md#part-2'), { path: 'a/c.md', hash: '#part-2' });
+    assert.deepEqual(resolveRelative('a/b.md', 'c.md?x=1'), { path: 'a/c.md', hash: '' });
+    assert.deepEqual(resolveRelative('a/b.md', 'my%20file.md'), { path: 'a/my file.md', hash: '' });
+    assert.deepEqual(resolveRelative('a/b.md', 'my file.md'), { path: 'a/my file.md', hash: '' });
+  });
+
+  it('stops at the root of the file area', () => {
+    assert.deepEqual(resolveRelative('a/b.md', '../../../x.md'), { path: 'x.md', hash: '' });
+    assert.deepEqual(resolveRelative('b.md', '..'), { path: '', hash: '' });
+  });
+
+  it('leaves what is not relative or cannot be a path', () => {
+    assert.equal(resolveRelative('a/b.md', 'https://example.com/x.png'), null);
+    assert.equal(resolveRelative('a/b.md', '/files/a/x.png'), null);
+    assert.equal(resolveRelative('a/b.md', '#top'), null);
+    assert.equal(resolveRelative('a/b.md', ''), null);
+    assert.equal(resolveRelative('a/b.md', 'bad%zz.md'), null);
+  });
+});

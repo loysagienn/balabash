@@ -3,7 +3,9 @@
 // file has them, and the body by type — Markdown rendered, code and text
 // with line numbers, delimited text as a table, an image, a PDF; anything
 // else or a text too large is a card with "Download". Text content comes
-// through Query by path and modification time (queries.ts). The owner keys
+// through Query by path and modification time (queries.ts). A Markdown file
+// is rendered at its place: relative links lead to the owner's route of the
+// path they name (routeFor), relative images to the bytes. The owner keys
 // the preview by the file and its version: the state here (the image's
 // size, a failed load) is one file's.
 
@@ -11,6 +13,8 @@ import { useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import type { WorkspaceFileMeta } from '../../../api/contract.ts';
 import { fileUrl } from '../../lib/api/index.ts';
+import { useLinkTargets } from '../../lib/router/Link.tsx';
+import type { AppRoute } from '../../lib/router/routes.ts';
 import { countOf, fileSize, startedLabel } from '../../lib/format/index.ts';
 import { Btn } from '../../ui/Btn/Btn.tsx';
 import { CodeView } from '../../ui/CodeView/CodeView.tsx';
@@ -18,6 +22,7 @@ import { CsvView } from '../../ui/CsvView/CsvView.tsx';
 import { IconBtn } from '../../ui/IconBtn/IconBtn.tsx';
 import { ImgView } from '../../ui/ImgView/ImgView.tsx';
 import { Md } from '../../ui/Md/Md.tsx';
+import type { MdPlace } from '../../ui/Md/Md.tsx';
 import { MetaCard } from '../../ui/MetaCard/MetaCard.tsx';
 import { Note } from '../../ui/Note/Note.tsx';
 import { PdfView } from '../../ui/PdfView/PdfView.tsx';
@@ -39,7 +44,8 @@ function readsText(viewer: Viewer): boolean {
   return viewer.kind === 'markdown' || viewer.kind === 'code' || viewer.kind === 'csv';
 }
 
-function TextBody({ file, viewer, text }: { file: WorkspaceFileMeta; viewer: Viewer; text: string }) {
+function TextBody({ file, viewer, text, routeFor }: { file: WorkspaceFileMeta; viewer: Viewer; text: string; routeFor: (path: string) => AppRoute }) {
+  const linkTarget = useLinkTargets();
   const lines = useMemo(
     () => (viewer.kind === 'code' ? codeLines(text, viewer.language, (file.sizeBytes ?? 0) <= HIGHLIGHT_MAX) : null),
     [file.sizeBytes, text, viewer],
@@ -47,7 +53,9 @@ function TextBody({ file, viewer, text }: { file: WorkspaceFileMeta; viewer: Vie
   const table = useMemo(() => (viewer.kind === 'csv' ? parseDelimited(text, viewer.delimiter, CSV_ROWS) : null), [text, viewer]);
 
   if (viewer.kind === 'markdown') {
-    return <Md source={text} />;
+    const place: MdPlace = { path: file.path, link: target => linkTarget(routeFor(target)), bytes: target => fileUrl(target) };
+
+    return <Md source={text} at={place} />;
   }
   if (lines) {
     return <CodeView lines={lines} />;
@@ -74,7 +82,7 @@ type ImageLoad = { size: { width: number; height: number } | null; failed: boole
 
 const IMAGE_START: ImageLoad = { size: null, failed: false, attempt: 0 };
 
-export function FilePreview({ file, now }: { file: WorkspaceFileMeta; now: Date }) {
+export function FilePreview({ file, now, routeFor }: { file: WorkspaceFileMeta; now: Date; routeFor: (path: string) => AppRoute }) {
   const name = nameOf(file.path);
   const { path, sizeBytes, mediaType } = file;
   // Stable while the file is: the text bodies memoize on it.
@@ -130,7 +138,7 @@ export function FilePreview({ file, now }: { file: WorkspaceFileMeta; now: Date 
       </MetaCard>
     );
   } else if (text.data !== undefined) {
-    body = <TextBody file={file} viewer={viewer} text={text.data} />;
+    body = <TextBody file={file} viewer={viewer} text={text.data} routeFor={routeFor} />;
   } else if (text.error) {
     body = (
       <Note state="err" icon="cloud-off" role="alert" action="Retry" actionIcon="refresh-cw" onAction={() => void text.refetch()}>

@@ -62,6 +62,25 @@ export function activityCaption(total: number | null, recent: number | null, run
   return parts.length > 0 ? parts.join(' · ') : undefined;
 }
 
+export type EmptyWords = { title: string; note: string };
+
+// The empty activity. The store holds a window of threads — the newest ones
+// and the active ones — so an agent with none in it may still have threads:
+// "No threads yet" only when the whole count says none; otherwise the
+// agent's threads are all older than the window, named with their count once
+// it is known (the link below the activity leads to them). Before the count
+// lands, or when it failed, the window's own truth is told without a number.
+export function emptyActivity(name: string, total: number | null): EmptyWords {
+  if (total === 0) {
+    return { title: 'No threads yet', note: `Threads of ${name} appear here as it works.` };
+  }
+
+  return {
+    title: 'No recent threads',
+    note: total === null ? `Nothing recent from ${name}; its earlier threads are in the full list.` : `${name} has ${countOf(total, 'thread')}, all older than the recent ones shown here; the full list has them.`,
+  };
+}
+
 export type AgentsFilterPatch = Partial<Omit<AgentsRoute, 'key'>>;
 
 // The next route of a change: an undefined or empty value drops the key, so

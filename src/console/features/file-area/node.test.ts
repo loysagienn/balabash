@@ -3,7 +3,7 @@ import { describe, it } from 'node:test';
 import { isNumeric, parseDelimited } from './csv.ts';
 import { codeLines, splitHighlighted } from './codeLines.ts';
 import { ApiError } from '../../lib/api/index.ts';
-import { crumbSegments, isNotFound, listingSummary, nameOf, nodeOf, parentOf, viewerFor, TEXT_PREVIEW_MAX } from './node.ts';
+import { crumbSegments, isNotFound, listingSummary, nameOf, nodeOf, parentOf, underRoot, viewerFor, TEXT_PREVIEW_MAX } from './node.ts';
 
 const file = (path: string, mediaType: string, sizeBytes = 100) => ({ path, mediaType, sizeBytes });
 
@@ -16,6 +16,16 @@ describe('file area — node rules', () => {
     assert.deepEqual(crumbSegments('', ''), []);
     assert.deepEqual(crumbSegments('proj', 'proj/inbox.md'), ['inbox.md']);
     assert.deepEqual(crumbSegments('proj', 'proj'), []);
+  });
+
+  it('tells a path under the root from one outside it', () => {
+    assert.equal(underRoot('', 'anything/at/all.md'), true);
+    assert.equal(underRoot('', ''), true);
+    assert.equal(underRoot('proj', 'proj'), true);
+    assert.equal(underRoot('proj', 'proj/inbox.md'), true);
+    assert.equal(underRoot('proj', 'project-two/inbox.md'), false);
+    assert.equal(underRoot('proj', 'other/proj/x.md'), false);
+    assert.equal(underRoot('proj', ''), false);
   });
 
   it('picks the viewer by type, extension and size', () => {

@@ -26,7 +26,7 @@ import { SkelRow } from '../../ui/Skel/Skel.tsx';
 import { fileIcon } from '../../ui/atoms/fileIcon.ts';
 import { FileMenu } from './FileMenu.tsx';
 import { FilePreview } from './FilePreview.tsx';
-import { crumbSegments, isNotFound, joinPath, listingSummary, nameOf, nodeOf, parentOf } from './node.ts';
+import { crumbSegments, isNotFound, joinPath, listingSummary, nameOf, nodeOf, parentOf, underRoot } from './node.ts';
 import type { DirListing } from './node.ts';
 import { useWorkspaceNode } from './queries.ts';
 
@@ -128,6 +128,11 @@ export function FileBrowser({ root, rootLabel, lead, path, routeFor, pins, class
     crumbs.push({ label: segments[i] as string, ...linkTarget(routeFor(joinPath(root, ...segments.slice(0, i + 1)))) });
   }
 
+  // Where a link of the preview leads (a relative link of a Markdown file):
+  // the owner's route while the path stays under the root; one that climbs
+  // out of it (../ from a project's folder) is the Files section's.
+  const linkRoute = (target: string): AppRoute => (underRoot(root, target) ? routeFor(target) : { key: 'files', path: target });
+
   let body;
 
   if (gone) {
@@ -173,7 +178,7 @@ export function FileBrowser({ root, rootLabel, lead, path, routeFor, pins, class
       {file ? (
         <FaPreview>
           {/* keyed by the file and its version: the preview's own state (the image's size, a failed load) belongs to one file */}
-          <FilePreview key={`${file.path}@${file.modifiedAt ?? ''}`} file={file} now={now} />
+          <FilePreview key={`${file.path}@${file.modifiedAt ?? ''}`} file={file} now={now} routeFor={linkRoute} />
         </FaPreview>
       ) : null}
     </FileArea>

@@ -142,6 +142,12 @@ export function joinPath(...parts: string[]): string {
   return parts.filter(Boolean).join('/');
 }
 
+// Whether a path is the root or below it ('' — the whole file area, which
+// holds every path).
+export function underRoot(root: string, path: string): boolean {
+  return root === '' || path === root || path.startsWith(`${root}/`);
+}
+
 export function isNotFound(error: unknown): boolean {
   return error instanceof ApiError && error.status === 404;
 }

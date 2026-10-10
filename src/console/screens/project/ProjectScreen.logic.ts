@@ -7,7 +7,7 @@ import type { WorkspaceFileMeta } from '../../../api/contract.ts';
 import type { AppRoute } from '../../lib/router/routes.ts';
 import type { SnapshotStage } from '../../store/stream/selectors.ts';
 import { crumbSegments, joinPath, nameOf, parentOf } from '../../features/file-area/node.ts';
-import { fileTimeLabel } from '../../lib/format/index.ts';
+import { countOf, fileTimeLabel } from '../../lib/format/index.ts';
 import type { IconName } from '../../ui/Icon/Icon.tsx';
 
 export type ProjectStage = 'loading' | 'failed' | 'unknown' | 'project';
@@ -67,6 +67,26 @@ export function projectShell(title: string, slug: string, path: string | undefin
 // the way Home names all projects.
 export function allThreadsLabel(total: number | null): string {
   return total === null ? 'All' : `All · ${total.toLocaleString('en-US')}`;
+}
+
+export type EmptyWords = { title: string; note: string };
+
+// The empty "Project threads" card. The store holds a window of threads —
+// the newest ones and the active ones — so a project with none in it may
+// still have threads: "No threads yet" only when the whole count says none;
+// otherwise the project's threads are all older than the window, named with
+// their count once it is known ("All · N" in the card's header leads to
+// them). Before the count lands, or when it failed, the window's own truth
+// is told without a number.
+export function emptyProjectThreads(total: number | null): EmptyWords {
+  if (total === 0) {
+    return { title: 'No threads yet', note: 'Threads started for this project appear here as agents work on it.' };
+  }
+
+  return {
+    title: 'No recent threads',
+    note: total === null ? 'Nothing recent for this project; its earlier threads are under All.' : `The project has ${countOf(total, 'thread')}, all older than the recent ones shown here; they are under All.`,
+  };
 }
 
 export type PinData = { icon: IconName; name: string; desc: string; path: string };

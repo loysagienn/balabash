@@ -43,7 +43,7 @@ import { Screen } from '../../ui/Screen/Screen.tsx';
 import { Skel, SkelRow, SkelStack } from '../../ui/Skel/Skel.tsx';
 import { DetailSection, Split, SplitDetail, SplitList } from '../../ui/Split/Split.tsx';
 import { Code, Quiet, Tag } from '../../ui/atoms/atoms.tsx';
-import { activityCaption, agentMatches, agentsDetail, agentsShell, agentsSummary, engineLabel, engineName, modeLabel, withAgentsFilters } from './AgentsScreen.logic.ts';
+import { activityCaption, agentMatches, agentsDetail, agentsShell, agentsSummary, emptyActivity, engineLabel, engineName, modeLabel, withAgentsFilters } from './AgentsScreen.logic.ts';
 import './AgentsScreen.css';
 
 // The activity shows the newest threads; the rest are a link away.
@@ -70,11 +70,14 @@ function AgentDetail({ agent, running }: { agent: AgentView; running: number }) 
   const since = recentSince(now);
   const all = useThreadTotal({ agent: agent.name });
   const recent = useThreadTotal({ agent: agent.name, createdAtGte: since.toISOString() });
-  const caption = activityCaption(all.data ? totalWithTail(all.data, threads) : null, recent.data ? totalWithTail(recent.data, threads, since) : null, running);
+  const whole = all.data ? totalWithTail(all.data, threads) : null;
+  const caption = activityCaption(whole, recent.data ? totalWithTail(recent.data, threads, since) : null, running);
   // A request that failed takes the caption's place with its Retry: the
   // number it would complete is not known, and a stale one would pass for
   // current.
   const failed = all.isError || recent.isError;
+  // An empty activity says whether the agent has no threads or none recent.
+  const empty = emptyActivity(agent.name, whole);
 
   return (
     <Card narrow="bare">
@@ -121,8 +124,8 @@ function AgentDetail({ agent, running }: { agent: AgentView; running: number }) 
         {threads.length > 0 ? (
           <ThreadList className="agt-list" threads={threads.slice(0, AGENT_THREADS)} now={now} noAgent flat />
         ) : (
-          <Empty icon="messages-square" title="No threads yet">
-            Threads of {agent.name} appear here as it works.
+          <Empty icon="messages-square" title={empty.title}>
+            {empty.note}
           </Empty>
         )}
         <Link className="link" route={{ key: 'threads', agent: agent.name }}>

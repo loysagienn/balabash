@@ -38,7 +38,7 @@ import { PageHead } from '../../ui/PageHead/PageHead.tsx';
 import { Pin, Pins } from '../../ui/Pins/Pins.tsx';
 import { Screen } from '../../ui/Screen/Screen.tsx';
 import { Skel, SkelStack } from '../../ui/Skel/Skel.tsx';
-import { allThreadsLabel, pinsOf, projectRoute, projectShell, projectStage } from './ProjectScreen.logic.ts';
+import { allThreadsLabel, emptyProjectThreads, pinsOf, projectRoute, projectShell, projectStage } from './ProjectScreen.logic.ts';
 import './ProjectScreen.css';
 
 // The card shows the newest threads; the rest are a link away.
@@ -76,6 +76,8 @@ function ProjectPage({ project, route }: { project: ProjectView; route: ProjectR
   // the link with its Retry (the link stays — "All" is a route either way).
   const all = useThreadTotal({ projectId: project.id });
   const total = all.data ? totalWithTail(all.data, threads) : null;
+  // An empty card says whether the project has no threads or none recent.
+  const empty = emptyProjectThreads(total);
   const flagging = useAppSelector(s => selectProjectFlagging(s, project.id));
   const [editing, setEditing] = useState(false);
   const path = joinPath(project.slug, route.path ?? '');
@@ -167,8 +169,8 @@ function ProjectPage({ project, route }: { project: ProjectView; route: ProjectR
         {threads.length > 0 ? (
           <ThreadList threads={threads.slice(0, PROJECT_THREADS)} now={now} flat />
         ) : (
-          <Empty icon="messages-square" title="No threads yet">
-            Threads started for this project appear here as agents work on it.
+          <Empty icon="messages-square" title={empty.title}>
+            {empty.note}
           </Empty>
         )}
       </Card>

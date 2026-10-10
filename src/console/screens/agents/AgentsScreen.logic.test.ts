@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { activityCaption, agentMatches, agentsDetail, agentsShell, agentsSummary, engineLabel, engineName, modeLabel, withAgentsFilters } from './AgentsScreen.logic.ts';
+import { activityCaption, agentMatches, agentsDetail, agentsShell, agentsSummary, emptyActivity, engineLabel, engineName, modeLabel, withAgentsFilters } from './AgentsScreen.logic.ts';
 
 describe('agents screen rules', () => {
   it('matches the search against the name and the description, case-insensitive', () => {
@@ -35,6 +35,13 @@ describe('agents screen rules', () => {
     assert.equal(activityCaption(null, 61, 1), '1 running');
     assert.equal(activityCaption(null, null, 0), undefined);
     assert.equal(activityCaption(0, 0, 0), undefined);
+  });
+
+  it('tells an agent without threads from one whose threads are older than the window', () => {
+    assert.deepEqual(emptyActivity('scheduler', 0), { title: 'No threads yet', note: 'Threads of scheduler appear here as it works.' });
+    assert.deepEqual(emptyActivity('scheduler', 1), { title: 'No recent threads', note: 'scheduler has 1 thread, all older than the recent ones shown here; the full list has them.' });
+    assert.deepEqual(emptyActivity('scheduler', 1214), { title: 'No recent threads', note: 'scheduler has 1,214 threads, all older than the recent ones shown here; the full list has them.' });
+    assert.deepEqual(emptyActivity('scheduler', null), { title: 'No recent threads', note: 'Nothing recent from scheduler; its earlier threads are in the full list.' });
   });
 
   it('writes the next route of a filter change without empty keys', () => {

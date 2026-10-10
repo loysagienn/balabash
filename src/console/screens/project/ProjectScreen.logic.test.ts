@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { allThreadsLabel, pinsOf, projectRoute, projectShell, projectStage } from './ProjectScreen.logic.ts';
+import { allThreadsLabel, emptyProjectThreads, pinsOf, projectRoute, projectShell, projectStage } from './ProjectScreen.logic.ts';
 
 describe('project page', () => {
   it('tells the stage of the page', () => {
@@ -14,6 +14,13 @@ describe('project page', () => {
     assert.equal(allThreadsLabel(null), 'All');
     assert.equal(allThreadsLabel(0), 'All · 0');
     assert.equal(allThreadsLabel(1234), 'All · 1,234');
+  });
+
+  it('tells a project without threads from one whose threads are older than the window', () => {
+    assert.deepEqual(emptyProjectThreads(0), { title: 'No threads yet', note: 'Threads started for this project appear here as agents work on it.' });
+    assert.deepEqual(emptyProjectThreads(1), { title: 'No recent threads', note: 'The project has 1 thread, all older than the recent ones shown here; they are under All.' });
+    assert.deepEqual(emptyProjectThreads(1234), { title: 'No recent threads', note: 'The project has 1,234 threads, all older than the recent ones shown here; they are under All.' });
+    assert.deepEqual(emptyProjectThreads(null), { title: 'No recent threads', note: 'Nothing recent for this project; its earlier threads are under All.' });
   });
 
   it('routes the file area at the project folder', () => {
