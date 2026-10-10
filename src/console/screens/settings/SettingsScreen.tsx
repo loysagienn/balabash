@@ -13,7 +13,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
-import type { TelegramView } from '../../../api/contract.ts';
+import type { SettingsFactsResponse, TelegramView } from '../../../api/contract.ts';
 import { useAppDispatch, useAppSelector } from '../../store/hooks.ts';
 import { logout, saveSettings } from '../../store/session/actions.ts';
 import { selectMe, selectSession, selectSettingsSaved, selectSettingsSaving } from '../../store/session/selectors.ts';
@@ -32,7 +32,8 @@ import { Screen } from '../../ui/Screen/Screen.tsx';
 import { SkelRow, SkelStack } from '../../ui/Skel/Skel.tsx';
 import { Status } from '../../ui/Status/Status.tsx';
 import { useSettingsFacts } from './queries.ts';
-import { sessionWords, telegramWords, timezoneWords } from './SettingsScreen.logic.ts';
+import { factsStage, sessionWords, telegramWords, timezoneWords } from './SettingsScreen.logic.ts';
+import type { FactsStage } from './SettingsScreen.logic.ts';
 import './SettingsScreen.css';
 
 // A name of Settings: at most this long (the server's cap).
@@ -95,15 +96,27 @@ function NameCard({ title, label, fid, hint, field, current, saving, saved, onSa
 }
 
 // The facts of the three cards come from one query; each card shows its
-// own stage of it — a skeleton of its shape while the facts are in flight,
-// the failure with Retry (a failed read must not look like one still
-// going), the facts.
+// own stage of it (factsStage) — a skeleton of its shape while the facts
+// are in flight, the failure with Retry (a failed read must not look like
+// one still going), the facts. A refetch that failed over facts loaded
+// before (the tab's return after the server went away) is one note above
+// the three cards, with Retry: Query keeps the last good answer, and the
+// cards show it, but as what it is — the facts of an earlier moment.
 type Facts = ReturnType<typeof useSettingsFacts>;
+type Stage = FactsStage<SettingsFactsResponse>;
 
-function FactsFailure({ facts, what }: { facts: Facts; what: string }) {
+function FactsFailure({ facts, error, what }: { facts: Facts; error: Error; what: string }) {
   return (
     <Note state="err" role="alert" action="Retry" actionBusy={facts.isFetching} onAction={() => void facts.refetch()}>
-      Couldn’t load {what} — {facts.error?.message}
+      Couldn’t load {what} — {error.message}
+    </Note>
+  );
+}
+
+function FactsStale({ facts, error }: { facts: Facts; error: Error }) {
+  return (
+    <Note state="err" icon="cloud-off" role="alert" action="Retry" actionIcon="refresh-cw" actionBusy={facts.isFetching} onAction={() => void facts.refetch()}>
+      Couldn’t refresh the Telegram binding, the time zone and the session — showing the facts loaded before. {error.message}
     </Note>
   );
 }
@@ -158,15 +171,15 @@ function TelegramRow({ telegram, now }: { telegram: TelegramView; now: Date }) {
   );
 }
 
-function TelegramCard({ facts, now }: { facts: Facts; now: Date }) {
+function TelegramCard({ facts, stage, now }: { facts: Facts; stage: Stage; now: Date }) {
   return (
     <Card narrow="bare" label="Telegram">
       <CardHead title="Telegram" />
-      {facts.data ? (
-        <TelegramRow telegram={facts.data.telegram} now={now} />
-      ) : facts.error ? (
+      {stage.kind === 'facts' ? (
+        <TelegramRow telegram={stage.data.telegram} now={now} />
+      ) : stage.kind === 'failed' ? (
         <CardBody>
-          <FactsFailure facts={facts} what="the Telegram binding" />
+          <FactsFailure facts={facts} error={stage.error} what="the Telegram binding" />
         </CardBody>
       ) : (
         <List narrow="tiles" busy>
@@ -177,11 +190,11 @@ function TelegramCard({ facts, now }: { facts: Facts; now: Date }) {
   );
 }
 
-function TimezoneCard({ facts, now }: { facts: Facts; now: Date }) {
+function TimezoneCard({ facts, stage, now }: { facts: Facts; stage: Stage; now: Date }) {
   let body: ReactNode;
 
-  if (facts.data) {
-    const words = timezoneWords(facts.data.scheduleTimezone, now);
+  if (stage.kind === 'facts') {
+    const words = timezoneWords(stage.data.scheduleTimezone, now);
 
     body = (
       <Field
@@ -196,8 +209,8 @@ function TimezoneCard({ facts, now }: { facts: Facts; now: Date }) {
         <Input id="tz" value={words.value} onChange={() => undefined} readOnly mono ariaLabel="Time zone" />
       </Field>
     );
-  } else if (facts.error) {
-    body = <FactsFailure facts={facts} what="the time zone" />;
+  } else if (stage.kind === 'failed') {
+    body = <FactsFailure facts={facts} error={stage.error} what="the time zone" />;
   } else {
     body = <SkelStack widths={[24, 56]} smFirst />;
   }
@@ -210,17 +223,17 @@ function TimezoneCard({ facts, now }: { facts: Facts; now: Date }) {
   );
 }
 
-function SessionCard({ facts, now, logoutPending, onLogout }: { facts: Facts; now: Date; logoutPending: boolean; onLogout: () => void }) {
+function SessionCard({ facts, stage, now, logoutPending, onLogout }: { facts: Facts; stage: Stage; now: Date; logoutPending: boolean; onLogout: () => void }) {
   return (
     <Card narrow="bare" label="Session" className="set-session">
       <CardHead title="Session" />
-      {facts.data ? (
+      {stage.kind === 'facts' ? (
         <List narrow="tiles">
-          <Row lead={<Obj icon="monitor" size="md" />} title="This browser" meta={sessionWords(facts.data.session, now)} />
+          <Row lead={<Obj icon="monitor" size="md" />} title="This browser" meta={sessionWords(stage.data.session, now)} />
         </List>
-      ) : facts.error ? (
+      ) : stage.kind === 'failed' ? (
         <CardBody>
-          <FactsFailure facts={facts} what="this browser’s session" />
+          <FactsFailure facts={facts} error={stage.error} what="this browser’s session" />
         </CardBody>
       ) : (
         <List narrow="tiles" busy>
@@ -248,6 +261,7 @@ export function SettingsScreen() {
   const saved = useAppSelector(selectSettingsSaved);
   const { logoutPending } = useAppSelector(selectSession);
   const facts = useSettingsFacts();
+  const stage = factsStage(facts);
   const now = useNow();
 
   return (
@@ -276,9 +290,10 @@ export function SettingsScreen() {
             saved={saved.operatorName}
             onSave={value => dispatch(saveSettings({ operatorName: value }))}
           />
-          <TelegramCard facts={facts} now={now} />
-          <TimezoneCard facts={facts} now={now} />
-          <SessionCard facts={facts} now={now} logoutPending={logoutPending} onLogout={() => dispatch(logout())} />
+          {stage.kind === 'facts' && stage.stale ? <FactsStale facts={facts} error={stage.stale} /> : null}
+          <TelegramCard facts={facts} stage={stage} now={now} />
+          <TimezoneCard facts={facts} stage={stage} now={now} />
+          <SessionCard facts={facts} stage={stage} now={now} logoutPending={logoutPending} onLogout={() => dispatch(logout())} />
         </div>
       </Screen>
     </Shell>

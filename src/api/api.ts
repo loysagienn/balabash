@@ -17,6 +17,7 @@ import { config } from '../config/index.ts';
 import { prepareObject } from '../utils/serialize-json.ts';
 import { parseJsonBody } from './json-body.ts';
 import { SettingsError, parseSettingsPatch } from './settings.ts';
+import { BOT_API_TIMEOUT_MS, createTelegramFacts } from './telegram-facts.ts';
 import { countThreadsAt, ensureOperatorWorkspace, getMainThread, getThread, listThreads } from '../core/threads.ts';
 import { getEventsAfter, listThreadEvents } from '../core/events.ts';
 import { getLiveHub } from '../core/live.ts';
@@ -110,81 +111,37 @@ async function requireSession(ctx: Context, next: Next): Promise<void> {
 }
 
 // The bound telegram group's title — the workspace name of /api/me while
-// none is stored (the User row itself is empty by design) and the row of
-// the Telegram card of Settings. Fetched via the Bot API and cached — a
-// failure degrades to null, never to an error. Telegram is an optional
-// channel: without it there is no title; the Bot API client is created
-// lazily so a boot without the token never touches it.
+// none is stored (the User row itself is empty by design) — and the facts
+// of the Telegram card of Settings come from the Bot API through
+// telegram-facts.ts: cached, under a short deadline, a failure degrades to
+// null, never to an error or a long wait. Telegram is an optional channel:
+// the Bot API client is created lazily so a boot without the token never
+// touches it, and the client's own timeout is set below grammY's default of
+// 500 seconds for the day the deadline's abort is not honoured.
 let telegramApi: Api | null = null;
-const groupTitleCache = new Map<string, { title: string | null; fetchedAt: number }>();
-const GROUP_TITLE_TTL_MS = 10 * 60 * 1000;
+type GrammySignal = Parameters<Api['getMe']>[0];
 
-function readBoundGroup(userId: string) {
-  return prisma.telegramGroup.findUnique({ where: { userId } });
-}
-
-async function getGroupTitle(userId: string): Promise<string | null> {
-  if (!config.telegramEnabled) {
-    return null;
-  }
-
-  const cached = groupTitleCache.get(userId);
-
-  if (cached && Date.now() - cached.fetchedAt < GROUP_TITLE_TTL_MS) {
-    return cached.title;
-  }
-
-  let title: string | null = null;
-
-  try {
-    const group = await readBoundGroup(userId);
-
-    if (group) {
-      telegramApi ??= new Api(config.telegramBotToken);
-
-      const chat = await telegramApi.getChat(Number(group.chatId));
-
-      title = chat.title ?? null;
-    }
-  } catch {
-    title = null;
-  }
-
-  groupTitleCache.set(userId, { title, fetchedAt: Date.now() });
-
-  return title;
-}
-
-// The bot's own username, for the words of the Telegram card. A bot does
-// not change its username while running, so one answer serves the process;
-// a failed call is asked again next time.
-let botUsername: string | null | undefined;
-
-async function getBotUsername(): Promise<string | null> {
-  if (!config.telegramEnabled) {
-    return null;
-  }
-
-  if (botUsername === undefined) {
-    try {
-      telegramApi ??= new Api(config.telegramBotToken);
-      botUsername = (await telegramApi.getMe()).username ?? null;
-    } catch {
+const telegramFacts = createTelegramFacts({
+  client: () => {
+    if (!config.telegramEnabled) {
       return null;
     }
-  }
 
-  return botUsername;
+    const api = (telegramApi ??= new Api(config.telegramBotToken, { timeoutSeconds: Math.ceil(BOT_API_TIMEOUT_MS / 1000) }));
+
+    // grammY types the signal through its abort-controller shim; at run
+    // time it listens to the native AbortSignal the facts hand it.
+    return { getChat: (chatId, signal) => api.getChat(chatId, signal as GrammySignal), getMe: signal => api.getMe(signal as GrammySignal) };
+  },
+  readGroup: userId => prisma.telegramGroup.findUnique({ where: { userId }, select: { chatId: true, updatedAt: true } }),
+});
+
+function getGroupTitle(userId: string): Promise<string | null> {
+  return telegramFacts.groupTitle(userId);
 }
 
-async function readTelegramView(userId: string): Promise<TelegramView> {
-  const [group, title, username] = await Promise.all([readBoundGroup(userId), getGroupTitle(userId), getBotUsername()]);
-
-  return {
-    enabled: config.telegramEnabled,
-    botUsername: username,
-    group: group ? { chatId: group.chatId, title, linkedAt: group.updatedAt } : null,
-  };
+function readTelegramView(userId: string): Promise<TelegramView> {
+  return telegramFacts.view(userId);
 }
 
 // --------------------------------------------------------------------------

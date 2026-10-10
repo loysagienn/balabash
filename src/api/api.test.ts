@@ -13,7 +13,7 @@ import { test, describe, before, after, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { STAND_HOST, startStand } from '../test-support/stand.ts';
+import { STAND_HOST, sessionCookie, startStand } from '../test-support/stand.ts';
 import type { Reply, Stand } from '../test-support/stand.ts';
 import type { CreateProjectResponse, FileMetaResponse, ProjectResponse, SettingsFactsResponse, SettingsResponse, MeResponse, WorkspaceNodeResponse } from './contract.ts';
 
@@ -823,6 +823,62 @@ describe('settings over the api', () => {
       assert.deepEqual(bound.json<SettingsFactsResponse>().telegram, { enabled: false, botUsername: null, group: { chatId: -1003986621992n, title: null, linkedAt } });
     } finally {
       await prisma.telegramGroup.deleteMany({ where: { userId: stand.userId } });
+    }
+  });
+
+  test('GET /settings answers the session behind the cookie alone, the fields the contract names, and this workspace’s group alone', async () => {
+    const { createAuthCode } = await import('./auth-codes.ts');
+
+    // No cookie: refused before any fact is read.
+    const anonymous = await stand.request('GET', '/api/settings', { cookie: null });
+
+    assert.equal(anonymous.status, 401);
+
+    // A second browser of the same user, signed in from a code of the
+    // Telegram command with its own User-Agent: each cookie reads its own
+    // row — the phone's facts are the phone's, the stand's stay the stand's.
+    const ua = 'Mozilla/5.0 (iPhone; CPU iPhone OS 26_7_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/154.0.8037.55 Mobile/15E148 Safari/604.1';
+    const signedIn = await stand.request('POST', '/api/auth', { body: { code: createAuthCode(stand.userId, 'telegram') }, cookie: null, headers: { 'user-agent': ua } });
+
+    assert.equal(signedIn.status, 200, signedIn.text);
+
+    const phone = sessionCookie(signedIn.headers['set-cookie'] ?? []);
+    const phoneRow = await prisma.session.findFirstOrThrow({ where: { userId: stand.userId, userAgent: ua } });
+
+    try {
+      const phoneFacts = (await stand.request('GET', '/api/settings', { cookie: phone })).json<SettingsFactsResponse>();
+      const ownFacts = (await stand.request('GET', '/api/settings')).json<SettingsFactsResponse>();
+
+      assert.deepEqual(phoneFacts.session, { createdAt: phoneRow.createdAt, userAgent: ua, loginSource: 'telegram' });
+      assert.deepEqual({ userAgent: ownFacts.session.userAgent, loginSource: ownFacts.session.loginSource }, { userAgent: '', loginSource: 'console' });
+      assert.notEqual(ownFacts.session.createdAt.getTime(), phoneRow.createdAt.getTime());
+
+      // Exactly the contract's fields: nothing of the row (id, token hash,
+      // lastUsed) rides along.
+      assert.deepEqual(Object.keys(ownFacts).sort(), ['scheduleTimezone', 'session', 'telegram']);
+      assert.deepEqual(Object.keys(ownFacts.session).sort(), ['createdAt', 'loginSource', 'userAgent']);
+      assert.deepEqual(Object.keys(ownFacts.telegram).sort(), ['botUsername', 'enabled', 'group']);
+
+      // A session born before the column, and one with a value the
+      // contract does not name: both read as unknown.
+      await prisma.session.update({ where: { id: phoneRow.id }, data: { loginSource: null } });
+      assert.equal((await stand.request('GET', '/api/settings', { cookie: phone })).json<SettingsFactsResponse>().session.loginSource, null);
+      await prisma.session.update({ where: { id: phoneRow.id }, data: { loginSource: 'carrier-pigeon' } });
+      assert.equal((await stand.request('GET', '/api/settings', { cookie: phone })).json<SettingsFactsResponse>().session.loginSource, null);
+    } finally {
+      await prisma.session.delete({ where: { id: phoneRow.id } });
+    }
+
+    // Another workspace's bound group is not this one's.
+    const other = await prisma.user.create({ data: {} });
+
+    await prisma.telegramGroup.create({ data: { chatId: -1001234567890n, userId: other.id, status: 'active' } });
+
+    try {
+      assert.equal((await stand.request('GET', '/api/settings')).json<SettingsFactsResponse>().telegram.group, null);
+    } finally {
+      await prisma.telegramGroup.deleteMany({ where: { userId: other.id } });
+      await prisma.user.delete({ where: { id: other.id } });
     }
   });
 
