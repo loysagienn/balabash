@@ -101,11 +101,46 @@ describe('mapCodexEvent', () => {
       { type: 'session.thinking', payload: { text: 'third', durationMs: 600 } },
     ]);
 
+    // Items the journal does not write still bound the output: a long bridge call, a message, a plan.
+    mapCodexEvent(memory, ev({ type: 'item.started', item: { id: 'm1', type: 'mcp_tool_call', server: 'balabash', tool: 'get_event', arguments: { seq: 1 }, status: 'in_progress' } }), 13_100);
+    assert.deepEqual(
+      mapCodexEvent(memory, ev({ type: 'item.completed', item: { id: 'm1', type: 'mcp_tool_call', server: 'balabash', tool: 'get_event', arguments: { seq: 1 }, status: 'completed' } }), 43_000),
+      [],
+    );
+    assert.deepEqual(mapCodexEvent(memory, ev({ type: 'item.completed', item: reasoning('r5', 'after the bridge') }), 46_000), [
+      { type: 'session.thinking', payload: { text: 'after the bridge', durationMs: 3000 } },
+    ]);
+    assert.deepEqual(mapCodexEvent(memory, ev({ type: 'item.completed', item: { id: 'a1', type: 'agent_message', text: 'Looking.' } }), 50_000), []);
+    assert.deepEqual(mapCodexEvent(memory, ev({ type: 'item.completed', item: reasoning('r6', 'after the text') }), 52_500), [
+      { type: 'session.thinking', payload: { text: 'after the text', durationMs: 2500 } },
+    ]);
+    assert.deepEqual(mapCodexEvent(memory, ev({ type: 'item.completed', item: { id: 't1', type: 'todo_list', items: [{ text: 'Fix', completed: false }] } }), 53_000).map(entry => entry.type), ['session.plan']);
+    assert.deepEqual(mapCodexEvent(memory, ev({ type: 'item.completed', item: reasoning('r7', 'after the plan') }), 54_000), [
+      { type: 'session.thinking', payload: { text: 'after the plan', durationMs: 1000 } },
+    ]);
+    // A started item is not yet a bound.
+    mapCodexEvent(memory, ev({ type: 'item.started', item: { ...command, id: 'c2' } }), 54_100);
+    assert.deepEqual(mapCodexEvent(memory, ev({ type: 'item.completed', item: reasoning('r8', 'meanwhile') }), 55_000), [
+      { type: 'session.thinking', payload: { text: 'meanwhile', durationMs: 1000 } },
+    ]);
+
     const usage = { input_tokens: 1, cached_input_tokens: 0, cache_write_input_tokens: 0, output_tokens: 1, reasoning_output_tokens: 0 };
 
-    mapCodexEvent(memory, ev({ type: 'turn.completed', usage }), 14_000);
+    // The turn's end clears the clocks, an unfinished thought included; the next turn starts them anew — after a failed turn too.
+    mapCodexEvent(memory, ev({ type: 'item.started', item: reasoning('r9', '') }), 56_000);
+    mapCodexEvent(memory, ev({ type: 'turn.completed', usage }), 60_000);
     assert.equal(memory.bound, null);
     assert.equal(memory.reasoningFrom.size, 0);
+    assert.deepEqual(mapCodexEvent(memory, ev({ type: 'item.completed', item: reasoning('r9', 'late') }), 61_000), [
+      { type: 'session.state', payload: { state: 'run' } },
+      { type: 'session.thinking', payload: { text: 'late' } },
+    ]);
+    mapCodexEvent(memory, ev({ type: 'turn.failed', error: { message: 'boom' } }), 62_000);
+    assert.equal(memory.bound, null);
+    mapCodexEvent(memory, ev({ type: 'turn.started' }), 70_000);
+    assert.deepEqual(mapCodexEvent(memory, ev({ type: 'item.completed', item: reasoning('r10', 'fresh') }), 72_000), [
+      { type: 'session.thinking', payload: { text: 'fresh', durationMs: 2000 } },
+    ]);
   });
 
   it('a failed turn is a turn with an error', () => {

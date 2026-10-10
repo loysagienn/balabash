@@ -132,12 +132,14 @@ export type EventPayloads = {
     error?: string;
   };
   'session.context': { totalTokens: number; maxTokens: number; percentage: number };
-  // durationMs — how long the thought took as the journal observed it:
-  // Claude — from the frame that bounds the model's output before it (the
-  // tool result, the turn's init, the previous block) or, when the CLI sends
-  // them, from the first thinking_tokens frame of the stretch; Codex — the
-  // item.started / item.completed pair of the reasoning item. Absent when
-  // the journal had nothing to measure from.
+  // durationMs — how long the thought took as the journal observed it — the
+  // harness's interval, API latency and frame delivery included, not the
+  // model's own count: Claude — from the frame that bounds the model's
+  // output before it (the tool result, the turn's init, the previous block
+  // with content, the end of a retry's wait) to the frame carrying the
+  // thought as its sole block; Codex — the item.started / item.completed
+  // pair of the reasoning item, or since the previous completed item.
+  // Absent when the journal had nothing to measure from.
   'session.thinking': { text: string; parentToolUseId?: string | null; durationMs?: number };
   // Assistant text followed by more actions in the same turn (the final
   // text of a turn is the agent.message the runner delivers).

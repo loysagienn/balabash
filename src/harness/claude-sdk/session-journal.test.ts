@@ -169,10 +169,9 @@ describe('mapSdkMessage', () => {
     });
   });
 
-  it('times a thought from the frame that bounds the output before it, per origin, or from the first thinking_tokens frame', () => {
+  it('times a thought from the frame that bounds the output before it, per origin', () => {
     const memory = createTurnMemory();
     const thought = (text: string, parent: string | null = null) => assistant([{ type: 'thinking', thinking: text, signature: 's' }], parent);
-    const tokens = (estimated: number) => frame({ type: 'system', subtype: 'thinking_tokens', estimated_tokens: estimated, estimated_tokens_delta: estimated });
 
     mapSdkMessage(memory, init, 1000);
     // Chatter between the bound and the thought does not move the bound.
@@ -184,12 +183,8 @@ describe('mapSdkMessage', () => {
     mapSdkMessage(memory, toolResult('t1', 'a b'), 9000);
     // Measured from the tool result, not from the previous thought or the progress tick.
     assert.deepEqual(mapSdkMessage(memory, thought('read it'), 12_000), [{ type: 'session.thinking', payload: { text: 'read it', parentToolUseId: null, durationMs: 3000 } }]);
-
-    // The CLI's live estimate marks where the thinking began; only the first frame of the stretch counts.
-    assert.deepEqual(mapSdkMessage(memory, tokens(40), 14_000), []);
-    assert.deepEqual(mapSdkMessage(memory, tokens(90), 15_000), []);
-    assert.deepEqual(mapSdkMessage(memory, thought('deeper'), 20_000), [{ type: 'session.thinking', payload: { text: 'deeper', parentToolUseId: null, durationMs: 6000 } }]);
-    assert.equal(memory.thinkingFrom, null);
+    // Consecutive thoughts: the second is measured from the first.
+    assert.deepEqual(mapSdkMessage(memory, thought('deeper'), 20_000), [{ type: 'session.thinking', payload: { text: 'deeper', parentToolUseId: null, durationMs: 8000 } }]);
 
     // A sub-agent's frames interleave with the parent's: each origin has its own bound.
     mapSdkMessage(memory, assistant([{ type: 'tool_use', id: 'ag', name: 'Agent', input: { prompt: 'go' } }]), 20_500);
@@ -199,21 +194,61 @@ describe('mapSdkMessage', () => {
     assert.deepEqual(mapSdkMessage(memory, thought('child again', 'ag'), 27_000), [{ type: 'session.thinking', payload: { text: 'child again', parentToolUseId: 'ag', durationMs: 3000 } }]);
     assert.deepEqual(mapSdkMessage(memory, thought('meanwhile', null), 28_000), [{ type: 'session.thinking', payload: { text: 'meanwhile', parentToolUseId: null, durationMs: 7500 } }]);
 
-    // A retry starts the request over; an empty block is nothing; a second block in one frame has no measure of its own.
-    mapSdkMessage(memory, frame({ type: 'system', subtype: 'api_retry', attempt: 1, max_retries: 3, retry_delay_ms: 10, error_status: 529, error: 'overloaded' }), 30_000);
-    assert.deepEqual(
-      mapSdkMessage(memory, assistant([{ type: 'thinking', thinking: '', signature: 'x' }, { type: 'thinking', thinking: 'one', signature: 'x' }, { type: 'thinking', thinking: 'two', signature: 'x' }]), 31_000),
-      [
-        { type: 'session.thinking', payload: { text: 'one', parentToolUseId: null, durationMs: 1000 } },
-        { type: 'session.thinking', payload: { text: 'two', parentToolUseId: null } },
-      ],
-    );
-
     // The result ends the turn's clocks; the next turn's init starts them again.
     mapSdkMessage(memory, result, 32_000);
     assert.equal(memory.bounds.size, 0);
     mapSdkMessage(memory, init, 40_000);
     assert.deepEqual(mapSdkMessage(memory, thought('next'), 40_800), [{ type: 'session.thinking', payload: { text: 'next', parentToolUseId: null, durationMs: 800 } }]);
+  });
+
+  it('a retry is measured from the end of its announced wait, the redacted-thinking frames do not shorten a thought, a frame of several blocks is unmeasured', () => {
+    const memory = createTurnMemory();
+    const thought = (text: string) => assistant([{ type: 'thinking', thinking: text, signature: 's' }]);
+    const retry = (delay: number) => frame({ type: 'system', subtype: 'api_retry', attempt: 1, max_retries: 3, retry_delay_ms: delay, error_status: 529, error: 'overloaded' });
+    const tokens = (estimated: number) => frame({ type: 'system', subtype: 'thinking_tokens', estimated_tokens: estimated, estimated_tokens_delta: estimated });
+
+    mapSdkMessage(memory, init, 1000);
+    // The retry's wait is not thinking: 8 s announced, the thought arrives 10 s later — 2 s of thought.
+    assert.deepEqual(types(mapSdkMessage(memory, retry(8000), 1000)), ['session.retry']);
+    assert.deepEqual(mapSdkMessage(memory, thought('after the wait'), 11_000), [{ type: 'session.thinking', payload: { text: 'after the wait', parentToolUseId: null, durationMs: 2000 } }]);
+    // Repeated retries: the last wait's end is the start; a thought arriving within the wait is 0.
+    mapSdkMessage(memory, retry(4000), 12_000);
+    mapSdkMessage(memory, retry(2000), 17_000);
+    assert.deepEqual(mapSdkMessage(memory, thought('third try'), 20_500), [{ type: 'session.thinking', payload: { text: 'third try', parentToolUseId: null, durationMs: 1500 } }]);
+    mapSdkMessage(memory, retry(5000), 21_000);
+    assert.deepEqual(mapSdkMessage(memory, thought('early'), 23_000), [{ type: 'session.thinking', payload: { text: 'early', parentToolUseId: null, durationMs: 0 } }]);
+    // A bound after the retry (a tool result) is the newer start.
+    mapSdkMessage(memory, retry(30_000), 24_000);
+    mapSdkMessage(memory, assistant([{ type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'ls' } }]), 25_000);
+    mapSdkMessage(memory, toolResult('t1', 'a'), 26_000);
+    assert.deepEqual(mapSdkMessage(memory, thought('answering'), 29_000), [{ type: 'session.thinking', payload: { text: 'answering', parentToolUseId: null, durationMs: 3000 } }]);
+
+    // thinking_tokens frames arrive at the end of the redacted phase (live: 17 ms before the thought) — not a clock;
+    // an empty (redacted) thinking frame is part of the stretch, not its end.
+    assert.deepEqual(mapSdkMessage(memory, tokens(400), 38_000), []);
+    assert.deepEqual(mapSdkMessage(memory, tokens(900), 38_983), []);
+    assert.deepEqual(mapSdkMessage(memory, thought('long'), 39_000), [{ type: 'session.thinking', payload: { text: 'long', parentToolUseId: null, durationMs: 10_000 } }]);
+    assert.deepEqual(mapSdkMessage(memory, assistant([{ type: 'thinking', thinking: '', signature: 'x' }]), 45_000), []);
+    assert.deepEqual(mapSdkMessage(memory, assistant([]), 45_500), []);
+    assert.deepEqual(mapSdkMessage(memory, thought('after redacted'), 46_000), [{ type: 'session.thinking', payload: { text: 'after redacted', parentToolUseId: null, durationMs: 7000 } }]);
+
+    // A frame packing several blocks has no end of its own for any of them: thought + text, text + thought, two thoughts.
+    assert.deepEqual(mapSdkMessage(memory, assistant([{ type: 'thinking', thinking: 'a', signature: 's' }, { type: 'text', text: 'b' }]), 50_000), [
+      { type: 'session.thinking', payload: { text: 'a', parentToolUseId: null } },
+    ]);
+    assert.deepEqual(mapSdkMessage(memory, assistant([{ type: 'text', text: 'c' }, { type: 'thinking', thinking: 'd', signature: 's' }]), 54_000), [
+      { type: 'session.text', payload: { text: 'b', parentToolUseId: null } },
+      { type: 'session.thinking', payload: { text: 'd', parentToolUseId: null } },
+    ]);
+    assert.deepEqual(
+      mapSdkMessage(memory, assistant([{ type: 'thinking', thinking: '', signature: 'x' }, { type: 'thinking', thinking: 'one', signature: 'x' }, { type: 'thinking', thinking: 'two', signature: 'x' }]), 58_000),
+      [
+        { type: 'session.thinking', payload: { text: 'one', parentToolUseId: null } },
+        { type: 'session.thinking', payload: { text: 'two', parentToolUseId: null } },
+      ],
+    );
+    // Such a frame still bounds the next thought.
+    assert.deepEqual(mapSdkMessage(memory, thought('alone again'), 60_000), [{ type: 'session.thinking', payload: { text: 'alone again', parentToolUseId: null, durationMs: 2000 } }]);
   });
 
   it('maps state frames, compaction, retries, tasks and summaries', () => {

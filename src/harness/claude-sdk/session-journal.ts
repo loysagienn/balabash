@@ -19,9 +19,15 @@
 //   too (nothing to pair it with);
 // - thinking blocks with how long they took — the time since the frame
 //   that bounds the model's output before them (the tool result they
-//   answer, the turn's init, the previous assistant block; per sub-agent,
-//   whose frames interleave with the parent's), or, when the CLI sends them,
-//   since the first thinking_tokens frame of the stretch — and assistant
+//   answer, the turn's init, the previous assistant block with content, a
+//   compaction, the end of a retry's announced wait; per sub-agent, whose
+//   frames interleave with the parent's); only a thought that is the sole
+//   block of its frame is measured — the CLI emits one assistant frame per
+//   completed block, so that is the normal case, and a frame packing several
+//   blocks has no end of its own for any of them. The thinking_tokens frames
+//   are not a clock: the CLI digests them from the redacted-thinking phase,
+//   and the first one arrives at that phase's end (live, 2026-10-10: 17 ms
+//   before the thought's frame), not at its start — and assistant
 //   text followed by more actions in the same turn (the final text of a
 //   turn is the runner's agent.message);
 // - the turn itself, then the context window measured after it;
@@ -50,22 +56,19 @@ type PendingText = { text: string; parentToolUseId: string | null };
 // harness closes it: whether the start was journaled, the state last
 // recorded, the native tool uses awaiting their result, the assistant text
 // not yet known to be intermediate (the last two are a turn's and clear at
-// its result), and the clocks a thought is measured from — the time of the
+// its result), and the clock a thought is measured from — the time of the
 // last frame that bounds the model's output, per parentToolUseId (null —
-// the session's own frames), and the first thinking_tokens frame since
-// that bound (the CLI's live estimate of a thinking stretch; it carries no
-// parent, so it times the session's own thoughts).
+// the session's own frames).
 export type TurnMemory = {
   started: boolean;
   state: SessionState;
   tools: Map<string, { name: string; parentToolUseId: string | null }>;
   pendingText: PendingText | null;
   bounds: Map<string | null, number>;
-  thinkingFrom: number | null;
 };
 
 export function createTurnMemory(): TurnMemory {
-  return { started: false, state: 'wait', tools: new Map(), pendingText: null, bounds: new Map(), thinkingFrom: null };
+  return { started: false, state: 'wait', tools: new Map(), pendingText: null, bounds: new Map() };
 }
 
 const STATE_OF_FRAME: Record<string, SessionState> = { idle: 'wait', running: 'run', requires_action: 'act' };
@@ -110,19 +113,16 @@ function planItems(input: unknown): SessionPlanItem[] | null {
 export function mapSdkMessage(memory: TurnMemory, message: SDKMessage, at = Date.now()): JournalEntry[] {
   const entries: JournalEntry[] = [];
 
-  // The frame bounds the model's output of this origin: the next thought
+  // The frame bounds the model's output of this origin at `time` (its
+  // arrival, unless the frame itself names a later moment): the next thought
   // of the origin is measured from it.
-  const bound = (parentToolUseId: string | null): void => {
-    memory.bounds.set(parentToolUseId, at);
-
-    if (parentToolUseId === null) {
-      memory.thinkingFrom = null;
-    }
+  const bound = (parentToolUseId: string | null, time = at): void => {
+    memory.bounds.set(parentToolUseId, time);
   };
 
   // How long the thought that arrived now took; undefined before any bound.
   const thoughtDuration = (parentToolUseId: string | null): number | undefined => {
-    const from = parentToolUseId === null && memory.thinkingFrom !== null ? memory.thinkingFrom : memory.bounds.get(parentToolUseId);
+    const from = memory.bounds.get(parentToolUseId);
 
     return from === undefined ? undefined : Math.max(0, at - from);
   };
@@ -191,10 +191,14 @@ export function mapSdkMessage(memory: TurnMemory, message: SDKMessage, at = Date
           });
           break;
         }
-        case 'api_retry':
-          // The request starts over: so does the thought it will bring.
+        case 'api_retry': {
+          // The request failed and starts over after the announced wait: the
+          // thought it will bring is measured from the wait's end, not from
+          // this frame.
+          const delay = typeof message.retry_delay_ms === 'number' && Number.isFinite(message.retry_delay_ms) ? Math.max(0, message.retry_delay_ms) : 0;
+
           setState('run');
-          bound(null);
+          bound(null, at + delay);
           entries.push({
             type: 'session.retry',
             payload: {
@@ -206,6 +210,7 @@ export function mapSdkMessage(memory: TurnMemory, message: SDKMessage, at = Date
             },
           });
           break;
+        }
         case 'task_started':
           entries.push({
             type: 'session.task.started',
@@ -243,13 +248,6 @@ export function mapSdkMessage(memory: TurnMemory, message: SDKMessage, at = Date
             },
           });
           break;
-        case 'thinking_tokens':
-          // The first estimate of a stretch marks where the thinking began.
-          if (memory.thinkingFrom === null) {
-            memory.thinkingFrom = at;
-          }
-
-          break;
         default:
           break;
       }
@@ -257,20 +255,26 @@ export function mapSdkMessage(memory: TurnMemory, message: SDKMessage, at = Date
 
     case 'assistant': {
       const parentToolUseId = message.parent_tool_use_id;
-      // The frame's first thought took the time since the bound; a second
-      // thinking block in the same frame has no measure of its own.
-      let durationMs = thoughtDuration(parentToolUseId);
+      const blocks = blocksOf(message.message?.content);
+      // A thought that is the frame's sole block took the time since the
+      // bound; a frame packing several blocks has no end of its own for any
+      // of them, so its thoughts carry no measure.
+      const durationMs = blocks.length === 1 ? thoughtDuration(parentToolUseId) : undefined;
+      // Whether the frame carried the model's output — an empty (redacted)
+      // thinking block is part of the thinking stretch, not its end.
+      let content = false;
 
       setState('run');
 
-      for (const block of blocksOf(message.message?.content)) {
+      for (const block of blocks) {
         if (block.type === 'thinking') {
           if (typeof block.thinking === 'string' && block.thinking.trim()) {
+            content = true;
             entries.push({ type: 'session.thinking', payload: { text: block.thinking, parentToolUseId, ...(durationMs !== undefined ? { durationMs } : {}) } });
-            durationMs = undefined;
           }
         } else if (block.type === 'text') {
           if (typeof block.text === 'string' && block.text.trim()) {
+            content = true;
             flushText();
 
             // A sub-agent's text is never the turn's final text.
@@ -281,6 +285,7 @@ export function mapSdkMessage(memory: TurnMemory, message: SDKMessage, at = Date
             }
           }
         } else if (block.type === 'tool_use') {
+          content = true;
           flushText();
 
           const name = typeof block.name === 'string' ? block.name : '';
@@ -305,7 +310,10 @@ export function mapSdkMessage(memory: TurnMemory, message: SDKMessage, at = Date
         }
       }
 
-      bound(parentToolUseId);
+      if (content) {
+        bound(parentToolUseId);
+      }
+
       break;
     }
 
@@ -355,7 +363,6 @@ export function mapSdkMessage(memory: TurnMemory, message: SDKMessage, at = Date
       memory.pendingText = null;
       memory.tools.clear();
       memory.bounds.clear();
-      memory.thinkingFrom = null;
       entries.push({
         type: 'session.turn',
         payload: {

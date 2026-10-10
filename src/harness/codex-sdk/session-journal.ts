@@ -7,7 +7,8 @@
 // other than the bridge (the bridge's calls are the tool.call.* events);
 // reasoning is session.thinking with how long it took — its item.started /
 // item.completed pair, or the time since the turn's start or the previous
-// completed item when the start frame did not come; the to-do list is
+// completed item (any item: a bridge call, a message, a plan — whether
+// journaled or not) when the start frame did not come; the to-do list is
 // session.plan. No context
 // measurement (Codex offers none), no sub-agent frames, no init frame. The
 // content of an MCP result passes sanitizeToolResult: no bytes in the log.
@@ -29,8 +30,8 @@ export type CodexTurnMemory = {
   // start frame of its own).
   started: Set<string>;
   // When each reasoning item started, by id, and the time of the last frame
-  // that bounds the model's output (the turn's start, a completed item) —
-  // what a reasoning item without a start frame is measured from.
+  // that bounds the model's output (the turn's start, any completed item)
+  // — what a reasoning item without a start frame is measured from.
   reasoningFrom: Map<string, number>;
   bound: number | null;
 };
@@ -102,8 +103,17 @@ export function mapCodexEvent(memory: CodexTurnMemory, event: ThreadEvent, at = 
     case 'item.updated':
     case 'item.completed': {
       const { item } = event;
+      // What a reasoning item completing now without a start frame is
+      // measured from — read before this frame moves the bound.
+      const from = memory.reasoningFrom.get(item.id) ?? memory.bound;
 
       setState('run');
+
+      // Every completed item bounds the model's output, journaled or not:
+      // a bridge call, a message, a plan — the next thought starts after it.
+      if (event.type === 'item.completed') {
+        memory.bound = at;
+      }
 
       if (item.type === 'todo_list') {
         entries.push({
@@ -117,10 +127,7 @@ export function mapCodexEvent(memory: CodexTurnMemory, event: ThreadEvent, at = 
         if (event.type === 'item.started') {
           memory.reasoningFrom.set(item.id, at);
         } else if (event.type === 'item.completed') {
-          const from = memory.reasoningFrom.get(item.id) ?? memory.bound;
-
           memory.reasoningFrom.delete(item.id);
-          memory.bound = at;
 
           if (item.text.trim()) {
             entries.push({ type: 'session.thinking', payload: { text: item.text, ...(from === null || from === undefined ? {} : { durationMs: Math.max(0, at - from) }) } });
@@ -143,7 +150,6 @@ export function mapCodexEvent(memory: CodexTurnMemory, event: ThreadEvent, at = 
 
       if (event.type === 'item.completed') {
         memory.started.delete(item.id);
-        memory.bound = at;
         entries.push({ type: 'session.tool.completed', payload: { toolUseId: item.id, name: tool.name, ...completionOf(item) } });
       }
 
