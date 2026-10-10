@@ -42,6 +42,7 @@ import { createUserSession, destroySession, getSession } from './session.ts';
 import type { SessionModel } from '../../prisma-generated/models.ts';
 import { createEventStreamHandler } from './event-stream.ts';
 import { planLimits } from '../harness/claude-sdk/plan-limits.ts';
+import { codexPlanLimits } from '../harness/codex-sdk/plan-limits.ts';
 import { buildSnapshot } from './snapshot.ts';
 import { checkMutationOrigin } from './origin.ts';
 import type {
@@ -1069,12 +1070,16 @@ router.delete('/schedule/tasks/:slug', requireSession, async ctx => {
 // log and has no core facade; this endpoint is its only reader. rawUsage
 // stays server-side (bulky and unneeded for the charts).
 
-// The plan's rate limits (contract: LimitsResponse): the newest measurement
-// a live Claude session took, refreshed through one when stale and one is
-// alive (src/harness/claude-sdk/plan-limits.ts). The account is the host's
-// Claude login — one for the process, not a fact of the user or a thread.
+// The plans' rate limits (contract: LimitsResponse): the newest measurement
+// of each account — Claude's taken by a live Claude session, refreshed
+// through one when stale and one is alive (src/harness/claude-sdk/
+// plan-limits.ts); Codex's taken by a short-lived app-server of the CLI,
+// refreshed when stale (src/harness/codex-sdk/plan-limits.ts). The accounts
+// are the host's logins — one per process, not a fact of the user or a
+// thread. Both reads run at once: a wait for one does not delay the other.
 router.get('/limits', requireSession, async ctx => {
-  const response: LimitsResponse = await planLimits.read();
+  const [claude, codex] = await Promise.all([planLimits.read(), codexPlanLimits.read()]);
+  const response: LimitsResponse = { claude, codex };
 
   ctx.body = prepareObject(response);
 });

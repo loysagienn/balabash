@@ -1,5 +1,5 @@
-// The plan's rate limits (the console's "Claude limits" cards, GET
-// /api/limits): a measurement the inner CLI of a live Claude session takes
+// The Claude plan's rate limits (the Claude group of the console's "Plan
+// limits" card, GET /api/limits): a measurement the inner CLI of a live Claude session takes
 // on request — the SDK control `get_usage` reads the claude.ai usage
 // endpoint — kept in the process's memory as the newest known value. The
 // account is the host's Claude login: one for the whole process, so one
@@ -27,7 +27,7 @@
 // its late answer ignored, its session tried last next time.
 
 import type { SDKControlGetUsageResponse, SDKMessage, SDKRateLimitInfo } from '@anthropic-ai/claude-agent-sdk';
-import type { ClaudeLimitsView, LimitFailureView, LimitWindowKind, LimitWindowView, LimitsResponse } from '../../api/contract.ts';
+import type { ClaudeLimitsResponse, ClaudeLimitsView, LimitFailureView, LimitWindowKind, LimitWindowView } from '../../api/contract.ts';
 import { subscribeSdkSessionEnd, subscribeSdkStream } from './stream-tap.ts';
 
 export type UsageProvider = () => Promise<SDKControlGetUsageResponse>;
@@ -171,7 +171,7 @@ export type PlanLimitsService = {
   // measurement through a live session when one answers within READ_WAIT_MS,
   // else the cache — and the outcome of the last round since the cache's
   // measurement that brought none.
-  read(): Promise<LimitsResponse>;
+  read(): Promise<ClaudeLimitsResponse>;
   // The measurement in flight, if any — for a test to settle on.
   settled(): Promise<void>;
 };

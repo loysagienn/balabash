@@ -368,13 +368,15 @@ export type LlmRequestsResponse = {
 };
 
 // ---------------------------------------------------------------------------
-// Claude subscription limits (read-only, the second data layer): the plan's
-// rate-limit windows as the inner CLI of a live Claude session reads them
-// from the claude.ai usage endpoint (the SDK control `get_usage`), kept in
-// the process's memory — the newest measurement, whichever session made it.
-// Nothing here is an event of the log; the console reads it by place. The
-// account is the host's Claude login: one per process, so the measurement
-// is not scoped to a thread or a user.
+// Plan limits (read-only, the second data layer): the rate-limit windows of
+// the subscriptions the agents run on, measured in the process and kept in
+// its memory — the newest measurement of each. Nothing here is an event of
+// the log; the console reads it by place. Claude: the inner CLI of a live
+// Claude session reads the claude.ai usage endpoint (the SDK control
+// `get_usage`). Codex: a short-lived app-server of the vendored CLI answers
+// `account/rateLimits/read` for the account in the app's CODEX_HOME. Both
+// accounts are the host's logins: one per process, so a measurement is not
+// scoped to a thread or a user.
 
 export type LimitWindowKind = 'five_hour' | 'seven_day' | 'seven_day_opus' | 'seven_day_sonnet' | 'seven_day_oauth_apps' | 'model';
 
@@ -385,8 +387,8 @@ export type LimitWindowStatus = 'allowed' | 'allowed_warning' | 'rejected';
 
 export type LimitWindowView = {
   kind: LimitWindowKind;
-  // The server's label of a per-model weekly window ("Opus"); null for the
-  // plan-wide kinds.
+  // The server's label of a per-model weekly window ("Fable", "Opus"); null
+  // for the plan-wide kinds.
   model: string | null;
   // Percent of the window used, 0–100; null when the endpoint did not say.
   utilization: number | null;
@@ -418,26 +420,82 @@ export type ClaudeLimitsView = {
 };
 
 // The last round of measuring that brought nothing: when, and what the
-// control said (the SDK marks it experimental — a CLI may refuse it in its
-// context; a control may not answer in time). Cleared by a measurement.
+// source said (Claude: the SDK marks the control experimental — a CLI may
+// refuse it in its context, a control may not answer in time; Codex: the
+// app-server's error, a process that exited, no answer in time). Cleared
+// by a measurement.
 export type LimitFailureView = {
   at: Date;
   message: string;
 };
 
-// GET /api/limits — the newest measurement, or null when none was taken
-// since the process started (the limits are measured through a live Claude
-// session: none has run, or the control failed in every one); lastFailure —
-// the outcome of the last round since that measurement that brought none,
-// null when the last round measured. liveSessions — the Claude sessions
-// alive right now (zero explains a stale measurement: nothing can refresh it
-// until the next run); lastSessionAt — when the last Claude session ended,
-// null when none has since the process started.
-export type LimitsResponse = {
+// The Claude half of GET /api/limits: limits — the newest measurement, or
+// null when none was taken since the process started (the limits are
+// measured through a live Claude session: none has run, or the control
+// failed in every one); lastFailure — the outcome of the last round since
+// that measurement that brought none, null when the last round measured.
+// liveSessions — the Claude sessions alive right now (zero explains a stale
+// measurement: nothing can refresh it until the next run); lastSessionAt —
+// when the last Claude session ended, null when none has since the process
+// started.
+export type ClaudeLimitsResponse = {
   limits: ClaudeLimitsView | null;
   lastFailure: LimitFailureView | null;
   liveSessions: number;
   lastSessionAt: Date | null;
+};
+
+// One rate-limit window of the Codex account: the backend meters a primary
+// window and, on some plans, a secondary one, each of a stated length
+// (minutes; 10080 — a week, 300 — five hours) with the percent used and
+// the reset moment. bucket — the backend's limit the window belongs to
+// (its name, or its id) when it meters more than one; null for the one
+// bucket of the plan.
+export type CodexLimitWindowView = {
+  bucket: string | null;
+  kind: 'primary' | 'secondary';
+  windowMinutes: number | null;
+  utilization: number;
+  resetsAt: Date | null;
+};
+
+export type CodexLimitsView = {
+  measuredAt: Date;
+  // The backend's plan type ('plus', 'pro', 'prolite', 'team', 'business',
+  // 'enterprise', 'free', …), null when it did not say.
+  planType: string | null;
+  windows: CodexLimitWindowView[];
+  // Why the backend is refusing requests, when it is ('rate_limit_reached',
+  // 'workspace_owner_credits_depleted', …); null while requests go through.
+  reached: string | null;
+  // The workspace's spend control is reached (null — the backend did not
+  // say).
+  spendControlReached: boolean | null;
+  // Extra credits of the account: whether it has any, whether they are
+  // unlimited, the balance as the backend prints it; null when not said.
+  credits: { has: boolean; unlimited: boolean; balance: string | null } | null;
+  // The member's own spend limit of the period, when the plan has one: the
+  // used and the limit as the backend prints them, the percent left, the
+  // reset moment.
+  spendLimit: { used: string; limit: string; remainingPercent: number; resetsAt: Date } | null;
+  // Rate-limit reset credits the account can redeem (the backend's "full
+  // reset" grants), null when not said.
+  resetCredits: number | null;
+};
+
+// The Codex half of GET /api/limits: limits — the newest measurement, or
+// null when none has succeeded since the process started (a read measures
+// when the cache is stale, so null means the app-server has not answered
+// yet, or answered nothing but failures); lastFailure — as for Claude.
+export type CodexLimitsResponse = {
+  limits: CodexLimitsView | null;
+  lastFailure: LimitFailureView | null;
+};
+
+// GET /api/limits — both accounts' newest measurements.
+export type LimitsResponse = {
+  claude: ClaudeLimitsResponse;
+  codex: CodexLimitsResponse;
 };
 
 // ---------------------------------------------------------------------------

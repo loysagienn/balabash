@@ -1160,13 +1160,17 @@ async function settingsEvents(): Promise<{ seq: bigint; actor: string; threadId:
 }
 
 describe('the plan limits over the api', () => {
-  test('GET /limits answers the process’s measurement: none without a Claude session, the view a live session’s control gives, the kept view once it is gone', async () => {
+  test('GET /limits answers each account’s measurement: Claude — none without a session, the view a live session’s control gives, the kept view once it is gone; Codex — none without a provider, the view the app-server gives, kept without one', async () => {
     const { planLimits } = await import('../harness/claude-sdk/plan-limits.ts');
+    const { codexPlanLimits } = await import('../harness/codex-sdk/plan-limits.ts');
 
     const none = await stand.request('GET', '/api/limits');
 
     assert.equal(none.status, 200, none.text);
-    assert.deepEqual(none.json<LimitsResponse>(), { limits: null, lastFailure: null, liveSessions: 0, lastSessionAt: null });
+    assert.deepEqual(none.json<LimitsResponse>(), {
+      claude: { limits: null, lastFailure: null, liveSessions: 0, lastSessionAt: null },
+      codex: { limits: null, lastFailure: null },
+    });
 
     // A live session's control, as sdk-session.ts registers it.
     const unregister = planLimits.registerProvider('thread-limits', async () => ({
@@ -1176,6 +1180,7 @@ describe('the plan limits over the api', () => {
       rate_limits: {
         five_hour: { utilization: 47, resets_at: '2026-10-10T18:00:00Z' },
         seven_day: { utilization: 81, resets_at: '2026-10-13T10:00:00Z' },
+        model_scoped: [{ display_name: 'Fable', utilization: 63, resets_at: '2026-10-13T10:00:00Z' }],
         extra_usage: { is_enabled: false, monthly_limit: null, used_credits: null, utilization: null },
       },
       behaviors: null,
@@ -1186,13 +1191,13 @@ describe('the plan limits over the api', () => {
 
       assert.equal(live.status, 200, live.text);
 
-      const body = live.json<LimitsResponse>();
+      const { claude } = live.json<LimitsResponse>();
 
-      assert.equal(body.liveSessions, 1);
-      assert.equal(body.lastFailure, null);
-      assert.ok(body.limits && body.limits.measuredAt instanceof Date);
+      assert.equal(claude.liveSessions, 1);
+      assert.equal(claude.lastFailure, null);
+      assert.ok(claude.limits && claude.limits.measuredAt instanceof Date);
       assert.deepEqual(
-        { ...body.limits, measuredAt: undefined },
+        { ...claude.limits, measuredAt: undefined },
         {
           measuredAt: undefined,
           subscriptionType: 'max',
@@ -1200,6 +1205,7 @@ describe('the plan limits over the api', () => {
           windows: [
             { kind: 'five_hour', model: null, utilization: 47, resetsAt: new Date('2026-10-10T18:00:00Z'), status: null },
             { kind: 'seven_day', model: null, utilization: 81, resetsAt: new Date('2026-10-13T10:00:00Z'), status: null },
+            { kind: 'model', model: 'Fable', utilization: 63, resetsAt: new Date('2026-10-13T10:00:00Z'), status: null },
           ],
           overage: { enabled: false, inUse: false, usedCredits: null, monthlyLimit: null, utilization: null, currency: null },
         },
@@ -1212,9 +1218,9 @@ describe('the plan limits over the api', () => {
 
     const after = (await stand.request('GET', '/api/limits')).json<LimitsResponse>();
 
-    assert.equal(after.liveSessions, 0);
-    assert.equal(after.limits?.subscriptionType, 'max');
-    assert.ok(after.lastSessionAt instanceof Date);
+    assert.equal(after.claude.liveSessions, 0);
+    assert.equal(after.claude.limits?.subscriptionType, 'max');
+    assert.ok(after.claude.lastSessionAt instanceof Date);
 
     // A session whose control refuses, measuring on its init frame: the kept
     // measurement and the outcome of the round, as dates.
@@ -1228,12 +1234,53 @@ describe('the plan limits over the api', () => {
 
       const failed = (await stand.request('GET', '/api/limits')).json<LimitsResponse>();
 
-      assert.equal(failed.limits?.subscriptionType, 'max');
-      assert.equal(failed.lastFailure?.message, 'get_usage is not supported in this context');
-      assert.ok(failed.lastFailure?.at instanceof Date);
+      assert.equal(failed.claude.limits?.subscriptionType, 'max');
+      assert.equal(failed.claude.lastFailure?.message, 'get_usage is not supported in this context');
+      assert.ok(failed.claude.lastFailure?.at instanceof Date);
     } finally {
       refusing();
     }
+
+    // The app-server's answer, as startCodexPlanLimits registers it: the
+    // read measures (the cache is empty) and answers the view.
+    const snapshot = {
+      limitId: 'codex',
+      limitName: null,
+      primary: { usedPercent: 63, windowDurationMins: 10080, resetsAt: 1792115459 },
+      secondary: null,
+      credits: { hasCredits: false, unlimited: false, balance: '0' },
+      individualLimit: null,
+      spendControlReached: false,
+      planType: 'prolite',
+      rateLimitReachedType: null,
+    };
+
+    codexPlanLimits.setProvider(async () => ({ rateLimits: snapshot, rateLimitsByLimitId: { codex: snapshot }, rateLimitResetCredits: { availableCount: 3 } }));
+
+    try {
+      const measured = (await stand.request('GET', '/api/limits')).json<LimitsResponse>();
+
+      assert.equal(measured.codex.lastFailure, null);
+      assert.ok(measured.codex.limits && measured.codex.limits.measuredAt instanceof Date);
+      assert.deepEqual(
+        { ...measured.codex.limits, measuredAt: undefined },
+        {
+          measuredAt: undefined,
+          planType: 'prolite',
+          windows: [{ bucket: null, kind: 'primary', windowMinutes: 10080, utilization: 63, resetsAt: new Date(1792115459 * 1000) }],
+          reached: null,
+          spendControlReached: false,
+          credits: { has: false, unlimited: false, balance: '0' },
+          spendLimit: null,
+          resetCredits: 3,
+        },
+      );
+    } finally {
+      codexPlanLimits.setProvider(null);
+    }
+
+    // Without a provider the measurement is kept.
+    assert.equal((await stand.request('GET', '/api/limits')).json<LimitsResponse>().codex.limits?.planType, 'prolite');
 
     // A reading, not a mutation: the session is still required.
     assert.equal((await stand.request('GET', '/api/limits', { cookie: null })).status, 401);

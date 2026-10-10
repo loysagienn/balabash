@@ -17,7 +17,7 @@ import { selectActiveProjects, selectArchivedProjectCount, selectProjects } from
 import { selectStream, snapshotStage } from '../../store/stream/selectors.ts';
 import { snapshotLoad } from '../../store/stream/actions.ts';
 import { selectLatestFinishedThread, selectRunningCountByProject, selectRunningThreads } from '../../store/threads/selectors.ts';
-import { ClaudeLimitsCard } from '../../features/limits/ClaudeLimitsCard.tsx';
+import { LimitsCard } from '../../features/limits/LimitsCard.tsx';
 import { Shell } from '../../features/shell/Shell.tsx';
 import { NAV } from '../../features/shell/nav.ts';
 import { ThreadList } from '../../features/thread-list/ThreadList.tsx';
@@ -216,7 +216,7 @@ export function HomeScreen() {
             </Card>
           </Grid12Col>
           <Grid12Col span={4} stack className="home-col">
-            <ClaudeLimitsCard scope="home" className="home-o2" />
+            <LimitsCard scope="home" className="home-o2" />
             <Card narrow="bare" className="home-o3">
               <CardHead
                 title="Active projects"

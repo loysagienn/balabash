@@ -43,7 +43,7 @@ type ApiOverrides = Omit<Partial<Api>, 'threads' | 'workspace' | 'files' | 'sett
 // The file area, the stored files' facts, the model requests and the secret
 // requests are Query, not the store: handlers never call them.
 const LLM_REQUESTS: Api['llmRequests'] = { list: async () => ({ requests: [] }) };
-const LIMITS: Api['limits'] = { get: async () => ({ limits: null, lastFailure: null, liveSessions: 0, lastSessionAt: null }) };
+const LIMITS: Api['limits'] = { get: async () => ({ claude: { limits: null, lastFailure: null, liveSessions: 0, lastSessionAt: null }, codex: { limits: null, lastFailure: null } }) };
 
 const FILES: Api['files'] = { meta: async fileId => ({ file: { fileId, name: null, contentType: null, sizeBytes: null, width: null, height: null } }) };
 

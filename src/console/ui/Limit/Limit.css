@@ -11,8 +11,13 @@
 .lim-s[data-level="over"]{color:var(--lvl-over)}
 .lims[data-layout="stack"]{grid-template-columns:minmax(0,1fr)}
 .lims[data-layout="stack"] .lim{grid-template-columns:auto minmax(0,1fr);justify-items:stretch}
+/* ── Limit group ──  .limgrp > .listgrp + (.card-b notes) + .lims + .card-f — the windows of one account in the "Plan limits" card.
+   The group header is the list group of the design; the first group sits right under the card header, so it has no rule of its own. */
+.card-h + .limgrp > .listgrp{border-top:0}
 @container shell (max-width:720px){
   .lims[data-narrow="tiles"]{gap:var(--sp-2);background:none}
   .lims[data-narrow="tiles"] .lim{grid-template-columns:auto minmax(0,1fr);justify-items:stretch;border-radius:var(--r-md);padding:var(--sp-3)}
+  .card[data-narrow="bare"] .limgrp > :is(.listgrp,.card-f){padding-inline:0}
+  .card[data-narrow="bare"] .limgrp > .card-b{padding:0}
 }
 }

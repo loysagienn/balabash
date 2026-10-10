@@ -86,7 +86,7 @@ const api: Api = {
     },
   },
   llmRequests: { list: async () => ({ requests: [] }) },
-  limits: { get: async () => ({ limits: null, lastFailure: null, liveSessions: 0, lastSessionAt: null }) },
+  limits: { get: async () => ({ claude: { limits: null, lastFailure: null, liveSessions: 0, lastSessionAt: null }, codex: { limits: null, lastFailure: null } }) },
   schedule: {
     runs: async () => ({ runs: [], nextCursor: null }),
     latestRuns: async () => ({ runs: [] }),

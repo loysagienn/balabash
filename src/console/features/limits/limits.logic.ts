@@ -1,9 +1,10 @@
-// The words of the "Claude limits" cards (design: Limit rows on Home and
-// System) over GET /api/limits: which windows a card shows, a row's title,
-// reset line and state label, the footer's measurement and overage words,
-// the note when there is no measurement. Pure, tested.
+// The words of the "Plan limits" card (design: Limit rows on Home and
+// System) over GET /api/limits, a group per account: which windows a card
+// shows, a row's title, reset line and state label, the group's plan and
+// footer (the measurement, Claude's overage, Codex's credits), the notes
+// when there is no measurement or the account is refusing. Pure, tested.
 
-import type { ClaudeLimitsView, LimitFailureView, LimitOverageView, LimitWindowKind, LimitWindowView, LimitsResponse } from '../../../api/contract.ts';
+import type { ClaudeLimitsResponse, ClaudeLimitsView, CodexLimitWindowView, CodexLimitsView, LimitFailureView, LimitOverageView, LimitWindowKind, LimitWindowView } from '../../../api/contract.ts';
 import { countOf, dateTimeLabel, durationLabel, shortDate, timeOfDay } from '../../lib/format/index.ts';
 import type { RingLevel } from '../../ui/Ring/Ring.logic.ts';
 import { ringLevel } from '../../ui/Ring/Ring.logic.ts';
@@ -20,9 +21,11 @@ export type LimitRow = {
   level: RingLevel | undefined;
 };
 
-// Where the rows are shown: Home keeps to the plan-wide windows unless a
-// narrower one is at a warning or exhausted — by its percentage or by the
-// API's answer since the measurement; System lists every window.
+// Where the rows are shown: Home keeps to the plan-wide windows and the
+// per-model ones (the server's current meters — the models the agents run
+// on), the older narrow kinds (Opus, Sonnet, OAuth apps) only at a warning
+// or exhausted — by their percentage or by the API's answer since the
+// measurement; System lists every window.
 export type LimitsScope = 'home' | 'all';
 
 const TITLES: Record<Exclude<LimitWindowKind, 'model'>, string> = {
@@ -44,8 +47,14 @@ export function windowTitle(window: Pick<LimitWindowView, 'kind' | 'model'>): st
   return window.kind === 'model' ? `7 days · ${window.model ?? 'model'}` : TITLES[window.kind];
 }
 
-// "at 18:00" today, "Mon, 10:00" within the week, then "Oct 20, 10:00".
-function resetMoment(resetsAt: Date, now: Date): string {
+// "at 18:00" today, "Mon, 10:00" within the week, then "Oct 20, 10:00". The
+// moment is named to the nearest minute: the endpoints state a reset on a
+// minute boundary and jitter around it by a second between measurements —
+// cut off, the seconds would turn "Tue, 00:00" into "Mon, 23:59" from one
+// read to the next.
+function resetMoment(at: Date, now: Date): string {
+  const resetsAt = new Date(Math.round(at.getTime() / MINUTE) * MINUTE);
+
   if (sameDay(resetsAt, now)) {
     return `at ${timeOfDay(resetsAt)}`;
   }
@@ -116,10 +125,10 @@ export function limitRows(limits: ClaudeLimitsView, scope: LimitsScope, now: Dat
       continue;
     }
 
-    const planWide = window.kind === 'five_hour' || window.kind === 'seven_day';
+    const onHome = window.kind === 'five_hour' || window.kind === 'seven_day' || window.kind === 'model';
     const level = limitLevel(window);
 
-    if (scope === 'home' && !planWide && level === undefined) {
+    if (scope === 'home' && !onHome && level === undefined) {
       continue;
     }
 
@@ -181,7 +190,7 @@ export function overageWords(overage: LimitOverageView | null): string | null {
 
 // The note in place of the rows when the server has no measurement: why,
 // and what brings one.
-export function noLimitsWords(response: Pick<LimitsResponse, 'liveSessions' | 'lastSessionAt'>, now: Date): string {
+export function noLimitsWords(response: Pick<ClaudeLimitsResponse, 'liveSessions' | 'lastSessionAt'>, now: Date): string {
   if (response.liveSessions > 0) {
     return `No limit data yet: ${countOf(response.liveSessions, 'Claude session is', 'Claude sessions are')} running, but none has answered a measurement.`;
   }
@@ -193,10 +202,134 @@ export function noLimitsWords(response: Pick<LimitsResponse, 'liveSessions' | 'l
 }
 
 // The note over the rows (or in their place) when the last round of
-// measuring brought nothing: when it failed and what the control said.
-export function failureWords(failure: LimitFailureView, now: Date): string {
-  return `Couldn’t measure the limits ${dateTimeLabel(failure.at, now)}: ${failure.message}`;
+// measuring brought nothing: whose limits, when it failed and what the
+// source said.
+export function failureWords(account: 'Claude' | 'Codex', failure: LimitFailureView, now: Date): string {
+  return `Couldn’t measure the ${account} limits ${dateTimeLabel(failure.at, now)}: ${failure.message}`;
 }
 
 export const UNAVAILABLE_WORDS = 'Plan limits are not available for this account: it runs on an API key or a cloud provider, or its login lacks the profile scope.';
 export const NO_WINDOWS_WORDS = 'The plan reported no windows with a percentage.';
+
+// ---------------------------------------------------------------------------
+// The plan of a group's header: "Max plan", "Pro Lite plan"; nothing when
+// the account did not say.
+
+const PLAN_NAMES: Record<string, string> = {
+  pro: 'Pro',
+  max: 'Max',
+  team: 'Team',
+  enterprise: 'Enterprise',
+  free: 'Free',
+  go: 'Go',
+  plus: 'Plus',
+  prolite: 'Pro Lite',
+  business: 'Business',
+  edu: 'Edu',
+  edu_plus: 'Edu Plus',
+  edu_pro: 'Edu Pro',
+};
+
+export function planWords(plan: string | null): string | null {
+  if (plan === null || plan === '') {
+    return null;
+  }
+
+  const name = PLAN_NAMES[plan] ?? plan.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+
+  return `${name} plan`;
+}
+
+// ---------------------------------------------------------------------------
+// Codex: the account's windows as rows, the footer, the refusal.
+
+// "7 days", "5 hours", "90 minutes" by the window's length; "window" when
+// the backend did not say; the bucket's name after it when there are
+// several.
+export function codexWindowTitle(window: Pick<CodexLimitWindowView, 'windowMinutes' | 'bucket'>): string {
+  const minutes = window.windowMinutes;
+  let title = 'window';
+
+  if (minutes !== null && minutes > 0) {
+    if (minutes % 1440 === 0) {
+      title = countOf(minutes / 1440, 'day');
+    } else if (minutes % 60 === 0) {
+      title = countOf(minutes / 60, 'hour');
+    } else {
+      title = countOf(minutes, 'minute');
+    }
+  }
+
+  return window.bucket === null ? title : `${title} · ${window.bucket}`;
+}
+
+export function codexRows(limits: CodexLimitsView, now: Date): LimitRow[] {
+  return limits.windows.map(window => {
+    const state = { utilization: window.utilization, status: null };
+
+    return {
+      key: `codex:${window.bucket ?? ''}:${window.kind}`,
+      title: codexWindowTitle(window),
+      meta: resetWords(window.resetsAt, now),
+      value: window.utilization,
+      label: limitLabel(state, null),
+      level: limitLevel(state),
+    };
+  });
+}
+
+const REACHED_WORDS: Record<string, string> = {
+  rate_limit_reached: 'the rate limit is reached',
+  workspace_owner_credits_depleted: 'the workspace owner’s credits are depleted',
+  workspace_member_credits_depleted: 'the workspace member’s credits are depleted',
+  workspace_owner_usage_limit_reached: 'the workspace owner’s usage limit is reached',
+  workspace_member_usage_limit_reached: 'the workspace member’s usage limit is reached',
+};
+
+// The note when the backend is refusing requests: why, in its terms;
+// nothing while they go through.
+export function codexReachedWords(limits: Pick<CodexLimitsView, 'reached' | 'spendControlReached'>): string | null {
+  if (limits.reached !== null) {
+    return `Codex is refusing requests: ${REACHED_WORDS[limits.reached] ?? limits.reached.replace(/_/g, ' ')}.`;
+  }
+
+  if (limits.spendControlReached === true) {
+    return 'Codex is refusing requests: the spend control is reached.';
+  }
+
+  return null;
+}
+
+// The footer: when the measurement was taken, the credits as the backend
+// states them, the member's spend limit, the reset credits — "measured
+// 16:31 · no extra credits · 3 reset credits available".
+export function codexMeasuredWords(limits: CodexLimitsView, now: Date): string {
+  const parts = [`measured ${dateTimeLabel(limits.measuredAt, now)}`];
+  const { credits, spendLimit } = limits;
+
+  if (credits) {
+    if (credits.unlimited) {
+      parts.push('unlimited credits');
+    } else if (credits.has) {
+      parts.push(credits.balance !== null ? `credits: ${credits.balance}` : 'credits available');
+    } else {
+      parts.push('no extra credits');
+    }
+  }
+
+  if (spendLimit) {
+    parts.push(`spend limit ${spendLimit.used} of ${spendLimit.limit} (${spendLimit.remainingPercent}% left, ${resetWords(spendLimit.resetsAt, now)})`);
+  }
+
+  if (limits.resetCredits !== null && limits.resetCredits > 0) {
+    parts.push(`${countOf(limits.resetCredits, 'reset credit')} available`);
+  }
+
+  return parts.join(' · ');
+}
+
+export const NO_CODEX_LIMITS_WORDS = 'No Codex limit data yet: the CLI’s app-server has not answered a measurement; the next refresh asks again.';
+// The server of an older build answers without the accounts (the console
+// bundle goes live before the app restarts).
+export const OLDER_SERVER_WORDS = 'The server runs an older build and answers the limits in another shape; the card fills in after the app restarts.';
+export const NO_CODEX_WINDOWS_WORDS = 'The plan reported no rate-limit windows.';

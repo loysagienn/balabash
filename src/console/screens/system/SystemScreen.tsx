@@ -1,5 +1,6 @@
-// System (design: SystemScreen): the "Claude limits" card — every window of
-// the plan with the overage (features/limits, GET /api/limits) — and the
+// System (design: SystemScreen): the "Plan limits" card — every window of
+// the Claude plan with the overage and the Codex plan's windows
+// (features/limits, GET /api/limits) — and the
 // "Model usage" section's first card, "Main thread · tokens per request" —
 // the prompt cache of the main thread per request (spec:
 // design/main-thread-token-chart.md) over GET /api/llm-requests. The
@@ -12,7 +13,7 @@ import { useNow } from '../../lib/format/useNow.ts';
 import { useAppSelector } from '../../store/hooks.ts';
 import { selectMe } from '../../store/session/selectors.ts';
 import { selectMainThread } from '../../store/threads/selectors.ts';
-import { ClaudeLimitsCard } from '../../features/limits/ClaudeLimitsCard.tsx';
+import { LimitsCard } from '../../features/limits/LimitsCard.tsx';
 import { Shell } from '../../features/shell/Shell.tsx';
 import { Card, CardBody, CardFoot, CardHead } from '../../ui/Card/Card.tsx';
 import { Empty } from '../../ui/Empty/Empty.tsx';
@@ -135,7 +136,7 @@ export function SystemScreen() {
       <Screen>
         <Grid12>
           <Grid12Col span={12}>
-            <ClaudeLimitsCard scope="system" />
+            <LimitsCard scope="system" />
           </Grid12Col>
           <Grid12Col span={12} stack>
             <div className="sys-usage-h">
