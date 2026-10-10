@@ -3,8 +3,9 @@
 // reset line and state label, the footer's measurement and overage words,
 // the note when there is no measurement. Pure, tested.
 
-import type { ClaudeLimitsView, LimitOverageView, LimitWindowKind, LimitWindowView, LimitsResponse } from '../../../api/contract.ts';
+import type { ClaudeLimitsView, LimitFailureView, LimitOverageView, LimitWindowKind, LimitWindowView, LimitsResponse } from '../../../api/contract.ts';
 import { countOf, dateTimeLabel, durationLabel, shortDate, timeOfDay } from '../../lib/format/index.ts';
+import type { RingLevel } from '../../ui/Ring/Ring.logic.ts';
 import { ringLevel } from '../../ui/Ring/Ring.logic.ts';
 
 export type LimitRow = {
@@ -14,10 +15,14 @@ export type LimitRow = {
   // Percent used — the ring's value.
   value: number;
   label: string;
+  // The level of the state label: the ring's, raised to a warning by what
+  // the API answered since the measurement.
+  level: RingLevel | undefined;
 };
 
 // Where the rows are shown: Home keeps to the plan-wide windows unless a
-// narrower one is at a warning or exhausted; System lists every window.
+// narrower one is at a warning or exhausted — by its percentage or by the
+// API's answer since the measurement; System lists every window.
 export type LimitsScope = 'home' | 'all';
 
 const TITLES: Record<Exclude<LimitWindowKind, 'model'>, string> = {
@@ -71,13 +76,26 @@ export function resetWords(resetsAt: Date | null, now: Date): string {
   return `resets ${resetMoment(resetsAt, now)} · in ${ms < MINUTE ? 'under a minute' : durationLabel(ms)}`;
 }
 
-// The state label under the reset line, by the ring's rule (below 80 —
-// normal, 80–99 — warning, 100 and above — exhausted; "· overage" when the
-// requests go on past the plan at API rates). A refusal the API answered
-// since the measurement shows as "refused" while the percentage is not yet
-// at 100.
-export function limitLabel(window: Pick<LimitWindowView, 'utilization' | 'status'>, overage: LimitOverageView | null): string {
+// The level of a window: the ring's rule over its percentage (below 80 —
+// none, 80–99 — warn, 100 and above — over), raised to warn by a warning or
+// a refusal the API answered since the measurement — the percentage is the
+// measurement's, the API's answer is newer.
+export function limitLevel(window: Pick<LimitWindowView, 'utilization' | 'status'>): RingLevel | undefined {
   const level = ringLevel(window.utilization ?? 0);
+
+  if (level === undefined && (window.status === 'allowed_warning' || window.status === 'rejected')) {
+    return 'warn';
+  }
+
+  return level;
+}
+
+// The state label under the reset line: normal, warning, exhausted ("·
+// overage" when the requests go on past the plan at API rates) by the
+// level; a refusal the API answered since the measurement shows as
+// "refused" while the percentage is not yet at 100.
+export function limitLabel(window: Pick<LimitWindowView, 'utilization' | 'status'>, overage: LimitOverageView | null): string {
+  const level = limitLevel(window);
 
   if (level === 'over') {
     return overage?.inUse ? 'exhausted · overage' : 'exhausted';
@@ -99,8 +117,9 @@ export function limitRows(limits: ClaudeLimitsView, scope: LimitsScope, now: Dat
     }
 
     const planWide = window.kind === 'five_hour' || window.kind === 'seven_day';
+    const level = limitLevel(window);
 
-    if (scope === 'home' && !planWide && ringLevel(window.utilization) === undefined) {
+    if (scope === 'home' && !planWide && level === undefined) {
       continue;
     }
 
@@ -110,6 +129,7 @@ export function limitRows(limits: ClaudeLimitsView, scope: LimitsScope, now: Dat
       meta: resetWords(window.resetsAt, now),
       value: window.utilization,
       label: limitLabel(window, limits.overage),
+      level,
     });
   }
 
@@ -172,5 +192,11 @@ export function noLimitsWords(response: Pick<LimitsResponse, 'liveSessions' | 'l
   return 'No limit data yet: no Claude session has run since the app started; the next run measures them.';
 }
 
-export const UNAVAILABLE_WORDS = 'Plan limits do not apply to this account — it runs on an API key or a cloud provider.';
+// The note over the rows (or in their place) when the last round of
+// measuring brought nothing: when it failed and what the control said.
+export function failureWords(failure: LimitFailureView, now: Date): string {
+  return `Couldn’t measure the limits ${dateTimeLabel(failure.at, now)}: ${failure.message}`;
+}
+
+export const UNAVAILABLE_WORDS = 'Plan limits are not available for this account: it runs on an API key or a cloud provider, or its login lacks the profile scope.';
 export const NO_WINDOWS_WORDS = 'The plan reported no windows with a percentage.';

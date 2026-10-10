@@ -19,10 +19,15 @@
 // many sessions are alive and when the last one ended, and says so. A
 // control that fails (the SDK marks it experimental; a CLI may refuse it in
 // its context) is "no measurement", never a session failure: the session
-// goes on, the cache stays.
+// goes on, the cache stays — and the reader learns the outcome of the last
+// round that brought nothing (lastFailure: when, what the control said),
+// cleared by the next measurement. A control that does not answer within
+// ATTEMPT_MS is left behind the same way (the SDK's request keeps no timer:
+// a pending control resolves only with the answer or the session's close),
+// its late answer ignored, its session tried last next time.
 
 import type { SDKControlGetUsageResponse, SDKMessage, SDKRateLimitInfo } from '@anthropic-ai/claude-agent-sdk';
-import type { ClaudeLimitsView, LimitWindowKind, LimitWindowView, LimitsResponse } from '../../api/contract.ts';
+import type { ClaudeLimitsView, LimitFailureView, LimitWindowKind, LimitWindowView, LimitsResponse } from '../../api/contract.ts';
 import { subscribeSdkSessionEnd, subscribeSdkStream } from './stream-tap.ts';
 
 export type UsageProvider = () => Promise<SDKControlGetUsageResponse>;
@@ -33,6 +38,8 @@ export const FRESH_MS = 30_000;
 export const FRAME_REFRESH_MS = 60_000;
 // A read waits this long for a measurement in flight, then answers the cache.
 export const READ_WAIT_MS = 8_000;
+// One control is given this long to answer before the round moves on.
+export const ATTEMPT_MS = 10_000;
 // Providers tried per refresh before giving up on this round.
 const PROVIDER_ATTEMPTS = 3;
 
@@ -51,6 +58,11 @@ function dateOf(iso: string | null | undefined): Date | null {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
+// The same window instance: both reset moments known and equal.
+function sameReset(a: Date | null, b: Date | null): boolean {
+  return a !== null && b !== null && a.getTime() === b.getTime();
+}
+
 function windowOf(kind: LimitWindowKind, model: string | null, raw: PlanWindow): LimitWindowView {
   return { kind, model, utilization: raw.utilization ?? null, resetsAt: dateOf(raw.resets_at), status: null };
 }
@@ -58,8 +70,11 @@ function windowOf(kind: LimitWindowKind, model: string | null, raw: PlanWindow):
 // The response of the usage control as the console's view: every window the
 // endpoint named (a plan-wide kind that is null or absent is not a window;
 // the per-model rows keep the server's label), the extra-usage block, the
-// plan. The statuses of a previous view are carried over by window — they
-// came after the previous measurement and say how the API answered since.
+// plan. The status of a previous view is carried over to the same window —
+// the same kind, model and reset moment: it came after the previous
+// measurement and says how the API answered since. A window that has reset
+// (another reset moment, or none known) starts without one: a refusal of the
+// window before it says nothing about this one.
 export function limitsOfUsage(response: SDKControlGetUsageResponse, measuredAt: Date, previous: ClaudeLimitsView | null = null): ClaudeLimitsView {
   const limits = response.rate_limits;
   const windows: LimitWindowView[] = [];
@@ -81,7 +96,7 @@ export function limitsOfUsage(response: SDKControlGetUsageResponse, measuredAt: 
   for (const window of windows) {
     const before = previous?.windows.find(w => w.kind === window.kind && w.model === window.model);
 
-    if (before && before.status !== null) {
+    if (before && before.status !== null && sameReset(before.resetsAt, window.resetsAt)) {
       window.status = before.status;
     }
   }
@@ -154,7 +169,8 @@ export type PlanLimitsService = {
   sessionEnded(threadId: string): void;
   // The console's read: a fresh-enough cache as it is; otherwise a
   // measurement through a live session when one answers within READ_WAIT_MS,
-  // else the cache.
+  // else the cache — and the outcome of the last round since the cache's
+  // measurement that brought none.
   read(): Promise<LimitsResponse>;
   // The measurement in flight, if any — for a test to settle on.
   settled(): Promise<void>;
@@ -164,39 +180,78 @@ export type PlanLimitsDeps = {
   now?: () => number;
   // Where a failed control is reported (once per distinct message).
   warn?: (message: string) => void;
+  // How long one control is given to answer (ATTEMPT_MS; a test shortens it).
+  attemptMs?: number;
 };
 
 export function createPlanLimits(deps: PlanLimitsDeps = {}): PlanLimitsService {
   const now = deps.now ?? Date.now;
   const warn = deps.warn ?? ((message: string) => console.warn(`[plan-limits] ${message}`));
+  const attemptMs = deps.attemptMs ?? ATTEMPT_MS;
   const providers = new Map<string, UsageProvider>();
   let limits: ClaudeLimitsView | null = null;
+  let lastFailure: LimitFailureView | null = null;
   let lastSessionAt: Date | null = null;
   // The moment a frame last asked for a measurement (throttle).
   let frameRefreshAt = -Infinity;
   let inFlight: Promise<void> | null = null;
   let lastWarning: string | null = null;
 
-  const measure = async (): Promise<void> => {
-    const candidates = [...providers.values()].slice(0, PROVIDER_ATTEMPTS);
+  const warnOnce = (message: string) => {
+    if (message !== lastWarning) {
+      lastWarning = message;
+      warn(message);
+    }
+  };
 
-    for (const provider of candidates) {
+  // One control's answer, or the timeout: a control that is still pending
+  // after attemptMs is left behind — its answer, if it ever comes, is
+  // dropped — and its session goes to the back of the line.
+  const attempt = (threadId: string, provider: UsageProvider): Promise<SDKControlGetUsageResponse> =>
+    new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        if (providers.get(threadId) === provider) {
+          providers.delete(threadId);
+          providers.set(threadId, provider);
+        }
+
+        reject(new Error(`no answer within ${attemptMs / 1000} s`));
+      }, attemptMs);
+
+      provider().then(
+        response => {
+          clearTimeout(timer);
+          resolve(response);
+        },
+        error => {
+          clearTimeout(timer);
+          reject(error);
+        },
+      );
+    });
+
+  const measure = async (): Promise<void> => {
+    const candidates = [...providers.entries()].slice(0, PROVIDER_ATTEMPTS);
+    let failure: string | null = null;
+
+    for (const [threadId, provider] of candidates) {
       try {
-        const response = await provider();
+        const response = await attempt(threadId, provider);
         const measuredAt = new Date(now());
 
         limits = limitsOfUsage(response, measuredAt, limits);
+        lastFailure = null;
         lastWarning = null;
 
         return;
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-
-        if (message !== lastWarning) {
-          lastWarning = message;
-          warn(`usage control failed: ${message}`);
-        }
+        failure = error instanceof Error ? error.message : String(error);
+        warnOnce(`usage control failed: ${failure}`);
       }
+    }
+
+    if (failure !== null) {
+      lastFailure = { at: new Date(now()), message: failure };
     }
   };
 
@@ -268,7 +323,7 @@ export function createPlanLimits(deps: PlanLimitsDeps = {}): PlanLimitsService {
         });
       }
 
-      return { limits, liveSessions: providers.size, lastSessionAt };
+      return { limits, lastFailure, liveSessions: providers.size, lastSessionAt };
     },
 
     settled: () => inFlight ?? Promise.resolve(),

@@ -4,7 +4,9 @@
 // in a row on System with a Refresh button — and, under them, when the
 // measurement was taken and whether a live session can refresh it; on
 // System also the overage line. Without a measurement the card says why
-// (no Claude session has run, or none answered); an account without plan
+// (no Claude session has run, or none answered); a round of measuring that
+// brought nothing is a note with what the control said — over the rows of
+// the measurement before, or in place of the rows; an account without plan
 // limits says that. The stages of the query — factsStage: a skeleton of
 // the rows' shape, the failure with Retry, the rows; a failed refetch over
 // kept rows is a note above them.
@@ -18,7 +20,7 @@ import { IconBtn } from '../../ui/IconBtn/IconBtn.tsx';
 import { Limit, Limits } from '../../ui/Limit/Limit.tsx';
 import { Note } from '../../ui/Note/Note.tsx';
 import { Caption } from '../../ui/atoms/atoms.tsx';
-import { NO_WINDOWS_WORDS, UNAVAILABLE_WORDS, limitRows, measuredWords, noLimitsWords, overageWords } from './limits.logic.ts';
+import { NO_WINDOWS_WORDS, UNAVAILABLE_WORDS, failureWords, limitRows, measuredWords, noLimitsWords, overageWords } from './limits.logic.ts';
 import { useLimits } from './queries.ts';
 
 export type ClaudeLimitsCardProps = {
@@ -52,11 +54,18 @@ export function ClaudeLimitsCard({ scope, className }: ClaudeLimitsCardProps) {
       </Empty>
     );
   } else {
-    const { limits, liveSessions, lastSessionAt } = stage.data;
+    const { limits, lastFailure, liveSessions, lastSessionAt } = stage.data;
     const stale = stage.stale ? (
       <CardBody>
         <Note state="err" icon="cloud-off" role="alert" action="Retry" actionIcon="refresh-cw" actionBusy={query.isFetching} onAction={() => void query.refetch()}>
           Couldn’t refresh — showing the limits read before. {stage.stale.message}
+        </Note>
+      </CardBody>
+    ) : null;
+    const failure = lastFailure ? (
+      <CardBody>
+        <Note state="err" icon="triangle-alert" role="status">
+          {failureWords(lastFailure, now)}
         </Note>
       </CardBody>
     ) : null;
@@ -65,11 +74,13 @@ export function ClaudeLimitsCard({ scope, className }: ClaudeLimitsCardProps) {
       body = (
         <>
           {stale}
-          <CardBody>
-            <Note state="wait" icon="hourglass">
-              {noLimitsWords({ liveSessions, lastSessionAt }, now)}
-            </Note>
-          </CardBody>
+          {failure ?? (
+            <CardBody>
+              <Note state="wait" icon="hourglass">
+                {noLimitsWords({ liveSessions, lastSessionAt }, now)}
+              </Note>
+            </CardBody>
+          )}
         </>
       );
     } else if (!limits.available) {
@@ -88,10 +99,11 @@ export function ClaudeLimitsCard({ scope, className }: ClaudeLimitsCardProps) {
       body = (
         <>
           {stale}
+          {failure}
           {rows.length > 0 ? (
             <Limits layout={layout} narrow="tiles">
               {rows.map(row => (
-                <Limit key={row.key} title={row.title} meta={row.meta} value={row.value} label={row.label} />
+                <Limit key={row.key} title={row.title} meta={row.meta} value={row.value} label={row.label} level={row.level} />
               ))}
             </Limits>
           ) : (

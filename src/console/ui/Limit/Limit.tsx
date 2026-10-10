@@ -2,11 +2,14 @@
 // reset and the state; loading — a skeleton of the same shape. The
 // container (design: .lims) lays limits in a row as many as fit, or
 // stacked (layout="stack"); on the phone narrow="tiles" makes them tiles.
-// The level of the state label follows the ring's rule (Ring.logic.ts).
+// The level of the state label follows the ring's rule (Ring.logic.ts)
+// unless the caller names one (a warning the API answered after the
+// measurement, below the ring's threshold).
 
 import type { CSSProperties, ReactNode } from 'react';
 import { Gauge } from '../Ring/Gauge.tsx';
 import { Ring } from '../Ring/Ring.tsx';
+import type { RingLevel } from '../Ring/Ring.logic.ts';
 import { ringLevel } from '../Ring/Ring.logic.ts';
 import { SkelStack } from '../Skel/Skel.tsx';
 import './Limit.css';
@@ -45,6 +48,7 @@ export type LimitProps =
       // Percentage used; 100 and above is "over".
       value: number;
       label: string;
+      level?: RingLevel;
     };
 
 export function Limit(props: LimitProps) {
@@ -60,6 +64,7 @@ export function Limit(props: LimitProps) {
   }
 
   const { title, meta, value, label } = props;
+  const level = 'level' in props ? props.level : ringLevel(value);
 
   return (
     <div className="lim">
@@ -67,7 +72,7 @@ export function Limit(props: LimitProps) {
       <div className="lim-main">
         <span className="lim-t">{title}</span>
         <span className="lim-m">{meta}</span>
-        <span className="lim-s" data-level={ringLevel(value)}>
+        <span className="lim-s" data-level={level}>
           {label}
         </span>
       </div>

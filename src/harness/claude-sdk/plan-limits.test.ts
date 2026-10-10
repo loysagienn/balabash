@@ -1,12 +1,14 @@
 // The plan-limits service over fake usage controls: the view of a usage
-// answer, the statuses of rate_limit_event frames, when a measurement is
-// taken (init, event, stale read — throttled, one at a time), what a read
-// answers without a session or with a failing control.
+// answer, the statuses of rate_limit_event frames (carried to the same
+// window only), when a measurement is taken (init, event, stale read —
+// throttled, one at a time), what a read answers without a session, with a
+// failing control (the outcome of the round) or with one that does not
+// answer (left behind, its late answer dropped).
 
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import type { SDKControlGetUsageResponse, SDKMessage } from '@anthropic-ai/claude-agent-sdk';
-import { FRAME_REFRESH_MS, FRESH_MS, createPlanLimits, limitsOfUsage, withRateLimitInfo } from './plan-limits.ts';
+import { ATTEMPT_MS, FRAME_REFRESH_MS, FRESH_MS, READ_WAIT_MS, createPlanLimits, limitsOfUsage, withRateLimitInfo } from './plan-limits.ts';
 
 const T0 = Date.parse('2026-10-10T16:00:00Z');
 
@@ -86,6 +88,18 @@ describe('limitsOfUsage', () => {
     );
     assert.equal(next.overage?.inUse, true);
   });
+
+  it('a window that has reset starts without the status of the window before it; one with no reset moment known carries none', () => {
+    const before = withRateLimitInfo(limitsOfUsage(usage(), new Date(T0)), { status: 'rejected', rateLimitType: 'five_hour' });
+    const reset = limitsOfUsage(usage({ rate_limits: { ...usage().rate_limits, five_hour: { utilization: 1, resets_at: '2026-10-10T23:00:00Z' } } }), new Date(T0 + 1000), before);
+
+    assert.deepEqual(reset.windows[0], { kind: 'five_hour', model: null, utilization: 1, resetsAt: new Date('2026-10-10T23:00:00Z'), status: null });
+
+    const unknown = withRateLimitInfo(limitsOfUsage(usage({ rate_limits: { five_hour: { utilization: 95, resets_at: null } } }), new Date(T0)), { status: 'rejected', rateLimitType: 'five_hour' });
+
+    assert.equal(unknown?.windows[0]?.status, 'rejected');
+    assert.equal(limitsOfUsage(usage({ rate_limits: { five_hour: { utilization: 95, resets_at: null } } }), new Date(T0 + 1000), unknown).windows[0]?.status, null);
+  });
 });
 
 describe('withRateLimitInfo', () => {
@@ -112,10 +126,10 @@ describe('withRateLimitInfo', () => {
 });
 
 describe('createPlanLimits', () => {
-  function stand(start = T0) {
+  function stand(start = T0, attemptMs?: number) {
     let clock = start;
     const warnings: string[] = [];
-    const service = createPlanLimits({ now: () => clock, warn: m => warnings.push(m) });
+    const service = createPlanLimits({ now: () => clock, warn: m => warnings.push(m), attemptMs });
 
     return { service, warnings, tick: (ms: number) => (clock += ms) };
   }
@@ -123,7 +137,7 @@ describe('createPlanLimits', () => {
   it('reads nothing without a session, measures through a session on the init frame and answers the cache after the session ended', async () => {
     const { service, tick } = stand();
 
-    assert.deepEqual(await service.read(), { limits: null, liveSessions: 0, lastSessionAt: null });
+    assert.deepEqual(await service.read(), { limits: null, lastFailure: null, liveSessions: 0, lastSessionAt: null });
 
     let calls = 0;
     const unregister = service.registerProvider('t1', async () => {
@@ -150,7 +164,7 @@ describe('createPlanLimits', () => {
     tick(5000);
     service.sessionEnded('t1');
 
-    assert.deepEqual(await service.read(), { limits: read.limits, liveSessions: 0, lastSessionAt: new Date(T0 + 5000) });
+    assert.deepEqual(await service.read(), { limits: read.limits, lastFailure: null, liveSessions: 0, lastSessionAt: new Date(T0 + 5000) });
     assert.equal(calls, 1);
   });
 
@@ -222,7 +236,7 @@ describe('createPlanLimits', () => {
     assert.equal(measured.limits?.windows[1]?.status, 'rejected');
   });
 
-  it('a failing control is a warning once per message, the cache stays, the next session answers', async () => {
+  it('a failing control is a warning once per message and the outcome of the round, the cache stays, the next session answers and clears it', async () => {
     const { service, warnings, tick } = stand();
 
     service.registerProvider('t1', async () => {
@@ -231,11 +245,16 @@ describe('createPlanLimits', () => {
     service.observe('t1', init);
     await service.settled();
 
-    assert.deepEqual(await service.read(), { limits: null, liveSessions: 1, lastSessionAt: null });
+    assert.deepEqual(await service.read(), {
+      limits: null,
+      lastFailure: { at: new Date(T0), message: 'get_usage is not supported in this context' },
+      liveSessions: 1,
+      lastSessionAt: null,
+    });
     assert.deepEqual(warnings, ['usage control failed: get_usage is not supported in this context']);
 
     tick(FRESH_MS);
-    await service.read();
+    assert.equal((await service.read()).lastFailure?.at.getTime(), T0 + FRESH_MS);
     assert.equal(warnings.length, 1);
 
     service.registerProvider('t2', async () => usage());
@@ -244,6 +263,60 @@ describe('createPlanLimits', () => {
     const read = await service.read();
 
     assert.equal(read.limits?.subscriptionType, 'max');
+    assert.equal(read.lastFailure, null);
     assert.equal(read.liveSessions, 2);
+
+    // A failure after a measurement: the measurement stays, the outcome is told beside it.
+    service.registerProvider('t2', async () => {
+      throw new Error('closed');
+    });
+    tick(FRESH_MS);
+
+    const failed = await service.read();
+
+    assert.equal(failed.limits?.measuredAt.getTime(), T0 + 2 * FRESH_MS);
+    assert.deepEqual(failed.lastFailure, { at: new Date(T0 + 3 * FRESH_MS), message: 'closed' });
+  });
+
+  it('a control that does not answer in time is left behind: the next session measures, a late answer is dropped, the silent session is tried last', async () => {
+    const attemptMs = 30;
+    const { service: quick, warnings } = stand(T0, attemptMs);
+    const order: string[] = [];
+    let releaseHung: (() => void) | null = null;
+
+    quick.registerProvider('hung', () => {
+      order.push('hung');
+
+      return new Promise(resolve => {
+        releaseHung = () => resolve(usage({ subscription_type: 'stale' }));
+      });
+    });
+    quick.registerProvider('live', async () => {
+      order.push('live');
+
+      return usage();
+    });
+
+    const started = Date.now();
+    const read = await quick.read();
+
+    assert.ok(Date.now() - started < READ_WAIT_MS);
+    assert.deepEqual(order, ['hung', 'live']);
+    assert.equal(read.limits?.subscriptionType, 'max');
+    assert.equal(read.lastFailure, null);
+    assert.deepEqual(warnings, [`usage control failed: no answer within ${attemptMs / 1000} s`]);
+
+    // The late answer of the abandoned attempt changes nothing.
+    releaseHung!();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.equal((await quick.read()).limits?.subscriptionType, 'max');
+
+    // The next round starts with the session that answered.
+    order.length = 0;
+    quick.observe('live', init);
+    await quick.settled();
+    assert.deepEqual(order, ['live']);
+    // The real span is a round's share of a read's wait: three attempts fit no read, one does.
+    assert.ok(ATTEMPT_MS > READ_WAIT_MS);
   });
 });

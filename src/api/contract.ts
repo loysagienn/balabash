@@ -417,14 +417,25 @@ export type ClaudeLimitsView = {
   overage: LimitOverageView | null;
 };
 
+// The last round of measuring that brought nothing: when, and what the
+// control said (the SDK marks it experimental — a CLI may refuse it in its
+// context; a control may not answer in time). Cleared by a measurement.
+export type LimitFailureView = {
+  at: Date;
+  message: string;
+};
+
 // GET /api/limits — the newest measurement, or null when none was taken
 // since the process started (the limits are measured through a live Claude
-// session: none has run, or the control failed in every one). liveSessions —
-// the Claude sessions alive right now (zero explains a stale measurement:
-// nothing can refresh it until the next run); lastSessionAt — when the last
-// Claude session ended, null when none has since the process started.
+// session: none has run, or the control failed in every one); lastFailure —
+// the outcome of the last round since that measurement that brought none,
+// null when the last round measured. liveSessions — the Claude sessions
+// alive right now (zero explains a stale measurement: nothing can refresh it
+// until the next run); lastSessionAt — when the last Claude session ended,
+// null when none has since the process started.
 export type LimitsResponse = {
   limits: ClaudeLimitsView | null;
+  lastFailure: LimitFailureView | null;
   liveSessions: number;
   lastSessionAt: Date | null;
 };

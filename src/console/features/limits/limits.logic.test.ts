@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import type { ClaudeLimitsView, LimitWindowView } from '../../../api/contract.ts';
-import { limitLabel, limitRows, measuredWords, noLimitsWords, overageWords, resetWords, windowTitle } from './limits.logic.ts';
+import { failureWords, limitLabel, limitLevel, limitRows, measuredWords, noLimitsWords, overageWords, resetWords, windowTitle } from './limits.logic.ts';
 
 const NOW = new Date(2026, 9, 10, 16, 38); // October 10, local
 
@@ -41,6 +41,14 @@ describe('limits words', () => {
     assert.equal(limitLabel({ utilization: 100, status: null }, { ...on, inUse: false }), 'exhausted');
     assert.equal(limitLabel({ utilization: 95, status: 'rejected' }, null), 'refused');
     assert.equal(limitLabel({ utilization: null, status: null }, null), 'normal');
+    // The API's answer since the measurement is newer than its percentage.
+    assert.equal(limitLabel({ utilization: 20, status: 'allowed_warning' }, null), 'warning');
+    assert.equal(limitLabel({ utilization: 20, status: 'rejected' }, null), 'refused');
+    assert.equal(limitLabel({ utilization: 20, status: 'allowed' }, null), 'normal');
+    assert.equal(limitLevel({ utilization: 20, status: 'allowed_warning' }), 'warn');
+    assert.equal(limitLevel({ utilization: 20, status: 'rejected' }), 'warn');
+    assert.equal(limitLevel({ utilization: 100, status: 'allowed' }), 'over');
+    assert.equal(limitLevel({ utilization: 20, status: null }), undefined);
   });
 
   it('rows: Home keeps to the plan-wide windows unless a narrower one is at a warning; System lists them all; no percentage — no row', () => {
@@ -53,14 +61,35 @@ describe('limits words', () => {
     ]);
 
     assert.deepEqual(limitRows(limits, 'home', NOW), [
-      { key: 'five_hour', title: '5 hours', meta: 'resets at 18:00 · in 1h 22m', value: 47, label: 'normal' },
-      { key: 'seven_day', title: '7 days', meta: 'resets Wed, 10:00 · in 3d 17h', value: 81, label: 'warning' },
-      { key: 'model:Fable', title: '7 days · Fable', meta: 'resets Wed, 10:00 · in 3d 17h', value: 100, label: 'exhausted' },
+      { key: 'five_hour', title: '5 hours', meta: 'resets at 18:00 · in 1h 22m', value: 47, label: 'normal', level: undefined },
+      { key: 'seven_day', title: '7 days', meta: 'resets Wed, 10:00 · in 3d 17h', value: 81, label: 'warning', level: 'warn' },
+      { key: 'model:Fable', title: '7 days · Fable', meta: 'resets Wed, 10:00 · in 3d 17h', value: 100, label: 'exhausted', level: 'over' },
     ]);
     assert.deepEqual(
       limitRows(limits, 'all', NOW).map(row => row.key),
       ['five_hour', 'seven_day', 'model:Fable', 'model:Sonnet'],
     );
+  });
+
+  it('rows: a narrow window the API refused or warned about since the measurement is on Home at its low percentage, and leaves once the API allows again', () => {
+    const refused = view([window({ kind: 'five_hour', utilization: 47 }), window({ kind: 'seven_day_opus', utilization: 20, status: 'rejected' })]);
+
+    assert.deepEqual(
+      limitRows(refused, 'home', NOW).map(row => [row.key, row.label, row.level]),
+      [
+        ['five_hour', 'normal', undefined],
+        ['seven_day_opus', 'refused', 'warn'],
+      ],
+    );
+
+    const warned = view([window({ kind: 'seven_day_opus', utilization: 20, status: 'allowed_warning' })]);
+
+    assert.deepEqual(limitRows(warned, 'home', NOW).map(row => [row.key, row.label, row.level]), [['seven_day_opus', 'warning', 'warn']]);
+
+    const allowed = view([window({ kind: 'seven_day_opus', utilization: 20, status: 'allowed' })]);
+
+    assert.deepEqual(limitRows(allowed, 'home', NOW), []);
+    assert.deepEqual(limitRows(allowed, 'all', NOW).map(row => [row.label, row.level]), [['normal', undefined]]);
   });
 
   it('the footer: the measurement’s moment and what can refresh it; the overage line when the endpoint spoke of it', () => {
@@ -87,5 +116,13 @@ describe('limits words', () => {
     assert.equal(noLimitsWords({ liveSessions: 1, lastSessionAt: null }, NOW), 'No limit data yet: 1 Claude session is running, but none has answered a measurement.');
     assert.equal(noLimitsWords({ liveSessions: 0, lastSessionAt: new Date(2026, 9, 10, 12, 40) }, NOW), 'No limit data yet: the last Claude session ended 12:40; the next run measures them.');
     assert.equal(noLimitsWords({ liveSessions: 0, lastSessionAt: null }, NOW), 'No limit data yet: no Claude session has run since the app started; the next run measures them.');
+  });
+
+  it('the note of a round that brought nothing: when, and what the control said', () => {
+    assert.equal(
+      failureWords({ at: new Date(2026, 9, 10, 16, 35), message: 'get_usage is not supported in this context' }, NOW),
+      'Couldn’t measure the limits 16:35: get_usage is not supported in this context',
+    );
+    assert.equal(failureWords({ at: new Date(2026, 9, 9, 16, 35), message: 'no answer within 10 s' }, NOW), 'Couldn’t measure the limits Oct 9, 16:35: no answer within 10 s');
   });
 });

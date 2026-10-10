@@ -17,6 +17,7 @@ import path from 'node:path';
 import { STAND_HOST, sessionCookie, startStand } from '../test-support/stand.ts';
 import type { Reply, Stand } from '../test-support/stand.ts';
 import type { CreateProjectResponse, FileMetaResponse, LimitsResponse, ProjectResponse, SettingsFactsResponse, SettingsResponse, MeResponse, WorkspaceNodeResponse, WorkspaceWriteResponse } from './contract.ts';
+import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 
 type ErrorBody = { error: { code: string; message: string } };
 
@@ -1165,7 +1166,7 @@ describe('the plan limits over the api', () => {
     const none = await stand.request('GET', '/api/limits');
 
     assert.equal(none.status, 200, none.text);
-    assert.deepEqual(none.json<LimitsResponse>(), { limits: null, liveSessions: 0, lastSessionAt: null });
+    assert.deepEqual(none.json<LimitsResponse>(), { limits: null, lastFailure: null, liveSessions: 0, lastSessionAt: null });
 
     // A live session's control, as sdk-session.ts registers it.
     const unregister = planLimits.registerProvider('thread-limits', async () => ({
@@ -1188,6 +1189,7 @@ describe('the plan limits over the api', () => {
       const body = live.json<LimitsResponse>();
 
       assert.equal(body.liveSessions, 1);
+      assert.equal(body.lastFailure, null);
       assert.ok(body.limits && body.limits.measuredAt instanceof Date);
       assert.deepEqual(
         { ...body.limits, measuredAt: undefined },
@@ -1213,6 +1215,25 @@ describe('the plan limits over the api', () => {
     assert.equal(after.liveSessions, 0);
     assert.equal(after.limits?.subscriptionType, 'max');
     assert.ok(after.lastSessionAt instanceof Date);
+
+    // A session whose control refuses, measuring on its init frame: the kept
+    // measurement and the outcome of the round, as dates.
+    const refusing = planLimits.registerProvider('thread-refusing', async () => {
+      throw new Error('get_usage is not supported in this context');
+    });
+
+    try {
+      planLimits.observe('thread-refusing', { type: 'system', subtype: 'init', uuid: 'u', session_id: 's' } as unknown as SDKMessage);
+      await planLimits.settled();
+
+      const failed = (await stand.request('GET', '/api/limits')).json<LimitsResponse>();
+
+      assert.equal(failed.limits?.subscriptionType, 'max');
+      assert.equal(failed.lastFailure?.message, 'get_usage is not supported in this context');
+      assert.ok(failed.lastFailure?.at instanceof Date);
+    } finally {
+      refusing();
+    }
 
     // A reading, not a mutation: the session is still required.
     assert.equal((await stand.request('GET', '/api/limits', { cookie: null })).status, 401);
