@@ -1268,10 +1268,8 @@ describe('the plan limits over the api', () => {
           measuredAt: undefined,
           planType: 'prolite',
           windows: [{ bucket: null, kind: 'primary', windowMinutes: 10080, utilization: 63, resetsAt: new Date(1792115459 * 1000) }],
-          reached: null,
-          spendControlReached: false,
+          buckets: [{ bucket: null, reached: null, spendControlReached: false, spendLimit: null }],
           credits: { has: false, unlimited: false, balance: '0' },
-          spendLimit: null,
           resetCredits: 3,
         },
       );

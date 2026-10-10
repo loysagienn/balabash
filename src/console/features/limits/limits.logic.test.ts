@@ -7,6 +7,7 @@ import {
   codexRows,
   codexWindowTitle,
   failureWords,
+  isCurrentLimitsShape,
   limitLabel,
   limitLevel,
   limitRows,
@@ -161,14 +162,26 @@ function codex(partial: Partial<CodexLimitsView> = {}): CodexLimitsView {
     measuredAt: new Date(2026, 9, 10, 16, 31),
     planType: 'prolite',
     windows: [{ bucket: null, kind: 'primary', windowMinutes: 10080, utilization: 63, resetsAt: new Date(2026, 9, 14, 10, 0) }],
-    reached: null,
-    spendControlReached: false,
+    buckets: [{ bucket: null, reached: null, spendControlReached: false, spendLimit: null }],
     credits: { has: false, unlimited: false, balance: '0' },
-    spendLimit: null,
     resetCredits: 3,
     ...partial,
   };
 }
+
+describe('the shape of the answer', () => {
+  it('this build’s contract has both accounts and the Codex buckets; the older server’s shapes are not it', () => {
+    const claude = { limits: null, lastFailure: null, liveSessions: 0, lastSessionAt: null };
+
+    assert.equal(isCurrentLimitsShape({ claude, codex: { limits: null, lastFailure: null } }), true);
+    assert.equal(isCurrentLimitsShape({ claude, codex: { limits: codex(), lastFailure: null } }), true);
+    // The flat answer of the Claude-only build, the two-account answer
+    // before the buckets, nothing at all.
+    assert.equal(isCurrentLimitsShape(claude), false);
+    assert.equal(isCurrentLimitsShape({ claude, codex: { limits: { ...codex(), buckets: undefined, reached: null }, lastFailure: null } }), false);
+    assert.equal(isCurrentLimitsShape(null), false);
+  });
+});
 
 describe('codex limits words', () => {
   it('titles a window by its length, with the bucket when there are several; an unstated length is "window"', () => {
@@ -196,13 +209,25 @@ describe('codex limits words', () => {
     assert.deepEqual(codexRows(codex({ windows: [] }), NOW), []);
   });
 
-  it('the refusal note: the backend’s reason in words, the spend control, nothing while requests go through', () => {
-    assert.equal(codexReachedWords({ reached: null, spendControlReached: false }), null);
-    assert.equal(codexReachedWords({ reached: null, spendControlReached: null }), null);
-    assert.equal(codexReachedWords({ reached: 'rate_limit_reached', spendControlReached: false }), 'Codex is refusing requests: the rate limit is reached.');
-    assert.equal(codexReachedWords({ reached: 'workspace_owner_credits_depleted', spendControlReached: true }), 'Codex is refusing requests: the workspace owner’s credits are depleted.');
-    assert.equal(codexReachedWords({ reached: 'something_new', spendControlReached: null }), 'Codex is refusing requests: something new.');
-    assert.equal(codexReachedWords({ reached: null, spendControlReached: true }), 'Codex is refusing requests: the spend control is reached.');
+  it('the refusal notes: the backend’s reason in words, the spend control, nothing while requests go through; one per bucket that refuses, named when there are several', () => {
+    const one = (reached: string | null, spendControlReached: boolean | null) => codexReachedWords({ buckets: [{ bucket: null, reached, spendControlReached, spendLimit: null }] });
+
+    assert.deepEqual(one(null, false), []);
+    assert.deepEqual(one(null, null), []);
+    assert.deepEqual(one('rate_limit_reached', false), ['Codex is refusing requests: the rate limit is reached.']);
+    assert.deepEqual(one('workspace_owner_credits_depleted', true), ['Codex is refusing requests: the workspace owner’s credits are depleted.']);
+    assert.deepEqual(one('something_new', null), ['Codex is refusing requests: something new.']);
+    assert.deepEqual(one(null, true), ['Codex is refusing requests: the spend control is reached.']);
+    assert.deepEqual(
+      codexReachedWords({
+        buckets: [
+          { bucket: 'codex', reached: null, spendControlReached: false, spendLimit: null },
+          { bucket: 'Other models', reached: 'workspace_member_usage_limit_reached', spendControlReached: true, spendLimit: null },
+          { bucket: 'Third', reached: null, spendControlReached: true, spendLimit: null },
+        ],
+      }),
+      ['Codex is refusing requests against Other models: the workspace member’s usage limit is reached.', 'Codex is refusing requests against Third: the spend control is reached.'],
+    );
   });
 
   it('the footer: the measurement, the credits as stated, the member’s spend limit, the reset credits', () => {
@@ -211,9 +236,28 @@ describe('codex limits words', () => {
     assert.equal(codexMeasuredWords(codex({ credits: { has: true, unlimited: true, balance: null }, resetCredits: 0 }), NOW), 'measured 16:31 · unlimited credits');
     assert.equal(codexMeasuredWords(codex({ credits: { has: true, unlimited: false, balance: '12.50' }, resetCredits: 1 }), NOW), 'measured 16:31 · credits: 12.50 · 1 reset credit available');
     assert.equal(codexMeasuredWords(codex({ credits: { has: true, unlimited: false, balance: null }, resetCredits: null }), NOW), 'measured 16:31 · credits available');
+    const spendLimit = { used: '$80', limit: '$100', remainingPercent: 20, resetsAt: new Date(2026, 9, 14, 10, 0) };
+
     assert.equal(
-      codexMeasuredWords(codex({ measuredAt: new Date(2026, 9, 9, 23, 10), credits: null, resetCredits: null, spendLimit: { used: '$80', limit: '$100', remainingPercent: 20, resetsAt: new Date(2026, 9, 14, 10, 0) } }), NOW),
+      codexMeasuredWords(codex({ measuredAt: new Date(2026, 9, 9, 23, 10), credits: null, resetCredits: null, buckets: [{ bucket: null, reached: null, spendControlReached: false, spendLimit }] }), NOW),
       'measured Oct 9, 23:10 · spend limit $80 of $100 (20% left, resets Wed, 10:00 · in 3d 17h)',
+    );
+    // Several buckets: each spend limit named by its bucket; an unknown
+    // reset moment says so.
+    assert.equal(
+      codexMeasuredWords(
+        codex({
+          credits: null,
+          resetCredits: null,
+          buckets: [
+            { bucket: 'codex', reached: null, spendControlReached: false, spendLimit: null },
+            { bucket: 'Other models', reached: null, spendControlReached: false, spendLimit },
+            { bucket: 'Third', reached: null, spendControlReached: false, spendLimit: { ...spendLimit, resetsAt: null } },
+          ],
+        }),
+        NOW,
+      ),
+      'measured 16:31 · Other models: spend limit $80 of $100 (20% left, resets Wed, 10:00 · in 3d 17h) · Third: spend limit $80 of $100 (20% left, reset time unknown)',
     );
   });
 });

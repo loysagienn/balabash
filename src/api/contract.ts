@@ -459,25 +459,39 @@ export type CodexLimitWindowView = {
   resetsAt: Date | null;
 };
 
+// The member's own spend limit of the period, when the plan has one: the
+// used and the limit as the backend prints them, the percent left, the
+// reset moment (null when the backend's moment is not a date).
+export type CodexSpendLimitView = { used: string; limit: string; remainingPercent: number; resetsAt: Date | null };
+
+// What the backend states of one metered limit beside its windows — the
+// facts are the bucket's, not the account's: on a plan that meters several
+// limits one may be refusing while another goes through. bucket — as on
+// the windows (null for the one bucket of the plan).
+export type CodexBucketView = {
+  bucket: string | null;
+  // Why the backend is refusing requests against this limit, when it is
+  // ('rate_limit_reached', 'workspace_owner_credits_depleted', …); null
+  // while they go through.
+  reached: string | null;
+  // The workspace's spend control is reached (null — the backend did not
+  // say).
+  spendControlReached: boolean | null;
+  spendLimit: CodexSpendLimitView | null;
+};
+
 export type CodexLimitsView = {
   measuredAt: Date;
   // The backend's plan type ('plus', 'pro', 'prolite', 'team', 'business',
   // 'enterprise', 'free', …), null when it did not say.
   planType: string | null;
   windows: CodexLimitWindowView[];
-  // Why the backend is refusing requests, when it is ('rate_limit_reached',
-  // 'workspace_owner_credits_depleted', …); null while requests go through.
-  reached: string | null;
-  // The workspace's spend control is reached (null — the backend did not
-  // say).
-  spendControlReached: boolean | null;
+  // Every metered limit, in the windows' order — the keyed snapshots when
+  // the backend sent them, else the historical one.
+  buckets: CodexBucketView[];
   // Extra credits of the account: whether it has any, whether they are
   // unlimited, the balance as the backend prints it; null when not said.
   credits: { has: boolean; unlimited: boolean; balance: string | null } | null;
-  // The member's own spend limit of the period, when the plan has one: the
-  // used and the limit as the backend prints them, the percent left, the
-  // reset moment.
-  spendLimit: { used: string; limit: string; remainingPercent: number; resetsAt: Date } | null;
   // Rate-limit reset credits the account can redeem (the backend's "full
   // reset" grants), null when not said.
   resetCredits: number | null;

@@ -9,15 +9,15 @@
 // without one says the app-server has not answered; a round of measuring
 // that brought nothing is a note with what the source said — over the rows
 // of the measurement before, or in place of the rows; an account without
-// plan limits says that; a Codex account that is refusing requests says
-// why. Home links to System ("Details"); System has a Refresh button. The
+// plan limits says that; a Codex limit the backend is refusing requests
+// against says why (a note per bucket). Home links to System ("Details"); System has a Refresh button. The
 // stages of the query — factsStage: a skeleton of the rows' shape, the
 // failure with Retry, the groups; a failed refetch over kept groups is a
-// note above them. An answer without the accounts — the server of an older
+// note above them. An answer in another shape — the server of an older
 // build, until the app restarts — is a note, not a crash.
 
 import type { ReactNode } from 'react';
-import type { ClaudeLimitsResponse, CodexLimitsResponse, LimitsResponse } from '../../../api/contract.ts';
+import type { ClaudeLimitsResponse, CodexLimitsResponse } from '../../../api/contract.ts';
 import { Link } from '../../lib/router/Link.tsx';
 import { useNow } from '../../lib/format/useNow.ts';
 import { factsStage } from '../../lib/query/stage.ts';
@@ -39,6 +39,7 @@ import {
   codexReachedWords,
   codexRows,
   failureWords,
+  isCurrentLimitsShape,
   limitRows,
   measuredWords,
   noLimitsWords,
@@ -55,12 +56,6 @@ export type LimitsCardProps = {
 };
 
 type Scope = LimitsCardProps['scope'];
-
-function hasAccounts(data: LimitsResponse): boolean {
-  const partial: Partial<LimitsResponse> = data;
-
-  return partial.claude !== undefined && partial.codex !== undefined;
-}
 
 function Group({ name, plan, children }: { name: string; plan: string | null; children: ReactNode }) {
   return (
@@ -170,11 +165,13 @@ function CodexGroup({ response, scope, now }: { response: CodexLimitsResponse; s
   return (
     <Group name="Codex" plan={planWords(limits.planType)}>
       {failure}
-      {reached ? (
+      {reached.length > 0 ? (
         <CardBody>
-          <Note state="err" icon="triangle-alert" role="status">
-            {reached}
-          </Note>
+          {reached.map(note => (
+            <Note key={note} state="err" icon="triangle-alert" role="status">
+              {note}
+            </Note>
+          ))}
         </CardBody>
       ) : null}
       <Rows rows={codexRows(limits, now)} scope={scope} empty={NO_CODEX_WINDOWS_WORDS} />
@@ -213,7 +210,7 @@ export function LimitsCard({ scope, className }: LimitsCardProps) {
         {stage.error.message}
       </Empty>
     );
-  } else if (!hasAccounts(stage.data)) {
+  } else if (!isCurrentLimitsShape(stage.data)) {
     body = (
       <CardBody>
         <Note state="wait" icon="hourglass">

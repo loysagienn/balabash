@@ -18,7 +18,7 @@
 // measurement. Without a provider (a test stand, a host without the CLI)
 // the cache stands: null until something measures.
 
-import type { CodexLimitWindowView, CodexLimitsResponse, CodexLimitsView, LimitFailureView } from '../../api/contract.ts';
+import type { CodexBucketView, CodexLimitWindowView, CodexLimitsResponse, CodexLimitsView, LimitFailureView } from '../../api/contract.ts';
 import type { CodexRateLimitSnapshot, CodexRateLimitWindow, CodexRateLimitsResponse } from './app-server.ts';
 import { codexAppServerCommand, readCodexRateLimits } from './app-server.ts';
 import { ensureCodexHome } from './codex-home.ts';
@@ -33,25 +33,35 @@ export const ATTEMPT_MS = 10_000;
 // Answers the account's rate limits; the signal ends the attempt.
 export type CodexLimitsProvider = (signal: AbortSignal) => Promise<CodexRateLimitsResponse>;
 
-function dateOfSeconds(seconds: number | null | undefined): Date | null {
-  return typeof seconds === 'number' && Number.isFinite(seconds) ? new Date(seconds * 1000) : null;
+// Unix seconds as a Date; null when the backend did not say, or said a
+// number no date can hold.
+function dateOfSeconds(seconds: number | null): Date | null {
+  if (seconds === null) {
+    return null;
+  }
+
+  const date = new Date(seconds * 1000);
+
+  return Number.isNaN(date.getTime()) ? null : date;
 }
 
 function windowOf(bucket: string | null, kind: CodexLimitWindowView['kind'], raw: CodexRateLimitWindow): CodexLimitWindowView {
-  return { bucket, kind, windowMinutes: raw.windowDurationMins ?? null, utilization: raw.usedPercent, resetsAt: dateOfSeconds(raw.resetsAt) };
+  return { bucket, kind, windowMinutes: raw.windowDurationMins, utilization: raw.usedPercent, resetsAt: dateOfSeconds(raw.resetsAt) };
 }
 
-// The app-server's answer as the console's view: the windows of every
-// metered bucket (the keyed snapshots when the backend sent them, else the
-// historical one; a bucket is named only when there are several), the
-// account facts of the historical snapshot.
+// The app-server's answer as the console's view: every metered bucket (the
+// keyed snapshots when the backend sent them, else the historical one; a
+// bucket is named only when there are several) with its windows and the
+// facts it states — the refusal, the spend control, the member's spend
+// limit; the plan and the credits of the historical snapshot — the account's.
 export function limitsOfRateLimits(response: CodexRateLimitsResponse, measuredAt: Date): CodexLimitsView {
   const keyed = response.rateLimitsByLimitId ? Object.entries(response.rateLimitsByLimitId) : null;
-  const buckets: [string | null, CodexRateLimitSnapshot][] = keyed && keyed.length > 0 ? keyed.map(([id, snapshot]) => [snapshot.limitName ?? snapshot.limitId ?? id, snapshot]) : [[null, response.rateLimits]];
+  const snapshots: [string | null, CodexRateLimitSnapshot][] = keyed && keyed.length > 0 ? keyed.map(([id, snapshot]) => [snapshot.limitName ?? snapshot.limitId ?? id, snapshot]) : [[null, response.rateLimits]];
   const windows: CodexLimitWindowView[] = [];
+  const buckets: CodexBucketView[] = [];
 
-  for (const [name, snapshot] of buckets) {
-    const bucket = buckets.length > 1 ? name : null;
+  for (const [name, snapshot] of snapshots) {
+    const bucket = snapshots.length > 1 ? name : null;
 
     if (snapshot.primary) {
       windows.push(windowOf(bucket, 'primary', snapshot.primary));
@@ -60,21 +70,26 @@ export function limitsOfRateLimits(response: CodexRateLimitsResponse, measuredAt
     if (snapshot.secondary) {
       windows.push(windowOf(bucket, 'secondary', snapshot.secondary));
     }
+
+    const spend = snapshot.individualLimit;
+
+    buckets.push({
+      bucket,
+      reached: snapshot.rateLimitReachedType,
+      spendControlReached: snapshot.spendControlReached,
+      spendLimit: spend ? { used: spend.used, limit: spend.limit, remainingPercent: spend.remainingPercent, resetsAt: dateOfSeconds(spend.resetsAt) } : null,
+    });
   }
 
   const account = response.rateLimits;
-  const credits = account.credits ?? null;
-  const spend = account.individualLimit ?? null;
-  const resetsAt = spend ? dateOfSeconds(spend.resetsAt) : null;
+  const credits = account.credits;
 
   return {
     measuredAt,
-    planType: account.planType ?? null,
+    planType: account.planType,
     windows,
-    reached: account.rateLimitReachedType ?? null,
-    spendControlReached: account.spendControlReached ?? null,
-    credits: credits ? { has: credits.hasCredits, unlimited: credits.unlimited, balance: credits.balance ?? null } : null,
-    spendLimit: spend && resetsAt ? { used: spend.used, limit: spend.limit, remainingPercent: spend.remainingPercent, resetsAt } : null,
+    buckets,
+    credits: credits ? { has: credits.hasCredits, unlimited: credits.unlimited, balance: credits.balance } : null,
     resetCredits: response.rateLimitResetCredits?.availableCount ?? null,
   };
 }

@@ -4,7 +4,7 @@
 // footer (the measurement, Claude's overage, Codex's credits), the notes
 // when there is no measurement or the account is refusing. Pure, tested.
 
-import type { ClaudeLimitsResponse, ClaudeLimitsView, CodexLimitWindowView, CodexLimitsView, LimitFailureView, LimitOverageView, LimitWindowKind, LimitWindowView } from '../../../api/contract.ts';
+import type { ClaudeLimitsResponse, ClaudeLimitsView, CodexBucketView, CodexLimitWindowView, CodexLimitsView, LimitFailureView, LimitOverageView, LimitWindowKind, LimitWindowView, LimitsResponse } from '../../../api/contract.ts';
 import { countOf, dateTimeLabel, durationLabel, shortDate, timeOfDay } from '../../lib/format/index.ts';
 import type { RingLevel } from '../../ui/Ring/Ring.logic.ts';
 import { ringLevel } from '../../ui/Ring/Ring.logic.ts';
@@ -286,26 +286,47 @@ const REACHED_WORDS: Record<string, string> = {
   workspace_member_usage_limit_reached: 'the workspace member’s usage limit is reached',
 };
 
-// The note when the backend is refusing requests: why, in its terms;
-// nothing while they go through.
-export function codexReachedWords(limits: Pick<CodexLimitsView, 'reached' | 'spendControlReached'>): string | null {
-  if (limits.reached !== null) {
-    return `Codex is refusing requests: ${REACHED_WORDS[limits.reached] ?? limits.reached.replace(/_/g, ' ')}.`;
+// The notes when the backend is refusing requests: one per bucket that
+// is, in its terms — "Codex is refusing requests: the rate limit is
+// reached.", and on a plan that meters several limits, "Codex is refusing
+// requests against Other models: …"; none while they go through.
+export function codexReachedWords(limits: Pick<CodexLimitsView, 'buckets'>): string[] {
+  const notes: string[] = [];
+
+  for (const bucket of limits.buckets) {
+    const against = bucket.bucket === null ? '' : ` against ${bucket.bucket}`;
+
+    if (bucket.reached !== null) {
+      notes.push(`Codex is refusing requests${against}: ${REACHED_WORDS[bucket.reached] ?? bucket.reached.replace(/_/g, ' ')}.`);
+    } else if (bucket.spendControlReached === true) {
+      notes.push(`Codex is refusing requests${against}: the spend control is reached.`);
+    }
   }
 
-  if (limits.spendControlReached === true) {
-    return 'Codex is refusing requests: the spend control is reached.';
+  return notes;
+}
+
+// "spend limit $80 of $100 (20% left, resets Wed, 10:00 · in 3d 17h)",
+// named by its bucket when there are several.
+function spendLimitWords(bucket: CodexBucketView, now: Date): string | null {
+  const { spendLimit } = bucket;
+
+  if (!spendLimit) {
+    return null;
   }
 
-  return null;
+  const words = `spend limit ${spendLimit.used} of ${spendLimit.limit} (${spendLimit.remainingPercent}% left, ${resetWords(spendLimit.resetsAt, now)})`;
+
+  return bucket.bucket === null ? words : `${bucket.bucket}: ${words}`;
 }
 
 // The footer: when the measurement was taken, the credits as the backend
-// states them, the member's spend limit, the reset credits — "measured
-// 16:31 · no extra credits · 3 reset credits available".
+// states them, the member's spend limit of each bucket that has one, the
+// reset credits — "measured 16:31 · no extra credits · 3 reset credits
+// available".
 export function codexMeasuredWords(limits: CodexLimitsView, now: Date): string {
   const parts = [`measured ${dateTimeLabel(limits.measuredAt, now)}`];
-  const { credits, spendLimit } = limits;
+  const { credits } = limits;
 
   if (credits) {
     if (credits.unlimited) {
@@ -317,8 +338,12 @@ export function codexMeasuredWords(limits: CodexLimitsView, now: Date): string {
     }
   }
 
-  if (spendLimit) {
-    parts.push(`spend limit ${spendLimit.used} of ${spendLimit.limit} (${spendLimit.remainingPercent}% left, ${resetWords(spendLimit.resetsAt, now)})`);
+  for (const bucket of limits.buckets) {
+    const spend = spendLimitWords(bucket, now);
+
+    if (spend) {
+      parts.push(spend);
+    }
   }
 
   if (limits.resetCredits !== null && limits.resetCredits > 0) {
@@ -329,7 +354,26 @@ export function codexMeasuredWords(limits: CodexLimitsView, now: Date): string {
 }
 
 export const NO_CODEX_LIMITS_WORDS = 'No Codex limit data yet: the CLI’s app-server has not answered a measurement; the next refresh asks again.';
-// The server of an older build answers without the accounts (the console
-// bundle goes live before the app restarts).
+// The server of an older build answers the limits in another shape (the
+// console bundle goes live before the app restarts).
 export const OLDER_SERVER_WORDS = 'The server runs an older build and answers the limits in another shape; the card fills in after the app restarts.';
+
+// Whether the answer is of this build's contract: both accounts present,
+// the Codex view (when there is one) with its buckets. Anything else is
+// the server of an older build — a note, not a crash.
+export function isCurrentLimitsShape(data: unknown): data is LimitsResponse {
+  if (typeof data !== 'object' || data === null) {
+    return false;
+  }
+
+  const partial = data as Partial<LimitsResponse>;
+
+  if (partial.claude === undefined || partial.codex === undefined) {
+    return false;
+  }
+
+  const codex = partial.codex.limits;
+
+  return codex === null || Array.isArray((codex as Partial<CodexLimitsView>).buckets);
+}
 export const NO_CODEX_WINDOWS_WORDS = 'The plan reported no rate-limit windows.';
