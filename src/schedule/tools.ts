@@ -13,16 +13,11 @@ import type { ToolFunction } from '../capabilities/mcp-client.ts';
 import type { BuiltinServerCallContext, BuiltinToolServer } from '../capabilities/tool-manager.ts';
 import type { ScheduledTaskModel } from '../../prisma-generated/models.ts';
 import { WorkspacePathError, sanitizeRelPath } from '../workspace/files.ts';
-import { hasTaskBody, workspaceTaskFile } from './catalog.ts';
-import {
-  JOB_TIMEOUT_DEFAULT_MS,
-  JOB_TIMEOUT_MAX_MS,
-  JOB_TIMEOUT_MIN_MS,
-  fireTask,
-  isTaskRunning,
-} from './engine.ts';
+import { workspaceTaskFile } from './catalog.ts';
+import { JOB_TIMEOUT_DEFAULT_MS, JOB_TIMEOUT_MAX_MS, JOB_TIMEOUT_MIN_MS, isTaskRunning } from './engine.ts';
 import { assertValidCron, cronNextRun } from './heart.ts';
 import { registryMutation } from '../core/registry-events.ts';
+import { ScheduleError, deleteTask, isSleeping, runTask as runTaskCommand } from './commands.ts';
 import { taskRecord } from './view.ts';
 
 export const SCHEDULE_SERVER_NAME = 'schedule';
@@ -233,10 +228,6 @@ function describeTrigger(task: ScheduledTaskModel): string {
   }
 
   return 'no trigger (manual run_task only)';
-}
-
-async function isSleeping(task: ScheduledTaskModel): Promise<boolean> {
-  return task.kind === 'code' && !(await hasTaskBody(task.userId, task.slug));
 }
 
 async function createTask(args: JsonObject, ctx: BuiltinServerCallContext): Promise<string> {
@@ -454,24 +445,14 @@ async function listTasks(ctx: BuiltinServerCallContext): Promise<string> {
   return lines.join('\n');
 }
 
+// The delete and the manual run are the shared commands of
+// src/schedule/commands.ts (the console's endpoints run the same); here
+// only the model's reply is worded.
 async function cancelTask(args: JsonObject, ctx: BuiltinServerCallContext): Promise<string> {
   const slug = requireSlug(args);
-  const task = await prisma.scheduledTask.findFirst({ where: { slug, userId: ctx.userId } });
-  // deleteMany: idempotent against the heart consuming the same one-shot row —
-  // whoever deletes it journals it, the other sees zero rows.
-  const count = task
-    ? await registryMutation(async (tx, journal) => {
-        const deleted = await tx.scheduledTask.deleteMany({ where: { id: task.id } });
+  const task = await deleteTask(ctx.userId, slug, { kind: 'thread', userId: ctx.userId, threadId: ctx.threadId });
 
-        if (deleted.count > 0) {
-          await journal('schedule.task.cancelled', { ...taskRecord(task, new Date()), reason: 'cancelled' }, { kind: 'thread', userId: ctx.userId, threadId: ctx.threadId });
-        }
-
-        return deleted.count;
-      })
-    : 0;
-
-  if (!task || count === 0) {
+  if (!task) {
     throw new Error(`no task with slug "${slug}" in this workspace`);
   }
 
@@ -480,20 +461,16 @@ async function cancelTask(args: JsonObject, ctx: BuiltinServerCallContext): Prom
 
 async function runTask(args: JsonObject, ctx: BuiltinServerCallContext): Promise<string> {
   const slug = requireSlug(args);
-  const task = await prisma.scheduledTask.findFirst({ where: { slug, userId: ctx.userId } });
+  let outcome;
 
-  if (!task) {
-    throw new Error(`no task with slug "${slug}" in this workspace`);
+  try {
+    outcome = await runTaskCommand(ctx.userId, slug);
+  } catch (error) {
+    // A refusal of the command reads as the tool's error, in its words.
+    throw error instanceof ScheduleError ? new Error(error.message) : error;
   }
 
-  // The sleeping-task rule, synchronously: a body-less code task cannot run.
-  if (await isSleeping(task)) {
-    throw new Error(
-      `task "${slug}" is sleeping — no run(ctx) body: neither ${workspaceTaskFile(task.userId, slug)} nor a bundled tasks/${slug}.ts.`,
-    );
-  }
-
-  const outcome = await fireTask(task, 'manual');
+  const { task } = outcome;
 
   switch (outcome.kind) {
     case 'fired':
@@ -511,10 +488,6 @@ async function runTask(args: JsonObject, ctx: BuiltinServerCallContext): Promise
       return `Task "${slug}" started. It runs asynchronously; it reports only through the events it pushes (or a system.exception on failure). The schedule is untouched.`;
     case 'already_running':
       return `Task "${slug}" is already running — this manual run is skipped.`;
-    case 'no_main_thread':
-      throw new Error(`workspace has no main thread to fire into`);
-    case 'sleeping':
-      throw new Error(`task "${slug}" is sleeping — its body is not in the running bundle`);
   }
 }
 

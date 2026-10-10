@@ -87,6 +87,19 @@ const api: Api = {
   },
   llmRequests: { list: async () => ({ requests: [] }) },
   limits: { get: async () => ({ limits: null, lastFailure: null, liveSessions: 0, lastSessionAt: null }) },
+  schedule: {
+    runs: async () => ({ runs: [], nextCursor: null }),
+    latestRuns: async () => ({ runs: [] }),
+    run: async () => {
+      throw new Error('not here');
+    },
+    runTask: async () => {
+      throw new Error('not here');
+    },
+    deleteTask: async () => {
+      throw new Error('not here');
+    },
+  },
   secretRequests: {
     get: async () => {
       throw new Error('not here');

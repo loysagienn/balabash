@@ -1,0 +1,12 @@
+@layer screens{
+/* Schedule: “next run” as a column, so the last run beside it does not jump */
+.sch-list{--row-time-w:84px}
+/* the log: a day's divider over its group of runs */
+.sch-day{display:flex;flex-direction:column;gap:var(--sp-2)}
+.sch-day + .sch-day{margin-top:var(--sp-2)}
+.sch-day .actgroup{margin-inline:var(--sp-4h)}
+.card[data-narrow="bare"] .sch-day .actgroup{margin-inline:0}
+.sch-more{display:flex;justify-content:center;padding:var(--sp-3) var(--sp-4h)}
+/* a failed read of one run's output: the error and its Retry on one line */
+.sch-run-fail{display:flex;flex-wrap:wrap;align-items:center;gap:var(--sp-2)}
+}

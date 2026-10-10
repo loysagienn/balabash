@@ -20,6 +20,7 @@ import { connectStoreToVisibility } from './lib/visibility/index.ts';
 import { connectStoreToFeedEviction } from './lib/feed-eviction/index.ts';
 import { connectQueryClientToSession } from './lib/query/session.ts';
 import { connectQueryClientToSecretRequests } from './lib/query/secret-requests.ts';
+import { connectQueryClientToSchedule } from './lib/query/schedule.ts';
 import { PHONE_MEDIA, installPinchGuard } from './lib/touch/pinch.ts';
 import { createStore } from './store/index.ts';
 import type { AppStore } from './store/index.ts';
@@ -62,6 +63,7 @@ connectQueryClientToSession(store, queryClient);
 // The form of a one-time link follows the request of its id in the store:
 // issued again, the cached form is read again (lib/query/secret-requests.ts).
 connectQueryClientToSecretRequests(store, queryClient);
+connectQueryClientToSchedule(store, queryClient);
 
 // The operator's console is the operator's: the store and the query client
 // are reachable from the browser console for debugging

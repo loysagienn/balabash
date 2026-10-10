@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import type { Thread } from '../../core/contract.ts';
 import type { Api } from '../lib/api/index.ts';
-import type { AppsResponse, ProjectView, ThreadsResponse } from '../../api/contract.ts';
+import type { AppsResponse, ProjectView, TaskView, ThreadsResponse } from '../../api/contract.ts';
 import { ApiError } from '../lib/api/index.ts';
 import type { StoreEnhancer } from 'redux';
 import { createStore } from './index.ts';
@@ -16,6 +16,8 @@ import type { Action, AppStore } from './index.ts';
 import { eventAction } from './events.ts';
 import { routeTo, tabVisible } from './router/actions.ts';
 import { loadApps, publishApp, unpublishApp } from './apps/actions.ts';
+import { deleteTask, runTask } from './schedule/actions.ts';
+import { selectRunsChanged, selectTaskCall, selectTasks } from './schedule/selectors.ts';
 import { selectAppCall, selectAppPublish } from './apps/selectors.ts';
 import { login, logout, requestConsoleCode, saveSettings, sessionCheck, sessionLost } from './session/actions.ts';
 import { selectOperatorName } from './session/selectors.ts';
@@ -36,7 +38,7 @@ type Calls = { name: string; args: unknown[] }[];
 
 const ISO_NOW = '2026-10-09T10:00:00.000Z';
 
-type ApiOverrides = Omit<Partial<Api>, 'threads' | 'workspace' | 'files' | 'settings' | 'llmRequests' | 'limits' | 'secretRequests' | 'projects' | 'apps'> & { threads?: Partial<Api['threads']>; settings?: Partial<Api['settings']>; projects?: Partial<Api['projects']>; apps?: Partial<Api['apps']> };
+type ApiOverrides = Omit<Partial<Api>, 'threads' | 'workspace' | 'files' | 'settings' | 'llmRequests' | 'limits' | 'secretRequests' | 'projects' | 'apps' | 'schedule'> & { threads?: Partial<Api['threads']>; settings?: Partial<Api['settings']>; projects?: Partial<Api['projects']>; apps?: Partial<Api['apps']>; schedule?: Partial<Api['schedule']> };
 
 // The file area, the stored files' facts, the model requests and the secret
 // requests are Query, not the store: handlers never call them.
@@ -66,7 +68,7 @@ function fakeApi(overrides: ApiOverrides = {}, calls: Calls = []): Api {
 
       return impl(...args);
     };
-  const base: Omit<Api, 'threads' | 'workspace' | 'files' | 'settings' | 'llmRequests' | 'limits' | 'secretRequests' | 'projects' | 'apps'> = {
+  const base: Omit<Api, 'threads' | 'workspace' | 'files' | 'settings' | 'llmRequests' | 'limits' | 'secretRequests' | 'projects' | 'apps' | 'schedule'> = {
     me: async () => ME,
     auth: async () => ME,
     consoleCode: async () => null,
@@ -96,6 +98,17 @@ function fakeApi(overrides: ApiOverrides = {}, calls: Calls = []): Api {
     archive: async id => ({ project: projectRow(id, { archived: true }) }),
     unarchive: async id => ({ project: projectRow(id, { archived: false }) }),
     ...overrides.projects,
+  };
+  // The journal reads are Query, not the store: handlers never call them.
+  const schedule: Api['schedule'] = {
+    runs: async () => ({ runs: [], nextCursor: null }),
+    latestRuns: async () => ({ runs: [] }),
+    run: async () => {
+      throw new Error('not here');
+    },
+    runTask: async () => ({ outcome: 'fired', runId: 'run-1' }),
+    deleteTask: async slug => ({ task: taskRow(slug) }),
+    ...overrides.schedule,
   };
   const threads: Api['threads'] = {
     list: async () => ({ threads: [], nextCursor: null }),
@@ -134,8 +147,11 @@ function fakeApi(overrides: ApiOverrides = {}, calls: Calls = []): Api {
     llmRequests: LLM_REQUESTS,
     limits: LIMITS,
     secretRequests: SECRET_REQUESTS,
+    schedule: { runs: schedule.runs, latestRuns: schedule.latestRuns, run: schedule.run, runTask: wrap('schedule.runTask', schedule.runTask), deleteTask: wrap('schedule.deleteTask', schedule.deleteTask) },
   };
 }
+
+const taskRow = (slug: string, patch: Partial<TaskView> = {}): TaskView => ({ id: `task-${slug}`, slug, name: slug, description: null, kind: 'command', cron: '0 3 * * *', at: null, note: null, command: 'pg_dump', cwd: null, timeoutMs: null, reportOnSuccess: false, createdBy: 'scheduler', createdAt: new Date(ISO_NOW), nextRunAt: new Date(ISO_NOW), ...patch });
 
 async function dispatched(store: AppStore, action: Action): Promise<void> {
   await (store.dispatch(action) as unknown as Promise<void> | void);
@@ -2561,5 +2577,130 @@ describe('apps listing', () => {
     answers[3].resolve(listing([FRESH]));
     await settle();
     assert.deepEqual(store.getState().apps.refresh, { request: null, error: null });
+  });
+});
+
+describe('schedule commands', () => {
+  const toasts = (store: AppStore) => store.getState().ui.toasts.map(toast => ({ title: toast.title, state: toast.state }));
+
+  type Answer<T> = { resolve: (value: T) => void; reject: (error: unknown) => void };
+
+  const held =
+    <T,>(answers: Answer<T>[]) =>
+    () =>
+      new Promise<T>((resolve, reject) => {
+        answers.push({ resolve, reject });
+      });
+
+  async function onSchedule(overrides: ApiOverrides = {}, calls: Calls = [], route: AppRoute = { key: 'schedule' }): Promise<AppStore> {
+    const store = createStore({
+      api: fakeApi({ snapshot: async () => snapshot({ tasks: [taskRow('backup'), taskRow('remind', { kind: 'note', command: null, note: 'Call', cron: null }), taskRow('sync', { kind: 'code', command: null })] }), ...overrides }, calls),
+      initialRoute: route,
+    });
+
+    await dispatched(store, sessionCheck());
+    await settle();
+
+    return store;
+  }
+
+  it('runs a task: one call per task, a toast in the kind’s words, the journal stamp moved only by a command job', async () => {
+    const calls: Calls = [];
+    const answers: Answer<{ outcome: 'fired' | 'already_running'; runId: string | null }>[] = [];
+    const store = await onSchedule({ schedule: { runTask: held(answers) } }, calls);
+    const stamp = selectRunsChanged(store.getState());
+
+    store.dispatch(runTask('backup'));
+    store.dispatch(runTask('backup'));
+    assert.deepEqual(selectTaskCall(store.getState(), 'backup'), { kind: 'run' });
+    assert.equal(calls.filter(call => call.name === 'schedule.runTask').length, 1, 'the second run waits for the first');
+
+    answers[0]!.resolve({ outcome: 'fired', runId: 'run-9' });
+    await settle();
+    assert.equal(selectTaskCall(store.getState(), 'backup'), null);
+    assert.equal(selectRunsChanged(store.getState()), stamp + 1);
+    assert.deepEqual(toasts(store), [{ title: 'Run started', state: 'run' }]);
+
+    // A note fired lands in the main thread — no journal row, no stamp.
+    store.dispatch(runTask('remind'));
+    answers[1]!.resolve({ outcome: 'fired', runId: null });
+    await settle();
+    assert.equal(selectRunsChanged(store.getState()), stamp + 1);
+    assert.deepEqual(toasts(store)[1], { title: 'Reminder sent', state: 'done' });
+
+    store.dispatch(runTask('sync'));
+    answers[2]!.resolve({ outcome: 'already_running', runId: null });
+    await settle();
+    assert.deepEqual(toasts(store)[2], { title: 'Already running', state: 'wait' });
+
+    // A refusal is a toast with the server's words; the call is freed.
+    store.dispatch(runTask('sync'));
+    answers[3]!.reject(new ApiError(409, 'task_sleeping', 'task "sync" is sleeping — no run(ctx) body'));
+    await settle();
+    assert.equal(selectTaskCall(store.getState(), 'sync'), null);
+    assert.deepEqual(toasts(store)[3], { title: 'Couldn’t run “sync”', state: 'err' });
+    assert.equal(store.getState().ui.toasts[3]!.desc, 'task "sync" is sleeping — no run(ctx) body');
+  });
+
+  it('the journal stamp follows a job that reported through the log', async () => {
+    resetSeq(400n);
+
+    const store = await onSchedule();
+    const stamp = selectRunsChanged(store.getState());
+
+    store.dispatch(eventAction(event({ type: 'schedule.fired', actor: 'system', targetThreadId: 'main', payload: { slug: 'backup', name: 'backup', runId: 'run-2', output: 'ok' } })));
+    assert.equal(selectRunsChanged(store.getState()), stamp + 1);
+    // A note's fire names no run.
+    store.dispatch(eventAction(event({ type: 'schedule.fired', actor: 'system', targetThreadId: 'main', payload: { slug: 'remind', name: 'remind', note: 'Call' } })));
+    assert.equal(selectRunsChanged(store.getState()), stamp + 1);
+    store.dispatch(eventAction(event({ type: 'system.exception', actor: 'system', threadId: 'main', payload: { scope: 'workspace-job', slug: 'backup', runId: 'run-3', status: 'failed', exitCode: 1, error: 'Workspace job "backup" failed' } })));
+    assert.equal(selectRunsChanged(store.getState()), stamp + 2);
+    store.dispatch(eventAction(event({ type: 'system.exception', actor: 'system', threadId: 'main', payload: { scope: 'scheduled-task', slug: 'sync', error: 'failed' } })));
+    assert.equal(selectRunsChanged(store.getState()), stamp + 2);
+  });
+
+  it('deletes a task: the row dropped from the answer, a toast, the detail of that task led back to the list; the tail finds nothing to do', async () => {
+    resetSeq(420n);
+
+    const answers: Answer<{ task: TaskView }>[] = [];
+    const store = await onSchedule({ schedule: { deleteTask: held(answers) } }, [], { key: 'schedule', slug: 'backup' });
+
+    store.dispatch(deleteTask('backup'));
+    assert.deepEqual(selectTaskCall(store.getState(), 'backup'), { kind: 'delete' });
+
+    answers[0]!.resolve({ task: taskRow('backup') });
+    await settle();
+    assert.deepEqual(selectTasks(store.getState()).map(task => task.slug), ['remind', 'sync']);
+    assert.equal(selectTaskCall(store.getState(), 'backup'), null);
+    assert.deepEqual(toasts(store), [{ title: 'Task deleted', state: 'off' }]);
+    assert.deepEqual(store.getState().router.route, { key: 'schedule' });
+
+    const after = store.getState().schedule;
+
+    store.dispatch(eventAction(event({ type: 'schedule.task.cancelled', actor: 'user', payload: { id: 'task-backup', slug: 'backup', name: 'backup', kind: 'command', createdAt: ISO_NOW, reason: 'cancelled' } })));
+    assert.equal(store.getState().schedule, after);
+
+    // A refusal keeps the row and tells it; the screen of another task is not moved.
+    store.dispatch(routeTo({ key: 'schedule', slug: 'sync' }));
+    store.dispatch(deleteTask('remind'));
+    answers[1]!.reject(new ApiError(404, 'not_found', 'No such task'));
+    await settle();
+    assert.deepEqual(selectTasks(store.getState()).map(task => task.slug), ['remind', 'sync']);
+    assert.deepEqual(toasts(store)[1], { title: 'Couldn’t delete “remind”', state: 'err' });
+    assert.deepEqual(store.getState().router.route, { key: 'schedule', slug: 'sync' });
+  });
+
+  it('an answer that outlived its session touches nothing', async () => {
+    const answers: Answer<{ outcome: 'fired' | 'already_running'; runId: string | null }>[] = [];
+    const store = await onSchedule({ schedule: { runTask: held(answers) } });
+    const stamp = selectRunsChanged(store.getState());
+
+    store.dispatch(runTask('backup'));
+    store.dispatch(sessionLost());
+    answers[0]!.resolve({ outcome: 'fired', runId: 'run-9' });
+    await settle();
+    assert.equal(selectRunsChanged(store.getState()), 0);
+    assert.equal(stamp, 0);
+    assert.deepEqual(store.getState().ui.toasts, []);
   });
 });

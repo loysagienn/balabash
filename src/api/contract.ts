@@ -597,6 +597,83 @@ export type TaskView = {
   nextRunAt: Date | null;
 };
 
+// ---------------------------------------------------------------------------
+// The schedule's run journal and the operator's commands over a task (the
+// Schedule screen). A run is a row of job_runs — the journal of workspace
+// jobs (kind 'command'): every run of one is written, a success as well as
+// a failure; a note task leaves a schedule.fired event instead, a code task
+// only what it pushes. The journal is telemetry outside the event log (the
+// llm_requests pattern), so the console reads it by place.
+
+export type JobRunStatus = 'running' | 'ok' | 'failed' | 'timeout' | 'spawn_error' | 'aborted';
+export type JobTrigger = 'cron' | 'at' | 'manual';
+
+// One run as the lists show it: the outcome and the timing, without the
+// output tails (a page of runs stays small).
+export type JobRunView = {
+  id: string;
+  slug: string;
+  trigger: JobTrigger;
+  status: JobRunStatus;
+  exitCode: number | null;
+  startedAt: Date;
+  finishedAt: Date | null;
+  durationMs: number | null;
+  // Whether the kept tail of a stream lost its beginning (16 KiB kept).
+  stdoutTruncated: boolean;
+  stderrTruncated: boolean;
+};
+
+// One run in full: the command and working directory as they were at fire
+// time (the task may be gone or changed since) and the tails of both streams.
+export type JobRunDetailView = JobRunView & {
+  command: string;
+  cwd: string | null;
+  stdoutTail: string;
+  stderrTail: string;
+};
+
+export type JobRunsQuery = {
+  // Only the runs of this task.
+  slug?: string;
+  // Cursor: the id of the oldest run of the previous page — the next page
+  // holds the runs started before it.
+  before?: string;
+  limit?: number;
+};
+
+// Newest first; nextCursor — the id to ask `before` for the next page, null
+// at the end.
+export type JobRunsResponse = {
+  runs: JobRunView[];
+  nextCursor: string | null;
+};
+
+// The newest run of every task that has one (by slug): the "last run" of
+// the task rows.
+export type LatestJobRunsResponse = {
+  runs: JobRunView[];
+};
+
+export type JobRunResponse = {
+  run: JobRunDetailView;
+};
+
+// POST /schedule/tasks/:slug/run — the task fired by hand, the schedule
+// untouched: `fired` with the runId of a command job (null for a note or a
+// code task — they leave no journal row), or `already_running` when a run of
+// the same task is still going and this one burns.
+export type RunTaskResponse = {
+  outcome: 'fired' | 'already_running';
+  runId: string | null;
+};
+
+// DELETE /schedule/tasks/:slug — the row as it was; the same end arrives as
+// schedule.task.cancelled of the tail.
+export type DeleteTaskResponse = {
+  task: TaskView;
+};
+
 export type ConnectionView = {
   id: string;
   server: string;

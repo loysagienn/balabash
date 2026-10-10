@@ -22,6 +22,7 @@ import { HomeScreen } from '../screens/home/HomeScreen.tsx';
 import { ThreadScreen } from '../screens/thread/ThreadScreen.tsx';
 import { ThreadsScreen } from '../screens/threads/ThreadsScreen.tsx';
 import { SettingsScreen } from '../screens/settings/SettingsScreen.tsx';
+import { ScheduleScreen } from '../screens/schedule/ScheduleScreen.tsx';
 import { SystemScreen } from '../screens/system/SystemScreen.tsx';
 import { DevUi } from '../screens/dev-ui/DevUi.tsx';
 import { selectTitle } from './title.ts';
@@ -67,7 +68,7 @@ export function App() {
     case 'apps':
       return <AppsScreen route={route} />;
     case 'schedule':
-      return <Placeholder current="schedule" title="Schedule" icon="calendar-clock" what="Schedule" />;
+      return <ScheduleScreen route={route} />;
     case 'connections':
       return <Placeholder current="connections" title="Connections" icon="plug" what="Connections" />;
     case 'secrets':

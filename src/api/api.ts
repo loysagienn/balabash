@@ -33,6 +33,9 @@ import { getOauthClientRequest, provisionOauthClient } from '../capabilities/con
 import { AppManagementError, listApps, publishApp, unpublishApp } from '../apps/management.ts';
 import { ProjectError, archiveProject, createProject, parseProjectInput, parseProjectPatch, unarchiveProject, updateProject } from '../projects/mutations.ts';
 import { projectView } from '../projects/store.ts';
+import { ScheduleError, deleteTask, runTask } from '../schedule/commands.ts';
+import { JOB_RUNS_PAGE_DEFAULT, JOB_RUNS_PAGE_MAX, getJobRun, latestJobRuns, listJobRuns } from '../schedule/runs.ts';
+import { taskView } from '../schedule/view.ts';
 import { publicAppsBase } from '../apps/urls.ts';
 import { consumeAuthCode, createAuthCode } from './auth-codes.ts';
 import { createUserSession, destroySession, getSession } from './session.ts';
@@ -44,7 +47,12 @@ import { checkMutationOrigin } from './origin.ts';
 import type {
   AppsResponse,
   CreateProjectResponse,
+  DeleteTaskResponse,
   FileMetaResponse,
+  JobRunResponse,
+  JobRunsResponse,
+  LatestJobRunsResponse,
+  RunTaskResponse,
   ProjectResponse,
   PublicationResponse,
   LimitsResponse,
@@ -896,6 +904,112 @@ router.post('/projects/:id/unarchive', requireSession, async ctx => {
 
     return { project: projectView(project) };
   });
+});
+
+// --------------------------------------------------------------------------
+// The schedule (the Schedule screen): the run journal of workspace jobs —
+// job_runs, telemetry outside the event log, read by place (a page newest
+// first with a keyset cursor, one run with its output tails, the newest run
+// of every task) — and the operator's two commands over a task, the same
+// implementation the schedule tools use (src/schedule/commands.ts): a
+// manual run (the schedule untouched; the outcome of a command job is in
+// the journal, of a note or a code task in the log) and a delete (the row
+// and its schedule.task.cancelled commit together, authored by the
+// operator). The tasks themselves are the snapshot's.
+
+const SLUG_MAX = 64;
+
+function parseRunsLimit(value: string | undefined): number | null {
+  if (value === undefined) {
+    return JOB_RUNS_PAGE_DEFAULT;
+  }
+
+  if (!/^\d+$/.test(value)) {
+    return null;
+  }
+
+  const limit = Number(value);
+
+  return limit >= 1 && limit <= JOB_RUNS_PAGE_MAX ? limit : null;
+}
+
+router.get('/schedule/runs', requireSession, async ctx => {
+  const userId = ctx.state.userId as string;
+  const slug = queryValue(ctx.query.slug);
+  const before = queryValue(ctx.query.before);
+  const limit = parseRunsLimit(queryValue(ctx.query.limit));
+
+  if (limit === null) {
+    sendError(ctx, 400, 'bad_request', `limit must be an integer between 1 and ${JOB_RUNS_PAGE_MAX}`);
+
+    return;
+  }
+
+  if ((slug !== undefined && slug.length > SLUG_MAX) || (before !== undefined && before.length > THREAD_FILTER_MAX)) {
+    sendError(ctx, 400, 'bad_request', `slug must be at most ${SLUG_MAX} and before at most ${THREAD_FILTER_MAX} characters`);
+
+    return;
+  }
+
+  const response: JobRunsResponse = await listJobRuns(userId, { slug, before, limit });
+
+  ctx.body = prepareObject(response);
+});
+
+router.get('/schedule/runs/latest', requireSession, async ctx => {
+  const response: LatestJobRunsResponse = { runs: await latestJobRuns(ctx.state.userId as string) };
+
+  ctx.body = prepareObject(response);
+});
+
+router.get('/schedule/runs/:id', requireSession, async ctx => {
+  const run = await getJobRun(ctx.state.userId as string, ctx.params.id as string);
+
+  if (!run) {
+    sendError(ctx, 404, 'not_found', 'No such run');
+
+    return;
+  }
+
+  const response: JobRunResponse = { run };
+
+  ctx.body = prepareObject(response);
+});
+
+const SCHEDULE_ERROR_STATUS: Record<ScheduleError['code'], number> = { not_found: 404, sleeping: 409, no_main_thread: 409 };
+
+router.post('/schedule/tasks/:slug/run', requireSession, async ctx => {
+  const userId = ctx.state.userId as string;
+
+  try {
+    const outcome = await runTask(userId, ctx.params.slug as string);
+    const response: RunTaskResponse = outcome.kind === 'fired' ? { outcome: 'fired', runId: outcome.runId } : { outcome: 'already_running', runId: null };
+
+    ctx.body = prepareObject(response);
+  } catch (error) {
+    if (error instanceof ScheduleError) {
+      sendError(ctx, SCHEDULE_ERROR_STATUS[error.code], error.code === 'not_found' ? 'not_found' : `task_${error.code}`, error.code === 'not_found' ? 'No such task' : error.message);
+
+      return;
+    }
+
+    throw error;
+  }
+});
+
+router.delete('/schedule/tasks/:slug', requireSession, async ctx => {
+  const userId = ctx.state.userId as string;
+  const task = await deleteTask(userId, ctx.params.slug as string, { kind: 'user', userId });
+
+  if (!task) {
+    sendError(ctx, 404, 'not_found', 'No such task');
+
+    return;
+  }
+
+  const response: DeleteTaskResponse = { task: taskView(task, new Date()) };
+
+  ctx.body = prepareObject(response);
 });
 
 // --------------------------------------------------------------------------

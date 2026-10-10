@@ -30,7 +30,10 @@ export type ProjectRoute = { key: 'project'; slug: string; path?: string; view?:
 export type FilesRoute = { key: 'files'; path: string; view?: 'edit' };
 export type AppsFilter = 'published' | 'errors';
 export type AppsRoute = { key: 'apps'; filter?: AppsFilter; q?: string };
-export type ScheduleRoute = { key: 'schedule'; taskId?: string };
+// slug — the selected task (/schedule/<slug>, a detail screen on the
+// phone); tab 'log' — the run log instead of the tasks, task — the log of
+// one task; q — the tasks search.
+export type ScheduleRoute = { key: 'schedule'; slug?: string; tab?: 'log'; task?: string; q?: string };
 export type ConnectionsRoute = { key: 'connections' };
 export type SecretsRoute = { key: 'secrets'; id: string };
 export type AgentsRoute = { key: 'agents'; name?: string; q?: string };
@@ -217,16 +220,33 @@ export const settings = simple('settings', 'settings');
 
 export const schedule = defineRoute<ScheduleRoute>({
   key: 'schedule',
-  readRoute: path => {
+  readRoute: (path, params) => {
     const parts = segments(path);
 
     if (parts[0] !== 'schedule' || parts.length > 2) {
       return null;
     }
 
-    return parts.length === 2 ? { key: 'schedule', taskId: parts[1] } : { key: 'schedule' };
+    if (parts.length === 2) {
+      return { key: 'schedule', slug: parts[1] };
+    }
+
+    const route: ScheduleRoute = { key: 'schedule' };
+    const tab = param(params, 'tab');
+    const task = param(params, 'task');
+    const q = param(params, 'q');
+
+    if (tab === 'log') {
+      route.tab = 'log';
+
+      if (task) route.task = task;
+    } else if (q) {
+      route.q = q;
+    }
+
+    return route;
   },
-  writeRoute: route => `/schedule${route.taskId ? `/${encodeURIComponent(route.taskId)}` : ''}`,
+  writeRoute: route => (route.slug ? `/schedule/${encodeURIComponent(route.slug)}` : `/schedule${queryString(route.tab === 'log' ? { tab: 'log', task: route.task } : { q: route.q })}`),
 });
 
 export const secrets = defineRoute<SecretsRoute>({

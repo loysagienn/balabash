@@ -6,7 +6,12 @@ import type {
   AppsResponse,
   CreateProjectRequest,
   CreateProjectResponse,
+  DeleteTaskResponse,
   FileMetaResponse,
+  JobRunResponse,
+  JobRunsQuery,
+  JobRunsResponse,
+  LatestJobRunsResponse,
   LimitsResponse,
   LlmRequestsQuery,
   LlmRequestsResponse,
@@ -16,6 +21,7 @@ import type {
   ProvisionSecretsResponse,
   PublicationResponse,
   PublishAppRequest,
+  RunTaskResponse,
   SecretRequestResponse,
   SettingsFactsResponse,
   SettingsPatchRequest,
@@ -111,6 +117,19 @@ export type Api = {
   limits: {
     get(signal?: AbortSignal): Promise<LimitsResponse>;
   };
+  // The schedule: the run journal of workspace jobs (the second data layer
+  // — a page of runs newest first on a cursor, one run with its output,
+  // the newest run of every task) and the operator's two commands over a
+  // task — a manual run (the schedule untouched; the answer names the
+  // journal row of a command job) and a delete (the answer is the row; the
+  // same end arrives as schedule.task.cancelled of the tail).
+  schedule: {
+    runs(query: JobRunsQuery, signal?: AbortSignal): Promise<JobRunsResponse>;
+    latestRuns(signal?: AbortSignal): Promise<LatestJobRunsResponse>;
+    run(id: string, signal?: AbortSignal): Promise<JobRunResponse>;
+    runTask(slug: string): Promise<RunTaskResponse>;
+    deleteTask(slug: string): Promise<DeleteTaskResponse>;
+  };
   // The trusted window of a one-time link (the second data layer too): the
   // field metadata of a secret request, and the values going to storage —
   // they never come back, not in the answer, not in an event. A 404 is the
@@ -138,6 +157,7 @@ export function createApi(options: FetchOptions = {}): Api {
   const thread = (id: string) => `/api/threads/${encodeURIComponent(id)}`;
   const project = (id: string) => `/api/projects/${encodeURIComponent(id)}`;
   const secretRequest = (id: string) => `/api/secret-requests/${encodeURIComponent(id)}`;
+  const task = (slug: string) => `/api/schedule/tasks/${encodeURIComponent(slug)}`;
 
   return {
     me: () => apiFetch<MeResponse>('/api/me', { unauthenticated: true }),
@@ -181,6 +201,13 @@ export function createApi(options: FetchOptions = {}): Api {
     },
     limits: {
       get: signal => apiFetch<LimitsResponse>('/api/limits', { signal }),
+    },
+    schedule: {
+      runs: (query, signal) => apiFetch<JobRunsResponse>('/api/schedule/runs', { query, signal }),
+      latestRuns: signal => apiFetch<LatestJobRunsResponse>('/api/schedule/runs/latest', { signal }),
+      run: (id, signal) => apiFetch<JobRunResponse>(`/api/schedule/runs/${encodeURIComponent(id)}`, { signal }),
+      runTask: slug => apiFetch<RunTaskResponse>(`${task(slug)}/run`, { method: 'POST', body: {} }),
+      deleteTask: slug => apiFetch<DeleteTaskResponse>(task(slug), { method: 'DELETE' }),
     },
     secretRequests: {
       get: (id, signal) => apiFetch<SecretRequestResponse>(secretRequest(id), { signal }),
