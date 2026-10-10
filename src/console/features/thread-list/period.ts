@@ -7,6 +7,7 @@
 
 import { dayKey, daysBefore, dayStart, shortDate } from '../../lib/format/index.ts';
 import type { ThreadsRoute } from '../../lib/router/routes.ts';
+import type { ThreadsFilterPatch } from './filters.ts';
 
 export type Period = Pick<ThreadsRoute, 'from' | 'to'>;
 export type PeriodPreset = 'today' | 'yesterday' | '7d' | '30d';
@@ -34,6 +35,17 @@ export function presetPeriod(preset: PeriodPreset, now: Date): Period {
     case '30d':
       return { from: dayKey(daysBefore(now, 29)) };
   }
+}
+
+// The route patch of a preset the user has just chosen: both days replaced
+// with the preset's days at the moment of the choice. The time is read here,
+// not taken from the last render — useNow refreshes once a minute, so right
+// after midnight the rendered time is still yesterday's, and Yesterday chosen
+// from it would keep the day before yesterday in the URL.
+export function choosePreset(preset: PeriodPreset): ThreadsFilterPatch {
+  const { from, to } = presetPeriod(preset, new Date());
+
+  return { from, to };
 }
 
 export function samePeriod(a: Period, b: Period): boolean {

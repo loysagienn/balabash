@@ -22,7 +22,7 @@ import { Seg, SegItem } from '../../ui/Seg/Seg.tsx';
 import { Kbd } from '../../ui/atoms/atoms.tsx';
 import { withFilters } from './filters.ts';
 import type { ThreadsFilterPatch } from './filters.ts';
-import { PERIOD_PRESETS, periodLabel, periodPreset, presetPeriod } from './period.ts';
+import { PERIOD_PRESETS, choosePreset, periodLabel, periodPreset } from './period.ts';
 
 const SEARCH_ID = 'threads-search';
 
@@ -132,7 +132,7 @@ export function ThreadFilters({ route, counts, active }: ThreadFiltersProps) {
                 <MenuItem icon="circle-dashed" label="Any time" checked={!period} onClick={() => (setMenu(null), go({ from: undefined, to: undefined }))} />
                 <MenuSep />
                 {PERIOD_PRESETS.map(p => (
-                  <MenuItem key={p.id} icon="calendar" label={p.label} checked={preset === p.id} onClick={() => (setMenu(null), go({ from: undefined, to: undefined, ...presetPeriod(p.id, now) }))} />
+                  <MenuItem key={p.id} icon="calendar" label={p.label} checked={preset === p.id} onClick={() => (setMenu(null), go(choosePreset(p.id)))} />
                 ))}
               </Menu>
             }

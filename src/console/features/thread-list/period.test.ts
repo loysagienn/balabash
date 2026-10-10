@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { periodLabel, periodPreset, presetPeriod, samePeriod } from './period.ts';
+import { choosePreset, periodLabel, periodPreset, presetPeriod, samePeriod } from './period.ts';
 
 const at = (y: number, m: number, d: number, h = 0) => new Date(y, m - 1, d, h);
 const NOW = at(2026, 10, 9, 17);
@@ -14,6 +14,21 @@ describe('threads period', () => {
     // Across a month and a year.
     assert.deepEqual(presetPeriod('7d', at(2026, 1, 3)), { from: '2025-12-28' });
     assert.deepEqual(presetPeriod('30d', at(2026, 3, 1)), { from: '2026-01-31' });
+  });
+
+  // The last render was before midnight (useNow ticks once a minute); the
+  // choice is made after it — the days are those of the moment of the choice.
+  it('reads the days of a chosen preset at the moment of the choice, not of the last render', t => {
+    t.mock.timers.enable({ apis: ['Date'], now: at(2026, 10, 9, 23).setMinutes(59, 50) });
+    const rendered = new Date();
+
+    assert.equal(periodPreset({ from: '2026-10-08', to: '2026-10-08' }, rendered), 'yesterday');
+    t.mock.timers.setTime(at(2026, 10, 10).setSeconds(5));
+    assert.deepEqual(choosePreset('yesterday'), { from: '2026-10-09', to: '2026-10-09' });
+    assert.deepEqual(choosePreset('today'), { from: '2026-10-10', to: undefined });
+    // Both keys are in the patch: the route's previous end is replaced, not kept.
+    assert.deepEqual(choosePreset('7d'), { from: '2026-10-04', to: undefined });
+    assert.deepEqual(presetPeriod('yesterday', rendered), { from: '2026-10-08', to: '2026-10-08' });
   });
 
   it('recognizes a preset only while the days are its days', () => {
