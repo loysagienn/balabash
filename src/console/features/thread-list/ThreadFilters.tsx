@@ -1,12 +1,13 @@
-// The filter bar of the Threads screen: status segments, agent and project
-// pickers, search — all of it is the route (frontend.md: filters live in
-// the URL, a change replaces the history entry), and every one of them
+// The filter bar of the Threads screen: status segments, agent, project and
+// period pickers, search — all of it is the route (frontend.md: filters live
+// in the URL, a change replaces the history entry), and every one of them
 // reloads the list from the server. The segments carry the counts of the
 // set (segmentCount). "/" focuses the search from anywhere on the screen.
 
 import { useEffect, useState } from 'react';
 import type { ThreadCounts, ThreadStatus } from '../../../core/contract.ts';
 import type { ThreadsRoute } from '../../lib/router/routes.ts';
+import { useNow } from '../../lib/format/useNow.ts';
 import { useAppDispatch, useAppSelector } from '../../store/hooks.ts';
 import { selectProjects } from '../../store/projects/selectors.ts';
 import { routeTo } from '../../store/router/actions.ts';
@@ -21,6 +22,7 @@ import { Seg, SegItem } from '../../ui/Seg/Seg.tsx';
 import { Kbd } from '../../ui/atoms/atoms.tsx';
 import { withFilters } from './filters.ts';
 import type { ThreadsFilterPatch } from './filters.ts';
+import { PERIOD_PRESETS, periodLabel, periodPreset, presetPeriod } from './period.ts';
 
 const SEARCH_ID = 'threads-search';
 
@@ -49,7 +51,10 @@ export function ThreadFilters({ route, counts, active }: ThreadFiltersProps) {
   const agents = useAppSelector(selectKnownAgents);
   const projects = useAppSelector(selectProjects);
   const project = route.project ? projects.find(p => p.slug === route.project) : undefined;
-  const [menu, setMenu] = useState<'agent' | 'project' | null>(null);
+  const now = useNow();
+  const period = periodLabel(route, now);
+  const preset = periodPreset(route, now);
+  const [menu, setMenu] = useState<'agent' | 'project' | 'period' | null>(null);
   const go = (patch: ThreadsFilterPatch) => dispatch(routeTo(withFilters(route, patch), { replace: true }));
 
   useEffect(() => {
@@ -118,6 +123,21 @@ export function ThreadFilters({ route, counts, active }: ThreadFiltersProps) {
               expanded={menu === 'project'}
               onClick={() => setMenu(menu === 'project' ? null : 'project')}
             />
+          </MenuAnchor>
+          <MenuAnchor
+            open={menu === 'period'}
+            onClose={() => setMenu(null)}
+            menu={
+              <Menu label="Period">
+                <MenuItem icon="circle-dashed" label="Any time" checked={!period} onClick={() => (setMenu(null), go({ from: undefined, to: undefined }))} />
+                <MenuSep />
+                {PERIOD_PRESETS.map(p => (
+                  <MenuItem key={p.id} icon="calendar" label={p.label} checked={preset === p.id} onClick={() => (setMenu(null), go({ from: undefined, to: undefined, ...presetPeriod(p.id, now) }))} />
+                ))}
+              </Menu>
+            }
+          >
+            <FChip label="Period" value={period} icon="calendar" end="chevron-down" expanded={menu === 'period'} onClick={() => setMenu(menu === 'period' ? null : 'period')} />
           </MenuAnchor>
         </>
       }

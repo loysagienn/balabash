@@ -9,7 +9,7 @@ export type ThreadsFilterPatch = Partial<Omit<ThreadsRoute, 'key'>>;
 export function withFilters(route: ThreadsRoute, patch: ThreadsFilterPatch): ThreadsRoute {
   const next: ThreadsRoute = { ...route, ...patch };
 
-  for (const key of ['status', 'agent', 'project', 'q'] as const) {
+  for (const key of ['status', 'agent', 'project', 'q', 'from', 'to'] as const) {
     if (next[key] === undefined || next[key] === '') {
       delete next[key];
     }
@@ -19,5 +19,5 @@ export function withFilters(route: ThreadsRoute, patch: ThreadsFilterPatch): Thr
 }
 
 export function hasFilters(route: ThreadsRoute): boolean {
-  return Boolean(route.status || route.agent || route.project || route.q);
+  return Boolean(route.status || route.agent || route.project || route.q || route.from || route.to);
 }

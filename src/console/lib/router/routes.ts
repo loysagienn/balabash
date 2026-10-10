@@ -4,6 +4,7 @@
 // writeRoute are inverses (routes.test.ts).
 
 import type { ThreadStatus } from '../../../core/contract.ts';
+import { isDayKey } from '../format/index.ts';
 import { defineRoute, encodePath, initRouter, queryString, segments } from './types.ts';
 import type { InferRoute } from './types.ts';
 
@@ -15,6 +16,10 @@ export type ThreadsFilters = {
   // A project slug (the snapshot maps it to the projectId).
   project?: string;
   q?: string;
+  // The period: local calendar days "YYYY-MM-DD", both ends inclusive, either
+  // one alone an open range (the store turns them into createdAtGte/Lte).
+  from?: string;
+  to?: string;
 };
 
 export type HomeRoute = { key: 'home' };
@@ -69,14 +74,18 @@ export const threads = defineRoute<ThreadsRoute>({
     const agent = param(params, 'agent');
     const project = param(params, 'project');
     const q = param(params, 'q');
+    const from = param(params, 'from');
+    const to = param(params, 'to');
 
     if (agent) route.agent = agent;
     if (project) route.project = project;
     if (q) route.q = q;
+    if (from && isDayKey(from)) route.from = from;
+    if (to && isDayKey(to)) route.to = to;
 
     return route;
   },
-  writeRoute: route => `/threads${queryString({ status: route.status, agent: route.agent, project: route.project, q: route.q })}`,
+  writeRoute: route => `/threads${queryString({ status: route.status, agent: route.agent, project: route.project, q: route.q, from: route.from, to: route.to })}`,
 });
 
 export const thread = defineRoute<ThreadRoute>({

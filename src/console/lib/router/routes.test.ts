@@ -7,6 +7,8 @@ const CASES: [string, AppRoute][] = [
   ['/', { key: 'home' }],
   ['/threads', { key: 'threads' }],
   ['/threads?status=active&agent=engineer&project=balabash&q=slug', { key: 'threads', status: 'active', agent: 'engineer', project: 'balabash', q: 'slug' }],
+  ['/threads?from=2026-10-01&to=2026-10-09', { key: 'threads', from: '2026-10-01', to: '2026-10-09' }],
+  ['/threads?status=completed&to=2025-12-31', { key: 'threads', status: 'completed', to: '2025-12-31' }],
   ['/threads/4f1c-aa', { key: 'thread', id: '4f1c-aa' }],
   ['/projects', { key: 'projects' }],
   ['/projects?archived=1', { key: 'projects', archived: true }],
@@ -44,6 +46,10 @@ describe('routes', () => {
 
   it('ignores unknown filter values and trailing slashes', () => {
     assert.deepEqual(readRoute('/threads/?status=bogus'), { key: 'threads' });
+    // A period is a pair of real local days in the one shape: a rollover
+    // day, a short form or an instant is not one.
+    assert.deepEqual(readRoute('/threads?from=2026-02-30&to=2026-10-9'), { key: 'threads' });
+    assert.deepEqual(readRoute('/threads?from=2026-10-09T00:00:00Z&to=2026-10-09'), { key: 'threads', to: '2026-10-09' });
     assert.deepEqual(readRoute('/apps?filter=bogus'), { key: 'apps' });
     assert.deepEqual(readRoute('/threads/42/'), { key: 'thread', id: '42' });
   });

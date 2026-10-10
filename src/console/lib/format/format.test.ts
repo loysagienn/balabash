@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { agoLabel, clockLabel, countOf, dateTimeLabel, dayKey, dayLabel, durationLabel, fileSize, fileTimeLabel, rangeLabel, shortDate, sinceLabel, startedLabel, timeOfDay } from './index.ts';
+import { agoLabel, clockLabel, countOf, dateTimeLabel, dayEnd, dayKey, dayLabel, daysBefore, dayStart, durationLabel, fileSize, fileTimeLabel, isDayKey, rangeLabel, shortDate, sinceLabel, startedLabel, timeOfDay } from './index.ts';
 
 // Local-time constructors: the helpers format in the browser's zone.
 const at = (y: number, m: number, d: number, h = 0, min = 0, sec = 0) => new Date(y, m - 1, d, h, min, sec);
@@ -25,6 +25,22 @@ describe('format', () => {
     assert.equal(dayLabel(at(2026, 10, 2), NOW), 'October 2');
     assert.equal(dayLabel(at(2025, 9, 24), NOW), 'September 24, 2025');
     assert.equal(dayKey(at(2026, 10, 9, 23)), '2026-10-09');
+  });
+
+  it('reads a day key back into its local day, ends included', () => {
+    assert.equal(dayStart('2026-10-09').getTime(), at(2026, 10, 9).getTime());
+    assert.equal(dayEnd('2026-10-09').getTime(), at(2026, 10, 10).getTime() - 1);
+    assert.equal(dayKey(dayEnd('2026-10-31')), '2026-10-31');
+    assert.equal(dayKey(daysBefore(NOW, 0)), '2026-10-09');
+    assert.equal(dayKey(daysBefore(NOW, 9)), '2026-09-30');
+    assert.equal(daysBefore(NOW, 1).getHours(), 0);
+    assert.equal(isDayKey('2026-10-09'), true);
+    assert.equal(isDayKey('2024-02-29'), true);
+    assert.equal(isDayKey('2026-02-30'), false);
+    assert.equal(isDayKey('2026-13-01'), false);
+    assert.equal(isDayKey('2026-10-9'), false);
+    assert.equal(isDayKey('2026-10-09T00:00'), false);
+    assert.equal(isDayKey(''), false);
   });
 
   it('writes since, ranges and short dates', () => {

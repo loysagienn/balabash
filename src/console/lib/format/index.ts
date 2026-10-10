@@ -32,6 +32,31 @@ export function dayKey(date: Date): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }
 
+// Whether a text is a day key naming a real local day: the shape and the
+// round trip — "2026-02-30" rolls over into March and does not come back.
+export function isDayKey(text: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}$/.test(text) && dayKey(dayStart(text)) === text;
+}
+
+// The first instant of a local day: "2026-10-09" → October 9, 00:00 local.
+export function dayStart(key: string): Date {
+  const [y, m, d] = key.split('-').map(Number) as [number, number, number];
+
+  return new Date(y, m - 1, d);
+}
+
+// The last instant of a local day: 23:59:59.999, across a DST change too.
+export function dayEnd(key: string): Date {
+  const [y, m, d] = key.split('-').map(Number) as [number, number, number];
+
+  return new Date(new Date(y, m - 1, d + 1).getTime() - 1);
+}
+
+// The start of the local day `n` days before now's day (0 — today).
+export function daysBefore(now: Date, n: number): Date {
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate() - n);
+}
+
 function sameDay(a: Date, b: Date): boolean {
   return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 }

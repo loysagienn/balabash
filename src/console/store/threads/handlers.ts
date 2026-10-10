@@ -47,6 +47,8 @@ export const loadThreadsHandler: ActionHandler<'LOAD_THREADS'> = ({ api, dispatc
           ...(filters.projectId ? { projectId: filters.projectId } : {}),
           ...(filters.agent ? { agent: filters.agent } : {}),
           ...(filters.q ? { q: filters.q } : {}),
+          ...(filters.createdAtGte ? { createdAtGte: filters.createdAtGte } : {}),
+          ...(filters.createdAtLte ? { createdAtLte: filters.createdAtLte } : {}),
           ...(before !== null ? { before: before.toString() } : {}),
           limit: THREADS_PAGE,
         },
