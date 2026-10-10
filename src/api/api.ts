@@ -25,7 +25,7 @@ import { appendEvent } from '../core/append.ts';
 import { registryMutation } from '../core/registry-events.ts';
 import { THREAD_CANCEL, THREAD_INTERRUPT } from '../core/envelope.ts';
 import type { FileRef, Thread, ThreadStatus } from '../core/contract.ts';
-import { WorkspacePathError, listDir, replaceFileContent, resolveFilePath, sanitizeRelPath, statFile } from '../workspace/files.ts';
+import { WorkspacePathError, fileNodeOf, listDir, replaceFileContent, resolveFilePath, sanitizeRelPath, statFile, statWritable, withFileWriteLock } from '../workspace/files.ts';
 import { FileNotFoundError, getFile, getUserFile, openFileContent } from '../files/index.ts';
 import { verifyDownloadLink } from '../files/storage/local.ts';
 import { getExternalServerSecretRequest, provisionExternalServerSecrets } from '../capabilities/external-secrets.ts';
@@ -1159,8 +1159,14 @@ filesRouter.get('/files/*path', requireSession, async ctx => {
 // answer reaches the client instead of a reset). If-Match with the ETag of
 // the GET is the guard against overwriting what an agent wrote since that
 // read: 412 while the tag no longer holds; a request without it replaces
-// whatever is there (a script's own choice). The check and the write are
-// two steps — a write landing between them is the window of one rename.
+// whatever is there (a script's own choice). The look, the comparison, the
+// replacement and the answer run under the file's write lock
+// (withFileWriteLock): two writes of this route under one tag end as one
+// success and one 412. An agent writing on the host between the look and
+// the rename is not held by it — that window stays; the answer's ETag is
+// built from the stats of the written inode itself (replaceFileContent), so
+// it names the saved bytes even when an agent replaced them right after,
+// and the next save under it is refused instead of passing.
 const MARKDOWN_MAX_BYTES = 2 * 1024 * 1024;
 const MARKDOWN_PATH = /\.(md|markdown)$/i;
 
@@ -1204,37 +1210,31 @@ filesRouter.put('/files/*path', requireSession, async ctx => {
     return;
   }
 
-  const absPath = resolveFilePath(userId, relPath);
-  const before = await stat(absPath, { bigint: true }).catch(() => null);
+  await withFileWriteLock(userId, relPath, async () => {
+    // A symbolic link or a folder outside the area is not a file of the
+    // area: the same 404 as a missing path.
+    const before = await statWritable(userId, relPath);
 
-  if (!before?.isFile()) {
-    sendError(ctx, 404, 'not_found', 'No such file in the workspace file area');
+    if (!before) {
+      sendError(ctx, 404, 'not_found', 'No such file in the workspace file area');
 
-    return;
-  }
+      return;
+    }
 
-  const ifMatch = ctx.get('if-match');
+    const ifMatch = ctx.get('if-match');
 
-  if (ifMatch && ifMatch !== workspaceFileEtag(before)) {
-    sendError(ctx, 412, 'precondition_failed', 'The file changed since it was read');
+    if (ifMatch && ifMatch !== workspaceFileEtag(before)) {
+      sendError(ctx, 412, 'precondition_failed', 'The file changed since it was read');
 
-    return;
-  }
+      return;
+    }
 
-  await replaceFileContent(userId, relPath, content);
+    const written = await replaceFileContent(userId, relPath, content);
+    const response: WorkspaceWriteResponse = { file: await fileNodeOf(userId, relPath, written.stats), etag: workspaceFileEtag(written.validator) };
 
-  const [file, after] = await Promise.all([statFile(userId, relPath), stat(absPath, { bigint: true }).catch(() => null)]);
-
-  if (!file || !after?.isFile()) {
-    sendError(ctx, 404, 'not_found', 'No such file in the workspace file area');
-
-    return;
-  }
-
-  const response: WorkspaceWriteResponse = { file, etag: workspaceFileEtag(after) };
-
-  ctx.set('etag', response.etag);
-  ctx.body = prepareObject(response);
+    ctx.set('etag', response.etag);
+    ctx.body = prepareObject(response);
+  });
 });
 
 // The validator of the workspace bytes: the size and the inode's two times

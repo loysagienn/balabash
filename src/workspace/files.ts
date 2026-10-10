@@ -16,6 +16,7 @@
 import path from 'node:path';
 import fs from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
+import type { BigIntStats, Stats } from 'node:fs';
 import type { DatabaseSync } from 'node:sqlite';
 import { workspaceDbPath, workspaceFilesDir } from './layout.ts';
 import { WorkspaceDbBusyError, inWriteTransaction, withWorkspaceDb, type WithDbOptions } from './sqlite.ts';
@@ -409,35 +410,100 @@ export async function listDir(userId: string, relDir: string): Promise<Workspace
 // Write primitive: the whole content of one file replaced in a step.
 // ---------------------------------------------------------------------------
 
-// The bytes land in a sibling temp file and take the file's name by rename:
-// a reader sees the old content or the new one, never a half-written file,
-// and a failure leaves the file as it was (the temp file is removed; the
-// one a crash leaves behind is a dot-file beside it). What may be replaced is the
-// caller's rule (the web API: an existing Markdown file under a size limit,
-// under a precondition); here — a path inside the area whose folder exists.
-export async function replaceFileContent(userId: string, relPath: string, content: Buffer): Promise<void> {
+// The file boundary of a write, beyond the string boundary of
+// sanitizeRelPath: the entry itself is a regular file (lstat — a symbolic
+// link is not a file of the area, the listing does not show one) and the
+// folder it is in really lies inside the area (realpath of the parent under
+// the realpath of the area — a link to a folder outside would otherwise
+// carry the write there). The stats are the inode's in full precision, the
+// ones a precondition compares against. What is not covered: a parent
+// swapped for a link between this look and the rename — the other writers
+// here are the operator's own agents, not an adversary.
+export async function statWritable(userId: string, relPath: string): Promise<BigIntStats | null> {
   const absPath = resolveFilePath(userId, relPath);
-  const temp = path.join(path.dirname(absPath), `.${path.basename(absPath)}.${randomBytes(6).toString('hex')}.tmp`);
+  const [stats, areaReal, parentReal] = await Promise.all([
+    fs.lstat(absPath, { bigint: true }).catch(() => null),
+    fs.realpath(workspaceFilesDir(userId)).catch(() => null),
+    fs.realpath(path.dirname(absPath)).catch(() => null),
+  ]);
 
-  try {
-    await fs.writeFile(temp, content, { flag: 'wx' });
-    await fs.rename(temp, absPath);
-  } catch (error) {
-    await fs.rm(temp, { force: true });
-    throw error;
-  }
-}
-
-/** The node of one file; null when the path is missing or not a file. */
-export async function statFile(userId: string, relPath: string): Promise<WorkspaceFileNode | null> {
-  const rel = sanitizeRelPath(relPath);
-  const absPath = path.join(workspaceFilesDir(userId), rel);
-  const stats = await fs.stat(absPath).catch(() => null);
-
-  if (!stats?.isFile()) {
+  if (!stats?.isFile() || areaReal === null || parentReal === null) {
     return null;
   }
 
+  return parentReal === areaReal || parentReal.startsWith(areaReal + path.sep) ? stats : null;
+}
+
+// One write of a file at a time within this process: a conditional write
+// (look, compare, replace, answer) runs whole before the next one looks, so
+// two writes under one validator end as one success and one refusal, not
+// two successes. Keyed by user and path; the chain is dropped once nobody
+// is in it. Writers outside the process (agents on the host) are not held
+// by this — their window is the one described at replaceFileContent.
+const writeChains = new Map<string, Promise<unknown>>();
+
+export async function withFileWriteLock<T>(userId: string, relPath: string, work: () => Promise<T>): Promise<T> {
+  const key = `${userId}/${sanitizeRelPath(relPath)}`;
+  const previous = writeChains.get(key) ?? Promise.resolve();
+  const run = previous.then(work, work);
+  const settled = run.then(
+    () => undefined,
+    () => undefined,
+  );
+
+  writeChains.set(key, settled);
+
+  try {
+    return await run;
+  } finally {
+    if (writeChains.get(key) === settled) {
+      writeChains.delete(key);
+    }
+  }
+}
+
+// The bytes land in a sibling temp file and take the file's name by rename:
+// a reader sees the old content or the new one, never a half-written file,
+// and a failure leaves the file as it was (the temp file is removed; the
+// one a crash leaves behind is a dot-file beside it, `.write-<hex>.tmp` —
+// its own short name, so a file whose name is near the limit of a name can
+// still be written). The answer is the stats of the written inode, taken
+// through the open handle after the rename: the validator of these bytes
+// and no other — a replacement of the file by another writer in the same
+// instant (a rename of theirs) is a different inode and does not show here,
+// so a tag built from them names what was saved, and the next conditional
+// write under it is refused once the file is no longer those bytes. What
+// may be replaced is the caller's rule (the web API: an existing Markdown
+// file under a size limit, under a precondition); here — a path inside the
+// area whose folder exists. Two readings of the one inode: the node's
+// (milliseconds, as the listing's stat rounds them) and the validator's
+// (nanoseconds, truncated) — a millisecond derived from the latter can
+// differ from the listing's by one at the edge of a millisecond.
+export type WrittenFile = { stats: Stats; validator: BigIntStats };
+
+export async function replaceFileContent(userId: string, relPath: string, content: Buffer): Promise<WrittenFile> {
+  const absPath = resolveFilePath(userId, relPath);
+  const temp = path.join(path.dirname(absPath), `.write-${randomBytes(6).toString('hex')}.tmp`);
+  const handle = await fs.open(temp, 'wx');
+
+  try {
+    await handle.writeFile(content);
+    await fs.rename(temp, absPath);
+
+    const [stats, validator] = await Promise.all([handle.stat(), handle.stat({ bigint: true })]);
+
+    return { stats, validator };
+  } catch (error) {
+    await fs.rm(temp, { force: true });
+    throw error;
+  } finally {
+    await handle.close();
+  }
+}
+
+// The node of a file from its stats (the listing's shape) and its
+// annotation.
+async function fileNode(userId: string, rel: string, stats: Pick<Stats, 'size' | 'mtime'>): Promise<WorkspaceFileNode> {
   const meta = await withExistingDb(userId, { title: null, description: null } as FileMeta, db => readMeta(db, rel));
 
   return {
@@ -448,4 +514,17 @@ export async function statFile(userId: string, relPath: string): Promise<Workspa
     description: meta.description,
     mediaType: guessContentType(rel),
   };
+}
+
+/** The node of a file the caller has the stats of (a write's answer). */
+export function fileNodeOf(userId: string, relPath: string, stats: Pick<Stats, 'size' | 'mtime'>): Promise<WorkspaceFileNode> {
+  return fileNode(userId, sanitizeRelPath(relPath), stats);
+}
+
+/** The node of one file; null when the path is missing or not a file. */
+export async function statFile(userId: string, relPath: string): Promise<WorkspaceFileNode | null> {
+  const rel = sanitizeRelPath(relPath);
+  const stats = await fs.stat(path.join(workspaceFilesDir(userId), rel)).catch(() => null);
+
+  return stats?.isFile() ? fileNode(userId, rel, stats) : null;
 }

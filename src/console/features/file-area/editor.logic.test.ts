@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { ApiError } from '../../lib/api/index.ts';
-import { canEdit, editorText, isDirty, saveFailure, saved, typed } from './editor.logic.ts';
+import { canEdit, editedFile, editorText, isDirty, saveFailure, saved, typed } from './editor.logic.ts';
 
 describe('file area — editor rules', () => {
   it('edits Markdown that previews and nothing else', () => {
@@ -10,6 +10,20 @@ describe('file area — editor rules', () => {
     assert.equal(canEdit({ path: 'notes/big.md', sizeBytes: 3 * 1024 * 1024, mediaType: 'text/markdown' }), false);
     assert.equal(canEdit({ path: 'notes/data.csv', sizeBytes: 100, mediaType: 'text/csv' }), false);
     assert.equal(canEdit({ path: 'src/index.ts', sizeBytes: 100, mediaType: 'text/typescript' }), false);
+  });
+
+  it('keeps the editor over the file it last could edit at the path: gone or grown under a draft, it stays; another path or the preview drops it', () => {
+    const small = { path: 'notes/inbox.md', sizeBytes: 100, modifiedAt: '2026-10-10T10:00:00.000Z', title: null, description: null, mediaType: 'text/markdown' };
+    const grown = { ...small, sizeBytes: 3 * 1024 * 1024, modifiedAt: '2026-10-10T11:00:00.000Z' };
+    const other = { ...small, path: 'notes/other.md' };
+
+    assert.equal(editedFile('edit', small, null, 'notes/inbox.md'), small);
+    assert.equal(editedFile('edit', null, null, 'notes/inbox.md'), null);
+    assert.equal(editedFile('edit', null, small, 'notes/inbox.md'), small);
+    assert.equal(editedFile('edit', grown, small, 'notes/inbox.md'), small);
+    assert.equal(editedFile('edit', null, small, 'notes/other.md'), null);
+    assert.equal(editedFile('edit', other, small, 'notes/other.md'), other);
+    assert.equal(editedFile(undefined, small, small, 'notes/inbox.md'), null);
   });
 
   it('shows the draft over the loaded content and is dirty only when they differ', () => {

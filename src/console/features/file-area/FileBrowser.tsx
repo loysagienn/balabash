@@ -9,6 +9,7 @@
 // Query keeps older data through a failed refetch: a 404 still means the
 // path is gone, any other failure keeps the rows under a banner with Retry.
 
+import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { WorkspaceFileMeta, WorkspaceFolderMeta } from '../../../api/contract.ts';
 import type { AppRoute } from '../../lib/router/routes.ts';
@@ -26,7 +27,7 @@ import type { IconName } from '../../ui/Icon/Icon.tsx';
 import { Note } from '../../ui/Note/Note.tsx';
 import { SkelRow } from '../../ui/Skel/Skel.tsx';
 import { fileIcon } from '../../ui/atoms/fileIcon.ts';
-import { canEdit } from './editor.logic.ts';
+import { canEdit, editedFile } from './editor.logic.ts';
 import { FileEditor } from './FileEditor.tsx';
 import { FileMenu } from './FileMenu.tsx';
 import { FilePreview } from './FilePreview.tsx';
@@ -128,9 +129,22 @@ export function FileBrowser({ root, rootLabel, lead, path, view, routeFor, pins,
   // The path is gone (a 404 of the node or of a file's folder) whatever
   // Query still holds from before.
   const gone = answer === null ? isNotFound(node.error) : answer.kind === 'file' && isNotFound(parent.error);
-  const file = !gone && answer?.kind === 'file' ? answer.file : null;
-  const kind = gone ? null : answer?.kind ?? null;
-  const editing = view === 'edit' && file !== null && canEdit(file);
+  const loadedFile = !gone && answer?.kind === 'file' ? answer.file : null;
+  // The file under the editor is held: once the editor is open at a path,
+  // a refetch that finds the file gone or no longer editable (grown past
+  // the preview's limit) does not unmount it under a draft — the editor
+  // keeps the last editable node and reports what it finds when it saves
+  // (editedFile). Dropped on leaving the editor or the path.
+  const [held, setHeld] = useState<WorkspaceFileMeta | null>(null);
+  const edited = editedFile(view, loadedFile, held, path);
+
+  useEffect(() => {
+    setHeld(edited);
+  }, [edited]);
+
+  const file = loadedFile ?? edited;
+  const kind = file ? 'file' : gone ? null : answer?.kind ?? null;
+  const editing = edited !== null;
   const listPath = kind === 'file' ? parentOf(path) : path;
   const listQuery = kind === 'file' ? parent : node;
   const listing = !gone && listQuery.data?.kind === 'dir' ? listQuery.data : null;
@@ -197,7 +211,7 @@ export function FileBrowser({ root, rootLabel, lead, path, view, routeFor, pins,
         <FaPreview>
           {editing ? (
             /* keyed by the path alone: the draft survives a new version of the file under it */
-            <FileEditor key={file.path} file={file} exitRoute={routeFor(file.path)} />
+            <FileEditor key={edited.path} file={edited} exitRoute={routeFor(edited.path)} />
           ) : (
             /* keyed by the file and its version: the preview's own state (the image's size, a failed load) belongs to one file */
             <FilePreview

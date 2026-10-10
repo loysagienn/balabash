@@ -880,6 +880,131 @@ describe('editing a Markdown file over the api', () => {
     assert.equal(crossSite.json<ErrorBody>().error.code, 'cross_site');
     assert.equal(await fs.readFile(path.join(filesDir, dir, 'notes.md'), 'utf8'), '# Mine\n');
   });
+
+  test('a symbolic link is not a file of the area: through a link to a folder outside or to a file, the write is refused and nothing changes', async () => {
+    // Outside the area, inside the stand's directory (cleaned with it).
+    const outside = path.join(filesDir, '..', 'outside-the-area');
+    const inside = path.join(filesDir, dir, 'notes.md');
+    const kept = await fs.readFile(inside, 'utf8');
+
+    await fs.mkdir(outside, { recursive: true });
+    await fs.writeFile(path.join(outside, 'notes.md'), '# Outside\n');
+    await fs.symlink(outside, path.join(filesDir, dir, 'link'));
+    await fs.symlink(inside, path.join(filesDir, dir, 'alias.md'));
+
+    try {
+      const throughFolder = await put(`${dir}/link/notes.md`, '# Taken over\n');
+
+      assert.equal(throughFolder.status, 404);
+      assert.equal(throughFolder.json<ErrorBody>().error.code, 'not_found');
+      assert.equal(await fs.readFile(path.join(outside, 'notes.md'), 'utf8'), '# Outside\n');
+
+      const throughFile = await put(`${dir}/alias.md`, '# Taken over\n');
+
+      assert.equal(throughFile.status, 404);
+      assert.equal(await fs.readFile(inside, 'utf8'), kept);
+      assert.ok((await fs.lstat(path.join(filesDir, dir, 'alias.md'))).isSymbolicLink());
+      assert.deepEqual((await fs.readdir(outside)).sort(), ['notes.md']);
+    } finally {
+      await fs.rm(path.join(filesDir, dir, 'link'), { force: true });
+      await fs.rm(path.join(filesDir, dir, 'alias.md'), { force: true });
+      await fs.rm(outside, { recursive: true, force: true });
+    }
+  });
+
+  test('a file whose name is near the limit of a name is still written: the temp file has its own short name', async () => {
+    const name = `${'a'.repeat(237)}.md`;
+
+    assert.equal(Buffer.byteLength(name), 240);
+    await fs.writeFile(path.join(filesDir, dir, name), '# Long\n');
+
+    try {
+      const written = await put(`${dir}/${name}`, '# Long, edited\n');
+
+      assert.equal(written.status, 200, written.text);
+      assert.equal(await fs.readFile(path.join(filesDir, dir, name), 'utf8'), '# Long, edited\n');
+      assert.deepEqual((await fs.readdir(path.join(filesDir, dir))).filter(entry => entry.startsWith('.')), []);
+    } finally {
+      await fs.rm(path.join(filesDir, dir, name), { force: true });
+    }
+  });
+
+  test('two writes under one ETag at once: one succeeds, the other is refused — the look and the replacement of one write are one step against the other', { timeout: 30_000 }, async () => {
+    const rel = `${dir}/notes.md`;
+    const read = await stand.request('GET', `/files/${rel}`);
+    const etag = read.headers.etag as string;
+    const original = fs.rename;
+    let held = false;
+    // The first rename is held while the second request arrives: without
+    // the lock both looks would pass and both writes would succeed.
+    const rename = mock.method(fs, 'rename', async (from: string, to: string) => {
+      if (!held) {
+        held = true;
+        await new Promise(resolve => setTimeout(resolve, 200));
+      }
+
+      return original.call(fs, from, to);
+    });
+
+    try {
+      const [a, b] = await Promise.all([
+        put(rel, '# A\n', { 'if-match': etag }),
+        new Promise(resolve => setTimeout(resolve, 30)).then(() => put(rel, '# B\n', { 'if-match': etag })),
+      ]);
+
+      assert.deepEqual([a.status, b.status].sort(), [200, 412], `${a.text} / ${b.text}`);
+
+      const winner = a.status === 200 ? a : b;
+
+      assert.equal(await fs.readFile(path.join(filesDir, rel), 'utf8'), winner === a ? '# A\n' : '# B\n');
+      assert.equal((await stand.request('GET', `/files/${rel}`, { headers: { 'if-none-match': winner.headers.etag as string } })).status, 304);
+    } finally {
+      rename.mock.restore();
+    }
+  });
+
+  test('the ETag of the answer names the saved bytes: a replacement by another writer right after the rename lends neither its node nor its tag, and the next save under the answered tag is refused', async () => {
+    const rel = `${dir}/notes.md`;
+    const abs = path.join(filesDir, rel);
+    const original = fs.rename;
+    let replaced = false;
+    const rename = mock.method(fs, 'rename', async (from: string, to: string) => {
+      await original.call(fs, from, to);
+
+      // An agent's replacement in the same instant: another inode under
+      // the name, before the route answers.
+      if (!replaced && to === abs) {
+        replaced = true;
+        const theirs = path.join(filesDir, dir, 'theirs.tmp');
+
+        await fs.writeFile(theirs, '# Theirs, right after\n');
+        await original.call(fs, theirs, abs);
+      }
+    });
+
+    try {
+      const written = await put(rel, '# Ours\n');
+
+      assert.equal(written.status, 200, written.text);
+
+      const { file, etag } = written.json<WorkspaceWriteResponse>();
+
+      assert.equal(file.sizeBytes, Buffer.byteLength('# Ours\n'));
+      assert.equal(written.headers.etag, etag);
+
+      const revalidated = await stand.request('GET', `/files/${rel}`, { headers: { 'if-none-match': etag } });
+
+      assert.equal(revalidated.status, 200);
+      assert.notEqual(revalidated.headers.etag, etag);
+
+      const next = await put(rel, '# Ours again\n', { 'if-match': etag });
+
+      assert.equal(next.status, 412);
+      assert.equal(await fs.readFile(abs, 'utf8'), '# Theirs, right after\n');
+    } finally {
+      rename.mock.restore();
+    }
+  });
 });
 
 describe('settings over the api', () => {

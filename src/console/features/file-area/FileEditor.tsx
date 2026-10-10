@@ -9,7 +9,11 @@
 // the answer (the node and the text — no second read); the folder's
 // listing is invalidated for the new size and time. Cancel asks about a
 // dirty draft, then leaves to the preview (the route without `edit`); the
-// browser asks before unloading a dirty draft.
+// browser asks before unloading a dirty draft. The owner keeps this
+// component mounted while the route says `edit`, whatever became of the
+// file meanwhile (FileBrowser): a file gone or grown past the editable
+// size under a draft is reported by the save that fails, not by dropping
+// the draft.
 
 import { useEffect, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
@@ -87,8 +91,12 @@ export function FileEditor({ file, exitRoute }: { file: WorkspaceFileMeta; exitR
       return;
     }
 
-    // The preview shows the file as it is now — theirs, after a conflict.
+    // The preview shows the file as it is now — theirs, after a conflict:
+    // the node and the text both, since the text is keyed by the node's
+    // modification time and a replacement that kept it (cp -p, rsync -a)
+    // would otherwise be shown from the cache, under its old ETag.
     void queryClient.invalidateQueries({ queryKey: ['workspace', file.path], exact: true });
+    void queryClient.invalidateQueries({ queryKey: ['workspace-text', file.path] });
     dispatch(routeTo(exitRoute, { replace: true }));
   };
 

@@ -17,6 +17,22 @@ export function canEdit(file: Pick<WorkspaceFileMeta, 'path' | 'sizeBytes' | 'me
   return viewerFor(file).kind === 'markdown';
 }
 
+// The file the editor is over while the route says `edit`: the current
+// node when it is editable; else the one held from before at the same path
+// — the file is gone or grew past the editable size under the editor, and
+// the draft is not dropped for it (the save reports what it finds); none
+// before the first load of the path, none outside the editor view.
+export function editedFile(view: 'edit' | undefined, current: WorkspaceFileMeta | null, held: WorkspaceFileMeta | null, path: string): WorkspaceFileMeta | null {
+  if (view !== 'edit') {
+    return null;
+  }
+  if (current && canEdit(current)) {
+    return current;
+  }
+
+  return held?.path === path ? held : null;
+}
+
 // What the textarea shows: the draft, else the loaded content.
 export function editorText(draft: Draft | null, loaded: string | undefined): string {
   return draft?.text ?? loaded ?? '';
