@@ -976,19 +976,51 @@ router.get('/schedule/runs/:id', requireSession, async ctx => {
   ctx.body = prepareObject(response);
 });
 
-const SCHEDULE_ERROR_STATUS: Record<ScheduleError['code'], number> = { not_found: 404, sleeping: 409, no_main_thread: 409 };
+const SCHEDULE_ERROR_STATUS: Record<ScheduleError['code'], number> = { not_found: 404, replaced: 409, sleeping: 409, no_main_thread: 409 };
+
+function sendScheduleError(ctx: Context, error: ScheduleError): void {
+  sendError(ctx, SCHEDULE_ERROR_STATUS[error.code], error.code === 'not_found' ? 'not_found' : `task_${error.code}`, error.code === 'not_found' ? 'No such task' : error.message);
+}
+
+// The row a command of the console means (contract: TaskCommandRequest):
+// absent — whatever row holds the slug; present — that row, or 409
+// task_replaced. Anything but a string is a 400.
+function parseTaskId(ctx: Context, raw: unknown): string | undefined | null {
+  if (raw === undefined) {
+    return undefined;
+  }
+
+  if (typeof raw === 'string' && raw.length > 0) {
+    return raw;
+  }
+
+  sendError(ctx, 400, 'bad_request', 'taskId must be a non-empty string');
+
+  return null;
+}
 
 router.post('/schedule/tasks/:slug/run', requireSession, async ctx => {
   const userId = ctx.state.userId as string;
+  const body = await readJsonBody(ctx);
+
+  if (!body) {
+    return;
+  }
+
+  const taskId = parseTaskId(ctx, body.taskId);
+
+  if (taskId === null) {
+    return;
+  }
 
   try {
-    const outcome = await runTask(userId, ctx.params.slug as string);
+    const outcome = await runTask(userId, ctx.params.slug as string, taskId);
     const response: RunTaskResponse = outcome.kind === 'fired' ? { outcome: 'fired', runId: outcome.runId } : { outcome: 'already_running', runId: null };
 
     ctx.body = prepareObject(response);
   } catch (error) {
     if (error instanceof ScheduleError) {
-      sendError(ctx, SCHEDULE_ERROR_STATUS[error.code], error.code === 'not_found' ? 'not_found' : `task_${error.code}`, error.code === 'not_found' ? 'No such task' : error.message);
+      sendScheduleError(ctx, error);
 
       return;
     }
@@ -999,17 +1031,33 @@ router.post('/schedule/tasks/:slug/run', requireSession, async ctx => {
 
 router.delete('/schedule/tasks/:slug', requireSession, async ctx => {
   const userId = ctx.state.userId as string;
-  const task = await deleteTask(userId, ctx.params.slug as string, { kind: 'user', userId });
+  const taskId = parseTaskId(ctx, queryValue(ctx.query.taskId));
 
-  if (!task) {
-    sendError(ctx, 404, 'not_found', 'No such task');
-
+  if (taskId === null) {
     return;
   }
 
-  const response: DeleteTaskResponse = { task: taskView(task, new Date()) };
+  try {
+    const task = await deleteTask(userId, ctx.params.slug as string, { kind: 'user', userId }, taskId);
 
-  ctx.body = prepareObject(response);
+    if (!task) {
+      sendError(ctx, 404, 'not_found', 'No such task');
+
+      return;
+    }
+
+    const response: DeleteTaskResponse = { task: taskView(task, new Date()) };
+
+    ctx.body = prepareObject(response);
+  } catch (error) {
+    if (error instanceof ScheduleError) {
+      sendScheduleError(ctx, error);
+
+      return;
+    }
+
+    throw error;
+  }
 });
 
 // --------------------------------------------------------------------------

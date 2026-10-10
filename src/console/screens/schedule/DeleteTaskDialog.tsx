@@ -2,6 +2,8 @@
 // irreversible (rule 13) over DELETE_TASK. The task will no longer run;
 // its run log stays. The dialog stays, busy, while the call runs and
 // closes when it ended — the outcome is a toast (store/schedule/handlers.ts).
+// The call names the row the dialog shows (its id): a slug that belongs to
+// another row by then is refused by the server, and that row stays.
 
 import { useEffect, useState } from 'react';
 import type { TaskView } from '../../../api/contract.ts';
@@ -34,7 +36,7 @@ export function DeleteTaskDialog({ task, onClose }: { task: TaskView; onClose: (
           return;
         }
 
-        dispatch(deleteTask(task.slug));
+        dispatch(deleteTask(task.slug, task.id));
         setSent(true);
       }}
       onClose={onClose}

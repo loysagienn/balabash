@@ -3,10 +3,13 @@
 // the command it ran, the stdout tail, the stderr tail in red, an honest
 // notice where a tail lost its beginning. The output is read when the row
 // opens (Xp mounts its body only then) — one run whole from the journal
-// (useJobRun); a run still going has no output yet and says so.
+// (useJobRun); a run still going has no output yet and says so — it is
+// read again while it goes, and a failed re-read is told over the output
+// read before (the words "still running" may be old by then).
 
 import type { JobRunDetailView, JobRunView } from '../../../api/contract.ts';
 import { Btn } from '../../ui/Btn/Btn.tsx';
+import { Note } from '../../ui/Note/Note.tsx';
 import { Skel, SkelStack } from '../../ui/Skel/Skel.tsx';
 import { Terminal, TermErr, TermLine, Trunc } from '../../ui/Terminal/Terminal.tsx';
 import { Xp } from '../../ui/Xp/Xp.tsx';
@@ -51,7 +54,16 @@ function RunOutput({ id }: { id: string }) {
   const query = useJobRun(id);
 
   if (query.data) {
-    return <RunOutputBody run={query.data} />;
+    return (
+      <>
+        {query.error ? (
+          <Note state="err" icon="cloud-off" role="status" action="Retry" actionIcon="refresh-cw" actionBusy={query.isFetching} onAction={() => void query.refetch()}>
+            Couldn’t refresh the output — {query.error.message}. Showing the run as read before.
+          </Note>
+        ) : null}
+        <RunOutputBody run={query.data} />
+      </>
+    );
   }
 
   if (query.error) {

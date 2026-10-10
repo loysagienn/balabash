@@ -24,6 +24,7 @@ const CASES: [string, AppRoute][] = [
   ['/apps?filter=errors&q=wind', { key: 'apps', filter: 'errors', q: 'wind' }],
   ['/schedule', { key: 'schedule' }],
   ['/schedule/db-backup', { key: 'schedule', slug: 'db-backup' }],
+  ['/schedule/db-backup?q=back', { key: 'schedule', slug: 'db-backup', q: 'back' }],
   ['/schedule?tab=log', { key: 'schedule', tab: 'log' }],
   ['/schedule?tab=log&task=db-backup', { key: 'schedule', tab: 'log', task: 'db-backup' }],
   ['/schedule?q=backup', { key: 'schedule', q: 'backup' }],

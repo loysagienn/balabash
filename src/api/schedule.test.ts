@@ -50,6 +50,7 @@ before(async () => {
   await task('echo-job', { command: "printf 'hello\\n'; printf 'warn\\n' >&2", timeoutMs: 5_000, createdBy: 'engineer' });
   await task('disk-check', { command: 'df -h', cron: '0 */6 * * *' });
   await task('sleeper', { kind: 'code', cron: '0 9 * * *' });
+  await task('rotate', { command: 'true', timeoutMs: 5_000 });
   await prisma.scheduledTask.create({ data: { slug: 'foreign-job', userId: FOREIGN_USER, name: 'Foreign', kind: 'command', command: 'true' } });
 
   const run = (id: string, slug: string, startedAt: Date, data: Record<string, unknown> = {}) =>
@@ -304,6 +305,53 @@ describe('running and deleting a task over the api', () => {
     assert.equal(again.status, 404);
     assert.equal(again.json<ErrorBody>().error.code, 'not_found');
     assert.equal((await scheduleEvents()).length, events.length);
+  });
+
+  test('a command naming the row it means is refused when the slug belongs to another row since — nothing fired, the new row stays', async () => {
+    const before = await prisma.scheduledTask.findUniqueOrThrow({ where: { slug: 'rotate' } });
+
+    // Another hand edits the task the way the tools do: cancel and create again under the same slug.
+    await prisma.scheduledTask.delete({ where: { id: before.id } });
+
+    const after = await prisma.scheduledTask.create({ data: { slug: 'rotate', userId: stand.userId, name: 'rotate (edited)', kind: 'command', command: 'exit 3', timeoutMs: 5_000 } });
+
+    assert.notEqual(after.id, before.id);
+
+    const run = await stand.request('POST', '/api/schedule/tasks/rotate/run', { body: { taskId: before.id } });
+
+    assert.equal(run.status, 409, run.text);
+    assert.equal(run.json<ErrorBody>().error.code, 'task_replaced');
+    assert.match(run.json<ErrorBody>().error.message, /replaced/);
+    assert.equal(await prisma.jobRun.count({ where: { slug: 'rotate' } }), 0, 'the replacement did not run');
+
+    const del = await stand.request('DELETE', `/api/schedule/tasks/rotate?taskId=${before.id}`);
+
+    assert.equal(del.status, 409, del.text);
+    assert.equal(del.json<ErrorBody>().error.code, 'task_replaced');
+    assert.ok(await prisma.scheduledTask.findUnique({ where: { id: after.id } }), 'the replacement stays');
+    assert.equal((await scheduleEvents()).filter(event => event.type === 'schedule.task.cancelled').length, 1, 'no cancellation journaled');
+
+    // A taskId that is not a string is refused before the lookup.
+    const bad = await stand.request('POST', '/api/schedule/tasks/rotate/run', { body: { taskId: 5 } });
+
+    assert.equal(bad.status, 400);
+    assert.equal(bad.json<ErrorBody>().error.code, 'bad_request');
+
+    // Naming the row that holds the slug now: the commands go through.
+    const runNow = await stand.request('POST', '/api/schedule/tasks/rotate/run', { body: { taskId: after.id } });
+
+    assert.equal(runNow.status, 200, runNow.text);
+
+    const { runId } = runNow.json<RunTaskResponse>();
+
+    assert.ok(runId);
+    assert.equal((await settledRun(runId)).exitCode, 3, 'the row named ran, with its own command');
+
+    const delNow = await stand.request('DELETE', `/api/schedule/tasks/rotate?taskId=${after.id}`);
+
+    assert.equal(delNow.status, 200, delNow.text);
+    assert.equal(delNow.json<DeleteTaskResponse>().task.id, after.id);
+    assert.equal(await prisma.scheduledTask.findUnique({ where: { slug: 'rotate' } }), null);
   });
 
   test('a task of another workspace cannot be deleted and is not told apart from a missing one', async () => {

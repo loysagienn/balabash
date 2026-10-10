@@ -659,6 +659,15 @@ export type JobRunResponse = {
   run: JobRunDetailView;
 };
 
+// The row a command over a task means — the task the operator saw and
+// confirmed. Absent: whatever row holds the slug. Present and the slug now
+// held by another row (the task cancelled and created again under the same
+// slug): 409 task_replaced, nothing fired or deleted. POST …/run reads it
+// from the body, DELETE from the query (`?taskId=`).
+export type TaskCommandRequest = {
+  taskId?: string;
+};
+
 // POST /schedule/tasks/:slug/run — the task fired by hand, the schedule
 // untouched: `fired` with the runId of a command job (null for a note or a
 // code task — they leave no journal row), or `already_running` when a run of

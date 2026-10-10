@@ -227,14 +227,19 @@ export const schedule = defineRoute<ScheduleRoute>({
       return null;
     }
 
+    const q = param(params, 'q');
+
     if (parts.length === 2) {
-      return { key: 'schedule', slug: parts[1] };
+      const route: ScheduleRoute = { key: 'schedule', slug: parts[1] };
+
+      if (q) route.q = q;
+
+      return route;
     }
 
     const route: ScheduleRoute = { key: 'schedule' };
     const tab = param(params, 'tab');
     const task = param(params, 'task');
-    const q = param(params, 'q');
 
     if (tab === 'log') {
       route.tab = 'log';
@@ -246,7 +251,7 @@ export const schedule = defineRoute<ScheduleRoute>({
 
     return route;
   },
-  writeRoute: route => (route.slug ? `/schedule/${encodeURIComponent(route.slug)}` : `/schedule${queryString(route.tab === 'log' ? { tab: 'log', task: route.task } : { q: route.q })}`),
+  writeRoute: route => (route.slug ? `/schedule/${encodeURIComponent(route.slug)}${queryString({ q: route.q })}` : `/schedule${queryString(route.tab === 'log' ? { tab: 'log', task: route.task } : { q: route.q })}`),
 });
 
 export const secrets = defineRoute<SecretsRoute>({

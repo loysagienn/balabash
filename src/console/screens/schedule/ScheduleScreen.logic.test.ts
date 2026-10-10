@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import type { JobRunView, TaskView } from '../../../api/contract.ts';
+import type { ScheduleRoute } from '../../lib/router/routes.ts';
+import { writeRoute } from '../../lib/router/routes.ts';
+import { routeTo } from '../../store/router/actions.ts';
+import { createRouterReducer } from '../../store/router/reducer.ts';
 import {
   anyRunning,
   createdWords,
@@ -237,9 +241,35 @@ describe('the screen', () => {
     assert.deepEqual(withScheduleFilters({ key: 'schedule', slug: 'db-backup' }, { slug: undefined }), { key: 'schedule' });
   });
 
+  it('a selected task keeps the search beside it and is dropped by the log tab — each move says a new URL', () => {
+    const selected: ScheduleRoute = { key: 'schedule', slug: 'db-backup' };
+
+    assert.deepEqual(withScheduleFilters(selected, { q: 'back' }), { key: 'schedule', slug: 'db-backup', q: 'back' });
+    assert.deepEqual(withScheduleFilters({ key: 'schedule', slug: 'db-backup', q: 'back' }, { q: '' }), { key: 'schedule', slug: 'db-backup' });
+    assert.deepEqual(withScheduleFilters({ key: 'schedule', q: 'back' }, { slug: 'db-backup' }), { key: 'schedule', slug: 'db-backup', q: 'back' });
+    assert.deepEqual(withScheduleFilters(selected, { tab: 'log', q: undefined }), { key: 'schedule', tab: 'log' });
+    assert.deepEqual(withScheduleFilters({ key: 'schedule', slug: 'db-backup', q: 'back' }, { tab: 'log' }), { key: 'schedule', tab: 'log' });
+    assert.deepEqual(withScheduleFilters({ key: 'schedule', tab: 'log', task: 'db-backup' }, { tab: undefined, task: undefined }), { key: 'schedule' });
+
+    // Through the real router: from the selected task, the log tab and a
+    // search are routes of their own, not the same URL again.
+    const reduce = createRouterReducer(selected);
+    const start = reduce(undefined, { type: 'TAB_VISIBLE' });
+
+    for (const patch of [{ tab: 'log' as const, q: undefined }, { q: 'back' }]) {
+      const next = reduce(start, routeTo(withScheduleFilters(selected, patch), { replace: true }));
+
+      assert.notEqual(next, start, JSON.stringify(patch));
+      assert.notEqual(writeRoute(next.route), writeRoute(selected));
+    }
+
+    assert.equal(reduce(start, routeTo(withScheduleFilters(selected, { q: undefined }), { replace: true })), start, 'the same URL changes nothing');
+  });
+
   it('shapes the shell and the details panel', () => {
     assert.deepEqual(scheduleShell({ key: 'schedule' }, null), { title: 'Schedule', detail: false });
     assert.deepEqual(scheduleShell({ key: 'schedule', slug: 'db-backup' }, task()), { title: 'Schedule', titleNarrow: 'DB backup', back: { key: 'schedule' }, backNarrow: true, detail: true });
+    assert.deepEqual(scheduleShell({ key: 'schedule', slug: 'db-backup', q: 'back' }, task()).back, { key: 'schedule', q: 'back' });
     assert.equal(scheduleShell({ key: 'schedule', slug: 'gone' }, null).titleNarrow, 'gone');
     assert.equal(scheduleDetail(undefined, false, 'ready'), 'pick');
     assert.equal(scheduleDetail('db-backup', false, 'loading'), 'loading');

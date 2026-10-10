@@ -2610,10 +2610,14 @@ describe('schedule commands', () => {
     const store = await onSchedule({ schedule: { runTask: held(answers) } }, calls);
     const stamp = selectRunsChanged(store.getState());
 
-    store.dispatch(runTask('backup'));
-    store.dispatch(runTask('backup'));
+    store.dispatch(runTask('backup', 'task-backup'));
+    store.dispatch(runTask('backup', 'task-backup'));
     assert.deepEqual(selectTaskCall(store.getState(), 'backup'), { kind: 'run' });
-    assert.equal(calls.filter(call => call.name === 'schedule.runTask').length, 1, 'the second run waits for the first');
+    assert.deepEqual(
+      calls.filter(call => call.name === 'schedule.runTask').map(call => call.args),
+      [['backup', 'task-backup']],
+      'the second run waits for the first; the call names the row the card showed',
+    );
 
     answers[0]!.resolve({ outcome: 'fired', runId: 'run-9' });
     await settle();
@@ -2622,19 +2626,19 @@ describe('schedule commands', () => {
     assert.deepEqual(toasts(store), [{ title: 'Run started', state: 'run' }]);
 
     // A note fired lands in the main thread — no journal row, no stamp.
-    store.dispatch(runTask('remind'));
+    store.dispatch(runTask('remind', 'task-remind'));
     answers[1]!.resolve({ outcome: 'fired', runId: null });
     await settle();
     assert.equal(selectRunsChanged(store.getState()), stamp + 1);
     assert.deepEqual(toasts(store)[1], { title: 'Reminder sent', state: 'done' });
 
-    store.dispatch(runTask('sync'));
+    store.dispatch(runTask('sync', 'task-sync'));
     answers[2]!.resolve({ outcome: 'already_running', runId: null });
     await settle();
     assert.deepEqual(toasts(store)[2], { title: 'Already running', state: 'wait' });
 
     // A refusal is a toast with the server's words; the call is freed.
-    store.dispatch(runTask('sync'));
+    store.dispatch(runTask('sync', 'task-sync'));
     answers[3]!.reject(new ApiError(409, 'task_sleeping', 'task "sync" is sleeping — no run(ctx) body'));
     await settle();
     assert.equal(selectTaskCall(store.getState(), 'sync'), null);
@@ -2663,10 +2667,12 @@ describe('schedule commands', () => {
     resetSeq(420n);
 
     const answers: Answer<{ task: TaskView }>[] = [];
-    const store = await onSchedule({ schedule: { deleteTask: held(answers) } }, [], { key: 'schedule', slug: 'backup' });
+    const calls: Calls = [];
+    const store = await onSchedule({ schedule: { deleteTask: held(answers) } }, calls, { key: 'schedule', slug: 'backup' });
 
-    store.dispatch(deleteTask('backup'));
+    store.dispatch(deleteTask('backup', 'task-backup'));
     assert.deepEqual(selectTaskCall(store.getState(), 'backup'), { kind: 'delete' });
+    assert.deepEqual(calls.filter(call => call.name === 'schedule.deleteTask').map(call => call.args), [['backup', 'task-backup']], 'the call names the row the dialog showed');
 
     answers[0]!.resolve({ task: taskRow('backup') });
     await settle();
@@ -2682,12 +2688,22 @@ describe('schedule commands', () => {
 
     // A refusal keeps the row and tells it; the screen of another task is not moved.
     store.dispatch(routeTo({ key: 'schedule', slug: 'sync' }));
-    store.dispatch(deleteTask('remind'));
+    store.dispatch(deleteTask('remind', 'task-remind'));
     answers[1]!.reject(new ApiError(404, 'not_found', 'No such task'));
     await settle();
     assert.deepEqual(selectTasks(store.getState()).map(task => task.slug), ['remind', 'sync']);
     assert.deepEqual(toasts(store)[1], { title: 'Couldn’t delete “remind”', state: 'err' });
     assert.deepEqual(store.getState().router.route, { key: 'schedule', slug: 'sync' });
+
+    // A slug held by another row than the dialog showed: refused by the
+    // server, the row stays, the server's words in the toast.
+    store.dispatch(deleteTask('sync', 'task-sync'));
+    answers[2]!.reject(new ApiError(409, 'task_replaced', 'task "sync" was replaced since it was read — it is another task now; read it again'));
+    await settle();
+    assert.deepEqual(selectTasks(store.getState()).map(task => task.slug), ['remind', 'sync']);
+    assert.equal(selectTaskCall(store.getState(), 'sync'), null);
+    assert.deepEqual(toasts(store)[2], { title: 'Couldn’t delete “sync”', state: 'err' });
+    assert.match(store.getState().ui.toasts[2]!.desc ?? '', /replaced/);
   });
 
   it('an answer that outlived its session touches nothing', async () => {
@@ -2695,7 +2711,7 @@ describe('schedule commands', () => {
     const store = await onSchedule({ schedule: { runTask: held(answers) } });
     const stamp = selectRunsChanged(store.getState());
 
-    store.dispatch(runTask('backup'));
+    store.dispatch(runTask('backup', 'task-backup'));
     store.dispatch(sessionLost());
     answers[0]!.resolve({ outcome: 'fired', runId: 'run-9' });
     await settle();

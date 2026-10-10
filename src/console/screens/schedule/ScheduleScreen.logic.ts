@@ -393,8 +393,11 @@ export function noJournalWords(kind: string): string | null {
 export type ScheduleFilterPatch = Partial<Omit<ScheduleRoute, 'key'>>;
 
 // The next route of a change: an undefined or empty value drops the key,
-// so the URL stays canonical; the search belongs to the tasks tab, the
-// task filter to the log.
+// so the URL stays canonical; the search belongs to the tasks tab (and
+// stays beside a selected task — the list is still there when wide), the
+// task filter to the log, which is a tab of its own: opening it drops the
+// selected task (the URL of a selected task has no tab, so the move would
+// otherwise say the same URL and change nothing).
 export function withScheduleFilters(route: ScheduleRoute, patch: ScheduleFilterPatch): ScheduleRoute {
   const next: ScheduleRoute = { ...route, ...patch };
 
@@ -406,6 +409,7 @@ export function withScheduleFilters(route: ScheduleRoute, patch: ScheduleFilterP
 
   if (next.tab === 'log') {
     delete next.q;
+    delete next.slug;
   } else {
     delete next.task;
   }
@@ -416,14 +420,14 @@ export function withScheduleFilters(route: ScheduleRoute, patch: ScheduleFilterP
 export type ScheduleShell = { title: string; titleNarrow?: string; back?: AppRoute; backNarrow?: boolean; detail: boolean };
 
 // The shell of the split view: a selected task is a detail screen on the
-// phone, titled by its name, with "Back" to the list — and a panel beside
-// the list when wide.
+// phone, titled by its name, with "Back" to the list (the search kept) —
+// and a panel beside the list when wide.
 export function scheduleShell(route: ScheduleRoute, task: Pick<TaskView, 'name'> | null): ScheduleShell {
   if (!route.slug) {
     return { title: 'Schedule', detail: false };
   }
 
-  return { title: 'Schedule', titleNarrow: task?.name ?? route.slug, back: { key: 'schedule' }, backNarrow: true, detail: true };
+  return { title: 'Schedule', titleNarrow: task?.name ?? route.slug, back: withScheduleFilters(route, { slug: undefined }), backNarrow: true, detail: true };
 }
 
 export type ScheduleDetail = 'pick' | 'task' | 'unknown' | 'loading';

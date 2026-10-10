@@ -63,26 +63,34 @@ function TaskMenu({ task }: { task: TaskView }) {
   );
 }
 
+// The runs read before stay in sight when a re-read fails — the empty
+// list included: "No runs yet" after a failed re-read is an old answer,
+// and the note says so.
 function TaskRuns({ task, now }: { task: TaskView; now: Date }) {
   const query = useJobRuns(task.slug, TASK_RUNS);
   const runs: JobRunView[] = query.data?.pages[0]?.runs ?? [];
 
   if (query.data) {
+    const stale = query.error ? (
+      <Note state="err" icon="cloud-off" role="status" action="Retry" actionIcon="refresh-cw" actionBusy={query.isFetching} onAction={() => void query.refetch()}>
+        Couldn’t refresh the runs — {query.error.message}. Showing the runs read before.
+      </Note>
+    ) : null;
+
     if (runs.length === 0) {
       return (
-        <Empty icon="square-terminal" title="No runs yet">
-          Every run of the command lands here with its exit code and output — the scheduled ones and the manual ones alike.
-        </Empty>
+        <>
+          {stale}
+          <Empty icon="square-terminal" title="No runs yet">
+            Every run of the command lands here with its exit code and output — the scheduled ones and the manual ones alike.
+          </Empty>
+        </>
       );
     }
 
     return (
       <>
-        {query.error ? (
-          <Note state="err" icon="cloud-off" role="status" action="Retry" actionIcon="refresh-cw" actionBusy={query.isFetching} onAction={() => void query.refetch()}>
-            Couldn’t refresh the runs — {query.error.message}. Showing the runs read before.
-          </Note>
-        ) : null}
+        {stale}
         <ActGroup>
           {runs.map(run => (
             <RunRow key={run.id} run={run} words={taskRunWords(run, now)} />
@@ -161,7 +169,7 @@ export function TaskDetail({ task, nextRunAt, timezone, lastRun, now }: { task: 
   return (
     <Card narrow="bare" label={task.name}>
       <CardHead title={task.name} tag={kind.label}>
-        <Btn label="Run now" icon="play" size="sm" busy={call?.kind === 'run'} disabled={call?.kind === 'delete'} onClick={() => dispatch(runTask(task.slug))} />
+        <Btn label="Run now" icon="play" size="sm" busy={call?.kind === 'run'} disabled={call?.kind === 'delete'} onClick={() => dispatch(runTask(task.slug, task.id))} />
         <TaskMenu task={task} />
       </CardHead>
       <DetailSection>

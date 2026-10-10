@@ -156,8 +156,10 @@ export function cronWords(expression: string): string | null {
       return 'every minute';
     }
 
+    // A step that does not divide the hour restarts at :00 — the last gap
+    // is shorter, so "every N minutes" would be untrue.
     if (minute.kind === 'step' && minute.from === null) {
-      return minute.every === 1 ? 'every minute' : `every ${minute.every} minutes`;
+      return minute.every === 1 ? 'every minute' : 60 % minute.every === 0 ? `every ${minute.every} minutes` : null;
     }
 
     if (minute.kind === 'list' && minute.values.length === 1) {
@@ -173,11 +175,23 @@ export function cronWords(expression: string): string | null {
     const atWords = at === 0 ? '' : ` at :${String(at).padStart(2, '0')}`;
     const everyWords = hour.every === 1 ? 'every hour' : `every ${hour.every} hours`;
 
+    // Over the whole day the step restarts at midnight: only a step that
+    // divides the day is "every N hours". Within a range the words name
+    // the first and the last hour the step reaches, and the gap to the next
+    // day is theirs to tell.
     if (hour.from === null) {
-      return `${everyWords}${atWords}`;
+      return 24 % hour.every === 0 ? `${everyWords}${atWords}` : null;
     }
 
-    return `${everyWords}${atWords} from ${clockWords(hour.from, at)} to ${clockWords(hour.to ?? hour.from, at)}`;
+    const to = hour.to ?? hour.from;
+
+    if (hour.from > 23 || to > 23 || to < hour.from) {
+      return null;
+    }
+
+    const last = hour.from + Math.floor((to - hour.from) / hour.every) * hour.every;
+
+    return `${everyWords}${atWords} from ${clockWords(hour.from, at)} to ${clockWords(last, at)}`;
   }
 
   // Fixed times of day.

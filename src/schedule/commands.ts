@@ -5,7 +5,11 @@
 // the row's transaction by whoever asked (RegistryAuthor); running fires the
 // task exactly as a trigger would and leaves the schedule untouched. A
 // refusal is a ScheduleError whose code the api maps to a status and the
-// tool to its reply.
+// tool to its reply. A command may name the row it means (expectId — the
+// console's: the operator confirmed what a card showed): when the slug now
+// belongs to another row (the task cancelled and created again under the
+// same slug), the command is refused as 'replaced' and touches nothing; a
+// tool names only the slug and means whatever row holds it.
 
 import { prisma } from '../db/client.ts';
 import { registryMutation } from '../core/registry-events.ts';
@@ -15,7 +19,7 @@ import { hasTaskBody, workspaceTaskFile } from './catalog.ts';
 import { fireTask } from './engine.ts';
 import { taskRecord } from './view.ts';
 
-export type ScheduleErrorCode = 'not_found' | 'sleeping' | 'no_main_thread';
+export type ScheduleErrorCode = 'not_found' | 'replaced' | 'sleeping' | 'no_main_thread';
 
 export class ScheduleError extends Error {
   readonly code: ScheduleErrorCode;
@@ -41,18 +45,29 @@ export function sleepingText(task: ScheduledTaskModel): string {
   return `task "${task.slug}" is sleeping — no run(ctx) body: neither ${workspaceTaskFile(task.userId, task.slug)} nor a bundled tasks/${task.slug}.ts.`;
 }
 
+// The row the command means, when it named one: another row under the
+// slug is a replacement, not the task the caller saw.
+function assertExpected(task: ScheduledTaskModel, expectId: string | undefined): void {
+  if (expectId !== undefined && task.id !== expectId) {
+    throw new ScheduleError('replaced', `task "${task.slug}" was replaced since it was read — it is another task now; read it again`);
+  }
+}
+
 // Deletes the task of the user by slug: the row and its
 // schedule.task.cancelled (reason 'cancelled') in one transaction. The
 // answer is the row as it was; null when the user has no such task — or
 // when it vanished between the lookup and the delete (the heart consuming
 // the one-shot journals that end itself; deleteMany keeps the two
-// idempotent against each other).
-export async function deleteTask(userId: string, slug: string, by: RegistryAuthor): Promise<ScheduledTaskModel | null> {
+// idempotent against each other). With expectId, a slug held by another
+// row is refused ('replaced') and that row stays.
+export async function deleteTask(userId: string, slug: string, by: RegistryAuthor, expectId?: string): Promise<ScheduledTaskModel | null> {
   const task = await findTask(userId, slug);
 
   if (!task) {
     return null;
   }
+
+  assertExpected(task, expectId);
 
   const count = await registryMutation(async (tx, journal) => {
     const deleted = await tx.scheduledTask.deleteMany({ where: { id: task.id } });
@@ -72,13 +87,16 @@ export type RunOutcome = { kind: 'fired'; task: ScheduledTaskModel; runId: strin
 // Runs the task of the user by hand, right now — the action exactly as on
 // a trigger fire, the schedule untouched (a one-shot is not consumed, a
 // cron task keeps its moment). Refusals: no such task, a sleeping code
-// task, a workspace without a main thread to fire into.
-export async function runTask(userId: string, slug: string): Promise<RunOutcome> {
+// task, a workspace without a main thread to fire into, a slug held by
+// another row than expectId names.
+export async function runTask(userId: string, slug: string, expectId?: string): Promise<RunOutcome> {
   const task = await findTask(userId, slug);
 
   if (!task) {
     throw new ScheduleError('not_found', `no task with slug "${slug}" in this workspace`);
   }
+
+  assertExpected(task, expectId);
 
   // The sleeping-task rule, synchronously: a body-less code task cannot run.
   if (await isSleeping(task)) {

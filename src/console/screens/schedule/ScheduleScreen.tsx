@@ -7,7 +7,9 @@
 // spelled out with its expression, the last run (the newest run of every
 // command job, read by place — a reminder or a code task has no journal)
 // and the next run, recomputed in the schedule's time zone (next-run.ts;
-// the zone comes with the Settings facts). A failed first snapshot
+// the zone comes with the Settings facts). A failed read of the latest
+// runs is told over the list (the rows then claim nothing about a last
+// run — or show what was read before). A failed first snapshot
 // replaces the split view: the error and Retry must be in sight on the
 // phone too, where the named task hides the list.
 
@@ -29,6 +31,7 @@ import { FBar } from '../../ui/FBar/FBar.tsx';
 import { IconBtn } from '../../ui/IconBtn/IconBtn.tsx';
 import { Input } from '../../ui/Input/Input.tsx';
 import { List, Row } from '../../ui/List/List.tsx';
+import { Note } from '../../ui/Note/Note.tsx';
 import { Obj } from '../../ui/Obj/Obj.tsx';
 import { Screen } from '../../ui/Screen/Screen.tsx';
 import { SkelRow, SkelStack } from '../../ui/Skel/Skel.tsx';
@@ -116,7 +119,7 @@ export function ScheduleScreen({ route }: { route: ScheduleRoute }) {
     list = (
       <List className="sch-list" narrow="tiles">
         {visible.map(({ task, nextRunAt }) => (
-          <TaskRow key={task.id} task={task} nextRunAt={nextRunAt} lastRun={lastRunOf(task.slug)} current={task.slug === route.slug} now={now} {...linkTarget(withScheduleFilters(route, { slug: task.slug, q: undefined }))} />
+          <TaskRow key={task.id} task={task} nextRunAt={nextRunAt} lastRun={lastRunOf(task.slug)} current={task.slug === route.slug} now={now} {...linkTarget(withScheduleFilters(route, { slug: task.slug }))} />
         ))}
       </List>
     );
@@ -176,6 +179,11 @@ export function ScheduleScreen({ route }: { route: ScheduleRoute }) {
       <Split view={route.slug ? 'detail' : 'list'}>
         <SplitList>
           {bar}
+          {latest.error ? (
+            <Note state="err" icon="cloud-off" role="status" action="Retry" actionIcon="refresh-cw" actionBusy={latest.isFetching} onAction={() => void latest.refetch()}>
+              Couldn’t read the last runs — {latest.error.message}.{latest.data ? ' Showing the runs read before.' : ''}
+            </Note>
+          ) : null}
           <Card narrow="bare">{list}</Card>
         </SplitList>
         <SplitDetail>{detail}</SplitDetail>

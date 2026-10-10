@@ -27,6 +27,7 @@ import type {
   SettingsPatchRequest,
   SettingsResponse,
   SnapshotResponse,
+  TaskCommandRequest,
   ThreadEventsResponse,
   ThreadResponse,
   ThreadsQuery,
@@ -122,13 +123,15 @@ export type Api = {
   // the newest run of every task) and the operator's two commands over a
   // task — a manual run (the schedule untouched; the answer names the
   // journal row of a command job) and a delete (the answer is the row; the
-  // same end arrives as schedule.task.cancelled of the tail).
+  // same end arrives as schedule.task.cancelled of the tail). Both name the
+  // row the operator saw (taskId): a slug held by another row since is a
+  // 409 task_replaced, nothing done.
   schedule: {
     runs(query: JobRunsQuery, signal?: AbortSignal): Promise<JobRunsResponse>;
     latestRuns(signal?: AbortSignal): Promise<LatestJobRunsResponse>;
     run(id: string, signal?: AbortSignal): Promise<JobRunResponse>;
-    runTask(slug: string): Promise<RunTaskResponse>;
-    deleteTask(slug: string): Promise<DeleteTaskResponse>;
+    runTask(slug: string, taskId: string): Promise<RunTaskResponse>;
+    deleteTask(slug: string, taskId: string): Promise<DeleteTaskResponse>;
   };
   // The trusted window of a one-time link (the second data layer too): the
   // field metadata of a secret request, and the values going to storage —
@@ -206,8 +209,8 @@ export function createApi(options: FetchOptions = {}): Api {
       runs: (query, signal) => apiFetch<JobRunsResponse>('/api/schedule/runs', { query, signal }),
       latestRuns: signal => apiFetch<LatestJobRunsResponse>('/api/schedule/runs/latest', { signal }),
       run: (id, signal) => apiFetch<JobRunResponse>(`/api/schedule/runs/${encodeURIComponent(id)}`, { signal }),
-      runTask: slug => apiFetch<RunTaskResponse>(`${task(slug)}/run`, { method: 'POST', body: {} }),
-      deleteTask: slug => apiFetch<DeleteTaskResponse>(task(slug), { method: 'DELETE' }),
+      runTask: (slug, taskId) => apiFetch<RunTaskResponse>(`${task(slug)}/run`, { method: 'POST', body: { taskId } satisfies TaskCommandRequest }),
+      deleteTask: (slug, taskId) => apiFetch<DeleteTaskResponse>(task(slug), { method: 'DELETE', query: { taskId } satisfies TaskCommandRequest }),
     },
     secretRequests: {
       get: (id, signal) => apiFetch<SecretRequestResponse>(secretRequest(id), { signal }),

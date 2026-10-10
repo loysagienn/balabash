@@ -5,7 +5,8 @@
 // outcome is told by a toast in the task's own words — a command job's run
 // started (its journal row is read by place), a note landed in the main
 // thread, a code task runs on its own, a run still going burns this one —
-// and so is a refusal (a sleeping code task, a missing task). A delete
+// and so is a refusal (a sleeping code task, a missing task, a slug held
+// by another row than the card showed). A delete
 // drops the row and, when the operator is looking at that very task, leads
 // back to the list: the detail of a deleted task has nothing to show.
 
@@ -37,7 +38,7 @@ export const runTaskHandler: ActionHandler<'RUN_TASK'> =
     const name = task?.name ?? action.slug;
 
     try {
-      const outcome = await api.schedule.runTask(action.slug);
+      const outcome = await api.schedule.runTask(action.slug, action.id);
 
       if (ownCall(getState().schedule.calls, action.slug) !== request) {
         return;
@@ -75,7 +76,7 @@ export const deleteTaskHandler: ActionHandler<'DELETE_TASK'> =
     const name = selectTaskBySlug(getState(), action.slug)?.name ?? action.slug;
 
     try {
-      const deleted = await api.schedule.deleteTask(action.slug);
+      const deleted = await api.schedule.deleteTask(action.slug, action.id);
 
       if (ownCall(getState().schedule.calls, action.slug) !== request) {
         return;

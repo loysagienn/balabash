@@ -9,10 +9,13 @@ import type { TaskCall } from './reducer.ts';
 // while the store still waits for exactly that call. A run's outcome is a
 // toast (the journal row of a command job is read by place, a note lands
 // in the main thread's feed); a delete drops the row at once — the same end
-// comes back as schedule.task.cancelled of the tail, idempotently.
-export const runTask = (slug: string) => ({ type: 'RUN_TASK', slug }) as const;
+// comes back as schedule.task.cancelled of the tail, idempotently. `id` —
+// the row the operator saw: the server refuses the command when the slug
+// belongs to another row by then (409 task_replaced), so a card never
+// runs or deletes a task it did not show.
+export const runTask = (slug: string, id: string) => ({ type: 'RUN_TASK', slug, id }) as const;
 export const runTaskDone = (slug: string, request: TaskCall, outcome: RunTaskResponse) => ({ type: 'RUN_TASK_DONE', slug, request, outcome }) as const;
 export const runTaskFail = (slug: string, request: TaskCall, error: ApiFailure) => ({ type: 'RUN_TASK_FAIL', slug, request, error }) as const;
-export const deleteTask = (slug: string) => ({ type: 'DELETE_TASK', slug }) as const;
+export const deleteTask = (slug: string, id: string) => ({ type: 'DELETE_TASK', slug, id }) as const;
 export const deleteTaskDone = (slug: string, request: TaskCall, deleted: DeleteTaskResponse) => ({ type: 'DELETE_TASK_DONE', slug, request, deleted }) as const;
 export const deleteTaskFail = (slug: string, request: TaskCall, error: ApiFailure) => ({ type: 'DELETE_TASK_FAIL', slug, request, error }) as const;

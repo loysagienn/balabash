@@ -14,6 +14,22 @@ describe('a cron expression spelled out', () => {
     assert.equal(cronWords('30 */2 * * *'), 'every 2 hours at :30');
     assert.equal(cronWords('0 1-23/2 * * *'), 'every 2 hours from 1:00 to 23:00');
     assert.equal(cronWords('30 1-23/2 * * *'), 'every 2 hours at :30 from 1:30 to 23:30');
+    assert.equal(cronWords('*/20 * * * *'), 'every 20 minutes');
+    assert.equal(cronWords('0 */8 * * *'), 'every 8 hours');
+  });
+
+  it('does not call a step that restarts at the hour or the day an even interval', () => {
+    // */7: :00, :07, …, :56, then :00 — the last gap is four minutes.
+    assert.equal(cronWords('*/7 * * * *'), null);
+    assert.equal(cronWords('*/45 * * * *'), null);
+    // */5 hours: 0, 5, 10, 15, 20, then 0 — the last gap is four hours.
+    assert.equal(cronWords('0 */5 * * *'), null);
+    assert.equal(cronWords('15 */7 * * *'), null);
+    // Within a range the words name the hours the step reaches.
+    assert.equal(cronWords('0 0-23/5 * * *'), 'every 5 hours from 0:00 to 20:00');
+    assert.equal(cronWords('0 9-17/3 * * *'), 'every 3 hours from 9:00 to 15:00');
+    assert.equal(cronWords('0 17-9/3 * * *'), null);
+    assert.equal(cronWords('0 9-25/3 * * *'), null);
   });
 
   it('reads times of day and days of the week', () => {
