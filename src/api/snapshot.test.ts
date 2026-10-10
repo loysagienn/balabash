@@ -28,6 +28,9 @@ let readAgents: typeof import('./snapshot.ts')['readAgents'];
 let loadAgents: typeof import('../capabilities/agent-catalog.ts')['loadAgents'];
 let getAgents: typeof import('../capabilities/agent-catalog.ts')['getAgents'];
 let COORDINATOR_BUNDLE: typeof import('../coordinator/functions.ts')['COORDINATOR_BUNDLE'];
+let getEventsAfter: typeof import('../core/events.ts')['getEventsAfter'];
+let prisma: typeof import('../db/client.ts')['prisma'];
+let startedModel: typeof import('../projections/last-model.ts')['startedModel'];
 
 before(async () => {
   stand = await startStand();
@@ -35,6 +38,9 @@ before(async () => {
   ({ readMainLastMessage, readAgents } = await import('./snapshot.ts'));
   ({ loadAgents, getAgents } = await import('../capabilities/agent-catalog.ts'));
   ({ COORDINATOR_BUNDLE } = await import('../coordinator/functions.ts'));
+  ({ getEventsAfter } = await import('../core/events.ts'));
+  ({ prisma } = await import('../db/client.ts'));
+  ({ startedModel } = await import('../projections/last-model.ts'));
 });
 
 after(() => stand.stop());
@@ -212,5 +218,48 @@ describe('the agent catalog of the snapshot', () => {
     await appendEvent({ type: 'thread.started', actor: 'system', userId: foreign, threadId: foreign, payload: { agent: 'gardener', title: 'elsewhere' } });
     await startedOn(foreign, 'gardener', 'claude-opus-5-5', foreign);
     assert.equal((await byName()).get('gardener'), null);
+  });
+
+  // The console's agents reducer folds the tail by the same rule
+  // (startedModel over every session.started of a catalog agent); the
+  // reducer itself is the console's (store.test.ts), the rule and the
+  // tail are replayed here over the server's own reading.
+  test('the replay of the tail over the snapshot equals the next snapshot', async () => {
+    const lastModels = async () => Object.fromEntries((await readAgents(stand.userId)).map(agent => [agent.name, agent.lastModel]));
+    // The stamp as buildSnapshot takes it (readHeadSeq): the head of the log before the projections.
+    const asOfSeq = (await prisma.event.aggregate({ _max: { seq: true } }))._max.seq ?? 0n;
+    const snapshot = await lastModels();
+    const engineer = await startChild('engineer');
+    const browser = await startChild('browser');
+    const foreign = randomUUID();
+
+    // A model, another agent's model, a start naming no model after a model,
+    // an empty model, a start of an agent outside the catalog, a start of
+    // another workspace — the tail of one window.
+    await startedOn(engineer, 'engineer', 'claude-opus-5-5');
+    await startedOn(browser, 'browser', 'claude-sonnet-5');
+    await startedOn(engineer, 'engineer', null);
+    await startedOn(browser, 'browser', '');
+    await written({ type: 'session.started', actor: 'agent', agentName: 'nobody', userId: stand.userId, threadId: engineer, payload: { model: 'claude-opus-5-5', tools: [], mcpServers: [] } });
+    await appendEvent({ type: 'thread.started', actor: 'system', userId: foreign, threadId: foreign, payload: { agent: 'gardener', title: 'elsewhere' } });
+    await startedOn(foreign, 'gardener', 'claude-opus-5-5', foreign);
+    await startedOn(engineer, 'engineer', 'claude-fable-5-1');
+
+    // The tail as the stream serves it: after the snapshot's stamp, this
+    // workspace's events (src/api/event-stream.ts visible).
+    const tail = (await getEventsAfter(asOfSeq, { limit: 1000 })).filter(event => event.userId === stand.userId || event.userId === null);
+    const replay = { ...snapshot };
+
+    for (const event of tail) {
+      if (event.type === 'session.started' && event.agentName && Object.hasOwn(replay, event.agentName)) {
+        replay[event.agentName] = startedModel(event.payload);
+      }
+    }
+
+    assert.ok(tail.length >= 8);
+    assert.equal(replay.engineer, 'claude-fable-5-1');
+    assert.equal(replay.browser, null);
+    assert.equal(replay.gardener, null);
+    assert.deepEqual(await lastModels(), replay);
   });
 });

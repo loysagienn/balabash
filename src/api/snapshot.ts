@@ -14,6 +14,7 @@ import { prisma } from '../db/client.ts';
 import type { Event, JsonObject, Thread } from '../core/contract.ts';
 import { toEvent } from '../core/envelope.ts';
 import { SESSION_VIEW_TYPES, foldSession } from '../projections/session.ts';
+import { startedModel } from '../projections/last-model.ts';
 import type { SessionView } from '../projections/session.ts';
 import { getLatestTerminalThread, getThread, listThreads } from '../core/threads.ts';
 import { readThreadWindow } from './thread-window.ts';
@@ -107,20 +108,22 @@ function readServices(): ServiceView[] {
 // The model each agent's newest session started with: the model of the
 // agent's latest session.started in this workspace (the Claude journal
 // writes it; Codex sessions have no such event). One DISTINCT ON over the
-// session.started rows of the log (the (type, seq) index); an agent whose
-// newest start names no model has no entry. The tail keeps it fresh: the
-// console's agents reducer folds session.started the same way.
-async function readLastModels(userId: string): Promise<Map<string, string>> {
-  const rows = await prisma.$queryRaw<Array<{ agentName: string | null; model: string | null }>>`
-    SELECT DISTINCT ON (agent_name) agent_name AS "agentName", payload->>'model' AS model
+// session.started rows of the log (the (type, seq) index), the newest row's
+// payload read by startedModel (src/projections/last-model.ts) — an agent
+// whose newest start names no model is left without one. The tail keeps it
+// fresh: the console's agents reducer folds session.started by the same
+// rule (the stand test replays the tail over the snapshot and compares).
+async function readLastModels(userId: string): Promise<Map<string, string | null>> {
+  const rows = await prisma.$queryRaw<Array<{ agentName: string | null; payload: JsonObject }>>`
+    SELECT DISTINCT ON (agent_name) agent_name AS "agentName", payload
     FROM events
     WHERE user_id = ${userId} AND type = 'session.started' AND agent_name IS NOT NULL
     ORDER BY agent_name, seq DESC`;
-  const models = new Map<string, string>();
+  const models = new Map<string, string | null>();
 
   for (const row of rows) {
-    if (row.agentName && row.model) {
-      models.set(row.agentName, row.model);
+    if (row.agentName) {
+      models.set(row.agentName, startedModel(row.payload));
     }
   }
 

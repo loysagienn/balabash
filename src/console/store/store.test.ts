@@ -1395,18 +1395,31 @@ describe('agents screen', () => {
     assert.equal(store.getState().agents.byName.engineer.model, 'm');
     assert.equal(store.getState().agents.byName.browser.lastModel, null);
 
-    // The same model again, an agent outside the catalog, a start naming no
-    // model — nothing changes.
+    // The same model again, an agent outside the catalog — nothing changes.
     const before = store.getState().agents;
 
     store.dispatch(started(54n, 'engineer', 'claude-opus-5-5'));
     store.dispatch(started(55n, 'gardener', 'claude-opus-5-5'));
     store.dispatch(started(56n, 'constructor', 'claude-opus-5-5'));
-    store.dispatch(eventAction(event({ seq: 57n, type: 'session.started', threadId: 'e1', agentName: 'engineer', payload: { tools: [], mcpServers: [] } as never })));
     assert.equal(store.getState().agents, before);
 
+    // A newer start naming no model leaves the agent without one — the
+    // snapshot's rule (readLastModels reads the newest start, whatever it
+    // names), so a reload shows the same catalog; again, nothing changes.
+    const unnamed = (seq: bigint, payload: Record<string, unknown>) =>
+      eventAction(event({ seq, type: 'session.started', threadId: 'e1', agentName: 'engineer', payload: { tools: [], mcpServers: [], ...payload } as never }));
+
+    store.dispatch(unnamed(57n, {}));
+    assert.equal(store.getState().agents.byName.engineer.lastModel, null);
+    assert.equal(store.getState().agents.byName.engineer.model, 'm');
+
+    const cleared = store.getState().agents;
+
+    store.dispatch(unnamed(58n, { model: '' }));
+    assert.equal(store.getState().agents, cleared);
+
     // A newer start on another model replaces it.
-    store.dispatch(started(58n, 'engineer', 'claude-opus-5-5-20260301'));
+    store.dispatch(started(59n, 'engineer', 'claude-opus-5-5-20260301'));
     assert.equal(store.getState().agents.byName.engineer.lastModel, 'claude-opus-5-5-20260301');
     assert.deepEqual(store.getState().agents.names, ['engineer', 'browser']);
   });
