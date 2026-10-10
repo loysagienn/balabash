@@ -83,4 +83,28 @@ describe('lastMessageOf', () => {
     assert.deepEqual(lastMessageOf([user, link]), { text: 'report.pdf', at: link.createdAt, seq: link.seq });
     assert.deepEqual(lastMessageOf([user, empty]), { text: '', at: empty.createdAt, seq: empty.seq });
   });
+
+  it('takes the later by seq of the loaded events and the message the snapshot carried', () => {
+    resetSeq(10n);
+    const older = event({ type: 'user.message', threadId: 'main', payload: { text: 'Before the snapshot' } });
+    const kept = event({ type: 'agent.message', threadId: 'main', payload: { content: [{ type: 'text', text: 'Carried by the snapshot' }] } });
+    const tool = event({ type: 'tool.call.started', threadId: 'main', payload: { callId: 'c', functionName: 'spawn_agent', input: {} } });
+    const newer = event({ type: 'user.message', threadId: 'main', payload: { text: 'After the snapshot' } });
+    const keptMessage = { text: 'Carried by the snapshot', at: kept.createdAt, seq: kept.seq };
+
+    // Nothing loaded yet: the snapshot's message is the row's.
+    assert.deepEqual(lastMessageOf([], kept), keptMessage);
+    // Older events loaded (the thread's chunk below the snapshot): still the snapshot's.
+    assert.deepEqual(lastMessageOf([older], kept), keptMessage);
+    // A newer event that is not a message changes nothing.
+    assert.deepEqual(lastMessageOf([older, tool], kept), keptMessage);
+    // The tail brought a newer message: the tail's.
+    assert.deepEqual(lastMessageOf([older, newer], kept), { text: 'After the snapshot', at: newer.createdAt, seq: newer.seq });
+    assert.deepEqual(lastMessageOf([newer, tool], kept), { text: 'After the snapshot', at: newer.createdAt, seq: newer.seq });
+    // The kept event itself among the loaded events (the overlap of snapshot and tail): the same message once.
+    assert.deepEqual(lastMessageOf([older, kept], kept), keptMessage);
+    // Only a message counts as kept: another kind of event is nothing.
+    assert.equal(lastMessageOf([], tool), null);
+    assert.deepEqual(lastMessageOf([older], tool), { text: 'Before the snapshot', at: older.createdAt, seq: older.seq });
+  });
 });

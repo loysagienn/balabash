@@ -25,6 +25,8 @@ import { createProject, setProjectArchived, updateProject } from './projects/act
 import { selectActiveProjects, selectArchivedProjectCount, selectArchivedProjects, selectProjectCreate, selectProjectEdit, selectProjectFlagging } from './projects/selectors.ts';
 import { selectConnections, selectConnectionsNeedingAction } from './connections/selectors.ts';
 import { makeSelectThreadEvents } from './feed/selectors.ts';
+import { snapshotLoad } from './stream/actions.ts';
+import { makeSelectLastMessage } from '../features/thread-list/selectors.ts';
 import { selectThreadState } from './sessions/selectors.ts';
 import { ME, event, resetSeq, snapshot, thread } from './fixtures.ts';
 
@@ -403,19 +405,64 @@ describe('threads from events', () => {
     assert.equal(created(store, 'h2').headless, false);
   });
 
-  it('keeps the last message of the main thread the snapshot carried', async () => {
+  it('keeps the last message of the main thread the snapshot carried, and the pinned row takes the later of it and the loaded events', async () => {
     resetSeq(230n);
 
     const kept = event({ type: 'user.message', actor: 'user', threadId: 'main', payload: { text: 'Start the designer' } });
-    const store = createStore({ api: fakeApi({ snapshot: async () => snapshot({ threads: [thread({ id: 'main', parentId: null, agent: 'coordinator' })], mainLastMessage: kept }) }), initialRoute: { key: 'home' } });
+    let carried = kept;
+    const store = createStore({
+      api: fakeApi({ snapshot: async () => snapshot({ threads: [thread({ id: 'main', parentId: null, agent: 'coordinator' })], mainLastMessage: carried }) }),
+      initialRoute: { key: 'home' },
+    });
+    const selectLastMessage = makeSelectLastMessage();
+    const last = () => selectLastMessage(store.getState(), 'main');
+    const keptMessage = { text: 'Start the designer', at: kept.createdAt, seq: kept.seq };
 
     assert.equal(store.getState().threads.mainLastMessage, null);
+    assert.equal(last(), null);
     await dispatched(store, sessionCheck());
     await settle();
     assert.deepEqual(store.getState().threads.mainLastMessage, kept);
     // The snapshot's message is not a loaded event of the feed: the feed
-    // still starts where the tail or the thread's chunk puts it.
+    // still starts where the tail or the thread's chunk puts it — and the
+    // row has its words before any event of the thread is loaded.
     assert.equal(store.getState().feed.byThread.main, undefined);
+    assert.deepEqual(last(), keptMessage);
+
+    // The tail: a child starts and reports to the main thread — events of
+    // its feed, but not messages.
+    store.dispatch(eventAction(event({ type: 'thread.started', threadId: 'c1', targetThreadId: 'main', agentName: 'designer', payload: { agent: 'designer' } })));
+    store.dispatch(eventAction(event({ type: 'thread.progress', threadId: 'c1', targetThreadId: 'main', agentName: 'designer', payload: { text: 'Drawing the chart' } })));
+    assert.deepEqual(store.getState().feed.byThread.main?.seqs, ['231', '232']);
+    assert.deepEqual(last(), keptMessage);
+
+    // The child's message addressed to the main thread is later by seq: the row's.
+    const reply = event({ type: 'agent.message', threadId: 'c1', targetThreadId: 'main', agentName: 'designer', payload: { content: [{ type: 'text', text: 'The chart is ready.' }] } });
+    const replyMessage = { text: 'The chart is ready.', at: reply.createdAt, seq: reply.seq };
+
+    store.dispatch(eventAction(reply));
+    assert.deepEqual(last(), replyMessage);
+
+    // A message inside the child only and a later non-message of the main thread change nothing.
+    store.dispatch(eventAction(event({ type: 'agent.message', threadId: 'c1', agentName: 'designer', payload: { content: [{ type: 'text', text: 'Inside the child' }] } })));
+    store.dispatch(eventAction(event({ type: 'tool.call.started', threadId: 'main', agentName: 'coordinator', payload: { callId: 'c', functionName: 'spawn_agent', input: {} } })));
+    assert.deepEqual(last(), replyMessage);
+    assert.equal(last(), last());
+
+    // A snapshot taken again (a reconnect) still carrying the older message:
+    // the loaded events keep the later one.
+    await dispatched(store, snapshotLoad());
+    await settle();
+    assert.deepEqual(store.getState().threads.mainLastMessage, kept);
+    assert.deepEqual(last(), replyMessage);
+
+    // A snapshot ahead of the loaded events (the tab was away): its message is the row's.
+    const ahead = event({ type: 'user.message', actor: 'user', threadId: 'main', payload: { text: 'Now deploy it' } });
+
+    carried = ahead;
+    await dispatched(store, snapshotLoad());
+    await settle();
+    assert.deepEqual(last(), { text: 'Now deploy it', at: ahead.createdAt, seq: ahead.seq });
   });
 });
 

@@ -23,7 +23,7 @@
     "import-sqlite": "node --enable-source-maps --env-file=.env ./dist/import-sqlite.js",
     "build-console": "NODE_ENV=production node ./build/build-console.js",
     "build-console-dev": "NODE_ENV=development node ./build/build-console.js",
-    "types": "tsc --noEmit && tsc --noEmit -p src/console/tsconfig.json",
+    "types": "tsc --noEmit && tsc --noEmit -p src/console/tsconfig.json && tsc --noEmit -p src/web/tsconfig.json",
     "postinstall": "node scripts/patch-sdk-bridge.mjs",
     "test": "node --test --no-warnings=ExperimentalWarning --test-global-setup=src/test-support/global-setup.ts \"src/**/*.test.ts\" \"tools/**/*.test.ts\""
   },

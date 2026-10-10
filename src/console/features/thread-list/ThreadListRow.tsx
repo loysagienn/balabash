@@ -4,7 +4,7 @@
 // action among the thread's loaded events — all turned into the words of
 // ui/ThreadRow by rowData.ts. The row is a link to the thread. The pinned
 // main thread shows its last message instead: the newest among its loaded
-// events or the one the snapshot carried.
+// events or the one the snapshot carried (selectors.ts).
 
 import { useMemo } from 'react';
 import type { Thread } from '../../../core/contract.ts';
@@ -15,8 +15,9 @@ import { selectSession, selectThreadState } from '../../store/sessions/selectors
 import { selectChildCount } from '../../store/threads/selectors.ts';
 import { ThreadRow } from '../../ui/ThreadRow/ThreadRow.tsx';
 import { isActiveState } from '../../ui/ThreadRow/ThreadRow.logic.ts';
-import { lastActionOf, lastMessageOf } from './lastAction.ts';
+import { lastActionOf } from './lastAction.ts';
 import { threadRowData } from './rowData.ts';
+import { makeSelectLastMessage } from './selectors.ts';
 
 export type ThreadListRowProps = {
   thread: Thread;
@@ -40,9 +41,9 @@ export function ThreadListRow({ thread, now, hit, fresh, current, noAgent, main 
   const selectEvents = useMemo(makeSelectThreadEvents, []);
   const active = isActiveState(state);
   const events = useAppSelector(s => (active ? selectEvents(s, thread.id) : NO_EVENTS));
-  const kept = useAppSelector(s => (main ? s.threads.mainLastMessage : null));
+  const selectLastMessage = useMemo(makeSelectLastMessage, []);
   const last = useMemo(() => (active && !main ? lastActionOf(events) : null), [active, main, events]);
-  const lastMessage = useMemo(() => (main ? lastMessageOf(events, kept) : null), [main, events, kept]);
+  const lastMessage = useAppSelector(s => (main ? selectLastMessage(s, thread.id) : null));
   const link = useLinkProps({ key: 'thread', id: thread.id });
   const data = threadRowData({ thread, state, session, project, kids, headless: thread.headless, last, now, ...(main ? { main, lastMessage } : {}) });
 

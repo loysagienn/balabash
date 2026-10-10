@@ -704,7 +704,7 @@ export default function ThreadPage() {
         <div className={styles.meta}>
           <span className={styles.agent}>{info.agent}</span>
           {info.parentId === null ? <span className={styles.badge}>главный</span> : null}
-          {thread.data.headless ? <span className={styles.badge}>headless</span> : null}
+          {info.headless ? <span className={styles.badge}>headless</span> : null}
           <span className={`${styles.status} ${styles[`status_${info.status}`]}`}>{STATUS_LABELS[info.status]}</span>
           <span className={styles.time}>
             {formatDateTime(info.createdAt)}
@@ -739,7 +739,7 @@ export default function ThreadPage() {
         </button>
       </div>
 
-      {tab === 'chat' ? <ChatTab thread={info} headless={thread.data.headless} /> : <EventsTab threadId={threadId} />}
+      {tab === 'chat' ? <ChatTab thread={info} headless={info.headless} /> : <EventsTab threadId={threadId} />}
     </main>
   );
 }
