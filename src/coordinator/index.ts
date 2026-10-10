@@ -17,7 +17,11 @@ import { getPendingRestart } from '../runtime/restart.ts';
 import { buildTurnPrompt, buildKeepalivePrompt, markPromptStateWarm, PROMPT_CACHE_TTL_MS } from '../harness/openai/prompt-builder.ts';
 import { startLlmRequestMetrics } from '../harness/openai/llm-metrics.ts';
 import { runTurn, prewarmPrompt } from '../harness/openai/turn.ts';
+import type { FunctionDefinition, TurnClient } from '../harness/openai/turn.ts';
 import { getLlmBackend } from '../harness/openai/backend.ts';
+import { createJournalWriter } from '../harness/session-journal.ts';
+import type { JournalWriter } from '../harness/session-journal.ts';
+import type { SessionState } from '../projections/session.ts';
 import { COORDINATOR_INSTRUCTIONS } from './instructions.ts';
 import { getCoordinatorFunctionDefinitions, dispatchCoordinatorFunction } from './functions.ts';
 
@@ -37,6 +41,14 @@ const KEEPALIVE_INTERVAL_MS = PROMPT_CACHE_TTL_MS - 5 * 60 * 1000;
 
 export type CoordinatorRun = {
   accept: (event: Event) => void;
+};
+
+// Test seams: the function definitions, the OpenAI client and the journal
+// writer — the real ones by default.
+export type CoordinatorRunDeps = {
+  functionDefinitions?: (userId: string) => Promise<FunctionDefinition[]>;
+  client?: TurnClient;
+  journal?: JournalWriter;
 };
 
 // Coordinator turns in flight, process-wide — the restart module's busy
@@ -107,9 +119,36 @@ export function buildStatusText(children: Thread[], projects: ProjectModel[]): s
   return lines.join('\n');
 }
 
-export function createCoordinatorRun({ threadId, userId }: { threadId: string; userId: string }): CoordinatorRun {
+export function createCoordinatorRun({ threadId, userId }: { threadId: string; userId: string }, deps: CoordinatorRunDeps = {}): CoordinatorRun {
+  const functionDefinitions = deps.functionDefinitions ?? getCoordinatorFunctionDefinitions;
+  const journal = deps.journal ?? createJournalWriter();
   let wakePending = false;
   let running = false;
+
+  // The course of the main thread for the console's header and lists: the
+  // same session.state the SDK journals write for the inner sessions of the
+  // child threads (src/harness/session-journal.ts — actor 'agent', the
+  // thread's agent name, no addressee), authored here because the
+  // coordinator has no SDK session behind it. `run` goes out before the
+  // model's first request of a turn, `wait` once the loop has nothing left
+  // to run. Only a change is written — `state` is the state this run last
+  // wrote — so a loop whose wakes rendered to nothing writes nothing, with
+  // one exception: the first loop of the process, whose `wait` answers for
+  // a `run` the previous process may have left behind when it died
+  // mid-turn (foldSession takes a repeated state as no change). Not part
+  // of the transcript (getTranscript excludes session.*) and routed to no
+  // one (ROUTED_TYPES) — the write does not wake this very run.
+  let state: SessionState | null = null;
+
+  const setState = (next: SessionState): Promise<void> => {
+    if (state === next) {
+      return Promise.resolve();
+    }
+
+    state = next;
+
+    return journal.write(threadId, [{ type: 'session.state', payload: { state: next } }]);
+  };
 
   // Cache-diagnostics baseline: the id of the thread's last request with the
   // current prefix (a turn's first request or a prewarm ping). The server
@@ -148,7 +187,7 @@ export function createCoordinatorRun({ threadId, userId }: { threadId: string; u
     }
 
     try {
-      const tools = await getCoordinatorFunctionDefinitions(userId);
+      const tools = await functionDefinitions(userId);
       const children = await listThreads(userId, { status: 'active', parentId: threadId });
       const projects = await listProjects(userId, { archived: false });
 
@@ -198,7 +237,7 @@ export function createCoordinatorRun({ threadId, userId }: { threadId: string; u
     }
 
     const lastSeq = events.at(-1)!.seq;
-    const tools = await getCoordinatorFunctionDefinitions(userId);
+    const tools = await functionDefinitions(userId);
     const children = await listThreads(userId, { status: 'active', parentId: threadId });
     const projects = await listProjects(userId, { archived: false });
 
@@ -227,6 +266,10 @@ export function createCoordinatorRun({ threadId, userId }: { threadId: string; u
       purpose: 'turn',
     });
 
+    // In the log before the request goes out: the write resolves once
+    // written or given up on (the writer never throws into the turn).
+    await setState('run');
+
     const outcome = await runTurn({
       model: config.mainOpenaiModel,
       instructions: COORDINATOR_INSTRUCTIONS,
@@ -235,6 +278,7 @@ export function createCoordinatorRun({ threadId, userId }: { threadId: string; u
       metrics,
       dispatch: call => dispatchCoordinatorFunction(call, { userId, threadId }),
       cacheComparisonResponseId: lastResponseId,
+      ...(deps.client ? { deps: { client: deps.client } } : {}),
     });
 
     lastResponseId = outcome.firstResponseId;
@@ -271,6 +315,10 @@ export function createCoordinatorRun({ threadId, userId }: { threadId: string; u
         }
       }
     } finally {
+      // Queued, not awaited: the loop's exit stays synchronous after its
+      // last turn, so a wake arriving now is not lost between the while
+      // check and `running = false`. The writer's chain keeps the order.
+      void setState('wait');
       running = false;
       activeTurns -= 1;
       // Armed after every loop, including skipped and failed turns: the
