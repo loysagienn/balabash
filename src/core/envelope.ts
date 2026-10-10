@@ -20,7 +20,15 @@ export const THREAD_NOTIFICATION = 'thread.notification';
 export const SYSTEM_EXCEPTION = 'system.exception';
 export const SYSTEM_RESTART_REQUESTED = 'system.restart.requested';
 export const SYSTEM_RESTART_COMPLETED = 'system.restart.completed';
+// Installation credentials asked of the operator (src/capabilities/secret-requests.ts):
+// a request opened — the one-time link exists, the bell of the console
+// shows it until the values land — and the values landed (sanitized: field
+// names only, never values). The requested event is journaled in the
+// request row's transaction like a registry event; the provisioned one is
+// addressed to the thread that issued the link.
+export const OAUTH_CLIENT_REQUESTED = 'oauth_client.requested';
 export const OAUTH_CLIENT_PROVISIONED = 'oauth_client.provisioned';
+export const SECRETS_REQUESTED = 'secrets.requested';
 export const SECRETS_PROVISIONED = 'secrets.provisioned';
 export const CONNECTION_COMPLETED = 'connection.completed';
 export const CONNECTION_FAILED = 'connection.failed';
@@ -54,7 +62,9 @@ const CANONICAL_TYPES: ReadonlySet<string> = new Set([
   'tool.call.started',
   'tool.call.completed',
   'tool.call.failed',
+  OAUTH_CLIENT_REQUESTED,
   OAUTH_CLIENT_PROVISIONED,
+  SECRETS_REQUESTED,
   SECRETS_PROVISIONED,
   SYSTEM_EXCEPTION,
   // Restart-based self-extension: a request written by the restart tool,

@@ -20,6 +20,7 @@ import type { JsonObject } from '../../core/contract.ts';
 import type { ConnectionView } from '../../api/contract.ts';
 import type { ConnectionRecord } from '../../core/event-types.ts';
 import { appendEvent } from '../../core/append.ts';
+import { openSecretRequest } from '../secret-requests.ts';
 import {
   CONNECTION_COMPLETED,
   CONNECTION_DISCONNECTED,
@@ -319,11 +320,12 @@ export async function requestAuthorization(
   return `https://${config.domain}/connect/${server.name}?nonce=${connectNonce}`;
 }
 
-// Records a pending request for a manual installation OAuth client and
-// returns the operator's link into the web interface (session-gated page;
-// the id is an address, not a credential — ownership is checked at the API
-// edge). No TTL: the request lives until fulfilled or replaced. Submitted
-// values never enter the event log.
+// Records a pending request for a manual installation OAuth client
+// (../secret-requests.ts: the row and its oauth_client.requested event in
+// one transaction) and returns the operator's link into the web interface
+// (session-gated page; the id is an address, not a credential — ownership
+// is checked at the API edge). No TTL: the request lives until fulfilled or
+// replaced. Submitted values never enter the event log.
 export async function requestOauthClientCredentials(
   userId: string,
   threadId: string,
@@ -335,15 +337,7 @@ export async function requestOauthClientCredentials(
     throw new Error(`Integration "${server.name}" uses Dynamic Client Registration`);
   }
 
-  // nonce/expiresAt are vestigial: the session flow never reads them. They
-  // stay written (columns are required) until a later cleanup migration.
-  const vestigial = { nonce: randomToken(), expiresAt: new Date() };
-
-  const row = await prisma.oauthClientRequest.upsert({
-    where: { userId_server: { userId, server: server.name } },
-    create: { userId, threadId, server: server.name, ...vestigial },
-    update: { threadId, ...vestigial },
-  });
+  const row = await openSecretRequest('oauth-client', { userId, threadId, server: server.name });
 
   return `https://${config.domain}/secrets/${row.id}`;
 }
@@ -416,6 +410,7 @@ export async function provisionOauthClient(
     threadId: null,
     targetThreadId: consumed.threadId,
     payload: {
+      requestId: consumed.id,
       server: consumed.server,
       fields: normalizedClientSecret ? ['client_id', 'client_secret'] : ['client_id'],
     },

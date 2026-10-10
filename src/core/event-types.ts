@@ -207,8 +207,16 @@ export type EventPayloads = {
   // The row is gone: the user disconnected the account, or a flow's newborn
   // row turned out to be a twin of an established one (reason 'duplicate').
   'connection.disconnected': { connectionId: string; server: string; account: string; name: string; reason?: 'disconnected' | 'duplicate' };
-  'oauth_client.provisioned': { server: string; fields: string[] };
-  'secrets.provisioned': { server: string; fields: string[] };
+  // Installation credentials asked of the operator
+  // (src/capabilities/secret-requests.ts): the request opened — the row as
+  // the snapshot shows it, journaled in its transaction, authored by the
+  // thread that issued the link; the values landed — field names only,
+  // addressed to that thread. requestId is absent on provisioned events
+  // recorded before the request was journaled.
+  'oauth_client.requested': SecretRequestRecord;
+  'oauth_client.provisioned': { requestId?: string; server: string; fields: string[] };
+  'secrets.requested': SecretRequestRecord;
+  'secrets.provisioned': { requestId?: string; server: string; fields: string[] };
 
   // Registry events (src/core/registry-events.ts): written where the
   // registry tables change, the payload is the row as the console's
@@ -284,6 +292,19 @@ export type ConnectionRecord = {
   threadId: string | null;
   createdAt: string;
   updatedAt: string;
+};
+
+// An open request for installation credentials as secrets.requested /
+// oauth_client.requested carry it (OpenSecretRequestView of the snapshot
+// with an ISO date; the kind is the event's type; the asking agent and
+// thread are the event's author). Never values.
+export type SecretRequestRecord = {
+  requestId: string;
+  server: string;
+  // The names of the fields asked for (secrets: the ${secret:NAME} keys of
+  // the server's config; OAuth client: client_id, client_secret).
+  fields: string[];
+  requestedAt: string;
 };
 
 export type EventType = keyof EventPayloads;

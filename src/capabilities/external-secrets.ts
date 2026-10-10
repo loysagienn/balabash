@@ -1,15 +1,17 @@
 // Installation credentials for external MCP servers (§10): every
 // ${secret:NAME} reference is provisioned through a one-time web form —
 // values go straight to the database, never through the chat, the model or
-// the log (§2 ставка 4). The log records only the fact: a sanitized
-// secrets.provisioned event addressed to the thread that issued the link.
+// the log (§2 ставка 4). The log records only the facts: a request opened
+// (secrets.requested, secret-requests.ts — the console's bell shows it)
+// and a sanitized secrets.provisioned event addressed to the thread that
+// issued the link.
 
-import crypto from 'node:crypto';
 import { prisma } from '../db/client.ts';
 import { appendEvent } from '../core/append.ts';
 import { SECRETS_PROVISIONED } from '../core/envelope.ts';
 import { config } from '../config/index.ts';
 import { disconnectExternalServer, listExternalSecretTargets, type ExternalSecretTarget } from './tool-manager.ts';
+import { openSecretRequest } from './secret-requests.ts';
 
 const SECRET_KEY_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
@@ -27,10 +29,6 @@ function toFields(target: ExternalSecretTarget): ExternalServerSecretField[] {
 
 function getTarget(serverName: string): ExternalSecretTarget | null {
   return listExternalSecretTargets().find(target => target.name === serverName) ?? null;
-}
-
-function randomToken(): string {
-  return crypto.randomBytes(24).toString('base64url');
 }
 
 function parseFields(value: unknown): ExternalServerSecretField[] {
@@ -54,12 +52,13 @@ function parseFields(value: unknown): ExternalServerSecretField[] {
   });
 }
 
-// Records a pending request and returns the operator's link into the web
-// interface. The page behind it lives behind the SESSION — the request id in
-// the URL is an address, not a credential; ownership is checked at the API
-// edge. The request lives until fulfilled or replaced — no TTL. threadId is
-// the issuing thread (the auth agent's): the provisioning event is addressed
-// to it.
+// Records a pending request (secret-requests.ts: the row and its
+// secrets.requested event in one transaction) and returns the operator's
+// link into the web interface. The page behind it lives behind the SESSION
+// — the request id in the URL is an address, not a credential; ownership
+// is checked at the API edge. The request lives until fulfilled or replaced
+// — no TTL. threadId is the issuing thread (the auth agent's): the
+// provisioning event is addressed to it.
 export async function requestExternalServerCredentials(
   userId: string,
   threadId: string,
@@ -71,17 +70,7 @@ export async function requestExternalServerCredentials(
     throw new Error(`External server "${serverName}" is not awaiting installation credentials`);
   }
 
-  const fields = toFields(target);
-  // nonce/expiresAt are vestigial: the session flow never reads them. They
-  // stay written (columns are required) until a later cleanup migration
-  // drops them once no running code references them.
-  const vestigial = { nonce: randomToken(), expiresAt: new Date() };
-
-  const row = await prisma.externalServerSecretRequest.upsert({
-    where: { userId_server: { userId, server: target.name } },
-    create: { userId, threadId, server: target.name, fields, ...vestigial },
-    update: { threadId, fields, ...vestigial },
-  });
+  const row = await openSecretRequest('external-secrets', { userId, threadId, server: target.name, fields: toFields(target) });
 
   return `https://${config.domain}/secrets/${row.id}`;
 }
@@ -187,7 +176,7 @@ export async function provisionExternalServerSecrets(
     userId: consumed.userId,
     threadId: null,
     targetThreadId: consumed.threadId,
-    payload: { server: consumed.server, fields: Object.keys(normalized) },
+    payload: { requestId: consumed.id, server: consumed.server, fields: Object.keys(normalized) },
   }).catch(error => {
     console.error(`[secrets] failed to journal provisioning for "${consumed.server}":`, error);
   });

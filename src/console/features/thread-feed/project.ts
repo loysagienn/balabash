@@ -760,6 +760,12 @@ class Builder {
       return;
     }
 
+    if (is(event, 'oauth_client.requested') || is(event, 'secrets.requested')) {
+      this.push({ kind: 'sys', key, at, icon: 'key-round', state: 'act', text: `${event.payload.server}: ${event.type === 'secrets.requested' ? 'secrets' : 'OAuth client'} requested` });
+
+      return;
+    }
+
     if (is(event, 'oauth_client.provisioned') || is(event, 'secrets.provisioned')) {
       this.push({ kind: 'sys', key, at, icon: 'key-round', text: `${event.payload.server}: ${event.type === 'secrets.provisioned' ? 'secrets' : 'OAuth client'} provisioned` });
 

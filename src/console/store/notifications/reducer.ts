@@ -10,7 +10,15 @@
 // connection.* events that open or close the waiting (reauthorization_required
 // — the server writes it on the connected → waiting transition only;
 // completed; disconnected) drop the mark, a rename or a failed attempt in
-// between keeps it. `read` — the keys the user has seen
+// between keeps it. An open request for installation credentials (the
+// one-time link of the auth agent) is read from the secretRequests domain
+// the same way: keyed by the request's id, its mark dropped when the
+// request is issued again (secrets.requested / oauth_client.requested —
+// the same row, a new ask) and when the values land (provisioned — by the
+// requestId the event names; one without it, the history before the id
+// was carried, closes the row by its server in store/secret-requests and
+// leaves a mark no row reads: the next request gets a new id, the mark is
+// a tab's memory). `read` — the keys the user has seen
 // (store/notifications/actions.ts), pruned with the items that leave.
 
 import type { NotificationLevel } from '../../../core/contract.ts';
@@ -41,8 +49,10 @@ export type NotificationsState = {
 
 export const KEEP = 50;
 
-// The key of a connection's waiting row (features/notifications/notifications.logic.ts).
+// The keys of the waiting rows (features/notifications/notifications.logic.ts):
+// a connection that needs signing in again, an open request for credentials.
 export const connectionReadKey = (connectionId: string) => `connection:${connectionId}`;
+export const secretRequestReadKey = (requestId: string) => `secret-request:${requestId}`;
 
 export const initialNotifications: NotificationsState = { items: [], read: {} };
 
@@ -69,13 +79,13 @@ function withItem(state: NotificationsState, item: NotificationItem): Notificati
   return { items, read };
 }
 
-// The read mark of a connection's row leaves with its episode.
-function withoutRead(state: NotificationsState, connectionId: string | undefined): NotificationsState {
-  if (!connectionId || !state.read[connectionReadKey(connectionId)]) {
+// The read mark of a waiting row leaves with its episode.
+function withoutRead(state: NotificationsState, key: string | undefined): NotificationsState {
+  if (!key || !state.read[key]) {
     return state;
   }
 
-  const { [connectionReadKey(connectionId)]: gone, ...read } = state.read;
+  const { [key]: gone, ...read } = state.read;
 
   return { ...state, read };
 }
@@ -106,7 +116,15 @@ export function notificationsReducer(state: NotificationsState = initialNotifica
       const key = String(event.seq);
 
       if (action.type === 'event/connection.reauthorization_required' || action.type === 'event/connection.completed' || action.type === 'event/connection.disconnected') {
-        return withoutRead(state, action.event.payload.connectionId);
+        const { connectionId } = action.event.payload;
+
+        return withoutRead(state, connectionId ? connectionReadKey(connectionId) : undefined);
+      }
+
+      if (action.type === 'event/secrets.requested' || action.type === 'event/oauth_client.requested' || action.type === 'event/secrets.provisioned' || action.type === 'event/oauth_client.provisioned') {
+        const { requestId } = action.event.payload;
+
+        return withoutRead(state, requestId ? secretRequestReadKey(requestId) : undefined);
       }
 
       if (action.type === 'event/thread.notification') {

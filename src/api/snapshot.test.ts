@@ -5,7 +5,9 @@
 // the api carrying their headless policy (GET /threads/:id answers the
 // thread alone; a headless thread refuses the operator's message), and the
 // agent catalog the console shows: the coordinator ahead of the catalog,
-// the platform's default effort, the model of each agent's newest session.
+// the platform's default effort, the model of each agent's newest session
+// — and the open requests for installation credentials with the events
+// that open and close them, as the bell of the console reads them.
 // The whole GET /api/snapshot stays out: buildSnapshot reads config.domain,
 // which the stand strips with the other domains (checks.md).
 //
@@ -17,7 +19,9 @@ import { randomUUID } from 'node:crypto';
 import { startStand } from '../test-support/stand.ts';
 import type { Stand } from '../test-support/stand.ts';
 import type { JsonObject, Thread } from '../core/contract.ts';
-import type { ThreadResponse, ThreadsResponse } from './contract.ts';
+import type { SecretRequestRecord } from '../core/event-types.ts';
+import type { OpenSecretRequestView, SecretRequestResponse, ThreadResponse, ThreadsResponse } from './contract.ts';
+import { secretRequestFromRecord } from '../console/store/records.ts';
 
 type ErrorBody = { error: { code: string; message: string } };
 
@@ -31,6 +35,8 @@ let COORDINATOR_BUNDLE: typeof import('../coordinator/functions.ts')['COORDINATO
 let getEventsAfter: typeof import('../core/events.ts')['getEventsAfter'];
 let prisma: typeof import('../db/client.ts')['prisma'];
 let startedModel: typeof import('../projections/last-model.ts')['startedModel'];
+let openSecretRequest: typeof import('../capabilities/secret-requests.ts')['openSecretRequest'];
+let readOpenSecretRequests: typeof import('../capabilities/secret-requests.ts')['readOpenSecretRequests'];
 
 before(async () => {
   stand = await startStand();
@@ -41,6 +47,7 @@ before(async () => {
   ({ getEventsAfter } = await import('../core/events.ts'));
   ({ prisma } = await import('../db/client.ts'));
   ({ startedModel } = await import('../projections/last-model.ts'));
+  ({ openSecretRequest, readOpenSecretRequests } = await import('../capabilities/secret-requests.ts'));
 });
 
 after(() => stand.stop());
@@ -261,5 +268,116 @@ describe('the agent catalog of the snapshot', () => {
     assert.equal(replay.browser, null);
     assert.equal(replay.gardener, null);
     assert.deepEqual(await lastModels(), replay);
+  });
+});
+
+describe('the open requests for credentials of the snapshot', () => {
+  // The tail of one window, this workspace's events, folded by the console's
+  // rule (store/secret-requests): the row the bell shows.
+  async function replayed(asOfSeq: bigint): Promise<Record<string, OpenSecretRequestView>> {
+    const tail = (await getEventsAfter(asOfSeq, { limit: 1000 })).filter(event => event.userId === stand.userId || event.userId === null);
+    const rows: Record<string, OpenSecretRequestView> = {};
+
+    for (const event of tail) {
+      if (event.type === 'secrets.requested' || event.type === 'oauth_client.requested') {
+        const row = secretRequestFromRecord(event.type === 'secrets.requested' ? 'external-secrets' : 'oauth-client', event.payload as Partial<SecretRequestRecord>, event);
+
+        if (row) {
+          rows[row.id] = row;
+        }
+      } else if (event.type === 'secrets.provisioned' || event.type === 'oauth_client.provisioned') {
+        const requestId = typeof event.payload.requestId === 'string' ? event.payload.requestId : null;
+
+        for (const id of Object.keys(rows)) {
+          if (id === requestId) {
+            delete rows[id];
+          }
+        }
+      }
+    }
+
+    return rows;
+  }
+
+  test('opens a request with its event in one transaction, authored by the issuing thread; issued again, it is the same row at the new moment', async () => {
+    const asOfSeq = (await prisma.event.aggregate({ _max: { seq: true } }))._max.seq ?? 0n;
+    const auth = await startChild('auth');
+
+    assert.deepEqual(await readOpenSecretRequests(stand.userId), []);
+
+    const keys = await openSecretRequest('external-secrets', { userId: stand.userId, threadId: auth, server: 'yandex-direct', fields: [{ key: 'API_KEY', description: 'd1' }, { key: 'LOGIN', description: 'd2' }] });
+    const client = await openSecretRequest('oauth-client', { userId: stand.userId, threadId: auth, server: 'google' });
+    const rows = await readOpenSecretRequests(stand.userId);
+
+    assert.deepEqual(
+      rows.map(row => [row.id, row.kind, row.server, row.fields, row.threadId, row.agent]),
+      [
+        [keys.id, 'external-secrets', 'yandex-direct', ['API_KEY', 'LOGIN'], auth, 'auth'],
+        [client.id, 'oauth-client', 'google', ['client_id', 'client_secret'], auth, 'auth'],
+      ],
+    );
+
+    const events = (await getEventsAfter(asOfSeq, { limit: 100 })).filter(event => event.type.endsWith('.requested'));
+
+    assert.deepEqual(
+      events.map(event => [event.type, event.actor, event.agentName, event.threadId, event.targetThreadId, event.payload]),
+      [
+        ['secrets.requested', 'agent', 'auth', auth, null, { requestId: keys.id, server: 'yandex-direct', fields: ['API_KEY', 'LOGIN'], requestedAt: rows[0].requestedAt.toISOString() }],
+        ['oauth_client.requested', 'agent', 'auth', auth, null, { requestId: client.id, server: 'google', fields: ['client_id', 'client_secret'], requestedAt: rows[1].requestedAt.toISOString() }],
+      ],
+    );
+
+    // Issued again from another thread: the same row (the link holds), the
+    // new fields, the new thread and moment; the form still answers by the id.
+    const other = await startChild('auth');
+    const again = await openSecretRequest('external-secrets', { userId: stand.userId, threadId: other, server: 'yandex-direct', fields: [{ key: 'API_KEY', description: 'd1' }] });
+    const after = await readOpenSecretRequests(stand.userId);
+    const replaced = after.find(row => row.id === keys.id);
+
+    assert.equal(again.id, keys.id);
+    assert.ok(replaced);
+    assert.deepEqual([replaced.fields, replaced.threadId], [['API_KEY'], other]);
+    assert.ok(replaced.requestedAt.getTime() > rows[0].requestedAt.getTime());
+    assert.deepEqual(after.map(row => row.id), [client.id, keys.id], 'the older moment first');
+
+    const form = await stand.request('GET', `/api/secret-requests/${keys.id}`);
+
+    assert.equal(form.status, 200, form.text);
+    assert.deepEqual(form.json<SecretRequestResponse>().request.fields.map(field => field.key), ['API_KEY']);
+
+    // The replay of the tail equals the rows (the bell after a reload equals the bell that stayed open).
+    assert.deepEqual(await replayed(asOfSeq), Object.fromEntries((await readOpenSecretRequests(stand.userId)).map(row => [row.id, row])));
+  });
+
+  test('closes the request when the values land: the row is gone, the provisioned event names it', async () => {
+    const asOfSeq = (await prisma.event.aggregate({ _max: { seq: true } }))._max.seq ?? 0n;
+    const before = await readOpenSecretRequests(stand.userId);
+    const keys = before.find(row => row.kind === 'external-secrets');
+    const client = before.find(row => row.kind === 'oauth-client');
+
+    assert.ok(keys && client);
+
+    const saved = await stand.request('POST', `/api/secret-requests/${keys.id}`, { body: { values: { API_KEY: 'k' } } });
+
+    assert.equal(saved.status, 200, saved.text);
+    assert.deepEqual((await readOpenSecretRequests(stand.userId)).map(row => row.id), [client.id]);
+
+    const savedClient = await stand.request('POST', `/api/secret-requests/${client.id}`, { body: { values: { client_id: 'id', client_secret: '' } } });
+
+    assert.equal(savedClient.status, 200, savedClient.text);
+    assert.deepEqual(await readOpenSecretRequests(stand.userId), []);
+
+    const events = (await getEventsAfter(asOfSeq, { limit: 100 })).filter(event => event.type.endsWith('.provisioned'));
+
+    assert.deepEqual(
+      events.map(event => [event.type, event.actor, event.targetThreadId, event.payload]),
+      [
+        ['secrets.provisioned', 'system', keys.threadId, { requestId: keys.id, server: 'yandex-direct', fields: ['API_KEY'] }],
+        ['oauth_client.provisioned', 'system', client.threadId, { requestId: client.id, server: 'google', fields: ['client_id'] }],
+      ],
+    );
+    assert.deepEqual(await replayed(asOfSeq), {});
+    // The values stay out of the log.
+    assert.ok(!JSON.stringify(events.map(event => event.payload)).includes('"k"'));
   });
 });

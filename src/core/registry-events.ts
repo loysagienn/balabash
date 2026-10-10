@@ -1,11 +1,14 @@
 // Registry events: the log's record of a registry table changing (projects,
-// scheduled tasks, app publications — and the names of Settings on the
-// user's row, settings.updated). The snapshot the console hydrates
-// from is a projection of the log, so every change of a table it shows
-// must be an event too, or the browser's copy goes stale until a reload.
+// scheduled tasks, app publications, the names of Settings on the user's
+// row — settings.updated — and the open requests for installation
+// credentials — secrets.requested / oauth_client.requested). The snapshot
+// the console hydrates from is a projection of the log, so every change of
+// a table it shows must be an event too, or the browser's copy goes stale
+// until a reload.
 // They are journaled where the table changes (src/projects/mutations.ts,
-// src/schedule/tools.ts and heart.ts, src/apps/management.ts), in the same
-// transaction as the change: the row and its event commit together or not
+// src/schedule/tools.ts and heart.ts, src/apps/management.ts,
+// src/capabilities/secret-requests.ts), in the same transaction as the
+// change: the row and its event commit together or not
 // at all, and the event's seq is allocated under the row lock the change
 // holds, so two changes of one row reach the log in the order they reached
 // the table — a reducer folding the tail never sees an older row after a
@@ -20,7 +23,7 @@ import { notifyAppended } from './live.ts';
 import type { EventPayloads, EventType } from './event-types.ts';
 import type { JsonObject } from './contract.ts';
 
-export type RegistryEventType = Extract<EventType, `project.${string}` | `schedule.task.${string}` | `app.${string}` | 'settings.updated'>;
+export type RegistryEventType = Extract<EventType, `project.${string}` | `schedule.task.${string}` | `app.${string}` | 'settings.updated' | 'secrets.requested' | 'oauth_client.requested'>;
 
 // Who changed the registry: an agent through a tool call (the event is
 // authored by its thread), the operator from the console (actor user, no

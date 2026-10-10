@@ -63,6 +63,7 @@ export function snapshot(partial: Partial<SnapshotResponse> = {}): SnapshotRespo
     tasks: [],
     connections: [],
     services: [],
+    secretRequests: [],
     agents: [],
     ...partial,
   };

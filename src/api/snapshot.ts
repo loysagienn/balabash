@@ -24,6 +24,7 @@ import { publicAppsBase } from '../apps/urls.ts';
 import { taskView } from '../schedule/view.ts';
 import { connectionView, listUserConnections } from '../capabilities/connections/index.ts';
 import { listUserAuthServers } from '../capabilities/tool-manager.ts';
+import { readOpenSecretRequests } from '../capabilities/secret-requests.ts';
 import { getAgents } from '../capabilities/agent-catalog.ts';
 import { COORDINATOR_AGENT } from '../core/threads.ts';
 import { COORDINATOR_BUNDLE, COORDINATOR_DESCRIPTION } from '../coordinator/functions.ts';
@@ -192,13 +193,14 @@ export async function buildSnapshot(userId: string, readMe: () => Promise<MeResp
   const now = new Date();
   const me = await readMe();
 
-  const [threads, mainLastMessage, projects, apps, tasks, connections, agents] = await Promise.all([
+  const [threads, mainLastMessage, projects, apps, tasks, connections, secretRequests, agents] = await Promise.all([
     readThreadWindow(userId, me.mainThreadId, { list: listThreads, get: getThread, latestTerminal: getLatestTerminalThread }),
     readMainLastMessage(me.mainThreadId),
     listProjects(userId),
     listApps(userId),
     readTasks(userId, now),
     readConnections(userId),
+    readOpenSecretRequests(userId),
     readAgents(userId),
   ]);
   const sessions = await readSessions(threads);
@@ -214,6 +216,7 @@ export async function buildSnapshot(userId: string, readMe: () => Promise<MeResp
     tasks,
     connections,
     services: readServices(),
+    secretRequests,
     agents,
   };
 }

@@ -7,7 +7,8 @@ import type { ConnectionsState } from '../connections/reducer.ts';
 import { eventAction } from '../events.ts';
 import { event, resetSeq } from '../fixtures.ts';
 import { markNotificationsRead } from './actions.ts';
-import { KEEP, connectionReadKey, initialNotifications, notificationsReducer } from './reducer.ts';
+import { initialSecretRequests, secretRequestsReducer } from '../secret-requests/reducer.ts';
+import { KEEP, connectionReadKey, initialNotifications, notificationsReducer, secretRequestReadKey } from './reducer.ts';
 import type { NotificationsState } from './reducer.ts';
 
 const reduce = (state: NotificationsState, ...events: Parameters<typeof event>[0][]) => events.reduce((acc, item) => notificationsReducer(acc, eventAction(event(item))), state);
@@ -130,7 +131,7 @@ describe('notifications reducer', () => {
       connections = connectionsReducer(connections, action);
       notifications = notificationsReducer(notifications, action);
     };
-    const rows = () => notificationViews({ items: notifications.items, read: notifications.read, connections: connections.ids.map(id => connections.byId[id]), threads: {}, mainThreadId: 'main' });
+    const rows = () => notificationViews({ items: notifications.items, read: notifications.read, connections: connections.ids.map(id => connections.byId[id]), secretRequests: [], threads: {}, mainThreadId: 'main' });
 
     step({ type: 'connection.reauthorization_required', actor: 'system', agentName: null, payload: { ...about, error: 'token revoked' } });
     assert.deepEqual(
@@ -169,6 +170,51 @@ describe('notifications reducer', () => {
 
     // A boundary event of a row never marked changes nothing.
     assert.equal(notificationsReducer(notifications, eventAction(event({ type: 'connection.completed', payload: { ...about, connectionId: 'c9' } }))), notifications);
+  });
+
+  // The waiting row of an open request for credentials, through the real
+  // secretRequests reducer: one read mark per request, dropped when the
+  // request is issued again and when the values land.
+  it('keeps a request read while it is open, unread again when issued anew, pruned when the values land', () => {
+    resetSeq(300n);
+
+    let requests = initialSecretRequests;
+    let notifications = initialNotifications;
+    const step = (partial: Parameters<typeof event>[0]) => {
+      const action = eventAction(event(partial));
+
+      requests = secretRequestsReducer(requests, action);
+      notifications = notificationsReducer(notifications, action);
+    };
+    const rows = () => notificationViews({ items: notifications.items, read: notifications.read, connections: [], secretRequests: requests.ids.map(id => requests.byId[id]), threads: {}, mainThreadId: 'main' });
+    const asked = { requestId: 'r1', server: 'yandex-direct', fields: ['API_KEY'], requestedAt: '2026-10-10T10:00:00.000Z' };
+
+    step({ type: 'secrets.requested', agentName: 'auth', threadId: 'auth-1', payload: asked });
+    assert.deepEqual(
+      rows().map(row => [row.key, row.title, row.desc, row.unread]),
+      [['secret-request:r1', 'yandex-direct keys needed', 'The “auth” agent asks for API_KEY.', true]],
+    );
+
+    notifications = notificationsReducer(notifications, markNotificationsRead([secretRequestReadKey('r1')]));
+    assert.equal(unreadCount(rows()), 0);
+
+    // Issued again: the same row, a new ask — unread anew.
+    step({ type: 'secrets.requested', agentName: 'auth', threadId: 'auth-2', payload: { ...asked, fields: ['API_KEY', 'TOKEN'], requestedAt: '2026-10-10T11:00:00.000Z' } });
+    assert.deepEqual(
+      rows().map(row => [row.key, row.desc, row.at.toISOString(), row.unread]),
+      [['secret-request:r1', 'The “auth” agent asks for API_KEY and TOKEN.', '2026-10-10T11:00:00.000Z', true]],
+    );
+
+    notifications = notificationsReducer(notifications, markNotificationsRead([secretRequestReadKey('r1')]));
+    step({ type: 'secrets.provisioned', actor: 'system', targetThreadId: 'auth-2', payload: { requestId: 'r1', server: 'yandex-direct', fields: ['API_KEY', 'TOKEN'] } });
+    assert.deepEqual(rows(), []);
+    assert.deepEqual(notifications.read, {});
+
+    // A provisioned event without the id (recorded before it was carried) closes the row by its server; no mark to drop.
+    step({ type: 'oauth_client.requested', agentName: 'auth', threadId: 'auth-3', payload: { requestId: 'r2', server: 'google', fields: ['client_id', 'client_secret'], requestedAt: '2026-10-10T12:00:00.000Z' } });
+    assert.equal(rows()[0].title, 'google OAuth client needed');
+    step({ type: 'oauth_client.provisioned', actor: 'system', targetThreadId: 'auth-3', payload: { server: 'google', fields: ['client_id'] } });
+    assert.deepEqual(rows(), []);
   });
 
   it('leaves other events alone', () => {

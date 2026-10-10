@@ -3,8 +3,8 @@
 // store. Tolerant of history: a record without its id, or with a date that
 // does not parse, is skipped (null) rather than folded in broken.
 
-import type { ConnectionView, ProjectView, TaskView } from '../../api/contract.ts';
-import type { ConnectionRecord, ProjectRecord, TaskRecord } from '../../core/event-types.ts';
+import type { ConnectionView, OpenSecretRequestView, ProjectView, TaskView } from '../../api/contract.ts';
+import type { ConnectionRecord, ProjectRecord, SecretRequestRecord, TaskRecord } from '../../core/event-types.ts';
 
 function date(value: unknown): Date | null {
   if (typeof value !== 'string') {
@@ -86,5 +86,25 @@ export function connectionFromRecord(record: Partial<ConnectionRecord>): Connect
     threadId: str(record.threadId),
     createdAt,
     updatedAt,
+  };
+}
+
+// The open request as secrets.requested / oauth_client.requested carry it:
+// the kind is the event's type, the asking thread and agent are the
+// event's author (its threadId and agentName), the moment is the record's
+// (the row's) — the event's own when the record carries none.
+export function secretRequestFromRecord(kind: OpenSecretRequestView['kind'], record: Partial<SecretRequestRecord>, author: { threadId: string | null; agentName: string | null; createdAt: Date }): OpenSecretRequestView | null {
+  if (!record.requestId || !record.server) {
+    return null;
+  }
+
+  return {
+    id: record.requestId,
+    kind,
+    server: record.server,
+    fields: Array.isArray(record.fields) ? record.fields.filter((field): field is string => typeof field === 'string') : [],
+    threadId: author.threadId,
+    agent: author.agentName,
+    requestedAt: date(record.requestedAt) ?? author.createdAt,
   };
 }

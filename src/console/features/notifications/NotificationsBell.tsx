@@ -2,8 +2,9 @@
 // "Activity and notifications"): the count of unread rows on the bell, the
 // rows grouped — waiting for you, errors, from agents — in a Pop floating
 // under the bell (ui/Float). A row's action opens its route and marks the
-// row read; "Mark all read" marks every row. The rows — store/notifications
-// and the connections (notifications.logic.ts); the time column ticks by
+// row read; "Mark all read" marks every row. The rows — store/notifications,
+// the connections and the open requests for credentials
+// (notifications.logic.ts); the time column ticks by
 // the minute while the popover is open. The focus: on open it lands on the
 // named dialog (the Pop), and "Mark all read" hands it back there before
 // its button leaves the DOM — a keyboard user keeps a place in the popover.
@@ -18,6 +19,7 @@ import { selectConnections } from '../../store/connections/selectors.ts';
 import { markNotificationsRead } from '../../store/notifications/actions.ts';
 import { selectNotificationItems, selectNotificationsRead } from '../../store/notifications/selectors.ts';
 import { routeTo } from '../../store/router/actions.ts';
+import { selectSecretRequests } from '../../store/secret-requests/selectors.ts';
 import { selectMe } from '../../store/session/selectors.ts';
 import { selectThreadsById } from '../../store/threads/selectors.ts';
 import { Bell } from '../../ui/Bell/Bell.tsx';
@@ -30,8 +32,8 @@ import type { NotificationView } from './notifications.logic.ts';
 import './Notifications.css';
 
 const selectNotificationViews = createSelector(
-  [selectNotificationItems, selectNotificationsRead, selectConnections, selectThreadsById, (state: Parameters<typeof selectMe>[0]) => selectMe(state)?.mainThreadId ?? null],
-  (items, read, connections, threads, mainThreadId) => notificationViews({ items, read, connections, threads, mainThreadId }),
+  [selectNotificationItems, selectNotificationsRead, selectConnections, selectSecretRequests, selectThreadsById, (state: Parameters<typeof selectMe>[0]) => selectMe(state)?.mainThreadId ?? null],
+  (items, read, connections, secretRequests, threads, mainThreadId) => notificationViews({ items, read, connections, secretRequests, threads, mainThreadId }),
 );
 
 export function NotificationsBell() {

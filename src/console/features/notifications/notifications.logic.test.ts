@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import type { ConnectionView } from '../../../api/contract.ts';
+import type { ConnectionView, OpenSecretRequestView } from '../../../api/contract.ts';
 import type { NotificationItem } from '../../store/notifications/reducer.ts';
 import { thread } from '../../store/fixtures.ts';
-import { clip, connectionKey, exceptionDesc, exceptionTitle, notificationViews, threadWords, unreadCount, unreadKeys } from './notifications.logic.ts';
+import { clip, connectionKey, exceptionDesc, exceptionTitle, notificationViews, secretRequestDesc, secretRequestKey, secretRequestTitle, threadWords, unreadCount, unreadKeys } from './notifications.logic.ts';
 
 const at = (minute: number) => new Date(2026, 9, 9, 17, minute);
 
@@ -41,8 +41,19 @@ const connection = (partial: Partial<ConnectionView> = {}): ConnectionView => ({
   ...partial,
 });
 
+const request = (partial: Partial<OpenSecretRequestView> = {}): OpenSecretRequestView => ({
+  id: 'r1',
+  kind: 'external-secrets',
+  server: 'yandex-direct',
+  fields: ['API_KEY'],
+  threadId: 't1',
+  agent: 'auth',
+  requestedAt: at(6),
+  ...partial,
+});
+
 const THREADS = { t1: thread({ id: 't1', title: 'Mini-apps: publishing by slug' }), main: thread({ id: 'main', parentId: null, agent: 'coordinator', title: null }) };
-const base = { read: {}, connections: [], threads: THREADS, mainThreadId: 'main' };
+const base = { read: {}, connections: [], secretRequests: [], threads: THREADS, mainThreadId: 'main' };
 
 describe('notifications', () => {
   it('groups the rows: waiting first, then errors, then the agents, newest first within a group', () => {
@@ -50,11 +61,13 @@ describe('notifications', () => {
       ...base,
       items: [note(1, 1, 'Build is green'), exception(2, 2, { consumerName: 'router', eventType: 'user.message' }), note(3, 3, 'Need the 2FA code', 'urgent'), exception(4, 4, { slug: 'db-backup', status: 'failed', exitCode: 127, error: '' })],
       connections: [connection()],
+      secretRequests: [request()],
     });
 
     assert.deepEqual(
       views.map(view => [view.group, view.key]),
       [
+        ['waiting', 'secret-request:r1'],
         ['waiting', 'connection:c1'],
         ['errors', '4'],
         ['errors', '2'],
@@ -62,7 +75,7 @@ describe('notifications', () => {
         ['agents', '1'],
       ],
     );
-    assert.equal(unreadCount(views), 5);
+    assert.equal(unreadCount(views), 6);
     assert.deepEqual(unreadKeys(views), views.map(view => view.key));
   });
 
@@ -127,6 +140,25 @@ describe('notifications', () => {
     assert.deepEqual(view.action, { label: 'Open connections', route: { key: 'connections' } });
     assert.equal(notificationViews({ ...base, items: [], connections: [connection({ identity: null })] })[0].desc, 'notion');
     assert.equal(connectionKey(connection({ updatedAt: at(7) })), 'connection:c1');
+  });
+
+  it('writes the waiting row of an open request for credentials: the server and the kind, who asks for what, "Enter" into its form', () => {
+    const [keys] = notificationViews({ ...base, items: [], secretRequests: [request()] });
+
+    assert.equal(keys.title, 'yandex-direct keys needed');
+    assert.equal(keys.desc, 'The “auth” agent asks for API_KEY.');
+    assert.equal(keys.icon, 'key-round');
+    assert.equal(keys.state, 'act');
+    assert.equal(keys.group, 'waiting');
+    assert.deepEqual(keys.at, at(6));
+    assert.deepEqual(keys.action, { label: 'Enter', route: { key: 'secrets', id: 'r1' } });
+    assert.equal(secretRequestKey(request()), 'secret-request:r1');
+
+    assert.equal(secretRequestTitle(request({ kind: 'oauth-client', server: 'google' })), 'google OAuth client needed');
+    assert.equal(secretRequestDesc(request({ kind: 'oauth-client', fields: ['client_id', 'client_secret'] })), 'The “auth” agent asks for the client ID and secret.');
+    assert.equal(secretRequestDesc(request({ fields: ['API_KEY', 'LOGIN', 'TOKEN'] })), 'The “auth” agent asks for API_KEY, LOGIN and TOKEN.');
+    assert.equal(secretRequestDesc(request({ fields: ['A', 'B'], agent: null })), 'An agent asks for A and B.');
+    assert.equal(secretRequestDesc(request({ fields: [] })), 'The “auth” agent asks for the installation credentials.');
   });
 
   it('counts the unread: a read key is read, the same connection with its row changed stays read', () => {

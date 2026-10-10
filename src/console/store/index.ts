@@ -27,6 +27,7 @@ import { appsReducer } from './apps/reducer.ts';
 import { loadAppsHandler, publishAppHandler, unpublishAppHandler } from './apps/handlers.ts';
 import { scheduleReducer } from './schedule/reducer.ts';
 import { connectionsReducer } from './connections/reducer.ts';
+import { secretRequestsReducer } from './secret-requests/reducer.ts';
 import { agentsReducer } from './agents/reducer.ts';
 import { notificationsReducer } from './notifications/reducer.ts';
 import { uiReducer } from './ui/reducer.ts';
@@ -83,6 +84,7 @@ export function createStore({ api, initialRoute, initialHash = '', enhancer }: C
     apps: appsReducer,
     schedule: scheduleReducer,
     connections: connectionsReducer,
+    secretRequests: secretRequestsReducer,
     agents: agentsReducer,
     notifications: notificationsReducer,
     ui: uiReducer,

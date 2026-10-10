@@ -523,6 +523,23 @@ export type ConnectionView = {
   updatedAt: Date;
 };
 
+// An open request for installation credentials (the one-time link an agent
+// sent the operator, src/capabilities/secret-requests.ts): what the bell
+// shows until the values land. Field names only, never values.
+export type OpenSecretRequestView = {
+  id: string;
+  kind: 'external-secrets' | 'oauth-client';
+  server: string;
+  fields: string[];
+  // The thread that issued the link and its agent; null when the row
+  // predates the thread being kept or the thread is gone.
+  threadId: string | null;
+  agent: string | null;
+  // When the link was issued; a request issued again for the same server
+  // replaces the open one and carries the new moment.
+  requestedAt: Date;
+};
+
 // A connectable service of the installation: the user-auth MCP servers of
 // the config (mcp-servers/*.json with auth: "user").
 export type ServiceView = {
@@ -582,5 +599,7 @@ export type SnapshotResponse = {
   tasks: TaskView[];
   connections: ConnectionView[];
   services: ServiceView[];
+  // The open requests for installation credentials, oldest first.
+  secretRequests: OpenSecretRequestView[];
   agents: AgentView[];
 };

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { connectionFromRecord, projectFromRecord, taskFromRecord } from './records.ts';
+import { connectionFromRecord, projectFromRecord, secretRequestFromRecord, taskFromRecord } from './records.ts';
 
 describe('registry records → views', () => {
   it('parses a project record and skips one without id or dates', () => {
@@ -31,5 +31,16 @@ describe('registry records → views', () => {
     assert.equal(view?.accountKey, 'default');
     assert.equal(view?.displayName, 'Notion');
     assert.equal(connectionFromRecord({ server: 'notion', account: 'default', name: 'Notion' }), null);
+  });
+
+  it('parses an open request for credentials: the kind from the caller, the author from the event, the moment from the record or the event', () => {
+    const author = { threadId: 'auth-1', agentName: 'auth', createdAt: new Date('2026-10-10T10:00:01.000Z') };
+    const view = secretRequestFromRecord('external-secrets', { requestId: 'r1', server: 'yandex-direct', fields: ['API_KEY', 7 as unknown as string], requestedAt: '2026-10-10T10:00:00.000Z' }, author);
+
+    assert.deepEqual(view, { id: 'r1', kind: 'external-secrets', server: 'yandex-direct', fields: ['API_KEY'], threadId: 'auth-1', agent: 'auth', requestedAt: new Date('2026-10-10T10:00:00.000Z') });
+    assert.equal(secretRequestFromRecord('oauth-client', { requestId: 'r2', server: 'google' }, author)?.requestedAt.toISOString(), '2026-10-10T10:00:01.000Z');
+    assert.deepEqual(secretRequestFromRecord('oauth-client', { requestId: 'r2', server: 'google' }, author)?.fields, []);
+    assert.equal(secretRequestFromRecord('oauth-client', { server: 'google' }, author), null);
+    assert.equal(secretRequestFromRecord('oauth-client', { requestId: 'r2' }, author), null);
   });
 });
