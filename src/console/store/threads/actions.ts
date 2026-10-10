@@ -14,8 +14,9 @@ export const loadThreadsFail = (filters: ThreadsListFilters, before: bigint | nu
   ({ type: 'LOAD_THREADS_FAIL', filters, before, error }) as const;
 
 // A chunk of a thread's feed, newest down: before = the feed's knownFrom, or
-// null for "from the head" (the handler resolves it to asOfSeq + 1 — what
-// comes after asOfSeq the tail delivers).
+// null for "from the head" (the handler resolves it to the seq after the
+// tail's last — what comes after it the tail delivers, or has — and to
+// asOfSeq + 1 before the tail's first frame).
 export const loadThreadEvents = (threadId: string, before: bigint | null) => ({ type: 'LOAD_THREAD_EVENTS', threadId, before }) as const;
 export const loadThreadEventsDone = (threadId: string, before: bigint | null, events: Event[], nextCursor: bigint | null) =>
   ({ type: 'LOAD_THREAD_EVENTS_DONE', threadId, before, events, nextCursor }) as const;

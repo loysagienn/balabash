@@ -76,7 +76,7 @@ export const loadThreadEventsHandler: ActionHandler<'LOAD_THREAD_EVENTS'> =
   ({ api, dispatch, getState, next }) =>
   async action => {
     const { threadId, before } = action;
-    const { asOfSeq } = getState().stream;
+    const { asOfSeq, lastSeq } = getState().stream;
 
     if (asOfSeq === null) {
       return;
@@ -84,8 +84,15 @@ export const loadThreadEventsHandler: ActionHandler<'LOAD_THREAD_EVENTS'> =
 
     next(action);
 
+    // "From the head" is everything the tail has not got to keep: the
+    // store holds every event after the last seq the tail delivered
+    // (nothing of this thread before it survives an eviction —
+    // lib/feed-eviction), and before the tail's first frame the snapshot's
+    // stamp is the head.
+    const head = lastSeq !== null && lastSeq > asOfSeq ? lastSeq : asOfSeq;
+
     try {
-      const page = await api.threads.events(threadId, { before: before ?? asOfSeq + 1n, limit: FEED_CHUNK });
+      const page = await api.threads.events(threadId, { before: before ?? head + 1n, limit: FEED_CHUNK });
 
       if (getState().feed.byThread[threadId]?.request?.before !== before) {
         return;

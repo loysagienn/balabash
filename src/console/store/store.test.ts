@@ -837,6 +837,33 @@ describe('thread events (feed)', () => {
     assert.deepEqual(store.getState().feed.byThread.t1.seqs, ['10', '11', '25']);
     assert.equal(store.getState().feed.byThread.t1.knownFrom, 10n);
   });
+
+  it('asks a chunk from the head after the seq the tail last delivered, and after the snapshot before the tail flows', async () => {
+    const calls: Calls = [];
+    const api = fakeApi({ threads: { events: async () => ({ events: [], nextCursor: null }) } }, calls);
+    const store = createStore({ api, initialRoute: { key: 'home' } });
+    const eventsCalls = () => calls.filter(call => call.name === 'threads.events').map(call => call.args[1]);
+
+    await dispatched(store, sessionCheck());
+    await settle();
+    await dispatched(store, loadThreadEvents('t1', null));
+    assert.deepEqual(eventsCalls(), [{ before: 101n, limit: 500 }]);
+
+    // The tail has moved: the store holds everything after its last frame
+    // (what an eviction took before it is the chunk's to bring back).
+    store.dispatch(eventAction(event({ type: 'thread.progress', seq: 180n, threadId: 't2', payload: { text: 'x' } })));
+    await dispatched(store, loadThreadEvents('t1', null));
+    assert.deepEqual(eventsCalls().at(-1), { before: 181n, limit: 500 });
+
+    // A frame below the snapshot's stamp does not move the head below it.
+    const other = createStore({ api: fakeApi({ threads: { events: async () => ({ events: [], nextCursor: null }) } }, calls), initialRoute: { key: 'home' } });
+
+    await dispatched(other, sessionCheck());
+    await settle();
+    other.dispatch(eventAction(event({ type: 'thread.progress', seq: 25n, threadId: 't2', payload: { text: 'x' } })));
+    await dispatched(other, loadThreadEvents('t1', null));
+    assert.deepEqual(eventsCalls().at(-1), { before: 101n, limit: 500 });
+  });
 });
 
 describe('route data', () => {

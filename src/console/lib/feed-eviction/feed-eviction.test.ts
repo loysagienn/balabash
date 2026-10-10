@@ -1,0 +1,241 @@
+// The eviction process over the real store with a fake Api and a clock
+// driven by hand: which feeds are in use (shown, running, the main
+// thread's), when a feed out of use is due, what a late frame of the tail
+// does to an evicted thread, and the silence after disconnecting.
+
+import assert from 'node:assert/strict';
+import { describe, it } from 'node:test';
+import type { TestContext } from 'node:test';
+import type { Api } from '../api/index.ts';
+import { createStore } from '../../store/index.ts';
+import type { AppStore } from '../../store/index.ts';
+import { eventAction } from '../../store/events.ts';
+import { routeTo } from '../../store/router/actions.ts';
+import { sessionCheck } from '../../store/session/actions.ts';
+import { loadThreadEvents } from '../../store/threads/actions.ts';
+import { ME, event, resetSeq, snapshot, thread } from '../../store/fixtures.ts';
+import { FEED_SWEEP_MS, FEED_TTL_MS, connectStoreToFeedEviction, evictableFeeds } from './index.ts';
+
+const MINUTE = 60_000;
+
+const api: Api = {
+  me: async () => ME,
+  auth: async () => ME,
+  consoleCode: async () => null,
+  logout: async () => ({ ok: true as const }),
+  snapshot: async () =>
+    snapshot({
+      asOfSeq: 50n,
+      threads: [
+        thread({ id: 'main', parentId: null, agent: 'coordinator' }),
+        thread({ id: 'running', createdSeq: 7n }),
+        thread({ id: 'done', createdSeq: 8n, status: 'completed', terminalSeq: 20n }),
+        thread({ id: 'other', createdSeq: 9n, status: 'completed', terminalSeq: 21n }),
+      ],
+    }),
+  settings: { update: async () => ({ settings: { workspaceName: 'Workspace', operatorName: null }, seq: null }) },
+  apps: {
+    list: async () => ({ apps: [], publicAppsBase: '' }),
+    publish: async () => {
+      throw new Error('not here');
+    },
+    unpublish: async () => {
+      throw new Error('not here');
+    },
+  },
+  projects: {
+    create: async () => {
+      throw new Error('not here');
+    },
+    update: async () => {
+      throw new Error('not here');
+    },
+    archive: async () => {
+      throw new Error('not here');
+    },
+    unarchive: async () => {
+      throw new Error('not here');
+    },
+  },
+  threads: {
+    list: async () => ({ threads: [], nextCursor: null }),
+    get: async () => ({ thread: thread({ id: 'done' }) }),
+    // One chunk for any thread: the thread's start, nothing older.
+    events: async threadId => ({ events: [event({ type: 'thread.started', seq: threadId === 'done' ? 8n : 9n, threadId, payload: { agent: 'engineer' } })], nextCursor: null }),
+    sendMessage: async () => ({}),
+    interrupt: async () => ({}),
+    cancel: async () => ({}),
+  },
+  workspace: {
+    node: async () => ({ kind: 'dir', path: '', directories: [], folders: [], files: [] }),
+    text: async () => '',
+  },
+  files: {
+    meta: async () => {
+      throw new Error('not here');
+    },
+  },
+  llmRequests: { list: async () => ({ requests: [] }) },
+  secretRequests: {
+    get: async () => {
+      throw new Error('not here');
+    },
+    provision: async () => {
+      throw new Error('not here');
+    },
+  },
+};
+
+const settle = () => new Promise(resolve => setTimeout(resolve, 0));
+
+// A signed-in store with its snapshot landed and the process attached under
+// mocked timers and a clock the test moves (`clock.now`, ms).
+async function connected(t: TestContext): Promise<{ store: AppStore; clock: { now: number }; feeds: () => string[]; sweep: (times?: number) => void; disconnect: () => void }> {
+  resetSeq(51n);
+
+  const clock = { now: 1_000_000 };
+  const store = createStore({ api, initialRoute: { key: 'home' } });
+
+  store.dispatch(sessionCheck());
+  await settle();
+  assert.equal(store.getState().stream.asOfSeq, 50n);
+
+  t.mock.timers.enable({ apis: ['setInterval'] });
+
+  const disconnect = connectStoreToFeedEviction(store, { now: () => clock.now });
+
+  t.after(disconnect);
+
+  // Moving the clock by one sweep and letting the sweep run.
+  const sweep = (times = 1) => {
+    for (let i = 0; i < times; i += 1) {
+      clock.now += FEED_SWEEP_MS;
+      t.mock.timers.tick(FEED_SWEEP_MS);
+    }
+  };
+
+  return { store, clock, feeds: () => Object.keys(store.getState().feed.byThread).sort(), sweep, disconnect };
+}
+
+const frame = (threadId: string, targetThreadId: string | null = null) => eventAction(event({ type: 'thread.progress', threadId, targetThreadId, payload: { text: 'working' } }));
+
+describe('feed eviction process', () => {
+  it('evicts the feed of a finished thread once it has been out of use for the TTL, not before', async t => {
+    const { store, feeds, sweep } = await connected(t);
+
+    store.dispatch(frame('done'));
+    store.dispatch(frame('other'));
+    assert.deepEqual(feeds(), ['done', 'other']);
+
+    sweep(FEED_TTL_MS / MINUTE - 1);
+    assert.deepEqual(feeds(), ['done', 'other']);
+
+    // A frame of the tail is a use: that feed's clock starts over — one
+    // sweep before the sweep that takes the other feed.
+    store.dispatch(frame('other'));
+    sweep();
+    assert.deepEqual(feeds(), ['other']);
+    assert.equal(store.getState().feed.events['51'], undefined);
+
+    sweep(FEED_TTL_MS / MINUTE - 2);
+    assert.deepEqual(feeds(), ['other']);
+    sweep();
+    assert.deepEqual(feeds(), []);
+    assert.deepEqual(store.getState().feed.events, {});
+  });
+
+  it('keeps the feeds in use: the thread on screen, a running thread, the main thread', async t => {
+    const { store, feeds, sweep } = await connected(t);
+
+    store.dispatch(routeTo({ key: 'thread', id: 'done' }));
+    await settle();
+    assert.deepEqual(store.getState().feed.byThread.done.seqs, ['8']);
+
+    store.dispatch(frame('running'));
+    store.dispatch(frame('main'));
+    store.dispatch(frame('other'));
+    assert.deepEqual(feeds(), ['done', 'main', 'other', 'running']);
+
+    sweep(FEED_TTL_MS / MINUTE + 1);
+    assert.deepEqual(feeds(), ['done', 'main', 'running']);
+
+    // The thread left: its reading period starts when the reading ends.
+    store.dispatch(routeTo({ key: 'home' }));
+    sweep(FEED_TTL_MS / MINUTE - 1);
+    assert.deepEqual(feeds(), ['done', 'main', 'running']);
+    sweep();
+    assert.deepEqual(feeds(), ['main', 'running']);
+
+    // The running thread ends: its feed is due the TTL after its last frame.
+    store.dispatch(eventAction(event({ type: 'thread.completed', threadId: 'running', targetThreadId: 'main', payload: { summary: { text: 'done' } } })));
+    assert.equal(store.getState().threads.byId.running.status, 'completed');
+    sweep(FEED_TTL_MS / MINUTE - 1);
+    assert.deepEqual(feeds(), ['main', 'running']);
+    sweep();
+    assert.deepEqual(feeds(), ['main']);
+    // The end was the main thread's too: it stays with the main feed.
+    assert.deepEqual(store.getState().feed.byThread.main.seqs, ['52', '54']);
+  });
+
+  it('does not evict a feed with a chunk in flight, and an evicted thread opened again loads from the head', async t => {
+    const { store, feeds, sweep } = await connected(t);
+    const requests: Array<bigint | undefined> = [];
+    const slow = new Promise<{ events: never[]; nextCursor: null }>(() => {});
+    const patched: Api = { ...api, threads: { ...api.threads, events: async (_threadId, query) => {
+      requests.push(query.before);
+
+      return slow;
+    } } };
+    const patchedStore = createStore({ api: patched, initialRoute: { key: 'home' } });
+
+    patchedStore.dispatch(sessionCheck());
+    await settle();
+
+    const clock = { now: 1_000_000 };
+    const disconnect = connectStoreToFeedEviction(patchedStore, { now: () => clock.now, ttlMs: 2 * MINUTE, sweepMs: MINUTE });
+
+    t.after(disconnect);
+    patchedStore.dispatch(frame('done'));
+    patchedStore.dispatch(loadThreadEvents('done', null));
+    patchedStore.dispatch(routeTo({ key: 'home' }));
+    assert.deepEqual(requests, [52n]);
+    assert.notEqual(patchedStore.getState().feed.byThread.done.request, null);
+
+    for (let i = 0; i < 3; i += 1) {
+      clock.now += MINUTE;
+      t.mock.timers.tick(MINUTE);
+    }
+
+    assert.deepEqual(Object.keys(patchedStore.getState().feed.byThread), ['done']);
+
+    // Meanwhile the first store: evicted, then opened again — the chunk is
+    // asked from the seq after the tail's last, so the evicted frame comes
+    // back with it.
+    store.dispatch(frame('done'));
+    sweep(FEED_TTL_MS / MINUTE);
+    assert.deepEqual(feeds(), []);
+    store.dispatch(routeTo({ key: 'thread', id: 'done' }));
+    await settle();
+    assert.deepEqual(store.getState().feed.byThread.done.seqs, ['8']);
+    assert.equal(store.getState().feed.byThread.done.knownFrom, 8n);
+  });
+
+  it('is silent once disconnected', async t => {
+    const { store, feeds, sweep, disconnect } = await connected(t);
+
+    store.dispatch(frame('done'));
+    disconnect();
+    sweep(FEED_TTL_MS / MINUTE + 1);
+    assert.deepEqual(feeds(), ['done']);
+  });
+
+  it('evictableFeeds: a feed without a reading is not due, a reading at the deadline is', async t => {
+    const { store } = await connected(t);
+
+    store.dispatch(frame('done'));
+    store.dispatch(frame('other'));
+    assert.deepEqual(evictableFeeds(store.getState(), new Map([['done', 5]]), 5), ['done']);
+    assert.deepEqual(evictableFeeds(store.getState(), new Map([['done', 6]]), 5), []);
+    assert.deepEqual(evictableFeeds(store.getState(), new Map([['done', 1], ['other', 1]]), 5), ['done', 'other']);
+  });
+});

@@ -3,6 +3,11 @@
 // tail writes every event it brings, open thread or not; a chunk loaded on
 // request fills the range below knownFrom. Idempotent by seq: a seq already
 // known is ignored, so the overlap of snapshot and tail is harmless.
+// Eviction (FEED_EVICT, decided by lib/feed-eviction) takes a thread's feed
+// out whole — its seq list, its cursor, and every event of it no kept
+// thread shows as well (an event is in the feeds of both its author and its
+// addressee) — so the thread reads as never loaded, and its next opening
+// asks for a chunk from the head.
 
 import type { Event } from '../../../core/contract.ts';
 import { feedThreadIds } from '../../../projections/feed.ts';
@@ -121,6 +126,35 @@ export function feedReducer(state: FeedState = initialFeed, action: Action): Fee
       return feed.request?.before === action.before
         ? { ...state, byThread: { ...state.byThread, [action.threadId]: { ...feed, request: null, error: action.error } } }
         : state;
+    }
+    case 'FEED_EVICT': {
+      const gone = action.threadIds.filter(threadId => state.byThread[threadId]);
+
+      if (gone.length === 0) {
+        return state;
+      }
+
+      const byThread = { ...state.byThread };
+
+      for (const threadId of gone) {
+        delete byThread[threadId];
+      }
+
+      const events = { ...state.events };
+
+      for (const threadId of gone) {
+        for (const seq of state.byThread[threadId]!.seqs) {
+          const event = events[seq];
+
+          // The other feed of the event (its author's or its addressee's)
+          // is still here: the event stays with it.
+          if (event && !feedThreadIds(event).some(other => byThread[other])) {
+            delete events[seq];
+          }
+        }
+      }
+
+      return { byThread, events };
     }
     default:
       return isEventAction(action) ? addEvents(state, [action.event]) : state;

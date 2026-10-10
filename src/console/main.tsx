@@ -1,6 +1,6 @@
 // Entry of the console SPA. The shell (src/api/console.ts) mounts it into
 // #root. Here the store is created with the route read from the location,
-// the processes (history, event stream, tab visibility) are attached, React renders,
+// the processes (history, event stream, tab visibility, feed eviction) are attached, React renders,
 // and the session check starts everything else (frontend.md, "Снимок +
 // хвост").
 
@@ -17,6 +17,7 @@ import { connectStoreToHistory } from './lib/router/history.ts';
 import { readRoute } from './lib/router/routes.ts';
 import { connectStoreToStream } from './lib/stream/index.ts';
 import { connectStoreToVisibility } from './lib/visibility/index.ts';
+import { connectStoreToFeedEviction } from './lib/feed-eviction/index.ts';
 import { connectQueryClientToSession } from './lib/query/session.ts';
 import { PHONE_MEDIA, installPinchGuard } from './lib/touch/pinch.ts';
 import { createStore } from './store/index.ts';
@@ -45,6 +46,9 @@ store = createStore({ api, initialRoute: readRoute(window.location.pathname + wi
 connectStoreToHistory(store, { readScroll: () => document.querySelector<HTMLElement>('main.shell-body')?.scrollTop ?? null });
 connectStoreToStream(store);
 connectStoreToVisibility(store);
+// The feeds of threads neither shown nor running leave the store after a
+// while (lib/feed-eviction).
+connectStoreToFeedEviction(store);
 // The phone's two-finger zoom is off (lib/touch/pinch.ts); desktop zoom — a
 // touch screen beside a mouse included — is not.
 installPinchGuard(document, navigator, window.matchMedia(PHONE_MEDIA));
