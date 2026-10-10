@@ -11,7 +11,8 @@ import type { SessionState } from '../projections/session.ts';
 // The human behind a user.message, as the channel knew them.
 export type UserIdentity = { firstName?: string; lastName?: string; username?: string };
 
-// A file that arrived with a user.message (stored by the channel adapter):
+// A file a message refers to — user.message.files (stored by the channel
+// adapter), thread.message.files (the sender's facts, src/core/file-blocks.ts):
 // the fileId points into file storage, the rest describes it.
 export type InboundFile = { fileId: string; contentType?: string | null; originalFilename?: string | null; sizeBytes?: number | null };
 
@@ -37,7 +38,10 @@ export type EventPayloads = {
     projectSlug?: string;
   };
   'thread.progress': { text: string };
-  'thread.message': { text: string; fileIds?: string[] };
+  // fileIds — the references the model reads; files — the same files with
+  // their facts for the reader, written together with fileIds (absent in
+  // history recorded before them).
+  'thread.message': { text: string; fileIds?: string[]; files?: InboundFile[] };
   'thread.notification': { text: string; level: NotificationLevel };
   'thread.completed': { summary: ThreadSummary; title?: string; description?: string };
   'thread.failed': { error: string };

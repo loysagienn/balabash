@@ -8,6 +8,7 @@ import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import type {
   Event,
+  FileRef,
   FilesApi,
   JsonObject,
   NotificationLevel,
@@ -18,6 +19,7 @@ import type {
   ToolsApi,
 } from '../core/contract.ts';
 import { appendEvent } from '../core/append.ts';
+import { messageFile } from '../core/file-blocks.ts';
 import {
   THREAD_CANCEL,
   THREAD_COMPLETED,
@@ -59,13 +61,19 @@ function getErrorMessage(error: unknown): string {
 }
 
 // File references in an outgoing thread.message: deduplicated and checked
-// against the workspace (a foreign or unknown fileId throws).
-async function validateMessageFileIds(userId: string, fileIds: string[] | undefined): Promise<string[]> {
+// against the workspace (a foreign or unknown fileId throws); the rows come
+// back for the payload's facts.
+async function validateMessageFiles(userId: string, fileIds: string[] | undefined): Promise<FileRef[]> {
   const unique = [...new Set((fileIds ?? []).map(id => id.trim()).filter(Boolean))];
 
-  await Promise.all(unique.map(fileId => getUserFile(userId, fileId)));
+  return Promise.all(unique.map(fileId => getUserFile(userId, fileId)));
+}
 
-  return unique;
+// The payload of a thread.message: the text, and for the files it carries
+// both the references (fileIds — what the model reads) and their facts
+// (files — what the reader names the attachments by).
+function threadMessagePayload(text: string, files: FileRef[]): JsonObject {
+  return { text, ...(files.length ? { fileIds: files.map(file => file.id), files: files.map(messageFile) } : {}) };
 }
 
 // An event's level must not exceed the thread's level.
@@ -271,7 +279,7 @@ export async function spawnAgentRun(thread: Thread, startedEvent: Event): Promis
     // are validated against the workspace up front: a dead or foreign fileId
     // must reject the call, not surface later at the recipient.
     sendToChild: async (childThreadId: string, text: string, fileIds?: string[]) => {
-      const validFileIds = await validateMessageFileIds(userId, fileIds);
+      const files = await validateMessageFiles(userId, fileIds);
 
       await appendEvent({
         type: THREAD_MESSAGE,
@@ -280,12 +288,12 @@ export async function spawnAgentRun(thread: Thread, startedEvent: Event): Promis
         userId,
         threadId,
         targetThreadId: childThreadId,
-        payload: { text, ...(validFileIds.length ? { fileIds: validFileIds } : {}) },
+        payload: threadMessagePayload(text, files),
       });
     },
 
     sendToParent: async (text: string, fileIds?: string[]) => {
-      const validFileIds = await validateMessageFileIds(userId, fileIds);
+      const files = await validateMessageFiles(userId, fileIds);
 
       await appendEvent({
         type: THREAD_MESSAGE,
@@ -294,7 +302,7 @@ export async function spawnAgentRun(thread: Thread, startedEvent: Event): Promis
         userId,
         threadId,
         targetThreadId: thread.parentId,
-        payload: { text, ...(validFileIds.length ? { fileIds: validFileIds } : {}) },
+        payload: threadMessagePayload(text, files),
       });
     },
 

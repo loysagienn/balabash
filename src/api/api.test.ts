@@ -15,7 +15,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { STAND_HOST, startStand } from '../test-support/stand.ts';
 import type { Reply, Stand } from '../test-support/stand.ts';
-import type { CreateProjectResponse, ProjectResponse, SettingsResponse, MeResponse, WorkspaceNodeResponse } from './contract.ts';
+import type { CreateProjectResponse, FileMetaResponse, ProjectResponse, SettingsResponse, MeResponse, WorkspaceNodeResponse } from './contract.ts';
 
 type ErrorBody = { error: { code: string; message: string } };
 
@@ -432,6 +432,37 @@ describe('the cache policy of the private surfaces', () => {
     assert.equal(reply.status, 200, reply.text);
     assert.equal(reply.text, 'stored');
     assert.equal(reply.headers['cache-control'], 'private, max-age=3600');
+  });
+
+  test('the facts of a stored file by id: own — kept for an hour; foreign and missing — the same 404', async () => {
+    const { ingestFile } = await import('../files/index.ts');
+    const own = await ingestFile({ body: Buffer.from('<png>'), contentType: 'image/png', sizeBytes: 5, originalFilename: 'shot.png', width: 32, height: 16, userId: stand.userId });
+    const foreign = await ingestFile({ body: Buffer.from('theirs'), contentType: 'text/plain', sizeBytes: 6, originalFilename: 'theirs.txt', userId: 'someone-else' });
+
+    const reply = await stand.request('GET', `/api/files/${own.id}/meta`);
+
+    assert.equal(reply.status, 200, reply.text);
+    assert.deepEqual(reply.json<FileMetaResponse>(), { file: { fileId: own.id, name: 'shot.png', contentType: 'image/png', sizeBytes: 5, width: 32, height: 16 } });
+    assert.equal(reply.headers['cache-control'], 'private, max-age=3600');
+
+    const nameless = await ingestFile({ body: Buffer.from('?'), userId: stand.userId });
+    const bare = await stand.request('GET', `/api/files/${nameless.id}/meta`);
+
+    assert.equal(bare.status, 200, bare.text);
+    // The size is the store's to record at ingest (the local driver counts the bytes); the rest is unknown.
+    assert.deepEqual(bare.json<FileMetaResponse>().file, { fileId: nameless.id, name: null, contentType: null, sizeBytes: nameless.sizeBytes, width: null, height: null });
+
+    for (const id of [foreign.id, 'no-such-file']) {
+      const refused = await stand.request('GET', `/api/files/${id}/meta`);
+
+      assert.equal(refused.status, 404, refused.text);
+      assert.equal(refused.json<ErrorBody>().error.code, 'not_found');
+      assert.equal(refused.headers['cache-control'], 'no-store');
+    }
+
+    const signedOut = await stand.request('GET', `/api/files/${own.id}/meta`, { cookie: '' });
+
+    assert.equal(signedOut.status, 401);
   });
 
   test('the workspace bytes are revalidated by ETag: 304 while the file holds, the bytes again once it changed', async () => {

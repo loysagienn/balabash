@@ -226,6 +226,26 @@ export type WorkspaceNodeResponse =
     };
 
 // ---------------------------------------------------------------------------
+// A stored file's facts by id: GET /api/files/:fileId/meta, under the
+// session with the ownership rule of the bytes (GET /api/files/:fileId) — a
+// foreign file and a missing one are the same 404. For the attachments of
+// recorded history that carry the fileId alone (src/core/file-blocks.ts);
+// a stored file is immutable, so the answer is kept privately like the bytes.
+
+export type StoredFileMeta = {
+  fileId: string;
+  // The original filename, null when the file arrived without one.
+  name: string | null;
+  contentType: string | null;
+  sizeBytes: number | null;
+  // Of an image, when known at ingest.
+  width: number | null;
+  height: number | null;
+};
+
+export type FileMetaResponse = { file: StoredFileMeta };
+
+// ---------------------------------------------------------------------------
 // LLM request telemetry (read-only): the llm_requests table minus rawUsage,
 // scoped to the session's userId. Serves the /llm-usage chart — the raw
 // last-N series, no server-side aggregation. Token counts are null (not 0)

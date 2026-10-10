@@ -64,7 +64,7 @@ function messageText(text: string | null | undefined, attachments: readonly stri
 
 function blockAttachments(blocks: readonly ContentBlock[]): string[] {
   return blocks.flatMap(block =>
-    block.type === 'image' ? ['image'] : block.type === 'file' ? ['file'] : block.type === 'resource_link' ? [block.name ?? block.uri] : [],
+    block.type === 'image' ? [block.name ?? 'image'] : block.type === 'file' ? [block.name ?? 'file'] : block.type === 'resource_link' ? [block.name ?? block.uri] : [],
   );
 }
 

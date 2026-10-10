@@ -100,6 +100,11 @@ const api: Api = {
     node: async () => ({ kind: 'dir', path: '', directories: [], folders: [], files: [] }),
     text: async () => '',
   },
+  files: {
+    meta: async () => {
+      throw new Error('not here');
+    },
+  },
   llmRequests: { list: async () => ({ requests: [] }) },
   secretRequests: {
     get: async () => {

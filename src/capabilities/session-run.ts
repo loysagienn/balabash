@@ -9,6 +9,7 @@
 import { mkdirSync } from 'node:fs';
 import { THREAD_NAMING_NOTE } from '../../agents/world/index.ts';
 import { workspaceDbPath, workspaceTasksDir } from '../workspace/layout.ts';
+import { fileContentBlock } from '../core/file-blocks.ts';
 import {
   CANCEL_REASON_PARAM_DESCRIPTION,
   CANCEL_THREAD_DESCRIPTION,
@@ -226,9 +227,7 @@ function createSendFileTool(ctx: RunContext, headless: boolean): SdkBridgeTool {
         content.push({ type: 'text', text: caption });
       }
 
-      content.push(
-        info.contentType?.toLowerCase().startsWith('image/') ? { type: 'image', fileId } : { type: 'file', fileId },
-      );
+      content.push(fileContentBlock(info));
 
       await ctx.pushEvent('agent.message', { content: content as unknown as JsonValue[] } as JsonObject);
 

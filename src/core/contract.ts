@@ -84,8 +84,13 @@ export type NotificationLevel = 'silent' | 'normal' | 'urgent';
 
 export type ContentBlock =
   | { type: 'text'; text: string }
-  | { type: 'image'; fileId: string }
-  | { type: 'file'; fileId: string }
+  // A stored file by reference, with its facts as the sender recorded them
+  // (the words of resource_link; src/core/file-blocks.ts writes them from
+  // the row): the reader names the attachment from the event itself.
+  // History recorded before the facts carries the fileId alone — the
+  // reader asks GET /api/files/:fileId/meta for it.
+  | { type: 'image'; fileId: string; name?: string; mimeType?: string; size?: number }
+  | { type: 'file'; fileId: string; name?: string; mimeType?: string; size?: number }
   | { type: 'resource_link'; uri: string; name?: string; mimeType?: string; size?: number };
 
 // ---------------------------------------------------------------------------

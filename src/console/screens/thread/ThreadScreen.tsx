@@ -22,7 +22,7 @@ import { selectComposerDraft, selectComposerSending, selectThreadCommandPending 
 import { Shell } from '../../features/shell/Shell.tsx';
 import { threadTitle, ctxOf } from '../../features/thread-list/rowData.ts';
 import { Attachments, FeedItems, hasRunningAction } from '../../features/thread-feed/ThreadFeed.tsx';
-import { fileHref } from '../../features/thread-feed/project.ts';
+import { fileIdAtts } from '../../features/thread-feed/project.ts';
 import { makeSelectFeedItems } from '../../features/thread-feed/selectors.ts';
 import { Composer } from '../../ui/Composer/Composer.tsx';
 import { ComposerLock } from '../../ui/Composer/ComposerLock.tsx';
@@ -329,7 +329,7 @@ function ThreadPage({ thread }: { thread: ThreadRecord }) {
                 {thread.status === 'completed' && thread.summary ? (
                   <Summary time={dateTimeLabel(thread.updatedAt, now)}>
                     <Md source={thread.summary.text} />
-                    <Attachments atts={(thread.summary.fileIds ?? []).map((fileId, i) => ({ key: `s${i}`, href: fileHref(fileId), name: 'file', image: false, size: null }))} />
+                    <Attachments atts={fileIdAtts(thread.summary.fileIds ?? [], 's')} />
                   </Summary>
                 ) : null}
                 {stage === 'skeleton' ? <FeedSkeleton /> : null}

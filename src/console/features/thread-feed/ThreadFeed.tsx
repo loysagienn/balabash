@@ -24,11 +24,27 @@ import { ActGroup } from '../../ui/Xp/Xp.tsx';
 import { Code } from '../../ui/atoms/atoms.tsx';
 import { fileIcon } from '../../ui/atoms/fileIcon.ts';
 import { FeedAction } from './FeedAction.tsx';
+import { attachmentFacts, needsMeta } from './attachments.ts';
 import type { Attachment, ChildItem, FeedItem, MessageItem } from './project.ts';
+import { useFileMeta } from './queries.ts';
 import { clipLine } from './actions.ts';
 import './ThreadFeed.css';
 
 const SUMMARY_MAX = 320;
+
+// One attachment: the facts the event recorded, else the stored file's meta
+// (asked for a file the history names by id alone), else the word of its
+// kind — the chip is a link to the file either way (attachments.ts).
+function AttachmentView({ att }: { att: Attachment }) {
+  const meta = useFileMeta(att.fileId, needsMeta(att));
+  const facts = attachmentFacts(att, meta.data);
+
+  return facts.image ? (
+    <AttThumb src={att.href} alt={facts.name} href={att.href} />
+  ) : (
+    <Att icon={fileIcon(facts.name)} file={facts.name} size={facts.size !== null ? fileSize(facts.size) : undefined} href={att.href} />
+  );
+}
 
 export function Attachments({ atts }: { atts: Attachment[] }) {
   if (atts.length === 0) {
@@ -37,13 +53,9 @@ export function Attachments({ atts }: { atts: Attachment[] }) {
 
   return (
     <Atts>
-      {atts.map(att =>
-        att.image ? (
-          <AttThumb key={att.key} src={att.href} alt={att.name} href={att.href} />
-        ) : (
-          <Att key={att.key} icon={fileIcon(att.name)} file={att.name} size={att.size !== null ? fileSize(att.size) : undefined} href={att.href} />
-        ),
-      )}
+      {atts.map(att => (
+        <AttachmentView key={att.key} att={att} />
+      ))}
     </Atts>
   );
 }

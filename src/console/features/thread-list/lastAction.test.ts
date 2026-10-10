@@ -74,12 +74,14 @@ describe('lastMessageOf', () => {
     });
     const files = event({ type: 'user.message', threadId: 'main', payload: { text: '', files: [{ fileId: 'a', name: 'a.png', mimeType: 'image/png', size: 1, originalFilename: 'a.png' }, { fileId: 'b', originalFilename: 'b.pdf' }] } });
     const picture = event({ type: 'agent.message', threadId: 'main', payload: { content: [{ type: 'image', fileId: 'f' }] } });
+    const named = event({ type: 'agent.message', threadId: 'main', payload: { content: [{ type: 'file', fileId: 'g', name: 'voucher.pdf', mimeType: 'application/pdf', size: 2048 }, { type: 'image', fileId: 'h', name: 'shot.png' }] } });
     const link = event({ type: 'agent.message', threadId: 'main', payload: { content: [{ type: 'resource_link', uri: 'https://x/y', name: 'report.pdf' }] } });
     const empty = event({ type: 'agent.message', threadId: 'main', payload: { content: [] } });
 
     assert.deepEqual(lastMessageOf([user, photo]), { text: 'image', at: photo.createdAt, seq: photo.seq });
     assert.deepEqual(lastMessageOf([user, photo, files]), { text: 'a.png, b.pdf', at: files.createdAt, seq: files.seq });
     assert.deepEqual(lastMessageOf([user, files, picture]), { text: 'image', at: picture.createdAt, seq: picture.seq });
+    assert.deepEqual(lastMessageOf([user, named]), { text: 'voucher.pdf, shot.png', at: named.createdAt, seq: named.seq });
     assert.deepEqual(lastMessageOf([user, link]), { text: 'report.pdf', at: link.createdAt, seq: link.seq });
     assert.deepEqual(lastMessageOf([user, empty]), { text: '', at: empty.createdAt, seq: empty.seq });
   });

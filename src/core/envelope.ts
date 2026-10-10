@@ -144,10 +144,12 @@ export const threadStartedPayloadSchema = z.looseObject({
 
 // Addressed inter-thread message (§5.1): one hop, parent ↔ child. Text plus
 // optional file references — files always travel between threads as fileIds
-// into the shared store, never as inline bytes.
+// into the shared store, never as inline bytes; files carries the facts of
+// the same files (name, type, size) for the reader.
 export const threadMessagePayloadSchema = z.looseObject({
   text: z.string().min(1),
   fileIds: z.array(z.string()).optional(),
+  files: z.array(z.looseObject({ fileId: z.string() })).optional(),
 });
 
 // A completed thread describes itself retrospectively: the corrected title

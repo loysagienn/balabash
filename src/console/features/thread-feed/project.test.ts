@@ -40,19 +40,49 @@ describe('projectFeed — messages', () => {
 
     assert.equal(user!.from, 'you');
     assert.equal(user!.variant, 'user');
-    assert.deepEqual(user!.atts, [{ key: '2:0', href: '/api/files/f1', name: 'shot.png', image: true, size: 1200 }]);
+    assert.deepEqual(user!.atts, [{ key: '2:0', href: '/api/files/f1', fileId: 'f1', name: 'shot.png', image: true, size: 1200 }]);
 
     assert.equal(agent!.to, 'you');
     assert.equal(agent!.text, 'done');
-    assert.equal(agent!.atts.length, 2);
-    assert.equal(agent!.atts[0]!.image, true);
-    assert.equal(agent!.atts[1]!.name, 'y.md');
+    assert.deepEqual(agent!.atts, [
+      { key: '3:1', href: '/api/files/f2', fileId: 'f2', name: null, image: true, size: null },
+      { key: '3:2', href: 'https://x/y.md', fileId: null, name: 'y.md', image: false, size: 40 },
+    ]);
     assert.equal(agent!.fold, false);
 
     assert.equal(toParent!.to, 'coordinator');
     assert.equal(fromParent!.from, 'coordinator');
     assert.equal(fromParent!.variant, 'task');
     assert.equal(toChild!.to, 'browser');
+  });
+
+  it('names the attachments by the facts the event recorded, and leaves the ones recorded by id alone to the meta', () => {
+    resetSeq(1n);
+
+    const items = projectFeed(
+      [
+        own('agent.message', { content: [{ type: 'file', fileId: 'f1', name: 'voucher.pdf', mimeType: 'application/pdf', size: 2048 }, { type: 'image', fileId: 'f2', name: 'shot.png', mimeType: 'image/png', size: 9 }] }),
+        // Telegram: a photo without a filename — files carry the type and the size.
+        event({ type: 'user.message', threadId: 't1', actor: 'user', payload: { text: null, files: [{ fileId: 'f3', contentType: 'image/jpeg', originalFilename: null, sizeBytes: 77 }] } }),
+        // A child's reply with files: fileIds for the model, files for the reader.
+        event({ type: 'thread.message', threadId: 'c9', targetThreadId: 't1', agentName: 'browser', payload: { text: 'the page', fileIds: ['f4'], files: [{ fileId: 'f4', contentType: 'image/png', originalFilename: 'page.png', sizeBytes: 5 }] } }),
+        // History before the facts: fileIds alone.
+        event({ type: 'thread.message', threadId: 't1', targetThreadId: 'main', payload: { text: 'to parent', fileIds: ['f5', 'f6'] } }),
+      ],
+      ctx,
+    );
+    const [agent, user, fromChild, toParent] = items as MessageItem[];
+
+    assert.deepEqual(agent!.atts, [
+      { key: '1:0', href: '/api/files/f1', fileId: 'f1', name: 'voucher.pdf', image: false, size: 2048 },
+      { key: '1:1', href: '/api/files/f2', fileId: 'f2', name: 'shot.png', image: true, size: 9 },
+    ]);
+    assert.deepEqual(user!.atts, [{ key: '2:0', href: '/api/files/f3', fileId: 'f3', name: null, image: true, size: 77 }]);
+    assert.deepEqual(fromChild!.atts, [{ key: '3:0', href: '/api/files/f4', fileId: 'f4', name: 'page.png', image: true, size: 5 }]);
+    assert.deepEqual(toParent!.atts, [
+      { key: '4:0', href: '/api/files/f5', fileId: 'f5', name: null, image: false, size: null },
+      { key: '4:1', href: '/api/files/f6', fileId: 'f6', name: null, image: false, size: null },
+    ]);
   });
 });
 
@@ -323,6 +353,55 @@ describe('projectFeed — threads, tasks and lines', () => {
     assert.deepEqual(task.meta, ['9k tokens', '4 calls', '1:30']);
     assert.equal(task.lastTool, 'Bash');
     assert.equal(task.summary, 'tests failed');
+  });
+
+  it('names a backgrounded sub-agent by its agent and keeps one card through a repeated announcement of the task', () => {
+    resetSeq(60n);
+
+    const items = projectFeed(
+      [
+        own('session.tool.started', { toolUseId: 'ag', name: 'Agent', input: { description: 'Data gaps', prompt: 'look', run_in_background: true } }),
+        own('session.task.started', { taskId: 'bg', toolUseId: 'ag', description: 'Data gaps', backgrounded: true, subagentType: 'general-purpose' }),
+        own('session.tool.completed', { toolUseId: 'ag', name: 'Agent', result: 'started', isError: false }),
+        own('session.task.progress', { taskId: 'bg', toolUseId: 'ag', description: 'Reading', usage: { totalTokens: 15_000, toolUses: 1, durationMs: 2_000 }, lastToolName: 'Read' }),
+        own('session.task.completed', { taskId: 'bg', status: 'completed', summary: 'first word', usage: { totalTokens: 77_000, toolUses: 33, durationMs: 382_000 } }),
+        // The harness announces the task again when its late output arrives.
+        own('session.task.started', { taskId: 'bg', toolUseId: 'ag', description: 'Data gaps', backgrounded: true, subagentType: 'general-purpose' }),
+      ],
+      ctx,
+    );
+
+    assert.deepEqual(
+      items.map(item => item.kind),
+      ['actions', 'subtask'],
+    );
+
+    const task = items[1] as SubtaskItem;
+
+    assert.equal(task.taskKind, 'general-purpose subagent');
+    assert.equal(task.state, 'run');
+    assert.equal(task.summary, 'first word');
+    assert.deepEqual(task.meta, ['77k tokens', '33 calls', '6:22']);
+
+    const done = projectFeed(
+      [
+        own('session.task.started', { taskId: 'bg', description: 'Data gaps', backgrounded: true, subagentType: 'general-purpose' }),
+        own('session.task.completed', { taskId: 'bg', status: 'completed', summary: 'first word', usage: { totalTokens: 77_000, toolUses: 33, durationMs: 382_000 } }),
+        own('session.task.started', { taskId: 'bg', description: 'Data gaps', backgrounded: true, subagentType: 'general-purpose' }),
+        own('session.task.completed', { taskId: 'bg', status: 'completed', summary: 'the late output', usage: { totalTokens: 78_000, toolUses: 33, durationMs: 492_000 } }),
+        own('session.task.started', { taskId: 'sh', description: 'npm test', backgrounded: true }),
+      ],
+      ctx,
+    );
+
+    assert.deepEqual(
+      done.map(item => item.kind),
+      ['subtask', 'subtask'],
+    );
+    assert.equal((done[0] as SubtaskItem).state, 'done');
+    assert.equal((done[0] as SubtaskItem).summary, 'the late output');
+    assert.deepEqual((done[0] as SubtaskItem).meta, ['78k tokens', '33 calls', '8:12']);
+    assert.equal((done[1] as SubtaskItem).taskKind, 'background task');
   });
 
   it('draws the thread’s own terminals, notifications, compaction, retries and system events as lines', () => {

@@ -10,7 +10,7 @@
 // it is — the result and the error are in the range, and they show.
 
 import type { Event, JsonObject } from '../../../core/contract.ts';
-import type { EventOf, EventPayloads, EventType, SessionPlanItem } from '../../../core/event-types.ts';
+import type { EventOf, EventPayloads, EventType, InboundFile, SessionPlanItem } from '../../../core/event-types.ts';
 import { formatTokensK } from '../../ui/Ring/Ring.logic.ts';
 import type { IconName } from '../../ui/Icon/Icon.tsx';
 import type { StateName } from '../../ui/atoms/state.ts';
@@ -31,7 +31,11 @@ export type FeedContext = {
   you: string | null;
 };
 
-export type Attachment = { key: string; href: string; name: string; image: boolean; size: number | null };
+// An attachment of a message: a stored file by id (fileId; name and size as
+// the event recorded them — null where the history carries the id alone,
+// and the component asks the file's meta: attachments.ts) or a
+// resource_link by uri (fileId null).
+export type Attachment = { key: string; href: string; fileId: string | null; name: string | null; image: boolean; size: number | null };
 
 export type MessageItem = {
   kind: 'message';
@@ -126,16 +130,36 @@ function contentText(content: EventPayloads['agent.message']['content']): string
     .join('\n\n');
 }
 
+function isImageType(contentType: string | null | undefined): boolean {
+  return typeof contentType === 'string' && contentType.toLowerCase().startsWith('image/');
+}
+
+// A stored file as an attachment: the facts the event recorded, null for
+// the ones it did not.
+function storedAtt(key: string, fileId: string, facts: { name?: string | null; image: boolean; size?: number | null }): Attachment {
+  return { key, href: fileHref(fileId), fileId, name: facts.name ?? null, image: facts.image, size: facts.size ?? null };
+}
+
+// The files of a message in the form of user.message.files (thread.message
+// carries the same): image by the content type.
+function messageFileAtts(files: readonly InboundFile[], key: string): Attachment[] {
+  return files.map((file, i) => storedAtt(`${key}:${i}`, file.fileId, { name: file.originalFilename, image: isImageType(file.contentType), size: file.sizeBytes }));
+}
+
+// Files by id alone (a summary's fileIds, a thread.message without files):
+// everything about them is the meta's to tell.
+export function fileIdAtts(fileIds: readonly string[], key: string): Attachment[] {
+  return fileIds.map((fileId, i) => storedAtt(`${key}:${i}`, fileId, { image: false }));
+}
+
 function contentAtts(content: EventPayloads['agent.message']['content'], key: string): Attachment[] {
   const atts: Attachment[] = [];
 
   content.forEach((block, i) => {
-    if (block.type === 'image' && typeof block.fileId === 'string') {
-      atts.push({ key: `${key}:${i}`, href: fileHref(block.fileId), name: 'image', image: true, size: null });
-    } else if (block.type === 'file' && typeof block.fileId === 'string') {
-      atts.push({ key: `${key}:${i}`, href: fileHref(block.fileId), name: 'file', image: false, size: null });
+    if ((block.type === 'image' || block.type === 'file') && typeof block.fileId === 'string') {
+      atts.push(storedAtt(`${key}:${i}`, block.fileId, { name: block.name, image: block.type === 'image', size: block.size }));
     } else if (block.type === 'resource_link' && typeof block.uri === 'string') {
-      atts.push({ key: `${key}:${i}`, href: block.uri, name: block.name ?? block.uri, image: typeof block.mimeType === 'string' && block.mimeType.startsWith('image/'), size: block.size ?? null });
+      atts.push({ key: `${key}:${i}`, href: block.uri, fileId: null, name: block.name ?? block.uri, image: isImageType(block.mimeType), size: block.size ?? null });
     }
   });
 
@@ -144,13 +168,7 @@ function contentAtts(content: EventPayloads['agent.message']['content'], key: st
 
 function userAtts(payload: EventPayloads['user.message'], key: string): Attachment[] {
   if (Array.isArray(payload.files) && payload.files.length > 0) {
-    return payload.files.map((file, i) => ({
-      key: `${key}:${i}`,
-      href: fileHref(file.fileId),
-      name: file.originalFilename ?? 'file',
-      image: typeof file.contentType === 'string' && file.contentType.startsWith('image/'),
-      size: file.sizeBytes ?? null,
-    }));
+    return messageFileAtts(payload.files, key);
   }
 
   return Array.isArray(payload.blocks) ? contentAtts(payload.blocks, key) : [];
@@ -382,7 +400,7 @@ class Builder {
 
     if (is(event, 'thread.message')) {
       const text = event.payload.text;
-      const atts = (event.payload.fileIds ?? []).map((fileId, i) => ({ key: `${key}:${i}`, href: fileHref(fileId), name: 'file', image: false, size: null }));
+      const atts = Array.isArray(event.payload.files) && event.payload.files.length > 0 ? messageFileAtts(event.payload.files, key) : fileIdAtts(event.payload.fileIds ?? [], key);
 
       if (own) {
         const to = event.targetThreadId ? (this.children.get(event.targetThreadId)?.agent ?? this.ctx.agentOf(event.targetThreadId) ?? this.ctx.parentAgent ?? 'parent') : (this.ctx.parentAgent ?? 'parent');
@@ -518,11 +536,25 @@ class Builder {
         return;
       }
 
+      // The harness announces a backgrounded task again when its late
+      // output arrives (a second started and completed of the same taskId):
+      // the card stays where it first appeared and runs again.
+      const known = this.tasks.get(event.payload.taskId);
+
+      if (known) {
+        known.state = 'run';
+        known.description = event.payload.description;
+
+        return;
+      }
+
+      // The kind names the agent when there is one, backgrounded or not; a
+      // background task is a backgrounded call without an agent (Bash).
       const item: SubtaskItem = {
         kind: 'subtask',
         key,
         at,
-        taskKind: event.payload.backgrounded ? 'background task' : event.payload.subagentType ? `${event.payload.subagentType} subagent` : 'subagent',
+        taskKind: event.payload.subagentType ? `${event.payload.subagentType} subagent` : event.payload.backgrounded ? 'background task' : 'subagent',
         description: event.payload.description,
         state: 'run',
         meta: [],

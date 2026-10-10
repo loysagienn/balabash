@@ -41,6 +41,7 @@ import { checkMutationOrigin } from './origin.ts';
 import type {
   AppsResponse,
   CreateProjectResponse,
+  FileMetaResponse,
   ProjectResponse,
   PublicationResponse,
   LlmRequestsResponse,
@@ -710,6 +711,30 @@ router.get('/files/:fileId', requireSession, async ctx => {
   }
 
   ctx.body = content;
+});
+
+// The facts of a stored file (name, type, size, the image's dimensions) for
+// an attachment recorded by fileId alone: the same ownership rule and the
+// same hour of private caching as the bytes — the row is as immutable as
+// the content.
+router.get('/files/:fileId/meta', requireSession, async ctx => {
+  const fileId = ctx.params.fileId as string;
+  let file: FileRef;
+
+  try {
+    file = await getUserFile(ctx.state.userId as string, fileId);
+  } catch {
+    sendError(ctx, 404, 'not_found', 'No such file');
+
+    return;
+  }
+
+  const response: FileMetaResponse = {
+    file: { fileId: file.id, name: file.originalFilename, contentType: file.contentType, sizeBytes: file.sizeBytes, width: file.width, height: file.height },
+  };
+
+  ctx.set('cache-control', 'private, max-age=3600');
+  ctx.body = prepareObject(response);
 });
 
 // --------------------------------------------------------------------------

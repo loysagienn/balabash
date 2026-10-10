@@ -6,6 +6,7 @@ import type {
   AppsResponse,
   CreateProjectRequest,
   CreateProjectResponse,
+  FileMetaResponse,
   LlmRequestsQuery,
   LlmRequestsResponse,
   LogoutResponse,
@@ -83,6 +84,12 @@ export type Api = {
     node(path: string): Promise<WorkspaceNodeResponse>;
     text(path: string, signal?: AbortSignal): Promise<string>;
   };
+  // A stored file's facts by id (the second data layer too): the name, type
+  // and size of an attachment recorded by fileId alone. A 404 is the answer
+  // "no such file of yours".
+  files: {
+    meta(fileId: string, signal?: AbortSignal): Promise<FileMetaResponse>;
+  };
   // Model request telemetry (the second data layer too): the newest rows of
   // llm_requests, oldest first — one thread's window with threadId.
   llmRequests: {
@@ -147,6 +154,9 @@ export function createApi(options: FetchOptions = {}): Api {
     workspace: {
       node: path => apiFetch<WorkspaceNodeResponse>('/api/workspace/node', { query: { path } }),
       text: (path, signal) => apiFetch<string>(fileUrl(path), { as: 'text', signal }),
+    },
+    files: {
+      meta: (fileId, signal) => apiFetch<FileMetaResponse>(`/api/files/${encodeURIComponent(fileId)}/meta`, { signal }),
     },
     llmRequests: {
       list: (query, signal) => apiFetch<LlmRequestsResponse>('/api/llm-requests', { query, signal }),
