@@ -41,6 +41,18 @@ export async function getLastEventSeq(type: string): Promise<bigint | null> {
   return row?.seq ?? null;
 }
 
+// The newest event of one type authored in a thread; null when the thread
+// never wrote one. The coordinator's boot sweep reads the last session.state
+// of a main thread with it.
+export async function getLastThreadEvent(threadId: string, type: string): Promise<Event | null> {
+  const row = await prisma.event.findFirst({
+    where: { threadId, type },
+    orderBy: { seq: 'desc' },
+  });
+
+  return row ? toEvent(row) : null;
+}
+
 // Seconds since the last event was appended, by the database clock; null on
 // an empty log. The restart module's quiet-window buffer reads this.
 export async function getLogQuietSeconds(): Promise<number | null> {

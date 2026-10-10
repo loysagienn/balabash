@@ -157,6 +157,12 @@ export async function listActiveChildThreads(): Promise<Thread[]> {
   return readThreads(prisma, Prisma.sql`threads.status = 'active' AND threads.parent_id IS NOT NULL`, Prisma.sql`ORDER BY threads.created_seq`);
 }
 
+// Every main thread across all workspaces, oldest first — the boot sweep
+// that settles the course a dead process left them in (src/coordinator).
+export async function listMainThreads(): Promise<Thread[]> {
+  return readThreads(prisma, Prisma.sql`threads.status = 'active' AND threads.parent_id IS NULL`, Prisma.sql`ORDER BY threads.created_seq`);
+}
+
 // The workspace's main thread: the only thread without a parent (§5.5).
 export async function getMainThread(userId: string, db: DbClient = prisma): Promise<Thread | null> {
   const [thread] = await readThreads(db, Prisma.sql`threads.user_id = ${userId} AND threads.parent_id IS NULL`, Prisma.sql`LIMIT 1`);

@@ -31,7 +31,7 @@ describe('createJournalWriter', () => {
     const other = writer.write('t2', [{ type: 'session.state', payload: { state: 'run' } }]);
     const dropped = writer.write('gone', [{ type: 'session.state', payload: { state: 'run' } }]);
 
-    await Promise.all([first, second, other, dropped]);
+    assert.deepEqual(await Promise.all([first, second, other, dropped]), [true, true, true, false]);
 
     assert.deepEqual(
       appended.filter(input => input.threadId === 't1').map(input => input.type),
@@ -67,14 +67,22 @@ describe('createJournalWriter', () => {
       identityOf: async () => ({ userId: 'u1', agentName: 'engineer' }),
     });
 
-    await writer.write('t1', [
-      { type: 'session.turn', payload: {} },
-      { type: 'session.state', payload: { state: 'wait' } },
-    ]);
-    await writer.write('t1', async () => {
-      throw new Error('no session');
-    });
-    await writer.write('t1', [{ type: 'session.state', payload: { state: 'run' } }]);
+    // The value tells whether everything landed: a dropped entry, a failed
+    // producer and an unknown thread all report false; a clean write true.
+    assert.equal(
+      await writer.write('t1', [
+        { type: 'session.turn', payload: {} },
+        { type: 'session.state', payload: { state: 'wait' } },
+      ]),
+      false,
+    );
+    assert.equal(
+      await writer.write('t1', async () => {
+        throw new Error('no session');
+      }),
+      false,
+    );
+    assert.equal(await writer.write('t1', [{ type: 'session.state', payload: { state: 'run' } }]), true);
     await tick();
 
     assert.deepEqual(appended, ['session.state', 'session.state']);

@@ -36,8 +36,12 @@ export type JournalWriterDeps = {
 
 export type JournalWriter = {
   // Queues the input behind everything already queued for the thread.
-  // Resolves when written (or given up on); never rejects.
-  write(threadId: string, input: JournalInput): Promise<void>;
+  // Resolves when written (or given up on); never rejects. The value tells
+  // which: true — every entry is in the log; false — at least one was
+  // dropped (unknown thread, failed producer, failed append), for a writer
+  // whose entry stands for a state it must see written (the coordinator's
+  // session.state); the SDK journals ignore it.
+  write(threadId: string, input: JournalInput): Promise<boolean>;
 };
 
 const IDENTITY_CACHE_SIZE = 64;
@@ -102,7 +106,7 @@ export function createJournalWriter(deps: JournalWriterDeps = {}): JournalWriter
   const identityOf = deps.identityOf ?? readIdentity;
   const cacheSize = deps.identityCacheSize ?? IDENTITY_CACHE_SIZE;
   const identities = new Map<string, Promise<JournalIdentity | null>>();
-  const chains = new Map<string, Promise<void>>();
+  const chains = new Map<string, Promise<boolean>>();
 
   const identity = (threadId: string): Promise<JournalIdentity | null> => {
     const known = identities.get(threadId);
@@ -137,13 +141,13 @@ export function createJournalWriter(deps: JournalWriterDeps = {}): JournalWriter
     return lookup;
   };
 
-  const flush = async (threadId: string, input: JournalInput): Promise<void> => {
+  const flush = async (threadId: string, input: JournalInput): Promise<boolean> => {
     const who = await identity(threadId);
 
     if (!who) {
       console.error(`[session-journal] thread ${threadId} is unknown; entries dropped`);
 
-      return;
+      return false;
     }
 
     let entries: JournalEntry[];
@@ -153,8 +157,10 @@ export function createJournalWriter(deps: JournalWriterDeps = {}): JournalWriter
     } catch (error) {
       console.error(`[session-journal] producer failed thread=${threadId}:`, error);
 
-      return;
+      return false;
     }
+
+    let written = true;
 
     for (const entry of entries) {
       try {
@@ -168,13 +174,16 @@ export function createJournalWriter(deps: JournalWriterDeps = {}): JournalWriter
         });
       } catch (error) {
         console.error(`[session-journal] append failed thread=${threadId} type=${entry.type}:`, error);
+        written = false;
       }
     }
+
+    return written;
   };
 
   return {
     write(threadId, input) {
-      const previous = chains.get(threadId) ?? Promise.resolve();
+      const previous = chains.get(threadId) ?? Promise.resolve(true);
       const next = previous.then(() => flush(threadId, input));
 
       chains.set(threadId, next);

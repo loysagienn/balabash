@@ -25,7 +25,7 @@ import { startScheduleHeart } from './schedule/heart.ts';
 import { startWorkspaceIndexer } from './workspace/indexer.ts';
 import { createScheduleToolServer } from './schedule/tools.ts';
 import { createProjectsToolServer } from './projects/tools.ts';
-import { createCoordinatorRun, hasActiveCoordinatorTurns } from './coordinator/index.ts';
+import { createCoordinatorRun, hasActiveCoordinatorTurns, settleMainThreadStates } from './coordinator/index.ts';
 import { startWebServer } from './api/index.ts';
 import { startThreadRouter } from './runtime/router.ts';
 import { RESTART_EXIT_CODE, completePendingRestarts, startRestartModule } from './runtime/restart.ts';
@@ -131,6 +131,12 @@ const consumers: Consumer[] = [];
 // no session starts unobserved. Not log consumers, but they stop like them.
 consumers.push({ name: 'claude-session-journal', stop: startClaudeSessionJournal() });
 consumers.push({ name: 'codex-session-journal', stop: startCodexSessionJournal() });
+
+// A main thread the previous process left in `run` (it died mid-turn) is
+// settled to `wait` before the router can rise a coordinator over it — after
+// a crash the next routed event may be hours away, and only a routed event
+// rises the run that would otherwise answer for the stale state.
+await settleMainThreadStates();
 
 consumers.push(
   startThreadRouter({

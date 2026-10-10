@@ -6,9 +6,9 @@
 
 import type { Event, Thread } from '../core/contract.ts';
 import { appendEvent } from '../core/append.ts';
-import { getTranscript } from '../core/events.ts';
+import { getLastThreadEvent, getTranscript } from '../core/events.ts';
 import { SYSTEM_EXCEPTION } from '../core/envelope.ts';
-import { listThreads } from '../core/threads.ts';
+import { listMainThreads, listThreads } from '../core/threads.ts';
 import { config } from '../config/index.ts';
 import { listProjects } from '../projects/store.ts';
 import type { ProjectModel } from '../projects/store.ts';
@@ -21,6 +21,7 @@ import type { FunctionDefinition, TurnClient } from '../harness/openai/turn.ts';
 import { getLlmBackend } from '../harness/openai/backend.ts';
 import { createJournalWriter } from '../harness/session-journal.ts';
 import type { JournalWriter } from '../harness/session-journal.ts';
+import { sessionStateFrom } from '../projections/session.ts';
 import type { SessionState } from '../projections/session.ts';
 import { COORDINATOR_INSTRUCTIONS } from './instructions.ts';
 import { getCoordinatorFunctionDefinitions, dispatchCoordinatorFunction } from './functions.ts';
@@ -39,16 +40,26 @@ const HISTORY_LIMIT = 400;
 // window are in the config comment.
 const KEEPALIVE_INTERVAL_MS = PROMPT_CACHE_TTL_MS - 5 * 60 * 1000;
 
+// A session.state write the log did not take (the database was away) is
+// retried on its own until it lands: the main thread is eternal and has no
+// terminal to settle its course, so a lost `wait` would read "running" in
+// the console until the next turn. First retry after STATE_RETRY_MS,
+// doubling up to STATE_RETRY_MAX_MS while the outage lasts.
+const STATE_RETRY_MS = 5_000;
+const STATE_RETRY_MAX_MS = 5 * 60 * 1000;
+
 export type CoordinatorRun = {
   accept: (event: Event) => void;
 };
 
-// Test seams: the function definitions, the OpenAI client and the journal
-// writer — the real ones by default.
+// Test seams: the function definitions, the OpenAI client, the journal
+// writer and the first retry delay of a lost state write — the real ones by
+// default.
 export type CoordinatorRunDeps = {
   functionDefinitions?: (userId: string) => Promise<FunctionDefinition[]>;
   client?: TurnClient;
   journal?: JournalWriter;
+  stateRetryMs?: number;
 };
 
 // Coordinator turns in flight, process-wide — the restart module's busy
@@ -131,23 +142,55 @@ export function createCoordinatorRun({ threadId, userId }: { threadId: string; u
   // thread's agent name, no addressee), authored here because the
   // coordinator has no SDK session behind it. `run` goes out before the
   // model's first request of a turn, `wait` once the loop has nothing left
-  // to run. Only a change is written — `state` is the state this run last
-  // wrote — so a loop whose wakes rendered to nothing writes nothing, with
-  // one exception: the first loop of the process, whose `wait` answers for
-  // a `run` the previous process may have left behind when it died
-  // mid-turn (foldSession takes a repeated state as no change). Not part
-  // of the transcript (getTranscript excludes session.*) and routed to no
-  // one (ROUTED_TYPES) — the write does not wake this very run.
+  // to run. `state` is the state this run knows the log to hold: the last
+  // one it wrote, taken at the call (so the queued `wait` of a loop's exit
+  // and the `run` of the next loop keep their order in the writer's chain)
+  // and forgotten again when the writer reports the write lost — null means
+  // unknown (a fresh run, or a lost write), and a state write of any value
+  // goes out; a lost one is retried by itself (STATE_RETRY_MS). So a loop
+  // whose wakes rendered to nothing writes nothing once the state is known,
+  // and a `run` a dead process left behind is the boot sweep's business
+  // (settleMainThreadStates). Not part of the transcript (getTranscript
+  // excludes session.*) and routed to no one (ROUTED_TYPES) — the write
+  // does not wake this very run.
   let state: SessionState | null = null;
+  let retryTimer: NodeJS.Timeout | null = null;
+  let retryDelay = deps.stateRetryMs ?? STATE_RETRY_MS;
 
-  const setState = (next: SessionState): Promise<void> => {
+  const retryState = (next: SessionState): void => {
+    if (retryTimer) {
+      clearTimeout(retryTimer);
+    }
+
+    retryTimer = setTimeout(() => {
+      retryTimer = null;
+
+      // Only while nothing newer was written in between: a later write that
+      // landed made the log current, a later one that was lost armed its own
+      // retry.
+      if (state === null) {
+        void setState(next);
+      }
+    }, retryDelay);
+    retryTimer.unref();
+    retryDelay = Math.min(retryDelay * 2, STATE_RETRY_MAX_MS);
+  };
+
+  const setState = async (next: SessionState): Promise<void> => {
     if (state === next) {
-      return Promise.resolve();
+      return;
     }
 
     state = next;
 
-    return journal.write(threadId, [{ type: 'session.state', payload: { state: next } }]);
+    const written = await journal.write(threadId, [{ type: 'session.state', payload: { state: next } }]);
+
+    if (written) {
+      retryDelay = deps.stateRetryMs ?? STATE_RETRY_MS;
+    } else if (state === next) {
+      state = null;
+      retryState(next);
+    }
   };
 
   // Cache-diagnostics baseline: the id of the thread's last request with the
@@ -336,4 +379,39 @@ export function createCoordinatorRun({ threadId, userId }: { threadId: string; u
       }
     },
   };
+}
+
+// Boot sweep: a main thread whose newest session.state is `run` was left so
+// by a process that died mid-turn — the model is not working, and the
+// coordinator rises lazily on the next routed event only, which after a
+// crash (the router's cursor already past the message that started the
+// turn) may be hours away. Settles each such thread to `wait` before the
+// router starts, so no run of this process has written anything yet.
+// Observational like the writes of a run: a failure is logged, the boot
+// goes on. Returns the number of threads settled.
+export async function settleMainThreadStates(deps: { journal?: JournalWriter } = {}): Promise<number> {
+  const journal = deps.journal ?? createJournalWriter();
+  let settled = 0;
+
+  try {
+    for (const thread of await listMainThreads()) {
+      const last = await getLastThreadEvent(thread.id, 'session.state');
+
+      if (!last || sessionStateFrom(last.payload) !== 'run') {
+        continue;
+      }
+
+      if (await journal.write(thread.id, [{ type: 'session.state', payload: { state: 'wait' } }])) {
+        settled += 1;
+      }
+    }
+  } catch (error) {
+    console.error('[coordinator] settling the main threads failed:', error);
+  }
+
+  if (settled) {
+    console.log(`[coordinator] settled ${settled} main thread(s) left in \`run\` by the previous process`);
+  }
+
+  return settled;
 }

@@ -221,6 +221,8 @@ describe('startClaudeSessionJournal', () => {
     const writer: JournalWriter = {
       write: async (threadId, input) => {
         writes.push({ threadId, input });
+
+        return true;
       },
     };
     const measured: string[] = [];
@@ -264,7 +266,7 @@ describe('startClaudeSessionJournal', () => {
     }
 
     // A session closed before the measurement has nothing to measure.
-    const closedWriter: JournalWriter = { write: async (_threadId, input) => void writes.push({ threadId: 'c', input }) };
+    const closedWriter: JournalWriter = { write: async (_threadId, input) => writes.push({ threadId: 'c', input }) > 0 };
     const stopClosed = startClaudeSessionJournal({
       writer: closedWriter,
       contextUsage: async () => {
