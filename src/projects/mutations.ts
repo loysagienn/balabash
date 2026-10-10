@@ -168,17 +168,6 @@ export async function createProject(userId: string, input: ProjectInput, by: Reg
 
   const adopted = existing !== null;
 
-  // The library anatomy (the law in agents/gardener.ts), seeded only where
-  // the folder has none — an adopted folder's existing files are someone's
-  // work and are never overwritten.
-  const seed = async (name: string, content: string) => {
-    await fs.writeFile(path.join(dir, name), content, { flag: 'wx' }).catch((error: NodeJS.ErrnoException) => {
-      if (error.code !== 'EEXIST') {
-        throw error;
-      }
-    });
-  };
-
   try {
     const project = await registryMutation(async (tx, journal) => {
       // The row first: of two creations of one slug at once the second
@@ -189,16 +178,57 @@ export async function createProject(userId: string, input: ProjectInput, by: Reg
       // behind is nothing.
       const created = await tx.project.create({ data: { userId, title, slug, description } });
 
-      // mkdir recursive doubles as lazy provisioning of the file area itself.
-      await fs.mkdir(dir, { recursive: true });
-      await seed(
-        'AGENTS.md',
-        `# ${title}\n\n${description}\n\n## Map\n\n- inbox.md — append anything new worth keeping: results, decisions, learned facts; dated, with the "why". A gardener agent consolidates later.\n- journal.md — dated history of the project, maintained by the gardener.\n\n(Keep this file the entry point: the map of the folder plus the project's identity and stable frame.)\n`,
-      );
-      await seed('inbox.md', '# Inbox\n\nAppend new material here freely — dated, with the "why". Drained by the gardener.\n');
-      await seed('journal.md', '# Journal\n\nDated events and decisions, newest first. Written by the gardener.\n');
+      // What this creation puts on the disk, to take back if its
+      // transaction fails: the folder when mkdir made it, and the files its
+      // own wx wrote — an adopted folder's existing files are someone's
+      // work, never on the list and never overwritten.
+      const written: string[] = [];
+      let madeDir = false;
 
-      await journal('project.created', projectRecord(created), by);
+      // The library anatomy (the law in agents/gardener.ts), seeded only
+      // where the folder has none.
+      const seed = async (name: string, content: string) => {
+        try {
+          await fs.writeFile(path.join(dir, name), content, { flag: 'wx' });
+          written.push(name);
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'EEXIST') {
+            throw error;
+          }
+        }
+      };
+
+      try {
+        // mkdir recursive doubles as lazy provisioning of the file area
+        // itself; it answers the first path it created, undefined when the
+        // folder was already there.
+        madeDir = (await fs.mkdir(dir, { recursive: true })) !== undefined;
+        await seed(
+          'AGENTS.md',
+          `# ${title}\n\n${description}\n\n## Map\n\n- inbox.md — append anything new worth keeping: results, decisions, learned facts; dated, with the "why". A gardener agent consolidates later.\n- journal.md — dated history of the project, maintained by the gardener.\n\n(Keep this file the entry point: the map of the folder plus the project's identity and stable frame.)\n`,
+        );
+        await seed('inbox.md', '# Inbox\n\nAppend new material here freely — dated, with the "why". Drained by the gardener.\n');
+        await seed('journal.md', '# Journal\n\nDated events and decisions, newest first. Written by the gardener.\n');
+
+        await journal('project.created', projectRecord(created), by);
+      } catch (error) {
+        // Taken back here, inside the transaction — before its rollback
+        // releases the slug to a concurrent creation, which would otherwise
+        // adopt this one's header as existing work. Only what was written
+        // above; the folder only when empty (rmdir), so anything that
+        // appeared beside the seed stays. A failure at the commit itself
+        // is past this point: the files stay for the next creation to
+        // adopt.
+        for (const name of written) {
+          await fs.rm(path.join(dir, name), { force: true }).catch((cause: unknown) => console.error('[projects] seed left behind:', cause));
+        }
+
+        if (madeDir) {
+          await fs.rmdir(dir).catch(() => {});
+        }
+
+        throw error;
+      }
 
       return created;
     });

@@ -6,6 +6,8 @@
 // instead of falling through to other middleware.
 
 import { createReadStream } from 'node:fs';
+import { stat } from 'node:fs/promises';
+import type { BigIntStats } from 'node:fs';
 import { Readable } from 'node:stream';
 import Router from '@koa/router';
 import { Api } from 'grammy';
@@ -22,7 +24,6 @@ import { appendEvent } from '../core/append.ts';
 import { THREAD_CANCEL, THREAD_INTERRUPT } from '../core/envelope.ts';
 import type { FileRef, Thread, ThreadStatus } from '../core/contract.ts';
 import { WorkspacePathError, listDir, resolveFilePath, sanitizeRelPath, statFile } from '../workspace/files.ts';
-import type { WorkspaceFileNode } from '../workspace/files.ts';
 import { getFile, getUserFile, openFileContent } from '../files/index.ts';
 import { verifyDownloadLink } from '../files/storage/local.ts';
 import { getExternalServerSecretRequest, provisionExternalServerSecrets } from '../capabilities/external-secrets.ts';
@@ -661,6 +662,10 @@ router.get('/files/:fileId', requireSession, async ctx => {
     return;
   }
 
+  // The content first: a store that refuses (a transient failure, a row
+  // pointing nowhere) ends in the middleware's 500, which must carry
+  // nothing of the headers below — not the hour, not the filename.
+  const content = Readable.fromWeb(await openFileContent(fileId));
   const contentType = file.contentType ?? 'application/octet-stream';
 
   ctx.type = contentType;
@@ -680,7 +685,7 @@ router.get('/files/:fileId', requireSession, async ctx => {
     ctx.length = file.sizeBytes;
   }
 
-  ctx.body = Readable.fromWeb(await openFileContent(fileId));
+  ctx.body = content;
 });
 
 // --------------------------------------------------------------------------
@@ -1016,6 +1021,18 @@ filesRouter.get('/files/*path', requireSession, async ctx => {
     return;
   }
 
+  // The validator's own stat (bigint — the full precision of the inode's
+  // times; the node above carries the listing's milliseconds); a file gone
+  // between the two is the same 404.
+  const absPath = resolveFilePath(userId, relPath);
+  const stats = await stat(absPath, { bigint: true }).catch(() => null);
+
+  if (!stats?.isFile()) {
+    sendError(ctx, 404, 'not_found', 'No such file in the workspace file area');
+
+    return;
+  }
+
   // Raw bytes, no JSON envelope: the content-type is the honest guess from
   // the extension (a future <img src> works for free), text declares utf-8.
   const filename = relPath.split('/').pop() as string;
@@ -1025,10 +1042,9 @@ filesRouter.get('/files/*path', requireSession, async ctx => {
   ctx.set('content-disposition', contentDisposition(filename, { attachment }));
   // The file changes under agents' hands at any moment, so the browser may
   // keep a copy only under revalidation on every use: a weak ETag of the
-  // size and the modification time (milliseconds — a Last-Modified date
-  // would miss two writes within one second), 304 while it holds.
+  // inode (workspaceFileEtag), 304 while it holds.
   ctx.set('cache-control', 'private, no-cache');
-  ctx.etag = workspaceFileEtag(file);
+  ctx.etag = workspaceFileEtag(stats);
   ctx.status = 200;
 
   if (ctx.fresh) {
@@ -1037,17 +1053,33 @@ filesRouter.get('/files/*path', requireSession, async ctx => {
     return;
   }
 
-  ctx.body = createReadStream(resolveFilePath(userId, relPath));
-
-  if (file.sizeBytes !== null) {
-    ctx.length = file.sizeBytes;
-  }
+  ctx.body = createReadStream(absPath);
+  ctx.length = Number(stats.size);
 });
 
-export function workspaceFileEtag(file: Pick<WorkspaceFileNode, 'sizeBytes' | 'modifiedAt'>): string {
-  const modifiedMs = file.modifiedAt === null ? 0 : Date.parse(file.modifiedAt);
+// The validator of the workspace bytes: the size and the inode's two times
+// in nanoseconds. The modification time is what a write moves (sub-second,
+// because a Last-Modified date in seconds would miss two writes within one
+// second); the change time is what the kernel moves on every write and on
+// every restore or copy that keeps the modification time (cp -p, rsync -a,
+// tar) — nothing in user space sets it, so content replaced under a kept
+// mtime still gets a new tag. What remains is two writes of one length
+// within one tick of the file clock; a hash of the content would close
+// that at the price of reading every file on every revalidation.
+export function workspaceFileEtag(stats: Pick<BigIntStats, 'size' | 'mtimeNs' | 'ctimeNs'>): string {
+  return `W/"${stats.size.toString(16)}-${stats.mtimeNs.toString(16)}-${stats.ctimeNs.toString(16)}"`;
+}
 
-  return `W/"${(file.sizeBytes ?? 0).toString(16)}-${modifiedMs.toString(16)}"`;
+// The 500 of a route that threw: the headers the route had announced for
+// its answer (a cache lifetime, a filename, a validator) are the answer's,
+// never the error's — an error is not stored and not downloaded.
+function sendInternalError(ctx: Context): void {
+  for (const name of ['content-disposition', 'etag', 'last-modified']) {
+    ctx.remove(name);
+  }
+
+  ctx.set('cache-control', 'no-store');
+  sendError(ctx, 500, 'internal_error', 'Internal error');
 }
 
 // The cross-site guard of every mutation under the session (src/api/origin.ts):
@@ -1093,7 +1125,7 @@ export function createFilesMiddleware(): (ctx: Context, next: Next) => Promise<v
       await routes(ctx, async () => {});
     } catch (error) {
       console.error('[files] unhandled error:', error);
-      sendError(ctx, 500, 'internal_error', 'Internal error');
+      sendInternalError(ctx);
 
       return;
     }
@@ -1240,7 +1272,7 @@ export function createApiMiddleware(): (ctx: Context, next: Next) => Promise<voi
       await routes(ctx, async () => {});
     } catch (error) {
       console.error('[api] unhandled error:', error);
-      sendError(ctx, 500, 'internal_error', 'Internal error');
+      sendInternalError(ctx);
 
       return;
     }

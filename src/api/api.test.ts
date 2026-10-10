@@ -9,7 +9,7 @@
 //
 // Run: npm test  (node:test, native type stripping — no build needed).
 
-import { test, describe, before, after } from 'node:test';
+import { test, describe, before, after, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -184,6 +184,11 @@ describe('projects over the api', () => {
       release = resolve;
       abandon = reject;
     });
+
+    // The cleanup abandons the barrier whether or not the transaction got
+    // as far as waiting on it (its insert may have failed first): handled
+    // here, so a barrier nobody waits on is not an unhandled rejection.
+    released.catch(() => {});
     const held = prisma.$transaction(
       async tx => {
         await tx.project.create({ data: { userId: stand.userId, title: 'Held', slug: 'held', description: 'The row that wins.' } });
@@ -196,13 +201,16 @@ describe('projects over the api', () => {
     held.catch(lockLost);
 
     const aborter = new AbortController();
+    const watching = new AbortController();
     let reply: Promise<Reply> | null = null;
+    let waiter: Promise<void> | null = null;
 
     try {
       await rowHeld;
       reply = stand.request('POST', '/api/projects', { body: { title: 'Loser', slug: 'held', description: 'The body that loses.' }, signal: aborter.signal });
+      waiter = waitForLockWaiter(watching.signal);
       await Promise.race([
-        waitForLockWaiter(),
+        waiter,
         failureOf(held),
         reply.then(early => {
           throw new Error(`the creation answered before the row was committed: ${early.status} ${early.text}`);
@@ -220,12 +228,81 @@ describe('projects over the api', () => {
       // The held row wrote no event of its own; the loser added none.
       assert.equal((await projectEvents()).filter(event => event.type === 'project.created').length, 2);
     } finally {
+      // Every helper let go and awaited: the transaction, the request and
+      // the observer, whichever of them the race left running.
       abandon(new Error('the scenario is over'));
       aborter.abort();
-      await Promise.allSettled([held, reply]);
+      watching.abort();
+      await Promise.allSettled([held, reply, waiter]);
     }
   });
+
+  // A creation that fails on the disk after part of its seed: the row and
+  // the event roll back, and the files it wrote go with them — before the
+  // rollback lets a concurrent creation of the slug in — so the next
+  // creation of the slug seeds from its own body instead of adopting the
+  // failed one's header. The disk failure is an injected one: the second
+  // seed file refuses with ENOSPC.
+  test('a creation failing on the disk after part of the seed leaves nothing, and the retry seeds its own files', async () => {
+    const failed = await withSeedFailure('inbox.md', () =>
+      stand.request('POST', '/api/projects', { body: { title: 'Partial A', slug: 'partial', description: 'The failed body.' } }),
+    );
+
+    assert.equal(failed.status, 500, failed.text);
+    assert.equal(await prisma.project.count({ where: { slug: 'partial' } }), 0);
+    assert.equal(await fs.stat(path.join(filesDir, 'partial')).catch(() => null), null);
+
+    const retried = await stand.request('POST', '/api/projects', { body: { title: 'Partial B', slug: 'partial', description: 'The body that stays.' } });
+
+    assert.equal(retried.status, 200, retried.text);
+    assert.equal(retried.json<CreateProjectResponse>().adopted, false);
+    assert.match(await fs.readFile(path.join(filesDir, 'partial', 'AGENTS.md'), 'utf8'), /^# Partial B\n\nThe body that stays\.\n/);
+    assert.equal((await projectEvents()).filter(event => event.type === 'project.created' && event.id === retried.json<CreateProjectResponse>().project.id).length, 1);
+  });
+
+  test('a creation failing on the disk in an adopted folder takes back only its own files', async () => {
+    const dir = path.join(filesDir, 'adopted');
+
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(path.join(dir, 'notes.md'), 'Someone’s work.\n');
+
+    const failed = await withSeedFailure('journal.md', () =>
+      stand.request('POST', '/api/projects', { body: { title: 'Adopted A', slug: 'adopted', description: 'The failed body.' } }),
+    );
+
+    assert.equal(failed.status, 500, failed.text);
+    assert.deepEqual((await fs.readdir(dir)).sort(), ['notes.md']);
+    assert.equal(await prisma.project.count({ where: { slug: 'adopted' } }), 0);
+
+    const retried = await stand.request('POST', '/api/projects', { body: { title: 'Adopted B', slug: 'adopted', description: 'The body that stays.' } });
+
+    assert.equal(retried.status, 200, retried.text);
+    assert.equal(retried.json<CreateProjectResponse>().adopted, true);
+    assert.deepEqual((await fs.readdir(dir)).sort(), ['AGENTS.md', 'inbox.md', 'journal.md', 'notes.md']);
+    assert.match(await fs.readFile(path.join(dir, 'AGENTS.md'), 'utf8'), /^# Adopted B\n/);
+    assert.equal(await fs.readFile(path.join(dir, 'notes.md'), 'utf8'), 'Someone’s work.\n');
+  });
 });
+
+// Runs the action with the seed of the named file refused by the disk
+// (ENOSPC) — the same fs.promises object createProject writes through; the
+// other writes pass. Restored whatever happens.
+async function withSeedFailure<T>(name: string, action: () => Promise<T>): Promise<T> {
+  const original = fs.writeFile;
+  const mocked = mock.method(fs, 'writeFile', (file: Parameters<typeof fs.writeFile>[0], ...rest: unknown[]) => {
+    if (typeof file === 'string' && path.basename(file) === name) {
+      return Promise.reject(Object.assign(new Error(`ENOSPC: no space left on device, open '${file}'`), { code: 'ENOSPC' }));
+    }
+
+    return (original as (...args: unknown[]) => Promise<void>).call(fs, file, ...rest);
+  });
+
+  try {
+    return await action();
+  } finally {
+    mocked.mock.restore();
+  }
+}
 
 describe('the cache policy of the private surfaces', () => {
   test('/api answers are never stored, the refusals included', async () => {
@@ -271,7 +348,7 @@ describe('the cache policy of the private surfaces', () => {
     assert.equal(first.status, 200, first.text);
     assert.equal(first.text, '# Todo\n');
     assert.equal(first.headers['cache-control'], 'private, no-cache');
-    assert.match(first.headers.etag ?? '', /^W\/"[0-9a-f]+-[0-9a-f]+"$/);
+    assert.match(first.headers.etag ?? '', /^W\/"[0-9a-f]+-[0-9a-f]+-[0-9a-f]+"$/);
 
     const same = await stand.request('GET', '/files/notes/todo.md', { headers: { 'if-none-match': first.headers.etag as string } });
 
@@ -293,6 +370,59 @@ describe('the cache policy of the private surfaces', () => {
     assert.equal(missing.status, 404);
     assert.equal(missing.headers['cache-control'], 'no-store');
   });
+
+  // A restore or a copy that keeps the times (cp -p, rsync -a, tar) can
+  // replace the content without moving the size or the modification time;
+  // the validator must still tell the new bytes from the old ones.
+  test('the ETag tells content apart when the size and the modification time are kept', async () => {
+    const file = path.join(filesDir, 'notes', 'kept.txt');
+    const kept = new Date('2026-01-02T03:04:05.678Z');
+
+    await fs.mkdir(path.dirname(file), { recursive: true });
+    await fs.writeFile(file, 'old');
+    await fs.utimes(file, kept, kept);
+
+    const first = await stand.request('GET', '/files/notes/kept.txt');
+
+    assert.equal(first.status, 200, first.text);
+    assert.equal(first.text, 'old');
+
+    const before = await fs.stat(file, { bigint: true });
+
+    // The kernel's file clock is coarse (a tick); let it move on.
+    await new Promise(resolve => setTimeout(resolve, 10));
+    await fs.writeFile(file, 'new');
+    await fs.utimes(file, kept, kept);
+
+    const after = await fs.stat(file, { bigint: true });
+
+    assert.equal(after.size, before.size);
+    assert.equal(after.mtimeMs, before.mtimeMs);
+
+    const revalidated = await stand.request('GET', '/files/notes/kept.txt', { headers: { 'if-none-match': first.headers.etag as string } });
+
+    assert.equal(revalidated.status, 200);
+    assert.equal(revalidated.text, 'new');
+    assert.notEqual(revalidated.headers.etag, first.headers.etag);
+  });
+
+  // A stored file the storage refuses to open after the owner check (a
+  // transient failure of the store, a row pointing nowhere) is a 500, and
+  // the error must not inherit the hour of the bytes nor their disposition.
+  test('a stored file that cannot be opened is a 500 that is never stored', async () => {
+    const { ingestFile } = await import('../files/index.ts');
+    const file = await ingestFile({ body: Buffer.from('gone'), contentType: 'text/plain', sizeBytes: 4, originalFilename: 'gone.txt', userId: stand.userId });
+
+    await prisma.file.update({ where: { id: file.id }, data: { objectKey: '../outside-the-root' } });
+
+    const reply = await stand.request('GET', `/api/files/${file.id}`);
+
+    assert.equal(reply.status, 500, reply.text);
+    assert.equal(reply.json<ErrorBody>().error.code, 'internal_error');
+    assert.equal(reply.headers['cache-control'], 'no-store');
+    assert.equal(reply.headers['content-disposition'], undefined);
+    assert.match(reply.headers['content-type'] ?? '', /^application\/json/);
+  });
 });
 
 // A promise that rejects when the given one does and never resolves — to
@@ -302,11 +432,13 @@ function failureOf(promise: Promise<unknown>): Promise<never> {
 }
 
 // Until a session of the stand's database waits for a lock — the creation's
-// insert blocked on the unique index behind the row the test holds.
-async function waitForLockWaiter(): Promise<void> {
+// insert blocked on the unique index behind the row the test holds — or
+// until told to stop (the scenario ended another way): the polling must not
+// outlive the test and the stand.
+async function waitForLockWaiter(signal: AbortSignal): Promise<void> {
   const deadline = Date.now() + 10_000;
 
-  while (Date.now() < deadline) {
+  while (!signal.aborted && Date.now() < deadline) {
     const [row] = await prisma.$queryRaw<{ n: number }[]>`
       SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'`;
 
@@ -317,7 +449,9 @@ async function waitForLockWaiter(): Promise<void> {
     await new Promise(resolve => setTimeout(resolve, 20));
   }
 
-  assert.fail('the creation never waited for the row');
+  if (!signal.aborted) {
+    assert.fail('the creation never waited for the row');
+  }
 }
 
 describe('settings over the api', () => {
