@@ -160,6 +160,86 @@ describe('projects over the api', () => {
     );
   });
 
+  // Two archives of one project at once: both read the live row before the
+  // transaction, so the second must not re-stamp the date the first set, nor
+  // journal a second archiving. The first is caught in the act — the test
+  // holds the archived row uncommitted in a transaction of its own, so the
+  // request's check sees a live project and its update waits on the row;
+  // once the row commits the request's turn comes with nothing left to do:
+  // the first date stays, one event, the answer tells the state as it is.
+  // The same for two unarchives.
+  for (const archived of [true, false]) {
+    const flip = archived ? 'archive' : 'unarchive';
+
+    test(`a ${flip} racing a concurrent one changes nothing: the first date and one event`, { timeout: 30_000 }, async () => {
+      const { appendEventIn } = await import('../core/append.ts');
+      const { projectRecord } = await import('../projects/store.ts');
+      const firstAt = archived ? new Date('2026-03-04T05:06:07.890Z') : null;
+      let locked!: () => void;
+      let lockLost!: (reason: unknown) => void;
+      const rowHeld = new Promise<void>((resolve, reject) => {
+        locked = resolve;
+        lockLost = reject;
+      });
+      let release!: () => void;
+      let abandon!: (reason: unknown) => void;
+      const released = new Promise<void>((resolve, reject) => {
+        release = resolve;
+        abandon = reject;
+      });
+
+      released.catch(() => {});
+      const held = prisma.$transaction(
+        async tx => {
+          const row = await tx.project.update({ where: { id }, data: { archived, archivedAt: firstAt } });
+
+          await appendEventIn(tx, { type: archived ? 'project.archived' : 'project.unarchived', actor: 'user', threadId: null, userId: stand.userId, payload: projectRecord(row) });
+          locked();
+          await released;
+        },
+        { timeout: 20_000 },
+      );
+
+      held.catch(lockLost);
+
+      const aborter = new AbortController();
+      const watching = new AbortController();
+      let reply: Promise<Reply> | null = null;
+      let waiter: Promise<void> | null = null;
+
+      try {
+        await rowHeld;
+        reply = stand.request('POST', `/api/projects/${id}/${flip}`, { signal: aborter.signal });
+        waiter = waitForLockWaiter(watching.signal);
+        await Promise.race([
+          waiter,
+          failureOf(held),
+          reply.then(early => {
+            throw new Error(`the ${flip} answered before the row was committed: ${early.status} ${early.text}`);
+          }),
+        ]);
+        release();
+        await held;
+
+        const late = await reply;
+
+        assert.equal(late.status, 200, late.text);
+        assert.equal(late.json<ProjectResponse>().project.archived, archived);
+        assert.equal(late.json<ProjectResponse>().project.archivedAt?.getTime() ?? null, firstAt?.getTime() ?? null, 'the answer tells the date the first flip set');
+
+        const row = await prisma.project.findUniqueOrThrow({ where: { id } });
+
+        assert.equal(row.archivedAt?.getTime() ?? null, firstAt?.getTime() ?? null, 'the first date stays');
+        assert.equal((await projectEvents()).filter(event => event.type === `project.${archived ? 'archived' : 'unarchived'}` && event.id === id).length, 2, 'one event per flip: the earlier test’s and the held one — the late request added none');
+      } finally {
+        abandon(new Error('the scenario is over'));
+        aborter.abort();
+        watching.abort();
+        await Promise.allSettled([held, reply, waiter]);
+      }
+    });
+  }
+
   test('two creations of one slug at once: one row, one event, one conflict, and the folder seeded by the row’s creation', async () => {
     const replies = await Promise.all([
       stand.request('POST', '/api/projects', { body: { title: 'Race A', slug: 'race', description: 'The first body.' } }),
@@ -597,7 +677,7 @@ describe('settings over the api', () => {
     const reply = await stand.request('PATCH', '/api/settings', { body: { workspaceName: '  Home  ', operatorName: 'Vladimir' } });
 
     assert.equal(reply.status, 200, reply.text);
-    assert.deepEqual(reply.json<SettingsResponse>(), { settings: { workspaceName: 'Home', operatorName: 'Vladimir' } });
+    assert.deepEqual(reply.json<SettingsResponse>().settings, { workspaceName: 'Home', operatorName: 'Vladimir' });
 
     const me = await stand.request('GET', '/api/me');
 
@@ -605,25 +685,33 @@ describe('settings over the api', () => {
 
     const cleared = await stand.request('PATCH', '/api/settings', { body: { operatorName: '   ' } });
 
-    assert.deepEqual(cleared.json<SettingsResponse>(), { settings: { workspaceName: 'Home', operatorName: null } });
+    assert.deepEqual(cleared.json<SettingsResponse>().settings, { workspaceName: 'Home', operatorName: null });
 
     const user = await prisma.user.findUniqueOrThrow({ where: { id: stand.userId } });
 
     assert.deepEqual({ workspaceName: user.workspaceName, operatorName: user.operatorName }, { workspaceName: 'Home', operatorName: null });
 
     // Each change journals settings.updated by the operator with the names
-    // the call answered — what every other tab folds into its `me`.
-    assert.deepEqual(await settingsEvents(), [
-      { actor: 'user', threadId: null, userId: stand.userId, payload: { workspaceName: 'Home', operatorName: 'Vladimir' } },
-      { actor: 'user', threadId: null, userId: stand.userId, payload: { workspaceName: 'Home', operatorName: null } },
-    ]);
+    // the call answered — what every other tab folds into its `me` — and
+    // the answer names its event's seq, the position the saving tab holds
+    // the names at.
+    const events = await settingsEvents();
+
+    assert.deepEqual(
+      events.map(({ seq: _seq, ...rest }) => rest),
+      [
+        { actor: 'user', threadId: null, userId: stand.userId, payload: { workspaceName: 'Home', operatorName: 'Vladimir' } },
+        { actor: 'user', threadId: null, userId: stand.userId, payload: { workspaceName: 'Home', operatorName: null } },
+      ],
+    );
+    assert.deepEqual([reply.json<SettingsResponse>().seq, cleared.json<SettingsResponse>().seq], [events[0]!.seq, events[1]!.seq]);
   });
 
   test('an empty patch answers the names and journals nothing', async () => {
     const reply = await stand.request('PATCH', '/api/settings', { body: {} });
 
     assert.equal(reply.status, 200, reply.text);
-    assert.deepEqual(reply.json<SettingsResponse>(), { settings: { workspaceName: 'Home', operatorName: null } });
+    assert.deepEqual(reply.json<SettingsResponse>(), { settings: { workspaceName: 'Home', operatorName: null }, seq: null });
     assert.equal((await settingsEvents()).length, 2);
   });
 
@@ -637,10 +725,10 @@ describe('settings over the api', () => {
   });
 });
 
-async function settingsEvents(): Promise<{ actor: string; threadId: string | null; userId: string | null; payload: unknown }[]> {
+async function settingsEvents(): Promise<{ seq: bigint; actor: string; threadId: string | null; userId: string | null; payload: unknown }[]> {
   const rows = await prisma.event.findMany({ where: { type: 'settings.updated' }, orderBy: { seq: 'asc' } });
 
-  return rows.map(row => ({ actor: row.actor, threadId: row.threadId, userId: row.userId, payload: row.payload }));
+  return rows.map(row => ({ seq: row.seq, actor: row.actor, threadId: row.threadId, userId: row.userId, payload: row.payload }));
 }
 
 describe('the api as a whole', () => {

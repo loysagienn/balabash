@@ -44,7 +44,8 @@ export type LogoutResponse = {
 // PATCH /api/settings: a field absent — left alone; null, empty or blank —
 // cleared (the workspace goes by the group's title again, the operator has
 // no name); a string — trimmed, at most 100 chars. 400 for another type or
-// a longer name. The answer is the effective names, as /api/me reports them.
+// a longer name. The answer is the effective names, as /api/me reports them,
+// and where the change stands in the log.
 export type SettingsPatchRequest = {
   workspaceName?: string | null;
   operatorName?: string | null;
@@ -52,6 +53,11 @@ export type SettingsPatchRequest = {
 
 export type SettingsResponse = {
   settings: NamesView;
+  // seq of the settings.updated event this call journaled — the names are
+  // the row's as of it, so a tab takes them only ahead of the names its
+  // tail already brought (a later save of another tab, answered sooner,
+  // is not put back). Null when nothing changed (an empty patch).
+  seq: bigint | null;
 };
 
 // ---------------------------------------------------------------------------

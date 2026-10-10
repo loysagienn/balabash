@@ -27,8 +27,11 @@ export const logoutFail = (error: ApiFailure) => ({ type: 'LOGOUT_FAIL', error }
 
 // The names of Settings (workspace, operator): each card saves on its own,
 // the answer updates `me` — the sidebar, the feed and the cards follow.
+// DONE carries where the answer stands in the log (the seq of the
+// settings.updated it journaled; null when the server changed nothing):
+// the reducer takes its names only ahead of the names it already holds.
 export const saveSettings = (patch: SettingsPatchRequest) => ({ type: 'SAVE_SETTINGS', patch }) as const;
-export const saveSettingsDone = (patch: SettingsPatchRequest, settings: NamesView) => ({ type: 'SAVE_SETTINGS_DONE', patch, settings }) as const;
+export const saveSettingsDone = (patch: SettingsPatchRequest, settings: NamesView, seq: bigint | null) => ({ type: 'SAVE_SETTINGS_DONE', patch, settings, seq }) as const;
 export const saveSettingsFail = (patch: SettingsPatchRequest, error: ApiFailure) => ({ type: 'SAVE_SETTINGS_FAIL', patch, error }) as const;
 
 // A session-gated call answered 401: the session is gone.

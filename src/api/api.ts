@@ -285,10 +285,11 @@ router.get('/me', requireSession, async ctx => {
 // transaction (registryMutation: the row and the event commit together,
 // seq under the row lock, so two saves reach the log in the order they
 // reached the row) with the effective names — the ones this call answers
-// — and every open tab folds them into its `me`; the group's title the
-// cleared workspace name falls back to is fetched before the transaction
-// (a Bot API call does not belong inside one). An empty patch changes
-// nothing and journals nothing.
+// — and every open tab folds them into its `me`; the answer names the
+// event's seq, so the saving tab applies it only ahead of what its tail
+// already brought. The group's title the cleared workspace name falls back
+// to is fetched before the transaction (a Bot API call does not belong
+// inside one). An empty patch changes nothing and journals nothing.
 router.patch('/settings', requireSession, async ctx => {
   const userId = ctx.state.userId as string;
   const body = await readJsonBody(ctx);
@@ -311,25 +312,22 @@ router.patch('/settings', requireSession, async ctx => {
     throw error;
   }
 
-  let settings: NamesView;
+  let response: SettingsResponse;
 
   if (Object.keys(patch).length > 0) {
     // Needed unless the patch itself names the workspace.
     const groupTitle = patch.workspaceName ? null : await getWorkspaceName(userId);
 
-    settings = await registryMutation(async (tx, journal) => {
+    response = await registryMutation(async (tx, journal) => {
       const user = await tx.user.update({ where: { id: userId }, data: patch, select: { workspaceName: true, operatorName: true } });
-      const names = namesOf(user, groupTitle);
+      const settings = namesOf(user, groupTitle);
+      const seq = await journal('settings.updated', settings, { kind: 'user', userId });
 
-      await journal('settings.updated', names, { kind: 'user', userId });
-
-      return names;
+      return { settings, seq };
     });
   } else {
-    settings = await readNames(userId);
+    response = { settings: await readNames(userId), seq: null };
   }
-
-  const response: SettingsResponse = { settings };
 
   ctx.body = prepareObject(response);
 });

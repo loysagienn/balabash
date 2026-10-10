@@ -30,7 +30,11 @@ export type RegistryAuthor =
   | { kind: 'user'; userId: string }
   | { kind: 'system'; userId: string };
 
-export type RegistryJournal = <T extends RegistryEventType>(type: T, payload: EventPayloads[T], by: RegistryAuthor) => Promise<void>;
+// Answers the seq of the event written — a change that answers a client
+// can tell it where in the log its change stands (PATCH /settings does, so
+// a tab applies the answer only ahead of the names its tail already
+// brought) — or null when the append was a no-op.
+export type RegistryJournal = <T extends RegistryEventType>(type: T, payload: EventPayloads[T], by: RegistryAuthor) => Promise<bigint | null>;
 
 // One registry change: the table writes and the events recording them in
 // one transaction (tx is the transaction's client — every write of the
@@ -49,9 +53,13 @@ export async function registryMutation<T>(change: (tx: Tx, journal: RegistryJour
         payload: payload as JsonObject,
       });
 
-      if (appendResult.written) {
-        appended.push(appendResult.event.seq);
+      if (!appendResult.written) {
+        return null;
       }
+
+      appended.push(appendResult.event.seq);
+
+      return appendResult.event.seq;
     };
 
     return change(tx, journal);

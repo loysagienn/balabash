@@ -341,15 +341,24 @@ async function setArchived(userId: string, id: string, archived: boolean, by: Re
     return { project, changed: false };
   }
 
-  const updated = await registryMutation(async (tx, journal) => {
-    const row = await tx.project.update({ where: { id: project.id }, data: { archived, archivedAt: archived ? new Date() : null } });
+  // The flag read above is not a lock: two calls at once both see a project
+  // still to flip. The flip is conditional on the row being the other way
+  // when the update takes the row lock (postgres re-checks the condition on
+  // the row as committed by then), so the second of two finds nothing to
+  // flip — the first date stays, no second event — and answers the row as
+  // it is (api.test.ts holds the first flip uncommitted under the second).
+  return registryMutation(async (tx, journal) => {
+    const { count } = await tx.project.updateMany({ where: { id: project.id, archived: !archived }, data: { archived, archivedAt: archived ? new Date() : null } });
+    const row = await tx.project.findUniqueOrThrow({ where: { id: project.id } });
+
+    if (count === 0) {
+      return { project: row, changed: false };
+    }
 
     await journal(archived ? 'project.archived' : 'project.unarchived', projectRecord(row), by);
 
-    return row;
+    return { project: row, changed: true };
   });
-
-  return { project: updated, changed: true };
 }
 
 export function archiveProject(userId: string, id: string, by: RegistryAuthor): Promise<FlaggedProject> {

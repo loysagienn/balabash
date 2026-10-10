@@ -27,7 +27,7 @@ import { createProject, setProjectArchived, updateProject } from './projects/act
 import { selectActiveProjects, selectArchivedProjectCount, selectArchivedProjects, selectProjectCreate, selectProjectEdit, selectProjectFlagging } from './projects/selectors.ts';
 import { selectConnections, selectConnectionsNeedingAction } from './connections/selectors.ts';
 import { makeSelectThreadEvents } from './feed/selectors.ts';
-import { snapshotLoad } from './stream/actions.ts';
+import { snapshotLoad, snapshotLoadDone } from './stream/actions.ts';
 import { makeSelectLastMessage } from '../features/thread-list/selectors.ts';
 import { selectThreadState } from './sessions/selectors.ts';
 import { ME, event, resetSeq, snapshot, thread } from './fixtures.ts';
@@ -74,8 +74,10 @@ function fakeApi(overrides: ApiOverrides = {}, calls: Calls = []): Api {
     unpublish: async input => ({ path: input.path ?? '', slug: input.slug ?? 'slug' }),
     ...overrides.apps,
   };
+  // Every answer of a save is newer than the fixtures' snapshot and events.
+  let answerSeq = 1_000n;
   const settings: Api['settings'] = {
-    update: async patch => ({ settings: { workspaceName: patch.workspaceName ?? ME.workspaceName, operatorName: patch.operatorName ?? ME.operatorName } }),
+    update: async patch => ({ settings: { workspaceName: patch.workspaceName ?? ME.workspaceName, operatorName: patch.operatorName ?? ME.operatorName }, seq: answerSeq++ }),
     ...overrides.settings,
   };
   const projectRow = (id: string, patch: Partial<ProjectView> = {}): ProjectView => ({ id, title: 'Project', slug: 'project', description: 'd', archived: false, archivedAt: null, createdAt: new Date(ISO_NOW), updatedAt: new Date(ISO_NOW), ...patch });
@@ -393,12 +395,16 @@ describe('session start-up', () => {
     await settle();
     assert.deepEqual([store.getState().session.me?.workspaceName, selectOperatorName(store.getState())], [ME.workspaceName, null]);
 
-    store.dispatch(eventAction(event({ type: 'settings.updated', actor: 'user', payload: { workspaceName: 'Home', operatorName: 'Vladimir' } })));
+    // The tail runs ahead of the snapshot's stamp (100): an event within
+    // the stamp is what the snapshot already told.
+    store.dispatch(eventAction(event({ seq: 100n, type: 'settings.updated', actor: 'user', payload: { workspaceName: 'Within', operatorName: 'Within' } })));
+    assert.deepEqual([store.getState().session.me?.workspaceName, selectOperatorName(store.getState())], [ME.workspaceName, null]);
+    store.dispatch(eventAction(event({ seq: 101n, type: 'settings.updated', actor: 'user', payload: { workspaceName: 'Home', operatorName: 'Vladimir' } })));
     assert.deepEqual([store.getState().session.me?.workspaceName, selectOperatorName(store.getState())], ['Home', 'Vladimir']);
     assert.equal(store.getState().session.me?.userId, ME.userId, 'the rest of me is kept');
 
     // Cleared on another device: the event carries the group's title and no operator.
-    store.dispatch(eventAction(event({ type: 'settings.updated', actor: 'user', payload: { workspaceName: 'Group', operatorName: null } })));
+    store.dispatch(eventAction(event({ seq: 102n, type: 'settings.updated', actor: 'user', payload: { workspaceName: 'Group', operatorName: null } })));
     assert.deepEqual([store.getState().session.me?.workspaceName, selectOperatorName(store.getState())], ['Group', null]);
     // The in-flight and accepted counters of the cards are not the event's business.
     assert.deepEqual(store.getState().session.settingsSaving, { workspaceName: false, operatorName: false });
@@ -441,11 +447,12 @@ describe('session start-up', () => {
     assert.equal(calls.filter(call => call.name === 'settings.update').length, 2);
   });
 
-  it('takes only the saved field from the answer: a late answer of one card keeps the other card\'s name', async () => {
-    // Both cards save at once; the answer of the first (workspace) arrives
-    // after the second (operator) — each answer carries both names.
-    const answers: ((settings: { workspaceName: string | null; operatorName: string | null }) => void)[] = [];
-    const api = fakeApi({ settings: { update: () => new Promise(resolve => answers.push(settings => resolve({ settings }))) } });
+  it('applies an answer only ahead of the names it holds: a late answer of one card keeps the other card\'s name', async () => {
+    // Both cards save at once; the answer of the first (workspace, seq 101)
+    // arrives after the second (operator, seq 102) — each answer carries
+    // both names as of its own event.
+    const answers: ((settings: { workspaceName: string | null; operatorName: string | null }, seq: bigint) => void)[] = [];
+    const api = fakeApi({ settings: { update: () => new Promise(resolve => answers.push((settings, seq) => resolve({ settings, seq }))) } });
     const store = createStore({ api, initialRoute: { key: 'settings' } });
 
     await dispatched(store, sessionCheck());
@@ -455,10 +462,10 @@ describe('session start-up', () => {
     const second = store.dispatch(saveSettings({ operatorName: 'Vladimir' }));
 
     assert.deepEqual(store.getState().session.settingsSaving, { workspaceName: true, operatorName: true });
-    answers[1]!({ workspaceName: 'Personal', operatorName: 'Vladimir' });
+    answers[1]!({ workspaceName: 'Personal', operatorName: 'Vladimir' }, 102n);
     await second;
     assert.deepEqual(store.getState().session.settingsSaved, { workspaceName: 0, operatorName: 1 });
-    answers[0]!({ workspaceName: 'Personal', operatorName: null });
+    answers[0]!({ workspaceName: 'Personal', operatorName: null }, 101n);
     await first;
 
     assert.equal(store.getState().session.me?.workspaceName, 'Personal');
@@ -467,11 +474,76 @@ describe('session start-up', () => {
     assert.deepEqual(store.getState().session.settingsSaved, { workspaceName: 1, operatorName: 1 });
   });
 
+  it('hydrates the names of me from the snapshot: a change between /me and the stamp is not lost', async () => {
+    // Tab A reads /me (Workspace); tab B saves New — the event commits
+    // before A's snapshot is stamped — so A's snapshot carries New under a
+    // stamp that includes the event, and the tail from the stamp never
+    // brings it again.
+    const api = fakeApi({ snapshot: async () => snapshot({ asOfSeq: 50n, me: { ...ME, workspaceName: 'New', operatorName: 'Vladimir' } }) });
+    const store = createStore({ api, initialRoute: { key: 'settings' } });
+
+    await dispatched(store, sessionCheck());
+    await settle();
+    assert.deepEqual([store.getState().session.me?.workspaceName, selectOperatorName(store.getState())], ['New', 'Vladimir']);
+    assert.equal(store.getState().session.me?.userId, ME.userId);
+    assert.deepEqual(store.getState().session.settingsSaved, { workspaceName: 0, operatorName: 0 });
+
+    // A snapshot stamped before names the tab already holds (a Retry
+    // answering late) does not put them back — the tail from its stamp
+    // brings the event again anyway; one stamped at or after them applies.
+    store.dispatch(eventAction(event({ seq: 60n, type: 'settings.updated', actor: 'user', payload: { workspaceName: 'Newer', operatorName: null } })));
+    store.dispatch(snapshotLoadDone(snapshot({ asOfSeq: 55n, me: { ...ME, workspaceName: 'New', operatorName: 'Vladimir' } })));
+    assert.deepEqual([store.getState().session.me?.workspaceName, selectOperatorName(store.getState())], ['Newer', null]);
+    store.dispatch(snapshotLoadDone(snapshot({ asOfSeq: 60n, me: { ...ME, workspaceName: 'Newest', operatorName: null } })));
+    assert.equal(store.getState().session.me?.workspaceName, 'Newest');
+  });
+
+  it('a late answer of a save does not put back a name a newer event replaced', async () => {
+    // Tab A saves A: the server commits and journals it (seq 101) while the
+    // HTTP answer lags; tab B saves B (seq 102); A's tail brings both events
+    // in order, then A's answer lands — as of 101, behind the names held as
+    // of 102: it completes the save (the counter moves, the toast shows)
+    // and leaves the names alone.
+    let answer!: (reply: { settings: { workspaceName: string | null; operatorName: string | null }; seq: bigint }) => void;
+    const api = fakeApi({ settings: { update: () => new Promise(resolve => { answer = resolve; }) } });
+    const store = createStore({ api, initialRoute: { key: 'settings' } });
+
+    await dispatched(store, sessionCheck());
+    await settle();
+
+    const late = store.dispatch(saveSettings({ workspaceName: 'A' }));
+
+    store.dispatch(eventAction(event({ seq: 101n, type: 'settings.updated', actor: 'user', payload: { workspaceName: 'A', operatorName: null } })));
+    store.dispatch(eventAction(event({ seq: 102n, type: 'settings.updated', actor: 'user', payload: { workspaceName: 'B', operatorName: null } })));
+    assert.equal(store.getState().session.me?.workspaceName, 'B');
+    answer({ settings: { workspaceName: 'A', operatorName: null }, seq: 101n });
+    await late;
+
+    assert.equal(store.getState().session.me?.workspaceName, 'B');
+    assert.deepEqual(store.getState().session.settingsSaving, { workspaceName: false, operatorName: false });
+    assert.deepEqual(store.getState().session.settingsSaved, { workspaceName: 1, operatorName: 0 });
+    assert.equal(store.getState().ui.toasts.at(-1)?.desc, 'Workspace name: “A”');
+
+    // The answer ahead of its own event applies; the event then changes
+    // nothing more, and a newer one moves the names on.
+    const early = store.dispatch(saveSettings({ workspaceName: 'C' }));
+
+    answer({ settings: { workspaceName: 'C', operatorName: null }, seq: 103n });
+    await early;
+    assert.equal(store.getState().session.me?.workspaceName, 'C');
+    store.dispatch(eventAction(event({ seq: 103n, type: 'settings.updated', actor: 'user', payload: { workspaceName: 'C', operatorName: null } })));
+    assert.equal(store.getState().session.me?.workspaceName, 'C');
+    store.dispatch(eventAction(event({ seq: 104n, type: 'settings.updated', actor: 'user', payload: { workspaceName: 'D', operatorName: 'Vladimir' } })));
+    assert.deepEqual([store.getState().session.me?.workspaceName, selectOperatorName(store.getState())], ['D', 'Vladimir']);
+    assert.deepEqual(store.getState().session.settingsSaved, { workspaceName: 2, operatorName: 0 });
+  });
+
   it('says "cleared" for the blank string the form sends, whatever fallback the answer carries', async () => {
     // The server reads a blank name as "clear" and answers the group's title.
+    let seq = 1_000n;
     const api = fakeApi({
       settings: {
-        update: async patch => ({ settings: { workspaceName: patch.workspaceName?.trim() ? patch.workspaceName.trim() : 'Group', operatorName: patch.operatorName?.trim() || null } }),
+        update: async patch => ({ settings: { workspaceName: patch.workspaceName?.trim() ? patch.workspaceName.trim() : 'Group', operatorName: patch.operatorName?.trim() || null }, seq: seq++ }),
       },
     });
     const store = createStore({ api, initialRoute: { key: 'settings' } });

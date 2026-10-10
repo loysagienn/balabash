@@ -152,9 +152,9 @@ export const saveSettingsHandler: ActionHandler<'SAVE_SETTINGS'> =
     next(action);
 
     try {
-      const { settings } = await api.settings.update(action.patch);
+      const { settings, seq } = await api.settings.update(action.patch);
 
-      dispatch(saveSettingsDone(action.patch, settings));
+      dispatch(saveSettingsDone(action.patch, settings, seq));
       dispatch(pushToast({ title: 'Saved', desc: savedWords(action.patch, settings), state: 'done' }));
     } catch (error) {
       const failure = toApiFailure(error);
