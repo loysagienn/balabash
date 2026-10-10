@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { isLocalPath, navKeyOf, readRoute, writeRoute } from './routes.ts';
+import { localPath, navKeyOf, readRoute, writeRoute } from './routes.ts';
 import type { AppRoute } from './routes.ts';
 
 const CASES: [string, AppRoute][] = [
@@ -48,16 +48,31 @@ describe('routes', () => {
     assert.deepEqual(readRoute('/threads/42/'), { key: 'thread', id: '42' });
   });
 
-  it('keeps only a path of this host as the sign-in destination', () => {
-    assert.ok(isLocalPath('/threads/1'));
-    assert.ok(isLocalPath('/'));
-    assert.equal(isLocalPath('//evil.example/x'), false);
-    assert.equal(isLocalPath('/\\evil.example/x'), false);
-    assert.equal(isLocalPath('https://evil.example/'), false);
-    assert.equal(isLocalPath('threads'), false);
-    assert.equal(isLocalPath(''), false);
+  it('keeps only a path of this host as the sign-in destination, in the form the browser navigates by', () => {
+    assert.equal(localPath('/threads/1'), '/threads/1');
+    assert.equal(localPath('/'), '/');
+    assert.equal(localPath('/apps/notes?tab=1#top'), '/apps/notes?tab=1#top');
+    assert.equal(localPath('/workspace/a b/заметки.md'), '/workspace/a%20b/%D0%B7%D0%B0%D0%BC%D0%B5%D1%82%D0%BA%D0%B8.md');
+    assert.equal(localPath('/./threads/../projects'), '/projects');
+    assert.equal(localPath('/%2F%2Fevil.example'), '/%2F%2Fevil.example');
+    assert.equal(localPath('//evil.example/x'), null);
+    assert.equal(localPath('/\\evil.example/x'), null);
+    assert.equal(localPath('https://evil.example/'), null);
+    assert.equal(localPath('threads'), null);
+    assert.equal(localPath(''), null);
+    assert.equal(localPath('/\t/evil.example/x'), null);
+    assert.equal(localPath('/\n/evil.example/x'), null);
+    assert.equal(localPath('/\r/evil.example/x'), null);
+    assert.equal(localPath('/\t\\evil.example/x'), null);
+    assert.equal(localPath('/\n\\evil.example/x'), null);
+    assert.equal(localPath('/\r\\evil.example/x'), null);
+    assert.equal(localPath('/\\\\evil.example/x'), null);
+    assert.equal(localPath('/\t\t//evil.example'), null);
     assert.deepEqual(readRoute('/login?next=%2F%2Fevil.example'), { key: 'login' });
+    assert.deepEqual(readRoute('/login?next=%2F%09%2Fevil.example%2Fx'), { key: 'login' });
+    assert.deepEqual(readRoute('/login?next=%2F%0A%5Cevil.example%2Fx'), { key: 'login' });
     assert.deepEqual(readRoute('/login?next=threads'), { key: 'login' });
+    assert.deepEqual(readRoute('/login?next=%2F.%2Fthreads%3Fstatus%3Dactive'), { key: 'login', next: '/threads?status=active' });
   });
 
   it('catches everything else as not_found with the URL kept', () => {

@@ -34,38 +34,67 @@ export const sessionCheckDoneHandler: ActionHandler<'SESSION_CHECK_DONE'> =
     }
   };
 
+// The form waits for one thing at a time: a request while the code is
+// being checked, or a code while one is being printed, is dropped. The
+// answer is for the request the reducer put into session.login.request
+// and is dispatched only while the store still waits for exactly it: a
+// lost session (a stale 401 of the session before) resets the form while
+// the call is in flight, and the answer of that call — a session, a
+// printed code, a failure — must not word or unblock the form of the
+// request sent after.
 export const loginHandler: ActionHandler<'LOGIN'> =
   ({ api, dispatch, getState, next }) =>
   async action => {
-    if (getState().session.login.pending) {
+    if (getState().session.login.request) {
       return;
     }
 
     next(action);
 
+    const request = getState().session.login.request;
+
+    if (!request) {
+      return;
+    }
+
     try {
-      dispatch(loginDone(await api.auth(action.code)));
+      const me = await api.auth(action.code);
+
+      if (getState().session.login.request === request) {
+        dispatch(loginDone(request, me));
+      }
     } catch (error) {
-      dispatch(loginFail(toApiFailure(error)));
+      if (getState().session.login.request === request) {
+        dispatch(loginFail(request, toApiFailure(error)));
+      }
     }
   };
 
-// The form waits for one thing at a time: a request while the code is
-// being checked, or a code while one is being printed, is dropped.
 export const consoleCodeHandler: ActionHandler<'CONSOLE_CODE_REQUEST'> =
   ({ api, dispatch, getState, next }) =>
   async action => {
-    if (getState().session.login.pending) {
+    if (getState().session.login.request) {
       return;
     }
 
     next(action);
 
+    const request = getState().session.login.request;
+
+    if (!request) {
+      return;
+    }
+
     try {
       await api.consoleCode();
-      dispatch(consoleCodeDone());
+
+      if (getState().session.login.request === request) {
+        dispatch(consoleCodeDone(request));
+      }
     } catch (error) {
-      dispatch(consoleCodeFail(toApiFailure(error)));
+      if (getState().session.login.request === request) {
+        dispatch(consoleCodeFail(request, toApiFailure(error)));
+      }
     }
   };
 

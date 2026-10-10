@@ -3,10 +3,10 @@
 // field says about an error, and where the /login door leads once the
 // session is there.
 
-import { isLocalPath, readRoute } from '../../lib/router/routes.ts';
+import { localPath, readRoute } from '../../lib/router/routes.ts';
 import type { AppRoute } from '../../lib/router/routes.ts';
 import type { ApiFailure } from '../../lib/api/index.ts';
-import type { LoginPending } from '../../store/session/reducer.ts';
+import type { LoginRequest } from '../../store/session/reducer.ts';
 
 // Typed into the code field instead of a code: asks the server to print a
 // login code for the operator's workspace into its own log — the way in
@@ -21,13 +21,13 @@ export function isConsoleWord(code: string): boolean {
 // never crosses the wire; the server keeps it for ten minutes).
 export const CODE_PRINTED_HINT = 'The code is printed in the server log — read it there and enter it here within 10 minutes.';
 
-export function submitLabel(pending: LoginPending): string {
-  switch (pending) {
+export function submitLabel(request: LoginRequest | null): string {
+  switch (request?.kind) {
     case 'sign-in':
       return 'Signing in';
     case 'console-code':
       return 'Requesting a code';
-    case null:
+    case undefined:
       return 'Sign in';
   }
 }
@@ -42,26 +42,30 @@ export function errorWords(error: ApiFailure): string {
 // place (with its fragment); a path it does not serve — the owner page of
 // an app under /apps/<path>, the shared surfaces — is a full navigation to
 // the same host. No destination, another origin or the door itself — Home.
+// The route already keeps `next` as a path of this host (localPath); the
+// destination is read from that parsed form once more — the one the
+// browser navigates by — never from a string as it was written.
 export type LoginDestination = { kind: 'route'; route: AppRoute; hash: string } | { kind: 'url'; url: string };
 
 export function loginDestination(next: string | undefined): LoginDestination {
   const home: LoginDestination = { kind: 'route', route: { key: 'home' }, hash: '' };
+  const local = next ? localPath(next) : null;
 
-  if (!next || !isLocalPath(next)) {
+  if (!local) {
     return home;
   }
 
-  const route = readRoute(next);
+  const route = readRoute(local);
 
   if (route.key === 'login') {
     return home;
   }
 
   if (route.key === 'not_found') {
-    return { kind: 'url', url: next };
+    return { kind: 'url', url: local };
   }
 
-  const hashAt = next.indexOf('#');
+  const hashAt = local.indexOf('#');
 
-  return { kind: 'route', route, hash: hashAt >= 0 ? next.slice(hashAt) : '' };
+  return { kind: 'route', route, hash: hashAt >= 0 ? local.slice(hashAt) : '' };
 }

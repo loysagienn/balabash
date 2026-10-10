@@ -18,10 +18,10 @@ import { CODE_PRINTED_HINT, errorWords, isConsoleWord, submitLabel } from './Sig
 
 export function SignIn() {
   const dispatch = useAppDispatch();
-  const { pending, error, codePrinted } = useAppSelector(state => state.session.login);
+  const { request, error, codePrinted } = useAppSelector(state => state.session.login);
   const [code, setCode] = useState('');
   const trimmed = code.trim();
-  const busy = pending !== null;
+  const busy = request !== null;
 
   const onSubmit = (event: FormEvent) => {
     event.preventDefault();
@@ -57,7 +57,7 @@ export function SignIn() {
             ariaLabel="One-time code"
           />
         </Field>
-        <Btn type="submit" label={submitLabel(pending)} variant="primary" block busy={busy} disabled={!trimmed} />
+        <Btn type="submit" label={submitLabel(request)} variant="primary" block busy={busy} disabled={!trimmed} />
       </form>
     </Solo>
   );

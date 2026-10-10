@@ -5,11 +5,17 @@ import type { Action } from '../types.ts';
 export type SessionStatus = 'loading' | 'anonymous' | 'signed-in' | 'error';
 
 // What the sign-in form waits for: the code's check, or the server
-// printing a code into its log.
-export type LoginPending = 'sign-in' | 'console-code' | null;
+// printing a code into its log. The request is the identity of the one
+// call in flight: an answer — a session, a printed code, a failure — is
+// applied only while the store still waits for exactly that request (the
+// rule of the threads and apps domains), so a call that outlived a lost
+// session, and the form reset with it, neither unblocks nor words the form
+// of the request sent after.
+export type LoginRequestKind = 'sign-in' | 'console-code';
+export type LoginRequest = { kind: LoginRequestKind };
 
 export type LoginState = {
-  pending: LoginPending;
+  request: LoginRequest | null;
   error: ApiFailure | null;
   // The server has printed a code into its log (the word "console" was
   // sent): the field says where to read it until the next attempt.
@@ -73,7 +79,7 @@ export const initialSession: SessionState = {
   status: 'loading',
   me: null,
   error: null,
-  login: { pending: null, error: null, codePrinted: false },
+  login: { request: null, error: null, codePrinted: false },
   logoutPending: false,
   settingsSaving: { workspaceName: false, operatorName: false },
   settingsSaved: { workspaceName: 0, operatorName: 0 },
@@ -90,17 +96,21 @@ export function sessionReducer(state: SessionState = initialSession, action: Act
     case 'LOGIN':
       // The hint stays through a code's check: a mistyped code is still in
       // the log.
-      return { ...state, login: { ...state.login, pending: 'sign-in', error: null } };
+      return { ...state, login: { ...state.login, request: { kind: 'sign-in' }, error: null } };
     case 'LOGIN_DONE':
-      return { ...state, status: 'signed-in', me: action.me, error: null, login: { pending: null, error: null, codePrinted: false } };
+      if (action.request !== state.login.request) {
+        return state;
+      }
+
+      return { ...state, status: 'signed-in', me: action.me, error: null, login: { request: null, error: null, codePrinted: false } };
     case 'LOGIN_FAIL':
-      return { ...state, login: { ...state.login, pending: null, error: action.error } };
+      return action.request === state.login.request ? { ...state, login: { ...state.login, request: null, error: action.error } } : state;
     case 'CONSOLE_CODE_REQUEST':
-      return { ...state, login: { pending: 'console-code', error: null, codePrinted: false } };
+      return { ...state, login: { request: { kind: 'console-code' }, error: null, codePrinted: false } };
     case 'CONSOLE_CODE_DONE':
-      return { ...state, login: { pending: null, error: null, codePrinted: true } };
+      return action.request === state.login.request ? { ...state, login: { request: null, error: null, codePrinted: true } } : state;
     case 'CONSOLE_CODE_FAIL':
-      return { ...state, login: { pending: null, error: action.error, codePrinted: false } };
+      return action.request === state.login.request ? { ...state, login: { request: null, error: action.error, codePrinted: false } } : state;
     case 'LOGOUT':
       return { ...state, logoutPending: true };
     case 'LOGOUT_FAIL':

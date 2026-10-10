@@ -232,7 +232,7 @@ describe('session start-up', () => {
     // One request at a time: the second press waits for the answer.
     const first = dispatched(store, requestConsoleCode());
 
-    assert.deepEqual(store.getState().session.login, { pending: 'console-code', error: null, codePrinted: false });
+    assert.deepEqual(store.getState().session.login, { request: { kind: 'console-code' }, error: null, codePrinted: false });
     await dispatched(store, requestConsoleCode());
     await dispatched(store, login('K7QM2X'));
     assert.equal(calls.filter(call => call.name === 'consoleCode').length, 1);
@@ -240,22 +240,123 @@ describe('session start-up', () => {
 
     printing!();
     await first;
-    assert.deepEqual(store.getState().session.login, { pending: null, error: null, codePrinted: true });
+    assert.deepEqual(store.getState().session.login, { request: null, error: null, codePrinted: true });
     assert.equal(store.getState().session.status, 'anonymous');
 
     // A wrong code keeps the hint (the code is still in the log); the next
     // request or sign-in starts over.
     await dispatched(store, login('WRONG'));
-    assert.deepEqual(store.getState().session.login, { pending: null, error: { status: 401, code: 'invalid_code', message: 'The code is invalid or expired' }, codePrinted: true });
+    assert.deepEqual(store.getState().session.login, { request: null, error: { status: 401, code: 'invalid_code', message: 'The code is invalid or expired' }, codePrinted: true });
 
     refuse = true;
 
     const second = dispatched(store, requestConsoleCode());
 
-    assert.deepEqual(store.getState().session.login, { pending: 'console-code', error: null, codePrinted: false });
+    assert.deepEqual(store.getState().session.login, { request: { kind: 'console-code' }, error: null, codePrinted: false });
     printing!();
     await second;
-    assert.deepEqual(store.getState().session.login, { pending: null, error: { status: 429, code: 'rate_limited', message: 'A login code was printed moments ago' }, codePrinted: false });
+    assert.deepEqual(store.getState().session.login, { request: null, error: { status: 429, code: 'rate_limited', message: 'A login code was printed moments ago' }, codePrinted: false });
+    assert.deepEqual(store.getState().router.route, { key: 'login', next: '/apps/notes' });
+  });
+
+  // The form is reset by a lost session (a stale 401 of the session before
+  // can land while the operator is already on the form) and a new request
+  // goes out while the old call is still in flight: the old answer — a
+  // printed code, a refusal, a session, a wrong code — is for a request the
+  // store no longer waits for and must neither word nor unblock the form
+  // of the new one.
+  it('an answer of a request that outlived a lost session is dropped; the request sent after keeps waiting', async () => {
+    const calls: Calls = [];
+    const printing: { resolve: () => void; reject: (error: Error) => void }[] = [];
+    const checking: { resolve: () => void; reject: (error: Error) => void }[] = [];
+    const api = fakeApi(
+      {
+        me: async () => {
+          throw new ApiError(401, 'unauthorized', 'No valid session');
+        },
+        auth: () =>
+          new Promise((resolve, reject) => {
+            checking.push({ resolve: () => resolve(ME), reject });
+          }),
+        consoleCode: () =>
+          new Promise<null>((resolve, reject) => {
+            printing.push({ resolve: () => resolve(null), reject });
+          }),
+      },
+      calls,
+    );
+    const store = createStore({ api, initialRoute: { key: 'login', next: '/apps/notes' } });
+    const authCalls = () => calls.filter(call => call.name === 'auth').length;
+    const waiting = { request: { kind: 'console-code' }, error: null, codePrinted: false };
+
+    await dispatched(store, sessionCheck());
+
+    // A printed code of the session before: the new request keeps waiting,
+    // a sign-in meanwhile is still dropped, the hint comes with B's answer.
+    const a = dispatched(store, requestConsoleCode());
+
+    store.dispatch(sessionLost());
+    assert.deepEqual(store.getState().session.login, { request: null, error: null, codePrinted: false });
+
+    const b = dispatched(store, requestConsoleCode());
+
+    assert.deepEqual(store.getState().session.login, waiting);
+    assert.equal(printing.length, 2);
+    printing[0]!.resolve();
+    await a;
+    assert.deepEqual(store.getState().session.login, waiting);
+    await dispatched(store, login('K7QM2X'));
+    assert.equal(authCalls(), 0);
+    printing[1]!.resolve();
+    await b;
+    assert.deepEqual(store.getState().session.login, { request: null, error: null, codePrinted: true });
+
+    // A refusal of the session before: the same.
+    const c = dispatched(store, requestConsoleCode());
+
+    store.dispatch(sessionLost());
+
+    const d = dispatched(store, requestConsoleCode());
+
+    assert.equal(printing.length, 4);
+    printing[2]!.reject(new ApiError(429, 'rate_limited', 'A login code was printed moments ago'));
+    await c;
+    assert.deepEqual(store.getState().session.login, waiting);
+    await dispatched(store, login('K7QM2X'));
+    assert.equal(authCalls(), 0);
+    printing[3]!.resolve();
+    await d;
+    assert.deepEqual(store.getState().session.login, { request: null, error: null, codePrinted: true });
+
+    // A wrong code of the session before lands on an idle form: no error.
+    const e = dispatched(store, login('OLD'));
+
+    store.dispatch(sessionLost());
+    assert.equal(checking.length, 1);
+    checking[0]!.reject(new ApiError(401, 'invalid_code', 'The code is invalid or expired'));
+    await e;
+    assert.deepEqual(store.getState().session.login, { request: null, error: null, codePrinted: false });
+    assert.equal(store.getState().session.status, 'anonymous');
+
+    // A session of the sign-in before, answered while the next code is being
+    // checked: not this request — the store stays with the one in flight.
+    const f = dispatched(store, login('OLD'));
+
+    store.dispatch(sessionLost());
+
+    const g = dispatched(store, login('NEW'));
+
+    assert.equal(checking.length, 3);
+    checking[1]!.resolve();
+    await f;
+    assert.equal(store.getState().session.status, 'anonymous');
+    assert.deepEqual(store.getState().session.login, { request: { kind: 'sign-in' }, error: null, codePrinted: false });
+    checking[2]!.resolve();
+    await g;
+    await settle();
+    assert.equal(store.getState().session.status, 'signed-in');
+    assert.deepEqual(store.getState().session.login, { request: null, error: null, codePrinted: false });
+    assert.equal(store.getState().stream.asOfSeq, 100n);
     assert.deepEqual(store.getState().router.route, { key: 'login', next: '/apps/notes' });
   });
 

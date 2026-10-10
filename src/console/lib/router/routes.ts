@@ -261,11 +261,28 @@ export const devUi = defineRoute<DevUiRoute>({
   writeRoute: route => `/dev/ui${queryString({ section: route.section })}`,
 });
 
-// A post-sign-in destination survives only as a path of this host: it must
-// start with one slash — "//host" is another origin, and "/\host" is the
-// same thing to a browser, which reads a backslash as a slash in a URL.
-export function isLocalPath(value: string): boolean {
-  return /^\/(?![/\\])/.test(value);
+// A post-sign-in destination survives only as a path of this host, in the
+// form the browser will actually navigate by: the string is parsed against
+// a fixed local base the way the address bar would parse it — a backslash
+// is a slash, a tab or a newline between the slashes is dropped ("/\t/host"
+// is "//host") — and it passes only when the parsed origin is still the
+// base's; what comes back is the parsed path, query and fragment, never the
+// string as written, so the check and the navigation read one URL. A string
+// without a leading slash, another origin or one the parser refuses — null.
+const LOCAL_BASE = 'https://local.invalid';
+
+export function localPath(value: string): string | null {
+  if (!value.startsWith('/')) {
+    return null;
+  }
+
+  try {
+    const url = new URL(value, LOCAL_BASE);
+
+    return url.origin === LOCAL_BASE ? `${url.pathname}${url.search}${url.hash}` : null;
+  } catch {
+    return null;
+  }
 }
 
 export const login = defineRoute<LoginRoute>({
@@ -278,8 +295,9 @@ export const login = defineRoute<LoginRoute>({
     }
 
     const next = param(params, 'next');
+    const local = next ? localPath(next) : null;
 
-    return next && isLocalPath(next) ? { key: 'login', next } : { key: 'login' };
+    return local ? { key: 'login', next: local } : { key: 'login' };
   },
   writeRoute: route => `/login${queryString({ next: route.next })}`,
 });
