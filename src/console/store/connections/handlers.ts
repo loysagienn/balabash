@@ -2,11 +2,14 @@
 // reconnect and connect. A rename and a connect are forms — one call per
 // form at a time, the refusal stays in the store for the dialog to show,
 // the acceptance closes it (lib/forms/attempt.ts); a disconnect and a
-// reconnect are one call per row at a time (connections.calls[id]), their
-// outcome applied by the identity of that call — an answer that outlived
-// its session (a sign-out, the next sign-in) touches nothing — and told by
-// a toast, a refusal too. A link answered (reconnect, connect) is held
-// beside its row; the toast says where to open it.
+// reconnect are one call per row at a time (connections.calls[id]) and
+// told by a toast, a refusal too. Every outcome is applied by the identity
+// of the call or form the store held when the command went out — an
+// answer that outlived its session (a sign-out, the next sign-in), its
+// row (disconnected meanwhile) or its form touches nothing. A link
+// answered (reconnect, connect) is held beside its row; the toast says
+// where to open it — only when the store took the link (an answer the
+// tail moved past holds no link, and says nothing).
 
 import { toApiFailure } from '../../lib/api/index.ts';
 import type { ActionHandler } from '../types.ts';
@@ -14,6 +17,7 @@ import { pushToast } from '../ui/actions.ts';
 import { connectServiceDone, connectServiceFail, disconnectConnectionDone, disconnectConnectionFail, reconnectConnectionDone, reconnectConnectionFail, renameConnectionDone, renameConnectionFail } from './actions.ts';
 import { ownCall } from './reducer.ts';
 import { disconnectedWords, linkReadyWords, renamedWords } from './words.ts';
+import { selectConnectionLink } from './selectors.ts';
 
 export const renameConnectionHandler: ActionHandler<'RENAME_CONNECTION'> =
   ({ api, dispatch, getState, next }) =>
@@ -24,18 +28,34 @@ export const renameConnectionHandler: ActionHandler<'RENAME_CONNECTION'> =
 
     next(action);
 
+    const request = getState().connections.renames[action.id];
+
+    if (!request?.pending) {
+      return;
+    }
+
     const previous = getState().connections.byId[action.id]?.displayName ?? action.name;
 
     try {
       const { connection } = await api.connections.rename(action.id, action.name);
 
-      dispatch(renameConnectionDone(action.id, connection));
+      if (getState().connections.renames[action.id] !== request) {
+        return;
+      }
 
-      if (connection.displayName !== previous) {
+      dispatch(renameConnectionDone(action.id, request, connection));
+
+      // Told only when the row now carries the answered name (an unchanged
+      // name is quiet; a row the tail moved past shows another name).
+      if (connection.displayName !== previous && getState().connections.byId[action.id]?.displayName === connection.displayName) {
         dispatch(pushToast(renamedWords(previous, connection)));
       }
     } catch (error) {
-      dispatch(renameConnectionFail(action.id, toApiFailure(error)));
+      if (getState().connections.renames[action.id] !== request) {
+        return;
+      }
+
+      dispatch(renameConnectionFail(action.id, request, toApiFailure(error)));
     }
   };
 
@@ -102,7 +122,10 @@ export const reconnectConnectionHandler: ActionHandler<'RECONNECT_CONNECTION'> =
       }
 
       dispatch(reconnectConnectionDone(action.id, request, link));
-      dispatch(pushToast(linkReadyWords(link.connection, link.expiresAt)));
+
+      if (selectConnectionLink(getState(), action.id)?.url === link.url) {
+        dispatch(pushToast(linkReadyWords(link.connection, link.expiresAt)));
+      }
     } catch (error) {
       if (ownCall(getState().connections.calls, action.id) !== request) {
         return;
@@ -124,12 +147,29 @@ export const connectServiceHandler: ActionHandler<'CONNECT_SERVICE'> =
 
     next(action);
 
+    const request = getState().connections.connects[action.server];
+
+    if (!request?.pending) {
+      return;
+    }
+
     try {
       const link = await api.connections.connect(action.name === null ? { server: action.server } : { server: action.server, name: action.name });
 
-      dispatch(connectServiceDone(action.server, link));
-      dispatch(pushToast(linkReadyWords(link.connection, link.expiresAt)));
+      if (getState().connections.connects[action.server] !== request) {
+        return;
+      }
+
+      dispatch(connectServiceDone(action.server, request, link));
+
+      if (selectConnectionLink(getState(), link.connection.id)?.url === link.url) {
+        dispatch(pushToast(linkReadyWords(link.connection, link.expiresAt)));
+      }
     } catch (error) {
-      dispatch(connectServiceFail(action.server, toApiFailure(error)));
+      if (getState().connections.connects[action.server] !== request) {
+        return;
+      }
+
+      dispatch(connectServiceFail(action.server, request, toApiFailure(error)));
     }
   };

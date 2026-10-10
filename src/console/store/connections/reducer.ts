@@ -10,15 +10,25 @@
 // recorded before the id was added names the account only and is not
 // folded; a completed recorded before it carried the row patches the status
 // and the identity. Beside the rows — the operator's own commands
-// (actions.ts): the answer of a rename and of a link folds the row at once
-// (the tail's event then finds the same row), a disconnect drops it; the
-// call in flight per row (a disconnect or a reconnect, applied by
-// identity), the form of a rename per row and of a connect per service
-// (lib/forms/attempt.ts); the sign-in links answered to this tab, by row —
-// a link is never in the log, so only the tab that asked holds it, until
-// the flow ends (completed, or the row is gone) or a newer link replaces it
-// (connection.pending with a later updatedAt than the one the link came
-// with — another tab or an agent re-issued it, which killed this one).
+// (actions.ts): the call in flight per row (a disconnect or a reconnect),
+// the form of a rename per row and of a connect per service
+// (lib/forms/attempt.ts) — an outcome is applied only to the call or form
+// it names (the one the store held when the command went out: a session
+// cleared, a row gone or a form of a later session no longer waits for
+// it); the answer of a rename and of a link folds the row at once (the
+// tail's event then finds the same row) unless the row held is fresher
+// (updatedAt later: the tail moved past the answer — another tab's or an
+// agent's change landed meanwhile; the answer is history and nothing of
+// it is applied, not the row, not the link), and a row the store no
+// longer holds is not brought back by an answer (a connect's new row is
+// added — it was never held); a disconnect drops the row with everything
+// of it, the calls and the form included; the sign-in links answered to
+// this tab, by row — a link is never in the log, so only the tab that
+// asked holds it, until the flow ends (completed, or the row is gone) or a
+// newer link replaces it (connection.pending with a later updatedAt than
+// the one the link came with — another tab or an agent re-issued it, which
+// killed this one). A new snapshot keeps the calls, forms, links and
+// failures of the rows it still has and drops those of rows it lacks.
 
 import type { ConnectionView, ServiceView } from '../../../api/contract.ts';
 import type { FormCallState } from '../../lib/forms/attempt.ts';
@@ -85,17 +95,41 @@ function withoutCall(state: ConnectionsState, id: string, request: ConnectionCal
   return ownCall(state.calls, id) === request ? { ...state, calls: without(state.calls, id) } : state;
 }
 
-// The row is gone: nothing of it stays — not the link, not the failure.
+// The row is gone: nothing of it stays — not the link, not the failure,
+// not the call or the form that waits for an answer about it (the answer
+// finds no call to apply to).
 function withoutRow(state: ConnectionsState, id: string | undefined): ConnectionsState {
   if (!id || !state.byId[id]) {
     return state;
   }
 
-  return { ...state, byId: without(state.byId, id), ids: state.ids.filter(known => known !== id), links: without(state.links, id), failures: without(state.failures, id) };
+  return { ...state, byId: without(state.byId, id), ids: state.ids.filter(known => known !== id), calls: without(state.calls, id), renames: without(state.renames, id), links: without(state.links, id), failures: without(state.failures, id) };
+}
+
+// Whether an answer's row is history: the row held is fresher (the tail
+// moved past the command), or the row is no longer held and the answer
+// is not the one that brought it into being.
+function stale(state: ConnectionsState, connection: ConnectionView, born: boolean): boolean {
+  const known = state.byId[connection.id];
+
+  return known ? known.updatedAt.getTime() > connection.updatedAt.getTime() : !born;
 }
 
 function withLink(state: ConnectionsState, connection: ConnectionView, url: string, expiresAt: Date): ConnectionsState {
   return { ...upsert(state, connection), links: { ...state.links, [connection.id]: { url, expiresAt, issuedAt: connection.updatedAt } }, failures: without(state.failures, connection.id) };
+}
+
+// The entries of the rows still held.
+function ofRows<T>(record: Record<string, T>, byId: Record<string, ConnectionView>): Record<string, T> {
+  const kept: Record<string, T> = {};
+
+  for (const id of Object.keys(record)) {
+    if (Object.hasOwn(byId, id)) {
+      kept[id] = record[id] as T;
+    }
+  }
+
+  return kept;
 }
 
 function withRename(state: ConnectionsState, id: string, form: (current: FormCallState) => FormCallState): ConnectionsState {
@@ -115,7 +149,16 @@ export function connectionsReducer(state: ConnectionsState = initialConnections,
         byId[connection.id] = connection;
       }
 
-      return { ...state, byId, ids: action.snapshot.connections.map(connection => connection.id), catalog: action.snapshot.services };
+      return {
+        ...state,
+        byId,
+        ids: action.snapshot.connections.map(connection => connection.id),
+        catalog: action.snapshot.services,
+        calls: ofRows(state.calls, byId),
+        renames: ofRows(state.renames, byId),
+        links: ofRows(state.links, byId),
+        failures: ofRows(state.failures, byId),
+      };
     }
     case 'event/connection.pending': {
       const connection = connectionFromRecord(action.event.payload);
@@ -170,13 +213,17 @@ export function connectionsReducer(state: ConnectionsState = initialConnections,
       return withoutRow(state, action.event.payload.connectionId);
     case 'RENAME_CONNECTION':
       return withRename(state, action.id, form => ({ ...form, pending: true, error: null }));
-    case 'RENAME_CONNECTION_DONE':
-      return upsert(
-        withRename(state, action.id, form => ({ pending: false, error: null, done: form.done + 1 })),
-        action.connection,
-      );
+    case 'RENAME_CONNECTION_DONE': {
+      if (state.renames[action.id] !== action.request) {
+        return state;
+      }
+
+      const next = withRename(state, action.id, form => ({ pending: false, error: null, done: form.done + 1 }));
+
+      return stale(next, action.connection, false) ? next : upsert(next, action.connection);
+    }
     case 'RENAME_CONNECTION_FAIL':
-      return withRename(state, action.id, form => ({ ...form, pending: false, error: action.error }));
+      return state.renames[action.id] === action.request ? withRename(state, action.id, form => ({ ...form, pending: false, error: action.error })) : state;
     case 'DISCONNECT_CONNECTION':
       return ownCall(state.calls, action.id) ? state : { ...state, calls: { ...state.calls, [action.id]: { kind: 'disconnect' } } };
     case 'RECONNECT_CONNECTION':
@@ -193,22 +240,26 @@ export function connectionsReducer(state: ConnectionsState = initialConnections,
         return state;
       }
 
-      return withLink(withoutCall(state, action.id, action.request), action.link.connection, action.link.url, action.link.expiresAt);
+      const next = withoutCall(state, action.id, action.request);
+
+      return stale(next, action.link.connection, false) ? next : withLink(next, action.link.connection, action.link.url, action.link.expiresAt);
     }
     case 'DISCONNECT_CONNECTION_FAIL':
     case 'RECONNECT_CONNECTION_FAIL':
       return withoutCall(state, action.id, action.request);
     case 'CONNECT_SERVICE':
       return withConnect(state, action.server, form => ({ ...form, pending: true, error: null }));
-    case 'CONNECT_SERVICE_DONE':
-      return withLink(
-        withConnect(state, action.server, form => ({ pending: false, error: null, done: form.done + 1 })),
-        action.link.connection,
-        action.link.url,
-        action.link.expiresAt,
-      );
+    case 'CONNECT_SERVICE_DONE': {
+      if (state.connects[action.server] !== action.request) {
+        return state;
+      }
+
+      const next = withConnect(state, action.server, form => ({ pending: false, error: null, done: form.done + 1 }));
+
+      return stale(next, action.link.connection, true) ? next : withLink(next, action.link.connection, action.link.url, action.link.expiresAt);
+    }
     case 'CONNECT_SERVICE_FAIL':
-      return withConnect(state, action.server, form => ({ ...form, pending: false, error: action.error }));
+      return state.connects[action.server] === action.request ? withConnect(state, action.server, form => ({ ...form, pending: false, error: action.error })) : state;
     default:
       return state;
   }

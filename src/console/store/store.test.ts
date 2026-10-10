@@ -2918,4 +2918,120 @@ describe('connection commands', () => {
     assert.deepEqual(store.getState().ui.toasts, []);
     assert.deepEqual(store.getState().connections.calls, {});
   });
+
+  it('a rename and a connect answered after the session was cleared touch nothing — not the next session’s forms of the same row and service either', async () => {
+    const renames: Answer<{ connection: ConnectionView }>[] = [];
+    const connects: Answer<ReturnType<typeof link>>[] = [];
+    const store = await onConnections({ connections: { rename: held(renames), connect: held(connects) } });
+
+    store.dispatch(renameConnection('work', 'Old session'));
+    store.dispatch(connectService('notion', 'Personal'));
+    store.dispatch(sessionLost());
+    assert.deepEqual(store.getState().connections.renames, {});
+    assert.deepEqual(store.getState().connections.connects, {});
+
+    // The next session opens the same forms and waits for its own answers.
+    await dispatched(store, sessionCheck());
+    await settle();
+    store.dispatch(renameConnection('work', 'New session'));
+    store.dispatch(connectService('notion', 'Personal'));
+    assert.equal(selectConnectionRename(store.getState(), 'work').pending, true);
+    assert.equal(selectServiceConnect(store.getState(), 'notion').pending, true);
+
+    renames[0]!.resolve({ connection: row('work', { displayName: 'Old session' }) });
+    connects[0]!.resolve(link(row('personal', { displayName: 'Personal', status: 'pending', identity: null, scope: null })));
+    await settle();
+    assert.equal(selectConnectionRename(store.getState(), 'work').pending, true, 'the old answer did not complete the new form');
+    assert.equal(selectServiceConnect(store.getState(), 'notion').pending, true);
+    assert.equal(selectConnections(store.getState()).find(connection => connection.id === 'work')?.displayName, 'work');
+    assert.deepEqual(selectConnections(store.getState()).map(connection => connection.id), ['work', 'home']);
+    assert.deepEqual(store.getState().connections.links, {}, 'no link of the old session');
+    assert.deepEqual(store.getState().ui.toasts, []);
+
+    renames[1]!.reject(new ApiError(409, 'conflict', 'Name "New session" is already used by account "home" of "notion"'));
+    connects[1]!.resolve(link(row('personal', { displayName: 'Personal', status: 'pending', identity: null, scope: null })));
+    await settle();
+    assert.equal(selectConnectionRename(store.getState(), 'work').error?.message, 'Name "New session" is already used by account "home" of "notion"');
+    assert.deepEqual(selectServiceConnect(store.getState(), 'notion'), { pending: false, error: null, done: 1 });
+    assert.ok(selectConnectionLink(store.getState(), 'personal'));
+    assert.equal(store.getState().ui.toasts.length, 1);
+  });
+
+  it('a late answer the tail moved past is history: a disconnected row is not brought back, a fresher row and its newer link stand, a later name stays', async () => {
+    resetSeq(600n);
+
+    const reconnects: Answer<ReturnType<typeof link>>[] = [];
+    const renames: Answer<{ connection: ConnectionView }>[] = [];
+    const store = await onConnections({ connections: { reconnect: held(reconnects), rename: held(renames) } });
+    const issued = new Date(Date.parse(ISO_NOW) + 5_000);
+
+    // Reconnect, the tail says the row is gone, then the answer.
+    store.dispatch(reconnectConnection('home'));
+    store.dispatch(eventAction(event({ type: 'connection.disconnected', actor: 'system', targetThreadId: 'main', payload: { connectionId: 'home', server: 'notion', account: 'home', name: 'home', reason: 'disconnected' } })));
+    assert.equal(selectConnectionCall(store.getState(), 'home'), null, 'the call went with the row');
+    reconnects[0]!.resolve(link(row('home', { status: 'pending', updatedAt: issued })));
+    await settle();
+    assert.deepEqual(selectConnections(store.getState()).map(connection => connection.id), ['work']);
+    assert.equal(selectConnectionLink(store.getState(), 'home'), null);
+    assert.deepEqual(store.getState().ui.toasts, []);
+
+    // Reconnect, a newer link by the tail (another tab's), then the answer:
+    // the row keeps the later date, the dead link is not held, nothing is said.
+    const newer = new Date(issued.getTime() + 60_000);
+
+    store.dispatch(reconnectConnection('work'));
+    store.dispatch(eventAction(event({ type: 'connection.pending', actor: 'system', targetThreadId: 'main', payload: record(row('work', { updatedAt: newer })) })));
+    reconnects[1]!.resolve(link(row('work', { updatedAt: issued })));
+    await settle();
+    assert.equal(selectConnectionCall(store.getState(), 'work'), null);
+    assert.equal(selectConnections(store.getState()).find(connection => connection.id === 'work')?.updatedAt.getTime(), newer.getTime());
+    assert.equal(selectConnectionLink(store.getState(), 'work'), null);
+    assert.deepEqual(store.getState().ui.toasts, []);
+
+    // Rename, a later rename by the tail, then the answer: the later name
+    // stays, the form is done (the dialog closes), nothing is said.
+    store.dispatch(renameConnection('work', 'Mine'));
+    store.dispatch(eventAction(event({ type: 'connection.renamed', actor: 'system', targetThreadId: 'main', createdAt: new Date(issued.getTime() + 120_000), payload: { connectionId: 'work', server: 'notion', account: 'work', name: 'Theirs', previousName: 'work' } })));
+    renames[0]!.resolve({ connection: row('work', { displayName: 'Mine', updatedAt: issued }) });
+    await settle();
+    assert.deepEqual(selectConnectionRename(store.getState(), 'work'), { pending: false, error: null, done: 1 });
+    assert.equal(selectConnections(store.getState()).find(connection => connection.id === 'work')?.displayName, 'Theirs');
+    assert.deepEqual(store.getState().ui.toasts, []);
+  });
+
+  it('a new snapshot keeps the calls, forms, links and failures of the rows it still has and drops those of the rows it lacks', async () => {
+    resetSeq(700n);
+
+    const reconnects: Answer<ReturnType<typeof link>>[] = [];
+    const disconnects: Answer<{ connection: ConnectionView }>[] = [];
+    const store = await onConnections({ connections: { reconnect: held(reconnects), disconnect: held(disconnects) } });
+    const services = [{ name: 'notion', description: 'Pages', multiAccount: true, manualClient: false }];
+
+    store.dispatch(reconnectConnection('home'));
+    reconnects[0]!.resolve(link(row('home', { status: 'pending' })));
+    await settle();
+    store.dispatch(eventAction(event({ type: 'connection.failed', actor: 'system', targetThreadId: 'main', payload: { connectionId: 'home', server: 'notion', account: 'home', name: 'home', error: 'access_denied' } })));
+    store.dispatch(disconnectConnection('work'));
+    store.dispatch(renameConnection('work', 'Kept'));
+    assert.ok(selectConnectionLink(store.getState(), 'home'));
+    assert.ok(selectConnectionFailure(store.getState(), 'home'));
+
+    // A snapshot without "home": its link and failure go; "work" keeps its
+    // call and its form.
+    store.dispatch(snapshotLoadDone(snapshot({ connections: [row('work')], services })));
+    assert.deepEqual(selectConnections(store.getState()).map(connection => connection.id), ['work']);
+    assert.equal(selectConnectionLink(store.getState(), 'home'), null);
+    assert.equal(selectConnectionFailure(store.getState(), 'home'), null);
+    assert.deepEqual(selectConnectionCall(store.getState(), 'work'), { kind: 'disconnect' });
+    assert.equal(selectConnectionRename(store.getState(), 'work').pending, true);
+
+    // A snapshot without "work" either: the call goes, and the answer of
+    // the disconnect in flight touches nothing.
+    store.dispatch(snapshotLoadDone(snapshot({ connections: [], services })));
+    assert.deepEqual(store.getState().connections.calls, {});
+    assert.deepEqual(store.getState().connections.renames, {});
+    disconnects[0]!.resolve({ connection: row('work') });
+    await settle();
+    assert.deepEqual(store.getState().ui.toasts.map(toast => toast.title), ['Sign-in link ready']);
+  });
 });

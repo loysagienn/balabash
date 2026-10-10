@@ -29,7 +29,7 @@ import { WorkspacePathError, fileNodeOf, listDir, replaceFileContent, resolveFil
 import { FileNotFoundError, getFile, getUserFile, openFileContent } from '../files/index.ts';
 import { verifyDownloadLink } from '../files/storage/local.ts';
 import { getExternalServerSecretRequest, provisionExternalServerSecrets } from '../capabilities/external-secrets.ts';
-import { ConnectionError, disconnectConnection, getOauthClientRequest, getUserConnection, issueConnectLink, provisionOauthClient, renameConnection, startConnection, connectionView } from '../capabilities/connections/index.ts';
+import { ConnectionError, disconnectConnection, getOauthClientRequest, getUserConnection, provisionOauthClient, reconnectConnection, renameConnection, startConnection, connectionView } from '../capabilities/connections/index.ts';
 import { AppManagementError, listApps, publishApp, unpublishApp } from '../apps/management.ts';
 import { ProjectError, archiveProject, createProject, parseProjectInput, parseProjectPatch, unarchiveProject, updateProject } from '../projects/mutations.ts';
 import { projectView } from '../projects/store.ts';
@@ -1070,7 +1070,12 @@ router.delete('/schedule/tasks/:slug', requireSession, async ctx => {
 // disconnect, a sign-in link for an existing account (re-authorization)
 // and for a new one (the catalog's "Connect"). The rows and the catalog
 // are the snapshot's. A row is addressed by its id; another workspace's
-// row and a missing one are one 404. The lifecycle events keep their
+// row and a missing one are one 404; a command names the row it read to
+// the module (expectId; the reconnect is by the row itself), so an
+// address that belongs to another row by then — the account disconnected
+// and connected again under the same address between the screen and the
+// command — is a 409 and the newcomer is not touched (the module's lock
+// per (user, server) holds the checks at the write). The lifecycle events keep their
 // addressee — the thread that drives the account (the auth agent's; the
 // main thread when the console issued the link): a rename and a
 // disconnect journal to the row's thread, a link from the console binds
@@ -1078,7 +1083,7 @@ router.delete('/schedule/tasks/:slug', requireSession, async ctx => {
 // secretary, who tells the user. A refusal is a ConnectionError whose
 // code maps to a status.
 
-const CONNECTION_ERROR_STATUS: Record<ConnectionError['code'], number> = { bad_request: 400, not_found: 404, conflict: 409 };
+const CONNECTION_ERROR_STATUS: Record<ConnectionError['code'], number> = { bad_request: 400, not_found: 404, conflict: 409, replaced: 409 };
 const CONNECTION_NAME_MAX = 200;
 
 function sendConnectionError(ctx: Context, error: ConnectionError): void {
@@ -1146,10 +1151,8 @@ router.patch('/connections/:id', requireSession, async ctx => {
   }
 
   try {
-    await renameConnection(userId, row.server, row.accountKey, name);
-
-    const renamed = await getUserConnection(userId, row.id);
-    const response: ConnectionResponse = { connection: connectionView(renamed ?? row) };
+    const { connection } = await renameConnection(userId, row.server, row.accountKey, name, undefined, row.id);
+    const response: ConnectionResponse = { connection: connectionView(connection) };
 
     ctx.body = prepareObject(response);
   } catch (error) {
@@ -1172,7 +1175,7 @@ router.delete('/connections/:id', requireSession, async ctx => {
   }
 
   try {
-    await disconnectConnection(userId, row.server, row.accountKey);
+    await disconnectConnection(userId, row.server, row.accountKey, undefined, row.id);
 
     const response: ConnectionResponse = { connection: connectionView(row) };
 
@@ -1203,7 +1206,7 @@ router.post('/connections/:id/reconnect', requireSession, async ctx => {
   }
 
   try {
-    const response: ConnectLinkResponse = await issueConnectLink(userId, mainThreadId, row.server, row.accountKey);
+    const response: ConnectLinkResponse = await reconnectConnection(userId, mainThreadId, row.id);
 
     ctx.body = prepareObject(response);
   } catch (error) {

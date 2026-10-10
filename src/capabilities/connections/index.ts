@@ -46,8 +46,10 @@ export { ACCOUNT_KEY_PATTERN } from './account-key.ts';
 // tools answer the model with the message, the console's endpoints map the
 // code to a status (src/api/api.ts) — 400 a malformed ask, 404 no such
 // service or account, 409 a rule of the registry (a name in use, a service
-// that holds one account, a manual OAuth client not provisioned yet).
-export type ConnectionErrorCode = 'bad_request' | 'not_found' | 'conflict';
+// that holds one account, a manual OAuth client not provisioned yet) or a
+// row that is not the one the caller meant (replaced: the address belongs
+// to another row by now).
+export type ConnectionErrorCode = 'bad_request' | 'not_found' | 'conflict' | 'replaced';
 
 export class ConnectionError extends Error {
   readonly code: ConnectionErrorCode;
@@ -84,6 +86,23 @@ function getServer(serverName: string): UserAuthServer {
   }
 
   return server;
+}
+
+// The registry of one (user, server) changes one command at a time: a
+// command runs its checks and its write in one transaction under an
+// advisory lock keyed by the pair, so what it checked (the row it means, a
+// name in use, how many accounts the service holds, whether an account at
+// this address exists) still holds when it writes. The lock is the pair's,
+// not the log's: the lifecycle event is journaled after the commit, as
+// before. A refusal thrown inside rolls the transaction back.
+async function underServerLock<T>(userId: string, serverName: string, work: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
+  return prisma.$transaction(async tx => {
+    // Executed, not queried: the function returns void, which the client
+    // cannot read as a column.
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${userId}), hashtext(${serverName}))`;
+
+    return work(tx);
+  });
 }
 
 export async function getOauthClient(serverName: string): Promise<Record<string, unknown> | null> {
@@ -172,16 +191,25 @@ async function journalConnectionEvent(type: string, row: { userId: string; threa
   });
 }
 
-async function requireConnection(userId: string, serverName: string, accountKey: string): Promise<ConnectionModel> {
-  const row = await prisma.connection.findUnique({
+// The row a command means: the one at the address — and, when the caller
+// named the row it saw (the console's endpoints pass the id of the row the
+// screen showed: expectId), that very row. An address that meanwhile
+// belongs to another row (the account was disconnected and connected
+// again under the same address) is refused; the newcomer is not touched.
+async function requireConnection(db: Prisma.TransactionClient, userId: string, serverName: string, accountKey: string, expectId?: string): Promise<ConnectionModel> {
+  const row = await db.connection.findUnique({
     where: { userId_server_accountKey: { userId, server: serverName, accountKey } },
   });
 
   if (!row) {
-    const rows = await prisma.connection.findMany({ where: { userId, server: serverName } });
+    const rows = await db.connection.findMany({ where: { userId, server: serverName } });
     const known = rows.map(candidate => `${candidate.accountKey} — "${candidate.displayName}"`).join('; ') || '(none)';
 
     throw new ConnectionError('not_found', `No account "${accountKey}" of "${serverName}". Accounts: ${known}`);
+  }
+
+  if (expectId !== undefined && row.id !== expectId) {
+    throw new ConnectionError('replaced', `Account "${accountKey}" of "${serverName}" was disconnected and connected again meanwhile — it is not the account you saw. Reload and retry.`);
   }
 
   return row;
@@ -196,24 +224,29 @@ export async function renameConnection(
   name: string,
   // The calling thread (the auth agent's) — the addressee of the event.
   threadId?: string,
-): Promise<{ accountKey: string; previousName: string; name: string }> {
-  const row = await requireConnection(userId, serverName, accountKey);
+  // The row the caller means (the console's endpoint): see requireConnection.
+  expectId?: string,
+): Promise<{ accountKey: string; previousName: string; name: string; connection: ConnectionModel }> {
   const trimmed = name.trim();
+  const { row, renamed } = await underServerLock(userId, serverName, async tx => {
+    const row = await requireConnection(tx, userId, serverName, accountKey, expectId);
 
-  if (!trimmed) {
-    throw new ConnectionError('bad_request', 'The new name must not be empty');
-  }
+    if (!trimmed) {
+      throw new ConnectionError('bad_request', 'The new name must not be empty');
+    }
 
-  // Case-insensitive, matching the name check at connect time.
-  const clash = await prisma.connection.findFirst({
-    where: { userId, server: serverName, displayName: { equals: trimmed, mode: 'insensitive' }, NOT: { id: row.id } },
+    // Case-insensitive, matching the name check at connect time.
+    const clash = await tx.connection.findFirst({
+      where: { userId, server: serverName, displayName: { equals: trimmed, mode: 'insensitive' }, NOT: { id: row.id } },
+    });
+
+    if (clash) {
+      throw new ConnectionError('conflict', `Name "${trimmed}" is already used by account "${clash.accountKey}" of "${serverName}"`);
+    }
+
+    return { row, renamed: await tx.connection.update({ where: { id: row.id }, data: { displayName: trimmed } }) };
   });
 
-  if (clash) {
-    throw new ConnectionError('conflict', `Name "${trimmed}" is already used by account "${clash.accountKey}" of "${serverName}"`);
-  }
-
-  await prisma.connection.update({ where: { id: row.id }, data: { displayName: trimmed } });
   await journalConnectionEvent(CONNECTION_RENAMED, { ...row, threadId: threadId ?? row.threadId }, {
     connectionId: row.id,
     server: row.server,
@@ -222,7 +255,7 @@ export async function renameConnection(
     previousName: row.displayName,
   });
 
-  return { accountKey: row.accountKey, previousName: row.displayName, name: trimmed };
+  return { accountKey: row.accountKey, previousName: row.displayName, name: trimmed, connection: renamed };
 }
 
 // Disconnects one account: the row dies, its live client is dropped, the
@@ -233,10 +266,17 @@ export async function disconnectConnection(
   serverName: string,
   accountKey: string,
   threadId?: string,
+  // The row the caller means (the console's endpoint): see requireConnection.
+  expectId?: string,
 ): Promise<{ accountKey: string; name: string }> {
-  const row = await requireConnection(userId, serverName, accountKey);
+  const row = await underServerLock(userId, serverName, async tx => {
+    const row = await requireConnection(tx, userId, serverName, accountKey, expectId);
 
-  await prisma.connection.delete({ where: { id: row.id } });
+    await tx.connection.delete({ where: { id: row.id } });
+
+    return row;
+  });
+
   dropUserClient(row.server, userId, row.accountKey);
   await journalConnectionEvent(CONNECTION_DISCONNECTED, { ...row, threadId: threadId ?? row.threadId }, {
     connectionId: row.id,
@@ -267,12 +307,195 @@ export async function requestAuthorization(
   return (await issueConnectLink(userId, threadId, serverName, requestedAccountKey, displayName)).url;
 }
 
-// Issues a one-time authorization link for one account of the service.
-// threadId is the issuing thread — the auth agent's, or the main thread
-// when the operator asks from the console: the flow's connection.* events
-// are addressed to it. Passing an unknown accountKey starts a new
-// account — gated on the service declaring an identity probe and on every
-// existing account's identity being known (else the twin guard is blind).
+// What a link is asked for — the three callers of the one issue.
+type LinkTarget =
+  // The auth agent's request_authorization: the account at this address —
+  // re-authorized when it exists, born when it does not.
+  | { kind: 'account'; accountKey: string; displayName: string | undefined }
+  // The console's "Reconnect": this very row, as the screen showed it —
+  // re-authorized; gone meanwhile, not found (never born again).
+  | { kind: 'row'; id: string }
+  // The console's "Connect": a new account — nameless, the service's first
+  // under the default address; named, one named so under an address
+  // derived from the name. Never a re-authorization: an address or a name
+  // that is taken by the time of the write is a refusal.
+  | { kind: 'new'; name: string | null };
+
+type LinkResolution = { existing: ConnectionModel } | { create: { accountKey: string; displayName: string } };
+
+// The row the target names among the rows of (user, server) as they are
+// under the lock, or the row to create.
+function resolveLinkTarget(server: UserAuthServer, target: LinkTarget, rows: ConnectionModel[]): LinkResolution {
+  switch (target.kind) {
+    case 'account': {
+      const existing = rows.find(row => row.accountKey === target.accountKey);
+
+      if (existing) {
+        return { existing };
+      }
+
+      // Proper naming at birth arrives with the lifecycle verbs; until then
+      // the display name falls back to the address.
+      return { create: { accountKey: target.accountKey, displayName: target.displayName?.trim() || (target.accountKey === DEFAULT_ACCOUNT_KEY ? server.name : target.accountKey) } };
+    }
+    case 'row': {
+      const existing = rows.find(row => row.id === target.id);
+
+      if (!existing) {
+        throw new ConnectionError('not_found', 'No such connection');
+      }
+
+      return { existing };
+    }
+    case 'new': {
+      const trimmed = target.name?.trim() || null;
+
+      if (!trimmed) {
+        if (rows.length) {
+          throw new ConnectionError('conflict', `"${server.name}" already has an account — name the new one, or reconnect the existing account instead`);
+        }
+
+        return { create: { accountKey: DEFAULT_ACCOUNT_KEY, displayName: server.name } };
+      }
+
+      const clash = rows.find(row => row.displayName.trim().toLowerCase() === trimmed.toLowerCase());
+
+      if (clash) {
+        throw new ConnectionError('conflict', `Name "${trimmed}" is already used by account "${clash.accountKey}" of "${server.name}" — reconnect that account instead`);
+      }
+
+      return { create: { accountKey: deriveAccountKey(trimmed, new Set([...rows.map(row => row.accountKey), DEFAULT_ACCOUNT_KEY])), displayName: trimmed } };
+    }
+  }
+}
+
+// Whether the target, over these rows, would create a row (the gate below
+// applies) rather than re-authorize one.
+function wouldCreate(target: LinkTarget, rows: ConnectionModel[]): boolean {
+  switch (target.kind) {
+    case 'account':
+      return !rows.some(row => row.accountKey === target.accountKey);
+    case 'row':
+      return false;
+    case 'new':
+      return true;
+  }
+}
+
+// The rows that keep the multiplicity gate shut: a row without a known
+// identity that holds tokens (a row with no stored tokens holds no provider
+// account — an abandoned link, a cleared re-auth — there is nothing for a
+// twin to hide behind; the callback's twin check covers it if it ever
+// completes).
+function identityUnknown(rows: ConnectionModel[]): ConnectionModel[] {
+  return rows.filter(row => !row.identityId && getAccessToken(row.tokens));
+}
+
+// The multiplicity gate of a new account, judged under the lock without a
+// network call: a service without an identity probe holds one account; a
+// service with one adds an account only while every existing account's
+// identity is known (else the twin guard is blind). The backfill that
+// asks the provider ran before the lock (issueLink); its refusals are
+// told by row, a row that appeared since is told to retry.
+function assertCanCreate(server: UserAuthServer, rows: ConnectionModel[], backfillRefusals: Map<string, string>): void {
+  if (!rows.length) {
+    return;
+  }
+
+  if (!server.identityProbe) {
+    throw new ConnectionError(
+      'conflict',
+      `Integration "${server.name}" declares no identity probe, so it holds at most one connected account`,
+    );
+  }
+
+  const [blind] = identityUnknown(rows);
+
+  if (blind) {
+    const reason = backfillRefusals.get(blind.id) ?? 'the account appeared while this link was being issued';
+
+    throw new ConnectionError(
+      'conflict',
+      `Cannot add another "${server.name}" account yet: the identity of account "${blind.accountKey}" is unknown (${reason}). Use that account once (a live call refreshes its token and records the identity), or re-authorize it, then retry.`,
+    );
+  }
+}
+
+// Issues a one-time authorization link for the target: the row is updated
+// (re-authorization: a fresh nonce, the issuing thread, the status pending
+// unless the account is connected — then its status only changes when the
+// new flow completes) or created pending, under the (user, server) lock,
+// so the rules hold at the write. threadId is the issuing thread — the auth
+// agent's, or the main thread when the operator asks from the console: the
+// flow's connection.* events are addressed to it.
+async function issueLink(userId: string, threadId: string, server: UserAuthServer, target: LinkTarget): Promise<ConnectLink> {
+  await requireManualOauthClient(server);
+
+  // The backfill asks the provider — outside the lock and the transaction;
+  // the gate is judged again inside, on the rows as they are then.
+  const backfillRefusals = new Map<string, string>();
+  const seen = await prisma.connection.findMany({ where: { userId, server: server.name } });
+
+  if (wouldCreate(target, seen) && server.identityProbe) {
+    for (const row of identityUnknown(seen)) {
+      const backfill = await backfillConnectionIdentity(server.identityProbe, row.id);
+
+      if (!backfill.ok) {
+        backfillRefusals.set(row.id, backfill.reason);
+      }
+    }
+  }
+
+  const connectNonce = randomToken();
+  const expiresAt = new Date(Date.now() + CONNECT_LINK_TTL_MS);
+  const pending = { expiresAt: expiresAt.toISOString() };
+  const row = await underServerLock(userId, server.name, async tx => {
+    const rows = await tx.connection.findMany({ where: { userId, server: server.name } });
+    const resolved = resolveLinkTarget(server, target, rows);
+
+    if ('existing' in resolved) {
+      return tx.connection.update({
+        where: { id: resolved.existing.id },
+        data: {
+          threadId,
+          connectNonce,
+          pendingState: null,
+          pending,
+          // A connected user may re-authorize; their status only changes when
+          // the new flow completes.
+          ...(resolved.existing.status === 'connected' ? {} : { status: 'pending' }),
+        },
+      });
+    }
+
+    assertCanCreate(server, rows, backfillRefusals);
+
+    return tx.connection.create({
+      data: {
+        userId,
+        threadId,
+        server: server.name,
+        accountKey: resolved.create.accountKey,
+        displayName: resolved.create.displayName,
+        status: 'pending',
+        connectNonce,
+        pending,
+      },
+    });
+  });
+
+  // The link exists: the row is (or stays) in the registry — the event
+  // carries it whole, the nonce and the tokens stay out of the log.
+  await journalConnectionEvent(CONNECTION_PENDING, row, connectionRecord(row));
+
+  return { url: `https://${config.domain}/connect/${server.name}?nonce=${connectNonce}`, connection: connectionView(row), expiresAt };
+}
+
+// Issues a one-time authorization link for one account of the service by
+// its address — the auth agent's request_authorization. Passing an unknown
+// accountKey starts a new account — gated on the service declaring an
+// identity probe and on every existing account's identity being known
+// (else the twin guard is blind).
 export async function issueConnectLink(
   userId: string,
   threadId: string,
@@ -281,91 +504,26 @@ export async function issueConnectLink(
   displayName?: string,
 ): Promise<ConnectLink> {
   const server = getServer(serverName);
-
-  await requireManualOauthClient(server);
-
   const accountKey = requestedAccountKey ?? DEFAULT_ACCOUNT_KEY;
 
   if (!ACCOUNT_KEY_PATTERN.test(accountKey)) {
     throw new ConnectionError('bad_request', `Account key "${accountKey}" must match ${ACCOUNT_KEY_PATTERN}`);
   }
 
-  const rows = await prisma.connection.findMany({ where: { userId, server: server.name } });
-  const existing = rows.find(row => row.accountKey === accountKey) ?? null;
+  return issueLink(userId, threadId, server, { kind: 'account', accountKey, displayName });
+}
 
-  // The multiplicity gate.
-  if (!existing && rows.length) {
-    if (!server.identityProbe) {
-      throw new ConnectionError(
-        'conflict',
-        `Integration "${server.name}" declares no identity probe, so it holds at most one connected account`,
-      );
-    }
+// The console's "Reconnect" of one row: a link for that very row (its
+// re-authorization); a row of another user and a missing one are one
+// not-found — a row gone by the write is not born again.
+export async function reconnectConnection(userId: string, threadId: string, id: string): Promise<ConnectLink> {
+  const row = await getUserConnection(userId, id);
 
-    for (const row of rows) {
-      if (row.identityId) {
-        continue;
-      }
-
-      // A row with no stored tokens holds no provider account (an abandoned
-      // link, a cleared re-auth) — there is nothing for a twin to hide
-      // behind; the callback's twin check covers it if it ever completes.
-      if (!getAccessToken(row.tokens)) {
-        continue;
-      }
-
-      const backfill = await backfillConnectionIdentity(server.identityProbe, row.id);
-
-      if (!backfill.ok) {
-        throw new ConnectionError(
-          'conflict',
-          `Cannot add another "${server.name}" account yet: the identity of account "${row.accountKey}" is unknown (${backfill.reason}). Use that account once (a live call refreshes its token and records the identity), or re-authorize it, then retry.`,
-        );
-      }
-    }
+  if (!row) {
+    throw new ConnectionError('not_found', 'No such connection');
   }
 
-  const connectNonce = randomToken();
-  const expiresAt = new Date(Date.now() + CONNECT_LINK_TTL_MS);
-  const pending = { expiresAt: expiresAt.toISOString() };
-
-  let row: ConnectionModel;
-
-  if (existing) {
-    row = await prisma.connection.update({
-      where: { id: existing.id },
-      data: {
-        threadId,
-        connectNonce,
-        pendingState: null,
-        pending,
-        // A connected user may re-authorize; their status only changes when
-        // the new flow completes.
-        ...(existing.status === 'connected' ? {} : { status: 'pending' }),
-      },
-    });
-  } else {
-    row = await prisma.connection.create({
-      data: {
-        userId,
-        threadId,
-        server: server.name,
-        accountKey,
-        // Proper naming at birth arrives with the lifecycle verbs; until then
-        // the display name falls back to the address.
-        displayName: displayName?.trim() || (accountKey === DEFAULT_ACCOUNT_KEY ? server.name : accountKey),
-        status: 'pending',
-        connectNonce,
-        pending,
-      },
-    });
-  }
-
-  // The link exists: the row is (or stays) in the registry — the event
-  // carries it whole, the nonce and the tokens stay out of the log.
-  await journalConnectionEvent(CONNECTION_PENDING, row, connectionRecord(row));
-
-  return { url: `https://${config.domain}/connect/${server.name}?nonce=${connectNonce}`, connection: connectionView(row), expiresAt };
+  return issueLink(userId, threadId, getServer(row.server), { kind: 'row', id: row.id });
 }
 
 // The console's "Connect" on a service of the catalog: a link for a new
@@ -375,27 +533,9 @@ export async function issueConnectLink(
 // first account under the default address, and a refusal once the service
 // has one (another account needs a name, an existing one its own
 // "Reconnect"). The link-issuing rules (one account without an identity
-// probe, a manual OAuth client not provisioned) are issueConnectLink's.
+// probe, a manual OAuth client not provisioned) are issueLink's.
 export async function startConnection(userId: string, threadId: string, serverName: string, name: string | null): Promise<ConnectLink> {
-  const server = getServer(serverName);
-  const rows = await prisma.connection.findMany({ where: { userId, server: server.name } });
-  const trimmed = name?.trim() || null;
-
-  if (!trimmed) {
-    if (rows.length) {
-      throw new ConnectionError('conflict', `"${server.name}" already has an account — name the new one, or reconnect the existing account instead`);
-    }
-
-    return issueConnectLink(userId, threadId, server.name);
-  }
-
-  const clash = rows.find(row => row.displayName.trim().toLowerCase() === trimmed.toLowerCase());
-
-  if (clash) {
-    throw new ConnectionError('conflict', `Name "${trimmed}" is already used by account "${clash.accountKey}" of "${server.name}" — reconnect that account instead`);
-  }
-
-  return issueConnectLink(userId, threadId, server.name, deriveAccountKey(trimmed, new Set([...rows.map(row => row.accountKey), DEFAULT_ACCOUNT_KEY])), trimmed);
+  return issueLink(userId, threadId, getServer(serverName), { kind: 'new', name });
 }
 
 // Records a pending request for a manual installation OAuth client
@@ -709,7 +849,11 @@ type IdentityOutcome =
 
 // Puts the flow's row back exactly as it was before the exchange: the old
 // tokens are still honored by providers (issuing new ones does not revoke
-// them), so a healthy account survives a mistaken consent untouched.
+// them), so a healthy account survives a mistaken consent untouched. The
+// link too: the exchange consumed the nonce (saveTokens), but the flow did
+// not complete — the link lives until its TTL, as the chat and the console
+// still show it, and the next click restarts the flow with a fresh OAuth
+// state; a nonce issued meanwhile (a newer link) stays.
 async function restorePreFlowState(preFlow: ConnectionModel): Promise<void> {
   await prisma.connection.update({
     where: { id: preFlow.id },
@@ -717,6 +861,13 @@ async function restorePreFlowState(preFlow: ConnectionModel): Promise<void> {
       tokens: (preFlow.tokens ?? Prisma.DbNull) as Prisma.InputJsonValue,
       metadata: (preFlow.metadata ?? Prisma.DbNull) as Prisma.InputJsonValue,
       status: preFlow.status,
+    },
+  });
+  await prisma.connection.updateMany({
+    where: { id: preFlow.id, connectNonce: null },
+    data: {
+      connectNonce: preFlow.connectNonce,
+      pending: (preFlow.pending ?? Prisma.DbNull) as Prisma.InputJsonValue,
     },
   });
 }
