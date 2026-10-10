@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { eventAction } from '../events.ts';
 import { event, resetSeq } from '../fixtures.ts';
+import { loadThreadEvents, loadThreadEventsDone } from '../threads/actions.ts';
 import { evictFeeds } from './actions.ts';
 import { feedReducer, initialFeed, insertSeq } from './reducer.ts';
 import type { FeedState } from './reducer.ts';
@@ -64,6 +65,36 @@ describe('FEED_EVICT', () => {
 
     assert.equal(feedReducer(before, evictFeeds(['nobody'])), before);
     assert.equal(feedReducer(before, evictFeeds([])), before);
+  });
+
+  it('keeps a shared event only while a kept feed really lists it: a feed brought back in part does not hold what it lacks', () => {
+    // The child evicted, then opened again with a chunk from the head that
+    // reaches only its end (seq 12): its start (seq 10) is the main feed's
+    // alone now. The main feed evicted: the start goes with it — the
+    // child's feed exists, but does not list it — while the end stays with
+    // the child. The child evicted again: nothing is left behind.
+    const evicted = feedReducer(loaded(), evictFeeds(['child']));
+    const requested = feedReducer(evicted, loadThreadEvents('child', null));
+    const partial = feedReducer(requested, loadThreadEventsDone('child', null, [evicted.events['12']], 12n));
+
+    assert.deepEqual(partial.byThread.child.seqs, ['12']);
+    assert.deepEqual(partial.byThread.main.seqs, ['10', '12', '14']);
+
+    const mainGone = feedReducer(partial, evictFeeds(['main']));
+
+    assert.deepEqual(Object.keys(mainGone.events).sort(), ['12', '13']);
+
+    const childGone = feedReducer(mainGone, evictFeeds(['child']));
+
+    assert.deepEqual(Object.keys(childGone.events), ['13']);
+
+    // The same with the child's feed started afresh by a late frame of the
+    // tail: the frame alone is the child's, the shared start and end are not.
+    const late = feedReducer(evicted, eventAction(event({ type: 'session.state', threadId: 'child', payload: { state: 'wait' } })));
+    const afterMain = feedReducer(late, evictFeeds(['main']));
+
+    assert.deepEqual(Object.keys(afterMain.events).sort(), ['13', '15']);
+    assert.deepEqual(Object.keys(feedReducer(afterMain, evictFeeds(['child'])).events), ['13']);
   });
 
   it('leaves an evicted thread as never loaded: the next frame of the tail starts its feed afresh', () => {

@@ -5,9 +5,12 @@
 // known is ignored, so the overlap of snapshot and tail is harmless.
 // Eviction (FEED_EVICT, decided by lib/feed-eviction) takes a thread's feed
 // out whole — its seq list, its cursor, and every event of it no kept
-// thread shows as well (an event is in the feeds of both its author and its
-// addressee) — so the thread reads as never loaded, and its next opening
-// asks for a chunk from the head.
+// feed lists as well (an event is in the feeds of both its author and its
+// addressee; a kept feed holds it only while its seq list has it — a feed
+// brought back in part, by a chunk from the head or a late frame of the
+// tail, lacks what it has not loaded) — so the thread reads as never
+// loaded, and its next opening asks for a chunk from the head. Every event
+// of the store is in the list of at least one feed.
 
 import type { Event } from '../../../core/contract.ts';
 import { feedThreadIds } from '../../../projections/feed.ts';
@@ -35,29 +38,40 @@ export const initialFeed: FeedState = { byThread: {}, events: {} };
 
 export const emptyFeed: ThreadFeed = { seqs: [], knownFrom: null, exhausted: false, request: null, error: null };
 
-// Inserts seq into the ascending list unless present; returns the same
-// array when nothing changed.
-export function insertSeq(seqs: string[], seq: bigint): string[] {
-  const key = seq.toString();
+// The place of seq in the ascending list: its index when present, else
+// the index it would take.
+function bisect(seqs: string[], seq: bigint): { at: number; found: boolean } {
   let low = 0;
   let high = seqs.length;
 
   while (low < high) {
     const mid = (low + high) >> 1;
-    const at = BigInt(seqs[mid]);
+    const here = BigInt(seqs[mid]);
 
-    if (at === seq) {
-      return seqs;
+    if (here === seq) {
+      return { at: mid, found: true };
     }
 
-    if (at < seq) {
+    if (here < seq) {
       low = mid + 1;
     } else {
       high = mid;
     }
   }
 
-  return [...seqs.slice(0, low), key, ...seqs.slice(low)];
+  return { at: low, found: false };
+}
+
+// Inserts seq into the ascending list unless present; returns the same
+// array when nothing changed.
+export function insertSeq(seqs: string[], seq: bigint): string[] {
+  const { at, found } = bisect(seqs, seq);
+
+  return found ? seqs : [...seqs.slice(0, at), seq.toString(), ...seqs.slice(at)];
+}
+
+export function hasSeq(seqs: string[], seq: bigint): boolean {
+  return bisect(seqs, seq).found;
 }
 
 function addEvents(state: FeedState, events: Event[], onThread?: (feed: ThreadFeed, threadId: string) => ThreadFeed): FeedState {
@@ -147,8 +161,8 @@ export function feedReducer(state: FeedState = initialFeed, action: Action): Fee
           const event = events[seq];
 
           // The other feed of the event (its author's or its addressee's)
-          // is still here: the event stays with it.
-          if (event && !feedThreadIds(event).some(other => byThread[other])) {
+          // is still here and lists it: the event stays with it.
+          if (event && !feedThreadIds(event).some(other => byThread[other] !== undefined && hasSeq(byThread[other].seqs, event.seq))) {
             delete events[seq];
           }
         }

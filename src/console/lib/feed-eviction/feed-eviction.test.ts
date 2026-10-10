@@ -6,6 +6,8 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import type { TestContext } from 'node:test';
+import type { Event } from '../../../core/contract.ts';
+import { feedThreadIds } from '../../../projections/feed.ts';
 import type { Api } from '../api/index.ts';
 import { createStore } from '../../store/index.ts';
 import type { AppStore } from '../../store/index.ts';
@@ -61,7 +63,7 @@ const api: Api = {
     list: async () => ({ threads: [], nextCursor: null }),
     get: async () => ({ thread: thread({ id: 'done' }) }),
     // One chunk for any thread: the thread's start, nothing older.
-    events: async threadId => ({ events: [event({ type: 'thread.started', seq: threadId === 'done' ? 8n : 9n, threadId, payload: { agent: 'engineer' } })], nextCursor: null }),
+    events: async (threadId, query) => ({ events: query.before === undefined || query.before > started(threadId).seq ? [started(threadId)] : [], nextCursor: null }),
     sendMessage: async () => ({}),
     interrupt: async () => ({}),
     cancel: async () => ({}),
@@ -86,15 +88,54 @@ const api: Api = {
   },
 };
 
+const started = (threadId: string) => event({ type: 'thread.started', seq: threadId === 'done' ? 8n : 9n, threadId, payload: { agent: 'engineer' } });
+
 const settle = () => new Promise(resolve => setTimeout(resolve, 0));
+
+// The server's side of the log for one test: the frames the tail brought
+// (recorded by `frame`) are on the server too, and a chunk asked below
+// `before` returns them with the thread's start, newest down — after the
+// test lets the answer go (`hold`), so a frame of the tail can land while
+// the request is in flight.
+function server(): { log: Event[]; events: Api['threads']['events']; requests: Array<bigint | undefined>; hold: () => () => void } {
+  const log: Event[] = [];
+  const requests: Array<bigint | undefined> = [];
+  let gate: Promise<void> | null = null;
+
+  return {
+    log,
+    requests,
+    hold: () => {
+      let release = () => {};
+
+      gate = new Promise(resolve => {
+        release = () => {
+          gate = null;
+          resolve();
+        };
+      });
+
+      return release;
+    },
+    events: async (threadId, query) => {
+      requests.push(query.before);
+      await gate;
+
+      const before = query.before ?? null;
+      const page = [started(threadId), ...log.filter(item => feedThreadIds(item).includes(threadId))].filter(item => before === null || item.seq < before);
+
+      return { events: page.sort((a, b) => (a.seq < b.seq ? 1 : -1)), nextCursor: null };
+    },
+  };
+}
 
 // A signed-in store with its snapshot landed and the process attached under
 // mocked timers and a clock the test moves (`clock.now`, ms).
-async function connected(t: TestContext): Promise<{ store: AppStore; clock: { now: number }; feeds: () => string[]; sweep: (times?: number) => void; disconnect: () => void }> {
+async function connected(t: TestContext, events: Api['threads']['events'] = api.threads.events): Promise<{ store: AppStore; clock: { now: number }; feeds: () => string[]; sweep: (times?: number) => void; disconnect: () => void }> {
   resetSeq(51n);
 
   const clock = { now: 1_000_000 };
-  const store = createStore({ api, initialRoute: { key: 'home' } });
+  const store = createStore({ api: { ...api, threads: { ...api.threads, events } }, initialRoute: { key: 'home' } });
 
   store.dispatch(sessionCheck());
   await settle();
@@ -117,7 +158,14 @@ async function connected(t: TestContext): Promise<{ store: AppStore; clock: { no
   return { store, clock, feeds: () => Object.keys(store.getState().feed.byThread).sort(), sweep, disconnect };
 }
 
-const frame = (threadId: string, targetThreadId: string | null = null) => eventAction(event({ type: 'thread.progress', threadId, targetThreadId, payload: { text: 'working' } }));
+// A frame of the tail for the store; `log` is the server that has it too.
+function frame(threadId: string, log: Event[] = []) {
+  const item = event({ type: 'thread.progress', threadId, targetThreadId: null, payload: { text: 'working' } });
+
+  log.push(item);
+
+  return eventAction(item);
+}
 
 describe('feed eviction process', () => {
   it('evicts the feed of a finished thread once it has been out of use for the TTL, not before', async t => {
@@ -177,47 +225,62 @@ describe('feed eviction process', () => {
     assert.deepEqual(store.getState().feed.byThread.main.seqs, ['52', '54']);
   });
 
-  it('does not evict a feed with a chunk in flight, and an evicted thread opened again loads from the head', async t => {
-    const { store, feeds, sweep } = await connected(t);
-    const requests: Array<bigint | undefined> = [];
-    const slow = new Promise<{ events: never[]; nextCursor: null }>(() => {});
-    const patched: Api = { ...api, threads: { ...api.threads, events: async (_threadId, query) => {
-      requests.push(query.before);
+  it('does not evict a feed with a chunk in flight; the answer is a use, and the clock starts over from it', async t => {
+    const { log, events, hold } = server();
+    const { store, feeds, sweep } = await connected(t, events);
+    const release = hold();
 
-      return slow;
-    } } };
-    const patchedStore = createStore({ api: patched, initialRoute: { key: 'home' } });
+    store.dispatch(frame('done', log));
+    store.dispatch(loadThreadEvents('done', null));
+    store.dispatch(routeTo({ key: 'home' }));
+    assert.notEqual(store.getState().feed.byThread.done.request, null);
+    sweep(FEED_TTL_MS / MINUTE + 1);
+    assert.deepEqual(feeds(), ['done']);
 
-    patchedStore.dispatch(sessionCheck());
+    // The answer lands: the feed is complete from the start, and due a TTL
+    // after the answer — not at the next sweep.
+    release();
     await settle();
+    assert.equal(store.getState().feed.byThread.done.request, null);
+    assert.deepEqual(store.getState().feed.byThread.done.seqs, ['8', '51']);
+    sweep(FEED_TTL_MS / MINUTE - 1);
+    assert.deepEqual(feeds(), ['done']);
+    sweep();
+    assert.deepEqual(feeds(), []);
+  });
 
-    const clock = { now: 1_000_000 };
-    const disconnect = connectStoreToFeedEviction(patchedStore, { now: () => clock.now, ttlMs: 2 * MINUTE, sweepMs: MINUTE });
+  it('an evicted thread opened again loads from the head: the evicted frame comes back with the chunk, and a frame during the request merges in', async t => {
+    const { log, events, requests, hold } = server();
+    const { store, feeds, sweep } = await connected(t, events);
 
-    t.after(disconnect);
-    patchedStore.dispatch(frame('done'));
-    patchedStore.dispatch(loadThreadEvents('done', null));
-    patchedStore.dispatch(routeTo({ key: 'home' }));
-    assert.deepEqual(requests, [52n]);
-    assert.notEqual(patchedStore.getState().feed.byThread.done.request, null);
-
-    for (let i = 0; i < 3; i += 1) {
-      clock.now += MINUTE;
-      t.mock.timers.tick(MINUTE);
-    }
-
-    assert.deepEqual(Object.keys(patchedStore.getState().feed.byThread), ['done']);
-
-    // Meanwhile the first store: evicted, then opened again — the chunk is
-    // asked from the seq after the tail's last, so the evicted frame comes
-    // back with it.
-    store.dispatch(frame('done'));
+    store.dispatch(frame('done', log));
     sweep(FEED_TTL_MS / MINUTE);
     assert.deepEqual(feeds(), []);
+    assert.deepEqual(store.getState().feed.events, {});
+
+    // The chunk is asked from the seq after the tail's last (51): the
+    // evicted frame is the chunk's to bring back. A frame of the tail
+    // while the answer is in flight starts the feed with the request on.
+    const release = hold();
+
     store.dispatch(routeTo({ key: 'thread', id: 'done' }));
     await settle();
-    assert.deepEqual(store.getState().feed.byThread.done.seqs, ['8']);
-    assert.equal(store.getState().feed.byThread.done.knownFrom, 8n);
+    assert.deepEqual(requests, [52n]);
+    store.dispatch(frame('done', log));
+    assert.deepEqual(store.getState().feed.byThread.done.seqs, ['52']);
+    assert.notEqual(store.getState().feed.byThread.done.request, null);
+
+    release();
+    await settle();
+    assert.deepEqual(requests, [52n]);
+    assert.deepEqual(store.getState().feed.byThread.done, { seqs: ['8', '51', '52'], knownFrom: 8n, exhausted: true, request: null, error: null });
+    assert.deepEqual(Object.keys(store.getState().feed.events).sort(), ['51', '52', '8']);
+
+    // Left again, the feed goes with everything it listed.
+    store.dispatch(routeTo({ key: 'home' }));
+    sweep(FEED_TTL_MS / MINUTE);
+    assert.deepEqual(feeds(), []);
+    assert.deepEqual(store.getState().feed.events, {});
   });
 
   it('is silent once disconnected', async t => {
