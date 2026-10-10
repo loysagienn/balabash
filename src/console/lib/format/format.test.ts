@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { agoLabel, clockLabel, countOf, dateTimeLabel, dayEnd, dayKey, dayLabel, daysBefore, dayStart, durationLabel, fileSize, fileTimeLabel, isDayKey, rangeLabel, shortDate, sinceLabel, startedLabel, timeOfDay } from './index.ts';
+import { agoLabel, clockLabel, countOf, dateTimeLabel, dayEnd, dayKey, dayLabel, daysBefore, dayStart, durationLabel, fileSize, fileTimeLabel, folderTimeLabel, isDayKey, rangeLabel, shortDate, sinceLabel, startedLabel, timeOfDay } from './index.ts';
 
 // Local-time constructors: the helpers format in the browser's zone.
 const at = (y: number, m: number, d: number, h = 0, min = 0, sec = 0) => new Date(y, m - 1, d, h, min, sec);
@@ -94,5 +94,15 @@ describe('format — feed times and sizes', () => {
     assert.equal(fileTimeLabel(new Date(2026, 9, 8, 23, 59), now), 'yesterday');
     assert.equal(fileTimeLabel(new Date(2026, 9, 2, 9, 0), now), 'Oct 2');
     assert.equal(fileTimeLabel(new Date(2025, 9, 2, 9, 0), now), 'Oct 2, 2025');
+  });
+
+  it('labels a folder’s time by the day', () => {
+    const now = new Date(2026, 9, 9, 16, 0);
+
+    assert.equal(folderTimeLabel(new Date(2026, 9, 9, 16, 51), now), 'today');
+    assert.equal(folderTimeLabel(new Date(2026, 9, 9, 0, 0), now), 'today');
+    assert.equal(folderTimeLabel(new Date(2026, 9, 8, 23, 59), now), 'yesterday');
+    assert.equal(folderTimeLabel(new Date(2026, 9, 2, 9, 0), now), 'Oct 2');
+    assert.equal(folderTimeLabel(new Date(2025, 9, 2, 9, 0), now), 'Oct 2, 2025');
   });
 });

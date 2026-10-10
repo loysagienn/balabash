@@ -5,7 +5,10 @@
 // selection (always on touch screens). dir — a folder: a chevron instead
 // of the actions, decoration only — the pointer goes through it to the
 // stretched link (data-dir, FileRow.css). Without a caption the second
-// line is not rendered.
+// line is not rendered. Where the list is narrow, a folder's time leaves
+// the time column and joins the caption ("1 folder · 11 files · today" —
+// the design's phone rows; the files keep the column): the row renders it
+// in both places, FileRow.css shows one.
 
 import type { MouseEvent, ReactNode } from 'react';
 import { Avatar } from '../Avatar/Avatar.tsx';
@@ -30,6 +33,8 @@ export type FileRowProps = {
 };
 
 export function FileRow({ name, icon = 'file-text', dir, caption, agent, size, time, selected, href, onClick, more }: FileRowProps) {
+  const folded = dir ? time : undefined;
+
   return (
     <div className="fr" data-dir={dir ? '' : undefined} aria-selected={selected ? 'true' : undefined}>
       <Obj icon={dir ? 'folder' : icon} size="md" kind={dir ? 'dir' : undefined} />
@@ -37,10 +42,11 @@ export function FileRow({ name, icon = 'file-text', dir, caption, agent, size, t
         <a className="fr-n" href={href} onClick={onClick}>
           {name}
         </a>
-        {agent || caption ? (
+        {agent || caption || folded ? (
           <span className="fr-c">
             {agent ? <Avatar agent={agent} size="xs" /> : null}
             {caption ? <span className="fr-c-t">{caption}</span> : null}
+            {folded ? <span className="fr-c-f">{folded}</span> : null}
           </span>
         ) : null}
       </span>

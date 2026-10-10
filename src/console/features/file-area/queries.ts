@@ -6,6 +6,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { useApi } from '../../lib/api/context.tsx';
 import { retryUnlessClient } from '../../lib/api/retry.ts';
+import { readNode } from './node.ts';
 
 export function useWorkspaceNode(path: string, enabled = true) {
   const api = useApi();
@@ -13,6 +14,7 @@ export function useWorkspaceNode(path: string, enabled = true) {
   return useQuery({
     queryKey: ['workspace', path],
     queryFn: () => api.workspace.node(path),
+    select: readNode,
     enabled,
     retry: retryUnlessClient,
   });

@@ -15,7 +15,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { STAND_HOST, startStand } from '../test-support/stand.ts';
 import type { Reply, Stand } from '../test-support/stand.ts';
-import type { CreateProjectResponse, ProjectResponse, SettingsResponse, MeResponse } from './contract.ts';
+import type { CreateProjectResponse, ProjectResponse, SettingsResponse, MeResponse, WorkspaceNodeResponse } from './contract.ts';
 
 type ErrorBody = { error: { code: string; message: string } };
 
@@ -453,6 +453,60 @@ async function waitForLockWaiter(signal: AbortSignal): Promise<void> {
     assert.fail('the creation never waited for the row');
   }
 }
+
+describe('the workspace node over the api', () => {
+  test('a folder answers its files and the facts of its folders: the folder’s own time and the count of its direct children', async () => {
+    const root = path.join(filesDir, 'node-probe');
+
+    try {
+      await fs.mkdir(path.join(root, 'full', 'inner', 'deeper'), { recursive: true });
+      await fs.mkdir(path.join(root, 'empty'), { recursive: true });
+      await fs.writeFile(path.join(root, 'full', 'a.md'), '# A\n');
+      await fs.writeFile(path.join(root, 'full', 'b.txt'), 'b');
+      await fs.writeFile(path.join(root, 'full', 'inner', 'c.txt'), 'c');
+      // Neither a directory nor a regular file: the listing's rule leaves it out of both counts.
+      await fs.symlink(path.join(root, 'full', 'a.md'), path.join(root, 'full', 'link.md'));
+      await fs.writeFile(path.join(root, 'top.md'), 'top\n');
+
+      const [empty, full] = await Promise.all([fs.stat(path.join(root, 'empty')), fs.stat(path.join(root, 'full'))]);
+      const reply = await stand.request('GET', '/api/workspace/node?path=node-probe');
+
+      assert.equal(reply.status, 200, reply.text);
+      const node = reply.json<WorkspaceNodeResponse>();
+
+      assert.equal(node.kind, 'dir');
+      if (node.kind !== 'dir') return;
+      assert.equal(node.path, 'node-probe');
+      assert.deepEqual(node.directories, ['empty', 'full']);
+      assert.deepEqual(node.folders, [
+        { path: 'node-probe/empty', modifiedAt: empty.mtime.toISOString(), directoryCount: 0, fileCount: 0 },
+        { path: 'node-probe/full', modifiedAt: full.mtime.toISOString(), directoryCount: 1, fileCount: 2 },
+      ]);
+      assert.deepEqual(node.files.map(file => file.path), ['node-probe/top.md']);
+
+      // A file changing inside a folder moves neither the folder's time nor its counts.
+      await fs.writeFile(path.join(root, 'full', 'a.md'), '# A\n\nmore\n');
+      const again = (await stand.request('GET', '/api/workspace/node?path=node-probe')).json<WorkspaceNodeResponse>();
+
+      assert.equal(again.kind, 'dir');
+      if (again.kind !== 'dir') return;
+      assert.deepEqual(again.folders, node.folders);
+
+      // Seen from the root, the probe is one folder with its own direct children.
+      const top = (await stand.request('GET', '/api/workspace/node?path=')).json<WorkspaceNodeResponse>();
+
+      assert.equal(top.kind, 'dir');
+      if (top.kind !== 'dir') return;
+      const probe = top.folders.find(folder => folder.path === 'node-probe');
+
+      assert.ok(probe, 'the probe folder is listed at the root');
+      assert.deepEqual({ directoryCount: probe.directoryCount, fileCount: probe.fileCount }, { directoryCount: 2, fileCount: 1 });
+      assert.equal(top.directories.includes('node-probe'), true);
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+});
 
 describe('settings over the api', () => {
   test('PATCH /settings stores the names and /me reads them back', async () => {

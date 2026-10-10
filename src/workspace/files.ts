@@ -295,10 +295,40 @@ export type WorkspaceFileNode = {
   mediaType: string;
 };
 
+// A folder of a listing: its own modification time — moved by a direct
+// entry added, removed or renamed, not by the files inside changing (the
+// file manager's reading of a folder's date) — and the count of its direct
+// children by the listing's own rule (directories and regular files). All
+// null when the folder vanished between readdir and stat or cannot be read.
+export type WorkspaceFolderNode = {
+  path: string;
+  modifiedAt: string | null; // ISO date-time
+  directoryCount: number | null;
+  fileCount: number | null;
+};
+
 export type WorkspaceDirListing = {
+  // The names, in order; folders carries the same entries with their facts.
   directories: string[];
+  folders: WorkspaceFolderNode[];
   files: WorkspaceFileNode[];
 };
+
+// One stat and one readdir per folder — the counts come from the entry
+// types, no stat of the children.
+async function folderNode(absDir: string, relPath: string): Promise<WorkspaceFolderNode> {
+  const [stats, entries] = await Promise.all([
+    fs.stat(absDir).catch(() => null),
+    fs.readdir(absDir, { withFileTypes: true }).catch(() => null),
+  ]);
+
+  return {
+    path: relPath,
+    modifiedAt: stats?.mtime.toISOString() ?? null,
+    directoryCount: entries ? entries.filter(entry => entry.isDirectory()).length : null,
+    fileCount: entries ? entries.filter(entry => entry.isFile()).length : null,
+  };
+}
 
 /**
  * Lists one directory (non-recursive), '' = the file-area root. A missing
@@ -315,10 +345,11 @@ export async function listDir(userId: string, relDir: string): Promise<Workspace
   try {
     entries = await fs.readdir(absDir, { withFileTypes: true });
   } catch {
-    return rel ? null : { directories: [], files: [] };
+    return rel ? null : { directories: [], folders: [], files: [] };
   }
 
   const directories: string[] = [];
+  const folders: Promise<WorkspaceFolderNode>[] = [];
   const files: WorkspaceFileNode[] = [];
   const presentNames = new Set<string>();
 
@@ -327,6 +358,7 @@ export async function listDir(userId: string, relDir: string): Promise<Workspace
   for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
     if (entry.isDirectory()) {
       directories.push(entry.name);
+      folders.push(folderNode(path.join(absDir, entry.name), rel ? `${rel}/${entry.name}` : entry.name));
       continue;
     }
 
@@ -366,7 +398,7 @@ export async function listDir(userId: string, relDir: string): Promise<Workspace
     }
   }
 
-  return { directories, files };
+  return { directories, folders: await Promise.all(folders), files };
 }
 
 /** The node of one file; null when the path is missing or not a file. */

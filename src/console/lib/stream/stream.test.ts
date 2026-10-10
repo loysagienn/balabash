@@ -97,7 +97,7 @@ const api: Api = {
     cancel: async () => ({}),
   },
   workspace: {
-    node: async () => ({ kind: 'dir', path: '', directories: [], files: [] }),
+    node: async () => ({ kind: 'dir', path: '', directories: [], folders: [], files: [] }),
     text: async () => '',
   },
   llmRequests: { list: async () => ({ requests: [] }) },

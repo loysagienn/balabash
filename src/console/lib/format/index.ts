@@ -142,6 +142,21 @@ export function agoLabel(date: Date, now: Date): string {
   return shortDate(date, now);
 }
 
+// "today", "yesterday", then "Oct 2" — when a folder changed, in the same
+// column: a folder's date is a day, not a time of day (the design's rows).
+export function folderTimeLabel(date: Date, now: Date): string {
+  const ago = daysAgo(date, now);
+
+  if (ago <= 0) {
+    return 'today';
+  }
+  if (ago === 1) {
+    return 'yesterday';
+  }
+
+  return shortDate(date, now);
+}
+
 // "Wednesday, October 8 · 16:38" — the clock under the title of Home.
 export function clockLabel(now: Date): string {
   return `${now.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })} · ${timeOfDay(now)}`;

@@ -188,12 +188,27 @@ export type WorkspaceFileMeta = {
   mediaType: string;
 };
 
+// A folder of a listing: its own modification time (a direct entry added,
+// removed or renamed — the files inside changing do not move it) and the
+// count of its direct children by the listing's rule (directories and
+// regular files). All null when the folder vanished between the listing and
+// its stat or cannot be read.
+export type WorkspaceFolderMeta = {
+  path: string;
+  modifiedAt: string | null; // ISO date-time
+  directoryCount: number | null;
+  fileCount: number | null;
+};
+
 export type WorkspaceNodeResponse =
   | {
       kind: 'dir';
       // '' is the file-area root; a missing root answers as an empty dir.
       path: string;
+      // The names of the folders, in order (the previous web reads them);
+      // folders carries the same entries with their facts.
       directories: string[];
+      folders: WorkspaceFolderMeta[];
       files: WorkspaceFileMeta[];
     }
   | {

@@ -894,6 +894,7 @@ router.get('/workspace/node', requireSession, async ctx => {
       kind: 'dir',
       path: relPath,
       directories: listing.directories,
+      folders: listing.folders,
       files: listing.files,
     };
 

@@ -8,12 +8,12 @@
 // path is gone, any other failure keeps the rows under a banner with Retry.
 
 import type { ReactNode } from 'react';
-import type { WorkspaceFileMeta } from '../../../api/contract.ts';
+import type { WorkspaceFileMeta, WorkspaceFolderMeta } from '../../../api/contract.ts';
 import type { AppRoute } from '../../lib/router/routes.ts';
 import { useLinkProps, useLinkTargets } from '../../lib/router/Link.tsx';
 import { useAppDispatch } from '../../store/hooks.ts';
 import { routeTo } from '../../store/router/actions.ts';
-import { fileSize, fileTimeLabel } from '../../lib/format/index.ts';
+import { fileSize, fileTimeLabel, folderTimeLabel } from '../../lib/format/index.ts';
 import { useNow } from '../../lib/format/useNow.ts';
 import { Crumbs } from '../../ui/Crumbs/Crumbs.tsx';
 import type { Crumb } from '../../ui/Crumbs/Crumbs.tsx';
@@ -26,7 +26,7 @@ import { SkelRow } from '../../ui/Skel/Skel.tsx';
 import { fileIcon } from '../../ui/atoms/fileIcon.ts';
 import { FileMenu } from './FileMenu.tsx';
 import { FilePreview } from './FilePreview.tsx';
-import { crumbSegments, isNotFound, joinPath, listingSummary, nameOf, nodeOf, parentOf, underRoot } from './node.ts';
+import { crumbSegments, folderCaption, isNotFound, joinPath, listingSummary, nameOf, nodeOf, parentOf, underRoot } from './node.ts';
 import type { DirListing } from './node.ts';
 import { useWorkspaceNode } from './queries.ts';
 
@@ -50,10 +50,21 @@ const SKELETON = [
   [50, 40],
 ];
 
-function DirRow({ path, routeFor }: { path: string; routeFor: (path: string) => AppRoute }) {
-  const link = useLinkProps(routeFor(path));
+// A folder's row: what it holds as the caption, the day it changed as the
+// time; a folder has no size.
+function DirRow({ folder, now, routeFor }: { folder: WorkspaceFolderMeta; now: Date; routeFor: (path: string) => AppRoute }) {
+  const link = useLinkProps(routeFor(folder.path));
 
-  return <FileRow name={nameOf(path)} dir size="—" {...link} />;
+  return (
+    <FileRow
+      name={nameOf(folder.path)}
+      dir
+      caption={folderCaption(folder)}
+      size="—"
+      time={folder.modifiedAt ? folderTimeLabel(new Date(folder.modifiedAt), now) : undefined}
+      {...link}
+    />
+  );
 }
 
 function Row({ file, selected, now, routeFor }: { file: WorkspaceFileMeta; selected: boolean; now: Date; routeFor: (path: string) => AppRoute }) {
@@ -75,7 +86,7 @@ function Row({ file, selected, now, routeFor }: { file: WorkspaceFileMeta; selec
 }
 
 function Rows({ listing, selectedPath, now, routeFor }: { listing: DirListing; selectedPath: string | null; now: Date; routeFor: (path: string) => AppRoute }) {
-  if (listing.directories.length === 0 && listing.files.length === 0) {
+  if (listing.folders.length === 0 && listing.files.length === 0) {
     return (
       <Empty icon="folder-open" title="Folder is empty">
         Agents put their results here.
@@ -87,8 +98,8 @@ function Rows({ listing, selectedPath, now, routeFor }: { listing: DirListing; s
     <>
       <FileListHead />
       <FaRows>
-        {listing.directories.map(name => (
-          <DirRow key={`d:${name}`} path={joinPath(listing.path, name)} routeFor={routeFor} />
+        {listing.folders.map(folder => (
+          <DirRow key={`d:${folder.path}`} folder={folder} now={now} routeFor={routeFor} />
         ))}
         {listing.files.map(file => (
           <Row key={file.path} file={file} selected={file.path === selectedPath} now={now} routeFor={routeFor} />

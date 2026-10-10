@@ -3,7 +3,7 @@
 // (WorkspaceNodeResponse); the content of a text file is fetched from
 // /files/<rel> only when a viewer reads it.
 
-import type { WorkspaceFileMeta, WorkspaceNodeResponse } from '../../../api/contract.ts';
+import type { WorkspaceFileMeta, WorkspaceFolderMeta, WorkspaceNodeResponse } from '../../../api/contract.ts';
 import { ApiError } from '../../lib/api/index.ts';
 import { countOf, fileSize } from '../../lib/format/index.ts';
 
@@ -117,10 +117,42 @@ export function viewerFor(file: Pick<WorkspaceFileMeta, 'path' | 'sizeBytes' | '
 
 export type DirListing = Extract<WorkspaceNodeResponse, { kind: 'dir' }>;
 
+// The node as the area reads it. The bundle goes live with the next page
+// load and the server with the restart, so until then a listing may come
+// from a server older than the bundle — one naming its folders without
+// their facts; such a listing reads as folders nobody could look into.
+export function readNode(node: WorkspaceNodeResponse): WorkspaceNodeResponse {
+  if (node.kind !== 'dir' || node.folders) {
+    return node;
+  }
+
+  return { ...node, folders: node.directories.map(name => ({ path: joinPath(node.path, name), modifiedAt: null, directoryCount: null, fileCount: null })) };
+}
+
+// "2 folders · 14 files" — the caption of a folder's row: the counts that
+// are not zero, "empty" when both are, nothing when the folder could not be
+// read.
+export function folderCaption(folder: Pick<WorkspaceFolderMeta, 'directoryCount' | 'fileCount'>): string | undefined {
+  if (folder.directoryCount === null || folder.fileCount === null) {
+    return undefined;
+  }
+
+  const parts = [];
+
+  if (folder.directoryCount > 0) {
+    parts.push(countOf(folder.directoryCount, 'folder'));
+  }
+  if (folder.fileCount > 0) {
+    parts.push(countOf(folder.fileCount, 'file'));
+  }
+
+  return parts.length > 0 ? parts.join(' · ') : 'empty';
+}
+
 // "2 folders · 6 files · 307 KiB" — the footer of a listing; a size only
 // when a file has one.
-export function listingSummary(listing: Pick<DirListing, 'directories' | 'files'>): string {
-  const parts = [countOf(listing.directories.length, 'folder'), countOf(listing.files.length, 'file')];
+export function listingSummary(listing: Pick<DirListing, 'folders' | 'files'>): string {
+  const parts = [countOf(listing.folders.length, 'folder'), countOf(listing.files.length, 'file')];
   const bytes = listing.files.reduce((sum, file) => sum + (file.sizeBytes ?? 0), 0);
 
   if (bytes > 0) {

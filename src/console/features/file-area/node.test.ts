@@ -3,7 +3,7 @@ import { describe, it } from 'node:test';
 import { isNumeric, parseDelimited } from './csv.ts';
 import { codeLines, splitHighlighted } from './codeLines.ts';
 import { ApiError } from '../../lib/api/index.ts';
-import { crumbSegments, isNotFound, listingSummary, nameOf, nodeOf, parentOf, underRoot, viewerFor, TEXT_PREVIEW_MAX } from './node.ts';
+import { crumbSegments, folderCaption, isNotFound, listingSummary, nameOf, nodeOf, parentOf, readNode, underRoot, viewerFor, TEXT_PREVIEW_MAX } from './node.ts';
 import { fileUrl } from '../../lib/api/index.ts';
 import { writeRoute } from '../../lib/router/routes.ts';
 import type { AppRoute } from '../../lib/router/routes.ts';
@@ -11,6 +11,8 @@ import { resolveRelative } from '../../ui/Md/relative.ts';
 import { projectRoute } from '../../screens/project/ProjectScreen.logic.ts';
 
 const file = (path: string, mediaType: string, sizeBytes = 100) => ({ path, mediaType, sizeBytes });
+const folder = (path: string) => ({ path, modifiedAt: null, directoryCount: 0, fileCount: 0 });
+const file_ = (path: string) => file(path, 'text/markdown');
 
 describe('file area — node rules', () => {
   it('splits paths', () => {
@@ -95,9 +97,35 @@ describe('file area — node rules', () => {
   });
 
   it('sums the footer', () => {
-    assert.equal(listingSummary({ directories: ['a', 'b'], files: [{ ...file('x', 't', 1024) } as never, { ...file('y', 't', 1024) } as never] }), '2 folders · 2 files · 2.0 KiB');
-    assert.equal(listingSummary({ directories: [], files: [] }), '0 folders · 0 files');
-    assert.equal(listingSummary({ directories: ['a'], files: [{ ...file('x', 't', null as never) } as never] }), '1 folder · 1 file');
+    assert.equal(listingSummary({ folders: [folder('a'), folder('b')], files: [{ ...file('x', 't', 1024) } as never, { ...file('y', 't', 1024) } as never] }), '2 folders · 2 files · 2.0 KiB');
+    assert.equal(listingSummary({ folders: [], files: [] }), '0 folders · 0 files');
+    assert.equal(listingSummary({ folders: [folder('a')], files: [{ ...file('x', 't', null as never) } as never] }), '1 folder · 1 file');
+  });
+
+  it('reads a listing of a server older than the bundle as folders without facts', () => {
+    const listing = { kind: 'dir' as const, path: 'a', directories: ['b', 'c'], files: [] };
+    const read = readNode(listing as never);
+
+    assert.equal(read.kind, 'dir');
+    assert.deepEqual(read.kind === 'dir' ? read.folders : null, [
+      { path: 'a/b', modifiedAt: null, directoryCount: null, fileCount: null },
+      { path: 'a/c', modifiedAt: null, directoryCount: null, fileCount: null },
+    ]);
+
+    const current = { ...listing, folders: [folder('a/b')] };
+
+    assert.equal(readNode(current), current);
+    const file = { kind: 'file' as const, path: 'a/x.md', file: { ...file_('a/x.md') } as never };
+
+    assert.equal(readNode(file), file);
+  });
+
+  it('captions a folder’s row with the counts it has', () => {
+    assert.equal(folderCaption({ directoryCount: 2, fileCount: 14 }), '2 folders · 14 files');
+    assert.equal(folderCaption({ directoryCount: 1, fileCount: 0 }), '1 folder');
+    assert.equal(folderCaption({ directoryCount: 0, fileCount: 1 }), '1 file');
+    assert.equal(folderCaption({ directoryCount: 0, fileCount: 0 }), 'empty');
+    assert.equal(folderCaption({ directoryCount: null, fileCount: null }), undefined);
   });
 });
 

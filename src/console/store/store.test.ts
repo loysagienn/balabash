@@ -48,7 +48,7 @@ const SECRET_REQUESTS: Api['secretRequests'] = {
 };
 
 const WORKSPACE: Api['workspace'] = {
-  node: async () => ({ kind: 'dir', path: '', directories: [], files: [] }),
+  node: async () => ({ kind: 'dir', path: '', directories: [], folders: [], files: [] }),
   text: async () => '',
 };
 
