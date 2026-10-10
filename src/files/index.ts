@@ -106,15 +106,25 @@ function toFileRef(file: FileModel): FileRef {
   };
 }
 
+// The expected refusal of a lookup — no such row, a row not yet uploaded, a
+// row of another user — as opposed to the store failing to answer at all:
+// a caller translating refusals (the API's 404) must let a failure through.
+export class FileNotFoundError extends Error {
+  constructor(fileId: string, reason = 'not found') {
+    super(`File "${fileId}" ${reason}`);
+    this.name = 'FileNotFoundError';
+  }
+}
+
 async function requireFile(fileId: string): Promise<FileModel> {
   const file = await prisma.file.findUnique({ where: { id: fileId } });
 
   if (!file) {
-    throw new Error(`File "${fileId}" not found`);
+    throw new FileNotFoundError(fileId);
   }
 
   if (!file.uploadedAt) {
-    throw new Error(`File "${fileId}" is not uploaded`);
+    throw new FileNotFoundError(fileId, 'is not uploaded');
   }
 
   return file;
@@ -192,7 +202,7 @@ export async function getUserFile(userId: string, fileId: string): Promise<FileR
   const file = await requireFile(fileId);
 
   if (file.userId !== userId) {
-    throw new Error(`File "${fileId}" not found`);
+    throw new FileNotFoundError(fileId);
   }
 
   return toFileRef(file);

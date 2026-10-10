@@ -401,6 +401,25 @@ async function withSeedFailure<T>(name: string, action: () => Promise<T>): Promi
   }
 }
 
+// Runs the action with the file row refused by the database (the client
+// reporting a lost connection): the `file` delegate the files layer reads
+// through is replaced on the client for the duration — the client is a
+// proxy whose model properties are not methods of their own, so
+// mock.method has nothing to take — and put back whatever happens.
+async function withFileLookupFailure<T>(action: () => Promise<T>): Promise<T> {
+  const original = prisma.file;
+  const refusing = { findUnique: () => Promise.reject(new Error("Can't reach database server")) };
+
+  assert.ok(Reflect.set(prisma, 'file', refusing));
+  assert.equal(prisma.file, refusing);
+
+  try {
+    return await action();
+  } finally {
+    Reflect.set(prisma, 'file', original);
+  }
+}
+
 describe('the cache policy of the private surfaces', () => {
   test('/api answers are never stored, the refusals included', async () => {
     const me = await stand.request('GET', '/api/me');
@@ -463,6 +482,31 @@ describe('the cache policy of the private surfaces', () => {
     const signedOut = await stand.request('GET', `/api/files/${own.id}/meta`, { cookie: '' });
 
     assert.equal(signedOut.status, 401);
+  });
+
+  // A store that fails to answer the lookup (the connection lost, the
+  // pool's timeout) is not a missing file: the 404 is the lookup's own
+  // refusal, the failure is the 500 the client may retry — for the facts
+  // and for the bytes alike, and never stored.
+  test('a stored file whose row cannot be read is a 500, not a 404', async () => {
+    const { ingestFile } = await import('../files/index.ts');
+    const file = await ingestFile({ body: Buffer.from('held'), contentType: 'text/plain', sizeBytes: 4, originalFilename: 'held.txt', userId: stand.userId });
+
+    await withFileLookupFailure(async () => {
+      for (const url of [`/api/files/${file.id}/meta`, `/api/files/${file.id}`]) {
+        const reply = await stand.request('GET', url);
+
+        assert.equal(reply.status, 500, `${url}: ${reply.text}`);
+        assert.equal(reply.json<ErrorBody>().error.code, 'internal_error');
+        assert.equal(reply.headers['cache-control'], 'no-store');
+      }
+    });
+
+    // The store answering again, the same request is the file.
+    const meta = await stand.request('GET', `/api/files/${file.id}/meta`);
+
+    assert.equal(meta.status, 200, meta.text);
+    assert.equal(meta.json<FileMetaResponse>().file.name, 'held.txt');
   });
 
   test('the workspace bytes are revalidated by ETag: 304 while the file holds, the bytes again once it changed', async () => {

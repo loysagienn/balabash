@@ -404,6 +404,54 @@ describe('projectFeed — threads, tasks and lines', () => {
     assert.equal((done[1] as SubtaskItem).taskKind, 'background task');
   });
 
+  it('keeps one card when the loaded range opens between the first start and the first end of a task announced again', () => {
+    resetSeq(70n);
+
+    // The chunk begins after the first started: the first completed alone
+    // makes the card, the second announcement runs it again where it is.
+    const events = [
+      own('session.task.completed', { taskId: 'bg', status: 'completed', summary: 'first word', usage: { totalTokens: 77_000, toolUses: 33, durationMs: 382_000 } }),
+      own('session.task.started', { taskId: 'bg', description: 'Data gaps', backgrounded: true, subagentType: 'general-purpose' }),
+    ];
+    const running = projectFeed(events, ctx);
+
+    assert.deepEqual(
+      running.map(item => item.kind),
+      ['subtask'],
+    );
+
+    const card = running[0] as SubtaskItem;
+
+    assert.equal(card.taskKind, 'general-purpose subagent');
+    assert.equal(card.state, 'run');
+    assert.equal(card.description, 'Data gaps');
+    assert.equal(card.summary, 'first word');
+    assert.deepEqual(card.meta, ['77k tokens', '33 calls', '6:22']);
+
+    resetSeq(70n);
+
+    const done = projectFeed(
+      [...events, own('session.task.completed', { taskId: 'bg', status: 'completed', summary: 'the late output', usage: { totalTokens: 78_000, toolUses: 33, durationMs: 492_000 } })],
+      ctx,
+    );
+
+    assert.equal(done.length, 1);
+    assert.equal((done[0] as SubtaskItem).state, 'done');
+    assert.equal((done[0] as SubtaskItem).description, 'Data gaps');
+    assert.equal((done[0] as SubtaskItem).summary, 'the late output');
+    assert.deepEqual((done[0] as SubtaskItem).meta, ['78k tokens', '33 calls', '8:12']);
+
+    // The end alone, unannounced again, reads as before: its summary for
+    // the description.
+    resetSeq(70n);
+
+    const alone = projectFeed(events.slice(0, 1), ctx);
+
+    assert.equal((alone[0] as SubtaskItem).taskKind, 'task');
+    assert.equal((alone[0] as SubtaskItem).description, 'first word');
+    assert.equal((alone[0] as SubtaskItem).summary, null);
+  });
+
   it('draws the thread’s own terminals, notifications, compaction, retries and system events as lines', () => {
     resetSeq(50n);
 

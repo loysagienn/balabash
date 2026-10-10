@@ -25,7 +25,7 @@ import { registryMutation } from '../core/registry-events.ts';
 import { THREAD_CANCEL, THREAD_INTERRUPT } from '../core/envelope.ts';
 import type { FileRef, Thread, ThreadStatus } from '../core/contract.ts';
 import { WorkspacePathError, listDir, resolveFilePath, sanitizeRelPath, statFile } from '../workspace/files.ts';
-import { getFile, getUserFile, openFileContent } from '../files/index.ts';
+import { FileNotFoundError, getFile, getUserFile, openFileContent } from '../files/index.ts';
 import { verifyDownloadLink } from '../files/storage/local.ts';
 import { getExternalServerSecretRequest, provisionExternalServerSecrets } from '../capabilities/external-secrets.ts';
 import { getOauthClientRequest, provisionOauthClient } from '../capabilities/connections/index.ts';
@@ -681,7 +681,14 @@ router.get('/files/:fileId', requireSession, async ctx => {
 
   try {
     file = await getUserFile(ctx.state.userId as string, fileId);
-  } catch {
+  } catch (error) {
+    // Only the lookup's own refusal is a 404; a store that failed to answer
+    // (the connection lost, the pool's timeout) is the middleware's 500,
+    // which the client may retry.
+    if (!(error instanceof FileNotFoundError)) {
+      throw error;
+    }
+
     sendError(ctx, 404, 'not_found', 'No such file');
 
     return;
@@ -723,7 +730,14 @@ router.get('/files/:fileId/meta', requireSession, async ctx => {
 
   try {
     file = await getUserFile(ctx.state.userId as string, fileId);
-  } catch {
+  } catch (error) {
+    // Only the lookup's own refusal is a 404; a store that failed to answer
+    // (the connection lost, the pool's timeout) is the middleware's 500,
+    // which the client may retry.
+    if (!(error instanceof FileNotFoundError)) {
+      throw error;
+    }
+
     sendError(ctx, 404, 'not_found', 'No such file');
 
     return;

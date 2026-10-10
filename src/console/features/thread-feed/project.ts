@@ -539,22 +539,32 @@ class Builder {
       // The harness announces a backgrounded task again when its late
       // output arrives (a second started and completed of the same taskId):
       // the card stays where it first appeared and runs again.
+      // The kind names the agent when there is one, backgrounded or not; a
+      // background task is a backgrounded call without an agent (Bash).
+      const taskKind = event.payload.subagentType ? `${event.payload.subagentType} subagent` : event.payload.backgrounded ? 'background task' : 'subagent';
       const known = this.tasks.get(event.payload.taskId);
 
       if (known) {
         known.state = 'run';
+        known.taskKind = taskKind;
+
+        // A card the end alone made (its start before the loaded range)
+        // stood its summary in for the description; the start brings the
+        // description, and the summary takes its own place.
+        if (known.summary === null && known.description !== event.payload.description) {
+          known.summary = known.description;
+        }
+
         known.description = event.payload.description;
 
         return;
       }
 
-      // The kind names the agent when there is one, backgrounded or not; a
-      // background task is a backgrounded call without an agent (Bash).
       const item: SubtaskItem = {
         kind: 'subtask',
         key,
         at,
-        taskKind: event.payload.subagentType ? `${event.payload.subagentType} subagent` : event.payload.backgrounded ? 'background task' : 'subagent',
+        taskKind,
         description: event.payload.description,
         state: 'run',
         meta: [],
@@ -594,9 +604,15 @@ class Builder {
 
       // The start is before the loaded range. A task bound to a tool use is
       // represented by that tool's row (an end alone when its start is out
-      // of range too); a task of its own gets its card from the end.
+      // of range too); a task of its own gets its card from the end — and
+      // the card is the task's, so a later announcement of the same taskId
+      // (the harness announces a backgrounded task again) runs it again
+      // where it is instead of making a second one.
       if (!event.payload.toolUseId) {
-        this.push({ kind: 'subtask', key, at, taskKind: 'task', description: event.payload.summary, state, meta: taskMeta(event.payload.usage), lastTool: null, summary: null });
+        const card: SubtaskItem = { kind: 'subtask', key, at, taskKind: 'task', description: event.payload.summary, state, meta: taskMeta(event.payload.usage), lastTool: null, summary: null };
+
+        this.tasks.set(event.payload.taskId, card);
+        this.push(card);
       }
 
       return;
