@@ -2,7 +2,10 @@
 // projects endpoints write the row, the folder and the project.* event
 // together and answer the console's shapes and refusals; PATCH /settings
 // stores the names; a cross-site mutation is refused and the browser's
-// own-origin one passes; a race of two creations leaves one row.
+// own-origin one passes; a race of two creations leaves one row, and the
+// folder is seeded by the creation that owns the row, never by the loser;
+// the cache policy of the private surfaces: /api is no-store, the workspace
+// bytes are revalidated by ETag, the stored files by id are kept for an hour.
 //
 // Run: npm test  (node:test, native type stripping — no build needed).
 
@@ -11,7 +14,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { STAND_HOST, startStand } from '../test-support/stand.ts';
-import type { Stand } from '../test-support/stand.ts';
+import type { Reply, Stand } from '../test-support/stand.ts';
 import type { CreateProjectResponse, ProjectResponse, SettingsResponse, MeResponse } from './contract.ts';
 
 type ErrorBody = { error: { code: string; message: string } };
@@ -140,18 +143,182 @@ describe('projects over the api', () => {
     );
   });
 
-  test('two creations of one slug at once: one row, one event, one conflict', async () => {
-    const body = { title: 'Race', slug: 'race', description: 'd' };
+  test('two creations of one slug at once: one row, one event, one conflict, and the folder seeded by the row’s creation', async () => {
     const replies = await Promise.all([
-      stand.request('POST', '/api/projects', { body }),
-      stand.request('POST', '/api/projects', { body }),
+      stand.request('POST', '/api/projects', { body: { title: 'Race A', slug: 'race', description: 'The first body.' } }),
+      stand.request('POST', '/api/projects', { body: { title: 'Race B', slug: 'race', description: 'The second body.' } }),
     ]);
 
     assert.deepEqual(replies.map(reply => reply.status).sort(), [200, 409]);
-    assert.equal(await prisma.project.count({ where: { slug: 'race' } }), 1);
+
+    const rows = await prisma.project.findMany({ where: { slug: 'race' } });
+
+    assert.equal(rows.length, 1);
     assert.equal((await projectEvents()).filter(event => event.type === 'project.created').length, 2);
+
+    // Whichever creation won the row seeded the folder with its own title
+    // and description.
+    const [row] = rows;
+
+    assert.match(await fs.readFile(path.join(filesDir, 'race', 'AGENTS.md'), 'utf8'), new RegExp(`^# ${row.title}\\n\\n${row.description}\\n`));
+  });
+
+  // The loser of the race, caught in the act: the test holds an uncommitted
+  // row of the slug in a transaction of its own, so the creation's friendly
+  // check sees nothing and its insert waits on the unique index; once the
+  // row commits the insert fails, and the loser must have written nothing to
+  // the disk — before the seed moved into the transaction it wrote the three
+  // files with its own title ahead of the row. Every wait is raced against
+  // the failure of what it depends on, and the cleanup lets the transaction
+  // go and aborts the request whatever happened.
+  test('a creation losing the row to a concurrent one leaves no folder behind', { timeout: 30_000 }, async () => {
+    let locked!: () => void;
+    let lockLost!: (reason: unknown) => void;
+    const rowHeld = new Promise<void>((resolve, reject) => {
+      locked = resolve;
+      lockLost = reject;
+    });
+    let release!: () => void;
+    let abandon!: (reason: unknown) => void;
+    const released = new Promise<void>((resolve, reject) => {
+      release = resolve;
+      abandon = reject;
+    });
+    const held = prisma.$transaction(
+      async tx => {
+        await tx.project.create({ data: { userId: stand.userId, title: 'Held', slug: 'held', description: 'The row that wins.' } });
+        locked();
+        await released;
+      },
+      { timeout: 20_000 },
+    );
+
+    held.catch(lockLost);
+
+    const aborter = new AbortController();
+    let reply: Promise<Reply> | null = null;
+
+    try {
+      await rowHeld;
+      reply = stand.request('POST', '/api/projects', { body: { title: 'Loser', slug: 'held', description: 'The body that loses.' }, signal: aborter.signal });
+      await Promise.race([
+        waitForLockWaiter(),
+        failureOf(held),
+        reply.then(early => {
+          throw new Error(`the creation answered before the row was committed: ${early.status} ${early.text}`);
+        }),
+      ]);
+      release();
+      await held;
+
+      const refused = await reply;
+
+      assert.equal(refused.status, 409, refused.text);
+      assert.equal(refused.json<ErrorBody>().error.code, 'conflict');
+      assert.equal(await fs.stat(path.join(filesDir, 'held')).catch(() => null), null);
+      assert.equal((await prisma.project.findUniqueOrThrow({ where: { userId_slug: { userId: stand.userId, slug: 'held' } } })).title, 'Held');
+      // The held row wrote no event of its own; the loser added none.
+      assert.equal((await projectEvents()).filter(event => event.type === 'project.created').length, 2);
+    } finally {
+      abandon(new Error('the scenario is over'));
+      aborter.abort();
+      await Promise.allSettled([held, reply]);
+    }
   });
 });
+
+describe('the cache policy of the private surfaces', () => {
+  test('/api answers are never stored, the refusals included', async () => {
+    const me = await stand.request('GET', '/api/me');
+
+    assert.equal(me.status, 200);
+    assert.equal(me.headers['cache-control'], 'no-store');
+
+    const threads = await stand.request('GET', '/api/threads?limit=1');
+
+    assert.equal(threads.status, 200, threads.text);
+    assert.equal(threads.headers['cache-control'], 'no-store');
+
+    const unknown = await stand.request('GET', '/api/nothing-here');
+
+    assert.equal(unknown.status, 404);
+    assert.equal(unknown.headers['cache-control'], 'no-store');
+
+    const signedOut = await stand.request('GET', '/api/me', { cookie: '' });
+
+    assert.equal(signedOut.status, 401);
+    assert.equal(signedOut.headers['cache-control'], 'no-store');
+  });
+
+  test('a stored file by id may be kept privately for an hour', async () => {
+    const { ingestFile } = await import('../files/index.ts');
+    const file = await ingestFile({ body: Buffer.from('stored'), contentType: 'text/plain', sizeBytes: 6, originalFilename: 'note.txt', userId: stand.userId });
+    const reply = await stand.request('GET', `/api/files/${file.id}`);
+
+    assert.equal(reply.status, 200, reply.text);
+    assert.equal(reply.text, 'stored');
+    assert.equal(reply.headers['cache-control'], 'private, max-age=3600');
+  });
+
+  test('the workspace bytes are revalidated by ETag: 304 while the file holds, the bytes again once it changed', async () => {
+    const file = path.join(filesDir, 'notes', 'todo.md');
+
+    await fs.mkdir(path.dirname(file), { recursive: true });
+    await fs.writeFile(file, '# Todo\n');
+
+    const first = await stand.request('GET', '/files/notes/todo.md');
+
+    assert.equal(first.status, 200, first.text);
+    assert.equal(first.text, '# Todo\n');
+    assert.equal(first.headers['cache-control'], 'private, no-cache');
+    assert.match(first.headers.etag ?? '', /^W\/"[0-9a-f]+-[0-9a-f]+"$/);
+
+    const same = await stand.request('GET', '/files/notes/todo.md', { headers: { 'if-none-match': first.headers.etag as string } });
+
+    assert.equal(same.status, 304);
+    assert.equal(same.text, '');
+    assert.equal(same.headers.etag, first.headers.etag);
+    assert.equal(same.headers['cache-control'], 'private, no-cache');
+
+    await fs.writeFile(file, '# Todo\n\n- one\n');
+
+    const changed = await stand.request('GET', '/files/notes/todo.md', { headers: { 'if-none-match': first.headers.etag as string } });
+
+    assert.equal(changed.status, 200);
+    assert.equal(changed.text, '# Todo\n\n- one\n');
+    assert.notEqual(changed.headers.etag, first.headers.etag);
+
+    const missing = await stand.request('GET', '/files/notes/nothing.md');
+
+    assert.equal(missing.status, 404);
+    assert.equal(missing.headers['cache-control'], 'no-store');
+  });
+});
+
+// A promise that rejects when the given one does and never resolves — to
+// race a wait against the failure of what it depends on.
+function failureOf(promise: Promise<unknown>): Promise<never> {
+  return promise.then(() => new Promise<never>(() => {}));
+}
+
+// Until a session of the stand's database waits for a lock — the creation's
+// insert blocked on the unique index behind the row the test holds.
+async function waitForLockWaiter(): Promise<void> {
+  const deadline = Date.now() + 10_000;
+
+  while (Date.now() < deadline) {
+    const [row] = await prisma.$queryRaw<{ n: number }[]>`
+      SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'`;
+
+    if (row && row.n > 0) {
+      return;
+    }
+
+    await new Promise(resolve => setTimeout(resolve, 20));
+  }
+
+  assert.fail('the creation never waited for the row');
+}
 
 describe('settings over the api', () => {
   test('PATCH /settings stores the names and /me reads them back', async () => {

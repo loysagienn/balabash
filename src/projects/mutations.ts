@@ -168,31 +168,35 @@ export async function createProject(userId: string, input: ProjectInput, by: Reg
 
   const adopted = existing !== null;
 
-  // mkdir recursive doubles as lazy provisioning of the file area itself.
-  await fs.mkdir(dir, { recursive: true });
-
   // The library anatomy (the law in agents/gardener.ts), seeded only where
   // the folder has none — an adopted folder's existing files are someone's
   // work and are never overwritten.
   const seed = async (name: string, content: string) => {
     await fs.writeFile(path.join(dir, name), content, { flag: 'wx' }).catch((error: NodeJS.ErrnoException) => {
-      // A concurrent writer beat us to it — their file wins.
       if (error.code !== 'EEXIST') {
         throw error;
       }
     });
   };
 
-  await seed(
-    'AGENTS.md',
-    `# ${title}\n\n${description}\n\n## Map\n\n- inbox.md — append anything new worth keeping: results, decisions, learned facts; dated, with the "why". A gardener agent consolidates later.\n- journal.md — dated history of the project, maintained by the gardener.\n\n(Keep this file the entry point: the map of the folder plus the project's identity and stable frame.)\n`,
-  );
-  await seed('inbox.md', '# Inbox\n\nAppend new material here freely — dated, with the "why". Drained by the gardener.\n');
-  await seed('journal.md', '# Journal\n\nDated events and decisions, newest first. Written by the gardener.\n');
-
   try {
     const project = await registryMutation(async (tx, journal) => {
+      // The row first: of two creations of one slug at once the second
+      // insert waits on the unique index for the first to commit and then
+      // fails — so only the creation that owns the row reaches the disk,
+      // and the seed carries its title and description, never the loser's.
+      // A failure on the disk rolls the row back; what the loser leaves
+      // behind is nothing.
       const created = await tx.project.create({ data: { userId, title, slug, description } });
+
+      // mkdir recursive doubles as lazy provisioning of the file area itself.
+      await fs.mkdir(dir, { recursive: true });
+      await seed(
+        'AGENTS.md',
+        `# ${title}\n\n${description}\n\n## Map\n\n- inbox.md — append anything new worth keeping: results, decisions, learned facts; dated, with the "why". A gardener agent consolidates later.\n- journal.md — dated history of the project, maintained by the gardener.\n\n(Keep this file the entry point: the map of the folder plus the project's identity and stable frame.)\n`,
+      );
+      await seed('inbox.md', '# Inbox\n\nAppend new material here freely — dated, with the "why". Drained by the gardener.\n');
+      await seed('journal.md', '# Journal\n\nDated events and decisions, newest first. Written by the gardener.\n');
 
       await journal('project.created', projectRecord(created), by);
 

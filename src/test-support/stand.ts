@@ -10,9 +10,10 @@
 // workspace the way a fresh install does — ensureOperatorWorkspace(): one
 // user and its main thread — and signs in through the real code exchange
 // (POST /api/auth), so the stand's cookie is a web session like any other.
-// Requests go to a Koa listener on an ephemeral port carrying the /api
-// middleware exactly as src/api/index.ts mounts it (app.proxy, and the
-// stand sends X-Forwarded-Proto: https — the session cookie is Secure).
+// Requests go to a Koa listener on an ephemeral port carrying the /files
+// and /api middleware exactly as src/api/index.ts mounts them (app.proxy,
+// and the stand sends X-Forwarded-Proto: https — the session cookie is
+// Secure).
 //
 // Import order — the one rule of using the stand. src/db/client.ts builds
 // the Prisma client at import from DATABASE_URL as it is at that moment,
@@ -157,7 +158,7 @@ export async function startStand(): Promise<Stand> {
     const { prisma } = await import('../db/client.ts');
     const { getLiveHub } = await import('../core/live.ts');
     const { ensureOperatorWorkspace } = await import('../core/threads.ts');
-    const { createApiMiddleware } = await import('../api/api.ts');
+    const { createApiMiddleware, createFilesMiddleware } = await import('../api/api.ts');
     const { createAuthCode } = await import('../api/auth-codes.ts');
 
     cleanup.add('disconnect', async () => {
@@ -170,6 +171,8 @@ export async function startStand(): Promise<Stand> {
     const app = new Koa();
 
     app.proxy = true;
+    // The session-gated surfaces in the order src/api/index.ts mounts them.
+    app.use(createFilesMiddleware());
     app.use(createApiMiddleware());
     app.use(ctx => {
       ctx.status = 404;

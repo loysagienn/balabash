@@ -22,6 +22,7 @@ import { appendEvent } from '../core/append.ts';
 import { THREAD_CANCEL, THREAD_INTERRUPT } from '../core/envelope.ts';
 import type { FileRef, Thread, ThreadStatus } from '../core/contract.ts';
 import { WorkspacePathError, listDir, resolveFilePath, sanitizeRelPath, statFile } from '../workspace/files.ts';
+import type { WorkspaceFileNode } from '../workspace/files.ts';
 import { getFile, getUserFile, openFileContent } from '../files/index.ts';
 import { verifyDownloadLink } from '../files/storage/local.ts';
 import { getExternalServerSecretRequest, provisionExternalServerSecrets } from '../capabilities/external-secrets.ts';
@@ -1022,12 +1023,32 @@ filesRouter.get('/files/*path', requireSession, async ctx => {
 
   ctx.set('content-type', file.mediaType.startsWith('text/') ? `${file.mediaType}; charset=utf-8` : file.mediaType);
   ctx.set('content-disposition', contentDisposition(filename, { attachment }));
+  // The file changes under agents' hands at any moment, so the browser may
+  // keep a copy only under revalidation on every use: a weak ETag of the
+  // size and the modification time (milliseconds — a Last-Modified date
+  // would miss two writes within one second), 304 while it holds.
+  ctx.set('cache-control', 'private, no-cache');
+  ctx.etag = workspaceFileEtag(file);
+  ctx.status = 200;
+
+  if (ctx.fresh) {
+    ctx.status = 304;
+
+    return;
+  }
+
   ctx.body = createReadStream(resolveFilePath(userId, relPath));
 
   if (file.sizeBytes !== null) {
     ctx.length = file.sizeBytes;
   }
 });
+
+export function workspaceFileEtag(file: Pick<WorkspaceFileNode, 'sizeBytes' | 'modifiedAt'>): string {
+  const modifiedMs = file.modifiedAt === null ? 0 : Date.parse(file.modifiedAt);
+
+  return `W/"${(file.sizeBytes ?? 0).toString(16)}-${modifiedMs.toString(16)}"`;
+}
 
 // The cross-site guard of every mutation under the session (src/api/origin.ts):
 // a page of another origin holding the browser's cookie is refused before any
@@ -1059,6 +1080,10 @@ export function createFilesMiddleware(): (ctx: Context, next: Next) => Promise<v
 
       return;
     }
+
+    // Private bytes: nothing is stored unless the route says so (the
+    // workspace bytes are, under revalidation).
+    ctx.set('cache-control', 'no-store');
 
     if (refuseCrossSite(ctx)) {
       return;
@@ -1201,6 +1226,11 @@ export function createApiMiddleware(): (ctx: Context, next: Next) => Promise<voi
 
       return;
     }
+
+    // Everything here is the session's private data of the moment: never
+    // stored by the browser or a proxy, refusals and errors included. A
+    // route with a reason to differ sets its own (the stored files by id).
+    ctx.set('cache-control', 'no-store');
 
     if (refuseCrossSite(ctx)) {
       return;
