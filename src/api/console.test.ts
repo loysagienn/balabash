@@ -64,9 +64,13 @@ before(async () => {
   const app = new Koa();
 
   app.use(createConsoleMiddleware(root));
+  // The receiving side names the whole URL: the query is the credential of
+  // /connect (nonce) and /oauth/callback (state) and the destination of the
+  // /apps handoff — a pass-through that dropped it would still hit the right
+  // branch, so method and path alone would not catch it.
   app.use(ctx => {
     ctx.status = 200;
-    ctx.body = `fell through: ${ctx.method} ${ctx.path}`;
+    ctx.body = `fell through: ${ctx.method} ${ctx.url}`;
   });
 
   server = app.listen(0, '127.0.0.1');
@@ -95,9 +99,9 @@ describe('console host branch', () => {
   });
 
   test('the connection surfaces pass through: /connect/<server> and /oauth/callback, whatever the method', async () => {
-    assert.equal(await (await request('/connect/notion?nonce=abc')).text(), 'fell through: GET /connect/notion');
+    assert.equal(await (await request('/connect/notion?nonce=abc')).text(), 'fell through: GET /connect/notion?nonce=abc');
     assert.equal(await (await request('/connect')).text(), 'fell through: GET /connect');
-    assert.equal(await (await request('/oauth/callback?code=1&state=2')).text(), 'fell through: GET /oauth/callback');
+    assert.equal(await (await request('/oauth/callback?code=1&state=2')).text(), 'fell through: GET /oauth/callback?code=1&state=2');
     assert.equal(await (await request('/oauth')).text(), 'fell through: GET /oauth');
     // The main chain answers a wrong method itself; the SPA's 405 is not its business.
     assert.equal(await (await request('/oauth/callback', { method: 'POST' })).text(), 'fell through: POST /oauth/callback');
@@ -108,7 +112,7 @@ describe('console host branch', () => {
 
   test('the owner page of an app passes through, the Apps screen does not', async () => {
     assert.equal(await (await request('/apps/tracker')).text(), 'fell through: GET /apps/tracker');
-    assert.equal(await (await request('/apps/tools/tracker/page?x=1')).text(), 'fell through: GET /apps/tools/tracker/page');
+    assert.equal(await (await request('/apps/tools/tracker/page?x=1')).text(), 'fell through: GET /apps/tools/tracker/page?x=1');
     assert.equal(await (await request('/apps/tracker', { method: 'HEAD' })).status, 200);
     // The bare section — with or without its trailing slash, with its own query — is the SPA's shell.
     assert.equal((await request('/apps')).status, 503);
