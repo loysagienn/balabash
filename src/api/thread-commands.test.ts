@@ -11,7 +11,7 @@ import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { startStand } from '../test-support/stand.ts';
-import type { Stand } from '../test-support/stand.ts';
+import type { Reply, Stand } from '../test-support/stand.ts';
 import type { ThreadCommandResponse } from './contract.ts';
 
 type ErrorBody = { error: { code: string; message: string } };
@@ -188,48 +188,91 @@ describe('thread commands over the api', () => {
     assert.deepEqual(await commandsTo(child), []);
   });
 
-  test('a thread closed between the handler’s check and its write answers thread_closed, and the log keeps no command', async () => {
-    const child = await startChild('Racing');
+  for (const command of COMMANDS) {
     // The test holds the thread's row lock in a transaction of its own: the
     // handler's check (an unlocked read) sees the thread active, its append
     // then waits for the lock — and what it sees once the lock is released
-    // is the terminal this transaction committed meanwhile.
-    let locked!: () => void;
-    let terminate!: () => void;
-    const lockHeld = new Promise<void>(resolve => (locked = resolve));
-    const terminal = new Promise<void>(resolve => (terminate = resolve));
-    const held = prisma.$transaction(
-      async tx => {
-        await tx.$queryRaw`SELECT id FROM threads WHERE id = ${child} FOR UPDATE`;
-        locked();
-        await terminal;
+    // is the terminal this transaction committed meanwhile. Every wait here
+    // ends with a failure of what it waits for: the holding transaction
+    // failing releases the wait for the lock, the request failing or
+    // answering early ends the wait for the handler, and the cleanup lets
+    // the transaction go and aborts the request whatever happened — the
+    // test's own timeout is the last resort, never the first.
+    test(`a thread closed between the handler’s check and its write answers thread_closed to ${command}, and the log keeps no command`, { timeout: 30_000 }, async () => {
+      const child = await startChild(`Racing ${command}`);
+      let locked!: () => void;
+      let lockLost!: (reason: unknown) => void;
+      const lockHeld = new Promise<void>((resolve, reject) => {
+        locked = resolve;
+        lockLost = reject;
+      });
+      let terminate!: () => void;
+      let abandon!: (reason: unknown) => void;
+      const terminal = new Promise<void>((resolve, reject) => {
+        terminate = resolve;
+        abandon = reject;
+      });
+      const held = prisma.$transaction(
+        async tx => {
+          await tx.$queryRaw`SELECT id FROM threads WHERE id = ${child} FOR UPDATE`;
+          locked();
+          await terminal;
 
-        const result = await appendEventIn(tx, { type: 'thread.completed', actor: 'system', userId: stand.userId, threadId: child, payload: { summary: { text: 'done first' } } });
+          const result = await appendEventIn(tx, { type: 'thread.completed', actor: 'system', userId: stand.userId, threadId: child, payload: { summary: { text: 'done first' } } });
 
-        assert.equal(result.written, true);
-      },
-      { timeout: 20_000 },
-    );
+          assert.equal(result.written, true);
+        },
+        { timeout: 20_000 },
+      );
 
-    await lockHeld;
+      // A transaction that fails before the lock ends the wait for it with
+      // its own reason (a no-op once the lock was taken).
+      held.catch(lockLost);
 
-    const reply = stand.request('POST', `/api/threads/${child}/cancel`, { body: { reason: 'too late' } });
+      const aborter = new AbortController();
+      let reply: Promise<Reply> | null = null;
 
-    await waitForLockWaiter();
-    terminate();
-    await held;
+      try {
+        await lockHeld;
+        reply = stand.request('POST', `/api/threads/${child}/${command}`, { body: { reason: 'too late' }, signal: aborter.signal });
+        await Promise.race([
+          waitForLockWaiter(),
+          failureOf(held),
+          reply.then(early => {
+            throw new Error(`the handler answered before the lock was released: ${early.status} ${early.text}`);
+          }),
+        ]);
+        terminate();
+        await held;
 
-    const refused = await reply;
+        const refused = await reply;
 
-    assert.equal(refused.status, 409, refused.text);
-    assert.equal(refused.json<ErrorBody>().error.code, 'thread_closed');
-    assert.deepEqual(await commandsTo(child), []);
-    assert.equal(await threadStatus(child), 'completed');
-  });
+        assert.equal(refused.status, 409, refused.text);
+        assert.equal(refused.json<ErrorBody>().error.code, 'thread_closed');
+        assert.deepEqual(await commandsTo(child), []);
+        assert.equal(await threadStatus(child), 'completed');
+      } finally {
+        // Whatever ended the test: the holding transaction is let go (a
+        // rejection rolls it back and frees the handler), the request is
+        // aborted, and both are awaited — nothing of the scenario outlives
+        // the test; the test's own error stays the one reported.
+        abandon(new Error('the scenario is over'));
+        aborter.abort();
+        await Promise.allSettled([held, reply]);
+      }
+    });
+  }
 });
 
+// A promise that rejects when the given one does and never resolves — to
+// race a wait against the failure of what it depends on.
+function failureOf(promise: Promise<unknown>): Promise<never> {
+  return promise.then(() => new Promise<never>(() => {}));
+}
+
 // Until a session of the stand's database waits for a lock — the handler's
-// append blocked on the row the test holds.
+// append blocked on the row the test holds. Each probe is one short query;
+// the deadline bounds the loop, the test's timeout bounds the rest.
 async function waitForLockWaiter(): Promise<void> {
   const deadline = Date.now() + 10_000;
 
