@@ -43,7 +43,8 @@ import { Screen } from '../../ui/Screen/Screen.tsx';
 import { Skel, SkelRow, SkelStack } from '../../ui/Skel/Skel.tsx';
 import { DetailSection, Split, SplitDetail, SplitList } from '../../ui/Split/Split.tsx';
 import { Code, Quiet, Tag } from '../../ui/atoms/atoms.tsx';
-import { activityCaption, agentMatches, agentsDetail, agentsShell, agentsSummary, emptyActivity, engineLabel, engineName, modeLabel, withAgentsFilters } from './AgentsScreen.logic.ts';
+import { engineLabel, engineName } from '../../lib/format/engine.ts';
+import { activityCaption, agentMatches, agentsDetail, agentsShell, agentsSummary, catalogModel, effortWords, emptyActivity, modeLabel, modelWords, withAgentsFilters } from './AgentsScreen.logic.ts';
 import './AgentsScreen.css';
 
 // The activity shows the newest threads; the rest are a link away.
@@ -61,8 +62,21 @@ function Who({ name }: { name: string }) {
   );
 }
 
+// A setting of the details: the value in code (a model id) or plain (an
+// effort), the quiet note on where it comes from beside it.
+function Setting({ value, note, code }: { value: string | null; note: string | null; code?: boolean }) {
+  return (
+    <span className="agt-setting">
+      {value ? code ? <Code>{value}</Code> : value : null}
+      {note ? <Quiet>{note}</Quiet> : null}
+    </span>
+  );
+}
+
 function AgentDetail({ agent, running }: { agent: AgentView; running: number }) {
   const now = useNow();
+  const model = modelWords(agent);
+  const effort = effortWords(agent);
   const selectThreads = useMemo(makeSelectAgentThreads, []);
   const threads = useAppSelector(s => selectThreads(s, agent.name));
   // The counts of the agent's threads — all time and the recent window —
@@ -91,8 +105,8 @@ function AgentDetail({ agent, running }: { agent: AgentView; running: number }) 
         <KeyValue
           items={[
             { key: 'engine', value: engineName(agent.sdk) },
-            { key: 'model', value: agent.model ? <Code>{agent.model}</Code> : <Quiet>default of the engine</Quiet> },
-            { key: 'effort', value: agent.effort ?? <Quiet>default of the engine</Quiet> },
+            { key: 'model', value: <Setting value={model.value} note={model.note} code /> },
+            { key: 'effort', value: <Setting value={effort.value} note={effort.note} /> },
             { key: 'mode', value: modeLabel(agent.headless) },
             {
               key: 'launches',
@@ -197,7 +211,7 @@ export function AgentsScreen({ route }: { route: AgentsRoute }) {
                   {active > 0 ? <Badge state="run" label={`${active} active`} size="sm" /> : null}
                   <span className="row-time">
                     {engineLabel(agent.sdk)}
-                    <small className="row-time-sub">{agent.model ?? 'default model'}</small>
+                    <small className="row-time-sub">{catalogModel(agent)}</small>
                   </span>
                 </>
               }

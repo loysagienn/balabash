@@ -21,13 +21,46 @@ export function agentMatches(agent: Pick<AgentView, 'name' | 'description'>, q: 
   return agent.name.toLowerCase().includes(needle) || agent.description.toLowerCase().includes(needle);
 }
 
-// The engine in the catalog row ("Claude") and in the details ("Claude Agent SDK").
-export function engineLabel(sdk: AgentView['sdk']): string {
-  return sdk === 'codex' ? 'Codex' : 'Claude';
+// The model of a catalog row: the one the declaration names, else the one
+// the agent's newest session ran on (what the engine's default resolved
+// to), else the engine's choice, not yet seen.
+export function catalogModel(agent: Pick<AgentView, 'model' | 'lastModel'>): string {
+  return agent.model ?? agent.lastModel ?? 'default model';
 }
 
-export function engineName(sdk: AgentView['sdk']): string {
-  return sdk === 'codex' ? 'Codex SDK' : 'Claude Agent SDK';
+// A setting of the details: the value (a model id, an effort) and a quiet
+// note on where it comes from; no value — the note alone.
+export type SettingWords = { value: string | null; note: string | null };
+
+// The model row: a named model as it is, with a note when the newest
+// session ran on another id (an alias resolved, a changed default); no
+// named model — the engine's default as the newest session resolved it,
+// or nothing seen yet.
+export function modelWords(agent: Pick<AgentView, 'model' | 'lastModel'>): SettingWords {
+  if (agent.model) {
+    return { value: agent.model, note: agent.lastModel && agent.lastModel !== agent.model ? `last session ran ${agent.lastModel}` : null };
+  }
+
+  if (agent.lastModel) {
+    return { value: agent.lastModel, note: 'default of the engine · last session' };
+  }
+
+  return { value: null, note: 'default of the engine' };
+}
+
+// The effort row: a named effort as it is; none — the platform's default
+// the session runs with; an engine without one (the coordinator) — the
+// model's own.
+export function effortWords(agent: Pick<AgentView, 'effort' | 'defaultEffort'>): SettingWords {
+  if (agent.effort) {
+    return { value: agent.effort, note: null };
+  }
+
+  if (agent.defaultEffort) {
+    return { value: agent.defaultEffort, note: 'default of the platform' };
+  }
+
+  return { value: null, note: 'default of the model' };
 }
 
 export function modeLabel(headless: boolean): string {

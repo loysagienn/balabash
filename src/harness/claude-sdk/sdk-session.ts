@@ -21,6 +21,7 @@ import { mergeEnv } from '../env.ts';
 import { nativeMcpServers } from './native-servers.ts';
 import { emitSdkMessage, emitSdkSessionEnd } from './stream-tap.ts';
 import { registerContextUsageProvider } from './context-usage.ts';
+import { DEFAULT_EFFORT } from '../default-effort.ts';
 
 export type SdkSessionDeps = {
   tools: ToolsApi;
@@ -48,11 +49,11 @@ export function createClaudeSession(options: SdkSessionOptions, deps: SdkSession
   let session: ClaudeSession | null = null;
   let bridge: BridgeServer | null = null;
   const pendingInputs: string[] = [];
-  // Reasoning effort; the platform default is explicit rather than trusting
-  // the SDK default to stay 'high'. Also stamped onto the mirrored init
-  // frame: the inner CLI omits `effort` on the SDK path, and the app reads
-  // the session's effort from its newest init frame.
-  const effort = options.effort ?? 'high';
+  // Reasoning effort; the platform default is explicit (default-effort.ts)
+  // rather than trusting the SDK default to stay 'high'. Also stamped onto
+  // the mirrored init frame: the inner CLI omits `effort` on the SDK path,
+  // and the app reads the session's effort from its newest init frame.
+  const effort = options.effort ?? DEFAULT_EFFORT;
   // Undoes the thread's context-usage registration (deps.threadId sessions).
   let unregisterContextUsage: (() => void) | null = null;
   // Set by interrupt(), consumed by the next result frame: an interrupted

@@ -5,6 +5,8 @@
 .agt-head{display:grid;grid-template-columns:auto minmax(0,1fr);align-items:center;gap:var(--sp-1) var(--sp-3)}
 .agt-head-av{grid-row:span 2}
 .agt-desc{font-size:var(--fs-meta);line-height:var(--lh-meta);color:var(--text-2)}
+/* a setting of the details: the value and the quiet note on where it comes from */
+.agt-setting{display:inline-flex;flex-wrap:wrap;align-items:baseline;gap:var(--sp-1h)}
 /* chips of tools and of the agents it launches */
 .agt-chips{display:flex;flex-wrap:wrap;gap:var(--sp-1)}
 .agt-who{display:inline-flex;align-items:center;gap:var(--sp-1h)}

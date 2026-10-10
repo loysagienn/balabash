@@ -18,6 +18,7 @@ import { createBridgeServer } from '../claude-sdk/bridge.ts';
 import { mergeEnv } from '../env.ts';
 import { ensureCodexHome } from './codex-home.ts';
 import { emitCodexEvent, emitCodexSessionEnd } from './stream-tap.ts';
+import { DEFAULT_EFFORT } from '../default-effort.ts';
 
 export type CodexSessionDeps = {
   tools: ToolsApi;
@@ -222,8 +223,9 @@ export function createCodexSession(options: SdkSessionOptions, deps: CodexSessio
       const thread = codex.startThread({
         ...(options.model ? { model: options.model } : {}),
         // Reasoning effort: the platform scale is a subset of Codex's, so the
-        // value passes through; the platform default is explicit.
-        modelReasoningEffort: options.effort ?? 'high',
+        // value passes through; the platform default is explicit
+        // (default-effort.ts).
+        modelReasoningEffort: options.effort ?? DEFAULT_EFFORT,
         workingDirectory: options.cwd ?? deps.cwd,
         skipGitRepoCheck: true,
         // Parity with the Claude sessions (bypassPermissions): the host is

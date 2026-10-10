@@ -24,6 +24,11 @@ import { taskView } from '../schedule/view.ts';
 import { connectionView, listUserConnections } from '../capabilities/connections/index.ts';
 import { listUserAuthServers } from '../capabilities/tool-manager.ts';
 import { getAgents } from '../capabilities/agent-catalog.ts';
+import { COORDINATOR_AGENT } from '../core/threads.ts';
+import { COORDINATOR_BUNDLE, COORDINATOR_DESCRIPTION } from '../coordinator/functions.ts';
+import { DEFAULT_EFFORT } from '../harness/default-effort.ts';
+import { config } from '../config/index.ts';
+import type { AgentDeclaration } from '../core/contract.ts';
 import type { AgentView, ConnectionView, MeResponse, ServiceView, SnapshotResponse, TaskView } from './contract.ts';
 
 export { SNAPSHOT_THREAD_WINDOW } from './thread-window.ts';
@@ -99,8 +104,31 @@ function readServices(): ServiceView[] {
   }));
 }
 
-function readAgents(): AgentView[] {
-  return getAgents().map(agent => ({
+// The model each agent's newest session started with: the model of the
+// agent's latest session.started in this workspace (the Claude journal
+// writes it; Codex sessions have no such event). One DISTINCT ON over the
+// session.started rows of the log (the (type, seq) index); an agent whose
+// newest start names no model has no entry. The tail keeps it fresh: the
+// console's agents reducer folds session.started the same way.
+async function readLastModels(userId: string): Promise<Map<string, string>> {
+  const rows = await prisma.$queryRaw<Array<{ agentName: string | null; model: string | null }>>`
+    SELECT DISTINCT ON (agent_name) agent_name AS "agentName", payload->>'model' AS model
+    FROM events
+    WHERE user_id = ${userId} AND type = 'session.started' AND agent_name IS NOT NULL
+    ORDER BY agent_name, seq DESC`;
+  const models = new Map<string, string>();
+
+  for (const row of rows) {
+    if (row.agentName && row.model) {
+      models.set(row.agentName, row.model);
+    }
+  }
+
+  return models;
+}
+
+function agentView(agent: AgentDeclaration, lastModel: string | null): AgentView {
+  return {
     name: agent.name,
     description: agent.description,
     icon: agent.icon ?? null,
@@ -111,7 +139,45 @@ function readAgents(): AgentView[] {
     notification: agent.notification ?? null,
     model: agent.session?.model ?? null,
     effort: agent.session?.effort ?? null,
-  }));
+    // Both SDK sessions run with the platform default when the declaration
+    // names no effort (src/harness/default-effort.ts).
+    defaultEffort: DEFAULT_EFFORT,
+    lastModel,
+  };
+}
+
+// The coordinator — the secretary of the main thread — is not a catalog
+// module (its loop is src/coordinator), so its view is built from its own
+// facts: the OpenAI backend and the model of the config, the tool servers of
+// its passport, every catalog agent as what it launches (its spawn functions
+// derive from the whole catalog). Its requests name no reasoning effort and
+// its turns journal no session.started — effort, defaultEffort and
+// lastModel stay null.
+function coordinatorView(catalog: AgentDeclaration[]): AgentView {
+  return {
+    name: COORDINATOR_AGENT,
+    description: COORDINATOR_DESCRIPTION,
+    icon: null,
+    sdk: 'openai',
+    tools: [...COORDINATOR_BUNDLE.declared],
+    agents: catalog.map(agent => agent.name),
+    headless: false,
+    notification: null,
+    model: config.mainOpenaiModel,
+    effort: null,
+    defaultEffort: null,
+    lastModel: null,
+  };
+}
+
+// The agents as the console's catalog shows them: the coordinator first,
+// then the catalog by name (getAgents sorts), each with the model its
+// newest session ran on.
+export async function readAgents(userId: string): Promise<AgentView[]> {
+  const catalog = getAgents();
+  const lastModels = await readLastModels(userId);
+
+  return [coordinatorView(catalog), ...catalog.map(agent => agentView(agent, lastModels.get(agent.name) ?? null))];
 }
 
 export async function buildSnapshot(userId: string, me: MeResponse): Promise<SnapshotResponse> {
@@ -120,13 +186,14 @@ export async function buildSnapshot(userId: string, me: MeResponse): Promise<Sna
   const asOfSeq = await readHeadSeq();
   const now = new Date();
 
-  const [threads, mainLastMessage, projects, apps, tasks, connections] = await Promise.all([
+  const [threads, mainLastMessage, projects, apps, tasks, connections, agents] = await Promise.all([
     readThreadWindow(userId, me.mainThreadId, { list: listThreads, get: getThread, latestTerminal: getLatestTerminalThread }),
     readMainLastMessage(me.mainThreadId),
     listProjects(userId),
     listApps(userId),
     readTasks(userId, now),
     readConnections(userId),
+    readAgents(userId),
   ]);
   const sessions = await readSessions(threads);
 
@@ -141,6 +208,6 @@ export async function buildSnapshot(userId: string, me: MeResponse): Promise<Sna
     tasks,
     connections,
     services: readServices(),
-    agents: readAgents(),
+    agents,
   };
 }

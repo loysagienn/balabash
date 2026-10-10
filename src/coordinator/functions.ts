@@ -35,8 +35,10 @@ import type { DispatchResult, FunctionCall, FunctionDefinition } from '../harnes
 // The coordinator's tool passport, listed explicitly like every agent's: the
 // coordinator has no native file tools, so the workspace_files hands ride
 // along; restart is the deliberately granted dangerous capability. A new
-// tool server reaches the coordinator only by being added here.
-const COORDINATOR_BUNDLE: ToolBundle = {
+// tool server reaches the coordinator only by being added here. Exported
+// for the console's agent catalog, which shows the secretary beside the
+// catalog agents with the same passport (src/api/snapshot.ts).
+export const COORDINATOR_BUNDLE: ToolBundle = {
   declared: [
     'apps',
     'current_datetime',
@@ -59,6 +61,13 @@ const COORDINATOR_BUNDLE: ToolBundle = {
     RESTART_SERVER_NAME,
   ],
 };
+
+// Who the coordinator is, for the console's agent catalog — the one place it
+// is described to the operator (the agents describe themselves in their
+// declarations; the coordinator's instructions speak to the model).
+export const COORDINATOR_DESCRIPTION =
+  'The secretary of the workspace: owns the main thread, talks with the user there, hands work out to the ' +
+  'agents in child threads and relays what they bring back.';
 
 const STATIC_FUNCTION_DEFINITIONS: FunctionDefinition[] = [
   {

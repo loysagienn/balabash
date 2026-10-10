@@ -1342,8 +1342,8 @@ describe('agents screen', () => {
             thread({ id: 'b1', createdSeq: 8n, agent: 'browser' }),
           ],
           agents: [
-            { name: 'engineer', description: 'code', icon: null, sdk: 'claude', tools: ['events'], agents: ['browser'], headless: false, notification: null, model: 'm', effort: 'high' },
-            { name: 'browser', description: 'web', icon: null, sdk: 'claude', tools: [], agents: [], headless: true, notification: null, model: null, effort: null },
+            { name: 'engineer', description: 'code', icon: null, sdk: 'claude', tools: ['events'], agents: ['browser'], headless: false, notification: null, model: 'm', effort: 'high', defaultEffort: 'high', lastModel: null },
+            { name: 'browser', description: 'web', icon: null, sdk: 'claude', tools: [], agents: [], headless: true, notification: null, model: null, effort: null, defaultEffort: 'high', lastModel: null },
           ],
         }),
     });
@@ -1381,6 +1381,34 @@ describe('agents screen', () => {
     // A thread the tail starts counts at once.
     store.dispatch(eventAction(event({ seq: 52n, type: 'thread.started', threadId: 'b2', targetThreadId: 'main', agentName: 'browser', payload: { agent: 'browser', title: 'x', headless: true, input: 'go' } })));
     assert.deepEqual(selectRunningCountByAgent(store.getState()), { engineer: 1, browser: 2 });
+  });
+
+  it('follows the model an agent’s newest session started with', async () => {
+    const store = await agentsStore();
+    const started = (seq: bigint, agentName: string, model: string) =>
+      eventAction(event({ seq, type: 'session.started', threadId: 'e1', agentName, payload: { model, tools: [], mcpServers: [] } }));
+
+    assert.equal(store.getState().agents.byName.engineer.lastModel, null);
+
+    store.dispatch(started(53n, 'engineer', 'claude-opus-5-5'));
+    assert.equal(store.getState().agents.byName.engineer.lastModel, 'claude-opus-5-5');
+    assert.equal(store.getState().agents.byName.engineer.model, 'm');
+    assert.equal(store.getState().agents.byName.browser.lastModel, null);
+
+    // The same model again, an agent outside the catalog, a start naming no
+    // model — nothing changes.
+    const before = store.getState().agents;
+
+    store.dispatch(started(54n, 'engineer', 'claude-opus-5-5'));
+    store.dispatch(started(55n, 'gardener', 'claude-opus-5-5'));
+    store.dispatch(started(56n, 'constructor', 'claude-opus-5-5'));
+    store.dispatch(eventAction(event({ seq: 57n, type: 'session.started', threadId: 'e1', agentName: 'engineer', payload: { tools: [], mcpServers: [] } as never })));
+    assert.equal(store.getState().agents, before);
+
+    // A newer start on another model replaces it.
+    store.dispatch(started(58n, 'engineer', 'claude-opus-5-5-20260301'));
+    assert.equal(store.getState().agents.byName.engineer.lastModel, 'claude-opus-5-5-20260301');
+    assert.deepEqual(store.getState().agents.names, ['engineer', 'browser']);
   });
 });
 

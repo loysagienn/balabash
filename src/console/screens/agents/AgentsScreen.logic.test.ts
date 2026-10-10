@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { activityCaption, agentMatches, agentsDetail, agentsShell, agentsSummary, emptyActivity, engineLabel, engineName, modeLabel, withAgentsFilters } from './AgentsScreen.logic.ts';
+import { activityCaption, agentMatches, agentsDetail, agentsShell, agentsSummary, catalogModel, effortWords, emptyActivity, modeLabel, modelWords, withAgentsFilters } from './AgentsScreen.logic.ts';
 
 describe('agents screen rules', () => {
   it('matches the search against the name and the description, case-insensitive', () => {
@@ -13,13 +13,29 @@ describe('agents screen rules', () => {
     assert.equal(agentMatches(agent, 'browser'), false);
   });
 
-  it('names the engine and the mode', () => {
-    assert.equal(engineLabel('claude'), 'Claude');
-    assert.equal(engineLabel('codex'), 'Codex');
-    assert.equal(engineName('claude'), 'Claude Agent SDK');
-    assert.equal(engineName('codex'), 'Codex SDK');
+  it('names the mode', () => {
     assert.equal(modeLabel(true), 'headless · no user surface');
     assert.equal(modeLabel(false), 'with the user · not headless');
+  });
+
+  it('names the model of a row: the declared one, else the newest session’s, else the engine’s unseen default', () => {
+    assert.equal(catalogModel({ model: 'claude-opus-5-5', lastModel: 'claude-opus-5-5-20260301' }), 'claude-opus-5-5');
+    assert.equal(catalogModel({ model: null, lastModel: 'claude-opus-5-5' }), 'claude-opus-5-5');
+    assert.equal(catalogModel({ model: null, lastModel: null }), 'default model');
+  });
+
+  it('words the model setting: a named model with a note when the newest session ran on another id, the resolved default, or nothing seen', () => {
+    assert.deepEqual(modelWords({ model: 'claude-opus-5-5', lastModel: null }), { value: 'claude-opus-5-5', note: null });
+    assert.deepEqual(modelWords({ model: 'claude-opus-5-5', lastModel: 'claude-opus-5-5' }), { value: 'claude-opus-5-5', note: null });
+    assert.deepEqual(modelWords({ model: 'opus', lastModel: 'claude-opus-5-5' }), { value: 'opus', note: 'last session ran claude-opus-5-5' });
+    assert.deepEqual(modelWords({ model: null, lastModel: 'claude-opus-5-5' }), { value: 'claude-opus-5-5', note: 'default of the engine · last session' });
+    assert.deepEqual(modelWords({ model: null, lastModel: null }), { value: null, note: 'default of the engine' });
+  });
+
+  it('words the effort setting: the named one, the platform default a session runs with, or the model’s own', () => {
+    assert.deepEqual(effortWords({ effort: 'max', defaultEffort: 'high' }), { value: 'max', note: null });
+    assert.deepEqual(effortWords({ effort: null, defaultEffort: 'high' }), { value: 'high', note: 'default of the platform' });
+    assert.deepEqual(effortWords({ effort: null, defaultEffort: null }), { value: null, note: 'default of the model' });
   });
 
   it('summarizes the catalog', () => {

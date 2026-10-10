@@ -11,6 +11,7 @@ import { countOf, dateTimeLabel } from '../../lib/format/index.ts';
 import { useNow } from '../../lib/format/useNow.ts';
 import { useAppDispatch, useAppSelector } from '../../store/hooks.ts';
 import { selectAgent } from '../../store/agents/selectors.ts';
+import { engineLabel } from '../../lib/format/engine.ts';
 import { makeSelectThreadEvents, selectThreadFeed } from '../../store/feed/selectors.ts';
 import { selectMe } from '../../store/session/selectors.ts';
 import { selectSession, selectThreadState } from '../../store/sessions/selectors.ts';
@@ -53,8 +54,6 @@ const SKELETON = [
   [25, 60],
   [30, 85, 55],
 ];
-
-const ENGINE: Record<string, string> = { claude: 'Claude', codex: 'Codex' };
 
 function FeedSkeleton() {
   return (
@@ -347,7 +346,7 @@ function ThreadPage({ thread }: { thread: ThreadRecord }) {
           <ThreadRail
             thread={thread}
             state={state}
-            engine={agentView ? (ENGINE[agentView.sdk] ?? agentView.sdk) : null}
+            engine={agentView ? engineLabel(agentView.sdk) : null}
             info={info}
             parent={parent}
             mainThreadId={me?.mainThreadId ?? null}

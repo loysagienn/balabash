@@ -438,17 +438,34 @@ export type ServiceView = {
   manualClient: boolean;
 };
 
+// An agent of the catalog as the console shows it, plus the coordinator —
+// the secretary of the main thread, which is not a catalog module: its
+// engine is the OpenAI backend, its tools are the tool servers of its own
+// passport (src/coordinator/functions.ts), it launches every catalog agent.
 export type AgentView = {
   name: string;
   description: string;
   icon: string | null;
-  sdk: 'claude' | 'codex';
+  sdk: 'claude' | 'codex' | 'openai';
+  // The tool servers of the passport (not the single tools).
   tools: string[];
   agents: string[];
   headless: boolean;
   notification: string | null;
+  // The model the declaration names; null leaves the choice to the engine.
   model: string | null;
+  // The reasoning effort the declaration names; null means defaultEffort.
   effort: string | null;
+  // The effort a session runs with when the declaration names none — the
+  // platform's own default for the Claude and Codex sessions; null for the
+  // coordinator (its requests name no effort).
+  defaultEffort: string | null;
+  // The model the agent's newest session actually started with (the model
+  // of its latest session.started in this workspace) — what the engine's
+  // default resolves to, and whether a named model is what runs; null while
+  // no session of the agent journaled one (Codex sessions and the
+  // coordinator never do).
+  lastModel: string | null;
 };
 
 export type SnapshotResponse = {

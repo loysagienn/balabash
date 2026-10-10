@@ -1,10 +1,12 @@
 // The pieces of the snapshot over the stand (src/test-support/stand.ts):
 // the last message of the main thread the pinned row shows before the
 // thread is opened — the newest user.message or agent.message of the
-// thread's feed, authored in it or addressed to it — and the threads of
+// thread's feed, authored in it or addressed to it — the threads of
 // the api carrying their headless policy (GET /threads/:id answers the
-// thread alone; a headless thread refuses the operator's message). The
-// whole GET /api/snapshot stays out: buildSnapshot reads config.domain,
+// thread alone; a headless thread refuses the operator's message), and the
+// agent catalog the console shows: the coordinator ahead of the catalog,
+// the platform's default effort, the model of each agent's newest session.
+// The whole GET /api/snapshot stays out: buildSnapshot reads config.domain,
 // which the stand strips with the other domains (checks.md).
 //
 // Run: npm test  (node:test, native type stripping — no build needed).
@@ -22,11 +24,17 @@ type ErrorBody = { error: { code: string; message: string } };
 let stand: Stand;
 let appendEvent: typeof import('../core/append.ts')['appendEvent'];
 let readMainLastMessage: typeof import('./snapshot.ts')['readMainLastMessage'];
+let readAgents: typeof import('./snapshot.ts')['readAgents'];
+let loadAgents: typeof import('../capabilities/agent-catalog.ts')['loadAgents'];
+let getAgents: typeof import('../capabilities/agent-catalog.ts')['getAgents'];
+let COORDINATOR_BUNDLE: typeof import('../coordinator/functions.ts')['COORDINATOR_BUNDLE'];
 
 before(async () => {
   stand = await startStand();
   ({ appendEvent } = await import('../core/append.ts'));
-  ({ readMainLastMessage } = await import('./snapshot.ts'));
+  ({ readMainLastMessage, readAgents } = await import('./snapshot.ts'));
+  ({ loadAgents, getAgents } = await import('../capabilities/agent-catalog.ts'));
+  ({ COORDINATOR_BUNDLE } = await import('../coordinator/functions.ts'));
 });
 
 after(() => stand.stop());
@@ -121,5 +129,88 @@ describe('the threads of the api and their headless policy', () => {
     const taken = await stand.request('POST', `/api/threads/${surfaced}/messages`, { body: { text: 'hello' } });
 
     assert.equal(taken.status, 200, taken.text);
+  });
+});
+
+describe('the agent catalog of the snapshot', () => {
+  // The coordinator's model is the config's; the stand strips the OpenAI
+  // variables, so the one the view reads is set here.
+  const MODEL = 'gpt-test-model';
+
+  before(() => {
+    process.env.MAIN_OPENAI_MODEL = MODEL;
+    loadAgents();
+  });
+
+  after(() => {
+    delete process.env.MAIN_OPENAI_MODEL;
+  });
+
+  async function startedOn(threadId: string, agentName: string, model: string | null, userId: string = stand.userId): Promise<void> {
+    await written({ type: 'session.started', actor: 'agent', agentName, userId, threadId, payload: { ...(model === null ? {} : { model }), tools: [], mcpServers: [] } });
+  }
+
+  test('heads the catalog with the coordinator: the OpenAI engine, the model of the config, its passport and every catalog agent', async () => {
+    const [coordinator, ...catalog] = await readAgents(stand.userId);
+    const names = getAgents().map(agent => agent.name);
+
+    assert.ok(names.length > 0);
+    assert.equal(coordinator.name, 'coordinator');
+    assert.equal(coordinator.sdk, 'openai');
+    assert.equal(coordinator.model, MODEL);
+    assert.deepEqual(coordinator.tools, COORDINATOR_BUNDLE.declared);
+    assert.deepEqual(coordinator.agents, names);
+    assert.equal(coordinator.headless, false);
+    assert.equal(coordinator.effort, null);
+    assert.equal(coordinator.defaultEffort, null);
+    assert.equal(coordinator.lastModel, null);
+    assert.ok(coordinator.description.length > 0);
+    assert.deepEqual(catalog.map(agent => agent.name), names);
+  });
+
+  test('gives every catalog agent the platform default effort beside the declared one, and the sdk of its declaration', async () => {
+    const [, ...catalog] = await readAgents(stand.userId);
+    const declared = new Map(getAgents().map(agent => [agent.name, agent]));
+
+    for (const agent of catalog) {
+      const decl = declared.get(agent.name)!;
+
+      assert.equal(agent.defaultEffort, 'high', agent.name);
+      assert.equal(agent.effort, decl.session?.effort ?? null, agent.name);
+      assert.equal(agent.model, decl.session?.model ?? null, agent.name);
+      assert.equal(agent.sdk, decl.sdk, agent.name);
+    }
+  });
+
+  test('reads the model of each agent’s newest session.started in this workspace', async () => {
+    const engineer = await startChild('engineer');
+    const browser = await startChild('browser');
+    const byName = async () => new Map((await readAgents(stand.userId)).map(agent => [agent.name, agent.lastModel]));
+
+    assert.equal((await byName()).get('engineer'), null);
+
+    await startedOn(engineer, 'engineer', 'claude-opus-5-5');
+    await startedOn(browser, 'browser', 'claude-sonnet-5');
+    assert.equal((await byName()).get('engineer'), 'claude-opus-5-5');
+    assert.equal((await byName()).get('browser'), 'claude-sonnet-5');
+    assert.equal((await byName()).get('gardener'), null);
+
+    // The newest start wins; a start naming no model leaves the agent without one.
+    const second = await startChild('engineer');
+
+    await startedOn(second, 'engineer', 'claude-fable-5-1');
+    assert.equal((await byName()).get('engineer'), 'claude-fable-5-1');
+
+    const third = await startChild('browser');
+
+    await startedOn(third, 'browser', null);
+    assert.equal((await byName()).get('browser'), null);
+
+    // Another workspace's session is not this one's.
+    const foreign = randomUUID();
+
+    await appendEvent({ type: 'thread.started', actor: 'system', userId: foreign, threadId: foreign, payload: { agent: 'gardener', title: 'elsewhere' } });
+    await startedOn(foreign, 'gardener', 'claude-opus-5-5', foreign);
+    assert.equal((await byName()).get('gardener'), null);
   });
 });
