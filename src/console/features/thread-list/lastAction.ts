@@ -12,13 +12,13 @@ import { plainLine } from '../../lib/format/plain.ts';
 export type LastAction = { last?: string; lastCode?: string };
 
 // The last message of the main thread for its pinned row: the newest
-// user.message or agent.message among the events the store holds, whatever
-// it carries — its first line of text, or the names of its attachments
-// when it has no text (a photo from Telegram without a caption arrives
-// with text: null), or an empty text — and its time. Null while none is
-// loaded: the snapshot brings the thread, not its messages; the tail and
-// the thread page's chunk do.
-export type LastMessage = { text: string; at: Date };
+// user.message or agent.message among the events the store holds — or the
+// one the snapshot carried (threads.mainLastMessage), whichever is later
+// by seq — whatever it carries: its first line of text, or the names of
+// its attachments when it has no text (a photo from Telegram without a
+// caption arrives with text: null), or an empty text — and its time. Null
+// while the thread has no message anywhere.
+export type LastMessage = { text: string; at: Date; seq: bigint };
 
 const MAX = 80;
 
@@ -76,22 +76,34 @@ function userAttachments(payload: EventOf<'user.message'>['payload']): string[] 
   return Array.isArray(payload.blocks) ? blockAttachments(payload.blocks) : [];
 }
 
-export function lastMessageOf(events: readonly Event[]): LastMessage | null {
-  for (let i = events.length - 1; i >= 0; i -= 1) {
-    const event = events[i]!;
+function messageOf(event: Event): LastMessage | null {
+  if (is(event, 'user.message')) {
+    return { text: messageText(event.payload.text, userAttachments(event.payload)), at: event.createdAt, seq: event.seq };
+  }
+  if (is(event, 'agent.message')) {
+    const content = Array.isArray(event.payload.content) ? event.payload.content : [];
+    const text = content.map(block => (block.type === 'text' && typeof block.text === 'string' ? block.text : '')).filter(Boolean).join('\n');
 
-    if (is(event, 'user.message')) {
-      return { text: messageText(event.payload.text, userAttachments(event.payload)), at: event.createdAt };
-    }
-    if (is(event, 'agent.message')) {
-      const content = Array.isArray(event.payload.content) ? event.payload.content : [];
-      const text = content.map(block => (block.type === 'text' && typeof block.text === 'string' ? block.text : '')).filter(Boolean).join('\n');
-
-      return { text: messageText(text, blockAttachments(content)), at: event.createdAt };
-    }
+    return { text: messageText(text, blockAttachments(content)), at: event.createdAt, seq: event.seq };
   }
 
   return null;
+}
+
+// events — the thread's events in seq order; kept — the message the
+// snapshot carried, if any (an event of another kind counts for nothing).
+export function lastMessageOf(events: readonly Event[], kept: Event | null = null): LastMessage | null {
+  const fallback = kept ? messageOf(kept) : null;
+
+  for (let i = events.length - 1; i >= 0; i -= 1) {
+    const message = messageOf(events[i]!);
+
+    if (message) {
+      return fallback && fallback.seq > message.seq ? fallback : message;
+    }
+  }
+
+  return fallback;
 }
 
 // events — the thread's events in seq order (store/feed selectors).

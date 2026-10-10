@@ -62,7 +62,7 @@ describe('threadRowData', () => {
 
     // No message loaded yet: the row is the title and the pin alone.
     assert.deepEqual(threadRowData({ ...input, lastMessage: null }), { agent: 'coordinator', title: 'Main thread', state: 'wait', pinned: true, time: '' });
-    assert.deepEqual(threadRowData({ ...input, lastMessage: { text: 'Started the designer on the token chart', at: at(16, 2) } }), {
+    assert.deepEqual(threadRowData({ ...input, lastMessage: { text: 'Started the designer on the token chart', at: at(16, 2), seq: 7n } }), {
       agent: 'coordinator',
       title: 'Main thread',
       state: 'wait',
@@ -71,8 +71,8 @@ describe('threadRowData', () => {
       time: '16:02',
     });
     // A message without words (neither text nor attachments): its time alone.
-    assert.deepEqual(threadRowData({ ...input, lastMessage: { text: '', at: at(16, 2) } }), { agent: 'coordinator', title: 'Main thread', state: 'wait', pinned: true, time: '16:02' });
-    assert.equal(threadRowData({ ...input, lastMessage: { text: 'Hi', at: new Date(2026, 9, 7, 9, 5) } }).time, 'Oct 7, 09:05');
+    assert.deepEqual(threadRowData({ ...input, lastMessage: { text: '', at: at(16, 2), seq: 7n } }), { agent: 'coordinator', title: 'Main thread', state: 'wait', pinned: true, time: '16:02' });
+    assert.equal(threadRowData({ ...input, lastMessage: { text: 'Hi', at: new Date(2026, 9, 7, 9, 5), seq: 7n } }).time, 'Oct 7, 09:05');
   });
 
   it('words a closed thread\'s description as plain text, its code as it is', () => {

@@ -5,7 +5,6 @@
 // updatedAt bump does not re-project the feed — and the operator's name).
 
 import { createSelector } from 'reselect';
-import type { EventOf } from '../../../core/event-types.ts';
 import { makeSelectThreadEvents } from '../../store/feed/selectors.ts';
 import { selectOperatorName } from '../../store/session/selectors.ts';
 import type { State } from '../../store/types.ts';
@@ -59,12 +58,3 @@ const selectFeedContext = createSelector(
 );
 
 export const makeSelectFeedItems = () => createSelector([makeSelectThreadEvents(), selectFeedContext], (events, ctx): FeedItem[] => projectFeed(events, ctx));
-
-// Whether the thread is headless by its own thread.started (when loaded);
-// null when the feed has not reached it — the agent catalog decides then.
-export const makeSelectStartedHeadless = () =>
-  createSelector([makeSelectThreadEvents(), (state: State, threadId: string) => threadId], (events, threadId): boolean | null => {
-    const started = events.find((event): event is EventOf<'thread.started'> => event.type === 'thread.started' && event.threadId === threadId);
-
-    return started ? (typeof started.payload.headless === 'boolean' ? started.payload.headless : null) : null;
-  });

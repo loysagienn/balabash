@@ -17,7 +17,7 @@ import { config } from '../config/index.ts';
 import { prepareObject } from '../utils/serialize-json.ts';
 import { parseJsonBody } from './json-body.ts';
 import { SettingsError, parseSettingsPatch } from './settings.ts';
-import { countThreadsAt, ensureOperatorWorkspace, getMainThread, getThread, isHeadlessThread, listThreads } from '../core/threads.ts';
+import { countThreadsAt, ensureOperatorWorkspace, getMainThread, getThread, listThreads } from '../core/threads.ts';
 import { getEventsAfter, listThreadEvents } from '../core/events.ts';
 import { getLiveHub } from '../core/live.ts';
 import { appendEvent } from '../core/append.ts';
@@ -424,7 +424,7 @@ router.get('/threads/:id', requireSession, async ctx => {
     return;
   }
 
-  const response: ThreadResponse = { thread, headless: await isHeadlessThread(thread.id) };
+  const response: ThreadResponse = { thread };
 
   ctx.body = prepareObject(response);
 });
@@ -499,7 +499,7 @@ router.post('/threads/:id/messages', requireSession, async ctx => {
     return;
   }
 
-  if (await isHeadlessThread(thread.id)) {
+  if (thread.headless) {
     sendError(ctx, 409, 'thread_headless', 'A headless thread takes no user messages — it talks to its parent only');
 
     return;

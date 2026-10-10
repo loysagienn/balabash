@@ -109,12 +109,11 @@ export type ThreadsResponse = {
   countsAsOfSeq?: bigint;
 };
 
+// GET /api/threads/:id — the thread as the snapshot and the list carry it
+// (its `headless` included: a headless thread's chat is the read-only
+// dialogue with the parent and POST /messages answers 409).
 export type ThreadResponse = {
   thread: Thread;
-  // Spawn-time policy from the thread.started payload: a headless thread has
-  // no user surface — the chat is the read-only dialogue with the parent and
-  // POST /messages answers 409.
-  headless: boolean;
 };
 
 // GET /api/threads/:id/events: cursor-paginated by the global event seq,
@@ -457,8 +456,13 @@ export type SnapshotResponse = {
   // the projections are read — the tail from here may overlap, never gap.
   asOfSeq: bigint;
   me: MeResponse;
-  // The window: every active thread plus the newest 200 by createdSeq.
+  // The window: every active thread, the newest 200 by createdSeq, the
+  // main thread and the thread that ended last (the greatest terminalSeq).
   threads: Thread[];
+  // The newest user.message or agent.message the main thread's feed shows
+  // (authored in it or addressed to it), for its pinned row before any of
+  // its events are loaded; null while it has none.
+  mainLastMessage: Event | null;
   sessions: Record<string, SessionView>;
   projects: ProjectView[];
   apps: AppsResponse;

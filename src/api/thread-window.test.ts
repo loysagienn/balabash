@@ -1,6 +1,7 @@
 // The snapshot's thread window over a fake log: every active thread comes
 // whatever their number (the pages run until a short one), the main thread
-// is there even when the limits would leave it out, nothing is doubled.
+// and the thread that ended last are there even when the limits would
+// leave them out, nothing is doubled.
 
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
@@ -11,13 +12,13 @@ import type { ThreadWindowReads } from './thread-window.ts';
 function thread(id: string, createdSeq: bigint, status: ThreadStatus, parentId: string | null = 'main'): Thread {
   const createdAt = new Date(1_700_000_000_000 + Number(createdSeq) * 1000);
 
-  return { id, userId: 'u1', parentId, agent: 'engineer', title: null, description: null, status, summary: null, projectId: null, createdSeq, terminalSeq: null, createdAt, updatedAt: createdAt };
+  return { id, userId: 'u1', parentId, agent: 'engineer', title: null, description: null, status, summary: null, projectId: null, headless: false, createdSeq, terminalSeq: null, createdAt, updatedAt: createdAt };
 }
 
 // A log of `active` active children above the root (createdSeq 1) and
 // `closed` completed ones between — the reads page it like the database.
-function fakeReads(threads: Thread[]): ThreadWindowReads & { calls: { list: number; get: number } } {
-  const calls = { list: 0, get: 0 };
+function fakeReads(threads: Thread[]): ThreadWindowReads & { calls: { list: number; get: number; latestTerminal: number } } {
+  const calls = { list: 0, get: 0, latestTerminal: 0 };
   const newestFirst = [...threads].sort((a, b) => (a.createdSeq > b.createdSeq ? -1 : 1));
 
   return {
@@ -31,6 +32,11 @@ function fakeReads(threads: Thread[]): ThreadWindowReads & { calls: { list: numb
       calls.get += 1;
 
       return threads.find(t => t.id === id) ?? null;
+    },
+    latestTerminal: async () => {
+      calls.latestTerminal += 1;
+
+      return threads.filter(t => t.terminalSeq !== null).sort((a, b) => (a.terminalSeq! > b.terminalSeq! ? -1 : 1))[0] ?? null;
     },
   };
 }
@@ -90,5 +96,37 @@ describe('snapshot thread window', () => {
 
     assert.equal((await readThreadWindow('u1', null, reads)).length, 4);
     assert.equal(reads.calls.get, 0);
+  });
+
+  it('holds the thread that ended last even when it is older than the window', async () => {
+    // Every closed thread of the log has ended — the oldest of them last
+    // (an old thread that finished after everything else), the rest in
+    // their creation order.
+    const threads = workspace(3, SNAPSHOT_THREAD_WINDOW + 50).map(t => (t.status === 'completed' ? { ...t, terminalSeq: t.id === 'c0' ? 10_000n : t.createdSeq + 1n } : t));
+    const reads = fakeReads(threads);
+    const window = await readThreadWindow('u1', 'main', reads);
+
+    assert.ok(window.some(t => t.id === 'c0'));
+    assert.equal(reads.calls.latestTerminal, 1);
+    assert.equal(window.filter(t => t.id === 'c0').length, 1);
+    // The newest 200 (the three active ones among them), the main thread and c0.
+    assert.equal(window.length, SNAPSHOT_THREAD_WINDOW + 2);
+    assert.deepEqual(window.map(t => t.createdSeq), [...window].sort((a, b) => (a.createdSeq > b.createdSeq ? -1 : 1)).map(t => t.createdSeq));
+
+    // The thread that ended last is the newest closed one — in the window
+    // already: nothing is added, nothing doubled.
+    const recent = threads.map(t => (t.id === 'c0' ? { ...t, terminalSeq: 3n } : t));
+    const again = await readThreadWindow('u1', 'main', fakeReads(recent));
+
+    assert.equal(again.some(t => t.id === 'c0'), false);
+    assert.equal(again.length, SNAPSHOT_THREAD_WINDOW + 1);
+    assert.equal(new Set(again.map(t => t.id)).size, again.length);
+  });
+
+  it('is content without a terminal when nothing has ended', async () => {
+    const reads = fakeReads(workspace(2));
+
+    assert.equal((await readThreadWindow('u1', 'main', reads)).length, 3);
+    assert.equal(reads.calls.latestTerminal, 1);
   });
 });

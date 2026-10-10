@@ -23,11 +23,11 @@ describe('thread page words', () => {
   });
 
   it('locks the composer for a finished or headless thread only', () => {
-    assert.equal(composerLock(thread({ id: 't' }), false), null);
-    assert.equal(composerLock(thread({ id: 't', agent: 'gardener' }), true)?.icon, 'eye-off');
-    assert.equal(composerLock(thread({ id: 't', status: 'completed' }), false)?.icon, 'lock');
-    assert.equal(composerLock(thread({ id: 't', status: 'failed' }), false)?.icon, 'octagon-x');
-    assert.equal(composerLock(thread({ id: 't', status: 'cancelled' }), true)?.icon, 'circle-slash');
+    assert.equal(composerLock(thread({ id: 't' })), null);
+    assert.equal(composerLock(thread({ id: 't', agent: 'gardener', headless: true }))?.icon, 'eye-off');
+    assert.equal(composerLock(thread({ id: 't', status: 'completed' }))?.icon, 'lock');
+    assert.equal(composerLock(thread({ id: 't', status: 'failed' }))?.icon, 'octagon-x');
+    assert.equal(composerLock(thread({ id: 't', status: 'cancelled', headless: true }))?.icon, 'circle-slash');
   });
 
   it('stages the feed body and its top line from the chunk state', () => {

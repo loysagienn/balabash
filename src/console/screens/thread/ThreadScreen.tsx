@@ -22,7 +22,7 @@ import { Shell } from '../../features/shell/Shell.tsx';
 import { threadTitle, ctxOf } from '../../features/thread-list/rowData.ts';
 import { Attachments, FeedItems, hasRunningAction } from '../../features/thread-feed/ThreadFeed.tsx';
 import { fileHref } from '../../features/thread-feed/project.ts';
-import { makeSelectFeedItems, makeSelectStartedHeadless } from '../../features/thread-feed/selectors.ts';
+import { makeSelectFeedItems } from '../../features/thread-feed/selectors.ts';
 import { Composer } from '../../ui/Composer/Composer.tsx';
 import { ComposerLock } from '../../ui/Composer/ComposerLock.tsx';
 import { Confirm } from '../../ui/Confirm/Confirm.tsx';
@@ -188,10 +188,8 @@ function ThreadPage({ thread }: { thread: ThreadRecord }) {
   const feed = useAppSelector(s => selectThreadFeed(s, id));
   const selectEvents = useMemo(makeSelectThreadEvents, []);
   const selectItems = useMemo(makeSelectFeedItems, []);
-  const selectStartedHeadless = useMemo(makeSelectStartedHeadless, []);
   const events = useAppSelector(s => selectEvents(s, id));
   const items = useAppSelector(s => selectItems(s, id));
-  const startedHeadless = useAppSelector(s => selectStartedHeadless(s, id));
   const draft = useAppSelector(s => selectComposerDraft(s, id));
   const sending = useAppSelector(s => selectComposerSending(s, id));
   const running = hasRunningAction(items);
@@ -218,7 +216,6 @@ function ThreadPage({ thread }: { thread: ThreadRecord }) {
     }
   }, [commands.running]);
 
-  const headless = startedHeadless ?? agentView?.headless ?? false;
   const info = useMemo(() => railSessionInfo(events, session?.context ?? null), [events, session]);
   const stage = feedStage(feed, events.length);
   const top = feedTop(feed);
@@ -237,7 +234,7 @@ function ThreadPage({ thread }: { thread: ThreadRecord }) {
 
   useFeedScroll(feedRef, itemsRef, ready, items, feed.knownFrom, feed.request !== null);
 
-  const lock = composerLock(thread, headless);
+  const lock = composerLock(thread);
   const title = threadTitle(thread);
   const meta = [
     thread.agent,
@@ -273,7 +270,7 @@ function ThreadPage({ thread }: { thread: ThreadRecord }) {
           title={title}
           state={state}
           ctx={ctx}
-          tag={headless ? 'headless' : undefined}
+          tag={thread.headless ? 'headless' : undefined}
           links={
             childIds.length > 0 ? (
               <a

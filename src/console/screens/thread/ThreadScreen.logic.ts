@@ -34,7 +34,7 @@ export function cancelWords(thread: Thread): string {
 export type ComposerLockWords = { icon: IconName; text: string; strong?: string };
 
 // Why there is no composer: the thread is headless, or it is over.
-export function composerLock(thread: Thread, headless: boolean): ComposerLockWords | null {
+export function composerLock(thread: Thread): ComposerLockWords | null {
   switch (thread.status) {
     case 'completed':
       return { icon: 'lock', text: 'Thread completed. To continue, ask the coordinator to start a new thread.' };
@@ -43,7 +43,7 @@ export function composerLock(thread: Thread, headless: boolean): ComposerLockWor
     case 'cancelled':
       return { icon: 'circle-slash', text: 'Thread cancelled.' };
     default:
-      return headless ? { icon: 'eye-off', strong: 'Headless thread', text: ` — the ${thread.agent} talks only to its parent thread. You can’t write here, but everything is visible.` } : null;
+      return thread.headless ? { icon: 'eye-off', strong: 'Headless thread', text: ` — the ${thread.agent} talks only to its parent thread. You can’t write here, but everything is visible.` } : null;
   }
 }
 

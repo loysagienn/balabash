@@ -19,7 +19,11 @@ import type { ThreadFilters } from './thread-query.ts';
 
 export const COORDINATOR_AGENT = 'coordinator';
 
-function toThread(row: ThreadRow): Thread {
+// A threads row as the reads below select it: the projection's columns
+// plus `headless`, read from the thread's own thread.started.
+type ThreadReadRow = ThreadRow & { headless: boolean };
+
+function toThread(row: ThreadReadRow): Thread {
   return {
     id: row.id,
     userId: row.userId,
@@ -30,6 +34,7 @@ function toThread(row: ThreadRow): Thread {
     status: row.status as ThreadStatus,
     summary: row.summary as ThreadSummary | null,
     projectId: row.projectId,
+    headless: row.headless,
     createdSeq: row.createdSeq,
     terminalSeq: row.terminalSeq,
     createdAt: row.createdAt,
@@ -37,17 +42,35 @@ function toThread(row: ThreadRow): Thread {
   };
 }
 
-export async function getThread(id: string): Promise<Thread | null> {
-  const row = await prisma.thread.findUnique({ where: { id } });
+// Every read of threads is raw SQL over this shape: the columns of the
+// projection aliased to the model's field names, and the spawn-time policy
+// `headless` joined in from the thread.started the row was created by
+// (`created_seq` is its seq, the primary key of events — one lookup per
+// row). The row does not store the policy — the event is its only source;
+// `= 'true'::jsonb` reads a boolean and nothing else as headless (a missing
+// or odd value is not), with no cast that could fail on an odd payload.
+const THREAD_COLUMNS = Prisma.sql`threads.id, threads.user_id AS "userId", threads.parent_id AS "parentId", threads.agent, threads.title,
+       threads.description, threads.status, threads.summary, threads.project_id AS "projectId",
+       COALESCE(started.payload -> 'headless' = 'true'::jsonb, false) AS headless,
+       threads.created_seq AS "createdSeq", threads.terminal_seq AS "terminalSeq",
+       threads.created_at AS "createdAt", threads.updated_at AS "updatedAt"`;
+const THREADS_FROM = Prisma.sql`threads LEFT JOIN events started ON started.seq = threads.created_seq`;
 
-  return row ? toThread(row) : null;
+async function readThreads(db: DbClient, where: Prisma.Sql, tail: Prisma.Sql = Prisma.empty): Promise<Thread[]> {
+  const rows = await db.$queryRaw<ThreadReadRow[]>`
+    SELECT ${THREAD_COLUMNS}
+    FROM ${THREADS_FROM}
+    WHERE ${where}
+    ${tail}`;
+
+  return rows.map(toThread);
 }
 
-// The columns of a threads row as the raw listing reads them, aliased to
-// the model's field names so the rows go through toThread like any other.
-const THREAD_COLUMNS = Prisma.sql`id, user_id AS "userId", parent_id AS "parentId", agent, title, description, status, summary,
-       project_id AS "projectId", created_seq AS "createdSeq", terminal_seq AS "terminalSeq",
-       created_at AS "createdAt", updated_at AS "updatedAt"`;
+export async function getThread(id: string): Promise<Thread | null> {
+  const [thread] = await readThreads(prisma, Prisma.sql`threads.id = ${id}`);
+
+  return thread ?? null;
+}
 
 type ListThreadsOptions = ThreadFilters & {
   limit?: number;
@@ -61,18 +84,27 @@ export async function listThreads(userId: string, { limit = 100, order = 'asc', 
   // The limit keeps the newest matching threads (the useful end of a growing
   // workspace) regardless of the output order. Raw SQL: the filters are the
   // fragments of thread-query.ts (the search reaches into the summary).
-  const rows = await prisma.$queryRaw<ThreadRow[]>`
-    SELECT ${THREAD_COLUMNS}
-    FROM threads
-    WHERE ${threadsWhere(userId, filters)}
-    ORDER BY created_seq DESC
-    LIMIT ${limit}`;
+  const threads = await readThreads(prisma, threadsWhere(userId, filters), Prisma.sql`ORDER BY threads.created_seq DESC LIMIT ${limit}`);
 
   if (order === 'asc') {
-    rows.reverse();
+    threads.reverse();
   }
 
-  return rows.map(toThread);
+  return threads;
+}
+
+// The thread of the workspace that ended last — the one with the greatest
+// terminal seq; null while none has. The snapshot carries it so the
+// console's "the last thread finished …" is the log's answer, not the
+// window's.
+export async function getLatestTerminalThread(userId: string): Promise<Thread | null> {
+  const [thread] = await readThreads(
+    prisma,
+    Prisma.sql`threads.user_id = ${userId} AND threads.terminal_seq IS NOT NULL`,
+    Prisma.sql`ORDER BY threads.terminal_seq DESC LIMIT 1`,
+  );
+
+  return thread ?? null;
 }
 
 export type ThreadCountFilters = Omit<ThreadFilters, 'status' | 'beforeCreatedSeq'>;
@@ -122,39 +154,28 @@ export async function countThreadsAt(userId: string, filters: ThreadCountFilters
 // Every active non-main thread across all workspaces — the restart module's
 // safe-window check (a pending restart waits until this list is empty).
 export async function listActiveChildThreads(): Promise<Thread[]> {
-  const rows = await prisma.thread.findMany({
-    where: { status: 'active', parentId: { not: null } },
-    orderBy: { createdSeq: 'asc' },
-  });
-
-  return rows.map(toThread);
+  return readThreads(prisma, Prisma.sql`threads.status = 'active' AND threads.parent_id IS NOT NULL`, Prisma.sql`ORDER BY threads.created_seq`);
 }
 
 // The workspace's main thread: the only thread without a parent (§5.5).
 export async function getMainThread(userId: string, db: DbClient = prisma): Promise<Thread | null> {
-  const row = await db.thread.findFirst({ where: { userId, parentId: null } });
+  const [thread] = await readThreads(db, Prisma.sql`threads.user_id = ${userId} AND threads.parent_id IS NULL`, Prisma.sql`LIMIT 1`);
 
-  return row ? toThread(row) : null;
+  return thread ?? null;
 }
 
 // Active threads of the subtree rooted at threadId, root included, in
 // creation order — the runtime's view for cascade aborts and status tails.
 export async function activeSubtree(threadId: string): Promise<Thread[]> {
-  const rows = await prisma.$queryRaw<ThreadRow[]>`
+  const subtree = Prisma.sql`
     WITH RECURSIVE subtree AS (
       SELECT id FROM threads WHERE id = ${threadId}
       UNION ALL
       SELECT t.id FROM threads t JOIN subtree s ON t.parent_id = s.id
     )
-    SELECT id, user_id AS "userId", parent_id AS "parentId", agent, title, description, status, summary,
-           project_id AS "projectId",
-           created_seq AS "createdSeq", terminal_seq AS "terminalSeq",
-           created_at AS "createdAt", updated_at AS "updatedAt"
-    FROM threads
-    WHERE id IN (SELECT id FROM subtree) AND status = 'active'
-    ORDER BY created_seq`;
+    SELECT id FROM subtree`;
 
-  return rows.map(toThread);
+  return readThreads(prisma, Prisma.sql`threads.id IN (${subtree}) AND threads.status = 'active'`, Prisma.sql`ORDER BY threads.created_seq`);
 }
 
 // ---------------------------------------------------------------------------
@@ -227,17 +248,6 @@ export async function ensureOperatorWorkspace(): Promise<Thread> {
   }
 
   return ensureMainThread(userId);
-}
-
-// The spawn-time policy of a thread lives in its thread.started payload —
-// the projection does not store it. Headless = no user surface by
-// declaration: the dialogue is with the parent only (no topic, no CCR
-// session, no web chat input).
-export async function isHeadlessThread(threadId: string): Promise<boolean> {
-  const row = await prisma.event.findFirst({ where: { threadId, type: THREAD_STARTED }, select: { payload: true } });
-  const payload = row?.payload;
-
-  return typeof payload === 'object' && payload !== null && !Array.isArray(payload) && (payload as JsonObject).headless === true;
 }
 
 // Spawn helper: generates the thread id and writes thread.started addressed

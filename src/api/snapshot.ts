@@ -11,10 +11,11 @@
 
 import { Prisma } from '../../prisma-generated/client.ts';
 import { prisma } from '../db/client.ts';
-import type { JsonObject, Thread } from '../core/contract.ts';
+import type { Event, JsonObject, Thread } from '../core/contract.ts';
+import { toEvent } from '../core/envelope.ts';
 import { SESSION_VIEW_TYPES, foldSession } from '../projections/session.ts';
 import type { SessionView } from '../projections/session.ts';
-import { getThread, listThreads } from '../core/threads.ts';
+import { getLatestTerminalThread, getThread, listThreads } from '../core/threads.ts';
 import { readThreadWindow } from './thread-window.ts';
 import { listProjects, projectView } from '../projects/store.ts';
 import { listApps } from '../apps/management.ts';
@@ -62,6 +63,23 @@ async function readSessions(threads: Thread[]): Promise<Record<string, SessionVi
   return sessions;
 }
 
+// The newest message of the main thread's feed — a user.message or an
+// agent.message authored in it or addressed to it, the feed's own selection
+// (src/core/events.ts listThreadEvents) — for its pinned row in the Threads
+// list before the thread is opened. Null while the thread has none.
+export async function readMainLastMessage(mainThreadId: string | null): Promise<Event | null> {
+  if (mainThreadId === null) {
+    return null;
+  }
+
+  const row = await prisma.event.findFirst({
+    where: { OR: [{ threadId: mainThreadId }, { targetThreadId: mainThreadId }], type: { in: ['user.message', 'agent.message'] } },
+    orderBy: { seq: 'desc' },
+  });
+
+  return row ? toEvent(row) : null;
+}
+
 async function readTasks(userId: string, now: Date): Promise<TaskView[]> {
   const rows = await prisma.scheduledTask.findMany({ where: { userId }, orderBy: { createdAt: 'asc' } });
 
@@ -102,8 +120,9 @@ export async function buildSnapshot(userId: string, me: MeResponse): Promise<Sna
   const asOfSeq = await readHeadSeq();
   const now = new Date();
 
-  const [threads, projects, apps, tasks, connections] = await Promise.all([
-    readThreadWindow(userId, me.mainThreadId, { list: listThreads, get: getThread }),
+  const [threads, mainLastMessage, projects, apps, tasks, connections] = await Promise.all([
+    readThreadWindow(userId, me.mainThreadId, { list: listThreads, get: getThread, latestTerminal: getLatestTerminalThread }),
+    readMainLastMessage(me.mainThreadId),
     listProjects(userId),
     listApps(userId),
     readTasks(userId, now),
@@ -115,6 +134,7 @@ export async function buildSnapshot(userId: string, me: MeResponse): Promise<Sna
     asOfSeq,
     me,
     threads,
+    mainLastMessage,
     sessions,
     projects: projects.map(projectView),
     apps: { apps, publicAppsBase: publicAppsBase() },

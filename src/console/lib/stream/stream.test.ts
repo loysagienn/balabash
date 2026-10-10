@@ -80,7 +80,7 @@ const api: Api = {
   },
   threads: {
     list: async () => ({ threads: [], nextCursor: null }),
-    get: async () => ({ thread: thread({ id: 'a' }), headless: false }),
+    get: async () => ({ thread: thread({ id: 'a' }) }),
     events: async () => ({ events: [], nextCursor: null }),
     sendMessage: async () => ({}),
     interrupt: async () => ({}),

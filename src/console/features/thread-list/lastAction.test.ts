@@ -46,8 +46,8 @@ describe('lastMessageOf', () => {
     const agent = event({ type: 'agent.message', threadId: 'main', payload: { content: [{ type: 'image', fileId: 'f' }, { type: 'text', text: 'Started the designer on the token chart.' }] } });
     const tool = event({ type: 'tool.call.started', threadId: 'main', payload: { callId: 'c', functionName: 'spawn_agent', input: {} } });
 
-    assert.deepEqual(lastMessageOf([user, agent, tool]), { text: 'Started the designer on the token chart.', at: agent.createdAt });
-    assert.deepEqual(lastMessageOf([user]), { text: 'Start the designer', at: user.createdAt });
+    assert.deepEqual(lastMessageOf([user, agent, tool]), { text: 'Started the designer on the token chart.', at: agent.createdAt, seq: agent.seq });
+    assert.deepEqual(lastMessageOf([user]), { text: 'Start the designer', at: user.createdAt, seq: user.seq });
     assert.equal(lastMessageOf([tool]), null);
     assert.equal(lastMessageOf([]), null);
   });
@@ -77,10 +77,10 @@ describe('lastMessageOf', () => {
     const link = event({ type: 'agent.message', threadId: 'main', payload: { content: [{ type: 'resource_link', uri: 'https://x/y', name: 'report.pdf' }] } });
     const empty = event({ type: 'agent.message', threadId: 'main', payload: { content: [] } });
 
-    assert.deepEqual(lastMessageOf([user, photo]), { text: 'image', at: photo.createdAt });
-    assert.deepEqual(lastMessageOf([user, photo, files]), { text: 'a.png, b.pdf', at: files.createdAt });
-    assert.deepEqual(lastMessageOf([user, files, picture]), { text: 'image', at: picture.createdAt });
-    assert.deepEqual(lastMessageOf([user, link]), { text: 'report.pdf', at: link.createdAt });
-    assert.deepEqual(lastMessageOf([user, empty]), { text: '', at: empty.createdAt });
+    assert.deepEqual(lastMessageOf([user, photo]), { text: 'image', at: photo.createdAt, seq: photo.seq });
+    assert.deepEqual(lastMessageOf([user, photo, files]), { text: 'a.png, b.pdf', at: files.createdAt, seq: files.seq });
+    assert.deepEqual(lastMessageOf([user, files, picture]), { text: 'image', at: picture.createdAt, seq: picture.seq });
+    assert.deepEqual(lastMessageOf([user, link]), { text: 'report.pdf', at: link.createdAt, seq: link.seq });
+    assert.deepEqual(lastMessageOf([user, empty]), { text: '', at: empty.createdAt, seq: empty.seq });
   });
 });

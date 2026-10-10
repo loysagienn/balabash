@@ -65,6 +65,10 @@ export type Thread = {
   summary: ThreadSummary | null;
   // The project the thread works for, named at spawn; null outside projects.
   projectId: string | null;
+  // Spawn-time policy read from the thread's own thread.started (the row
+  // does not store it): a headless thread has no user surface — the
+  // dialogue is with the parent only, no topic, no web chat input.
+  headless: boolean;
   createdSeq: bigint;
   terminalSeq: bigint | null;
   createdAt: Date;

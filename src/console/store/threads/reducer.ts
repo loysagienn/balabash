@@ -3,7 +3,7 @@
 // order, cursor, filters); the parent → children index. The fold of events
 // into a thread is the server's (src/projections/thread.ts).
 
-import type { Thread, ThreadCounts } from '../../../core/contract.ts';
+import type { Event, Thread, ThreadCounts } from '../../../core/contract.ts';
 import type { EventOf } from '../../../core/event-types.ts';
 import { threadCompletionFields, threadStartFields, threadStatusFrom } from '../../../projections/thread.ts';
 import type { ApiFailure } from '../../lib/api/index.ts';
@@ -37,6 +37,11 @@ export type ThreadsState = {
   list: ThreadsListState;
   childrenOf: Record<string, string[]>;
   lookup: Record<string, ThreadLookup>;
+  // The newest message of the main thread's feed as the snapshot knew it —
+  // the pinned row's words before the thread's events are loaded (the feed
+  // holds none of a thread the tab has not opened until the tail brings
+  // one). Null until the snapshot, or while the thread has no message.
+  mainLastMessage: Event | null;
 };
 
 export const initialThreads: ThreadsState = {
@@ -44,6 +49,7 @@ export const initialThreads: ThreadsState = {
   list: { ids: [], nextCursor: null, loading: false, filters: null, error: null, counts: null, countsAsOfSeq: null },
   childrenOf: {},
   lookup: {},
+  mainLastMessage: null,
 };
 
 function indexChildren(byId: Record<string, Thread>): Record<string, string[]> {
@@ -90,6 +96,7 @@ function threadFromStarted(event: EventOf<'thread.started'>): Thread | null {
     status: 'active',
     summary: null,
     projectId,
+    headless: event.payload.headless === true,
     createdSeq: event.seq,
     terminalSeq: null,
     createdAt: event.createdAt,
@@ -102,7 +109,7 @@ export function threadsReducer(state: ThreadsState = initialThreads, action: Act
     case 'SNAPSHOT_LOAD_DONE': {
       const byId = mergeThreads(state.byId, action.snapshot.threads);
 
-      return { ...state, byId, childrenOf: indexChildren(byId) };
+      return { ...state, byId, childrenOf: indexChildren(byId), mainLastMessage: action.snapshot.mainLastMessage };
     }
     case 'LOAD_THREADS':
       return { ...state, list: { ...state.list, loading: true, error: null, filters: action.filters, ...(action.before === null ? { ids: [], nextCursor: null, counts: null, countsAsOfSeq: null } : {}) } };

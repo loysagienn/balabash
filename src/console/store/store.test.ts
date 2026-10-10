@@ -72,7 +72,7 @@ function fakeApi(overrides: ApiOverrides = {}, calls: Calls = []): Api {
   };
   const threads: Api['threads'] = {
     list: async () => ({ threads: [], nextCursor: null }),
-    get: async () => ({ thread: thread({ id: 't1' }), headless: false }),
+    get: async () => ({ thread: thread({ id: 't1' }) }),
     events: async () => ({ events: [], nextCursor: null }),
     sendMessage: async () => ({}),
     interrupt: async () => ({}),
@@ -391,7 +391,37 @@ describe('threads from events', () => {
     assert.deepEqual(store.getState().feed.byThread.t9.seqs, [started.seq, progress.seq, completed.seq].map(String));
     assert.deepEqual(store.getState().feed.byThread.main.seqs, [started.seq, completed.seq].map(String));
   });
+
+  it('reads the headless policy of a started thread from its thread.started', () => {
+    resetSeq(220n);
+
+    const store = createStore({ api: fakeApi(), initialRoute: { key: 'home' } });
+
+    store.dispatch(eventAction(event({ type: 'thread.started', threadId: 'h1', targetThreadId: 'main', payload: { agent: 'gardener', headless: true } })));
+    store.dispatch(eventAction(event({ type: 'thread.started', threadId: 'h2', targetThreadId: 'main', payload: { agent: 'engineer' } })));
+    assert.equal(created(store, 'h1').headless, true);
+    assert.equal(created(store, 'h2').headless, false);
+  });
+
+  it('keeps the last message of the main thread the snapshot carried', async () => {
+    resetSeq(230n);
+
+    const kept = event({ type: 'user.message', actor: 'user', threadId: 'main', payload: { text: 'Start the designer' } });
+    const store = createStore({ api: fakeApi({ snapshot: async () => snapshot({ threads: [thread({ id: 'main', parentId: null, agent: 'coordinator' })], mainLastMessage: kept }) }), initialRoute: { key: 'home' } });
+
+    assert.equal(store.getState().threads.mainLastMessage, null);
+    await dispatched(store, sessionCheck());
+    await settle();
+    assert.deepEqual(store.getState().threads.mainLastMessage, kept);
+    // The snapshot's message is not a loaded event of the feed: the feed
+    // still starts where the tail or the thread's chunk puts it.
+    assert.equal(store.getState().feed.byThread.main, undefined);
+  });
 });
+
+function created(store: AppStore, id: string): Thread {
+  return store.getState().threads.byId[id]!;
+}
 
 describe('sessions from events', () => {
   it('folds the session of an active thread only; a late tail after the terminal is not a session', () => {
@@ -879,7 +909,7 @@ describe('thread page data', () => {
               throw new ApiError(404, 'not_found', 'No such thread');
             }
 
-            return { thread: thread({ id, agent: 'browser', createdSeq: 3n }), headless: false };
+            return { thread: thread({ id, agent: 'browser', createdSeq: 3n }) };
           },
         },
       },

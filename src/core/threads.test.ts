@@ -1,10 +1,12 @@
-// countThreadsAt over the stand's database (src/test-support/stand.ts):
-// the counts by status under the listing's filters, stamped with the head
-// of the log — both read in one REPEATABLE READ snapshot: a terminal that
-// commits between the two reads stays out of the counts as it is out of
-// the stamp (held in place with a lock queue, and shown to tell READ
-// COMMITTED apart), and under a run of terminals every stamp agrees with
-// the log at that stamp.
+// The reads of threads over the stand's database (src/test-support/
+// stand.ts). countThreadsAt: the counts by status under the listing's
+// filters, stamped with the head of the log — both read in one REPEATABLE
+// READ snapshot: a terminal that commits between the two reads stays out of
+// the counts as it is out of the stamp (held in place with a lock queue,
+// and shown to tell READ COMMITTED apart), and under a run of terminals
+// every stamp agrees with the log at that stamp. The rows themselves carry
+// the headless policy of their thread.started, and the workspace's thread
+// that ended last is the one with the greatest terminal seq.
 //
 // Run: npm test  (node:test, native type stripping — no build needed).
 
@@ -19,6 +21,7 @@ let stand: Stand;
 let prisma: typeof import('../db/client.ts')['prisma'];
 let appendEvent: typeof import('./append.ts')['appendEvent'];
 let appendEventIn: typeof import('./append.ts')['appendEventIn'];
+let threads: typeof import('./threads.ts');
 let countThreadsAt: typeof import('./threads.ts')['countThreadsAt'];
 let countThreads: typeof import('./threads.ts')['countThreads'];
 let Prisma: typeof import('../../prisma-generated/client.ts')['Prisma'];
@@ -27,16 +30,17 @@ before(async () => {
   stand = await startStand();
   ({ prisma } = await import('../db/client.ts'));
   ({ appendEvent, appendEventIn } = await import('./append.ts'));
-  ({ countThreadsAt, countThreads } = await import('./threads.ts'));
+  threads = await import('./threads.ts');
+  ({ countThreadsAt, countThreads } = threads);
   ({ Prisma } = await import('../../prisma-generated/client.ts'));
 });
 
 after(() => stand.stop());
 
-async function startChild(agent: string, title: string): Promise<string> {
+async function startChild(agent: string, title: string, policy: JsonObject = {}): Promise<string> {
   const id = randomUUID();
 
-  await appendEvent({ type: 'thread.started', actor: 'system', userId: stand.userId, threadId: id, targetThreadId: stand.mainThreadId, payload: { agent, title } });
+  await appendEvent({ type: 'thread.started', actor: 'system', userId: stand.userId, threadId: id, targetThreadId: stand.mainThreadId, payload: { agent, title, ...policy } });
 
   return id;
 }
@@ -264,3 +268,52 @@ async function waitForLockWaiters(n: number): Promise<void> {
 
   assert.fail(`${n} lock waiter(s) never appeared`);
 }
+
+describe('the rows of threads', () => {
+  test('carry the headless policy of their own thread.started, whatever read brings them', async () => {
+    const headless = await startChild('gardener', 'Headless by its start', { headless: true });
+    const surfaced = await startChild('engineer', 'Surfaced by its start', { headless: false });
+    const silent = await startChild('engineer', 'Nothing said');
+    // The payload schema is loose: an odd value is not a policy.
+    const odd = await startChild('engineer', 'Odd value', { headless: 'yes' });
+    const policy = (list: { id: string; headless: boolean }[]) => Object.fromEntries(list.filter(t => [headless, surfaced, silent, odd].includes(t.id)).map(t => [t.id, t.headless]));
+    const expected = { [headless]: true, [surfaced]: false, [silent]: false, [odd]: false };
+
+    assert.deepEqual(policy(await threads.listThreads(stand.userId, { agent: 'gardener' })), { [headless]: true });
+    assert.deepEqual(policy(await threads.listThreads(stand.userId, { q: 'by its start' })), { [headless]: true, [surfaced]: false });
+    assert.deepEqual(policy(await threads.listThreads(stand.userId)), expected);
+    assert.deepEqual(policy(await threads.listActiveChildThreads()), expected);
+    assert.deepEqual(policy(await threads.activeSubtree(stand.mainThreadId)), expected);
+    assert.equal((await threads.getThread(headless))?.headless, true);
+    assert.equal((await threads.getThread(silent))?.headless, false);
+    assert.equal((await threads.getMainThread(stand.userId))?.headless, false);
+    assert.equal((await threads.getThread(randomUUID())), null);
+    // The projection's row does not store it: the join is the only source.
+    assert.equal('headless' in (await prisma.thread.findUniqueOrThrow({ where: { id: headless } })), false);
+  });
+
+  test('the thread that ended last is the greatest terminal seq, whatever its age', async () => {
+    const stranger = randomUUID();
+
+    assert.equal(await threads.getLatestTerminalThread(stranger), null);
+
+    const older = await startChild('engineer', 'Older, ends last');
+    const newer = await startChild('engineer', 'Newer, ends first');
+
+    await close(newer, 'completed');
+
+    const first = await threads.getLatestTerminalThread(stand.userId);
+
+    assert.equal(first?.id, newer);
+
+    const ended = await close(older, 'failed');
+    const last = await threads.getLatestTerminalThread(stand.userId);
+
+    assert.equal(last?.id, older);
+    assert.equal(last?.status, 'failed');
+    assert.ok(ended.written);
+    assert.equal(last?.terminalSeq, ended.event.seq);
+    assert.ok(last!.createdSeq < first!.createdSeq);
+    assert.equal(await threads.getLatestTerminalThread(stranger), null);
+  });
+});
