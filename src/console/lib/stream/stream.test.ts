@@ -97,20 +97,25 @@ const api: Api = {
 const settle = () => new Promise(resolve => setTimeout(resolve, 0));
 
 // The process's clock: the moment it stamps when the tail stops flowing.
+// The tests move it by hand (`clock.now`) so that a stamp kept is told from
+// a stamp written again with the same value.
 const BROKE_AT = new Date('2026-10-10T16:31:00.000Z');
+const STILL_DOWN_AT = new Date('2026-10-10T16:40:00.000Z');
+const BROKE_AGAIN_AT = new Date('2026-10-10T17:05:00.000Z');
 
 // A signed-in store with its snapshot landed and the process attached: the
 // first EventSource is open on the tail. Timers are mocked from here on, so
 // the retry pause is driven by hand.
-async function connected(t: TestContext): Promise<{ store: AppStore; first: FakeEventSource; status: () => string; sources: () => FakeEventSource[] }> {
+async function connected(t: TestContext): Promise<{ store: AppStore; first: FakeEventSource; status: () => string; sources: () => FakeEventSource[]; clock: { now: Date } }> {
   FakeEventSource.instances = [];
   (globalThis as { EventSource?: unknown }).EventSource = FakeEventSource;
   t.after(() => {
     delete (globalThis as { EventSource?: unknown }).EventSource;
   });
 
+  const clock = { now: BROKE_AT };
   const store = createStore({ api, initialRoute: { key: 'home' } });
-  const disconnect = connectStoreToStream(store, { now: () => BROKE_AT });
+  const disconnect = connectStoreToStream(store, { now: () => clock.now });
 
   t.after(disconnect);
   store.dispatch(sessionCheck());
@@ -132,7 +137,7 @@ async function connected(t: TestContext): Promise<{ store: AppStore; first: Fake
   first.frame(52n);
   assert.equal(store.getState().stream.lastSeq, 52n);
 
-  return { store, first, status, sources };
+  return { store, first, status, sources, clock };
 }
 
 describe('stream process', () => {
@@ -170,7 +175,7 @@ describe('stream process', () => {
   });
 
   it('waits out the pause after a give-up and keeps saying reconnecting until the reopened tail flows', async t => {
-    const { store, first, status, sources } = await connected(t);
+    const { store, first, status, sources, clock } = await connected(t);
 
     first.gaveUp();
     assert.equal(status(), 'reconnecting');
@@ -189,7 +194,8 @@ describe('stream process', () => {
     assert.equal(status(), 'reconnecting');
 
     // The server is still down: the next attempt waits the pause again; the
-    // moment stays the first break's (the process's clock has moved on).
+    // moment stays the first break's while the process's clock has moved on.
+    clock.now = STILL_DOWN_AT;
     sources()[1].gaveUp();
     assert.equal(status(), 'reconnecting');
     assert.equal(store.getState().stream.dataAt, BROKE_AT);
@@ -200,8 +206,15 @@ describe('stream process', () => {
 
     sources()[2].opened();
     assert.equal(status(), 'open');
+    assert.equal(store.getState().stream.dataAt, null);
     sources()[2].frame(53n);
     assert.equal(sources()[2].readyState, FakeEventSource.OPEN);
+
+    // The next outage is its own: the moment is the new break's.
+    clock.now = BROKE_AGAIN_AT;
+    sources()[2].broke();
+    assert.equal(status(), 'reconnecting');
+    assert.equal(store.getState().stream.dataAt, BROKE_AGAIN_AT);
   });
 
   it('closes for good when the session ends during the pause', async t => {

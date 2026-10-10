@@ -1278,11 +1278,12 @@ describe('registry events', () => {
     store.dispatch(eventAction(event({ type: 'app.published', actor: 'user', payload: { path: 'b/tracker', slug: 'tracker', name: 'Tracker', description: null } })));
     assert.equal(store.getState().apps.items[0].slug, 'tracker');
 
-    // The same publication again is the same state.
+    // The same publication again keeps the rows (the screen's elements) and dates them.
     const published = store.getState().apps;
 
     store.dispatch(eventAction(event({ type: 'app.published', actor: 'user', payload: { path: 'b/tracker', slug: 'tracker', name: 'Tracker', description: null } })));
-    assert.equal(store.getState().apps, published);
+    assert.equal(store.getState().apps.items, published.items);
+    assert.equal(store.getState().apps.eventSeq, 341n);
 
     store.dispatch(eventAction(event({ type: 'app.published', actor: 'user', payload: { path: 'a/new', slug: 'new-app', name: 'New', description: 'fresh' } })));
     assert.deepEqual(store.getState().apps.items.map(item => [item.path, item.slug, item.name]), [['a/new', 'new-app', 'New'], ['b/tracker', 'tracker', 'Tracker']]);
@@ -1631,6 +1632,14 @@ describe('apps listing', () => {
   const listing = (apps: AppsResponse['apps']): AppsResponse => ({ apps, publicAppsBase: 'https://apps.example' });
   const listCalls = (calls: Calls) => calls.filter(call => call.name === 'apps.list').length;
 
+  type Answer = { resolve: (apps: AppsResponse) => void; reject: (error: unknown) => void };
+
+  // A listing that answers by hand: every call is one entry, settled by the test.
+  const heldList = (answers: Answer[]) => () =>
+    new Promise<AppsResponse>((resolve, reject) => {
+      answers.push({ resolve, reject });
+    });
+
   async function onApps(overrides: ApiOverrides = {}, calls: Calls = []): Promise<AppStore> {
     const store = createStore({ api: fakeApi({ snapshot: async () => snapshot({ apps: listing([TRACKER]) }), ...overrides }, calls), initialRoute: { key: 'apps' } });
 
@@ -1655,7 +1664,7 @@ describe('apps listing', () => {
     await settle();
     assert.equal(listCalls(calls), 1);
     assert.deepEqual(store.getState().apps.items, [NEW_FOLDER, TRACKER]);
-    assert.deepEqual(store.getState().apps.refresh, { pending: false, error: null });
+    assert.deepEqual(store.getState().apps.refresh, { request: null, error: null });
 
     await dispatched(store, tabVisible());
     await settle();
@@ -1667,31 +1676,59 @@ describe('apps listing', () => {
     assert.equal(listCalls(calls), 2);
   });
 
+  it('narrows the rows in the browser when the segment or the search changes within the screen: no read', async () => {
+    const calls: Calls = [];
+    const store = await onApps({ apps: { list: async () => listing([NEW_FOLDER, TRACKER]) } }, calls);
+
+    // Typing into the search, switching the segment, resetting the filters,
+    // the route it already shows: the rows are the ones it has.
+    for (const route of [
+      { key: 'apps', q: 't' },
+      { key: 'apps', q: 'tr' },
+      { key: 'apps', q: 'tr', filter: 'published' },
+      { key: 'apps' },
+      { key: 'apps' },
+    ] as const) {
+      await dispatched(store, routeTo(route, { replace: true }));
+      await settle();
+    }
+
+    assert.equal(listCalls(calls), 0);
+    assert.deepEqual(store.getState().apps.items, [TRACKER]);
+
+    // From another section it is an entry; a filter after it is not.
+    store.dispatch(routeTo({ key: 'home' }));
+    await dispatched(store, routeTo({ key: 'apps', filter: 'errors' }));
+    await settle();
+    assert.equal(listCalls(calls), 1);
+    await dispatched(store, routeTo({ key: 'apps', q: 'new' }, { replace: true }));
+    await settle();
+    assert.equal(listCalls(calls), 1);
+
+    // The tab's return and a Retry read whatever the filters are.
+    await dispatched(store, tabVisible());
+    await settle();
+    assert.equal(listCalls(calls), 2);
+    await dispatched(store, loadApps());
+    await settle();
+    assert.equal(listCalls(calls), 3);
+  });
+
   it('keeps the rows as they are when the listing changed nothing, and one read at a time', async () => {
     const calls: Calls = [];
-    let release: (() => void) | null = null;
-    const store = await onApps(
-      {
-        apps: {
-          list: () =>
-            new Promise<AppsResponse>(resolve => {
-              release = () => resolve(listing([{ ...TRACKER }]));
-            }),
-        },
-      },
-      calls,
-    );
+    const answers: Answer[] = [];
+    const store = await onApps({ apps: { list: heldList(answers) } }, calls);
     const before = store.getState().apps.items;
 
     store.dispatch(loadApps());
     store.dispatch(loadApps());
     assert.equal(listCalls(calls), 1);
-    assert.equal(store.getState().apps.refresh.pending, true);
+    assert.notEqual(store.getState().apps.refresh.request, null);
 
-    release!();
+    answers[0].resolve(listing([{ ...TRACKER }]));
     await settle();
     assert.equal(store.getState().apps.items, before);
-    assert.equal(store.getState().apps.refresh.pending, false);
+    assert.equal(store.getState().apps.refresh.request, null);
   });
 
   it('keeps the rows and records the failure of a re-read; Retry reads again', async () => {
@@ -1715,78 +1752,155 @@ describe('apps listing', () => {
     await dispatched(store, loadApps());
     await settle();
     assert.deepEqual(store.getState().apps.items, [TRACKER]);
-    assert.deepEqual(store.getState().apps.refresh, { pending: false, error: { status: 503, code: 'unavailable', message: 'down' } });
+    assert.deepEqual(store.getState().apps.refresh, { request: null, error: { status: 503, code: 'unavailable', message: 'down' } });
 
     fail = false;
     await dispatched(store, loadApps());
     await settle();
     assert.deepEqual(store.getState().apps.items, [NEW_FOLDER, TRACKER]);
-    assert.deepEqual(store.getState().apps.refresh, { pending: false, error: null });
+    assert.deepEqual(store.getState().apps.refresh, { request: null, error: null });
   });
 
   it('does not apply a listing that an app event may have outrun, and reads once more after it', async () => {
     resetSeq(360n);
 
     const calls: Calls = [];
-    const answers: ((apps: AppsResponse) => void)[] = [];
-    const store = await onApps(
-      {
-        apps: {
-          list: () =>
-            new Promise<AppsResponse>(resolve => {
-              answers.push(resolve);
-            }),
-        },
-      },
-      calls,
-    );
+    const answers: Answer[] = [];
+    const store = await onApps({ apps: { list: heldList(answers) } }, calls);
 
     store.dispatch(loadApps());
     assert.equal(answers.length, 1);
+    assert.deepEqual(store.getState().apps.refresh.request, { since: null });
 
     // Published while the listing was in flight: the row knows the slug.
     store.dispatch(eventAction(event({ type: 'app.published', actor: 'user', payload: { path: 'b/tracker', slug: 'tracker', name: 'Tracker', description: null } })));
     assert.equal(store.getState().apps.items[0].slug, 'tracker');
     assert.equal(store.getState().apps.eventSeq, 360n);
 
-    // The answer was read before the publish: it is not applied, the listing is asked for again.
-    answers[0](listing([NEW_FOLDER, TRACKER]));
+    // The answer was read before the publish: it is not applied, the listing is asked for again from after the event.
+    answers[0].resolve(listing([NEW_FOLDER, TRACKER]));
     await settle();
     assert.deepEqual(store.getState().apps.items, [{ ...TRACKER, slug: 'tracker' }]);
     assert.equal(answers.length, 2);
-    assert.equal(store.getState().apps.refresh.pending, true);
+    assert.deepEqual(store.getState().apps.refresh.request, { since: 360n });
 
-    answers[1](listing([NEW_FOLDER, { ...TRACKER, slug: 'tracker' }]));
+    answers[1].resolve(listing([NEW_FOLDER, { ...TRACKER, slug: 'tracker' }]));
     await settle();
     assert.deepEqual(store.getState().apps.items, [NEW_FOLDER, { ...TRACKER, slug: 'tracker' }]);
     assert.equal(answers.length, 2);
-    assert.equal(store.getState().apps.refresh.pending, false);
+    assert.equal(store.getState().apps.refresh.request, null);
 
-    // An event that changes no row does not date the rows.
+    // An event that changes no row still dates the rows — the listing in
+    // flight at that moment could predate it; the rows keep their identity.
+    const rows = store.getState().apps.items;
+
     store.dispatch(eventAction(event({ type: 'app.published', actor: 'user', payload: { path: 'b/tracker', slug: 'tracker', name: 'Tracker', description: null } })));
-    assert.equal(store.getState().apps.eventSeq, 360n);
+    assert.equal(store.getState().apps.eventSeq, 361n);
+    assert.equal(store.getState().apps.items, rows);
+
+    // A replayed seq (the overlap of a reconnection) does not move the stamp back.
+    store.dispatch(eventAction(event({ seq: 360n, type: 'app.published', actor: 'user', payload: { path: 'b/tracker', slug: 'tracker', name: 'Tracker', description: null } })));
+    assert.equal(store.getState().apps.eventSeq, 361n);
+  });
+
+  it('dates the rows on an unpublish of a folder they do not know: the listing in flight brought the publication and is not applied', async () => {
+    resetSeq(400n);
+
+    const calls: Calls = [];
+    const answers: Answer[] = [];
+    const store = await onApps({ apps: { list: heldList(answers) } }, calls);
+    // A published app whose folder was away when the snapshot was read
+    // (the listing skips it; the publication row stays) and is back now:
+    // the read in flight lists it with its slug.
+    const RESTORED = { path: 'c/restored', name: 'Restored', description: null, manifestError: null, slug: 'restored' };
+
+    store.dispatch(loadApps());
+    assert.equal(answers.length, 1);
+
+    // Unpublished while the listing was in flight: no row to change, but the rows are dated.
+    store.dispatch(eventAction(event({ type: 'app.unpublished', actor: 'user', payload: { path: 'c/restored', slug: 'restored' } })));
+    assert.equal(store.getState().apps.eventSeq, 400n);
+    assert.deepEqual(store.getState().apps.items, [TRACKER]);
+
+    // The answer predates the event: the publication it carries is gone.
+    answers[0].resolve(listing([TRACKER, RESTORED]));
+    await settle();
+    assert.deepEqual(store.getState().apps.items, [TRACKER]);
+    assert.equal(answers.length, 2);
+    assert.deepEqual(store.getState().apps.refresh.request, { since: 400n });
+
+    answers[1].resolve(listing([TRACKER, { ...RESTORED, slug: null }]));
+    await settle();
+    assert.deepEqual(store.getState().apps.items, [TRACKER, { ...RESTORED, slug: null }]);
+    assert.equal(store.getState().apps.refresh.request, null);
   });
 
   it('drops the answer of a read that outlives the session', async () => {
     const calls: Calls = [];
-    let release: (() => void) | null = null;
-    const store = await onApps(
-      {
-        apps: {
-          list: () =>
-            new Promise<AppsResponse>(resolve => {
-              release = () => resolve(listing([NEW_FOLDER]));
-            }),
-        },
-      },
-      calls,
-    );
+    const answers: Answer[] = [];
+    const store = await onApps({ apps: { list: heldList(answers) } }, calls);
 
     store.dispatch(loadApps());
     store.dispatch(sessionLost());
-    release!();
+    answers[0].resolve(listing([NEW_FOLDER]));
     await settle();
     assert.deepEqual(store.getState().apps.items, []);
-    assert.equal(store.getState().apps.refresh.pending, false);
+    assert.equal(store.getState().apps.refresh.request, null);
+  });
+
+  it('drops the answer and the failure of the previous session\'s read after the next sign-in, and keeps the new session\'s read in flight', async () => {
+    const calls: Calls = [];
+    const answers: Answer[] = [];
+    const FRESH = { path: 'f/fresh', name: 'Fresh', description: null, manifestError: null, slug: null };
+    const STALE = { path: 'f/fresh', name: 'Stale', description: null, manifestError: null, slug: null };
+    let rows = [TRACKER];
+    const store = await onApps({ apps: { list: heldList(answers) }, snapshot: async () => snapshot({ apps: listing(rows) }) }, calls);
+
+    // The read of the first session hangs; the session is lost and a new one
+    // signs in with its own snapshot — both sessions stand at eventSeq null.
+    store.dispatch(loadApps());
+    store.dispatch(sessionLost());
+    rows = [FRESH];
+    await dispatched(store, sessionCheck());
+    await settle();
+    assert.deepEqual(store.getState().apps.items, [FRESH]);
+
+    // The new session's own read is in flight when the old answer lands.
+    store.dispatch(loadApps());
+    assert.equal(answers.length, 2);
+
+    const current = store.getState().apps.refresh.request;
+
+    answers[0].resolve(listing([STALE]));
+    await settle();
+    assert.deepEqual(store.getState().apps.items, [FRESH]);
+    assert.equal(store.getState().apps.refresh.request, current);
+
+    // Still one read at a time: the old answer freed nothing.
+    store.dispatch(loadApps());
+    assert.equal(answers.length, 2);
+
+    answers[1].resolve(listing([NEW_FOLDER, FRESH]));
+    await settle();
+    assert.deepEqual(store.getState().apps.items, [NEW_FOLDER, FRESH]);
+    assert.equal(store.getState().apps.refresh.request, null);
+
+    // The same for a failure of the old read: no error lands in the new session.
+    store.dispatch(loadApps());
+    store.dispatch(sessionLost());
+    await dispatched(store, sessionCheck());
+    await settle();
+    store.dispatch(loadApps());
+    assert.equal(answers.length, 4);
+
+    const later = store.getState().apps.refresh.request;
+
+    answers[2].reject(new ApiError(503, 'unavailable', 'down'));
+    await settle();
+    assert.deepEqual(store.getState().apps.refresh, { request: later, error: null });
+
+    answers[3].resolve(listing([FRESH]));
+    await settle();
+    assert.deepEqual(store.getState().apps.refresh, { request: null, error: null });
   });
 });

@@ -5,7 +5,9 @@
 // (stream/handlers.ts), because the feed cursor and the project slugs
 // depend on it, and when the tab comes back into view (TAB_VISIBLE, the
 // visibility process) — the trigger tells the cases apart: what the
-// snapshot has just brought is not asked for again.
+// snapshot has just brought is not asked for again, and a route change
+// within the same section ('within' — the segment, the search, the id of
+// the thread shown) is not an entry into it ('enter').
 
 import type { AppRoute } from '../../lib/router/routes.ts';
 import type { ActionHandler, Dispatch, State } from '../types.ts';
@@ -13,9 +15,9 @@ import { loadApps } from '../apps/actions.ts';
 import { loadThread, loadThreadEvents, loadThreads } from '../threads/actions.ts';
 import { threadsFiltersOf, sameFilters } from '../threads/filters.ts';
 
-export type LoadTrigger = 'route' | 'snapshot' | 'visible';
+export type LoadTrigger = 'enter' | 'within' | 'snapshot' | 'visible';
 
-export function loadRouteData(route: AppRoute, dispatch: Dispatch, getState: () => State, trigger: LoadTrigger = 'route'): void {
+export function loadRouteData(route: AppRoute, dispatch: Dispatch, getState: () => State, trigger: LoadTrigger): void {
   const state = getState();
 
   if (state.session.status !== 'signed-in' || state.stream.asOfSeq === null) {
@@ -52,9 +54,12 @@ export function loadRouteData(route: AppRoute, dispatch: Dispatch, getState: () 
     }
     case 'apps': {
       // The listing has no event for a new folder or an edited manifest:
-      // read again on entering the screen and on the tab's return; the
-      // snapshot's rows are fresh.
-      if (trigger !== 'snapshot') {
+      // read again on entering the screen and on the tab's return. The
+      // snapshot's rows are fresh, and the segment or the search changing
+      // within the screen narrows the rows it has (visibleApps) — the
+      // server's listing walks the file area and reads every manifest, not
+      // a read per keystroke.
+      if (trigger === 'enter' || trigger === 'visible') {
         dispatch(loadApps());
       }
 
@@ -68,8 +73,10 @@ export function loadRouteData(route: AppRoute, dispatch: Dispatch, getState: () 
 export const routeToHandler: ActionHandler<'ROUTE_TO'> =
   ({ dispatch, getState, next }) =>
   action => {
+    const from = getState().router.route;
+
     next(action);
-    loadRouteData(action.route, dispatch, getState, 'route');
+    loadRouteData(action.route, dispatch, getState, from.key === action.route.key ? 'within' : 'enter');
   };
 
 export const tabVisibleHandler: ActionHandler<'TAB_VISIBLE'> =

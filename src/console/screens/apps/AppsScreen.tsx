@@ -124,7 +124,7 @@ export function AppsScreen({ route }: { route: AppsRoute }) {
           }
         />
         {refreshFailed ? (
-          <Note state="err" icon="cloud-off" role="status" action="Retry" actionIcon="refresh-cw" actionBusy={refresh.pending} onAction={() => dispatch(loadApps())}>
+          <Note state="err" icon="cloud-off" role="status" action="Retry" actionIcon="refresh-cw" actionBusy={refresh.request !== null} onAction={() => dispatch(loadApps())}>
             Couldn’t refresh the apps — {refresh.error?.message}. The list may be behind.
           </Note>
         ) : null}
