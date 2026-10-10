@@ -79,6 +79,9 @@ function fakeApi(overrides: ApiOverrides = {}, calls: Calls = []): Api {
   // Every answer of a save is newer than the fixtures' snapshot and events.
   let answerSeq = 1_000n;
   const settings: Api['settings'] = {
+    get: async () => {
+      throw new Error('not here');
+    },
     update: async patch => ({ settings: { workspaceName: patch.workspaceName ?? ME.workspaceName, operatorName: patch.operatorName ?? ME.operatorName }, seq: answerSeq++ }),
     ...overrides.settings,
   };
@@ -106,7 +109,7 @@ function fakeApi(overrides: ApiOverrides = {}, calls: Calls = []): Api {
     consoleCode: wrap('consoleCode', base.consoleCode),
     logout: wrap('logout', base.logout),
     snapshot: wrap('snapshot', base.snapshot),
-    settings: { update: wrap('settings.update', settings.update) },
+    settings: { get: wrap('settings.get', settings.get), update: wrap('settings.update', settings.update) },
     apps: { list: wrap('apps.list', apps.list), publish: wrap('apps.publish', apps.publish), unpublish: wrap('apps.unpublish', apps.unpublish) },
     projects: {
       create: wrap('projects.create', projects.create),

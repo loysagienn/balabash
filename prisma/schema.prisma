@@ -141,6 +141,10 @@ model Session {
   language  String?   @map("language")
   tokenHash String?   @unique @map("token_hash")
   rotatedAt DateTime? @map("rotated_at")
+  // Where the one-time code this session was born from came from:
+  // 'telegram' (the /auth_code command in the bound group) or 'console'
+  // (printed into the server log); null for sessions born before the column.
+  loginSource String? @map("login_source")
 
   @@index([userId])
   @@index([lastUsed])

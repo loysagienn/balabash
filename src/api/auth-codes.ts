@@ -3,8 +3,12 @@
 // /login page itself for the operator's workspace (the console code,
 // printed to the server log — api.ts). Ported from v1 src/auth-codes as is. Deliberately not persisted: a
 // restart just invalidates pending codes.
+//
+// A code remembers where it was issued (LoginSource): the session born from
+// it records that, and Settings tells the operator how this browser got in.
 
 import crypto from 'node:crypto';
+import type { LoginSource } from './contract.ts';
 
 const CODE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 const CODE_LENGTH = 8;
@@ -13,8 +17,11 @@ const ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 
 type PendingCode = {
   userId: string;
+  source: LoginSource;
   expiresAt: number;
 };
+
+export type ConsumedCode = { userId: string; source: LoginSource };
 
 const codes = new Map<string, PendingCode>();
 
@@ -28,7 +35,7 @@ function sweepExpired(): void {
   }
 }
 
-export function createAuthCode(userId: string): string {
+export function createAuthCode(userId: string, source: LoginSource): string {
   sweepExpired();
 
   // Only one active code per user: a new request invalidates the previous code
@@ -45,15 +52,16 @@ export function createAuthCode(userId: string): string {
     code += ALPHABET[byte % ALPHABET.length];
   }
 
-  codes.set(code, { userId, expiresAt: Date.now() + CODE_TTL_MS });
+  codes.set(code, { userId, source, expiresAt: Date.now() + CODE_TTL_MS });
 
   return code;
 }
 
 /**
- * Returns the userId for a valid code and invalidates it (one-time use).
+ * Returns the userId and the source for a valid code and invalidates it
+ * (one-time use).
  */
-export function consumeAuthCode(input: string): string | null {
+export function consumeAuthCode(input: string): ConsumedCode | null {
   sweepExpired();
 
   const code = input.trim().toUpperCase();
@@ -65,5 +73,5 @@ export function consumeAuthCode(input: string): string | null {
 
   codes.delete(code);
 
-  return entry.userId;
+  return { userId: entry.userId, source: entry.source };
 }

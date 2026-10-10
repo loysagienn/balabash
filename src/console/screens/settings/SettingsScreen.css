@@ -8,4 +8,11 @@
 .set-act{display:flex;align-items:center;justify-content:space-between;gap:var(--sp-3)}
 .set-act .caption{flex:1;min-width:0}
 .set-act + .set-act{margin-top:var(--sp-3);padding-top:var(--sp-3);border-top:1px solid var(--border)}
+/* The Session card: the row of this browser above the actions, a rule between. */
+.set-session > .list + .card-b{border-top:1px solid var(--border)}
+/* On the phone the facts of a tile (the group's id and day, the session's browser and source) are the row's whole
+   point and are short: they wrap instead of the list's ellipsis. */
+@container shell (max-width:720px){
+  .set-col .list[data-narrow="tiles"] .row-m{white-space:normal}
+}
 }

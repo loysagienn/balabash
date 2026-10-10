@@ -191,7 +191,7 @@ export async function startStand(): Promise<Stand> {
     const request = (method: string, urlPath: string, options: RequestOptions = {}) =>
       send(port, method, urlPath, { ...options, cookie: options.cookie === undefined ? cookie : options.cookie });
 
-    const signedIn = await request('POST', '/api/auth', { body: { code: createAuthCode(userId) } });
+    const signedIn = await request('POST', '/api/auth', { body: { code: createAuthCode(userId, 'console') } });
 
     if (signedIn.status !== 200) {
       throw new Error(`the stand could not sign in: ${signedIn.status} ${signedIn.text}`);

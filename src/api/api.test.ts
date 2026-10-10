@@ -15,7 +15,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { STAND_HOST, startStand } from '../test-support/stand.ts';
 import type { Reply, Stand } from '../test-support/stand.ts';
-import type { CreateProjectResponse, FileMetaResponse, ProjectResponse, SettingsResponse, MeResponse, WorkspaceNodeResponse } from './contract.ts';
+import type { CreateProjectResponse, FileMetaResponse, ProjectResponse, SettingsFactsResponse, SettingsResponse, MeResponse, WorkspaceNodeResponse } from './contract.ts';
 
 type ErrorBody = { error: { code: string; message: string } };
 
@@ -788,6 +788,42 @@ describe('settings over the api', () => {
     assert.equal(reply.status, 200, reply.text);
     assert.deepEqual(reply.json<SettingsResponse>(), { settings: { workspaceName: 'Home', operatorName: null }, seq: null });
     assert.equal((await settingsEvents()).length, 2);
+  });
+
+  test('GET /settings answers the facts of this browser, the schedule’s time zone and the Telegram binding', async () => {
+    const unbound = await stand.request('GET', '/api/settings');
+
+    assert.equal(unbound.status, 200, unbound.text);
+
+    const facts = unbound.json<SettingsFactsResponse>();
+
+    // The stand strips the channel's variables: Telegram is off, no group
+    // is bound; the time zone is the configuration's default; the session
+    // was born from a console code and the stand's client sends no
+    // User-Agent.
+    assert.deepEqual(facts.telegram, { enabled: false, botUsername: null, group: null });
+    assert.equal(facts.scheduleTimezone, 'Asia/Jerusalem');
+    assert.ok(facts.session.createdAt instanceof Date);
+    assert.deepEqual({ userAgent: facts.session.userAgent, loginSource: facts.session.loginSource }, { userAgent: '', loginSource: 'console' });
+
+    const row = await prisma.session.findFirstOrThrow({ where: { userId: stand.userId } });
+
+    assert.deepEqual({ createdAt: row.createdAt, loginSource: row.loginSource }, { createdAt: facts.session.createdAt, loginSource: 'console' });
+
+    // A bound group: its id and the moment the binding was written; the
+    // title needs the Bot API, which the stand has no token for.
+    const linkedAt = new Date('2026-08-06T22:44:25.685Z');
+
+    await prisma.telegramGroup.create({ data: { chatId: -1003986621992n, userId: stand.userId, status: 'active', updatedAt: linkedAt } });
+
+    try {
+      const bound = await stand.request('GET', '/api/settings');
+
+      assert.equal(bound.status, 200, bound.text);
+      assert.deepEqual(bound.json<SettingsFactsResponse>().telegram, { enabled: false, botUsername: null, group: { chatId: -1003986621992n, title: null, linkedAt } });
+    } finally {
+      await prisma.telegramGroup.deleteMany({ where: { userId: stand.userId } });
+    }
   });
 
   test('a field of another type is refused and nothing is written', async () => {

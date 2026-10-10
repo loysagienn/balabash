@@ -60,6 +60,55 @@ export type SettingsResponse = {
   seq: bigint | null;
 };
 
+// Where the one-time code a web session was born from came from: the
+// /auth_code command in the bound Telegram group, or the code the /login
+// page had the server print into its log.
+export type LoginSource = 'telegram' | 'console';
+
+// GET /api/settings — the facts the Settings screen shows beside the names:
+// none of them is an event of the log (the Telegram binding is a row the
+// bot writes, the time zone is the server's configuration, the session is
+// the request's own cookie), so the screen reads them by place, not from
+// the snapshot.
+export type TelegramGroupView = {
+  chatId: bigint;
+  // The group's title through the Bot API (cached ten minutes); null when
+  // the channel is off or the call failed.
+  title: string | null;
+  // When the binding was last written: the /start that bound the group, or
+  // the chat's migration to a supergroup after it.
+  linkedAt: Date;
+};
+
+export type TelegramView = {
+  // The channel is configured (a bot token): the bot posts and takes
+  // messages. Off — a bound group is remembered but not served.
+  enabled: boolean;
+  // The bot's @username (without the @) through the Bot API, once per
+  // process; null while the channel is off or the call failed.
+  botUsername: string | null;
+  // The group bound to this workspace, null while none is.
+  group: TelegramGroupView | null;
+};
+
+export type WebSessionView = {
+  // When this browser's session was born (the code exchange).
+  createdAt: Date;
+  // The User-Agent the browser sent at sign-in, as recorded ('' when it
+  // sent none).
+  userAgent: string;
+  // How the code came — null for a session born before the fact was kept.
+  loginSource: LoginSource | null;
+};
+
+export type SettingsFactsResponse = {
+  telegram: TelegramView;
+  // The IANA time zone the schedule evaluates cron expressions in
+  // (SCHEDULE_TIMEZONE of the server's environment).
+  scheduleTimezone: string;
+  session: WebSessionView;
+};
+
 // ---------------------------------------------------------------------------
 // The workspace window (read-only): threads and their event feeds. The core
 // envelope types are re-exported so the client names the same shapes the

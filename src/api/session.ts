@@ -12,6 +12,7 @@ import type { Context } from 'koa';
 import { prisma } from '../db/client.ts';
 import { config } from '../config/index.ts';
 import type { SessionModel } from '../../prisma-generated/models.ts';
+import type { LoginSource } from './contract.ts';
 
 const SESSION_ID_COOKIE_NAME = 'session_id';
 const SESSION_TOKEN_BYTES = 32;
@@ -189,7 +190,7 @@ export async function getSession(ctx: Context): Promise<SessionModel | null> {
  * Creates a session for a user who just exchanged a one-time auth code and
  * sets the cookie. This is the ONLY place a session row is born.
  */
-export async function createUserSession(ctx: Context, userId: string): Promise<SessionModel> {
+export async function createUserSession(ctx: Context, userId: string, loginSource: LoginSource): Promise<SessionModel> {
   const token = generateSessionToken();
 
   const session = await prisma.session.create({
@@ -198,6 +199,7 @@ export async function createUserSession(ctx: Context, userId: string): Promise<S
       userId,
       tokenHash: hashSessionToken(token),
       lastUsed: new Date(),
+      loginSource,
     },
   });
 

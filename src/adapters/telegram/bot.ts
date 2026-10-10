@@ -243,7 +243,7 @@ export async function initTelegramBot() {
       return;
     }
 
-    const code = createAuthCode(group.userId);
+    const code = createAuthCode(group.userId, 'telegram');
     const messageThreadId = ctx.message?.is_topic_message ? ctx.message.message_thread_id : undefined;
 
     await ctx.reply(

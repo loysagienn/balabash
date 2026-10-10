@@ -35,6 +35,7 @@ import { projectView } from '../projects/store.ts';
 import { publicAppsBase } from '../apps/urls.ts';
 import { consumeAuthCode, createAuthCode } from './auth-codes.ts';
 import { createUserSession, destroySession, getSession } from './session.ts';
+import type { SessionModel } from '../../prisma-generated/models.ts';
 import { createEventStreamHandler } from './event-stream.ts';
 import { buildSnapshot } from './snapshot.ts';
 import { checkMutationOrigin } from './origin.ts';
@@ -53,7 +54,10 @@ import type {
   ProvisionSecretsResponse,
   SecretRequestResponse,
   SecretRequestView,
+  LoginSource,
+  SettingsFactsResponse,
   SettingsResponse,
+  TelegramView,
   ThreadEventsResponse,
   ThreadResponse,
   ThreadsResponse,
@@ -105,45 +109,82 @@ async function requireSession(ctx: Context, next: Next): Promise<void> {
   await next();
 }
 
-// The workspace name for /api/me is the bound telegram group's title: the
-// User row itself is empty by design. Fetched via the Bot API and cached —
-// a failure degrades to null, never to an error. Telegram is an optional
-// channel: without it there is no group and the name is null; the Bot API
-// client is created lazily so a boot without the token never touches it.
+// The bound telegram group's title — the workspace name of /api/me while
+// none is stored (the User row itself is empty by design) and the row of
+// the Telegram card of Settings. Fetched via the Bot API and cached — a
+// failure degrades to null, never to an error. Telegram is an optional
+// channel: without it there is no title; the Bot API client is created
+// lazily so a boot without the token never touches it.
 let telegramApi: Api | null = null;
-const workspaceNameCache = new Map<string, { name: string | null; fetchedAt: number }>();
-const WORKSPACE_NAME_TTL_MS = 10 * 60 * 1000;
+const groupTitleCache = new Map<string, { title: string | null; fetchedAt: number }>();
+const GROUP_TITLE_TTL_MS = 10 * 60 * 1000;
 
-async function getWorkspaceName(userId: string): Promise<string | null> {
+function readBoundGroup(userId: string) {
+  return prisma.telegramGroup.findUnique({ where: { userId } });
+}
+
+async function getGroupTitle(userId: string): Promise<string | null> {
   if (!config.telegramEnabled) {
     return null;
   }
 
-  const cached = workspaceNameCache.get(userId);
+  const cached = groupTitleCache.get(userId);
 
-  if (cached && Date.now() - cached.fetchedAt < WORKSPACE_NAME_TTL_MS) {
-    return cached.name;
+  if (cached && Date.now() - cached.fetchedAt < GROUP_TITLE_TTL_MS) {
+    return cached.title;
   }
 
-  let name: string | null = null;
+  let title: string | null = null;
 
   try {
-    const group = await prisma.telegramGroup.findUnique({ where: { userId } });
+    const group = await readBoundGroup(userId);
 
     if (group) {
       telegramApi ??= new Api(config.telegramBotToken);
 
       const chat = await telegramApi.getChat(Number(group.chatId));
 
-      name = chat.title ?? null;
+      title = chat.title ?? null;
     }
   } catch {
-    name = null;
+    title = null;
   }
 
-  workspaceNameCache.set(userId, { name, fetchedAt: Date.now() });
+  groupTitleCache.set(userId, { title, fetchedAt: Date.now() });
 
-  return name;
+  return title;
+}
+
+// The bot's own username, for the words of the Telegram card. A bot does
+// not change its username while running, so one answer serves the process;
+// a failed call is asked again next time.
+let botUsername: string | null | undefined;
+
+async function getBotUsername(): Promise<string | null> {
+  if (!config.telegramEnabled) {
+    return null;
+  }
+
+  if (botUsername === undefined) {
+    try {
+      telegramApi ??= new Api(config.telegramBotToken);
+      botUsername = (await telegramApi.getMe()).username ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  return botUsername;
+}
+
+async function readTelegramView(userId: string): Promise<TelegramView> {
+  const [group, title, username] = await Promise.all([readBoundGroup(userId), getGroupTitle(userId), getBotUsername()]);
+
+  return {
+    enabled: config.telegramEnabled,
+    botUsername: username,
+    group: group ? { chatId: group.chatId, title, linkedAt: group.updatedAt } : null,
+  };
 }
 
 // --------------------------------------------------------------------------
@@ -228,7 +269,7 @@ router.post('/auth/console-code', async ctx => {
   lastConsoleCodeAt = now;
 
   const mainThread = await ensureOperatorWorkspace();
-  const code = createAuthCode(mainThread.userId);
+  const code = createAuthCode(mainThread.userId, 'console');
 
   console.log(`[web] login code for the operator workspace (one-time, valid 10 minutes): ${code}`);
 
@@ -242,17 +283,17 @@ router.post('/auth', async ctx => {
     return;
   }
   const code = typeof body.code === 'string' ? body.code : '';
-  const userId = code ? consumeAuthCode(code) : null;
+  const consumed = code ? consumeAuthCode(code) : null;
 
-  if (!userId) {
+  if (!consumed) {
     sendError(ctx, 401, 'invalid_code', 'The code is invalid or expired — request a new one');
 
     return;
   }
 
-  await createUserSession(ctx, userId);
+  await createUserSession(ctx, consumed.userId, consumed.source);
 
-  ctx.body = prepareObject(await buildMeResponse(userId));
+  ctx.body = prepareObject(await buildMeResponse(consumed.userId));
 });
 
 // The names as the console shows them: the stored workspace name wins over
@@ -267,7 +308,7 @@ function namesOf(user: StoredNames | null, groupTitle: string | null): NamesView
 async function readNames(userId: string): Promise<NamesView> {
   const user = await prisma.user.findUnique({ where: { id: userId }, select: { workspaceName: true, operatorName: true } });
 
-  return namesOf(user, user?.workspaceName ? null : await getWorkspaceName(userId));
+  return namesOf(user, user?.workspaceName ? null : await getGroupTitle(userId));
 }
 
 async function buildMeResponse(userId: string): Promise<MeResponse> {
@@ -279,6 +320,29 @@ async function buildMeResponse(userId: string): Promise<MeResponse> {
 router.get('/me', requireSession, async ctx => {
   ctx.body = prepareObject(await buildMeResponse(ctx.state.userId as string));
 });
+
+// The facts of Settings beside the names: the Telegram binding, the
+// schedule's time zone, this browser's session. None is an event of the log
+// — the console reads them by place (TanStack Query), never from the
+// snapshot. The session is the one behind the request's cookie: its facts
+// are the facts of this browser, which is why they are not part of `me`
+// (a projection of the workspace the tail keeps fresh).
+router.get('/settings', requireSession, async ctx => {
+  const session = ctx.state.session as SessionModel;
+  const facts: SettingsFactsResponse = {
+    telegram: await readTelegramView(ctx.state.userId as string),
+    scheduleTimezone: config.scheduleTimezone,
+    session: { createdAt: session.createdAt, userAgent: session.userAgent ?? '', loginSource: loginSourceOf(session.loginSource) },
+  };
+
+  ctx.body = prepareObject(facts);
+});
+
+// The column holds what createUserSession wrote; a value the contract does
+// not name (none is written today) reads as unknown rather than leaking.
+function loginSourceOf(value: string | null): LoginSource | null {
+  return value === 'telegram' || value === 'console' ? value : null;
+}
 
 // The names of Settings. The rule of the body is parseSettingsPatch
 // (settings.ts, pure, tested); the row is the user's own, so there is no
@@ -317,7 +381,7 @@ router.patch('/settings', requireSession, async ctx => {
 
   if (Object.keys(patch).length > 0) {
     // Needed unless the patch itself names the workspace.
-    const groupTitle = patch.workspaceName ? null : await getWorkspaceName(userId);
+    const groupTitle = patch.workspaceName ? null : await getGroupTitle(userId);
 
     response = await registryMutation(async (tx, journal) => {
       const user = await tx.user.update({ where: { id: userId }, data: patch, select: { workspaceName: true, operatorName: true } });

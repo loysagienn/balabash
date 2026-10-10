@@ -35,7 +35,12 @@ const api: Api = {
         thread({ id: 'other', createdSeq: 9n, status: 'completed', terminalSeq: 21n }),
       ],
     }),
-  settings: { update: async () => ({ settings: { workspaceName: 'Workspace', operatorName: null }, seq: null }) },
+  settings: {
+    get: async () => {
+      throw new Error('not here');
+    },
+    update: async () => ({ settings: { workspaceName: 'Workspace', operatorName: null }, seq: null }),
+  },
   apps: {
     list: async () => ({ apps: [], publicAppsBase: '' }),
     publish: async () => {

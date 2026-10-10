@@ -16,6 +16,7 @@ import type {
   PublicationResponse,
   PublishAppRequest,
   SecretRequestResponse,
+  SettingsFactsResponse,
   SettingsPatchRequest,
   SettingsResponse,
   SnapshotResponse,
@@ -44,8 +45,11 @@ export type Api = {
   logout(): Promise<LogoutResponse>;
   snapshot(): Promise<SnapshotResponse>;
   // The names of Settings: the answer carries the effective names as
-  // /api/me reports them.
+  // /api/me reports them. The facts beside them (the Telegram binding, the
+  // schedule's time zone, this browser's session) — the second data layer:
+  // none is an event of the log.
   settings: {
+    get(signal?: AbortSignal): Promise<SettingsFactsResponse>;
     update(patch: SettingsPatchRequest): Promise<SettingsResponse>;
   };
   // The project registry's changes (stage 6b): the answer carries the row
@@ -130,6 +134,7 @@ export function createApi(options: FetchOptions = {}): Api {
     logout: () => apiFetch<LogoutResponse>('/api/logout', { method: 'POST', unauthenticated: true }),
     snapshot: () => apiFetch<SnapshotResponse>('/api/snapshot'),
     settings: {
+      get: signal => apiFetch<SettingsFactsResponse>('/api/settings', { signal }),
       update: patch => apiFetch<SettingsResponse>('/api/settings', { method: 'PATCH', body: patch }),
     },
     projects: {
