@@ -1290,8 +1290,10 @@ router.get('/limits', requireSession, async ctx => {
 // src/api/system.ts): a measurement of the moment — the kernel's counters
 // against the sample before, the process's own facts, a size read of the
 // database (its failure is the answer "unavailable", not a 500), the
-// newest walk of the file area, the restart in the way. The System screen
-// reads it every 10 s while open, the shell's footer once a minute.
+// newest walk of the file area, the restart in the way as this workspace
+// may see it. The System screen reads it every 10 s while open; the
+// shell's footer and the summaries of Home and Project read it on mount
+// and focus, keeping an answer for a minute.
 router.get('/system', requireSession, async ctx => {
   const userId = ctx.state.userId as string;
   const response: SystemResponse = await buildSystem(userId);

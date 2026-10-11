@@ -18,19 +18,22 @@ describe('factsStage', () => {
 });
 
 describe('heldFailure', () => {
-  it('keeps the failure shown before through a refetch without data, and lets the fetch’s outcome replace it', () => {
+  it('keeps the failure shown before through a refetch without data — in flight or paused offline — and lets the fetch’s outcome replace it', () => {
     const failure = new Error('404');
     const other = new Error('500');
 
     // The first read: nothing held, nothing failed yet.
-    assert.equal(heldFailure(null, { data: undefined, error: null, isFetching: true }), null);
+    assert.equal(heldFailure(null, { data: undefined, error: null }), null);
     // It failed; the next poll starts — Query clears the error, the card keeps it.
-    assert.equal(heldFailure(null, { data: undefined, error: failure, isFetching: false }), failure);
-    assert.equal(heldFailure(failure, { data: undefined, error: null, isFetching: true }), failure);
+    assert.equal(heldFailure(null, { data: undefined, error: failure }), failure);
+    assert.equal(heldFailure(failure, { data: undefined, error: null }), failure);
+    // The poll is paused for the network being away (fetchStatus 'paused',
+    // not fetching, no error): still the failure, not the skeleton.
+    assert.equal(heldFailure(failure, { data: undefined, error: null }), failure);
     // The poll fails otherwise — its own error; or brings data — no failure.
-    assert.equal(heldFailure(failure, { data: undefined, error: other, isFetching: false }), other);
-    assert.equal(heldFailure(failure, { data: { ok: true }, error: null, isFetching: false }), null);
+    assert.equal(heldFailure(failure, { data: undefined, error: other }), other);
+    assert.equal(heldFailure(failure, { data: { ok: true }, error: null }), null);
     // A refetch over data with a held error from before: not a failure anymore.
-    assert.equal(heldFailure(failure, { data: { ok: true }, error: null, isFetching: true }), null);
+    assert.equal(heldFailure(failure, { data: { ok: true }, error: null }), null);
   });
 });

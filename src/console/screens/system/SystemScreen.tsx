@@ -20,7 +20,7 @@ import { useFactsStage } from '../../lib/query/useFactsStage.ts';
 import { useAppSelector } from '../../store/hooks.ts';
 import { selectMe } from '../../store/session/selectors.ts';
 import { selectMainThread } from '../../store/threads/selectors.ts';
-import { selectPendingRestart, selectSystemLog } from '../../store/system/selectors.ts';
+import { selectSystemLog } from '../../store/system/selectors.ts';
 import { LimitsCard } from '../../features/limits/LimitsCard.tsx';
 import { Shell } from '../../features/shell/Shell.tsx';
 import { SYSTEM_REFRESH_MS, useSystem } from '../../features/system/queries.ts';
@@ -47,14 +47,15 @@ import {
   consumerWords,
   cpuAverage,
   cpuWords,
+  diskConsumers,
   diskWords,
   emptyLogWords,
   filteredRows,
   logRows,
   memoryWords,
   networkWords,
+  pendingOf,
   processUptimeWords,
-  requestOf,
   restartNote,
   restartRows,
   sessionsWords,
@@ -62,6 +63,7 @@ import {
   trafficCaption,
   updatedWords,
   uptimeLabel,
+  versionWords,
 } from './facts.logic.ts';
 import type { LogFilter, LogRow } from './facts.logic.ts';
 import { TOKEN_WINDOW, toTokenRequest, windowCount, windowModels, windowRange } from './SystemScreen.logic.ts';
@@ -153,11 +155,12 @@ function MachineCard({ facts }: { facts: Facts }) {
     );
   }
 
-  const { machine, fileArea, fileStorageBytes, database } = stage.data;
+  const { machine } = stage.data;
   const cpu = cpuWords(machine.cpu);
   const average = cpuAverage(machine.cpu.perCore);
   const memory = machine.memory ? memoryWords(machine.memory) : null;
   const disk = machine.disk ? diskWords(machine.disk) : null;
+  const consumers = diskConsumers(stage.data);
   const traffic = machine.network ? trafficCaption(machine.network.inboundPerMinute.length) : null;
 
   return (
@@ -185,13 +188,8 @@ function MachineCard({ facts }: { facts: Facts }) {
         </Meter>
         <Meter gauge={memory?.percent ?? null} title="Memory" lines={memory ? [memory.main, memory.swap] : ['not measured on this host']} />
         <Meter gauge={disk?.percent ?? null} title="Disk" lines={disk ? [disk.main] : ['not measured on this host']}>
-          <KeyValue
-            items={[
-              { key: 'file storage', value: consumerWords(fileStorageBytes) },
-              { key: 'file area', value: consumerWords(fileArea?.bytes ?? null, true) },
-              { key: 'database', value: consumerWords(database.sizeBytes) },
-            ]}
-          />
+          <KeyValue items={consumers.items} />
+          {consumers.elsewhere ? <Caption>{consumers.elsewhere}</Caption> : null}
         </Meter>
         <div className="sys-meter">
           <div className="sys-meter-h">
@@ -230,6 +228,7 @@ function ProcessCard({ facts, now }: { facts: Facts; now: Date }) {
     );
   } else {
     const { process, database } = stage.data;
+    const version = versionWords(process, now);
 
     body = (
       <CardBody>
@@ -239,15 +238,28 @@ function ProcessCard({ facts, now }: { facts: Facts; now: Date }) {
             { key: 'memory', value: consumerWords(process.rssBytes) },
             {
               key: 'version',
-              value: process.commit ? (
+              value: version.build ? (
                 <>
-                  <Code>{process.commit}</Code>
-                  {process.branch ? ` · ${process.branch}` : ''}
+                  <Code>{version.build}</Code>
+                  {version.details ? ` · ${version.details}` : ''}
                 </>
               ) : (
-                'unknown — not a git checkout'
+                'no build stamp — the code runs from its sources, or was built outside a git checkout'
               ),
             },
+            ...(version.checkout
+              ? [
+                  {
+                    key: 'checkout',
+                    value: (
+                      <>
+                        <Code>{version.checkout}</Code>
+                        {version.build ? ' · not the build running' : ''}
+                      </>
+                    ),
+                  },
+                ]
+              : []),
             { key: 'node', value: process.node },
             { key: 'agent sessions', value: sessionsWords(process) },
             {
@@ -304,11 +316,14 @@ function LogRows({ rows, now }: { rows: LogRow[]; now: Date }) {
   );
 }
 
+// The restart in the way comes from the facts checked against the log
+// (pendingOf): the log alone holds the newest 50 system events, and a
+// request behind 50 exceptions would be lost from it.
 function RestartsCard({ facts, now }: { facts: Facts; now: Date }) {
   const log = useAppSelector(selectSystemLog);
-  const request = useAppSelector(selectPendingRestart);
   const rows = useMemo(() => restartRows(logRows(log)), [log]);
-  const note = request ? restartNote(requestOf(request), facts.data?.restart.pending ?? null, now) : null;
+  const pending = pendingOf(log, facts.data?.restart.pending);
+  const note = pending ? restartNote(pending.request, pending.waiting, now) : null;
 
   return (
     <Card narrow="bare" label="Restarts">

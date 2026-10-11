@@ -5,7 +5,10 @@
 // restart completes), two ways to read it: the System screen refreshes it
 // every SYSTEM_REFRESH_MS while the tab is visible; the shell's footer, the
 // summaries of Home and of a project's files take the facts as they are
-// for a minute — a screen opened within it asks nothing.
+// for a minute — a screen opened within it asks nothing, a reader mounted
+// or a tab focused after it reads again (a fresh read, not a poll: a tab
+// left open shows what it read until the System screen's poll, a restart
+// completed in the tail or the next mount/focus refreshes the key).
 
 import { useQuery } from '@tanstack/react-query';
 import { useApi } from '../../lib/api/context.tsx';

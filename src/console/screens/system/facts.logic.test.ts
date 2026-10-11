@@ -5,6 +5,7 @@ import {
   consumerWords,
   cpuAverage,
   cpuWords,
+  diskConsumers,
   diskWords,
   emptyLogWords,
   fileAreaSummary,
@@ -12,6 +13,7 @@ import {
   logRows,
   memoryWords,
   networkWords,
+  pendingOf,
   processUptimeWords,
   restartNote,
   restartRows,
@@ -22,6 +24,7 @@ import {
   trafficCaption,
   updatedWords,
   uptimeLabel,
+  versionWords,
 } from './facts.logic.ts';
 
 const at = (y: number, m: number, d: number, h = 0, min = 0, s = 0) => new Date(y, m - 1, d, h, min, s);
@@ -57,6 +60,35 @@ describe('the machine', () => {
     assert.equal(uptimeLabel(12 * 86_400 + 4 * 3600 + 7 * 60), '12d 4h');
     assert.equal(uptimeLabel(42 * 60), '42m');
   });
+
+  it('lists what is of this volume under the disk and names the database and a Spaces storage apart', () => {
+    const area = { measuredAt: NOW, files: 9, bytes: 18 * GB, folders: {}, complete: true, unreadable: 0 };
+    const database = { available: true, sizeBytes: 2.4 * GB, error: null, local: false };
+
+    assert.deepEqual(diskConsumers({ fileArea: area, fileStorage: { kind: 'local', bytes: 41 * GB }, database }), {
+      items: [
+        { key: 'file area · this workspace', value: '18 GB' },
+        { key: 'file storage · local', value: '41 GB' },
+      ],
+      elsewhere: 'outside the breakdown: database 2.4 GB (remote PostgreSQL)',
+    });
+    assert.deepEqual(diskConsumers({ fileArea: { ...area, complete: false, unreadable: 1 }, fileStorage: { kind: 'spaces', bytes: 41 * GB }, database: { ...database, local: true } }), {
+      items: [{ key: 'file area · this workspace', value: 'at least 18 GB' }],
+      elsewhere: 'outside the breakdown: file storage 41 GB (Spaces) · database 2.4 GB (PostgreSQL on this host)',
+    });
+    // Before the walk, without the sizes; and the answer of an older server, which names the storage's bytes alone.
+    assert.deepEqual(diskConsumers({ fileArea: null, fileStorage: { kind: 'local', bytes: null }, database: { available: false, sizeBytes: null, error: 'down', local: false } }).items, [
+      { key: 'file area · this workspace', value: 'measuring…' },
+      { key: 'file storage · local', value: '—' },
+    ]);
+    assert.deepEqual(diskConsumers({ fileArea: null, fileStorage: undefined as never, database: { available: true, sizeBytes: GB, error: null, local: undefined as never } }), {
+      items: [
+        { key: 'file area · this workspace', value: 'measuring…' },
+        { key: 'file storage', value: '—' },
+      ],
+      elsewhere: 'outside the breakdown: database 1 GB (PostgreSQL)',
+    });
+  });
 });
 
 describe('the process', () => {
@@ -68,20 +100,64 @@ describe('the process', () => {
     assert.equal(updatedWords(at(2026, 10, 11, 16, 38).getTime(), 10_000), 'updated 16:38 · every 10s');
     assert.equal(updatedWords(0, 10_000), null);
   });
+
+  it('names the build the process runs, dirty or not, and the checkout when it is another commit', () => {
+    const built = at(2026, 10, 11, 15, 50);
+    const stamp = { commit: 'eac52f1', branch: 'main', dirty: false, builtAt: built, checkout: { commit: 'eac52f1', branch: 'main' } };
+
+    assert.deepEqual(versionWords(stamp, NOW), { build: 'eac52f1', details: 'main · built 15:50', checkout: null });
+    // Built before the commit: the tree was dirty, and the process started in the next commit's checkout.
+    assert.deepEqual(versionWords({ ...stamp, dirty: true, checkout: { commit: '7b15d2d', branch: 'main' } }, NOW), { build: 'eac52f1+', details: 'main · built 15:50', checkout: '7b15d2d · main' });
+    // A rolled-back bundle: the checkout is ahead of the code running.
+    assert.deepEqual(versionWords({ ...stamp, checkout: { commit: '9c0ffee', branch: null } }, NOW).checkout, '9c0ffee');
+    // No stamp (the code runs from its sources): the checkout is all there is.
+    assert.deepEqual(versionWords({ commit: null, branch: null, dirty: false, builtAt: null, checkout: { commit: '7b15d2d', branch: 'main' } }, NOW), { build: null, details: null, checkout: '7b15d2d · main' });
+    assert.deepEqual(versionWords({ commit: null, branch: null, dirty: false, builtAt: null, checkout: null }, NOW), { build: null, details: null, checkout: null });
+    // The answer of an older server: commit and branch alone.
+    assert.deepEqual(versionWords({ commit: '3f9c21e', branch: 'main' } as never, NOW), { build: '3f9c21e', details: 'main', checkout: null });
+  });
 });
 
 describe('the restart in the way', () => {
-  const request = { requestedBy: 'engineer', requestedAt: at(2026, 10, 11, 16, 5), force: false };
-  const pending = { reason: 'r', requestedAt: request.requestedAt, requestedBy: 'engineer', threadId: 't1', force: false };
+  const request = { requestedBy: 'engineer', requestedAt: at(2026, 10, 11, 16, 5), force: false, own: true };
+  const waiting = { threads: [], otherThreads: 0, secretaryTurn: false, workspaceJob: false, logQuiet: true };
 
-  it('names who asked and what the window waits for', () => {
+  it('names who asked and what the window waits for, this workspace’s threads last as links', () => {
     const threads = [{ id: 't1', title: 'Web UI: screens', agent: 'engineer' }];
 
-    assert.deepEqual(restartNote(request, { ...pending, waiting: { threads, secretaryTurn: false, workspaceJob: false, logQuiet: true } }, NOW), { lead: 'Requested by engineer at 16:05', threads, tail: ' · waiting for 1 thread to close:' });
-    assert.deepEqual(restartNote(request, { ...pending, waiting: { threads: [], secretaryTurn: true, workspaceJob: true, logQuiet: false } }, NOW).tail, ' · waiting for a secretary turn to end, a workspace job to end, the log to go quiet');
-    assert.deepEqual(restartNote(request, { ...pending, waiting: { threads: [], secretaryTurn: false, workspaceJob: false, logQuiet: true } }, NOW).tail, ' · restarting now');
-    assert.deepEqual(restartNote({ ...request, requestedBy: null, force: true }, null, NOW), { lead: 'Requested by the operator at 16:05 · force', threads: [], tail: ' · checking the safe window' });
-    assert.equal(restartNote(request, { ...pending, waiting: null }, NOW).tail, ' · checking the safe window');
+    assert.deepEqual(restartNote(request, { ...waiting, threads }, NOW), { lead: 'Requested by engineer at 16:05', threads, tail: ' · waiting for 1 thread to close:' });
+    assert.deepEqual(restartNote(request, { ...waiting, secretaryTurn: true, workspaceJob: true, logQuiet: false }, NOW).tail, ' · waiting for a secretary turn to end, a workspace job to end, the log to go quiet');
+    assert.deepEqual(restartNote(request, { ...waiting, threads, otherThreads: 2, logQuiet: false }, NOW).tail, ' · waiting for the log to go quiet, 2 threads of other workspaces to close, 1 thread to close:');
+    assert.deepEqual(restartNote(request, waiting, NOW).tail, ' · restarting now');
+    assert.deepEqual(restartNote({ ...request, requestedBy: null, force: true }, undefined, NOW), { lead: 'Requested by the operator at 16:05 · force', threads: [], tail: ' · checking the safe window' });
+    assert.equal(restartNote(request, null, NOW).tail, ' · checking the safe window');
+    // Another workspace's request: no requester to name, its threads a count.
+    assert.deepEqual(restartNote({ ...request, requestedBy: null, own: false }, { ...waiting, otherThreads: 1 }, NOW), { lead: 'Requested from another workspace at 16:05', threads: [], tail: ' · waiting for 1 thread of other workspaces to close' });
+  });
+
+  it('is the facts’ pending unless the log completed it, else the log’s newest request after its newest completion', () => {
+    resetSeq();
+
+    const requested = (seq: bigint) => event({ seq, type: 'system.restart.requested', actor: 'system', threadId: 't1', createdAt: request.requestedAt, payload: { reason: 'a build', requestedBy: 'engineer' } });
+    const completed = (seq: bigint, requestSeq: number) => event({ seq, type: 'system.restart.completed', actor: 'system', targetThreadId: 'main', payload: { reason: 'a build', requestSeq } });
+    const pending = { seq: 7, own: true, reason: 'a build', requestedAt: request.requestedAt, requestedBy: 'engineer', threadId: 't1', force: false, waiting };
+
+    // The facts name the request the log holds: the facts, with the window.
+    assert.deepEqual(pendingOf([requested(7n)], pending), { request, waiting });
+    // The request left the log behind fifty exceptions: the facts still say it.
+    const exceptions = Array.from({ length: 50 }, (_, i) => event({ seq: BigInt(10 + i), type: 'system.exception', actor: 'system', payload: { error: 'x' } }));
+
+    assert.deepEqual(pendingOf(exceptions, pending), { request, waiting });
+    // The log holds a completion past it: the facts are from before that restart.
+    assert.equal(pendingOf([requested(7n), completed(9n, 7)], pending), null);
+    // The facts did not answer, or answered before the request: the log's request, the window unknown.
+    assert.deepEqual(pendingOf([requested(7n)], undefined), { request, waiting: undefined });
+    assert.deepEqual(pendingOf([requested(7n)], null), { request, waiting: undefined });
+    // Another workspace's request, which the log never shows.
+    assert.deepEqual(pendingOf([], { ...pending, own: false, reason: null, requestedBy: null, threadId: null }), { request: { ...request, requestedBy: null, own: false }, waiting });
+    // A pending of an older server, without a seq: left to the log.
+    assert.equal(pendingOf([completed(9n, 7)], { ...pending, seq: undefined as never }), null);
+    assert.equal(pendingOf([], null), null);
   });
 });
 
@@ -159,7 +235,7 @@ describe('the summaries of Home', () => {
     assert.equal(systemSummary(null), null);
     assert.equal(fileAreaSummary({ files: 2418, bytes: 1.2 * GB }), '2,418 files · 1.2 GB');
     assert.equal(fileAreaSummary({ files: 1, bytes: 300, complete: true }), '1 file · 300 B');
-    assert.equal(fileAreaSummary({ files: 1_000_000, bytes: 5 * GB, complete: false }), 'over 1,000,000 files · 5 GB');
+    assert.equal(fileAreaSummary({ files: 1_000_000, bytes: 5 * GB, complete: false }), 'at least 1,000,000 files · 5 GB');
     assert.equal(fileAreaSummary(null), null);
   });
 });

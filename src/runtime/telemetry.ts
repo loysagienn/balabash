@@ -7,9 +7,13 @@
 // Everything here is a measurement, never an event of the log; what the
 // kernel does not offer (no /proc, no statfs) is null, not an error.
 //
-// The version of the running code — the commit and the branch of the
-// checkout the process was started in — is read once at start with git;
-// a checkout without git (or a start outside one) has no version.
+// The version of the running code is the build's: build/server.js stamps
+// the bundle with the commit, the branch, whether the tree was dirty and
+// the moment (__BUILD_INFO__), so a bundle the supervisor rolled back
+// still names the code it holds; the checkout the process was started in
+// is read once at start with git and shown beside it when it differs. Code
+// run unbundled (the tests) has no build stamp; a start outside a git
+// checkout (or without git) has no checkout.
 
 import { execFile } from 'node:child_process';
 import fs from 'node:fs/promises';
@@ -147,8 +151,8 @@ type Rates = { perCore: number[] | null; network: { inBytesPerSecond: number; ou
 // the one before it — a read closer than MIN_RATE_SPAN_MS answers these.
 let latest: Sample | null = null;
 let latestRates: Rates = { perCore: null, network: null };
-// The timer's own samples, one per interval: the inbound bytes between two
-// of them are one bar of the hour.
+// The timer's newest sample with network counters: the inbound bytes from
+// it to the next are the bars of the minutes between them.
 let lastTick: Sample | null = null;
 const inboundHistory: number[] = [];
 
@@ -169,11 +173,26 @@ async function sampleNow(): Promise<Sample> {
   return sample;
 }
 
+// The bars between two samples with network counters: one per
+// SAMPLE_INTERVAL_MS of the time between them, each the average of the
+// span — a tick the counters could not be read at, or a late timer, leaves
+// no bar out, so the history's length is its minutes.
+export function inboundBars(previous: { at: number; rx: number }, next: { at: number; rx: number }): number[] {
+  const bars = Math.max(1, Math.round((next.at - previous.at) / SAMPLE_INTERVAL_MS));
+  const bytes = Math.max(0, next.rx - previous.rx);
+
+  return Array.from({ length: bars }, () => bytes / bars);
+}
+
 async function tick(): Promise<void> {
   const sample = await sampleNow();
 
-  if (lastTick && sample.net && lastTick.net) {
-    inboundHistory.push(Math.max(0, sample.net.rx - lastTick.net.rx));
+  if (!sample.net) {
+    return; // the counters are not readable now: the next readable sample spans the gap
+  }
+
+  if (lastTick?.net) {
+    inboundHistory.push(...inboundBars({ at: lastTick.at, rx: lastTick.net.rx }, { at: sample.at, rx: sample.net.rx }));
 
     if (inboundHistory.length > HISTORY_LENGTH) {
       inboundHistory.splice(0, inboundHistory.length - HISTORY_LENGTH);
@@ -186,7 +205,23 @@ async function tick(): Promise<void> {
 // ---------------------------------------------------------------------------
 // The version of the running code.
 
-let version: ProcessVersionView = { commit: null, branch: null };
+// The build stamp, defined by esbuild into the bundle (build/server.js);
+// undefined where the code runs from its sources.
+declare const __BUILD_INFO__: { commit: string | null; branch: string | null; dirty: boolean; builtAt: string } | undefined;
+
+function readBuildStamp(): Omit<ProcessVersionView, 'checkout'> {
+  const stamp = typeof __BUILD_INFO__ === 'undefined' ? null : __BUILD_INFO__;
+
+  if (!stamp) {
+    return { commit: null, branch: null, dirty: false, builtAt: null };
+  }
+
+  const builtAt = new Date(stamp.builtAt);
+
+  return { commit: stamp.commit, branch: stamp.branch, dirty: stamp.dirty, builtAt: Number.isNaN(builtAt.getTime()) ? null : builtAt };
+}
+
+let version: ProcessVersionView = { ...readBuildStamp(), checkout: null };
 
 async function git(args: string[]): Promise<string | null> {
   try {
@@ -199,10 +234,11 @@ async function git(args: string[]): Promise<string | null> {
   }
 }
 
-export async function readVersion(): Promise<ProcessVersionView> {
+// The checkout the process was started in.
+export async function readCheckout(): Promise<ProcessVersionView['checkout']> {
   const [commit, branch] = await Promise.all([git(['rev-parse', '--short', 'HEAD']), git(['rev-parse', '--abbrev-ref', 'HEAD'])]);
 
-  return { commit, branch: branch === 'HEAD' ? null : branch };
+  return commit ? { commit, branch: branch === 'HEAD' ? null : branch } : null;
 }
 
 export function getVersion(): ProcessVersionView {
@@ -216,9 +252,9 @@ export const PROCESS_STARTED_AT = new Date(Date.now() - process.uptime() * 1000)
 // The service and the read.
 
 export function startTelemetry(): { name: string; stop: () => void } {
-  readVersion()
-    .then(read => {
-      version = read;
+  readCheckout()
+    .then(checkout => {
+      version = { ...version, checkout };
     })
     .catch(() => {});
 

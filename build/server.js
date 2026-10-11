@@ -1,5 +1,32 @@
 import * as esbuild from 'esbuild';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs/promises';
+
+function git(args) {
+  try {
+    return execFileSync('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 5000 }).trim();
+  } catch {
+    return null;
+  }
+}
+
+// The build stamp the bundle carries (src/runtime/telemetry.ts reads it as
+// __BUILD_INFO__): the commit and the branch the build read from the
+// checkout, whether the tree held uncommitted changes — the bundle is then
+// not that commit alone — and the moment. Outside a git checkout the
+// commit is null.
+function readBuildInfo() {
+  const commit = git(['rev-parse', '--short', 'HEAD']);
+  const branch = git(['rev-parse', '--abbrev-ref', 'HEAD']);
+  const status = commit === null ? null : git(['status', '--porcelain']);
+
+  return {
+    commit,
+    branch: branch === 'HEAD' ? null : branch,
+    dirty: status !== null && status !== '',
+    builtAt: new Date().toISOString(),
+  };
+}
 
 function getOptions(NODE_ENV, APP_VERSION) {
   /**
@@ -20,6 +47,7 @@ function getOptions(NODE_ENV, APP_VERSION) {
     format: 'esm',
     define: {
       __APP_VERSION__: JSON.stringify(APP_VERSION),
+      __BUILD_INFO__: JSON.stringify(readBuildInfo()),
     },
     minify: NODE_ENV === 'production',
     sourcemap: NODE_ENV === 'production',

@@ -86,12 +86,13 @@ describe('a place brought back by history', () => {
 });
 
 describe('the footer of the sidebar', () => {
-  it('names the version, the uptime of the process and the sessions running, or nothing without the facts', () => {
+  it('names the build, the uptime of the process and the active threads, or nothing without the facts', () => {
     const now = new Date(2026, 9, 11, 16, 38);
     const startedAt = new Date(2026, 9, 11, 0, 21);
 
-    assert.deepEqual(footerWords({ commit: '3f9c21e', startedAt }, 4, now), { version: '3f9c21e', uptime: 'uptime 16h 17m', sessions: '4 agent sessions' });
-    assert.deepEqual(footerWords({ commit: null, startedAt }, 1, now), { version: null, uptime: 'uptime 16h 17m', sessions: '1 agent session' });
+    assert.deepEqual(footerWords({ commit: '3f9c21e', dirty: false, startedAt }, 4, now), { version: '3f9c21e', uptime: 'uptime 16h 17m', sessions: '4 active threads' });
+    assert.equal(footerWords({ commit: '3f9c21e', dirty: true, startedAt }, 4, now)?.version, '3f9c21e+');
+    assert.deepEqual(footerWords({ commit: null, startedAt }, 1, now), { version: null, uptime: 'uptime 16h 17m', sessions: '1 active thread' });
     assert.equal(footerWords(null, 4, now), null);
     assert.equal(footerWords(undefined, 4, now), null);
   });

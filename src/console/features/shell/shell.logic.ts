@@ -6,6 +6,7 @@
 
 import type { AppRoute } from '../../lib/router/routes.ts';
 import { countOf, durationLabel } from '../../lib/format/index.ts';
+import { buildLabel } from '../system/version.ts';
 
 export type KeyPress = {
   key: string;
@@ -88,16 +89,19 @@ export function restoreMove(input: { target: number; lastSet: number | null; scr
 }
 
 // The sidebar's footer (design: .shell-foot — "3f9c21e · uptime 16h 17m /
-// 4 agent sessions"): the version and the start of the process from the
-// facts read by place (GET /api/system), the sessions from the store —
-// the threads running now. Null without the facts: the footer is not
-// drawn until the server answers (an older server has no /api/system).
+// 4 agent sessions"): the build the process runs ("3f9c21e+" when the
+// tree held uncommitted changes at the build) and its start from the facts
+// read by place (GET /api/system), and the threads of this workspace at
+// work from the store — named as what they are, active threads (the
+// process's live sessions, every workspace's, are on System). Null without
+// the facts: the footer is not drawn until the server answers (an older
+// server has no /api/system).
 export type FooterWords = { version: string | null; uptime: string; sessions: string };
 
-export function footerWords(facts: { commit: string | null; startedAt: Date } | null | undefined, running: number, now: Date): FooterWords | null {
+export function footerWords(facts: { commit: string | null; dirty?: boolean; startedAt: Date } | null | undefined, running: number, now: Date): FooterWords | null {
   if (!facts) {
     return null;
   }
 
-  return { version: facts.commit, uptime: `uptime ${durationLabel(now.getTime() - facts.startedAt.getTime())}`, sessions: countOf(running, 'agent session') };
+  return { version: buildLabel(facts), uptime: `uptime ${durationLabel(now.getTime() - facts.startedAt.getTime())}`, sessions: countOf(running, 'active thread') };
 }

@@ -1,12 +1,13 @@
 // The pure rules of the telemetry (src/runtime/telemetry.ts): a core's
 // load between two samples, the memory lines of /proc/meminfo, the
-// interfaces of /proc/net/dev, the rate between two samples.
+// interfaces of /proc/net/dev, the rate between two samples, the bars of
+// the inbound history between two samples.
 //
 // Run: npm test
 
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { cpuLoad, cpuTimesOf, netRate, parseMeminfo, parseNetDev } from './telemetry.ts';
+import { SAMPLE_INTERVAL_MS, cpuLoad, cpuTimesOf, inboundBars, netRate, parseMeminfo, parseNetDev } from './telemetry.ts';
 
 describe('cpu load', () => {
   const times = (user: number, idle: number) => ({ times: { user, nice: 0, sys: 0, idle, irq: 0 } });
@@ -76,5 +77,20 @@ describe('the rate between two samples', () => {
     assert.equal(netRate({ at: 0, cpu: [], net: null }, sample(2000, 1, 1)), null);
     assert.equal(netRate(sample(0, 1, 1), sample(500, 2, 2)), null);
     assert.deepEqual(netRate(sample(0, 5000, 5000), sample(1000, 100, 100)), { inBytesPerSecond: 0, outBytesPerSecond: 0 });
+  });
+});
+
+describe('the bars of the inbound history', () => {
+  const minute = SAMPLE_INTERVAL_MS;
+
+  test('are one per minute between two samples, each the average of the span — a missed reading or a late timer leaves no minute out', () => {
+    assert.deepEqual(inboundBars({ at: 0, rx: 1000 }, { at: minute, rx: 1600 }), [600]);
+    // The reading at minute 2 failed: the sample at minute 3 spans two minutes.
+    assert.deepEqual(inboundBars({ at: minute, rx: 1600 }, { at: 3 * minute, rx: 2800 }), [600, 600]);
+    // A timer late by half a minute still counts as one minute.
+    assert.deepEqual(inboundBars({ at: 0, rx: 0 }, { at: 1.4 * minute, rx: 700 }), [700]);
+    // Too close to be a minute: one bar nonetheless; a counter that went down is no traffic.
+    assert.deepEqual(inboundBars({ at: 0, rx: 0 }, { at: 100, rx: 5 }), [5]);
+    assert.deepEqual(inboundBars({ at: 0, rx: 5000 }, { at: minute, rx: 100 }), [0]);
   });
 });

@@ -52,22 +52,49 @@ type PendingRestart = {
   requestedAt: Date;
   forceApplied: boolean;
   notified: boolean;
-  // What the newest poll found in the way; null before the first poll.
-  waiting: PendingRestartView['waiting'];
+  // What the newest poll found in the way, every workspace's threads with
+  // their owner; null before the first poll.
+  waiting: {
+    threads: { id: string; title: string | null; agent: string; userId: string }[];
+    secretaryTurn: boolean;
+    workspaceJob: boolean;
+    logQuiet: boolean;
+  } | null;
 };
 
 let pending: PendingRestart | null = null;
 
 // The coordinator's status tail shows this (volatile, outside the cache
-// head); the console's System screen shows what the restart waits for.
-export function getPendingRestart(): PendingRestartView | null {
+// head); the console's System screen shows what the restart waits for. The
+// view is the workspace's: the request's words and thread only when the
+// request is its own, the threads in the way only its own — another
+// workspace's are a count (src/api/contract.ts PendingRestartView).
+export function getPendingRestart(userId: string): PendingRestartView | null {
   if (!pending) {
     return null;
   }
 
-  const { reason, requestedAt, requestedBy, threadId, force, waiting } = pending;
+  const { seq, reason, requestedAt, requestedBy, threadId, force, waiting } = pending;
+  const own = pending.userId === userId;
 
-  return { reason, requestedAt, requestedBy, threadId, force, waiting };
+  return {
+    seq: Number(seq),
+    own,
+    reason: own ? reason : null,
+    requestedAt,
+    requestedBy: own ? requestedBy : null,
+    threadId: own ? threadId : null,
+    force,
+    waiting: waiting
+      ? {
+          threads: waiting.threads.filter(thread => thread.userId === userId).map(({ id, title, agent }) => ({ id, title, agent })),
+          otherThreads: waiting.threads.filter(thread => thread.userId !== userId).length,
+          secretaryTurn: waiting.secretaryTurn,
+          workspaceJob: waiting.workspaceJob,
+          logQuiet: waiting.logQuiet,
+        }
+      : null,
+  };
 }
 
 async function readRollbackMarker(): Promise<{ at?: string; reason?: string } | null> {
@@ -168,9 +195,11 @@ type RestartModuleHooks = {
   hasActiveJobs(): boolean;
   // Graceful shutdown ending in process.exit(RESTART_EXIT_CODE).
   onRestartWindow(): Promise<void>;
+  // How often the safe window is polled; the tests shorten it.
+  pollIntervalMs?: number;
 };
 
-export function startRestartModule({ isBusy, hasActiveJobs, onRestartWindow }: RestartModuleHooks): Consumer {
+export function startRestartModule({ isBusy, hasActiveJobs, onRestartWindow, pollIntervalMs = POLL_INTERVAL_MS }: RestartModuleHooks): Consumer {
   let exiting = false;
 
   const notifyLongPending = async (current: PendingRestart, blockedBy: string[]): Promise<void> => {
@@ -249,7 +278,7 @@ export function startRestartModule({ isBusy, hasActiveJobs, onRestartWindow }: R
     }
 
     current.waiting = {
-      threads: activeChildren.map(thread => ({ id: thread.id, title: thread.title, agent: thread.agent })),
+      threads: activeChildren.map(thread => ({ id: thread.id, title: thread.title, agent: thread.agent, userId: thread.userId })),
       secretaryTurn,
       workspaceJob,
       logQuiet,
@@ -270,7 +299,7 @@ export function startRestartModule({ isBusy, hasActiveJobs, onRestartWindow }: R
     poll().catch(error => {
       console.error('[restart] poll failed:', error);
     });
-  }, POLL_INTERVAL_MS);
+  }, pollIntervalMs);
 
   const consumer = startConsumer({
     name: 'restart',

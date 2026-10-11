@@ -1,9 +1,10 @@
 // GET /api/system over the stand (src/test-support/stand.ts): the machine
 // read from the kernel, the process's own facts, the database by its size
 // read, the file area of the session's workspace once walked, the restart
-// in the way; and the system log of the snapshot — the newest system.*
-// events the stream would show this workspace, in seq order, which the
-// console's system domain reproduces from the tail.
+// in the way — another workspace's request a bare fact, its threads a
+// count, never their names; and the system log of the snapshot — the
+// newest system.* events the stream would show this workspace, in seq
+// order, which the console's system domain reproduces from the tail.
 //
 // Run: npm test
 
@@ -26,6 +27,9 @@ let appendEvent: typeof import('../core/append.ts')['appendEvent'];
 let measureFileAreaTotals: typeof import('../workspace/totals.ts')['measureFileAreaTotals'];
 let readSystemLog: typeof import('./snapshot.ts')['readSystemLog'];
 let getEventsAfter: typeof import('../core/events.ts')['getEventsAfter'];
+let startRestartModule: typeof import('../runtime/restart.ts')['startRestartModule'];
+let ensureMainThread: typeof import('../core/threads.ts')['ensureMainThread'];
+let startThread: typeof import('../core/threads.ts')['startThread'];
 
 before(async () => {
   stand = await startStand();
@@ -37,6 +41,8 @@ before(async () => {
   ({ measureFileAreaTotals } = await import('../workspace/totals.ts'));
   ({ readSystemLog } = await import('./snapshot.ts'));
   ({ getEventsAfter } = await import('../core/events.ts'));
+  ({ startRestartModule } = await import('../runtime/restart.ts'));
+  ({ ensureMainThread, startThread } = await import('../core/threads.ts'));
 });
 
 after(async () => {
@@ -67,9 +73,14 @@ describe('GET /api/system', () => {
     assert.equal(body.database.available, true);
     assert.ok((body.database.sizeBytes ?? 0) > 0);
     assert.equal(body.database.error, null);
-    assert.equal(body.fileStorageBytes, 0);
+    // The stand's database is the embedded one on this host; its storage the local driver.
+    assert.equal(body.database.local, true);
+    assert.deepEqual(body.fileStorage, { kind: 'local', bytes: 0 });
     assert.equal(body.fileArea, null);
     assert.deepEqual(body.restart, { pending: null });
+    // Unbundled, the process has no build stamp; the checkout is read at the
+    // telemetry's start, which the stand does not run.
+    assert.deepEqual({ commit: body.process.commit, branch: body.process.branch, dirty: body.process.dirty, builtAt: body.process.builtAt, checkout: body.process.checkout }, { commit: null, branch: null, dirty: false, builtAt: null, checkout: null });
 
     assert.equal((await stand.request('GET', '/api/system', { cookie: null })).status, 401);
   });
@@ -86,7 +97,7 @@ describe('GET /api/system', () => {
 
     assert.ok(body.fileArea);
     assert.ok(body.fileArea.measuredAt instanceof Date);
-    assert.deepEqual({ files: body.fileArea.files, bytes: body.fileArea.bytes, folders: body.fileArea.folders, complete: body.fileArea.complete }, { files: 2, bytes: 7, folders: { renovation: { files: 1, bytes: 4 } }, complete: true });
+    assert.deepEqual({ files: body.fileArea.files, bytes: body.fileArea.bytes, folders: body.fileArea.folders, complete: body.fileArea.complete, unreadable: body.fileArea.unreadable }, { files: 2, bytes: 7, folders: { renovation: { files: 1, bytes: 4 } }, complete: true, unreadable: 0 });
   });
 });
 
@@ -140,5 +151,74 @@ describe('the system log of the snapshot', () => {
       state.log.map(event => [event.seq, event.type]),
       next.map(event => [event.seq, event.type]),
     );
+  });
+});
+
+describe('the restart in the way, as this workspace may see it', () => {
+  const until = async <T,>(read: () => Promise<T | null>, timeoutMs = 15_000): Promise<T> => {
+    const deadline = Date.now() + timeoutMs;
+
+    for (;;) {
+      const value = await read();
+
+      if (value !== null) {
+        return value;
+      }
+
+      assert.ok(Date.now() < deadline, 'the restart module did not pick the request up in time');
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+  };
+
+  test('another workspace’s request is a bare fact — no reason, no requester, no thread — and its threads in the way a count; an own request names its own', async () => {
+    const other = await prisma.user.create({ data: {} });
+    const otherMain = await ensureMainThread(other.id);
+    const foreignChild = await startThread({ userId: other.id, parentThreadId: otherMain.id, agent: 'engineer', title: 'foreign confidential title', actor: 'system' });
+    // The safe window never opens: a secretary turn is always in flight.
+    const restarts = startRestartModule({
+      isBusy: () => true,
+      hasActiveJobs: () => false,
+      onRestartWindow: () => assert.fail('the window must not open'),
+      pollIntervalMs: 50,
+    });
+
+    try {
+      const foreign = await appendEvent({ type: 'system.restart.requested', actor: 'system', userId: other.id, threadId: foreignChild.id, payload: { reason: 'foreign confidential reason', requestedBy: 'engineer' } });
+
+      assert.ok(foreign.written);
+      const seen = await until(async () => {
+        const body = (await stand.request('GET', '/api/system')).json<SystemResponse>();
+        const pending = body.restart.pending;
+
+        return pending && pending.seq === Number(foreign.event.seq) && pending.waiting ? pending : null;
+      });
+
+      assert.deepEqual(
+        { own: seen.own, reason: seen.reason, requestedBy: seen.requestedBy, threadId: seen.threadId, force: seen.force, threads: seen.waiting?.threads, otherThreads: seen.waiting?.otherThreads, secretaryTurn: seen.waiting?.secretaryTurn },
+        { own: false, reason: null, requestedBy: null, threadId: null, force: false, threads: [], otherThreads: 1, secretaryTurn: true },
+      );
+      assert.ok(seen.requestedAt instanceof Date);
+      assert.ok(!JSON.stringify(seen).includes('foreign confidential'));
+
+      // The workspace's own request, blocked by the other workspace's thread
+      // and by a child of its own: its words, its thread named, the other's counted.
+      const ownChild = await startThread({ userId: stand.userId, parentThreadId: stand.mainThreadId, agent: 'engineer', title: 'own thread', actor: 'system' });
+      const own = await appendEvent({ type: 'system.restart.requested', actor: 'system', userId: stand.userId, threadId: stand.mainThreadId, payload: { reason: 'my build', requestedBy: 'engineer' } });
+
+      assert.ok(own.written);
+      const mine = await until(async () => {
+        const body = (await stand.request('GET', '/api/system')).json<SystemResponse>();
+        const pending = body.restart.pending;
+
+        return pending && pending.seq === Number(own.event.seq) && pending.waiting && pending.waiting.threads.length ? pending : null;
+      });
+
+      assert.deepEqual(
+        { own: mine.own, reason: mine.reason, requestedBy: mine.requestedBy, threadId: mine.threadId, threads: mine.waiting?.threads, otherThreads: mine.waiting?.otherThreads },
+        { own: true, reason: 'my build', requestedBy: 'engineer', threadId: stand.mainThreadId, threads: [{ id: ownChild.id, title: 'own thread', agent: 'engineer' }], otherThreads: 1 },
+      );
+    } finally {
+      restarts.stop();
+    }
   });
 });

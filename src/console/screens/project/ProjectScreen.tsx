@@ -49,11 +49,13 @@ const PROJECT_THREADS = 8;
 
 // "9 files · 4 MB" — the folder's totals as the newest walk of the file
 // area counted them (features/system, GET /api/system); nothing until
-// the walk has seen the folder.
+// the walk has seen the folder; "at least" after a walk that could not
+// count everything (the folder's share of what it missed is unknown).
 function ProjectFilesSummary({ slug }: { slug: string }) {
   const facts = useSystemFacts();
-  const folder = facts.data?.fileArea?.folders[slug] ?? null;
-  const words = fileAreaSummary(folder);
+  const area = facts.data?.fileArea ?? null;
+  const folder = area?.folders[slug] ?? null;
+  const words = fileAreaSummary(folder && area ? { ...folder, complete: area.complete } : null);
 
   return words ? <Quiet>{words}</Quiet> : null;
 }

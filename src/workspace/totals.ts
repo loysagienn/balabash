@@ -7,8 +7,15 @@
 // gets the newest one or null before the first walk (the console says
 // "measuring"). The walk counts what is on disk — every regular file, the
 // hidden and the binary ones included — and never follows a symbolic link
-// (a link is not a file of the area, src/workspace/files.ts); a runaway
-// area is cut at MAX_ENTRIES and marked incomplete.
+// (a link is not a file of the area, src/workspace/files.ts): the root and
+// every node are read with lstat as they are at that moment, not as the
+// listing saw them, so a folder or a file replaced by a link since its
+// listing is not followed either (the check and the read are two calls —
+// a swap between them is the one window left). What the walk cannot read
+// (a folder refusing its listing, a file refusing its stat) is counted as
+// unreadable and makes the measurement incomplete — a lower bound, never
+// a precise zero; what vanished in between is simply gone. A runaway area
+// is cut at MAX_ENTRIES and marked incomplete the same way.
 
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -27,31 +34,66 @@ export function getFileAreaTotals(userId: string): FileAreaTotalsView | null {
 
 type Counter = { files: number; bytes: number };
 
+// A node that is not there anymore (or whose parent is not a directory
+// anymore): gone, not unreadable.
+function vanished(error: unknown): boolean {
+  const code = (error as { code?: unknown }).code;
+
+  return code === 'ENOENT' || code === 'ENOTDIR';
+}
+
 // The totals of one directory tree: the root is a file area (or any
 // directory — the tests measure a temporary one). Null when there is no
-// such directory.
+// such directory, or the root itself is a link.
 export async function measureDirectory(root: string, now = new Date()): Promise<FileAreaTotalsView | null> {
-  const rootStats = await fs.stat(root).catch(() => null);
+  const rootStats = await fs.lstat(root).catch(() => null);
 
   if (!rootStats?.isDirectory()) {
     return null;
   }
 
   const total: Counter = { files: 0, bytes: 0 };
-  const folders: Record<string, Counter> = {};
+  // A Map: a folder may be named like a property of Object ("__proto__").
+  const folders = new Map<string, Counter>();
   let entries = 0;
   let complete = true;
+  let unreadable = 0;
   // Iterative, deepest last: a deep tree must not grow the call stack.
   const pending: { dir: string; top: string | null }[] = [{ dir: root, top: null }];
 
   while (pending.length) {
     const { dir, top } = pending.pop()!;
+
+    // The folder as it is now: listed as a directory, it may have become a
+    // link (or gone) since — a link is not descended into.
+    if (dir !== root) {
+      let current;
+
+      try {
+        current = await fs.lstat(dir);
+      } catch (error) {
+        if (!vanished(error)) {
+          unreadable += 1;
+        }
+
+        continue;
+      }
+
+      if (!current.isDirectory()) {
+        continue;
+      }
+    }
+
     let names;
 
     try {
       names = await fs.readdir(dir, { withFileTypes: true });
-    } catch {
-      continue; // vanished mid-walk, or unreadable: not counted
+    } catch (error) {
+      if (!vanished(error)) {
+        unreadable += 1;
+      }
+
+      continue;
     }
 
     for (const entry of names) {
@@ -66,8 +108,8 @@ export async function measureDirectory(root: string, now = new Date()): Promise<
       const folder = top ?? (entry.isDirectory() ? entry.name : null);
 
       if (entry.isDirectory()) {
-        if (folder !== null && !Object.hasOwn(folders, folder)) {
-          folders[folder] = { files: 0, bytes: 0 };
+        if (folder !== null && !folders.has(folder)) {
+          folders.set(folder, { files: 0, bytes: 0 });
         }
 
         pending.push({ dir: path.join(dir, entry.name), top: folder });
@@ -78,9 +120,20 @@ export async function measureDirectory(root: string, now = new Date()): Promise<
         continue; // a symbolic link, a socket: not a file of the area
       }
 
-      const stats = await fs.stat(path.join(dir, entry.name)).catch(() => null);
+      // The file as it is now, without following a link it may have become.
+      let stats;
 
-      if (!stats?.isFile()) {
+      try {
+        stats = await fs.lstat(path.join(dir, entry.name));
+      } catch (error) {
+        if (!vanished(error)) {
+          unreadable += 1;
+        }
+
+        continue;
+      }
+
+      if (!stats.isFile()) {
         continue;
       }
 
@@ -88,7 +141,12 @@ export async function measureDirectory(root: string, now = new Date()): Promise<
       total.bytes += stats.size;
 
       if (top !== null) {
-        const counter = (folders[top] ??= { files: 0, bytes: 0 });
+        let counter = folders.get(top);
+
+        if (!counter) {
+          counter = { files: 0, bytes: 0 };
+          folders.set(top, counter);
+        }
 
         counter.files += 1;
         counter.bytes += stats.size;
@@ -96,7 +154,7 @@ export async function measureDirectory(root: string, now = new Date()): Promise<
     }
   }
 
-  return { measuredAt: now, files: total.files, bytes: total.bytes, folders, complete };
+  return { measuredAt: now, files: total.files, bytes: total.bytes, folders: Object.fromEntries(folders), complete: complete && unreadable === 0, unreadable };
 }
 
 export async function measureFileAreaTotals(userId: string): Promise<FileAreaTotalsView | null> {

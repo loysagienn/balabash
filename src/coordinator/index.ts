@@ -77,13 +77,17 @@ export function hasActiveCoordinatorTurns(): boolean {
 // function definitions — spawns must not reset the cache head. Direct
 // children only: grandchildren are invisible by construction (§5.2).
 // Exported for offline rendering (scripts/render-context.ts).
-export function buildStatusText(children: Thread[], projects: ProjectModel[]): string {
+export function buildStatusText(children: Thread[], projects: ProjectModel[], userId: string): string {
   const lines = [`[status — authoritative, overrides the transcript]`, `time: ${new Date().toISOString()}`];
-  const pendingRestart = getPendingRestart();
+  // The restart in the way as this workspace may see it: the reason only
+  // when the request is its own (src/runtime/restart.ts).
+  const pendingRestart = getPendingRestart(userId);
 
   if (pendingRestart) {
+    const origin = pendingRestart.own ? `(${pendingRestart.reason})` : '(requested from another workspace)';
+
     lines.push(
-      `restart pending: requested ${pendingRestart.requestedAt.toISOString()} (${pendingRestart.reason}) — happens once every child thread is closed and the log goes quiet; avoid starting new threads`,
+      `restart pending: requested ${pendingRestart.requestedAt.toISOString()} ${origin} — happens once every child thread is closed and the log goes quiet; avoid starting new threads`,
     );
   }
 
@@ -239,7 +243,7 @@ export function createCoordinatorRun({ threadId, userId }: { threadId: string; u
         model: config.mainOpenaiModel,
         instructions: COORDINATOR_INSTRUCTIONS,
         tools,
-        statusText: buildStatusText(children, projects),
+        statusText: buildStatusText(children, projects, userId),
       });
 
       // Nothing to keep warm: the state was reset, the head changed or the
@@ -292,7 +296,7 @@ export function createCoordinatorRun({ threadId, userId }: { threadId: string; u
       model: config.mainOpenaiModel,
       instructions: COORDINATOR_INSTRUCTIONS,
       tools,
-      statusText: buildStatusText(children, projects),
+      statusText: buildStatusText(children, projects, userId),
     });
 
     // The new events rendered to nothing — the model has nothing to react

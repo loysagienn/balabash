@@ -156,7 +156,7 @@ async function renderCoordinator(userId: string): Promise<string> {
     renderSection('Instructions (prompt-cache head)', COORDINATOR_INSTRUCTIONS),
     renderSection(
       'Status tail (format sample, rendered fresh every turn)',
-      `\`\`\`\n${buildStatusText([], [])}\n\`\`\``,
+      `\`\`\`\n${buildStatusText([], [], userId)}\n\`\`\``,
     ),
   ];
 

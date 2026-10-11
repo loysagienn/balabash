@@ -880,22 +880,34 @@ export type MachineView = {
     loadAvg: [number, number, number];
   };
   memory: { totalBytes: number; usedBytes: number; swapTotalBytes: number; swapUsedBytes: number } | null;
-  // The volume the process runs on (data/ is under its working directory).
+  // The volume the process runs on (data/ — the workspaces' file areas —
+  // is under its working directory).
   disk: { totalBytes: number; usedBytes: number; freeBytes: number } | null;
   network: {
     inBytesPerSecond: number | null;
     outBytesPerSecond: number | null;
     // The bytes received per minute over the last hour, oldest first — as
-    // many as the process has seen.
+    // many minutes as the process has seen; a minute the kernel could not
+    // be read in, or a late sample, holds the average of its gap.
     inboundPerMinute: number[];
   } | null;
 };
 
 export type ProcessVersionView = {
-  // The short hash of the checkout's HEAD and its branch at start; null
-  // outside a git checkout, or when git is not there.
+  // The build the process runs, stamped into the bundle when it was built
+  // (build/server.js): the short hash of the checkout's HEAD the build read
+  // and its branch, whether the tree held uncommitted changes then (the
+  // bundle is not that commit alone), and the moment of the build. Null
+  // where the build ran outside a git checkout, or the code runs unbundled.
   commit: string | null;
   branch: string | null;
+  dirty: boolean;
+  builtAt: Date | null;
+  // The checkout the process was started in (git rev-parse at start): the
+  // same commit as the build's unless the supervisor rolled the bundle back
+  // or the checkout moved without a build — then both are shown. Null
+  // outside a git checkout, or when git is not there.
+  checkout: { commit: string; branch: string | null } | null;
 };
 
 export type ProcessView = ProcessVersionView & {
@@ -905,8 +917,9 @@ export type ProcessView = ProcessVersionView & {
   uptimeSeconds: number;
   rssBytes: number;
   heapUsedBytes: number;
-  // The runs alive in the process — the live agent sessions — and the
-  // workspace jobs of the schedule in flight.
+  // The runs alive in the process — the live agent sessions of every
+  // workspace, the coordinator's among them — and the workspace jobs of
+  // the schedule in flight.
   liveSessions: number;
   workspaceJobs: number;
 };
@@ -916,22 +929,50 @@ export type DatabaseView = {
   available: boolean;
   sizeBytes: number | null;
   error: string | null;
+  // Whether the connection string names this host (loopback or a socket):
+  // a remote database takes no room on the volume the disk meter shows.
+  local: boolean;
+};
+
+// The file storage of the installation (src/files/storage.ts), one for
+// the host whatever the workspace: the driver and the bytes of every
+// stored file as the files table says them — the local driver keeps them
+// under FILES_ROOT, the spaces driver off this host.
+export type FileStorageView = {
+  kind: 'local' | 'spaces';
+  bytes: number | null;
 };
 
 // The totals of the workspace's file area, as the newest walk counted them
 // (src/workspace/totals.ts): every regular file on disk; `folders` — the
-// same per top-level folder (a project's folder among them).
+// same per top-level folder (a project's folder among them). An incomplete
+// walk — cut at its cap, or with folders and files it could not read — is
+// a lower bound: the area holds at least this much.
 export type FileAreaTotalsView = {
   measuredAt: Date;
   files: number;
   bytes: number;
   folders: Record<string, { files: number; bytes: number }>;
-  // False when the walk stopped at its cap: the area is bigger than said.
+  // False when the walk could not count everything: the totals are at
+  // least what they say.
   complete: boolean;
+  // The folders and files the walk could not read (a permission refused, an
+  // I/O error) — not counted, and the measurement incomplete for them.
+  unreadable: number;
 };
 
+// The restart in the way, as this workspace may see it: the request's own
+// words (reason, requester, thread) only when the request came from this
+// workspace (`own`); another workspace's request is a bare fact — that a
+// restart is pending since when, and whether it is forced (a forced
+// restart cancels every workspace's threads). What it waits for names the
+// threads of this workspace and counts the others.
 export type PendingRestartView = {
-  reason: string;
+  // The seq of the system.restart.requested event — a completion of the log
+  // with a greater seq means this view is stale.
+  seq: number;
+  own: boolean;
+  reason: string | null;
   requestedAt: Date;
   requestedBy: string | null;
   threadId: string | null;
@@ -940,6 +981,8 @@ export type PendingRestartView = {
   // the first poll.
   waiting: {
     threads: { id: string; title: string | null; agent: string }[];
+    // Active threads of other workspaces in the way — a count, not names.
+    otherThreads: number;
     secretaryTurn: boolean;
     workspaceJob: boolean;
     logQuiet: boolean;
@@ -951,8 +994,7 @@ export type SystemResponse = {
   machine: MachineView;
   process: ProcessView;
   database: DatabaseView;
-  // The bytes of every stored file (the file storage of the installation).
-  fileStorageBytes: number | null;
+  fileStorage: FileStorageView;
   // Null before the first walk of the file area.
   fileArea: FileAreaTotalsView | null;
   restart: { pending: PendingRestartView | null };

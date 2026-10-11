@@ -25,7 +25,7 @@ const counts = (partial: Partial<SectionCounts> = {}): SectionCounts => ({
 const GB = 1_000_000_000;
 const FACTS: NonNullable<SectionCounts['facts']> = {
   machine: { uptimeSeconds: 1, cpu: { cores: 2, perCore: [10, 18], loadAvg: [0, 0, 0] }, memory: null, disk: { totalBytes: 200 * GB, usedBytes: 131 * GB, freeBytes: 69 * GB }, network: null },
-  fileArea: { measuredAt: NOW, files: 2418, bytes: 1.2 * GB, folders: {}, complete: true },
+  fileArea: { measuredAt: NOW, files: 2418, bytes: 1.2 * GB, folders: {}, complete: true, unreadable: 0 },
 };
 
 describe('home section summaries', () => {
