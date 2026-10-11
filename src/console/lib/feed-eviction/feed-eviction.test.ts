@@ -24,7 +24,8 @@ const api: Api = {
   me: async () => ME,
   auth: async () => ME,
   consoleCode: async () => null,
-  logout: async () => ({ ok: true as const }),
+  logout: async () => ({ ok: true as const, signedIn: [] }),
+  workspaces: { list: async () => ({ current: 'u1', workspaces: [] }) },
   connections: {
     rename: async () => {
       throw new Error('not here');

@@ -43,6 +43,14 @@ export type SessionState = {
   // (a Retry), or the answer of a save that lagged behind another tab's
   // later save and its event, cannot put an older name back.
   namesSeq: bigint | null;
+  // The tab is leaving its workspace after signing out of it (logout):
+  // the workspaces still signed in on this browser, or null when the tab's
+  // own was already signed out elsewhere. The page loads anew in another.
+  leaving: { signedIn: string[] | null } | null;
+  // This page signed in itself (the sign-in form), rather than finding a
+  // session at its start: the /login door then just leads on, instead of
+  // offering one more workspace.
+  signedInHere: boolean;
 };
 
 export type SettingsField = keyof SettingsPatchRequest;
@@ -104,6 +112,8 @@ export const initialSession: SessionState = {
   settingsSaving: { workspaceName: false, operatorName: false },
   settingsSaved: { workspaceName: 0, operatorName: 0 },
   namesSeq: null,
+  leaving: null,
+  signedInHere: false,
 };
 
 export function sessionReducer(state: SessionState = initialSession, action: Action): SessionState {
@@ -123,7 +133,7 @@ export function sessionReducer(state: SessionState = initialSession, action: Act
         return state;
       }
 
-      return { ...state, status: 'signed-in', me: action.me, namesSeq: null, error: null, login: { request: null, error: null, codePrinted: false } };
+      return { ...state, status: 'signed-in', me: action.me, namesSeq: null, error: null, login: { request: null, error: null, codePrinted: false }, signedInHere: true };
     case 'LOGIN_FAIL':
       return action.request === state.login.request ? { ...state, login: { ...state.login, request: null, error: action.error } } : state;
     case 'CONSOLE_CODE_REQUEST':
@@ -136,6 +146,9 @@ export function sessionReducer(state: SessionState = initialSession, action: Act
       return { ...state, logoutPending: true };
     case 'LOGOUT_FAIL':
       return { ...state, logoutPending: false };
+    case 'WORKSPACE_LEAVE':
+      // The sign-out button stays busy until the page is gone.
+      return { ...state, leaving: { signedIn: action.signedIn } };
     case 'SAVE_SETTINGS':
       return { ...state, settingsSaving: withSaving(state, action.patch, true) };
     case 'SAVE_SETTINGS_DONE':

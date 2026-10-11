@@ -40,7 +40,6 @@
 
   /* ── Accent: links, active items, focus, capacity rings, section icons ── */
   --accent:#7d86ff;
-  --accent-2:#56b6ff;      /* only the second stop of the logo gradient */
   --accent-bg:color-mix(in srgb,var(--accent) 12%,transparent);
   --accent-line:color-mix(in srgb,var(--accent) 35%,transparent);
   --accent-ink:#ffffff;    /* text and icons on an accent fill */
@@ -85,6 +84,7 @@
   --id-6:oklch(0.78 0.12 215);  /* sky    */
   --id-7:oklch(0.78 0.12 35);   /* coral  */
   --id-8:oklch(0.78 0.12 125);  /* olive  */
+  --id-ink:#0c0d0f;             /* letter on a solid identifier fill (workspace mark) */
   --id-tint:15%;                /* avatar background = identifier color at 15% */
 
   /* ── Token series: parts of model tokens in the composition chart (TokenChart).

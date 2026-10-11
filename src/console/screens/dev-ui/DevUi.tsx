@@ -10,6 +10,7 @@ import { Shell } from '../../features/shell/Shell.tsx';
 import { ActivityChip } from '../../ui/ActivityChip/ActivityChip.tsx';
 import { Avatar } from '../../ui/Avatar/Avatar.tsx';
 import { AGENT_AVATARS } from '../../ui/Avatar/agents.ts';
+import { WsMark } from '../../ui/WsMark/WsMark.tsx';
 import { Badge } from '../../ui/Badge/Badge.tsx';
 import { ActionLink, Btn } from '../../ui/Btn/Btn.tsx';
 import { Card, CardBody, CardFoot, CardHead } from '../../ui/Card/Card.tsx';
@@ -404,6 +405,16 @@ export function DevUi() {
             <Avatar agent="designer" pip="wait" />
             <Avatar agent="browser" pip="act" />
             <Avatar agent="codex" pip="err" />
+          </Row>
+        </Section>
+
+        <Section title="Workspace mark">
+          <Row label="the eight colors · sm (menu rows) · default 28">
+            {[1, 2, 3, 4, 5, 6, 7, 8].map(color => (
+              <WsMark key={color} name="Personal" color={color} />
+            ))}
+            <WsMark name="Caloriu" color={4} size="sm" />
+            <WsMark name="family" color={3} />
           </Row>
         </Section>
 

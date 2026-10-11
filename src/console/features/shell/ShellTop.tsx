@@ -1,4 +1,6 @@
-// Shell header (design: ShellTop): "back" and the section above the page,
+// Shell header (design: ShellTop): on the phone, a top-level screen starts
+// with the current workspace's mark (the workspaces sheet, features/workspaces;
+// a page with "back" leaves the room to its title); "back" and the section above the page,
 // the title, a subtitle; on the right the main thread button (phone only,
 // on top-level screens — a page with "back" leaves the room to its title)
 // the activity indicator and the bell (features/notifications). pageHead —
@@ -13,6 +15,7 @@ import { ActivityChip } from '../../ui/ActivityChip/ActivityChip.tsx';
 import { Icon } from '../../ui/Icon/Icon.tsx';
 import { IconBtn } from '../../ui/IconBtn/IconBtn.tsx';
 import { NotificationsBell } from '../notifications/NotificationsBell.tsx';
+import { WorkspaceSheetButton } from '../workspaces/Workspaces.tsx';
 
 export type MainThreadLink = { route: AppRoute; current: boolean };
 
@@ -44,6 +47,7 @@ export function ShellTop({ title, titleNarrow, sub, crumb, back, backNarrow, pag
 
   return (
     <header className="shell-top" data-title={pageHead ? 'narrow' : undefined} data-back={backNarrow ? 'narrow' : undefined}>
+      {back ? null : <WorkspaceSheetButton />}
       {back ? <IconBtn icon="arrow-left" label="Back" size="sm" className="shell-back" onClick={() => dispatch(routeTo(back))} /> : null}
       {crumb ? (
         <>

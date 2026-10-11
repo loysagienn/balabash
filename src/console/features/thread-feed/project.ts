@@ -17,6 +17,7 @@ import type { StateName } from '../../ui/atoms/state.ts';
 import type { XpState } from '../../ui/Xp/Xp.tsx';
 import { actionDuration, bridgeAction, bridgeOutput, isPlanTool, nativeAction } from './actions.ts';
 import type { ActionDetail, ActionLabel } from './actions.ts';
+import { withWorkspace } from '../../lib/workspace/state.ts';
 
 export type FeedContext = {
   threadId: string;
@@ -115,8 +116,9 @@ const FOLD_LINES = 12;
 
 const is = <T extends EventType>(event: Event, type: T): event is Event & EventOf<T> => event.type === type;
 
+// A stored file's bytes, in the tab's workspace (?ws=: a link, an <img>).
 export function fileHref(fileId: string): string {
-  return `/api/files/${encodeURIComponent(fileId)}`;
+  return withWorkspace(`/api/files/${encodeURIComponent(fileId)}`);
 }
 
 function shouldFold(text: string): boolean {

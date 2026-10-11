@@ -154,6 +154,25 @@ model Session {
   @@map("web_sessions")
 }
 
+// The workspaces a web session is signed in to: one browser, one session
+// cookie, several workspaces. A row is born by a code exchange (the first
+// one creates the session too) and dies with the sign-out of that workspace
+// or with the session. web_sessions.user_id is the session's primary
+// workspace — always one of these rows; requests that do not name a
+// workspace act in it.
+model SessionWorkspace {
+  sessionId   String   @map("session_id")
+  userId      String   @map("user_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+  // Where the code that signed this workspace in came from: 'telegram' or
+  // 'console' (as web_sessions.login_source).
+  loginSource String?  @map("login_source")
+
+  @@id([sessionId, userId])
+  @@index([userId])
+  @@map("web_session_workspaces")
+}
+
 // CCR adapter state (src/adapters/ccr): the Claude remote-control session
 // (cse_*) mirroring a claude-sdk thread into the operator's Claude app, with
 // the SSE cursor the worker resumes from. Transport state, not events.

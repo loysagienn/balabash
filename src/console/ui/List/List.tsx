@@ -40,6 +40,8 @@ export type RowProps = {
   // grid has a column for it.
   lead: ReactNode;
   title: ReactNode;
+  // A tag beside the title ("this workspace").
+  tag?: ReactNode;
   meta?: ReactNode;
   desc?: ReactNode;
   end?: ReactNode;
@@ -54,7 +56,7 @@ export type RowProps = {
   className?: string;
 };
 
-export function Row({ lead, title, meta, desc, end, href, onClick, external, current, fresh, className }: RowProps) {
+export function Row({ lead, title, tag, meta, desc, end, href, onClick, external, current, fresh, className }: RowProps) {
   const classes = className ? `row ${className}` : 'row';
   const body = (
     <>
@@ -62,6 +64,7 @@ export function Row({ lead, title, meta, desc, end, href, onClick, external, cur
       <span className="row-main">
         <span className="row-t">
           <span className="row-t-text">{title}</span>
+          {tag ?? null}
         </span>
         {meta !== undefined && meta !== null ? <span className="row-m">{meta}</span> : null}
         {desc !== undefined && desc !== null ? <span className="row-d">{desc}</span> : null}

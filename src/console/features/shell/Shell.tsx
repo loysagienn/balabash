@@ -5,8 +5,9 @@
 // container width. Counts and attention marks come from the store: running
 // threads on "Threads", a dot on a section that awaits the user. The
 // toasts of the store stack in the corner of the shell (features/toasts).
-// The sidebar head names the workspace and, once Settings has it, the
-// operator under it; its footer — the version and the uptime of the
+// The sidebar head is the service icon with "Balabash", then the workspace
+// switcher (features/workspaces): the current workspace's mark, name and
+// operator, the menu of every workspace this browser is signed in to; its footer — the version and the uptime of the
 // process (features/system, the facts read by place) and the sessions
 // running (the store).
 
@@ -28,6 +29,7 @@ import { SectionGrid } from '../../ui/SectionGrid/SectionGrid.tsx';
 import { Sheet } from '../../ui/Sheet/Sheet.tsx';
 import { useSystemFacts } from '../system/queries.ts';
 import { Toasts } from '../toasts/Toasts.tsx';
+import { AddWorkspaceDialog, WorkspaceSwitcher } from '../workspaces/Workspaces.tsx';
 import { MORE, NAV, TABS } from './nav.ts';
 import { footerWords, isMainThreadOpen, isMainThreadShortcut, keepsScrollPlace, mainThreadRoute, mainThreadShortcutLabel } from './shell.logic.ts';
 import { restoreScroll } from './scroll.ts';
@@ -110,8 +112,6 @@ export function Shell({ current, detail, children, ...top }: ShellProps) {
     return () => document.removeEventListener('keydown', onKey);
   }, [mainRoute, dispatch]);
 
-  const workspace = me?.workspaceName ?? 'Workspace';
-  const operator = me?.operatorName ?? null;
   const facts = useSystemFacts();
   const now = useNow();
   const foot = footerWords(facts.data?.process, running, now);
@@ -122,13 +122,11 @@ export function Shell({ current, detail, children, ...top }: ShellProps) {
     <div className="app">
       <div className="shell" data-detail={detail ? '' : undefined}>
         <aside className="shell-side">
-          <div className="shell-ws">
+          <div className="shell-brand">
             <img className="shell-logo" src="/static/icon-192.png" alt="" width="192" height="192" />
-            <div>
-              <b className="shell-ws-name">{workspace}</b>
-              {operator ? <small className="shell-ws-sub">{operator}</small> : null}
-            </div>
+            Balabash
           </div>
+          <WorkspaceSwitcher />
           <nav className="shell-nav" aria-label="Sections">
             {main ? (
               <Link className="shell-nav-i shell-mt" route={main.route} current={main.current}>
@@ -203,6 +201,7 @@ export function Shell({ current, detail, children, ...top }: ShellProps) {
         </div>
       </div>
       <Toasts tabs={!detail} />
+      <AddWorkspaceDialog />
       {moreOpen ? (
         <Sheet label="More sections" onClose={() => dispatch(closeMoreSheet())}>
           <SectionGrid label="More sections">

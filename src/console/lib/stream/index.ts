@@ -1,4 +1,5 @@
-// The stream process: one EventSource per tab over GET /api/events/stream,
+// The stream process: one EventSource per tab over GET /api/events/stream
+// (in the tab's workspace, ?ws=),
 // opened once the session is signed in and the snapshot has stamped asOfSeq,
 // closed when either goes away. Every frame becomes an event/<type> action.
 // The browser reconnects by itself and sends Last-Event-ID; when it gives up
@@ -12,6 +13,7 @@ import type { Event } from '../../../core/contract.ts';
 import { parseJson } from '../../../utils/serialize-json.ts';
 import type { Action, State } from '../../store/types.ts';
 import { eventAction } from '../../store/events.ts';
+import { withWorkspace } from '../workspace/index.ts';
 import { streamClosed, streamConnecting, streamOpened, streamReconnecting } from '../../store/stream/actions.ts';
 
 export const STREAM_PATH = '/api/events/stream';
@@ -46,7 +48,7 @@ export function connectStoreToStream(store: Store<State, Action>, { now = () => 
       return;
     }
 
-    const next = new EventSource(`${STREAM_PATH}?after=${after}`);
+    const next = new EventSource(withWorkspace(`${STREAM_PATH}?after=${after}`));
 
     // Remembered before any dispatch: the dispatch notifies this very
     // process (sync), which must see the source and not open a second one.

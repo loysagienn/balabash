@@ -2,7 +2,7 @@
 // the Telegram row, the time zone field, the session row. Pure — tested
 // without the DOM.
 
-import type { LoginSource, TelegramGroupView, WebSessionView } from '../../../api/contract.ts';
+import type { LoginSource, TelegramGroupView } from '../../../api/contract.ts';
 import { dateTimeLabel, shortDate } from '../../lib/format/index.ts';
 
 // "Chrome, macOS" — the browser and the platform of a User-Agent, for the
@@ -60,10 +60,13 @@ export function loginSourceWords(source: LoginSource | null): string | null {
   }
 }
 
-// "signed in Oct 5, 10:24 · Chrome, macOS · code from Telegram" — the
-// session row's line, the parts the facts give.
-export function sessionWords(session: Pick<WebSessionView, 'createdAt' | 'userAgent' | 'loginSource'>, now: Date): string {
-  return [`signed in ${dateTimeLabel(session.createdAt, now)}`, browserWords(session.userAgent), loginSourceWords(session.loginSource)].filter(part => part !== null).join(' · ');
+// A workspace's row of "Signed in on this browser": "signed in Oct 5,
+// 10:24 · code from Telegram"; without the moment (an older server) — the
+// source alone, or nothing.
+export function workspaceSessionWords(signedInAt: Date | null, source: LoginSource | null, now: Date): string | null {
+  const parts = [signedInAt ? `signed in ${dateTimeLabel(signedInAt, now)}` : null, loginSourceWords(source)].filter(part => part !== null);
+
+  return parts.length ? parts.join(' · ') : null;
 }
 
 export type TimezoneWords = {

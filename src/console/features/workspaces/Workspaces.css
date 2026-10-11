@@ -1,0 +1,14 @@
+@layer patterns{
+/* ── Workspace switcher ──  .menu.wsmenu (desktop, in a float layer) · .wslist inside a sheet (phone)
+   > button.wsi[role=menuitemradio] (.wsm, .wsi-main > .wsi-t + .wsi-m, .wsi-end) */
+.wsmenu{--menu-w:276px}
+.wslist{display:flex;flex-direction:column;margin:0 calc(-1 * var(--sp-2)) var(--sp-1)}
+.wsi{display:flex;align-items:center;gap:var(--sp-2h);width:100%;min-height:var(--ctl-h-lg);padding:var(--sp-1h) var(--sp-2);border-radius:var(--r-inner);color:var(--text);text-align:left}
+.wsi:is(:hover,:focus-visible){background-image:var(--layer-selected);outline:none}
+.wsi-main{flex:1;min-width:0}
+.wsi-t{display:block;font-size:var(--fs-ui);line-height:var(--lh-ui);font-weight:var(--fw-medium);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.wsi-m{display:block;font-size:var(--fs-meta);line-height:var(--lh-meta);color:var(--text-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.wsi-end{display:flex;align-items:center;gap:var(--sp-2);flex:none;color:var(--text-3);font-size:var(--fs-meta);line-height:var(--lh-meta)}
+.wsi-end .ic{color:var(--accent)}
+.wssheet-actions{display:flex;flex-direction:column;gap:var(--sp-2)}
+}

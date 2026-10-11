@@ -39,7 +39,7 @@ import { JOB_RUNS_PAGE_DEFAULT, JOB_RUNS_PAGE_MAX, getJobRun, latestJobRuns, lis
 import { taskView } from '../schedule/view.ts';
 import { publicAppsBase } from '../apps/urls.ts';
 import { consumeAuthCode, createAuthCode } from './auth-codes.ts';
-import { createUserSession, destroySession, getSession } from './session.ts';
+import { getSession, listSessionWorkspaces, requestedWorkspace, resolveWorkspace, signInWorkspace, signOutWorkspace } from './session.ts';
 import type { SessionModel } from '../../prisma-generated/models.ts';
 import { createEventStreamHandler } from './event-stream.ts';
 import { planLimits } from '../harness/claude-sdk/plan-limits.ts';
@@ -73,6 +73,7 @@ import type {
   SecretRequestView,
   LoginSource,
   SettingsFactsResponse,
+  SignedInWorkspaceView,
   SettingsResponse,
   SystemResponse,
   TelegramView,
@@ -81,6 +82,7 @@ import type {
   ThreadsResponse,
   WorkspaceNodeResponse,
   WorkspaceWriteResponse,
+  WorkspacesResponse,
 } from './contract.ts';
 
 function sendError(ctx: Context, status: number, code: string, message: string): void {
@@ -113,8 +115,12 @@ async function readJsonBody(ctx: Context): Promise<Record<string, unknown> | nul
 
 // Session gate for every endpoint except the code exchange itself. The
 // session row always carries a userId (anonymous sessions are never
-// created), but the column is nullable — the guard re-checks.
-async function requireSession(ctx: Context, next: Next): Promise<void> {
+// created), but the column is nullable — the guard re-checks. The request
+// acts in one workspace of the session (session.ts, "Several workspaces"):
+// the one it names, or the primary one; naming a workspace this browser is
+// not signed in to is a 401 of its own code — the tab's workspace is gone,
+// the browser's session is not.
+async function gate(ctx: Context, next: Next, { fallbackToPrimary }: { fallbackToPrimary: boolean }): Promise<void> {
   const session = await getSession(ctx);
 
   if (!session || !session.userId) {
@@ -123,9 +129,28 @@ async function requireSession(ctx: Context, next: Next): Promise<void> {
     return;
   }
 
+  const requested = requestedWorkspace(ctx);
+  const userId = (await resolveWorkspace(session, requested)) ?? (fallbackToPrimary ? session.userId : null);
+
+  if (!userId) {
+    sendError(ctx, 401, 'workspace_signed_out', 'This browser is not signed in to that workspace');
+
+    return;
+  }
+
   ctx.state.session = session;
-  ctx.state.userId = session.userId;
+  ctx.state.userId = userId;
   await next();
+}
+
+function requireSession(ctx: Context, next: Next): Promise<void> {
+  return gate(ctx, next, { fallbackToPrimary: false });
+}
+
+// /api/me — the console's first call: a tab whose remembered workspace is
+// no longer signed in learns the one it is in now instead of a refusal.
+function requireSessionOrPrimary(ctx: Context, next: Next): Promise<void> {
+  return gate(ctx, next, { fallbackToPrimary: true });
 }
 
 // The bound telegram group's title — the workspace name of /api/me while
@@ -266,7 +291,8 @@ router.post('/auth', async ctx => {
     return;
   }
 
-  await createUserSession(ctx, consumed.userId, consumed.source);
+  // A browser already signed in adds this workspace to its session.
+  await signInWorkspace(ctx, consumed.userId, consumed.source);
 
   ctx.body = prepareObject(await buildMeResponse(consumed.userId));
 });
@@ -292,8 +318,28 @@ async function buildMeResponse(userId: string): Promise<MeResponse> {
   return { userId, ...names, mainThreadId: mainThread?.id ?? null };
 }
 
-router.get('/me', requireSession, async ctx => {
+router.get('/me', requireSessionOrPrimary, async ctx => {
   ctx.body = prepareObject(await buildMeResponse(ctx.state.userId as string));
+});
+
+// The workspaces of this browser (the switcher, Settings): names as /me
+// words them, in the order they were signed in to.
+router.get('/workspaces', requireSession, async ctx => {
+  const session = ctx.state.session as SessionModel;
+  const rows = await listSessionWorkspaces(session.id);
+  const workspaces = await Promise.all(
+    rows.map(
+      async (row): Promise<SignedInWorkspaceView> => ({
+        userId: row.userId,
+        ...(await readNames(row.userId)),
+        signedInAt: row.createdAt,
+        loginSource: loginSourceOf(row.loginSource),
+      }),
+    ),
+  );
+  const response: WorkspacesResponse = { current: ctx.state.userId as string, workspaces };
+
+  ctx.body = prepareObject(response);
 });
 
 // The facts of Settings beside the names: the Telegram binding, the
@@ -372,10 +418,10 @@ router.patch('/settings', requireSession, async ctx => {
   ctx.body = prepareObject(response);
 });
 
+// Signs this browser out of the request's workspace only; the others stay.
 router.post('/logout', requireSession, async ctx => {
-  await destroySession(ctx, ctx.state.session);
-
-  const response: LogoutResponse = { ok: true };
+  const signedIn = await signOutWorkspace(ctx, ctx.state.session as SessionModel, ctx.state.userId as string);
+  const response: LogoutResponse = { ok: true, signedIn };
 
   ctx.body = prepareObject(response);
 });

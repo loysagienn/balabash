@@ -11,6 +11,8 @@ export type Toast = ToastInput & { id: number };
 
 export type UiState = {
   moreSheet: boolean;
+  // The "Sign in to another workspace" window is open.
+  addWorkspace: boolean;
   toasts: Toast[];
   nextToastId: number;
   composerDrafts: Record<string, string>;
@@ -23,7 +25,7 @@ export type UiState = {
   threadCommands: Record<string, Partial<Record<ThreadCommand, true>>>;
 };
 
-export const initialUi: UiState = { moreSheet: false, toasts: [], nextToastId: 1, composerDrafts: {}, composerSending: {}, threadCommands: {} };
+export const initialUi: UiState = { moreSheet: false, addWorkspace: false, toasts: [], nextToastId: 1, composerDrafts: {}, composerSending: {}, threadCommands: {} };
 
 function withCommand(state: UiState, threadId: string, command: ThreadCommand, pending: boolean): UiState['threadCommands'] {
   const { [command]: current, ...rest } = state.threadCommands[threadId] ?? {};
@@ -54,6 +56,10 @@ export function uiReducer(state: UiState = initialUi, action: Action): UiState {
     case 'MORE_SHEET_CLOSE':
     case 'ROUTE_TO':
       return state.moreSheet ? { ...state, moreSheet: false } : state;
+    case 'ADD_WORKSPACE_OPEN':
+      return state.addWorkspace ? state : { ...state, addWorkspace: true };
+    case 'ADD_WORKSPACE_CLOSE':
+      return state.addWorkspace ? { ...state, addWorkspace: false } : state;
     case 'TOAST_PUSH':
       return { ...state, toasts: [...state.toasts, { ...action.toast, id: state.nextToastId }], nextToastId: state.nextToastId + 1 };
     case 'TOAST_DISMISS':

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { browserWords, loginSourceWords, sessionWords, telegramWords, timezoneWords } from './SettingsScreen.logic.ts';
+import { browserWords, loginSourceWords, telegramWords, timezoneWords, workspaceSessionWords } from './SettingsScreen.logic.ts';
 
 const NOW = new Date(2026, 9, 10, 16, 38); // October 10, local
 
@@ -29,12 +29,12 @@ describe('settings screen rules', () => {
     assert.equal(loginSourceWords(null), null);
   });
 
-  it('lines up the session row: the moment, the browser, the source — the parts the facts give', () => {
-    const ua = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36';
-
-    assert.equal(sessionWords({ createdAt: new Date(2026, 9, 5, 10, 24), userAgent: ua, loginSource: 'telegram' }, NOW), 'signed in Oct 5, 10:24 · Chrome, macOS · code from Telegram');
-    assert.equal(sessionWords({ createdAt: new Date(2026, 9, 10, 9, 3), userAgent: '', loginSource: null }, NOW), 'signed in 09:03');
-    assert.equal(sessionWords({ createdAt: new Date(2025, 11, 31, 23, 59), userAgent: 'curl/8', loginSource: 'console' }, NOW), 'signed in Dec 31, 2025, 23:59 · code from the server log');
+  it('lines up a workspace row of this browser: the moment and the source — the parts the facts give', () => {
+    assert.equal(workspaceSessionWords(new Date(2026, 9, 5, 10, 24), 'telegram', NOW), 'signed in Oct 5, 10:24 · code from Telegram');
+    assert.equal(workspaceSessionWords(new Date(2026, 9, 10, 9, 3), null, NOW), 'signed in 09:03');
+    assert.equal(workspaceSessionWords(new Date(2025, 11, 31, 23, 59), 'console', NOW), 'signed in Dec 31, 2025, 23:59 · code from the server log');
+    assert.equal(workspaceSessionWords(null, 'telegram', NOW), 'code from Telegram');
+    assert.equal(workspaceSessionWords(null, null, NOW), null);
   });
 
   it('names the time zone with its offset now and the clock there', () => {

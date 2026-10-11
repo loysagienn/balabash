@@ -1,7 +1,7 @@
 // FloatLayer — a panel floating next to its button in a layer over the
 // screen: a portal into document.body positioned at the anchor (position:
 // fixed, so a card or a list with overflow hidden does not clip it), under
-// the button with the right edges aligned, above it when there is no room
+// the button with the right edges aligned (or the left ones: align), above it when there is no room
 // below but there is above. It closes on a click outside, Escape, a scroll
 // outside it, a resize, or when the focus leaves it; on open the focus
 // moves inside (focus — where exactly: a menu takes its first item, a
@@ -22,13 +22,17 @@ export type FloatLayerProps = {
   anchor: RefObject<HTMLElement | null>;
   onClose: () => void;
   className?: string;
+  // Which edges line up: the right ones (end, the default — a button at a
+  // row's end), or the left ones (start — a button at the start of a
+  // narrow column, like the sidebar's workspace switcher).
+  align?: 'start' | 'end';
   // Where the focus goes on open; the layer itself by default.
   focus?: (layer: HTMLElement) => void;
   onKeyDown?: (event: KeyboardEvent<HTMLDivElement>) => void;
   children: ReactNode;
 };
 
-export function FloatLayer({ anchor, onClose, className, focus, onKeyDown, children }: FloatLayerProps) {
+export function FloatLayer({ anchor, onClose, className, align = 'end', focus, onKeyDown, children }: FloatLayerProps) {
   const layer = useRef<HTMLDivElement>(null);
   const close = useRef(onClose);
   const take = useRef(focus);
@@ -50,10 +54,10 @@ export function FloatLayer({ anchor, onClose, className, focus, onKeyDown, child
     const below = at.bottom + GAP + height <= window.innerHeight - EDGE || at.top - GAP - height < EDGE;
 
     setPlace({
-      right: Math.max(EDGE, window.innerWidth - at.right),
+      ...(align === 'start' ? { left: Math.max(EDGE, at.left) } : { right: Math.max(EDGE, window.innerWidth - at.right) }),
       ...(below ? { top: at.bottom + GAP } : { bottom: window.innerHeight - at.top + GAP }),
     });
-  }, [anchor]);
+  }, [anchor, align]);
 
   useEffect(() => {
     const node = layer.current;

@@ -1,11 +1,12 @@
 // The toasts of the screen from the store (ui.toasts): every pushToast
 // becomes a Toast in the stack at the corner of the shell; "Close" and the
 // timer (toasts.logic.ts) dismiss it. The icon follows the state. A toast
-// with an action shows its button: pressing it opens the route and
-// dismisses the toast.
+// with an action shows its button: pressing it opens the route (or the
+// other workspace) and dismisses the toast.
 
 import { useEffect } from 'react';
 import { useAppDispatch, useAppSelector } from '../../store/hooks.ts';
+import { switchWorkspace } from '../../lib/workspace/index.ts';
 import { routeTo } from '../../store/router/actions.ts';
 import { dismissToast } from '../../store/ui/actions.ts';
 import type { Toast as ToastData } from '../../store/ui/reducer.ts';
@@ -64,7 +65,12 @@ function ToastItem({ toast }: { toast: ToastData }) {
       onAction={
         action
           ? () => {
-              dispatch(routeTo(action.route));
+              if ('workspace' in action) {
+                switchWorkspace(action.workspace);
+              } else {
+                dispatch(routeTo(action.route));
+              }
+
               dispatch(dismissToast(toast.id));
             }
           : undefined

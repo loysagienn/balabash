@@ -74,11 +74,11 @@ function fakeApi(overrides: ApiOverrides = {}, calls: Calls = []): Api {
 
       return impl(...args);
     };
-  const base: Omit<Api, 'threads' | 'workspace' | 'files' | 'settings' | 'llmRequests' | 'limits' | 'system' | 'secretRequests' | 'projects' | 'apps' | 'schedule' | 'connections'> = {
+  const base: Omit<Api, 'threads' | 'workspace' | 'workspaces' | 'files' | 'settings' | 'llmRequests' | 'limits' | 'system' | 'secretRequests' | 'projects' | 'apps' | 'schedule' | 'connections'> = {
     me: async () => ME,
     auth: async () => ME,
     consoleCode: async () => null,
-    logout: async () => ({ ok: true as const }),
+    logout: async () => ({ ok: true as const, signedIn: [] }),
     snapshot: async () => snapshot(),
     ...overrides,
   };
@@ -164,6 +164,7 @@ function fakeApi(overrides: ApiOverrides = {}, calls: Calls = []): Api {
       interrupt: wrap('threads.interrupt', threads.interrupt),
       cancel: wrap('threads.cancel', threads.cancel),
     },
+    workspaces: { list: async () => ({ current: ME.userId, workspaces: [] }) },
     workspace: WORKSPACE,
     files: FILES,
     llmRequests: LLM_REQUESTS,
@@ -663,6 +664,70 @@ describe('session start-up', () => {
     store.dispatch(sessionLost());
     assert.equal(store.getState().session.status, 'anonymous');
     assert.equal(store.getState().stream.asOfSeq, null);
+  });
+
+  it('signing out of the tab’s workspace while others stay signed in leaves for one of them, nothing reset meanwhile', async () => {
+    const api = fakeApi({ logout: async () => ({ ok: true as const, signedIn: ['w2', 'w3'] }) });
+    const store = createStore({ api, initialRoute: { key: 'home' } });
+
+    await dispatched(store, sessionCheck());
+    await settle();
+    await dispatched(store, logout());
+
+    const { session } = store.getState();
+
+    assert.equal(session.status, 'signed-in');
+    assert.equal(session.logoutPending, true, 'the button stays busy until the page is gone');
+    assert.deepEqual(session.leaving, { signedIn: ['w2', 'w3'] });
+  });
+
+  it('a sign-out answered “not signed in to that workspace” leaves the tab’s workspace; any other 401 is the browser signed out', async () => {
+    const gone = fakeApi({
+      logout: async () => {
+        throw new ApiError(401, 'workspace_signed_out', 'This browser is not signed in to that workspace');
+      },
+    });
+    const store = createStore({ api: gone, initialRoute: { key: 'home' } });
+
+    await dispatched(store, sessionCheck());
+    await settle();
+    await dispatched(store, logout());
+    assert.deepEqual(store.getState().session.leaving, { signedIn: null });
+
+    const lost = fakeApi({
+      logout: async () => {
+        throw new ApiError(401, 'unauthorized', 'No valid session');
+      },
+    });
+    const other = createStore({ api: lost, initialRoute: { key: 'home' } });
+
+    await dispatched(other, sessionCheck());
+    await settle();
+    await dispatched(other, logout());
+    assert.equal(other.getState().session.status, 'anonymous');
+    assert.equal(other.getState().session.leaving, null);
+  });
+
+  it('a sign-in on the form marks the page as signed in here; a session found at the start does not', async () => {
+    const found = createStore({ api: fakeApi(), initialRoute: { key: 'home' } });
+
+    await dispatched(found, sessionCheck());
+    assert.equal(found.getState().session.status, 'signed-in');
+    assert.equal(found.getState().session.signedInHere, false);
+
+    const anonymous = fakeApi({
+      me: async () => {
+        throw new ApiError(401, 'unauthorized', 'No valid session');
+      },
+    });
+    const store = createStore({ api: anonymous, initialRoute: { key: 'login' } });
+
+    await dispatched(store, sessionCheck());
+    assert.equal(store.getState().session.status, 'anonymous');
+    await dispatched(store, login('K7QM2XP9'));
+    await settle();
+    assert.equal(store.getState().session.status, 'signed-in');
+    assert.equal(store.getState().session.signedInHere, true);
   });
 });
 

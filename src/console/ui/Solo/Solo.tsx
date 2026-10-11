@@ -1,6 +1,6 @@
 // Signed-out screen (design: Solo): sign-in, secrets entry, connection
-// result, link errors, 404. One centered card, brand mark on top, an
-// optional state icon. Children — the card's content.
+// result, link errors, 404. One centered card, the service icon and the
+// brand line on top, an optional state icon. Children — the card's content.
 
 import type { ReactNode } from 'react';
 import type { IconName } from '../Icon/Icon.tsx';
@@ -22,7 +22,7 @@ export function Solo({ brand = 'Balabash', icon, iconState, title, children }: S
       <div className="solo-wrap">
         <div className="solo-card">
           <div className="solo-brand">
-            <span className="solo-logo">B</span>
+            <img className="solo-logo" src="/static/icon-192.png" alt="" width="192" height="192" />
             {brand}
           </div>
           {icon ? <Obj icon={icon} size="lg" state={iconState} className="solo-ic" /> : null}

@@ -14,6 +14,7 @@
 
 import crypto from 'node:crypto';
 import { prisma } from '../db/client.ts';
+import { config } from '../config/index.ts';
 import type { Tx } from '../core/append.ts';
 import { registryMutation } from '../core/registry-events.ts';
 import type { Prisma } from '../../prisma-generated/client.ts';
@@ -40,6 +41,13 @@ type RequestRow = { id: string; userId: string; threadId: string | null; server:
 
 export function secretRequestRecord(row: RequestRow, fields: readonly string[]): SecretRequestRecord {
   return { requestId: row.id, server: row.server, fields: [...fields], requestedAt: row.createdAt.toISOString() };
+}
+
+// The one-time link of a request: the console's form at /secrets/<id>,
+// naming the workspace it belongs to (?ws=) — a browser signed in to
+// several workspaces opens it in that one, whichever the tab was showing.
+export function secretRequestUrl(id: string, userId: string): string {
+  return `https://${config.consoleDomain}/secrets/${encodeURIComponent(id)}?ws=${encodeURIComponent(userId)}`;
 }
 
 // Opens (or replaces) the request of one server for one user and journals

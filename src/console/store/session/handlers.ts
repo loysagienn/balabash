@@ -1,5 +1,5 @@
 // Session effects: the check at tab start, sign-in with a one-time code,
-// sign-out. A signed-in outcome cascades into SNAPSHOT_LOAD (the store
+// sign-out (of the tab's workspace: the others stay signed in). A signed-in outcome cascades into SNAPSHOT_LOAD (the store
 // hydrates, the stream process opens the tail).
 
 import type { NamesView, SettingsPatchRequest } from '../../../api/contract.ts';
@@ -7,7 +7,7 @@ import { toApiFailure } from '../../lib/api/index.ts';
 import type { ActionHandler } from '../types.ts';
 import { snapshotLoad } from '../stream/actions.ts';
 import { pushToast } from '../ui/actions.ts';
-import { consoleCodeDone, consoleCodeFail, loginDone, loginFail, logoutDone, logoutFail, saveSettingsDone, saveSettingsFail, sessionCheckDone, sessionCheckFail } from './actions.ts';
+import { consoleCodeDone, consoleCodeFail, leaveWorkspace, loginDone, loginFail, logoutDone, logoutFail, saveSettingsDone, saveSettingsFail, sessionCheckDone, sessionCheckFail } from './actions.ts';
 import { patchFields } from './reducer.ts';
 
 export const sessionCheckHandler: ActionHandler<'SESSION_CHECK'> =
@@ -111,13 +111,22 @@ export const logoutHandler: ActionHandler<'LOGOUT'> =
     next(action);
 
     try {
-      await api.logout();
-      dispatch(logoutDone());
+      const { signedIn } = await api.logout();
+
+      // Other workspaces are still signed in on this browser: the tab goes
+      // to one of them. None (or an older server, which answers no list) —
+      // the browser is signed out.
+      dispatch(signedIn && signedIn.length > 0 ? leaveWorkspace(signedIn) : logoutDone());
     } catch (error) {
       const failure = toApiFailure(error);
 
-      // Already signed out on the server: the outcome is the same.
-      dispatch(failure.status === 401 ? logoutDone() : logoutFail(failure));
+      // Already signed out on the server: the outcome is the same — of the
+      // whole browser, or of this tab's workspace alone.
+      if (failure.status === 401) {
+        dispatch(failure.code === 'workspace_signed_out' ? leaveWorkspace(null) : logoutDone());
+      } else {
+        dispatch(logoutFail(failure));
+      }
     }
   };
 

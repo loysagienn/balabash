@@ -23,6 +23,10 @@ export const consoleCodeFail = (request: LoginRequest | null, error: ApiFailure)
 
 export const logout = () => ({ type: 'LOGOUT' }) as const;
 export const logoutDone = () => ({ type: 'LOGOUT_DONE' }) as const;
+// Signed out of the tab's workspace while others stay signed in on this
+// browser (signedIn, in order) — or the tab's workspace was already gone
+// (null): the tab leaves for another workspace (lib/workspace/process.ts).
+export const leaveWorkspace = (signedIn: string[] | null) => ({ type: 'WORKSPACE_LEAVE', signedIn }) as const;
 export const logoutFail = (error: ApiFailure) => ({ type: 'LOGOUT_FAIL', error }) as const;
 
 // The names of Settings (workspace, operator): each card saves on its own,

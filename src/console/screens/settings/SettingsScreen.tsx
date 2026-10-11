@@ -1,15 +1,14 @@
-// Settings (design: SettingsScreen): the cards "Workspace" (its name) and
-// "You" (the operator's name), each saving on its own through
+// Settings (design: SettingsScreen): the cards "Workspace" (its name, and
+// the color of its mark — this browser's choice, lib/workspace) and "You"
+// (the operator's name), each name saving on its own through
 // PATCH /api/settings — the answer updates `me`, so the sidebar and the
 // feed follow, and a toast confirms; the cards of facts read by place from
 // GET /api/settings (queries.ts; the words — SettingsScreen.logic.ts):
 // "Telegram" — the group bound to the workspace, or that none is;
 // "Schedule time zone" — the zone the server evaluates cron in, read-only
-// (it is the server's environment, SCHEDULE_TIMEZONE); "Session" — this
-// browser's row (when it signed in, which browser, how the code came) and
-// two actions on this browser: "Reload page" — a plain location.reload()
-// (Vladimir's 29000: the installed app has no address bar to reload from;
-// it is not a restart of the server) — and the way out.
+// (it is the server's environment, SCHEDULE_TIMEZONE); "Signed in on this
+// browser" — the workspaces of this browser (GET /api/workspaces), the way
+// out of this tab's one, one more workspace, and "Reload page".
 
 import { useEffect, useRef, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
@@ -22,7 +21,7 @@ import { Shell } from '../../features/shell/Shell.tsx';
 import { useNow } from '../../lib/format/useNow.ts';
 import { Btn } from '../../ui/Btn/Btn.tsx';
 import { Card, CardBody, CardFoot, CardHead } from '../../ui/Card/Card.tsx';
-import { Caption, Code } from '../../ui/atoms/atoms.tsx';
+import { Caption, Code, Tag } from '../../ui/atoms/atoms.tsx';
 import { Field } from '../../ui/Field/Field.tsx';
 import { Input } from '../../ui/Input/Input.tsx';
 import { List, Row } from '../../ui/List/List.tsx';
@@ -31,10 +30,14 @@ import { Obj } from '../../ui/Obj/Obj.tsx';
 import { Screen } from '../../ui/Screen/Screen.tsx';
 import { SkelRow, SkelStack } from '../../ui/Skel/Skel.tsx';
 import { Status } from '../../ui/Status/Status.tsx';
+import { WsMark } from '../../ui/WsMark/WsMark.tsx';
+import { useWorkspaces } from '../../features/workspaces/queries.ts';
+import { WORKSPACE_COLORS, setWorkspaceColor } from '../../lib/workspace/index.ts';
+import { openAddWorkspace } from '../../store/ui/actions.ts';
 import { useSettingsFacts } from './queries.ts';
 import { useFactsStage } from '../../lib/query/useFactsStage.ts';
 import type { FactsStage } from '../../lib/query/stage.ts';
-import { sessionWords, telegramWords, timezoneWords } from './SettingsScreen.logic.ts';
+import { browserWords, telegramWords, timezoneWords, workspaceSessionWords } from './SettingsScreen.logic.ts';
 import './SettingsScreen.css';
 
 // A name of Settings: at most this long (the server's cap).
@@ -52,6 +55,8 @@ type NameCardProps = {
   // The count of accepted saves of this field (session.settingsSaved).
   saved: number;
   onSave: (value: string) => void;
+  // More of the card under the name (the workspace's color).
+  children?: ReactNode;
 };
 
 // The input is a draft over the effective value: null — no edits, the input
@@ -60,7 +65,7 @@ type NameCardProps = {
 // the effective value — trimmed, or the fallback after clearing — even when
 // that value equals the previous one. A draft edited after Save stays: it is
 // not what was sent. A failed save leaves the draft for another try.
-function NameCard({ title, label, fid, hint, field, current, saving, saved, onSave }: NameCardProps) {
+function NameCard({ title, label, fid, hint, field, current, saving, saved, onSave, children }: NameCardProps) {
   const [draft, setDraft] = useState<string | null>(null);
   const sent = useRef<string | null>(null);
   const value = draft ?? current ?? '';
@@ -91,8 +96,29 @@ function NameCard({ title, label, fid, hint, field, current, saving, saved, onSa
             </div>
           </Field>
         </form>
+        {children}
       </CardBody>
     </Card>
+  );
+}
+
+// The workspace's mark color — this browser's choice (lib/workspace): the
+// mark in each of the eight identity colors, saved on choice.
+function ColorField({ name, userId, color }: { name: string; userId: string; color: number }) {
+  return (
+    <div className="fld set-color">
+      <span className="fld-l" id="ws-c">
+        Color
+      </span>
+      <div className="set-sws" role="radiogroup" aria-labelledby="ws-c">
+        {WORKSPACE_COLORS.map(option => (
+          <button key={option} type="button" className="set-sw" role="radio" aria-checked={option === color} aria-label={`Color ${option}`} onClick={() => setWorkspaceColor(userId, option)}>
+            <WsMark name={name} color={option} />
+          </button>
+        ))}
+      </div>
+      <p className="fld-h">Tells this workspace apart from the others signed in on this browser. Kept in this browser, saved on choice.</p>
+    </div>
   );
 }
 
@@ -117,7 +143,7 @@ function FactsFailure({ facts, error, what }: { facts: Facts; error: Error; what
 function FactsStale({ facts, error }: { facts: Facts; error: Error }) {
   return (
     <Note state="err" icon="cloud-off" role="alert" action="Retry" actionIcon="refresh-cw" actionBusy={facts.isFetching} onAction={() => void facts.refetch()}>
-      Couldn’t refresh the Telegram binding, the time zone and the session — showing the facts loaded before. {error.message}
+      Couldn’t refresh the Telegram binding, the time zone and this browser’s session — showing the facts loaded before. {error.message}
     </Note>
   );
 }
@@ -224,31 +250,52 @@ function TimezoneCard({ facts, stage, now }: { facts: Facts; stage: Stage; now: 
   );
 }
 
-function SessionCard({ facts, stage, now, logoutPending, onLogout }: { facts: Facts; stage: Stage; now: Date; logoutPending: boolean; onLogout: () => void }) {
+// The workspaces this browser is signed in to (features/workspaces): a row
+// each — mark, name, "this workspace" on the tab's own, when and how it was
+// signed in; "Sign out" on the tab's own (the others are signed out from
+// their own tabs). Below: one more workspace, which browser this is, and
+// "Reload page" — a plain location.reload() (Vladimir's 29000: the
+// installed app has no address bar to reload from; it is not a restart of
+// the server).
+function BrowserCard({ facts, stage, now, logoutPending, onLogout, onAdd }: { facts: Facts; stage: Stage; now: Date; logoutPending: boolean; onLogout: () => void; onAdd: () => void }) {
+  const { items } = useWorkspaces();
+  const browser = stage.kind === 'facts' ? browserWords(stage.data.session.userAgent) : null;
+
   return (
-    <Card narrow="bare" label="Session" className="set-session">
-      <CardHead title="Session" />
-      {stage.kind === 'facts' ? (
-        <List narrow="tiles">
-          <Row lead={<Obj icon="monitor" size="md" />} title="This browser" meta={sessionWords(stage.data.session, now)} />
-        </List>
-      ) : stage.kind === 'failed' ? (
+    <Card narrow="bare" label="Signed in on this browser" className="set-session">
+      <CardHead title="Signed in on this browser" count={items.length} />
+      <List narrow="tiles">
+        {items.map(item => {
+          // The tab's own workspace without the list (an older server):
+          // the facts of the session stand in.
+          const own = item.current && item.signedInAt === null && stage.kind === 'facts' ? stage.data.session : null;
+          const meta = own ? workspaceSessionWords(own.createdAt, own.loginSource, now) : workspaceSessionWords(item.signedInAt, item.loginSource, now);
+
+          return (
+            <Row
+              key={item.userId}
+              lead={<WsMark name={item.name} color={item.color} />}
+              title={item.name}
+              tag={item.current ? <Tag>this workspace</Tag> : null}
+              meta={meta}
+              end={item.current ? <Btn label="Sign out" icon="log-out" size="sm" busy={logoutPending} onClick={onLogout} /> : null}
+            />
+          );
+        })}
+      </List>
+      {stage.kind === 'failed' ? (
         <CardBody>
           <FactsFailure facts={facts} error={stage.error} what="this browser’s session" />
         </CardBody>
-      ) : (
-        <List narrow="tiles" busy>
-          <SkelRow widths={[32, 80]} pill={false} />
-        </List>
-      )}
+      ) : null}
       <CardBody>
+        <div className="set-act">
+          <Caption>{browser ? `This browser: ${browser}.` : 'Sign in to one more workspace on this browser with its one-time code.'}</Caption>
+          <Btn label="Sign in to another workspace" icon="plus" onClick={onAdd} />
+        </div>
         <div className="set-act">
           <Caption>Reloads the console in this tab — the way to pick up a newly published build in the installed app. The server keeps running.</Caption>
           <Btn label="Reload page" icon="refresh-cw" onClick={() => window.location.reload()} />
-        </div>
-        <div className="set-act">
-          <Caption>Signs this browser out of the console.</Caption>
-          <Btn label="Sign out" icon="log-out" busy={logoutPending} onClick={onLogout} />
         </div>
       </CardBody>
     </Card>
@@ -264,6 +311,7 @@ export function SettingsScreen() {
   const facts = useSettingsFacts();
   const stage = useFactsStage(facts);
   const now = useNow();
+  const workspace = useWorkspaces();
 
   return (
     <Shell current="settings" title="Settings">
@@ -273,13 +321,15 @@ export function SettingsScreen() {
             title="Workspace"
             label="Name"
             fid="ws-n"
-            hint="Shown at the top of the sidebar."
+            hint="Shown in the workspace switcher and at the top of the sidebar."
             field="workspaceName"
             current={me?.workspaceName ?? null}
             saving={saving.workspaceName}
             saved={saved.workspaceName}
             onSave={value => dispatch(saveSettings({ workspaceName: value }))}
-          />
+          >
+            {workspace.current ? <ColorField name={workspace.current.name} userId={workspace.current.userId} color={workspace.current.color} /> : null}
+          </NameCard>
           <NameCard
             title="You"
             label="Your name"
@@ -294,7 +344,7 @@ export function SettingsScreen() {
           {stage.kind === 'facts' && stage.stale ? <FactsStale facts={facts} error={stage.stale} /> : null}
           <TelegramCard facts={facts} stage={stage} now={now} />
           <TimezoneCard facts={facts} stage={stage} now={now} />
-          <SessionCard facts={facts} stage={stage} now={now} logoutPending={logoutPending} onLogout={() => dispatch(logout())} />
+          <BrowserCard facts={facts} stage={stage} now={now} logoutPending={logoutPending} onLogout={() => dispatch(logout())} onAdd={() => dispatch(openAddWorkspace())} />
         </div>
       </Screen>
     </Shell>

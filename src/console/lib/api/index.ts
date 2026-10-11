@@ -43,8 +43,10 @@ import type {
   UpdateProjectRequest,
   WorkspaceNodeResponse,
   WorkspaceWriteResponse,
+  WorkspacesResponse,
 } from '../../../api/contract.ts';
 import { createFetch } from './fetch.ts';
+import { withWorkspace } from '../workspace/state.ts';
 import type { EtaggedText, FetchOptions } from './fetch.ts';
 
 export type { ApiFailure, EtaggedText } from './fetch.ts';
@@ -58,7 +60,13 @@ export type Api = {
   // POST /api/auth/console-code: the server prints a one-time code into its
   // log; 204 — nothing comes back; 429 when one was printed moments ago.
   consoleCode(): Promise<null>;
+  // Signs this browser out of the tab's workspace; the answer lists the
+  // workspaces still signed in (an older server answers none).
   logout(): Promise<LogoutResponse>;
+  // The workspaces this browser is signed in to (the switcher, Settings).
+  workspaces: {
+    list(signal?: AbortSignal): Promise<WorkspacesResponse>;
+  };
   snapshot(): Promise<SnapshotResponse>;
   // The names of Settings: the answer carries the effective names as
   // /api/me reports them. The facts beside them (the Telegram binding, the
@@ -174,7 +182,7 @@ export type Api = {
 };
 
 // The URL of a file's bytes (/files/<rel>): inline for viewers, an
-// attachment with download.
+// attachment with download — in the tab's workspace (?ws=).
 export function fileUrl(path: string, download = false): string {
   const encoded = path
     .split('/')
@@ -182,7 +190,7 @@ export function fileUrl(path: string, download = false): string {
     .map(segment => encodeURIComponent(segment))
     .join('/');
 
-  return `/files/${encoded}${download ? '?download=1' : ''}`;
+  return withWorkspace(`/files/${encoded}${download ? '?download=1' : ''}`);
 }
 
 export function createApi(options: FetchOptions = {}): Api {
@@ -198,6 +206,9 @@ export function createApi(options: FetchOptions = {}): Api {
     auth: code => apiFetch<MeResponse>('/api/auth', { method: 'POST', body: { code }, unauthenticated: true }),
     consoleCode: () => apiFetch<null>('/api/auth/console-code', { method: 'POST', unauthenticated: true }),
     logout: () => apiFetch<LogoutResponse>('/api/logout', { method: 'POST', unauthenticated: true }),
+    workspaces: {
+      list: signal => apiFetch<WorkspacesResponse>('/api/workspaces', { signal }),
+    },
     snapshot: () => apiFetch<SnapshotResponse>('/api/snapshot'),
     settings: {
       get: signal => apiFetch<SettingsFactsResponse>('/api/settings', { signal }),

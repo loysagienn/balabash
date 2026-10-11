@@ -5,13 +5,14 @@
 // visitors never touch the database. Everything else is as in v1: the raw
 // token lives only in the cookie, the DB stores a sha256(token + pepper)
 // hash, the token rotates after 24 hours, the session slides for 30 days,
-// lastUsed updates are rate-limited.
+// lastUsed updates are rate-limited. One session holds every workspace the
+// browser is signed in to (see "Several workspaces" below).
 
 import crypto from 'node:crypto';
 import type { Context } from 'koa';
 import { prisma } from '../db/client.ts';
 import { config } from '../config/index.ts';
-import type { SessionModel } from '../../prisma-generated/models.ts';
+import type { SessionModel, SessionWorkspaceModel } from '../../prisma-generated/models.ts';
 import type { LoginSource } from './contract.ts';
 
 const SESSION_ID_COOKIE_NAME = 'session_id';
@@ -165,7 +166,7 @@ export async function getSession(ctx: Context): Promise<SessionModel | null> {
   }
 
   if (isSessionExpired(session)) {
-    await prisma.session.deleteMany({ where: { id: session.id } });
+    await deleteSessionRows(session.id);
     clearSessionCookie(ctx);
 
     return null;
@@ -188,19 +189,26 @@ export async function getSession(ctx: Context): Promise<SessionModel | null> {
 
 /**
  * Creates a session for a user who just exchanged a one-time auth code and
- * sets the cookie. This is the ONLY place a session row is born.
+ * sets the cookie. This is the ONLY place a session row is born; the
+ * workspace the code was for is its first (and primary) workspace.
  */
 export async function createUserSession(ctx: Context, userId: string, loginSource: LoginSource): Promise<SessionModel> {
   const token = generateSessionToken();
 
-  const session = await prisma.session.create({
-    data: {
-      userAgent: ctx.headers['user-agent'] || '',
-      userId,
-      tokenHash: hashSessionToken(token),
-      lastUsed: new Date(),
-      loginSource,
-    },
+  const session = await prisma.$transaction(async tx => {
+    const row = await tx.session.create({
+      data: {
+        userAgent: ctx.headers['user-agent'] || '',
+        userId,
+        tokenHash: hashSessionToken(token),
+        lastUsed: new Date(),
+        loginSource,
+      },
+    });
+
+    await tx.sessionWorkspace.create({ data: { sessionId: row.id, userId, createdAt: row.createdAt, loginSource } });
+
+    return row;
   });
 
   ctx.cookies.set(SESSION_ID_COOKIE_NAME, token, COOKIE_OPTIONS);
@@ -211,10 +219,103 @@ export async function createUserSession(ctx: Context, userId: string, loginSourc
   return session;
 }
 
+// ---------------------------------------------------------------------------
+// Several workspaces in one browser: one cookie, one session, the
+// workspaces it is signed in to (web_session_workspaces). Each request acts
+// in one of them — the one it names (the header for fetches, ?ws= for what
+// the browser loads by itself: the event stream, file bytes, a link), or
+// the session's primary one when it names none. The primary
+// (web_sessions.user_id) is always a signed-in workspace: signing out of it
+// hands the role to the oldest remaining one.
+
+export const WORKSPACE_HEADER = 'x-balabash-workspace';
+export const WORKSPACE_QUERY = 'ws';
+
+// The workspace the request names, or null: the header first, then ?ws=.
+export function requestedWorkspace(ctx: Context): string | null {
+  const header = ctx.get(WORKSPACE_HEADER).trim();
+
+  if (header) {
+    return header;
+  }
+
+  const query = ctx.query[WORKSPACE_QUERY];
+  const value = (Array.isArray(query) ? query[0] : query)?.trim();
+
+  return value || null;
+}
+
+// The workspace a request of this session acts in: the one it names, when
+// the session is signed in to it; the primary one when it names none.
+// null — it names a workspace this session is not signed in to (signed out
+// of it elsewhere, or never signed in here).
+export async function resolveWorkspace(session: SessionModel, requested: string | null): Promise<string | null> {
+  if (!session.userId) {
+    return null;
+  }
+
+  if (requested === null || requested === session.userId) {
+    return session.userId;
+  }
+
+  const binding = await prisma.sessionWorkspace.findUnique({ where: { sessionId_userId: { sessionId: session.id, userId: requested } } });
+
+  return binding ? requested : null;
+}
+
+// The workspaces of a session in the order they were signed in to.
+export function listSessionWorkspaces(sessionId: string): Promise<SessionWorkspaceModel[]> {
+  return prisma.sessionWorkspace.findMany({ where: { sessionId }, orderBy: [{ createdAt: 'asc' }, { userId: 'asc' }] });
+}
+
 /**
- * Deletes the session row and clears the cookie (logout).
+ * Signs this browser in to the workspace of an exchanged code: a browser
+ * with a live session adds the workspace to it (signing in to a workspace
+ * it already has changes nothing), any other gets a new session.
  */
-export async function destroySession(ctx: Context, session: SessionModel): Promise<void> {
-  await prisma.session.deleteMany({ where: { id: session.id } });
-  clearSessionCookie(ctx);
+export async function signInWorkspace(ctx: Context, userId: string, loginSource: LoginSource): Promise<SessionModel> {
+  const session = await getSession(ctx);
+
+  if (!session || !session.userId) {
+    return createUserSession(ctx, userId, loginSource);
+  }
+
+  await prisma.sessionWorkspace.upsert({
+    where: { sessionId_userId: { sessionId: session.id, userId } },
+    create: { sessionId: session.id, userId, loginSource },
+    update: {},
+  });
+
+  return session;
+}
+
+/**
+ * Signs this browser out of one workspace. Answers the workspaces still
+ * signed in, in order; the last one gone ends the session itself (the row
+ * and the cookie).
+ */
+export async function signOutWorkspace(ctx: Context, session: SessionModel, userId: string): Promise<string[]> {
+  const remaining = await prisma.$transaction(async tx => {
+    await tx.sessionWorkspace.deleteMany({ where: { sessionId: session.id, userId } });
+
+    const rows = await tx.sessionWorkspace.findMany({ where: { sessionId: session.id }, orderBy: [{ createdAt: 'asc' }, { userId: 'asc' }] });
+
+    if (rows.length === 0) {
+      await tx.session.deleteMany({ where: { id: session.id } });
+    } else if (!rows.some(row => row.userId === session.userId)) {
+      await tx.session.update({ where: { id: session.id }, data: { userId: rows[0]!.userId } });
+    }
+
+    return rows.map(row => row.userId);
+  });
+
+  if (remaining.length === 0) {
+    clearSessionCookie(ctx);
+  }
+
+  return remaining;
+}
+
+async function deleteSessionRows(sessionId: string): Promise<void> {
+  await prisma.$transaction([prisma.sessionWorkspace.deleteMany({ where: { sessionId } }), prisma.session.deleteMany({ where: { id: sessionId } })]);
 }

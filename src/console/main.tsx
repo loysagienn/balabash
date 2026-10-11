@@ -1,6 +1,6 @@
 // Entry of the console SPA. The shell (src/api/console.ts) mounts it into
 // #root. Here the store is created with the route read from the location,
-// the processes (history, event stream, tab visibility, feed eviction) are attached, React renders,
+// the processes (history, event stream, the tab's workspace, tab visibility, feed eviction) are attached, React renders,
 // and the session check starts everything else (frontend.md, "Снимок +
 // хвост").
 
@@ -17,6 +17,8 @@ import { connectStoreToHistory } from './lib/router/history.ts';
 import { readRoute } from './lib/router/routes.ts';
 import { connectStoreToStream } from './lib/stream/index.ts';
 import { connectStoreToVisibility } from './lib/visibility/index.ts';
+import { bootWorkspace, currentWorkspace, leaveSignedOutWorkspace } from './lib/workspace/index.ts';
+import { connectStoreToWorkspace } from './lib/workspace/process.ts';
 import { connectStoreToFeedEviction } from './lib/feed-eviction/index.ts';
 import { connectQueryClientToSession } from './lib/query/session.ts';
 import { connectQueryClientToSecretRequests } from './lib/query/secret-requests.ts';
@@ -35,7 +37,21 @@ if (!root) {
 
 let store: AppStore;
 
-const api = createApi({ onUnauthorized: () => store.dispatch(sessionLost()) });
+// The tab's workspace (lib/workspace): a link's ?ws= (taken out of the
+// address before the route is read), the tab's own, or the browser's last.
+const boot = bootWorkspace(window.location.href);
+
+if (boot.cleaned !== null) {
+  window.history.replaceState(window.history.state, '', boot.cleaned);
+}
+
+// Every call names the tab's workspace; a 401 for it alone (signed out of
+// it in another tab) loads the page anew in the workspace the browser is
+// in now, any other 401 is the session gone.
+const api = createApi({
+  workspace: currentWorkspace,
+  onUnauthorized: code => (code === 'workspace_signed_out' ? leaveSignedOutWorkspace() : store.dispatch(sessionLost())),
+});
 
 // bigint and Date live in the state; the DevTools serializer needs to know.
 const devtools = window.__REDUX_DEVTOOLS_EXTENSION__?.({
@@ -48,6 +64,7 @@ store = createStore({ api, initialRoute: readRoute(window.location.pathname + wi
 // The body's scroll place an entry keeps when it is left (lib/router/history.ts).
 connectStoreToHistory(store, { readScroll: () => document.querySelector<HTMLElement>('main.shell-body')?.scrollTop ?? null });
 connectStoreToStream(store);
+connectStoreToWorkspace(store);
 connectStoreToVisibility(store);
 // The feeds of threads neither shown nor running leave the store after a
 // while (lib/feed-eviction).

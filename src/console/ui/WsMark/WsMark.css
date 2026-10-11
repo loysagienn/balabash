@@ -1,0 +1,10 @@
+@layer components{
+/* ── Workspace mark ──  <span class="wsm" data-id="6" data-size="sm">P</span>
+   The initial of the workspace on a solid identity fill (an agent avatar is a tint — a workspace is a fill); the color is
+   this browser's choice (Settings → Workspace → Color). size: sm 24 (menu rows) · default 28. */
+.wsm{
+  --wsm-size:var(--obj-md);
+  position:relative;width:var(--wsm-size);height:var(--wsm-size);border-radius:var(--r-inner);display:grid;place-items:center;flex:none;
+  background:var(--id-c,var(--text-2));color:var(--id-ink);font-size:var(--fs-ui);font-weight:var(--fw-bold);line-height:1;letter-spacing:0}
+.wsm[data-size="sm"]{--wsm-size:var(--obj-sm);font-size:var(--fs-meta)}
+}

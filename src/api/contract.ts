@@ -37,8 +37,13 @@ export type MeResponse = NamesView & {
   mainThreadId: string | null;
 };
 
+// POST /api/logout signs this browser out of the workspace the request acts
+// in (not of the browser's other workspaces); the answer lists the ones
+// still signed in, in the order they were signed in to — empty when that
+// was the last one (the session and its cookie are gone with it).
 export type LogoutResponse = {
   ok: true;
+  signedIn: string[];
 };
 
 // PATCH /api/settings: a field absent — left alone; null, empty or blank —
@@ -99,6 +104,24 @@ export type WebSessionView = {
   userAgent: string;
   // How the code came — null for a session born before the fact was kept.
   loginSource: LoginSource | null;
+};
+
+// GET /api/workspaces — the workspaces this browser is signed in to (one
+// session cookie, several workspaces; a request acts in the one it names by
+// the X-Balabash-Workspace header or ?ws=, else in the session's primary
+// one). Read by place: names of the other workspaces are not in the log of
+// the one a tab shows.
+export type SignedInWorkspaceView = NamesView & {
+  userId: string;
+  // When this browser signed in to the workspace, and how the code came.
+  signedInAt: Date;
+  loginSource: LoginSource | null;
+};
+
+export type WorkspacesResponse = {
+  // The workspace this request acted in.
+  current: string;
+  workspaces: SignedInWorkspaceView[];
 };
 
 export type SettingsFactsResponse = {

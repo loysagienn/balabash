@@ -7,6 +7,7 @@
 
 import { parseJson, stringifyJson } from '../../../utils/serialize-json.ts';
 import type { ApiErrorBody } from '../../../api/contract.ts';
+import { WORKSPACE_HEADER } from '../workspace/state.ts';
 
 export class ApiError extends Error {
   readonly status: number;
@@ -65,7 +66,13 @@ export type FetchInit = {
 export type EtaggedText = { text: string; etag: string | null };
 
 export type FetchOptions = {
-  onUnauthorized?: () => void;
+  // A session-gated call answered 401, with the refusal's code:
+  // 'workspace_signed_out' — the tab's workspace is no longer signed in on
+  // this browser (the session is); anything else — the session is gone.
+  onUnauthorized?: (code: string) => void;
+  // The workspace the tab acts in, named on every call (the header); null —
+  // none known yet, the server answers the session's primary one.
+  workspace?: () => string | null;
 };
 
 export function buildQuery(query: FetchInit['query']): string {
@@ -86,12 +93,14 @@ export function buildQuery(query: FetchInit['query']): string {
   return text ? `?${text}` : '';
 }
 
-export function createFetch({ onUnauthorized }: FetchOptions = {}) {
+export function createFetch({ onUnauthorized, workspace }: FetchOptions = {}) {
   return async function apiFetch<T>(path: string, init?: FetchInit): Promise<T> {
     const hasBody = init?.body !== undefined;
     const hasText = init?.text !== undefined;
+    const userId = workspace?.() ?? null;
     const headers: Record<string, string> = {
       ...(hasBody ? { 'content-type': 'application/json' } : hasText ? { 'content-type': 'text/plain; charset=utf-8' } : {}),
+      ...(userId ? { [WORKSPACE_HEADER]: userId } : {}),
       ...init?.headers,
     };
 
@@ -118,7 +127,7 @@ export function createFetch({ onUnauthorized }: FetchOptions = {}) {
       const error = extractError(data);
 
       if (response.status === 401 && !init?.unauthenticated) {
-        onUnauthorized?.();
+        onUnauthorized?.(error?.code ?? 'unknown');
       }
 
       throw new ApiError(response.status, error?.code ?? 'unknown', error?.message ?? `HTTP ${response.status}`);

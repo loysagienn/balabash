@@ -10,9 +10,8 @@ import { prisma } from '../db/client.ts';
 import { appendEventIn } from '../core/append.ts';
 import { notifyAppended } from '../core/live.ts';
 import { SECRETS_PROVISIONED } from '../core/envelope.ts';
-import { config } from '../config/index.ts';
 import { disconnectExternalServer, listExternalSecretTargets, type ExternalSecretTarget } from './tool-manager.ts';
-import { openSecretRequest } from './secret-requests.ts';
+import { openSecretRequest, secretRequestUrl } from './secret-requests.ts';
 
 const SECRET_KEY_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
@@ -73,7 +72,7 @@ export async function requestExternalServerCredentials(
 
   const row = await openSecretRequest('external-secrets', { userId, threadId, server: target.name, fields: toFields(target) });
 
-  return `https://${config.consoleDomain}/secrets/${row.id}`;
+  return secretRequestUrl(row.id, userId);
 }
 
 // The reverse of provisioning (auth agent):

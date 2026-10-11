@@ -5,11 +5,21 @@
 .shell{display:grid;grid-template-columns:var(--side-w) minmax(0,1fr);height:100%;min-height:0;background:var(--bg);color:var(--text)}
 
 .shell-side{display:flex;flex-direction:column;gap:var(--sp-3);min-width:0;padding:var(--sp-3h) var(--sp-2h);border-right:1px solid var(--border);background:var(--bg);overflow-y:auto}
-/* workspace: the service icon (the Balabash mark, its own colors and padding), name, operator */
-.shell-ws{display:flex;align-items:center;gap:var(--sp-2h);padding:var(--sp-1) var(--sp-1h)}
+/* brand: the service icon (the Balabash mark, its own colors and padding) and the service name */
+.shell-brand{display:flex;align-items:center;gap:var(--sp-2h);padding:0 var(--sp-1h);font-size:var(--fs-ui);line-height:var(--lh-ui);font-weight:var(--fw-semibold);color:var(--text-2)}
 .shell-logo{width:var(--ctl-h-sm);height:var(--ctl-h-sm);flex:none;display:block;object-fit:contain}
-.shell-ws-name{display:block;font-size:var(--fs-body);line-height:var(--lh-meta);font-weight:var(--fw-semibold)}
-.shell-ws-sub{display:block;font-size:var(--fs-meta);line-height:var(--lh-meta);color:var(--text-3)}
+/* workspace switcher: the current workspace (mark, name, operator) as one button; it opens the list of signed-in workspaces
+   (features/workspaces, the menu in a float layer) */
+.shell-ws-anchor{display:flex}
+.shell-ws{display:flex;align-items:center;gap:var(--sp-2h);width:100%;padding:var(--sp-1h);border-radius:var(--r-sm);color:var(--text);text-align:left}
+.shell-ws:hover{background-image:var(--layer-hover)}
+.shell-ws[aria-expanded="true"]{background-image:var(--layer-selected)}
+.shell-ws-main{flex:1;min-width:0}
+.shell-ws-name{display:block;font-size:var(--fs-body);line-height:var(--lh-meta);font-weight:var(--fw-semibold);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.shell-ws-sub{display:block;font-size:var(--fs-meta);line-height:var(--lh-meta);color:var(--text-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.shell-ws-end{display:flex;align-items:center;gap:var(--sp-2);flex:none;color:var(--text-3)}
+/* phone: the workspace mark at the start of the header, on top-level screens */
+.shell-ws-btn{display:none;margin-left:calc(-1 * var(--sp-2))}
 .shell-search{display:flex;align-items:center;gap:var(--sp-2);width:100%;height:var(--ctl-h);padding:0 var(--sp-2h) 0 var(--sp-3);border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface);color:var(--text-3);font-size:var(--fs-ui)}
 .shell-search:hover{border-color:var(--border-strong);color:var(--text-2)}
 .shell-search .kbd{margin-left:auto}
@@ -69,6 +79,7 @@
   .shell-top[data-back="narrow"] .shell-back{display:inline-flex}
   .shell-tabs{display:grid}
   .shell-mt-btn{display:inline-flex}
+  .shell-ws-btn{display:inline-flex}
   .shell[data-detail] .shell-tabs{display:none}
 }
 }

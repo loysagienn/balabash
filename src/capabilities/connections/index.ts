@@ -21,7 +21,7 @@ import type { ConnectionView } from '../../api/contract.ts';
 import type { ConnectionRecord } from '../../core/event-types.ts';
 import { appendEvent, appendEventIn } from '../../core/append.ts';
 import { notifyAppended } from '../../core/live.ts';
-import { openSecretRequest } from '../secret-requests.ts';
+import { openSecretRequest, secretRequestUrl } from '../secret-requests.ts';
 import {
   CONNECTION_COMPLETED,
   CONNECTION_DISCONNECTED,
@@ -557,7 +557,7 @@ export async function requestOauthClientCredentials(
 
   const row = await openSecretRequest('oauth-client', { userId, threadId, server: server.name });
 
-  return `https://${config.consoleDomain}/secrets/${row.id}`;
+  return secretRequestUrl(row.id, userId);
 }
 
 export type OauthClientRequestView = {

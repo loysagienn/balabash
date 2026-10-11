@@ -39,16 +39,18 @@ export type MenuAnchorProps = {
   // The button that opens it.
   children: ReactNode;
   className?: string;
+  // Which edges of the menu and the button line up (ui/Float).
+  align?: 'start' | 'end';
 };
 
-export function MenuAnchor({ open, onClose, menu, children, className }: MenuAnchorProps) {
+export function MenuAnchor({ open, onClose, menu, children, className, align }: MenuAnchorProps) {
   const anchor = useRef<HTMLSpanElement>(null);
 
   return (
     <span ref={anchor} className={className ? `menu-anchor ${className}` : 'menu-anchor'}>
       {children}
       {open ? (
-        <MenuLayer anchor={anchor} onClose={onClose}>
+        <MenuLayer anchor={anchor} onClose={onClose} align={align}>
           {menu}
         </MenuLayer>
       ) : null}
@@ -60,9 +62,9 @@ const ITEMS = '[role^="menuitem"]:not(:disabled)';
 
 // The menu in its floating layer (ui/Float): the first item takes the
 // focus on open, Up/Down move between the items.
-function MenuLayer({ anchor, onClose, children }: { anchor: RefObject<HTMLElement | null>; onClose: () => void; children: ReactNode }) {
+function MenuLayer({ anchor, onClose, align, children }: { anchor: RefObject<HTMLElement | null>; onClose: () => void; align?: 'start' | 'end'; children: ReactNode }) {
   return (
-    <FloatLayer anchor={anchor} onClose={onClose} className="menu-layer" focus={node => node.querySelector<HTMLElement>(ITEMS)?.focus()} onKeyDown={event => stepFocus(event, ITEMS, 'y')}>
+    <FloatLayer anchor={anchor} onClose={onClose} align={align} className="menu-layer" focus={node => node.querySelector<HTMLElement>(ITEMS)?.focus()} onKeyDown={event => stepFocus(event, ITEMS, 'y')}>
       {children}
     </FloatLayer>
   );
