@@ -347,7 +347,7 @@ model ScheduledTask {
   cwd             String?
   timeoutMs       Int?     @map("timeout_ms")
   reportOnSuccess Boolean  @default(false) @map("report_on_success")
-  createdBy   String?   @map("created_by") // agent that registered the task
+  createdBy   String?   @map("created_by") // who registered the task: the agent, or "operator" from the console
   createdAt   DateTime  @default(now()) @map("created_at")
 
   @@index([userId])

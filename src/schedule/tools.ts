@@ -6,31 +6,21 @@
 // calls are journaled as tool.call.* in the calling agent's thread.
 
 import type { JsonObject } from '../core/contract.ts';
-import { getThread } from '../core/threads.ts';
 import { prisma } from '../db/client.ts';
 import { config } from '../config/index.ts';
 import type { ToolFunction } from '../capabilities/mcp-client.ts';
 import type { BuiltinServerCallContext, BuiltinToolServer } from '../capabilities/tool-manager.ts';
 import type { ScheduledTaskModel } from '../../prisma-generated/models.ts';
-import { WorkspacePathError, sanitizeRelPath } from '../workspace/files.ts';
 import { workspaceTaskFile } from './catalog.ts';
 import { JOB_TIMEOUT_DEFAULT_MS, JOB_TIMEOUT_MAX_MS, JOB_TIMEOUT_MIN_MS, isTaskRunning } from './engine.ts';
-import { assertValidCron, cronNextRun } from './heart.ts';
-import { registryMutation } from '../core/registry-events.ts';
-import { ScheduleError, deleteTask, isSleeping, runTask as runTaskCommand } from './commands.ts';
-import { taskRecord } from './view.ts';
+import { cronNextRun } from './heart.ts';
+import { ScheduleError, createTask as createTaskCommand, deleteTask, isSleeping, runTask as runTaskCommand } from './commands.ts';
+import { SLUG_MAX_LENGTH, SLUG_PATTERN, parseTaskInput } from './input.ts';
 
 export const SCHEDULE_SERVER_NAME = 'schedule';
 
-const SLUG_PATTERN = /^[a-z][a-z0-9_-]*$/;
-const SLUG_MAX_LENGTH = 64;
-
 const JOB_RUNS_DEFAULT_LIMIT = 20;
 const JOB_RUNS_MAX_LIMIT = 50;
-
-// An ISO-8601 instant must carry an explicit offset (Z or ±hh:mm): a naive
-// local timestamp is ambiguous and silently parsed in server-local time.
-const ISO_OFFSET_RE = /(?:Z|[+-]\d{2}:?\d{2})$/;
 
 const FUNCTIONS: ToolFunction[] = [
   {
@@ -230,143 +220,41 @@ function describeTrigger(task: ScheduledTaskModel): string {
   return 'no trigger (manual run_task only)';
 }
 
+// A refusal of the shared parser names the contract's fields; the tool's
+// arguments are snake_case.
+function toolWords(message: string): string {
+  return message.replace(/\btimeoutMs\b/g, 'timeout_ms').replace(/\breportOnSuccess\b/g, 'report_on_success');
+}
+
+// The input rule is the registry's one (input.ts, shared with the console's
+// POST /api/schedule/tasks); the tool's snake_case arguments are mapped onto
+// the contract's names, a refusal reads as the tool's error in its words.
 async function createTask(args: JsonObject, ctx: BuiltinServerCallContext): Promise<string> {
-  const slug = requireSlug(args);
+  let outcome;
 
-  if (!SLUG_PATTERN.test(slug) || slug.length > SLUG_MAX_LENGTH) {
-    throw new Error(`slug must match ${SLUG_PATTERN} and be at most ${SLUG_MAX_LENGTH} chars`);
-  }
-
-  const name = typeof args.name === 'string' ? args.name.trim() : '';
-
-  if (!name) {
-    throw new Error('a non-empty name is required');
-  }
-
-  const kind = args.kind;
-
-  if (kind !== 'note' && kind !== 'code' && kind !== 'command') {
-    throw new Error('kind must be "note", "code" or "command"');
-  }
-
-  const description = typeof args.description === 'string' && args.description.trim() ? args.description.trim() : null;
-  const cron = typeof args.cron === 'string' && args.cron.trim() ? args.cron.trim() : null;
-  const atRaw = typeof args.at === 'string' && args.at.trim() ? args.at.trim() : null;
-  const note = typeof args.note === 'string' && args.note.trim() ? args.note.trim() : null;
-
-  if (cron && atRaw) {
-    throw new Error('cron and at are mutually exclusive — a task has at most one trigger');
-  }
-
-  if (kind === 'note' && !note) {
-    throw new Error('kind "note" requires a non-empty note — it is the content the secretary will act on');
-  }
-
-  // The per-kind command fields: validated and stored only for kind
-  // "command"; for other kinds a supplied value is rejected as confusion.
-  const command = typeof args.command === 'string' && args.command.trim() ? args.command.trim() : null;
-  const cwdRaw = typeof args.cwd === 'string' && args.cwd.trim() ? args.cwd.trim() : null;
-  const timeoutRaw = typeof args.timeout_ms === 'number' ? args.timeout_ms : null;
-  const reportOnSuccess = args.report_on_success === true;
-
-  if (kind !== 'command' && (command || cwdRaw || timeoutRaw !== null || reportOnSuccess)) {
-    throw new Error(`command, cwd, timeout_ms and report_on_success apply only to kind "command" — null them for kind "${kind}"`);
-  }
-
-  let cwd: string | null = null;
-  let timeoutMs: number | null = null;
-
-  if (kind === 'command') {
-    if (!command) {
-      throw new Error('kind "command" requires a non-empty command — it is what the trigger executes (bash -c)');
-    }
-
-    if (cwdRaw) {
-      try {
-        cwd = sanitizeRelPath(cwdRaw, 'cwd');
-      } catch (error) {
-        if (error instanceof WorkspacePathError) {
-          throw new Error(error.message);
-        }
-
-        throw error;
-      }
-    }
-
-    if (timeoutRaw !== null) {
-      if (!Number.isInteger(timeoutRaw) || timeoutRaw < JOB_TIMEOUT_MIN_MS || timeoutRaw > JOB_TIMEOUT_MAX_MS) {
-        throw new Error(
-          `timeout_ms must be an integer between ${JOB_TIMEOUT_MIN_MS} and ${JOB_TIMEOUT_MAX_MS} (milliseconds), or null for the default ${JOB_TIMEOUT_DEFAULT_MS}`,
-        );
-      }
-
-      timeoutMs = timeoutRaw;
-    }
-  }
-
-  let firstFire: Date | null = null;
-
-  if (cron) {
-    try {
-      assertValidCron(cron);
-    } catch (error) {
-      throw new Error(`invalid cron expression "${cron}": ${error instanceof Error ? error.message : String(error)}`);
-    }
-
-    firstFire = cronNextRun(cron, new Date());
-
-    if (!firstFire) {
-      throw new Error(`cron expression "${cron}" never yields a future moment`);
-    }
-  }
-
-  let at: Date | null = null;
-
-  if (atRaw) {
-    if (!ISO_OFFSET_RE.test(atRaw)) {
-      throw new Error('at must be an ISO 8601 instant with an explicit offset, e.g. "2026-08-09T09:00:00+03:00" or "...Z"');
-    }
-
-    at = new Date(atRaw);
-
-    if (Number.isNaN(at.getTime())) {
-      throw new Error(`at is not a valid ISO 8601 instant: "${atRaw}"`);
-    }
-  }
-
-  const existing = await prisma.scheduledTask.findUnique({ where: { slug } });
-
-  if (existing) {
-    throw new Error(`slug "${slug}" is already taken — cancel_task it first to recreate`);
-  }
-
-  const thread = await getThread(ctx.threadId);
-
-  const task = await registryMutation(async (tx, journal) => {
-    const created = await tx.scheduledTask.create({
-      data: {
-        slug,
-        userId: ctx.userId,
-        name,
-        description,
-        kind,
-        cron,
-        at,
-        // note is meaningless for a code body or a command — the registry does
-        // not keep it there.
-        note: kind === 'note' ? note : null,
-        command: kind === 'command' ? command : null,
-        cwd,
-        timeoutMs,
-        reportOnSuccess,
-        createdBy: thread?.agent ?? null,
-      },
+  try {
+    const input = parseTaskInput({
+      slug: args.slug,
+      name: args.name,
+      description: args.description,
+      kind: args.kind,
+      cron: args.cron,
+      at: args.at,
+      note: args.note,
+      command: args.command,
+      cwd: args.cwd,
+      timeoutMs: args.timeout_ms,
+      reportOnSuccess: args.report_on_success,
     });
 
-    await journal('schedule.task.created', taskRecord(created, new Date()), { kind: 'thread', userId: ctx.userId, threadId: ctx.threadId });
+    outcome = await createTaskCommand(ctx.userId, input, { kind: 'thread', userId: ctx.userId, threadId: ctx.threadId });
+  } catch (error) {
+    throw error instanceof ScheduleError ? new Error(toolWords(error.message)) : error;
+  }
 
-    return created;
-  });
+  const { task } = outcome;
+  const { slug, kind, at, cwd, timeoutMs, reportOnSuccess } = task;
+  const note = typeof args.note === 'string' && args.note.trim() ? args.note.trim() : null;
 
   const lines = [`Task "${slug}" (${kind}) registered. Trigger: ${describeTrigger(task)}.`];
 
@@ -375,7 +263,7 @@ async function createTask(args: JsonObject, ctx: BuiltinServerCallContext): Prom
   }
 
   if (kind === 'code') {
-    if (await isSleeping(task)) {
+    if (outcome.sleeping) {
       lines.push(
         `The task SLEEPS: no run(ctx) body under slug "${slug}". It comes alive the moment ` +
           `${workspaceTaskFile(task.userId, slug)} exists (a workspace task body, no build or restart), or after ` +

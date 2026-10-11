@@ -26,7 +26,7 @@ import { createProjectHandler, setProjectArchivedHandler, updateProjectHandler }
 import { appsReducer } from './apps/reducer.ts';
 import { loadAppsHandler, publishAppHandler, unpublishAppHandler } from './apps/handlers.ts';
 import { scheduleReducer } from './schedule/reducer.ts';
-import { deleteTaskHandler, runTaskHandler } from './schedule/handlers.ts';
+import { createTaskHandler, deleteTaskHandler, runTaskHandler } from './schedule/handlers.ts';
 import { connectServiceHandler, disconnectConnectionHandler, reconnectConnectionHandler, renameConnectionHandler } from './connections/handlers.ts';
 import { connectionsReducer } from './connections/reducer.ts';
 import { secretRequestsReducer } from './secret-requests/reducer.ts';
@@ -60,6 +60,7 @@ export const handlers = {
   LOAD_APPS: loadAppsHandler,
   PUBLISH_APP: publishAppHandler,
   UNPUBLISH_APP: unpublishAppHandler,
+  CREATE_TASK: createTaskHandler,
   RUN_TASK: runTaskHandler,
   DELETE_TASK: deleteTaskHandler,
   RENAME_CONNECTION: renameConnectionHandler,

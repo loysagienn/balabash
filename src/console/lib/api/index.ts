@@ -8,6 +8,8 @@ import type {
   ConnectionResponse,
   CreateProjectRequest,
   CreateProjectResponse,
+  CreateTaskRequest,
+  CreateTaskResponse,
   DeleteTaskResponse,
   FileMetaResponse,
   JobRunResponse,
@@ -131,16 +133,20 @@ export type Api = {
   };
   // The schedule: the run journal of workspace jobs (the second data layer
   // — a page of runs newest first on a cursor, one run with its output,
-  // the newest run of every task) and the operator's two commands over a
-  // task — a manual run (the schedule untouched; the answer names the
-  // journal row of a command job) and a delete (the answer is the row; the
-  // same end arrives as schedule.task.cancelled of the tail). Both name the
+  // the newest run of every task) and the operator's commands over the
+  // tasks — a new task (the answer is the row as the snapshot has it and
+  // whether a code task sleeps; the same row arrives as
+  // schedule.task.created of the tail), a manual run (the schedule
+  // untouched; the answer names the journal row of a command job) and a
+  // delete (the answer is the row; the same end arrives as
+  // schedule.task.cancelled of the tail). The run and the delete name the
   // row the operator saw (taskId): a slug held by another row since is a
   // 409 task_replaced, nothing done.
   schedule: {
     runs(query: JobRunsQuery, signal?: AbortSignal): Promise<JobRunsResponse>;
     latestRuns(signal?: AbortSignal): Promise<LatestJobRunsResponse>;
     run(id: string, signal?: AbortSignal): Promise<JobRunResponse>;
+    createTask(input: CreateTaskRequest): Promise<CreateTaskResponse>;
     runTask(slug: string, taskId: string): Promise<RunTaskResponse>;
     deleteTask(slug: string, taskId: string): Promise<DeleteTaskResponse>;
   };
@@ -237,6 +243,7 @@ export function createApi(options: FetchOptions = {}): Api {
       runs: (query, signal) => apiFetch<JobRunsResponse>('/api/schedule/runs', { query, signal }),
       latestRuns: signal => apiFetch<LatestJobRunsResponse>('/api/schedule/runs/latest', { signal }),
       run: (id, signal) => apiFetch<JobRunResponse>(`/api/schedule/runs/${encodeURIComponent(id)}`, { signal }),
+      createTask: input => apiFetch<CreateTaskResponse>('/api/schedule/tasks', { method: 'POST', body: input }),
       runTask: (slug, taskId) => apiFetch<RunTaskResponse>(`${task(slug)}/run`, { method: 'POST', body: { taskId } satisfies TaskCommandRequest }),
       deleteTask: (slug, taskId) => apiFetch<DeleteTaskResponse>(task(slug), { method: 'DELETE', query: { taskId } satisfies TaskCommandRequest }),
     },

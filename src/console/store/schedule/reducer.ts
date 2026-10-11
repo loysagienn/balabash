@@ -7,6 +7,8 @@
 // recomputes it from the expression in the schedule's time zone
 // (screens/schedule/nextRun.ts). calls — by slug, the operator's call in
 // flight (a run or a delete), one per task at a time, applied by identity.
+// create — the "New task" form (lib/forms/attempt.ts): the call in flight,
+// the refusal the form shows, how many creations the server accepted.
 // runsChanged — a stamp of the run journal (job_runs, read by place): it
 // moves when a manual run of a command job was accepted (RUN_TASK_DONE
 // with a runId), when a job reported through the log (schedule.fired with
@@ -16,6 +18,8 @@
 // run is going (screens/schedule/queries.ts).
 
 import type { TaskView } from '../../../api/contract.ts';
+import type { FormCallState } from '../../lib/forms/attempt.ts';
+import { idleForm } from '../../lib/forms/attempt.ts';
 import { taskFromRecord } from '../records.ts';
 import type { Action } from '../types.ts';
 
@@ -25,10 +29,15 @@ export type ScheduleState = {
   tasks: Record<string, TaskView>;
   ids: string[];
   calls: Record<string, TaskCall>;
+  create: FormCallState;
   runsChanged: number;
 };
 
-export const initialSchedule: ScheduleState = { tasks: {}, ids: [], calls: {}, runsChanged: 0 };
+export const initialSchedule: ScheduleState = { tasks: {}, ids: [], calls: {}, create: idleForm, runsChanged: 0 };
+
+function withTask(state: ScheduleState, task: TaskView): ScheduleState {
+  return { ...state, tasks: { ...state.tasks, [task.id]: task }, ids: state.ids.includes(task.id) ? state.ids : [...state.ids, task.id] };
+}
 
 // The call in flight for a slug — read by own key: a slug could be named
 // like a key of Object.prototype.
@@ -70,12 +79,14 @@ export function scheduleReducer(state: ScheduleState = initialSchedule, action: 
     case 'event/schedule.task.created': {
       const task = taskFromRecord(action.event.payload);
 
-      if (!task) {
-        return state;
-      }
-
-      return { ...state, tasks: { ...state.tasks, [task.id]: task }, ids: state.ids.includes(task.id) ? state.ids : [...state.ids, task.id] };
+      return task ? withTask(state, task) : state;
     }
+    case 'CREATE_TASK':
+      return { ...state, create: { ...state.create, pending: true, error: null } };
+    case 'CREATE_TASK_DONE':
+      return state.create === action.request ? withTask({ ...state, create: { pending: false, error: null, done: state.create.done + 1 } }, action.created.task) : state;
+    case 'CREATE_TASK_FAIL':
+      return state.create === action.request ? { ...state, create: { ...state.create, pending: false, error: action.error } } : state;
     case 'event/schedule.task.cancelled':
       return withoutTask(state, action.event.payload.id);
     case 'event/schedule.fired':

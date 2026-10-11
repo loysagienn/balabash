@@ -56,8 +56,11 @@ export function Dialog({ title, desc, confirm, confirmVariant = 'primary', confi
 }
 
 // Whether the probe sits in a narrow shell: the container query of
-// Dialog.css writes --dialog-narrow on it. null until the first read.
-function useNarrowShell(probe: { current: HTMLElement | null }): boolean | null {
+// Dialog.css writes --dialog-narrow on it. null until the first read. A
+// screen that is a modal when wide and a page of its own on the phone (the
+// "New task" form) renders its own `.dialog-probe` and reads it the same
+// way.
+export function useNarrowShell(probe: { current: HTMLElement | null }): boolean | null {
   const [narrow, setNarrow] = useState<boolean | null>(null);
 
   useLayoutEffect(() => {

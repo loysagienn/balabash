@@ -32,8 +32,10 @@ export type AppsFilter = 'published' | 'errors';
 export type AppsRoute = { key: 'apps'; filter?: AppsFilter; q?: string };
 // slug — the selected task (/schedule/<slug>, a detail screen on the
 // phone); tab 'log' — the run log instead of the tasks, task — the log of
-// one task; q — the tasks search.
-export type ScheduleRoute = { key: 'schedule'; slug?: string; tab?: 'log'; task?: string; q?: string };
+// one task; q — the tasks search; new — the "New task" form over the list
+// (/schedule?new=1: a modal when wide, a screen of its own on the phone; a
+// flag of the list, not a path — a task's slug may be "new").
+export type ScheduleRoute = { key: 'schedule'; slug?: string; tab?: 'log'; task?: string; q?: string; new?: true };
 export type ConnectionsRoute = { key: 'connections' };
 export type SecretsRoute = { key: 'secrets'; id: string };
 export type AgentsRoute = { key: 'agents'; name?: string; q?: string };
@@ -245,13 +247,14 @@ export const schedule = defineRoute<ScheduleRoute>({
       route.tab = 'log';
 
       if (task) route.task = task;
-    } else if (q) {
-      route.q = q;
+    } else {
+      if (q) route.q = q;
+      if (param(params, 'new') === '1') route.new = true;
     }
 
     return route;
   },
-  writeRoute: route => (route.slug ? `/schedule/${encodeURIComponent(route.slug)}${queryString({ q: route.q })}` : `/schedule${queryString(route.tab === 'log' ? { tab: 'log', task: route.task } : { q: route.q })}`),
+  writeRoute: route => (route.slug ? `/schedule/${encodeURIComponent(route.slug)}${queryString({ q: route.q })}` : `/schedule${queryString(route.tab === 'log' ? { tab: 'log', task: route.task } : { q: route.q, new: route.new ? '1' : undefined })}`),
 });
 
 export const secrets = defineRoute<SecretsRoute>({

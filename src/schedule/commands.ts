@@ -1,34 +1,83 @@
-// The operator's and the agents' commands over a registered task — one
+// The operator's and the agents' commands over the task registry — one
 // implementation for the schedule tool server (src/schedule/tools.ts) and
 // the console's endpoints (src/api/api.ts), the way src/projects/mutations.ts
-// serves both for projects. Deleting journals schedule.task.cancelled in
-// the row's transaction by whoever asked (RegistryAuthor); running fires the
-// task exactly as a trigger would and leaves the schedule untouched. A
-// refusal is a ScheduleError whose code the api maps to a status and the
-// tool to its reply. A command may name the row it means (expectId — the
-// console's: the operator confirmed what a card showed): when the slug now
-// belongs to another row (the task cancelled and created again under the
-// same slug), the command is refused as 'replaced' and touches nothing; a
-// tool names only the slug and means whatever row holds it.
+// serves both for projects. Creating writes the row and journals
+// schedule.task.created in its transaction by whoever asked (RegistryAuthor:
+// an agent's thread names the agent as the row's author, the operator is
+// "operator"); the input is checked by one pure rule (input.ts). Deleting
+// journals schedule.task.cancelled in the row's transaction; running fires
+// the task exactly as a trigger would and leaves the schedule untouched. A
+// refusal is a ScheduleError (errors.ts) whose code the api maps to a
+// status and the tool to its reply. A command may name the row it means
+// (expectId — the console's: the operator confirmed what a card showed):
+// when the slug now belongs to another row (the task cancelled and created
+// again under the same slug), the command is refused as 'replaced' and
+// touches nothing; a tool names only the slug and means whatever row holds
+// it.
 
 import { prisma } from '../db/client.ts';
 import { registryMutation } from '../core/registry-events.ts';
 import type { RegistryAuthor } from '../core/registry-events.ts';
+import { getThread } from '../core/threads.ts';
 import type { ScheduledTaskModel } from '../../prisma-generated/models.ts';
 import { hasTaskBody, workspaceTaskFile } from './catalog.ts';
 import { fireTask } from './engine.ts';
+import { ScheduleError } from './errors.ts';
+import type { TaskInput } from './input.ts';
 import { taskRecord } from './view.ts';
 
-export type ScheduleErrorCode = 'not_found' | 'replaced' | 'sleeping' | 'no_main_thread';
+export { ScheduleError } from './errors.ts';
+export type { ScheduleErrorCode } from './errors.ts';
 
-export class ScheduleError extends Error {
-  readonly code: ScheduleErrorCode;
+// The console's word for the operator in the row's author column (an
+// agent's row names the agent).
+export const OPERATOR_AUTHOR = 'operator';
 
-  constructor(code: ScheduleErrorCode, message: string) {
-    super(message);
-    this.name = 'ScheduleError';
-    this.code = code;
+export type CreateOutcome = {
+  task: ScheduledTaskModel;
+  // A code task without a run(ctx) body — it sleeps until one exists.
+  sleeping: boolean;
+};
+
+function isUniqueViolation(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && (error as { code?: unknown }).code === 'P2002';
+}
+
+// Writes the task of the user: the row and its schedule.task.created in one
+// transaction. A slug held by any row (of any workspace — slugs are global
+// to the registry) is a 'conflict': told ahead of the write, and the unique
+// index stays the last word — two creations of one slug at once leave one
+// row, the other is the same refusal (P2002), not a crash. The author
+// column: the agent of the asking thread, "operator" for the console, null
+// for the system.
+export async function createTask(userId: string, input: TaskInput, by: RegistryAuthor): Promise<CreateOutcome> {
+  const taken = () => new ScheduleError('conflict', `slug "${input.slug}" is already taken — cancel_task it first to recreate`);
+  const existing = await prisma.scheduledTask.findUnique({ where: { slug: input.slug } });
+
+  if (existing) {
+    throw taken();
   }
+
+  const createdBy = by.kind === 'thread' ? ((await getThread(by.threadId))?.agent ?? null) : by.kind === 'user' ? OPERATOR_AUTHOR : null;
+  let task: ScheduledTaskModel;
+
+  try {
+    task = await registryMutation(async (tx, journal) => {
+      const created = await tx.scheduledTask.create({ data: { ...input, userId, createdBy } });
+
+      await journal('schedule.task.created', taskRecord(created, new Date()), by);
+
+      return created;
+    });
+  } catch (error) {
+    if (isUniqueViolation(error)) {
+      throw taken();
+    }
+
+    throw error;
+  }
+
+  return { task, sleeping: await isSleeping(task) };
 }
 
 export async function findTask(userId: string, slug: string): Promise<ScheduledTaskModel | null> {

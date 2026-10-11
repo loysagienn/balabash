@@ -4,7 +4,10 @@
 // fires a note into the main thread's log and a command job into the
 // journal (a real bash on the stand), a sleeping code task is refused; a
 // delete answers the row and journals schedule.task.cancelled by the
-// operator; another workspace's tasks and runs are not found, not forbidden.
+// operator; a task is registered by the operator through the rules of the
+// create_task tool (the row and its schedule.task.created together, the
+// author "operator", a code task without a body sleeps); another
+// workspace's tasks and runs are not found, not forbidden.
 //
 // Run: npm test  (node:test, native type stripping — no build needed).
 
@@ -14,7 +17,7 @@ import fs from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { startStand } from '../test-support/stand.ts';
 import type { Stand } from '../test-support/stand.ts';
-import type { DeleteTaskResponse, JobRunResponse, JobRunsResponse, LatestJobRunsResponse, RunTaskResponse } from './contract.ts';
+import type { CreateTaskResponse, DeleteTaskResponse, JobRunResponse, JobRunsResponse, LatestJobRunsResponse, RunTaskResponse } from './contract.ts';
 
 type ErrorBody = { error: { code: string; message: string } };
 
@@ -359,5 +362,127 @@ describe('running and deleting a task over the api', () => {
 
     assert.equal(reply.status, 404);
     assert.ok(await prisma.scheduledTask.findUnique({ where: { slug: 'foreign-job' } }));
+  });
+});
+
+describe('creating a task over the api', () => {
+  const created = async () => (await scheduleEvents()).filter(event => event.type === 'schedule.task.created');
+
+  test('POST /schedule/tasks registers a command job by the operator: the row, its event in the same transaction, the answer the snapshot’s row', async () => {
+    const reply = await stand.request('POST', '/api/schedule/tasks', {
+      body: { slug: 'console-job', name: 'Console job', description: 'Registered from the console', kind: 'command', cron: '30 4 * * *', command: "printf 'hi\\n'", cwd: null, timeoutMs: 5_000, reportOnSuccess: true },
+    });
+
+    assert.equal(reply.status, 200, reply.text);
+
+    const { task, sleeping } = reply.json<CreateTaskResponse>();
+
+    assert.equal(sleeping, false);
+    assert.ok(task.nextRunAt instanceof Date && task.nextRunAt.getTime() > Date.now());
+    assert.deepEqual(
+      { ...task, id: typeof task.id, createdAt: task.createdAt instanceof Date, nextRunAt: 'date' },
+      { id: 'string', slug: 'console-job', name: 'Console job', description: 'Registered from the console', kind: 'command', cron: '30 4 * * *', at: null, note: null, command: "printf 'hi\\n'", cwd: null, timeoutMs: 5_000, reportOnSuccess: true, createdBy: 'operator', createdAt: true, nextRunAt: 'date' },
+    );
+
+    const row = await prisma.scheduledTask.findUniqueOrThrow({ where: { slug: 'console-job' } });
+
+    assert.equal(row.userId, stand.userId);
+    assert.equal(row.id, task.id);
+    assert.equal(row.cwd, null);
+
+    const events = await created();
+    const event = events[events.length - 1]!;
+
+    assert.equal(event.actor, 'user');
+    assert.equal(event.threadId, null);
+    assert.equal(event.payload.id, task.id);
+    assert.equal(event.payload.slug, 'console-job');
+    assert.equal(event.payload.createdBy, 'operator');
+    assert.equal(typeof event.payload.nextRunAt, 'string');
+
+    // Armed: a manual run of the new job settles a journal row.
+    const run = await stand.request('POST', '/api/schedule/tasks/console-job/run', { body: { taskId: task.id } });
+
+    assert.equal(run.status, 200, run.text);
+
+    const settled = await settledRun(run.json<RunTaskResponse>().runId!);
+
+    assert.equal(settled.status, 'ok');
+    assert.equal(settled.stdoutTail, 'hi\n');
+  });
+
+  test('a reminder with a one-shot instant and a code task without a body (it sleeps)', async () => {
+    const note = await stand.request('POST', '/api/schedule/tasks', { body: { slug: 'console-note', name: 'Call', kind: 'note', note: 'Call the electrician', at: '2030-01-01T09:00:00+03:00' } });
+
+    assert.equal(note.status, 200, note.text);
+    assert.deepEqual(
+      { at: note.json<CreateTaskResponse>().task.at, nextRunAt: note.json<CreateTaskResponse>().task.nextRunAt, note: note.json<CreateTaskResponse>().task.note, sleeping: note.json<CreateTaskResponse>().sleeping },
+      { at: new Date('2030-01-01T06:00:00Z'), nextRunAt: new Date('2030-01-01T06:00:00Z'), note: 'Call the electrician', sleeping: false },
+    );
+
+    const code = await stand.request('POST', '/api/schedule/tasks', { body: { slug: 'console-code', name: 'Digest', kind: 'code' } });
+
+    assert.equal(code.status, 200, code.text);
+    assert.equal(code.json<CreateTaskResponse>().sleeping, true);
+    assert.equal(code.json<CreateTaskResponse>().task.nextRunAt, null);
+    assert.equal((await created()).length, 3);
+  });
+
+  test('refusals: a taken slug (of any workspace) is a conflict, a bad input a bad request naming its field, a cross-site call refused — nothing written', async () => {
+    const before = await created();
+    const rows = await prisma.scheduledTask.count();
+
+    const taken = await stand.request('POST', '/api/schedule/tasks', { body: { slug: 'console-job', name: 'Again', kind: 'note', note: 'n' } });
+
+    assert.equal(taken.status, 409);
+    assert.equal(taken.json<ErrorBody>().error.code, 'task_conflict');
+    assert.match(taken.json<ErrorBody>().error.message, /slug "console-job" is already taken/);
+
+    const foreign = await stand.request('POST', '/api/schedule/tasks', { body: { slug: 'foreign-job', name: 'Again', kind: 'note', note: 'n' } });
+
+    assert.equal(foreign.status, 409, 'slugs are global to the registry');
+
+    for (const [body, field] of [
+      [{ slug: 'x', kind: 'note', note: 'n' }, /^name is required/],
+      [{ slug: 'Bad', name: 'n', kind: 'note', note: 'n' }, /^slug must match/],
+      [{ slug: 'x', name: 'n', kind: 'command' }, /^command is required/],
+      [{ slug: 'x', name: 'n', kind: 'command', command: 'true', cwd: '../up' }, /^cwd: /],
+      [{ slug: 'x', name: 'n', kind: 'command', command: 'true', timeoutMs: 10 }, /^timeoutMs must be/],
+      [{ slug: 'x', name: 'n', kind: 'note', note: 'n', cron: 'nope' }, /^cron expression "nope" is invalid/],
+      [{ slug: 'x', name: 'n', kind: 'note', note: 'n', at: '2030-01-01T09:00' }, /^at must be an ISO 8601 instant/],
+      [{ slug: 'x', name: 'n', kind: 'note' }, /^note is required/],
+    ] as const) {
+      const reply = await stand.request('POST', '/api/schedule/tasks', { body });
+
+      assert.equal(reply.status, 400, reply.text);
+      assert.equal(reply.json<ErrorBody>().error.code, 'bad_request');
+      assert.match(reply.json<ErrorBody>().error.message, field);
+    }
+
+    const corrupted = await stand.request('POST', '/api/schedule/tasks', { text: '{"slug": ' });
+
+    assert.equal(corrupted.status, 400);
+
+    const crossSite = await stand.request('POST', '/api/schedule/tasks', { body: { slug: 'evil', name: 'Evil', kind: 'note', note: 'n' }, headers: { origin: 'https://evil.example' } });
+
+    assert.equal(crossSite.status, 403);
+    assert.equal(crossSite.json<ErrorBody>().error.code, 'cross_site');
+
+    const anonymous = await stand.request('POST', '/api/schedule/tasks', { body: { slug: 'anon', name: 'Anon', kind: 'note', note: 'n' }, cookie: '' });
+
+    assert.equal(anonymous.status, 401);
+
+    assert.equal((await created()).length, before.length);
+    assert.equal(await prisma.scheduledTask.count(), rows);
+  });
+
+  test('two creations of one slug at once: one row, one event, the other a conflict', async () => {
+    const body = { slug: 'console-race', name: 'Race', kind: 'note', note: 'n' };
+    const replies = await Promise.all(Array.from({ length: 4 }, () => stand.request('POST', '/api/schedule/tasks', { body })));
+
+    assert.deepEqual(replies.map(reply => reply.status).sort(), [200, 409, 409, 409]);
+    assert.ok(replies.filter(reply => reply.status === 409).every(reply => reply.json<ErrorBody>().error.code === 'task_conflict'));
+    assert.equal(await prisma.scheduledTask.count({ where: { slug: 'console-race' } }), 1);
+    assert.equal((await created()).filter(event => event.payload.slug === 'console-race').length, 1);
   });
 });

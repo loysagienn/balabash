@@ -1,5 +1,10 @@
-// The effects of the schedule domain: the operator's manual run and delete
-// of a task. One call per task at a time (schedule.calls[slug]), the
+// The effects of the schedule domain: the operator's new task, manual run
+// and delete. A creation is a form (lib/forms/attempt.ts): the answer's row
+// is folded at once and, while the operator is still on the form (the
+// Schedule screen with `new`), the created task opens in its place; once
+// they have gone elsewhere during the call, a late answer must not pull
+// them back — the toast then carries "Open" instead; a refusal stays in
+// the form state for the form to show. One call per task at a time (schedule.calls[slug]), the
 // outcome applied by the identity of that call — an answer that outlived
 // its session (a sign-out, the next sign-in) touches nothing. A run's
 // outcome is told by a toast in the task's own words — a command job's run
@@ -14,10 +19,47 @@ import { toApiFailure } from '../../lib/api/index.ts';
 import type { ActionHandler } from '../types.ts';
 import { routeTo } from '../router/actions.ts';
 import { pushToast } from '../ui/actions.ts';
-import { deleteTaskDone, deleteTaskFail, runTaskDone, runTaskFail } from './actions.ts';
+import { createTaskDone, createTaskFail, deleteTaskDone, deleteTaskFail, runTaskDone, runTaskFail } from './actions.ts';
 import { ownCall } from './reducer.ts';
 import { selectTaskBySlug } from './selectors.ts';
-import { deletedWords, runOutcomeWords } from './words.ts';
+import { createdWords, deletedWords, runOutcomeWords } from './words.ts';
+
+export const createTaskHandler: ActionHandler<'CREATE_TASK'> =
+  ({ api, dispatch, getState, next }) =>
+  async action => {
+    if (getState().schedule.create.pending) {
+      return;
+    }
+
+    next(action);
+
+    const request = getState().schedule.create;
+
+    try {
+      const created = await api.schedule.createTask(action.input);
+
+      if (getState().schedule.create !== request) {
+        return;
+      }
+
+      const { route } = getState().router;
+      const stillHere = route.key === 'schedule' && route.new === true;
+      const target = { key: 'schedule', slug: created.task.slug } as const;
+
+      dispatch(createTaskDone(request, created));
+      dispatch(pushToast({ ...createdWords(created), action: stillHere ? undefined : { label: 'Open', route: target } }));
+
+      if (stillHere) {
+        dispatch(routeTo(target, { replace: true }));
+      }
+    } catch (error) {
+      if (getState().schedule.create !== request) {
+        return;
+      }
+
+      dispatch(createTaskFail(request, toApiFailure(error)));
+    }
+  };
 
 export const runTaskHandler: ActionHandler<'RUN_TASK'> =
   ({ api, dispatch, getState, next }) =>

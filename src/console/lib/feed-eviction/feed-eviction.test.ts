@@ -112,6 +112,9 @@ const api: Api = {
     run: async () => {
       throw new Error('not here');
     },
+    createTask: async () => {
+      throw new Error('not here');
+    },
     runTask: async () => {
       throw new Error('not here');
     },

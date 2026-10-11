@@ -33,7 +33,8 @@ import { ConnectionError, disconnectConnection, getOauthClientRequest, getUserCo
 import { AppManagementError, listApps, publishApp, unpublishApp } from '../apps/management.ts';
 import { ProjectError, archiveProject, createProject, parseProjectInput, parseProjectPatch, unarchiveProject, updateProject } from '../projects/mutations.ts';
 import { projectView } from '../projects/store.ts';
-import { ScheduleError, deleteTask, runTask } from '../schedule/commands.ts';
+import { ScheduleError, createTask, deleteTask, runTask } from '../schedule/commands.ts';
+import { parseTaskInput } from '../schedule/input.ts';
 import { JOB_RUNS_PAGE_DEFAULT, JOB_RUNS_PAGE_MAX, getJobRun, latestJobRuns, listJobRuns } from '../schedule/runs.ts';
 import { taskView } from '../schedule/view.ts';
 import { publicAppsBase } from '../apps/urls.ts';
@@ -51,6 +52,7 @@ import type {
   ConnectLinkResponse,
   ConnectionResponse,
   CreateProjectResponse,
+  CreateTaskResponse,
   DeleteTaskResponse,
   FileMetaResponse,
   JobRunResponse,
@@ -981,11 +983,44 @@ router.get('/schedule/runs/:id', requireSession, async ctx => {
   ctx.body = prepareObject(response);
 });
 
-const SCHEDULE_ERROR_STATUS: Record<ScheduleError['code'], number> = { not_found: 404, replaced: 409, sleeping: 409, no_main_thread: 409 };
+const SCHEDULE_ERROR_STATUS: Record<ScheduleError['code'], number> = { bad_request: 400, conflict: 409, not_found: 404, replaced: 409, sleeping: 409, no_main_thread: 409 };
 
+// not_found and bad_request are the API's common codes; the rest name the
+// task (task_conflict, task_replaced, task_sleeping, task_no_main_thread).
 function sendScheduleError(ctx: Context, error: ScheduleError): void {
-  sendError(ctx, SCHEDULE_ERROR_STATUS[error.code], error.code === 'not_found' ? 'not_found' : `task_${error.code}`, error.code === 'not_found' ? 'No such task' : error.message);
+  const common = error.code === 'not_found' || error.code === 'bad_request';
+
+  sendError(ctx, SCHEDULE_ERROR_STATUS[error.code], common ? error.code : `task_${error.code}`, error.code === 'not_found' ? 'No such task' : error.message);
 }
+
+// A task registered by the operator: the input by the rules of the
+// create_task tool (one parser — src/schedule/input.ts), the row and its
+// schedule.task.created in one transaction, authored by the operator
+// (createdBy "operator"). The answer carries the row and whether a code
+// task sleeps.
+router.post('/schedule/tasks', requireSession, async ctx => {
+  const userId = ctx.state.userId as string;
+  const body = await readJsonBody(ctx);
+
+  if (!body) {
+    return;
+  }
+
+  try {
+    const { task, sleeping } = await createTask(userId, parseTaskInput(body), { kind: 'user', userId });
+    const response: CreateTaskResponse = { task: taskView(task, new Date()), sleeping };
+
+    ctx.body = prepareObject(response);
+  } catch (error) {
+    if (error instanceof ScheduleError) {
+      sendScheduleError(ctx, error);
+
+      return;
+    }
+
+    throw error;
+  }
+});
 
 // The row a command of the console means (contract: TaskCommandRequest):
 // absent — whatever row holds the slug; present — that row, or 409

@@ -741,6 +741,37 @@ export type TaskCommandRequest = {
   taskId?: string;
 };
 
+// POST /schedule/tasks — a task registered from the console, by the rules of
+// the create_task tool (src/schedule/input.ts, one parser for both doors):
+// the slug's shape, a name, at most one trigger — a cron expression
+// (evaluated in the schedule's time zone) or `at`, an ISO 8601 instant with
+// an explicit offset — a note for kind 'note', the command fields for kind
+// 'command' only (cwd relative to the file area, timeoutMs 1 s – 5 h, null
+// for the default 10 min). null and absent are one "not given". The
+// answer is the row as the snapshot has it (the same row arrives as
+// schedule.task.created of the tail, folded idempotently) and whether a
+// code task sleeps (no run(ctx) body yet). Refusals: 400 bad_request (the
+// message starts with the field at fault), 409 task_conflict (the slug is
+// taken — by any workspace: slugs are global to the registry).
+export type CreateTaskRequest = {
+  slug: string;
+  name: string;
+  description?: string | null;
+  kind: 'note' | 'code' | 'command';
+  cron?: string | null;
+  at?: string | null;
+  note?: string | null;
+  command?: string | null;
+  cwd?: string | null;
+  timeoutMs?: number | null;
+  reportOnSuccess?: boolean | null;
+};
+
+export type CreateTaskResponse = {
+  task: TaskView;
+  sleeping: boolean;
+};
+
 // POST /schedule/tasks/:slug/run — the task fired by hand, the schedule
 // untouched: `fired` with the runId of a command job (null for a note or a
 // code task — they leave no journal row), or `already_running` when a run of

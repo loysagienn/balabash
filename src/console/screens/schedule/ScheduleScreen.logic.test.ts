@@ -277,3 +277,17 @@ describe('the screen', () => {
     assert.equal(scheduleDetail('db-backup', false, 'ready'), 'unknown');
   });
 });
+
+describe('the "New task" form in the route', () => {
+  it('withScheduleFilters: the form is the list’s — a selected task or the log drops it, the search stays beside it', () => {
+    assert.deepEqual(withScheduleFilters({ key: 'schedule', q: 'back' }, { new: true }), { key: 'schedule', q: 'back', new: true });
+    assert.deepEqual(withScheduleFilters({ key: 'schedule', q: 'back', new: true }, { new: undefined }), { key: 'schedule', q: 'back' });
+    assert.deepEqual(withScheduleFilters({ key: 'schedule', new: true }, { slug: 'db-backup' }), { key: 'schedule', slug: 'db-backup' });
+    assert.deepEqual(withScheduleFilters({ key: 'schedule', new: true }, { tab: 'log' }), { key: 'schedule', tab: 'log' });
+    assert.deepEqual(withScheduleFilters({ key: 'schedule', slug: 'db-backup' }, { slug: undefined, new: true }), { key: 'schedule', new: true });
+  });
+
+  it('scheduleShell: a screen of its own on the phone, "Back" to the list with the search kept', () => {
+    assert.deepEqual(scheduleShell({ key: 'schedule', new: true, q: 'back' }, null), { title: 'Schedule', titleNarrow: 'New task', back: { key: 'schedule', q: 'back' }, backNarrow: true, detail: true });
+  });
+});

@@ -397,11 +397,12 @@ export type ScheduleFilterPatch = Partial<Omit<ScheduleRoute, 'key'>>;
 // stays beside a selected task — the list is still there when wide), the
 // task filter to the log, which is a tab of its own: opening it drops the
 // selected task (the URL of a selected task has no tab, so the move would
-// otherwise say the same URL and change nothing).
+// otherwise say the same URL and change nothing). The "New task" form
+// (`new`) is the list's: a selected task or the log drops it.
 export function withScheduleFilters(route: ScheduleRoute, patch: ScheduleFilterPatch): ScheduleRoute {
   const next: ScheduleRoute = { ...route, ...patch };
 
-  for (const key of ['slug', 'tab', 'task', 'q'] as const) {
+  for (const key of ['slug', 'tab', 'task', 'q', 'new'] as const) {
     if (next[key] === undefined || next[key] === '') {
       delete next[key];
     }
@@ -410,8 +411,13 @@ export function withScheduleFilters(route: ScheduleRoute, patch: ScheduleFilterP
   if (next.tab === 'log') {
     delete next.q;
     delete next.slug;
+    delete next.new;
   } else {
     delete next.task;
+  }
+
+  if (next.slug) {
+    delete next.new;
   }
 
   return next;
@@ -421,8 +427,13 @@ export type ScheduleShell = { title: string; titleNarrow?: string; back?: AppRou
 
 // The shell of the split view: a selected task is a detail screen on the
 // phone, titled by its name, with "Back" to the list (the search kept) —
-// and a panel beside the list when wide.
+// and a panel beside the list when wide. The "New task" form the same:
+// a screen of its own on the phone, a modal over the list when wide.
 export function scheduleShell(route: ScheduleRoute, task: Pick<TaskView, 'name'> | null): ScheduleShell {
+  if (route.new) {
+    return { title: 'Schedule', titleNarrow: 'New task', back: withScheduleFilters(route, { new: undefined }), backNarrow: true, detail: true };
+  }
+
   if (!route.slug) {
     return { title: 'Schedule', detail: false };
   }

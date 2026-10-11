@@ -14,3 +14,6 @@ export const selectTaskBySlug = (state: State, slug: string): TaskView | null =>
 export const selectTaskCall = (state: State, slug: string): TaskCall | null => ownCall(state.schedule.calls, slug) ?? null;
 
 export const selectRunsChanged = (state: State) => state.schedule.runsChanged;
+
+// The "New task" form's call state (lib/forms/attempt.ts).
+export const selectTaskCreate = (state: State) => state.schedule.create;

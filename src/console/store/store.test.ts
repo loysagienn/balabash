@@ -16,8 +16,8 @@ import type { Action, AppStore } from './index.ts';
 import { eventAction } from './events.ts';
 import { routeTo, tabVisible } from './router/actions.ts';
 import { loadApps, publishApp, unpublishApp } from './apps/actions.ts';
-import { deleteTask, runTask } from './schedule/actions.ts';
-import { selectRunsChanged, selectTaskCall, selectTasks } from './schedule/selectors.ts';
+import { createTask, deleteTask, runTask } from './schedule/actions.ts';
+import { selectRunsChanged, selectTaskCall, selectTaskCreate, selectTasks } from './schedule/selectors.ts';
 import { selectAppCall, selectAppPublish } from './apps/selectors.ts';
 import { login, logout, requestConsoleCode, saveSettings, sessionCheck, sessionLost } from './session/actions.ts';
 import { selectOperatorName } from './session/selectors.ts';
@@ -112,6 +112,7 @@ function fakeApi(overrides: ApiOverrides = {}, calls: Calls = []): Api {
     run: async () => {
       throw new Error('not here');
     },
+    createTask: async input => ({ task: taskRow(input.slug, { name: input.name, kind: input.kind, cron: input.cron ?? null, command: input.command ?? null, note: input.note ?? null, createdBy: 'operator' }), sleeping: false }),
     runTask: async () => ({ outcome: 'fired', runId: 'run-1' }),
     deleteTask: async slug => ({ task: taskRow(slug) }),
     ...overrides.schedule,
@@ -169,7 +170,14 @@ function fakeApi(overrides: ApiOverrides = {}, calls: Calls = []): Api {
     limits: LIMITS,
     system: SYSTEM,
     secretRequests: SECRET_REQUESTS,
-    schedule: { runs: schedule.runs, latestRuns: schedule.latestRuns, run: schedule.run, runTask: wrap('schedule.runTask', schedule.runTask), deleteTask: wrap('schedule.deleteTask', schedule.deleteTask) },
+    schedule: {
+      runs: schedule.runs,
+      latestRuns: schedule.latestRuns,
+      run: schedule.run,
+      createTask: wrap('schedule.createTask', schedule.createTask),
+      runTask: wrap('schedule.runTask', schedule.runTask),
+      deleteTask: wrap('schedule.deleteTask', schedule.deleteTask),
+    },
   };
 }
 
@@ -3039,5 +3047,110 @@ describe('connection commands', () => {
     disconnects[0]!.resolve({ connection: row('work') });
     await settle();
     assert.deepEqual(store.getState().ui.toasts.map(toast => toast.title), ['Sign-in link ready']);
+  });
+});
+
+describe('a new task from the form', () => {
+  type Answer<T> = { resolve: (value: T) => void; reject: (error: unknown) => void };
+
+  const held =
+    <T,>(answers: Answer<T>[]) =>
+    () =>
+      new Promise<T>((resolve, reject) => {
+        answers.push({ resolve, reject });
+      });
+
+  const INPUT = { slug: 'nightly', name: 'Nightly', description: null, kind: 'command' as const, cron: '0 4 * * *', at: null, note: null, command: 'pg_dump', cwd: null, timeoutMs: null, reportOnSuccess: false };
+
+  async function onForm(overrides: ApiOverrides = {}, calls: Calls = [], route: AppRoute = { key: 'schedule', new: true }): Promise<AppStore> {
+    const store = createStore({ api: fakeApi({ snapshot: async () => snapshot({ tasks: [taskRow('backup')] }), ...overrides }, calls), initialRoute: route });
+
+    await dispatched(store, sessionCheck());
+    await settle();
+
+    return store;
+  }
+
+  it('one call at a time; the row folded from the answer, the toast, the created task opened in the form’s place; the tail’s event folds the same row again', async () => {
+    resetSeq(500n);
+
+    const calls: Calls = [];
+    const answers: Answer<{ task: TaskView; sleeping: boolean }>[] = [];
+    const store = await onForm({ schedule: { createTask: held(answers) } }, calls);
+
+    store.dispatch(createTask(INPUT));
+    store.dispatch(createTask({ ...INPUT, slug: 'twice' }));
+    assert.equal(selectTaskCreate(store.getState()).pending, true);
+    assert.deepEqual(
+      calls.filter(call => call.name === 'schedule.createTask').map(call => call.args),
+      [[INPUT]],
+      'the second submit waits for the first',
+    );
+
+    const row = taskRow('nightly', { name: 'Nightly', createdBy: 'operator' });
+
+    answers[0]!.resolve({ task: row, sleeping: false });
+    await settle();
+    assert.deepEqual(selectTaskCreate(store.getState()), { pending: false, error: null, done: 1 });
+    assert.deepEqual(selectTasks(store.getState()).map(task => task.slug), ['backup', 'nightly']);
+    assert.deepEqual(store.getState().router.route, { key: 'schedule', slug: 'nightly' });
+    assert.deepEqual(store.getState().ui.toasts.map(toast => [toast.title, toast.state, toast.action]), [['Task created', 'done', undefined]]);
+
+    store.dispatch(eventAction(event({ type: 'schedule.task.created', actor: 'user', payload: { ...row, at: null, createdAt: ISO_NOW, nextRunAt: ISO_NOW } })));
+    assert.deepEqual(selectTasks(store.getState()).map(task => task.slug), ['backup', 'nightly']);
+  });
+
+  it('a refusal stays in the form state; the next submit clears it; the words of a sleeping code task and a reminder', async () => {
+    resetSeq(520n);
+
+    const answers: Answer<{ task: TaskView; sleeping: boolean }>[] = [];
+    const store = await onForm({ schedule: { createTask: held(answers) } });
+
+    store.dispatch(createTask(INPUT));
+    answers[0]!.reject(new ApiError(409, 'task_conflict', 'slug "nightly" is already taken — cancel_task it first to recreate'));
+    await settle();
+    assert.deepEqual(selectTaskCreate(store.getState()), { pending: false, error: { status: 409, code: 'task_conflict', message: 'slug "nightly" is already taken — cancel_task it first to recreate' }, done: 0 });
+    assert.deepEqual(selectTasks(store.getState()).map(task => task.slug), ['backup']);
+    assert.deepEqual(store.getState().router.route, { key: 'schedule', new: true });
+    assert.equal(store.getState().ui.toasts.length, 0);
+
+    store.dispatch(createTask({ ...INPUT, slug: 'digest', kind: 'code', cron: null, command: null }));
+    assert.deepEqual(selectTaskCreate(store.getState()), { pending: true, error: null, done: 0 });
+    answers[1]!.resolve({ task: taskRow('digest', { kind: 'code', command: null, cron: null, nextRunAt: null }), sleeping: true });
+    await settle();
+    assert.deepEqual(store.getState().ui.toasts.map(toast => [toast.title, toast.state]), [['Task created — sleeping', 'wait']]);
+    assert.match(store.getState().ui.toasts[0]!.desc!, /sleeps until an agent writes tasks\/digest\.ts/);
+
+    store.dispatch(routeTo({ key: 'schedule', new: true }));
+    store.dispatch(createTask({ ...INPUT, slug: 'call', kind: 'note', cron: null, command: null, note: 'Call' }));
+    answers[2]!.resolve({ task: taskRow('call', { kind: 'note', command: null, note: 'Call' }), sleeping: false });
+    await settle();
+    assert.deepEqual(store.getState().ui.toasts[1]!.title, 'Reminder created');
+  });
+
+  it('an answer after the operator left the form: no navigation, the toast carries "Open"; an answer of another session’s form touches nothing', async () => {
+    resetSeq(540n);
+
+    const answers: Answer<{ task: TaskView; sleeping: boolean }>[] = [];
+    const store = await onForm({ schedule: { createTask: held(answers) } });
+
+    store.dispatch(createTask(INPUT));
+    store.dispatch(routeTo({ key: 'home' }));
+    answers[0]!.resolve({ task: taskRow('nightly', { name: 'Nightly' }), sleeping: false });
+    await settle();
+    assert.deepEqual(store.getState().router.route, { key: 'home' });
+    assert.deepEqual(store.getState().ui.toasts[0]!.action, { label: 'Open', route: { key: 'schedule', slug: 'nightly' } });
+    assert.deepEqual(selectTasks(store.getState()).map(task => task.slug), ['backup', 'nightly']);
+
+    // A late answer for a form state the store no longer holds (the state
+    // moved on: a failure replaced it) is not applied.
+    store.dispatch(createTask({ ...INPUT, slug: 'late' }));
+    const request = selectTaskCreate(store.getState());
+
+    store.dispatch({ type: 'CREATE_TASK_FAIL', request, error: { status: 0, code: 'network', message: 'offline' } });
+    answers[1]!.resolve({ task: taskRow('late'), sleeping: false });
+    await settle();
+    assert.deepEqual(selectTasks(store.getState()).map(task => task.slug), ['backup', 'nightly'], 'the late answer is not folded');
+    assert.equal(selectTaskCreate(store.getState()).error?.message, 'offline');
   });
 });

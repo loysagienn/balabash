@@ -24,6 +24,7 @@ import { snapshotLoad } from '../../store/stream/actions.ts';
 import { selectStream, snapshotStage } from '../../store/stream/selectors.ts';
 import { selectTasks } from '../../store/schedule/selectors.ts';
 import { Shell } from '../../features/shell/Shell.tsx';
+import { Btn } from '../../ui/Btn/Btn.tsx';
 import { useSettingsFacts } from '../settings/queries.ts';
 import { Card } from '../../ui/Card/Card.tsx';
 import { Empty } from '../../ui/Empty/Empty.tsx';
@@ -39,6 +40,7 @@ import { DetailSection, Split, SplitDetail, SplitList } from '../../ui/Split/Spl
 import { Status } from '../../ui/Status/Status.tsx';
 import { Tab, Tabs } from '../../ui/Tabs/Tabs.tsx';
 import { Code, Quiet, Tag } from '../../ui/atoms/atoms.tsx';
+import { NewTask } from './NewTask.tsx';
 import { RunLog } from './RunLog.tsx';
 import { TaskDetail } from './TaskDetail.tsx';
 import { kindWords, lastRunWords, orderTasks, scheduleDetail, scheduleShell, taskMatches, triggerWords, whenLabel, withScheduleFilters } from './ScheduleScreen.logic.ts';
@@ -63,6 +65,9 @@ export function ScheduleScreen({ route }: { route: ScheduleRoute }) {
   // claimed then — "not run yet" would be a guess).
   const lastRunOf = (slug: string) => (latest.data ? (latest.data.find(run => run.slug === slug) ?? null) : undefined);
   const go = (patch: Parameters<typeof withScheduleFilters>[1]) => dispatch(routeTo(withScheduleFilters(route, patch), { replace: true }));
+  // The form is a place of its own (a screen on the phone): entered, not
+  // replaced — "Back" returns to the list.
+  const create = () => dispatch(routeTo(withScheduleFilters(route, { new: true })));
   const selected = route.slug ? (tasks.find(task => task.slug === route.slug) ?? null) : null;
   const shell = scheduleShell(route, selected);
   const detailStage = scheduleDetail(route.slug, selected !== null, stage);
@@ -80,14 +85,17 @@ export function ScheduleScreen({ route }: { route: ScheduleRoute }) {
       }
       search={
         log ? undefined : (
-          <Input
-            value={route.q ?? ''}
-            onChange={q => go({ q })}
-            placeholder="Search tasks"
-            lead="search"
-            ariaLabel="Search tasks"
-            end={route.q ? <IconBtn icon="x" label="Clear" size="sm" onClick={() => go({ q: undefined })} /> : undefined}
-          />
+          <>
+            <Input
+              value={route.q ?? ''}
+              onChange={q => go({ q })}
+              placeholder="Search tasks"
+              lead="search"
+              ariaLabel="Search tasks"
+              end={route.q ? <IconBtn icon="x" label="Clear" size="sm" onClick={() => go({ q: undefined })} /> : undefined}
+            />
+            <Btn label="Create" icon="plus" variant="primary" onClick={create} />
+          </>
         )
       }
     />
@@ -105,8 +113,8 @@ export function ScheduleScreen({ route }: { route: ScheduleRoute }) {
     );
   } else if (tasks.length === 0) {
     list = (
-      <Empty icon="calendar-clock" title="No tasks yet">
-        Ask an agent to schedule a reminder, a script or a command — it shows up here with its next run.
+      <Empty icon="calendar-clock" title="No tasks yet" action="Create a task" actionIcon="plus" onAction={create}>
+        A reminder, a script or a command on a schedule — create one here or ask an agent; it shows up with its next run.
       </Empty>
     );
   } else if (visible.length === 0) {
@@ -175,7 +183,7 @@ export function ScheduleScreen({ route }: { route: ScheduleRoute }) {
       </>
     );
   } else {
-    body = (
+    const split = (
       <Split view={route.slug ? 'detail' : 'list'}>
         <SplitList>
           {bar}
@@ -188,6 +196,14 @@ export function ScheduleScreen({ route }: { route: ScheduleRoute }) {
         </SplitList>
         <SplitDetail>{detail}</SplitDetail>
       </Split>
+    );
+
+    body = route.new ? (
+      <NewTask route={route} timezone={timezone} now={now}>
+        {split}
+      </NewTask>
+    ) : (
+      split
     );
   }
 

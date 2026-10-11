@@ -28,6 +28,8 @@ const CASES: [string, AppRoute][] = [
   ['/schedule?tab=log', { key: 'schedule', tab: 'log' }],
   ['/schedule?tab=log&task=db-backup', { key: 'schedule', tab: 'log', task: 'db-backup' }],
   ['/schedule?q=backup', { key: 'schedule', q: 'backup' }],
+  ['/schedule?new=1', { key: 'schedule', new: true }],
+  ['/schedule?q=back&new=1', { key: 'schedule', q: 'back', new: true }],
   ['/connections', { key: 'connections' }],
   ['/secrets/abc', { key: 'secrets', id: 'abc' }],
   ['/agents', { key: 'agents' }],
