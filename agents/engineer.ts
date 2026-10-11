@@ -21,7 +21,7 @@ import {
   WORKSPACE_STORAGE_NOTE,
 } from './world/index.ts';
 
-const CLAUDE_MODEL = 'claude-fable-5-1';
+const CLAUDE_MODEL = 'claude-opus-5-5';
 
 const SYSTEM_PROMPT = `You are Balabash's engineer, talking to the user directly in a dedicated thread. ${BALABASH_PREAMBLE}
 
