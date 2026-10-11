@@ -247,7 +247,7 @@ export async function initTelegramBot() {
     const messageThreadId = ctx.message?.is_topic_message ? ctx.message.message_thread_id : undefined;
 
     await ctx.reply(
-      `Код для входа в веб: ${code}\nОдноразовый, действует 10 минут.\nhttps://${config.domain}/login`,
+      `Код для входа в веб: ${code}\nОдноразовый, действует 10 минут.\nhttps://${config.consoleDomain}/login`,
       messageThreadId === undefined ? undefined : { message_thread_id: messageThreadId },
     );
   });

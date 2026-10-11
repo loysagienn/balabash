@@ -55,9 +55,9 @@ before(async () => {
   stand = await startStand();
   ({ prisma } = await import('../db/client.ts'));
 
-  // The stand clears the inherited environment; the links are built from
-  // the domain.
-  process.env.DOMAIN = DOMAIN;
+  // The links are built from CONSOLE_DOMAIN; the stand sets its own, this
+  // file names a domain of its own to tell the two apart.
+  process.env.CONSOLE_DOMAIN = DOMAIN;
 
   const { registerUserAuthServer } = await import('../capabilities/tool-manager.ts');
   const service = (name: string, identityProbe: boolean) =>

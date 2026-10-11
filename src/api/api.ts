@@ -1262,10 +1262,10 @@ router.post('/connections', requireSession, async ctx => {
 });
 
 // --------------------------------------------------------------------------
-// LLM request telemetry (read-only): raw rows for the /llm-usage chart of
-// the old web and for the console's "Main thread · tokens per request"
-// (threadId — one thread's window; the rows are scoped by the session's
-// user, so a thread of another workspace simply has none). The api layer
+// LLM request telemetry (read-only): raw rows for the console's "Main
+// thread · tokens per request" (threadId — one thread's window; the rows are
+// scoped by the session's user, so a thread of another workspace simply has
+// none). The api layer
 // reads the table directly — llm_requests is deliberately outside the event
 // log and has no core facade; this endpoint is its only reader. rawUsage
 // stays server-side (bulky and unneeded for the charts).

@@ -129,31 +129,26 @@ export const config = {
     return process.env.INDEXER_OPENAI_MODEL || 'gpt-5.6-luna';
   },
 
-  // Public domain of the web surface: one-time provisioning links and the
-  // single OAuth redirect URI (https://<domain>/oauth/callback) are built
-  // from it.
-  get domain(): string {
-    return requireEnv('DOMAIN');
-  },
-
   get httpPort(): number {
     return Number(requireEnv('HTTP_PORT'));
   },
 
   // The apps execution domain (balabash.app): the host the core branches on
   // to serve the /apps runtime. Optional — without it the apps runtime
-  // lives on the main domain (owner /apps/* by the web session, published
+  // lives on the console domain (owner /apps/* by the web session, published
   // /a/<slug> without login; src/apps/urls.ts).
   get appsDomain(): string | null {
     return process.env.APPS_DOMAIN?.trim().toLowerCase() || null;
   },
 
-  // The console domain (console.balabash.app): the host of the new web
-  // interface, a browser SPA served by the core itself (src/api/console.ts)
-  // next to the same /api and /files. Optional — without it the console is
-  // not served anywhere.
-  get consoleDomain(): string | null {
-    return process.env.CONSOLE_DOMAIN?.trim().toLowerCase() || null;
+  // The public domain of the web surface (console.balabash.app): the host
+  // the core serves the console on — a browser SPA next to /api and /files
+  // (src/api/console.ts) — and the origin of every link the system hands
+  // out: the one-time provisioning and sign-in links, the owner pages of
+  // apps, the signed file links and the single OAuth redirect URI
+  // (https://<domain>/oauth/callback).
+  get consoleDomain(): string {
+    return requireEnv('CONSOLE_DOMAIN').trim().toLowerCase();
   },
 
   // Secret of the stateless apps cookie (HMAC over {userId, exp, kind});

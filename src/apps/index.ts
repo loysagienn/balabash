@@ -227,7 +227,7 @@ async function renderOwnerShell(ctx: Context, appPath: string, result: Exclude<M
       appBase: `/apps/${appPath}`,
       apiBase: `/platform/api/apps/${appPath}`,
       appPath,
-      refreshUrl: `https://${config.domain}/apps/${appPath}`,
+      refreshUrl: `https://${config.consoleDomain}/apps/${appPath}`,
     },
   });
 }
@@ -648,7 +648,7 @@ function handleAuthExchange(ctx: Context): void {
     ctx.body = [
       '<!doctype html><meta charset="utf-8"><title>Link expired</title>',
       '<p>This sign-in link has expired or was already used.</p>',
-      `<p><a href="https://${config.domain}${redirect}">Open it again</a> to get a fresh one.</p>`,
+      `<p><a href="https://${config.consoleDomain}${redirect}">Open it again</a> to get a fresh one.</p>`,
     ].join('\n');
 
     return;
@@ -735,7 +735,7 @@ async function handleAppsRequest(ctx: Context): Promise<void> {
 
     if (!userId) {
       ctx.status = 302;
-      ctx.redirect(`https://${config.domain}${urlPath}${ctx.search}`);
+      ctx.redirect(`https://${config.consoleDomain}${urlPath}${ctx.search}`);
 
       return;
     }

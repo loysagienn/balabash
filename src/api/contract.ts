@@ -1,4 +1,4 @@
-// Wire contract of the /api namespace. The Next.js client (src/web) imports
+// Wire contract of the /api namespace. The console (src/console) imports
 // these TYPE-ONLY: no runtime code crosses the process boundary. On the wire
 // every body goes through serialize-json in both directions, so bigint and
 // Date survive as their marked forms and these types describe the RESTORED
@@ -263,8 +263,9 @@ export type WorkspaceNodeResponse =
       kind: 'dir';
       // '' is the file-area root; a missing root answers as an empty dir.
       path: string;
-      // The names of the folders, in order (the previous web reads them);
-      // folders carries the same entries with their facts.
+      // The names of the folders, in order; folders carries the same
+      // entries with their facts (a listing without folders is read by its
+      // names alone — src/console/features/file-area/node.ts).
       directories: string[];
       folders: WorkspaceFolderMeta[];
       files: WorkspaceFileMeta[];
@@ -562,8 +563,8 @@ export type AppListingView = {
 export type AppsResponse = {
   apps: AppListingView[];
   // Absolute base of public app URLs, no trailing slash (src/apps/urls.ts):
-  // https://<APPS_DOMAIN> with an apps domain, https://<DOMAIN>/a without
-  // one — the client builds <publicAppsBase>/<slug>.
+  // https://<APPS_DOMAIN> with an apps domain, https://<CONSOLE_DOMAIN>/a
+  // without one — the client builds <publicAppsBase>/<slug>.
   publicAppsBase: string;
 };
 

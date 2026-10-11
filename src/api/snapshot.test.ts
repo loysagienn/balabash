@@ -8,15 +8,16 @@
 // the platform's default effort, the model of each agent's newest session
 // — and the open requests for installation credentials with the events
 // that open and close them, as the bell of the console reads them.
-// The whole GET /api/snapshot stays out: buildSnapshot reads config.domain,
-// which the stand strips with the other domains (checks.md).
+// GET /api/snapshot itself is read once: it answers over the stand, whose
+// host is the process's public domain (CONSOLE_DOMAIN), so the app URLs of
+// the snapshot are built from it.
 //
 // Run: npm test  (node:test, native type stripping — no build needed).
 
 import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { startStand } from '../test-support/stand.ts';
+import { STAND_HOST, startStand } from '../test-support/stand.ts';
 import type { Stand } from '../test-support/stand.ts';
 import type { JsonObject, Thread } from '../core/contract.ts';
 import type { OpenSecretRequestView, SecretRequestResponse, ThreadResponse, ThreadsResponse } from './contract.ts';
@@ -227,6 +228,17 @@ describe('the agent catalog of the snapshot', () => {
     await appendEvent({ type: 'thread.started', actor: 'system', userId: foreign, threadId: foreign, payload: { agent: 'gardener', title: 'elsewhere' } });
     await startedOn(foreign, 'gardener', 'claude-opus-5-5', foreign);
     assert.equal((await byName()).get('gardener'), null);
+  });
+
+  test('GET /api/snapshot answers over the stand, its app URLs built from the stand\'s own domain', async () => {
+    const response = await stand.request('GET', '/api/snapshot');
+
+    assert.equal(response.status, 200, response.text);
+
+    const body = response.json<{ apps: { publicAppsBase: string }; me: { userId: string } }>();
+
+    assert.equal(body.apps.publicAppsBase, `https://${STAND_HOST}/a`);
+    assert.equal(body.me.userId, stand.userId);
   });
 
   // The console's agents reducer folds the tail by the same rule

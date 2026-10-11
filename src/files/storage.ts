@@ -87,7 +87,7 @@ export async function getStorageDownloadUrl(input: {
 
   if (isLocal(input.bucket)) {
     return local.signDownloadLink({
-      origin: `https://${config.domain}`,
+      origin: `https://${config.consoleDomain}`,
       secret: config.sessionPepper,
       fileId: input.fileId,
       expiresInSeconds,

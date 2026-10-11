@@ -19,7 +19,7 @@ confidential from them.
   agent validation), `coordinator/` (the secretary: instructions and
   function definitions), `harness/` (the model backends: `claude-sdk/`,
   `codex-sdk/`, `openai/`), `adapters/` (surfaces: `telegram/`, `ccr/`),
-  `console/` (the new web interface: a browser SPA, its own tsconfig,
+  `console/` (the web interface: a browser SPA, its own tsconfig,
   served by the core on `CONSOLE_DOMAIN` through `src/api/console.ts`),
   `workspace/` (the per-user workbench: layout, sqlite, child processes),
   `projects/` (the project registry), `schedule/` (scheduled tasks and jobs),
@@ -28,8 +28,7 @@ confidential from them.
   starts: embedded-postgres, one migrated template, a copy per test; `stand.ts`
   — the stand of one test file: the app's modules over their own copy and
   file area, reached over HTTP; `db/test-guard.ts` keeps test children off
-  the live database), `web/` (the
-  previous Next.js UI, frozen: its own package, not developed further).
+  the live database).
 - `tasks/` — scheduled task bodies shipped with the product; `tasks/AGENTS.md`
   is their contract.
 - `scripts/` — offline maintenance scripts (`scripts/AGENTS.md`); among them

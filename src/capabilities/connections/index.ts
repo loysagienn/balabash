@@ -488,7 +488,7 @@ async function issueLink(userId: string, threadId: string, server: UserAuthServe
   // carries it whole, the nonce and the tokens stay out of the log.
   await journalConnectionEvent(CONNECTION_PENDING, row, connectionRecord(row));
 
-  return { url: `https://${config.domain}/connect/${server.name}?nonce=${connectNonce}`, connection: connectionView(row), expiresAt };
+  return { url: `https://${config.consoleDomain}/connect/${server.name}?nonce=${connectNonce}`, connection: connectionView(row), expiresAt };
 }
 
 // Issues a one-time authorization link for one account of the service by
@@ -557,7 +557,7 @@ export async function requestOauthClientCredentials(
 
   const row = await openSecretRequest('oauth-client', { userId, threadId, server: server.name });
 
-  return `https://${config.domain}/secrets/${row.id}`;
+  return `https://${config.consoleDomain}/secrets/${row.id}`;
 }
 
 export type OauthClientRequestView = {

@@ -121,6 +121,29 @@ describe('console host branch', () => {
     assert.equal((await request('/appsx')).status, 503);
   });
 
+  test('without an apps domain the apps runtime\'s /a and /platform pass through; with one they are the SPA\'s', async () => {
+    const saved = process.env.APPS_DOMAIN;
+
+    try {
+      delete process.env.APPS_DOMAIN;
+      assert.equal(await (await request('/a/tracker')).text(), 'fell through: GET /a/tracker');
+      assert.equal(await (await request('/a')).text(), 'fell through: GET /a');
+      assert.equal(await (await request('/platform/api/apps/tracker/rows', { method: 'POST' })).text(), 'fell through: POST /platform/api/apps/tracker/rows');
+      assert.equal((await request('/about')).status, 503);
+      assert.equal((await request('/platforms')).status, 503);
+
+      process.env.APPS_DOMAIN = 'apps.test';
+      assert.equal((await request('/a/tracker')).status, 503);
+      assert.equal((await request('/platform/vendor/react.js')).status, 503);
+    } finally {
+      if (saved === undefined) {
+        delete process.env.APPS_DOMAIN;
+      } else {
+        process.env.APPS_DOMAIN = saved;
+      }
+    }
+  });
+
   test('without a manifest the shell answers 503 "not built"', async () => {
     const response = await request('/');
 

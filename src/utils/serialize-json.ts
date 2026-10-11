@@ -4,7 +4,7 @@
 //
 // Lives in src/utils: ISOLATED modules only — no imports from the core tree
 // or node builtins. Everything here must stay importable from anywhere,
-// including the web/ Next.js client bundle.
+// including the console bundle (src/console, platform: browser).
 
 const TYPE = '_$_type';
 const VALUE = '_$_value';

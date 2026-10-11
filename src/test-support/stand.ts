@@ -147,6 +147,10 @@ export async function startStand(): Promise<Stand> {
     process.env.DATABASE_URL = db.url;
     process.env.SESSION_PEPPER = SESSION_PEPPER;
     process.env.FILE_STORAGE = 'local';
+    // The host the stand's requests name is also the public domain of the
+    // process: the links the api hands out and the snapshot's app URLs are
+    // built from CONSOLE_DOMAIN (src/config/index.ts).
+    process.env.CONSOLE_DOMAIN = STAND_HOST;
 
     const originalCwd = process.cwd();
 

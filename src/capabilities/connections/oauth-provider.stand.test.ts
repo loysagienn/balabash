@@ -29,9 +29,9 @@ let connection: ConnectionModel;
 
 before(async () => {
   stand = await startStand();
-  // The stand strips the domains the shell inherited; the redirect URI of
-  // this process is built from DOMAIN (src/config/index.ts).
-  process.env.DOMAIN = DOMAIN;
+  // The redirect URI of this process is built from CONSOLE_DOMAIN
+  // (src/config/index.ts); the stand sets its own, named here explicitly.
+  process.env.CONSOLE_DOMAIN = DOMAIN;
   ({ prisma } = await import('../../db/client.ts'));
   provider = await import('./oauth-provider.ts');
   connection = await prisma.connection.create({

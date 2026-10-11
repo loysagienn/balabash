@@ -32,7 +32,7 @@ function isObject(value: unknown): value is Record<string, unknown> {
 type StoredTokens = OAuthTokens & { obtained_at?: string };
 
 function redirectUrl(): string {
-  return `https://${config.domain}/oauth/callback`;
+  return `https://${config.consoleDomain}/oauth/callback`;
 }
 
 // Whether a stored client registration serves the given redirect URI. A

@@ -1,6 +1,6 @@
-// The console host (CONSOLE_DOMAIN, e.g. console.balabash.app): the new web
+// The console host (CONSOLE_DOMAIN, e.g. console.balabash.app): the web
 // interface — a browser SPA built from src/console into dist/console
-// (build/console.js) and served by the core itself. On this host only three
+// (build/console.js) and served by the core itself. On this host only these
 // kinds of requests exist:
 //
 // - /api/* and /files/*: fall through to the session-gated surfaces of the
@@ -12,7 +12,9 @@
 //   an app, where the handoff turns this host's session into a one-time
 //   token for the apps domain (src/apps/handoff.ts; without a session it
 //   sends the browser to /login?next=…, the SPA's door). The bare /apps is
-//   the SPA's Apps screen;
+//   the SPA's Apps screen. Without an apps domain the apps runtime lives on
+//   this very host, so /a/<slug> and /platform/* pass through as well
+//   (src/apps/urls.ts);
 // - /assets/<name>: the content-addressed bundle files, immutable;
 // - /static/<name>: the files of src/console/public under their own stable
 //   names (dist/console/public) — the web app manifest and the icons that
@@ -62,6 +64,10 @@ const PASS_THROUGH_PREFIXES = ['/api', '/files', '/connect', '/oauth'];
 // slash) staying the SPA's: /apps is the Apps screen, /apps/<path> the
 // owner page of an app.
 const PASS_THROUGH_UNDER_PREFIXES = ['/apps'];
+// The public slugs and the gateway of the apps runtime: the main chain's
+// business only when the runtime runs on this host, i.e. without an apps
+// domain (createMainDomainAppsMiddleware gates on the same fact).
+const SINGLE_HOST_APPS_PREFIXES = ['/a', '/platform'];
 
 type ConsoleManifest = {
   builtAt: string;
@@ -91,8 +97,10 @@ function escapeHtml(value: string): string {
 }
 
 function isPassThrough(urlPath: string): boolean {
+  const wholePrefixes = config.appsDomain ? PASS_THROUGH_PREFIXES : [...PASS_THROUGH_PREFIXES, ...SINGLE_HOST_APPS_PREFIXES];
+
   return (
-    PASS_THROUGH_PREFIXES.some(prefix => urlPath === prefix || urlPath.startsWith(`${prefix}/`)) ||
+    wholePrefixes.some(prefix => urlPath === prefix || urlPath.startsWith(`${prefix}/`)) ||
     PASS_THROUGH_UNDER_PREFIXES.some(prefix => urlPath.startsWith(`${prefix}/`) && urlPath.length > prefix.length + 1)
   );
 }

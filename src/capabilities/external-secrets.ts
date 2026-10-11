@@ -73,7 +73,7 @@ export async function requestExternalServerCredentials(
 
   const row = await openSecretRequest('external-secrets', { userId, threadId, server: target.name, fields: toFields(target) });
 
-  return `https://${config.domain}/secrets/${row.id}`;
+  return `https://${config.consoleDomain}/secrets/${row.id}`;
 }
 
 // The reverse of provisioning (auth agent):

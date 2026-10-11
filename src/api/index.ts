@@ -1,7 +1,7 @@
-// The web surface (§11.4). Stage 4 scope: the provisioning and OAuth
-// endpoints — they must exist before the first integration connects. The
-// full second adapter (sessions, thread pages, event feed) is deliberately
-// later (§15).
+// The web surface (§11.4): one Koa server, branching on the request's host
+// — the apps execution domain, the console domain (the SPA and the shared
+// surfaces under it) and the main chain of /api, /files, the one-time links
+// and the OAuth redirect that every host above falls through to.
 
 import Koa from 'koa';
 import { config } from '../config/index.ts';
@@ -38,15 +38,16 @@ export function startWebServer(): void {
   app.use(createAppsMiddleware());
 
   // The console host next: on CONSOLE_DOMAIN only the shared surfaces below
-  // exist — /api and /files, the /connect and /oauth of a connection and the
-  // /apps/<path> handoff (they fall through); everything else is the SPA —
-  // its assets and its shell (src/api/console.ts).
+  // exist — /api and /files, the /connect and /oauth of a connection, the
+  // /apps/<path> handoff and, without an apps domain, the apps runtime's
+  // /a and /platform (they fall through); everything else is the SPA — its
+  // assets and its shell (src/api/console.ts).
   app.use(createConsoleMiddleware());
 
   // Nonce/state-authenticated surfaces first (one-time links, OAuth
   // redirects), then the session-gated byte surface /files and the
-  // session-gated /api namespace. The apps surfaces of the main domain sit
-  // with the session-gated ones: with an apps domain the /apps handoff
+  // session-gated /api namespace. The apps surfaces of the console domain
+  // sit with the session-gated ones: with an apps domain the /apps handoff
   // turns the web session into a one-time token for that domain; without
   // one the whole apps runtime runs here (/apps owner pages by the web
   // session, /a/<slug> public, /platform/*). Each gates itself on

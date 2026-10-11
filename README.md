@@ -83,9 +83,11 @@ flight, a quiet log — before the process exits and the supervisor relaunches i
 new build crash-loops, the supervisor rolls back to the last good bundle, and the fresh
 process reports the rollback honestly into the log.
 
-**A web window.** A minimal web UI accompanies the chat: log in with a one-time code
-from the bot (no passwords), browse threads with status filters, and inspect any
-thread's raw event feed — every event, payload included, exactly as stored.
+**A web console.** The operator's window on everything: log in with a one-time code
+from the bot (no passwords), watch and drive threads live, browse projects and the
+workspace file area, publish mini-apps, operate scheduled tasks and connections, and
+read the plan limits and the system journal — a browser SPA served by the core itself
+on its own domain.
 
 ## Security posture
 
@@ -139,10 +141,10 @@ event log; each run owns a thread — its context and its visibility boundary.**
 
 ## Stack
 
-TypeScript on Node.js ≥ 24, single process, esbuild-bundled. PostgreSQL (Prisma) for
-the event log, S3-compatible object storage for files, grammY for Telegram, Koa +
-Next.js for the web surface, MCP as the tool protocol, Claude Agent SDK / OpenAI
-Responses API / Codex SDK as model backends.
+TypeScript on Node.js ≥ 24, single process, esbuild-bundled (the console SPA included).
+PostgreSQL (Prisma) for the event log, S3-compatible object storage for files, grammY
+for Telegram, Koa for the web surface, MCP as the tool protocol, Claude Agent SDK /
+OpenAI Responses API / Codex SDK as model backends.
 
 ## Status
 

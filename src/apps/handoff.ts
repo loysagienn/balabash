@@ -6,9 +6,9 @@
 //
 //   /apps/foo → 302 https://<appsDomain>/auth?token=…&redirect=/apps/foo
 //
-// No session → the usual main-domain login flow (/login?next=…, served by
-// Next). This is also the landing pad of the self-refresh loop: an expired
-// apps cookie sends the browser back here with the same path.
+// No session → the console's own door (/login?next=…, a route of the SPA).
+// This is also the landing pad of the self-refresh loop: an expired apps
+// cookie sends the browser back here with the same path.
 
 import type { Context, Next } from 'koa';
 import { config } from '../config/index.ts';

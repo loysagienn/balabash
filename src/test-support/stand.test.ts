@@ -13,7 +13,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { BLOCKED_DATABASE_URL } from '../db/test-guard.ts';
-import { startStand, sessionCookie } from './stand.ts';
+import { STAND_HOST, startStand, sessionCookie } from './stand.ts';
 import type { Stand } from './stand.ts';
 import type { MeResponse } from '../api/contract.ts';
 
@@ -46,7 +46,9 @@ describe('stand', () => {
     assert.equal(config.fileStorage, 'local');
     assert.equal(config.filesRoot, path.join(process.cwd(), 'files'));
     assert.equal(config.telegramEnabled, false);
-    assert.equal(config.consoleDomain, null);
+    assert.equal(config.appsDomain, null);
+    // The stand's own public domain — its host — not the shell's.
+    assert.equal(config.consoleDomain, STAND_HOST);
     assert.equal(process.env.OPENAI_API_KEY, undefined);
   });
 
