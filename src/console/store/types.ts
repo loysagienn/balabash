@@ -19,6 +19,7 @@ import type { ConnectionsState } from './connections/reducer.ts';
 import type { SecretRequestsState } from './secret-requests/reducer.ts';
 import type { AgentsState } from './agents/reducer.ts';
 import type { NotificationsState } from './notifications/reducer.ts';
+import type { SystemState } from './system/reducer.ts';
 import type { UiState } from './ui/reducer.ts';
 
 type Creators = typeof import('./actions.ts');
@@ -42,6 +43,7 @@ export type State = {
   secretRequests: SecretRequestsState;
   agents: AgentsState;
   notifications: NotificationsState;
+  system: SystemState;
   ui: UiState;
 };
 

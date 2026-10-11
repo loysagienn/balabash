@@ -29,6 +29,7 @@ import {
 } from '../core/envelope.ts';
 import { getEventsAfter, getLastEventSeq, getLogQuietSeconds } from '../core/events.ts';
 import { getMainThread, listActiveChildThreads, tombstoneActiveThreads } from '../core/threads.ts';
+import type { PendingRestartView } from '../api/contract.ts';
 
 // Kept in sync with supervisor.js by hand — the supervisor is dependency-free
 // and never imports the bundle.
@@ -45,17 +46,28 @@ type PendingRestart = {
   userId: string | null;
   threadId: string | null;
   reason: string;
+  // The agent of the requesting thread, as the request names it.
+  requestedBy: string | null;
   force: boolean;
   requestedAt: Date;
   forceApplied: boolean;
   notified: boolean;
+  // What the newest poll found in the way; null before the first poll.
+  waiting: PendingRestartView['waiting'];
 };
 
 let pending: PendingRestart | null = null;
 
-// The coordinator's status tail shows this (volatile, outside the cache head).
-export function getPendingRestart(): { reason: string; requestedAt: Date } | null {
-  return pending ? { reason: pending.reason, requestedAt: pending.requestedAt } : null;
+// The coordinator's status tail shows this (volatile, outside the cache
+// head); the console's System screen shows what the restart waits for.
+export function getPendingRestart(): PendingRestartView | null {
+  if (!pending) {
+    return null;
+  }
+
+  const { reason, requestedAt, requestedBy, threadId, force, waiting } = pending;
+
+  return { reason, requestedAt, requestedBy, threadId, force, waiting };
 }
 
 async function readRollbackMarker(): Promise<{ at?: string; reason?: string } | null> {
@@ -217,19 +229,31 @@ export function startRestartModule({ isBusy, hasActiveJobs, onRestartWindow }: R
       );
     }
 
-    if (isBusy()) {
+    const secretaryTurn = isBusy();
+
+    if (secretaryTurn) {
       blockedBy.push('a secretary turn in flight');
     }
 
-    if (hasActiveJobs()) {
+    const workspaceJob = hasActiveJobs();
+
+    if (workspaceJob) {
       blockedBy.push('a workspace job still running');
     }
 
     const quietSeconds = await getLogQuietSeconds();
+    const logQuiet = !(quietSeconds !== null && quietSeconds < QUIET_WINDOW_SECONDS);
 
-    if (quietSeconds !== null && quietSeconds < QUIET_WINDOW_SECONDS) {
+    if (!logQuiet) {
       blockedBy.push('the log is not quiet yet');
     }
+
+    current.waiting = {
+      threads: activeChildren.map(thread => ({ id: thread.id, title: thread.title, agent: thread.agent })),
+      secretaryTurn,
+      workspaceJob,
+      logQuiet,
+    };
 
     if (blockedBy.length) {
       await notifyLongPending(current, blockedBy);
@@ -267,10 +291,12 @@ export function startRestartModule({ isBusy, hasActiveJobs, onRestartWindow }: R
         userId: event.userId,
         threadId: event.threadId,
         reason: typeof event.payload.reason === 'string' ? event.payload.reason : 'restart',
+        requestedBy: typeof event.payload.requestedBy === 'string' ? event.payload.requestedBy : null,
         force,
         requestedAt: event.createdAt,
         forceApplied: false,
         notified: false,
+        waiting: null,
       };
 
       console.log(`[restart] pending (seq=${event.seq}${force ? ', force' : ''}): ${pending.reason}`);

@@ -1,8 +1,9 @@
 // Home — the overview: the threads at work (the coordinator's main thread
 // is reached from the shell, never listed here), every app, links to the
 // sections; on the right, the projects in work.
-// Everything on the screen is the snapshot and its tail, except the Claude
-// limits — a measurement read by place (features/limits). The columns
+// Everything on the screen is the snapshot and its tail, except the plan
+// limits and the facts under Files and System — measurements read by place
+// (features/limits, features/system). The columns
 // dissolve on the phone and the cards line up by importance
 // (HomeScreen.css).
 
@@ -19,6 +20,7 @@ import { snapshotLoad } from '../../store/stream/actions.ts';
 import { selectLatestFinishedThread, selectRunningCountByProject, selectRunningThreads } from '../../store/threads/selectors.ts';
 import { LimitsCard } from '../../features/limits/LimitsCard.tsx';
 import { Shell } from '../../features/shell/Shell.tsx';
+import { useSystemFacts } from '../../features/system/queries.ts';
 import { NAV } from '../../features/shell/nav.ts';
 import { ThreadList } from '../../features/thread-list/ThreadList.tsx';
 import { AppRow } from '../../ui/AppRow/AppRow.tsx';
@@ -104,6 +106,7 @@ export function HomeScreen() {
   const connections = useAppSelector(selectConnections);
   const needingAction = useAppSelector(selectConnectionsNeedingAction);
   const agentNames = useAppSelector(s => s.agents.names);
+  const facts = useSystemFacts();
   const streamSeq = stream.lastSeq ?? stream.asOfSeq;
 
   // Rows above this seq are new to the screen: it opened with the store at streamSeq.
@@ -138,6 +141,7 @@ export function HomeScreen() {
     connections: connections.length,
     connectionsNeedingAction: needingAction.length,
     agents: agentNames.length,
+    facts: facts.data ?? null,
     now,
   };
 

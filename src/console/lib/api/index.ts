@@ -31,6 +31,7 @@ import type {
   SettingsResponse,
   SnapshotResponse,
   StartConnectionRequest,
+  SystemResponse,
   TaskCommandRequest,
   ThreadEventsResponse,
   ThreadResponse,
@@ -121,6 +122,12 @@ export type Api = {
   // refresh it.
   limits: {
     get(signal?: AbortSignal): Promise<LimitsResponse>;
+  };
+  // The machine, the process and what runs in it (the second data layer
+  // too): a measurement of the moment — the System screen, the shell's
+  // footer, the summaries of Home and a project's files.
+  system: {
+    get(signal?: AbortSignal): Promise<SystemResponse>;
   };
   // The schedule: the run journal of workspace jobs (the second data layer
   // — a page of runs newest first on a cursor, one run with its output,
@@ -222,6 +229,9 @@ export function createApi(options: FetchOptions = {}): Api {
     },
     limits: {
       get: signal => apiFetch<LimitsResponse>('/api/limits', { signal }),
+    },
+    system: {
+      get: signal => apiFetch<SystemResponse>('/api/system', { signal }),
     },
     schedule: {
       runs: (query, signal) => apiFetch<JobRunsResponse>('/api/schedule/runs', { query, signal }),

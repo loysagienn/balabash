@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { isMainThreadOpen, isMainThreadShortcut, keepsScrollPlace, mainThreadRoute, mainThreadShortcutLabel, restoreMove } from './shell.logic.ts';
+import { footerWords, isMainThreadOpen, isMainThreadShortcut, keepsScrollPlace, mainThreadRoute, mainThreadShortcutLabel, restoreMove } from './shell.logic.ts';
 
 const press = (key: string, mods: Partial<Omit<import('./shell.logic.ts').KeyPress, 'key'>> = {}) => ({ key, metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, ...mods });
 
@@ -82,5 +82,17 @@ describe('a place brought back by history', () => {
     // The reader scrolled, or the feed opened at its own place.
     assert.equal(restoreMove({ target: 300, lastSet: 120, scrollTop: 80, maxScroll: 900 }), null);
     assert.equal(restoreMove({ target: 300, lastSet: 120, scrollTop: 300, maxScroll: 900 }), null);
+  });
+});
+
+describe('the footer of the sidebar', () => {
+  it('names the version, the uptime of the process and the sessions running, or nothing without the facts', () => {
+    const now = new Date(2026, 9, 11, 16, 38);
+    const startedAt = new Date(2026, 9, 11, 0, 21);
+
+    assert.deepEqual(footerWords({ commit: '3f9c21e', startedAt }, 4, now), { version: '3f9c21e', uptime: 'uptime 16h 17m', sessions: '4 agent sessions' });
+    assert.deepEqual(footerWords({ commit: null, startedAt }, 1, now), { version: null, uptime: 'uptime 16h 17m', sessions: '1 agent session' });
+    assert.equal(footerWords(null, 4, now), null);
+    assert.equal(footerWords(undefined, 4, now), null);
   });
 });

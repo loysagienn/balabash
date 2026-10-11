@@ -20,7 +20,7 @@ import type { ReactNode } from 'react';
 import type { ClaudeLimitsResponse, CodexLimitsResponse } from '../../../api/contract.ts';
 import { Link } from '../../lib/router/Link.tsx';
 import { useNow } from '../../lib/format/useNow.ts';
-import { factsStage } from '../../lib/query/stage.ts';
+import { useFactsStage } from '../../lib/query/useFactsStage.ts';
 import { Card, CardBody, CardFoot, CardHead } from '../../ui/Card/Card.tsx';
 import { Empty } from '../../ui/Empty/Empty.tsx';
 import { IconBtn } from '../../ui/IconBtn/IconBtn.tsx';
@@ -185,7 +185,7 @@ function CodexGroup({ response, scope, now }: { response: CodexLimitsResponse; s
 export function LimitsCard({ scope, className }: LimitsCardProps) {
   const query = useLimits();
   const now = useNow();
-  const stage = factsStage(query);
+  const stage = useFactsStage(query);
   let body;
 
   if (stage.kind === 'loading') {

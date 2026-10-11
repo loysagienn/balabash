@@ -21,6 +21,7 @@ import { connectStoreToFeedEviction } from './lib/feed-eviction/index.ts';
 import { connectQueryClientToSession } from './lib/query/session.ts';
 import { connectQueryClientToSecretRequests } from './lib/query/secret-requests.ts';
 import { connectQueryClientToSchedule } from './lib/query/schedule.ts';
+import { connectQueryClientToSystem } from './lib/query/system.ts';
 import { PHONE_MEDIA, installPinchGuard } from './lib/touch/pinch.ts';
 import { createStore } from './store/index.ts';
 import type { AppStore } from './store/index.ts';
@@ -64,6 +65,9 @@ connectQueryClientToSession(store, queryClient);
 // issued again, the cached form is read again (lib/query/secret-requests.ts).
 connectQueryClientToSecretRequests(store, queryClient);
 connectQueryClientToSchedule(store, queryClient);
+// A restart completed in the log is a new process: its facts are read again
+// (lib/query/system.ts).
+connectQueryClientToSystem(store, queryClient);
 
 // The operator's console is the operator's: the store and the query client
 // are reachable from the browser console for debugging

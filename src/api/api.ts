@@ -44,6 +44,7 @@ import { createEventStreamHandler } from './event-stream.ts';
 import { planLimits } from '../harness/claude-sdk/plan-limits.ts';
 import { codexPlanLimits } from '../harness/codex-sdk/plan-limits.ts';
 import { buildSnapshot } from './snapshot.ts';
+import { buildSystem } from './system.ts';
 import { checkMutationOrigin } from './origin.ts';
 import type {
   AppsResponse,
@@ -71,6 +72,7 @@ import type {
   LoginSource,
   SettingsFactsResponse,
   SettingsResponse,
+  SystemResponse,
   TelegramView,
   ThreadEventsResponse,
   ThreadResponse,
@@ -1280,6 +1282,19 @@ router.post('/connections', requireSession, async ctx => {
 router.get('/limits', requireSession, async ctx => {
   const [claude, codex] = await Promise.all([planLimits.read(), codexPlanLimits.read()]);
   const response: LimitsResponse = { claude, codex };
+
+  ctx.body = prepareObject(response);
+});
+
+// The machine, the process and what runs in it (contract: SystemResponse,
+// src/api/system.ts): a measurement of the moment — the kernel's counters
+// against the sample before, the process's own facts, a size read of the
+// database (its failure is the answer "unavailable", not a 500), the
+// newest walk of the file area, the restart in the way. The System screen
+// reads it every 10 s while open, the shell's footer once a minute.
+router.get('/system', requireSession, async ctx => {
+  const userId = ctx.state.userId as string;
+  const response: SystemResponse = await buildSystem(userId);
 
   ctx.body = prepareObject(response);
 });

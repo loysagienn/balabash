@@ -39,12 +39,17 @@ type Calls = { name: string; args: unknown[] }[];
 
 const ISO_NOW = '2026-10-09T10:00:00.000Z';
 
-type ApiOverrides = Omit<Partial<Api>, 'threads' | 'workspace' | 'files' | 'settings' | 'llmRequests' | 'limits' | 'secretRequests' | 'projects' | 'apps' | 'schedule' | 'connections'> & { threads?: Partial<Api['threads']>; settings?: Partial<Api['settings']>; projects?: Partial<Api['projects']>; apps?: Partial<Api['apps']>; schedule?: Partial<Api['schedule']>; connections?: Partial<Api['connections']> };
+type ApiOverrides = Omit<Partial<Api>, 'threads' | 'workspace' | 'files' | 'settings' | 'llmRequests' | 'limits' | 'system' | 'secretRequests' | 'projects' | 'apps' | 'schedule' | 'connections'> & { threads?: Partial<Api['threads']>; settings?: Partial<Api['settings']>; projects?: Partial<Api['projects']>; apps?: Partial<Api['apps']>; schedule?: Partial<Api['schedule']>; connections?: Partial<Api['connections']> };
 
 // The file area, the stored files' facts, the model requests and the secret
 // requests are Query, not the store: handlers never call them.
 const LLM_REQUESTS: Api['llmRequests'] = { list: async () => ({ requests: [] }) };
 const LIMITS: Api['limits'] = { get: async () => ({ claude: { limits: null, lastFailure: null, liveSessions: 0, lastSessionAt: null }, codex: { limits: null, lastFailure: null } }) };
+const SYSTEM: Api['system'] = {
+  get: async () => {
+    throw new Error('not here');
+  },
+};
 
 const FILES: Api['files'] = { meta: async fileId => ({ file: { fileId, name: null, contentType: null, sizeBytes: null, width: null, height: null } }) };
 
@@ -69,7 +74,7 @@ function fakeApi(overrides: ApiOverrides = {}, calls: Calls = []): Api {
 
       return impl(...args);
     };
-  const base: Omit<Api, 'threads' | 'workspace' | 'files' | 'settings' | 'llmRequests' | 'limits' | 'secretRequests' | 'projects' | 'apps' | 'schedule' | 'connections'> = {
+  const base: Omit<Api, 'threads' | 'workspace' | 'files' | 'settings' | 'llmRequests' | 'limits' | 'system' | 'secretRequests' | 'projects' | 'apps' | 'schedule' | 'connections'> = {
     me: async () => ME,
     auth: async () => ME,
     consoleCode: async () => null,
@@ -162,6 +167,7 @@ function fakeApi(overrides: ApiOverrides = {}, calls: Calls = []): Api {
     files: FILES,
     llmRequests: LLM_REQUESTS,
     limits: LIMITS,
+    system: SYSTEM,
     secretRequests: SECRET_REQUESTS,
     schedule: { runs: schedule.runs, latestRuns: schedule.latestRuns, run: schedule.run, runTask: wrap('schedule.runTask', schedule.runTask), deleteTask: wrap('schedule.deleteTask', schedule.deleteTask) },
   };

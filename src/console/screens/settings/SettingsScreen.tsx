@@ -32,7 +32,7 @@ import { Screen } from '../../ui/Screen/Screen.tsx';
 import { SkelRow, SkelStack } from '../../ui/Skel/Skel.tsx';
 import { Status } from '../../ui/Status/Status.tsx';
 import { useSettingsFacts } from './queries.ts';
-import { factsStage } from '../../lib/query/stage.ts';
+import { useFactsStage } from '../../lib/query/useFactsStage.ts';
 import type { FactsStage } from '../../lib/query/stage.ts';
 import { sessionWords, telegramWords, timezoneWords } from './SettingsScreen.logic.ts';
 import './SettingsScreen.css';
@@ -262,7 +262,7 @@ export function SettingsScreen() {
   const saved = useAppSelector(selectSettingsSaved);
   const { logoutPending } = useAppSelector(selectSession);
   const facts = useSettingsFacts();
-  const stage = factsStage(facts);
+  const stage = useFactsStage(facts);
   const now = useNow();
 
   return (

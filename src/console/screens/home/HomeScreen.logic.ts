@@ -4,8 +4,10 @@
 // the stage of the screen — snapshotStage (store/stream): both shared with
 // the Apps section.
 
+import type { SystemResponse } from '../../../api/contract.ts';
 import type { NavKey } from '../../lib/router/routes.ts';
 import { agoLabel, countOf, dateTimeLabel, plural, shortDate, timeOfDay } from '../../lib/format/index.ts';
+import { fileAreaSummary, systemSummary } from '../system/facts.logic.ts';
 
 export type SectionSummary = { meta: string; state?: 'act' };
 
@@ -21,6 +23,9 @@ export type SectionCounts = {
   connections: number;
   connectionsNeedingAction: number;
   agents: number;
+  // The facts read by place (GET /api/system): the file area's totals and
+  // the machine; null until the server answered.
+  facts: Pick<SystemResponse, 'machine' | 'fileArea'> | null;
   now: Date;
 };
 
@@ -28,12 +33,24 @@ function sameDay(a: Date, b: Date): boolean {
   return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 }
 
-// The summary of a section on Home — only from what the snapshot carries:
-// Files (count and size), System (telemetry) and Settings have no summary
-// until their data exists (plan.md, "Чего нет в данных"); a section without
-// a summary is drawn without one.
+// The summary of a section on Home — from what the snapshot carries, and
+// for Files and System from the facts read by place (the file area's
+// totals, the machine); Settings names what it holds. A section without a
+// summary yet is drawn without one.
 export function sectionSummary(key: NavKey, counts: SectionCounts): SectionSummary | null {
   switch (key) {
+    case 'files': {
+      const meta = fileAreaSummary(counts.facts?.fileArea ?? null);
+
+      return meta === null ? null : { meta };
+    }
+    case 'system': {
+      const meta = systemSummary(counts.facts);
+
+      return meta === null ? null : { meta };
+    }
+    case 'settings':
+      return { meta: 'names, Telegram, time zone' };
     case 'threads':
       return { meta: `${counts.running} active` };
     case 'projects':

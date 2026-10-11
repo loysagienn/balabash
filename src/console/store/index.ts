@@ -32,6 +32,7 @@ import { connectionsReducer } from './connections/reducer.ts';
 import { secretRequestsReducer } from './secret-requests/reducer.ts';
 import { agentsReducer } from './agents/reducer.ts';
 import { notificationsReducer } from './notifications/reducer.ts';
+import { systemReducer } from './system/reducer.ts';
 import { uiReducer } from './ui/reducer.ts';
 
 export type { Action, ActionOf, ActionType, State } from './types.ts';
@@ -95,6 +96,7 @@ export function createStore({ api, initialRoute, initialHash = '', enhancer }: C
     secretRequests: secretRequestsReducer,
     agents: agentsReducer,
     notifications: notificationsReducer,
+    system: systemReducer,
     ui: uiReducer,
   }) as unknown as Reducer<Domains, Action>;
 

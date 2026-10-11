@@ -129,6 +129,11 @@ const api: Api = {
   },
   llmRequests: { list: async () => ({ requests: [] }) },
   limits: { get: async () => ({ claude: { limits: null, lastFailure: null, liveSessions: 0, lastSessionAt: null }, codex: { limits: null, lastFailure: null } }) },
+  system: {
+    get: async () => {
+      throw new Error('not here');
+    },
+  },
   schedule: {
     runs: async () => ({ runs: [], nextCursor: null }),
     latestRuns: async () => ({ runs: [] }),

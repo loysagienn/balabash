@@ -865,6 +865,99 @@ export type AgentView = {
   lastModel: string | null;
 };
 
+// --------------------------------------------------------------------------
+// GET /api/system — the machine, the process and what runs in it: a
+// measurement of the moment (src/api/system.ts), never an event of the log.
+// What the host does not offer is null.
+
+export type MachineView = {
+  uptimeSeconds: number;
+  cpu: {
+    cores: number;
+    // The busy share of each core, in percent, over the span since the
+    // sample before; null until two samples are apart enough to say.
+    perCore: number[] | null;
+    loadAvg: [number, number, number];
+  };
+  memory: { totalBytes: number; usedBytes: number; swapTotalBytes: number; swapUsedBytes: number } | null;
+  // The volume the process runs on (data/ is under its working directory).
+  disk: { totalBytes: number; usedBytes: number; freeBytes: number } | null;
+  network: {
+    inBytesPerSecond: number | null;
+    outBytesPerSecond: number | null;
+    // The bytes received per minute over the last hour, oldest first — as
+    // many as the process has seen.
+    inboundPerMinute: number[];
+  } | null;
+};
+
+export type ProcessVersionView = {
+  // The short hash of the checkout's HEAD and its branch at start; null
+  // outside a git checkout, or when git is not there.
+  commit: string | null;
+  branch: string | null;
+};
+
+export type ProcessView = ProcessVersionView & {
+  pid: number;
+  node: string;
+  startedAt: Date;
+  uptimeSeconds: number;
+  rssBytes: number;
+  heapUsedBytes: number;
+  // The runs alive in the process — the live agent sessions — and the
+  // workspace jobs of the schedule in flight.
+  liveSessions: number;
+  workspaceJobs: number;
+};
+
+export type DatabaseView = {
+  // The size read answered — the database is reachable.
+  available: boolean;
+  sizeBytes: number | null;
+  error: string | null;
+};
+
+// The totals of the workspace's file area, as the newest walk counted them
+// (src/workspace/totals.ts): every regular file on disk; `folders` — the
+// same per top-level folder (a project's folder among them).
+export type FileAreaTotalsView = {
+  measuredAt: Date;
+  files: number;
+  bytes: number;
+  folders: Record<string, { files: number; bytes: number }>;
+  // False when the walk stopped at its cap: the area is bigger than said.
+  complete: boolean;
+};
+
+export type PendingRestartView = {
+  reason: string;
+  requestedAt: Date;
+  requestedBy: string | null;
+  threadId: string | null;
+  force: boolean;
+  // What the newest poll of the safe window found in the way; null before
+  // the first poll.
+  waiting: {
+    threads: { id: string; title: string | null; agent: string }[];
+    secretaryTurn: boolean;
+    workspaceJob: boolean;
+    logQuiet: boolean;
+  } | null;
+};
+
+export type SystemResponse = {
+  at: Date;
+  machine: MachineView;
+  process: ProcessView;
+  database: DatabaseView;
+  // The bytes of every stored file (the file storage of the installation).
+  fileStorageBytes: number | null;
+  // Null before the first walk of the file area.
+  fileArea: FileAreaTotalsView | null;
+  restart: { pending: PendingRestartView | null };
+};
+
 export type SnapshotResponse = {
   // seq of the last event of the log at the moment of reading, taken BEFORE
   // the projections are read — the tail from here may overlap, never gap.
@@ -886,4 +979,8 @@ export type SnapshotResponse = {
   // The open requests for installation credentials, oldest first.
   secretRequests: OpenSecretRequestView[];
   agents: AgentView[];
+  // The newest system events (restarts requested and completed,
+  // exceptions — this workspace's and the installation's; SYSTEM_LOG_KEEP
+  // of src/api/snapshot.ts), in seq order; the tail keeps them (store/system).
+  systemLog: Event[];
 };

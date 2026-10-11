@@ -6,12 +6,15 @@
 // threads on "Threads", a dot on a section that awaits the user. The
 // toasts of the store stack in the corner of the shell (features/toasts).
 // The sidebar head names the workspace and, once Settings has it, the
-// operator under it.
+// operator under it; its footer — the version and the uptime of the
+// process (features/system, the facts read by place) and the sessions
+// running (the store).
 
 import { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import type { ReactNode } from 'react';
 import { Link } from '../../lib/router/Link.tsx';
 import type { AppRoute, NavKey } from '../../lib/router/routes.ts';
+import { useNow } from '../../lib/format/useNow.ts';
 import { useAppDispatch, useAppSelector } from '../../store/hooks.ts';
 import { selectConnectionsNeedingAction } from '../../store/connections/selectors.ts';
 import { routeTo } from '../../store/router/actions.ts';
@@ -23,9 +26,10 @@ import { Icon } from '../../ui/Icon/Icon.tsx';
 import { Attn, Count, Kbd } from '../../ui/atoms/atoms.tsx';
 import { SectionGrid } from '../../ui/SectionGrid/SectionGrid.tsx';
 import { Sheet } from '../../ui/Sheet/Sheet.tsx';
+import { useSystemFacts } from '../system/queries.ts';
 import { Toasts } from '../toasts/Toasts.tsx';
 import { MORE, NAV, TABS } from './nav.ts';
-import { isMainThreadOpen, isMainThreadShortcut, keepsScrollPlace, mainThreadRoute, mainThreadShortcutLabel } from './shell.logic.ts';
+import { footerWords, isMainThreadOpen, isMainThreadShortcut, keepsScrollPlace, mainThreadRoute, mainThreadShortcutLabel } from './shell.logic.ts';
 import { restoreScroll } from './scroll.ts';
 import { ShellTop } from './ShellTop.tsx';
 import type { ShellTopProps } from './ShellTop.tsx';
@@ -108,6 +112,9 @@ export function Shell({ current, detail, children, ...top }: ShellProps) {
 
   const workspace = me?.workspaceName ?? 'Workspace';
   const operator = me?.operatorName ?? null;
+  const facts = useSystemFacts();
+  const now = useNow();
+  const foot = footerWords(facts.data?.process, running, now);
   const tabCurrent = section === null ? null : TABS.some(item => item.key === section) ? section : 'more';
   const moreAttention = MORE.some(item => attention.has(item.key));
 
@@ -148,6 +155,18 @@ export function Shell({ current, detail, children, ...top }: ShellProps) {
               </Link>
             ))}
           </nav>
+          {foot ? (
+            <div className="shell-foot">
+              {foot.version ? (
+                <>
+                  <b className="shell-foot-v">{foot.version}</b> ·{' '}
+                </>
+              ) : null}
+              {foot.uptime}
+              <br />
+              {foot.sessions}
+            </div>
+          ) : null}
         </aside>
         <div className="shell-main">
           <ShellTop {...top} running={running} main={main} />

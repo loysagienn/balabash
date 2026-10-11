@@ -1,5 +1,16 @@
 @layer screens{
-/* System (SystemScreen.dc.html): the "Model usage" section — its heading and the main thread card. */
+/* System (SystemScreen.dc.html): the meters of the machine, the "Model usage" section — its heading and the main thread card. */
+.sys-meters{display:grid;grid-template-columns:repeat(4,minmax(0,1fr))}
+.sys-meter{display:flex;flex-direction:column;gap:var(--sp-2h);min-width:0;padding:var(--sp-4) var(--sp-4h);border-left:1px solid var(--border)}
+.sys-meter:first-child{border-left:0}
+.sys-meter-h{display:flex;align-items:flex-start;gap:var(--sp-3)}   /* metric headings at one height, however many lines sit below them */
+.sys-meter-t{display:flex;flex-direction:column;gap:var(--sp-0h);font-size:var(--fs-meta);color:var(--text-3);min-width:0}
+.sys-meter-t b{font-size:var(--fs-ui);color:var(--text);font-weight:var(--fw-semibold)}
+/* a measurement the host does not give: the words stand where the ring would */
+.sys-meter-na{display:grid;place-items:center;width:var(--ring-lg,56px);height:var(--ring-lg,56px);flex:none;border:1px dashed var(--border);border-radius:50%;font-size:var(--fs-micro);color:var(--text-4)}
+.sys-skel{padding:var(--sp-4) var(--sp-4h)}
+/* the restart note: the threads it waits for are links in the sentence */
+.sys-wait a{color:inherit}
 .sys-usage-h{display:flex;flex-wrap:wrap;align-items:center;gap:var(--sp-2) var(--sp-3)}
 .sys-usage-t{margin:0;font-size:var(--fs-h2);font-weight:var(--fw-semibold)}
 .sys-tok-d{margin:0;padding:var(--sp-3h) var(--sp-4h) var(--sp-1h);font-size:var(--fs-meta);line-height:var(--lh-meta);color:var(--text-3);text-wrap:pretty}   /* main thread card: what the chart covers */
@@ -7,7 +18,12 @@
 .sys-tok-skel{--sys-tok-skel-w:420px;max-width:var(--sys-tok-skel-w)}
 /* "Show more" of the table: a link-looking button at the footer's end. */
 .sys-tok-more{margin-left:auto;padding:0;border:0;background:none;font:inherit;cursor:pointer}
+@container shell (max-width:1100px){ .sys-meters{grid-template-columns:repeat(2,minmax(0,1fr))} .sys-meter:nth-child(3){border-left:0} .sys-meter:nth-child(n+3){border-top:1px solid var(--border)} }
 @container shell (max-width:720px){
+  .sys-meters{grid-template-columns:minmax(0,1fr)}
+  .sys-meter{border-left:0;border-top:1px solid var(--border);padding-inline:0}
+  .sys-meter:first-child{border-top:0}
+  .sys-skel{padding-inline:0}
   .sys-tok-d{padding:0 0 var(--sp-1)}
 }
 }

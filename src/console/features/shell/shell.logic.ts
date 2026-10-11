@@ -5,6 +5,7 @@
 // place brought back by history is reached (restoreMove).
 
 import type { AppRoute } from '../../lib/router/routes.ts';
+import { countOf, durationLabel } from '../../lib/format/index.ts';
 
 export type KeyPress = {
   key: string;
@@ -84,4 +85,19 @@ export function restoreMove(input: { target: number; lastSet: number | null; scr
   const to = Math.max(0, Math.min(target, maxScroll));
 
   return { to, done: to >= target };
+}
+
+// The sidebar's footer (design: .shell-foot — "3f9c21e · uptime 16h 17m /
+// 4 agent sessions"): the version and the start of the process from the
+// facts read by place (GET /api/system), the sessions from the store —
+// the threads running now. Null without the facts: the footer is not
+// drawn until the server answers (an older server has no /api/system).
+export type FooterWords = { version: string | null; uptime: string; sessions: string };
+
+export function footerWords(facts: { commit: string | null; startedAt: Date } | null | undefined, running: number, now: Date): FooterWords | null {
+  if (!facts) {
+    return null;
+  }
+
+  return { version: facts.commit, uptime: `uptime ${durationLabel(now.getTime() - facts.startedAt.getTime())}`, sessions: countOf(running, 'agent session') };
 }

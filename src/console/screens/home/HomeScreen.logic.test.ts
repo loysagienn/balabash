@@ -17,9 +17,16 @@ const counts = (partial: Partial<SectionCounts> = {}): SectionCounts => ({
   connections: 3,
   connectionsNeedingAction: 0,
   agents: 11,
+  facts: null,
   now: NOW,
   ...partial,
 });
+
+const GB = 1_000_000_000;
+const FACTS: NonNullable<SectionCounts['facts']> = {
+  machine: { uptimeSeconds: 1, cpu: { cores: 2, perCore: [10, 18], loadAvg: [0, 0, 0] }, memory: null, disk: { totalBytes: 200 * GB, usedBytes: 131 * GB, freeBytes: 69 * GB }, network: null },
+  fileArea: { measuredAt: NOW, files: 2418, bytes: 1.2 * GB, folders: {}, complete: true },
+};
 
 describe('home section summaries', () => {
   it('summarizes the sections from the snapshot counts', () => {
@@ -28,6 +35,12 @@ describe('home section summaries', () => {
     assert.deepEqual(sectionSummary('apps', counts()), { meta: '5 · 2 published' });
     assert.deepEqual(sectionSummary('schedule', counts()), { meta: '7 tasks · next at 17:00' });
     assert.deepEqual(sectionSummary('connections', counts()), { meta: '3 accounts' });
+    assert.deepEqual(sectionSummary('settings', counts()), { meta: 'names, Telegram, time zone' });
+    assert.equal(sectionSummary('files', counts()), null);
+    assert.equal(sectionSummary('system', counts()), null);
+    assert.deepEqual(sectionSummary('files', counts({ facts: FACTS })), { meta: '2,418 files · 1.2 GB' });
+    assert.deepEqual(sectionSummary('system', counts({ facts: FACTS })), { meta: 'CPU 14% · disk 66%' });
+    assert.equal(sectionSummary('files', counts({ facts: { ...FACTS, fileArea: null } })), null);
     assert.deepEqual(sectionSummary('agents', counts()), { meta: '11 agents' });
   });
 
@@ -47,10 +60,9 @@ describe('home section summaries', () => {
     assert.deepEqual(sectionSummary('connections', counts({ connections: 0 })), { meta: 'none yet' });
   });
 
-  it('has no summary where the data does not exist yet', () => {
+  it('has no summary where the facts are not read yet, none for Home', () => {
     assert.equal(sectionSummary('files', counts()), null);
     assert.equal(sectionSummary('system', counts()), null);
-    assert.equal(sectionSummary('settings', counts()), null);
     assert.equal(sectionSummary('home', counts()), null);
   });
 });

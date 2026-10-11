@@ -28,6 +28,12 @@ export function dropRun(threadId: string): void {
   runs.delete(threadId);
 }
 
+// How many runs are alive right now — the live agent sessions of the
+// process (the console's System screen and the sidebar's footer).
+export function countRuns(): number {
+  return runs.size;
+}
+
 // Terminal cleanup: the thread is over — stop the run if it is still alive
 // and forget it. Safe to call for threads without a run.
 export function abortAndDropRun(threadId: string, reason: string): void {

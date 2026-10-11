@@ -23,6 +23,8 @@ import { loadTasks } from './schedule/catalog.ts';
 import { isAnyJobRunning, killRunningJobs } from './schedule/engine.ts';
 import { startScheduleHeart } from './schedule/heart.ts';
 import { startWorkspaceIndexer } from './workspace/indexer.ts';
+import { startFileAreaTotals } from './workspace/totals.ts';
+import { startTelemetry } from './runtime/telemetry.ts';
 import { createScheduleToolServer } from './schedule/tools.ts';
 import { createProjectsToolServer } from './projects/tools.ts';
 import { createCoordinatorRun, hasActiveCoordinatorTurns, settleMainThreadStates } from './coordinator/index.ts';
@@ -200,6 +202,12 @@ if (config.indexerEnabled) {
 } else {
   console.log('[app] indexer: disabled (INDEXER_ENABLED=false)');
 }
+
+// The totals of every file area (the console's summaries) and the
+// machine's telemetry (the System screen): measurements on their own
+// timers, not log consumers, but they stop like one.
+consumers.push(startFileAreaTotals());
+consumers.push(startTelemetry());
 
 // Every boot satisfies the restart requests recorded before it — report the
 // completions (with the supervisor's rollback marker and a migration

@@ -90,6 +90,12 @@ export function isAnyJobRunning(): boolean {
   return runningJobs.size > 0;
 }
 
+// How many workspace jobs are in flight — the child processes of the
+// schedule (the console's System screen).
+export function countRunningJobs(): number {
+  return runningJobs.size;
+}
+
 // Shutdown sweep: workspace jobs do not survive a restart — kill every
 // running job's process group before the process exits. The journal rows are
 // settled either by the in-flight completion handler (status 'aborted') or,

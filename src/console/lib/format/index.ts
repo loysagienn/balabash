@@ -230,3 +230,48 @@ export function fileSize(bytes: number): string {
 
   return `${mib < 10 ? mib.toFixed(1) : Math.round(mib)} MiB`;
 }
+
+// "512 B", "4.2 KB", "8 GB", "131 GB", "1.2 TB" — decimal units, one
+// decimal under 10 when there is one: the sizes of a machine (memory, disk, traffic) and the totals
+// of a file area; a file's own size in a listing is fileSize (binary).
+const BYTE_UNITS = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'] as const;
+
+export type ByteUnit = (typeof BYTE_UNITS)[number];
+
+export function byteUnitOf(bytes: number): ByteUnit {
+  let i = 0;
+  let value = Math.max(0, bytes);
+
+  while (value >= 1000 && i < BYTE_UNITS.length - 1) {
+    value /= 1000;
+    i += 1;
+  }
+
+  return BYTE_UNITS[i];
+}
+
+export function bytesIn(bytes: number, unit: ByteUnit): string {
+  const value = Math.max(0, bytes) / 1000 ** BYTE_UNITS.indexOf(unit);
+
+  if (unit === 'B' || value >= 10) {
+    return String(Math.round(value));
+  }
+
+  // One decimal under 10, unless it is a whole number: "9.8", "0.3", "8".
+  const tenths = Math.round(value * 10) / 10;
+
+  return Number.isInteger(tenths) ? String(tenths) : tenths.toFixed(1);
+}
+
+export function byteLabel(bytes: number): string {
+  const unit = byteUnitOf(bytes);
+
+  return `${bytesIn(bytes, unit)} ${unit}`;
+}
+
+// "9.8 of 16 GB" — a part and its whole in the unit of the whole.
+export function byteShareLabel(part: number, whole: number): string {
+  const unit = byteUnitOf(whole);
+
+  return `${bytesIn(part, unit)} of ${bytesIn(whole, unit)} ${unit}`;
+}

@@ -12,7 +12,7 @@
 import { Prisma } from '../../prisma-generated/client.ts';
 import { prisma } from '../db/client.ts';
 import type { Event, JsonObject, Thread } from '../core/contract.ts';
-import { toEvent } from '../core/envelope.ts';
+import { SYSTEM_EXCEPTION, SYSTEM_RESTART_COMPLETED, SYSTEM_RESTART_REQUESTED, toEvent } from '../core/envelope.ts';
 import { SESSION_VIEW_TYPES, foldSession } from '../projections/session.ts';
 import { startedModel } from '../projections/last-model.ts';
 import type { SessionView } from '../projections/session.ts';
@@ -34,6 +34,11 @@ import type { AgentDeclaration } from '../core/contract.ts';
 import type { AgentView, ConnectionView, MeResponse, ServiceView, SnapshotResponse, TaskView } from './contract.ts';
 
 export { SNAPSHOT_THREAD_WINDOW } from './thread-window.ts';
+
+// The newest system.* events the snapshot carries; the console's system
+// domain keeps as many (store/system/reducer.ts, KEEP).
+export const SYSTEM_LOG_KEEP = 50;
+export const SYSTEM_LOG_TYPES = [SYSTEM_EXCEPTION, SYSTEM_RESTART_REQUESTED, SYSTEM_RESTART_COMPLETED] as const;
 
 async function readHeadSeq(): Promise<bigint> {
   const { _max } = await prisma.event.aggregate({ _max: { seq: true } });
@@ -85,6 +90,21 @@ export async function readMainLastMessage(mainThreadId: string | null): Promise<
   });
 
   return row ? toEvent(row) : null;
+}
+
+// The system's own events as the stream shows them to this workspace —
+// its own and the installation-level ones (userId null: a restart
+// completed for no thread, an exception outside a workspace) — the newest
+// SYSTEM_LOG_KEEP in seq order. The console's system domain folds the
+// tail by the same rule (store/system/reducer.ts).
+export async function readSystemLog(userId: string): Promise<Event[]> {
+  const rows = await prisma.event.findMany({
+    where: { type: { in: [...SYSTEM_LOG_TYPES] }, OR: [{ userId }, { userId: null }] },
+    orderBy: { seq: 'desc' },
+    take: SYSTEM_LOG_KEEP,
+  });
+
+  return rows.reverse().map(toEvent);
 }
 
 async function readTasks(userId: string, now: Date): Promise<TaskView[]> {
@@ -193,7 +213,7 @@ export async function buildSnapshot(userId: string, readMe: () => Promise<MeResp
   const now = new Date();
   const me = await readMe();
 
-  const [threads, mainLastMessage, projects, apps, tasks, connections, secretRequests, agents] = await Promise.all([
+  const [threads, mainLastMessage, projects, apps, tasks, connections, secretRequests, agents, systemLog] = await Promise.all([
     readThreadWindow(userId, me.mainThreadId, { list: listThreads, get: getThread, latestTerminal: getLatestTerminalThread }),
     readMainLastMessage(me.mainThreadId),
     listProjects(userId),
@@ -202,6 +222,7 @@ export async function buildSnapshot(userId: string, readMe: () => Promise<MeResp
     readConnections(userId),
     readOpenSecretRequests(userId),
     readAgents(userId),
+    readSystemLog(userId),
   ]);
   const sessions = await readSessions(threads);
 
@@ -218,5 +239,6 @@ export async function buildSnapshot(userId: string, readMe: () => Promise<MeResp
     services: readServices(),
     secretRequests,
     agents,
+    systemLog,
   };
 }

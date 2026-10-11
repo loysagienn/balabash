@@ -65,6 +65,7 @@ export function snapshot(partial: Partial<SnapshotResponse> = {}): SnapshotRespo
     services: [],
     secretRequests: [],
     agents: [],
+    systemLog: [],
     ...partial,
   };
 }

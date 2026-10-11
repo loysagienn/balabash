@@ -22,6 +22,7 @@ import { setProjectArchived } from '../../store/projects/actions.ts';
 import { selectProjectBySlug, selectProjectFlagging } from '../../store/projects/selectors.ts';
 import { makeSelectProjectThreads, selectRunningCountByProject } from '../../store/threads/selectors.ts';
 import { Shell } from '../../features/shell/Shell.tsx';
+import { useSystemFacts } from '../../features/system/queries.ts';
 import { FileBrowser } from '../../features/file-area/FileBrowser.tsx';
 import { joinPath, nodeOf } from '../../features/file-area/node.ts';
 import { useWorkspaceNode } from '../../features/file-area/queries.ts';
@@ -38,11 +39,24 @@ import { PageHead } from '../../ui/PageHead/PageHead.tsx';
 import { Pin, Pins } from '../../ui/Pins/Pins.tsx';
 import { Screen } from '../../ui/Screen/Screen.tsx';
 import { Skel, SkelStack } from '../../ui/Skel/Skel.tsx';
+import { Quiet } from '../../ui/atoms/atoms.tsx';
+import { fileAreaSummary } from '../system/facts.logic.ts';
 import { allThreadsLabel, archivedNote, emptyProjectThreads, pinsOf, projectRoute, projectShell, projectStage } from './ProjectScreen.logic.ts';
 import './ProjectScreen.css';
 
 // The card shows the newest threads; the rest are a link away.
 const PROJECT_THREADS = 8;
+
+// "9 files · 4 MB" — the folder's totals as the newest walk of the file
+// area counted them (features/system, GET /api/system); nothing until
+// the walk has seen the folder.
+function ProjectFilesSummary({ slug }: { slug: string }) {
+  const facts = useSystemFacts();
+  const folder = facts.data?.fileArea?.folders[slug] ?? null;
+  const words = fileAreaSummary(folder);
+
+  return words ? <Quiet>{words}</Quiet> : null;
+}
 
 function ProjectPins({ project, now }: { project: ProjectView; now: Date }) {
   // The folder's own listing — the same query the file area runs at the
@@ -183,7 +197,9 @@ function ProjectPage({ project, route }: { project: ProjectView; route: ProjectR
         )}
       </Card>
       <Card narrow="bare" ref={files}>
-        <CardHead title="Project files" />
+        <CardHead title="Project files">
+          <ProjectFilesSummary slug={project.slug} />
+        </CardHead>
         <div className="proj-fa-wrap">
           <FileBrowser
             root={project.slug}
