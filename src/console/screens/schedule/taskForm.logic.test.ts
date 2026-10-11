@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { atHint, changeTaskForm, cronFacts, cronHint, cwdError, fieldOfTaskFailure, initialTaskForm, instantInZone, parseTimeout, slugFromName, taskRequest, validateTaskForm } from './taskForm.logic.ts';
+import { ZONE_PENDING, atHint, changeTaskForm, cronFacts, cronFieldHint, cronHint, cwdError, fieldOfTaskFailure, initialTaskForm, instantInZone, parseTimeout, slugFromName, taskRequest, validateTaskForm, zoneNoteWords } from './taskForm.logic.ts';
 import type { TaskFormValues } from './taskForm.logic.ts';
 
 const NOW = new Date('2026-10-11T12:00:00Z');
@@ -182,5 +182,30 @@ describe('the field a server refusal belongs to', () => {
     assert.equal(fieldOfTaskFailure('command, cwd, timeoutMs and reportOnSuccess apply only to kind "command"'), 'command');
     assert.equal(fieldOfTaskFailure('kind must be "note", "code" or "command"'), null);
     assert.equal(fieldOfTaskFailure('No such endpoint'), null);
+  });
+});
+
+describe('the schedule’s time zone not known yet (Settings not answered, or failed)', () => {
+  it('a schedule and a moment are not read: no browser zone stands in, the hints name no zone and promise no run', () => {
+    assert.equal(cronFieldHint('0 9 * * *', NOW, null), 'Minute, hour, day of month, month, day of week — the clock of the schedule’s time zone.');
+    assert.equal(atHint(null, NOW, null), 'The clock of the schedule’s time zone.');
+    assert.equal(atHint(new Date('2026-10-12T09:00:00Z'), NOW, null), 'The clock of the schedule’s time zone.');
+    assert.equal(cronFieldHint('0 4 * * *', NOW, ZONE), 'Daily at 4:00 · next run tomorrow, 04:00 (Europe/Moscow)');
+    assert.equal(cronFieldHint('nope', NOW, ZONE), 'Minute, hour, day of month, month, day of week — the clock of Europe/Moscow.');
+  });
+
+  it('the form refuses to send them; "Manual only" goes; the zone’s arrival reads the typed moment once, as that zone’s clock', () => {
+    assert.deepEqual(validateTaskForm(values(), NOW, null), { cron: ZONE_PENDING });
+    assert.deepEqual(validateTaskForm(values({ when: 'cron', cron: '' }), NOW, null), { cron: 'A cron expression is required: minute, hour, day of month, month, day of week.' });
+    assert.deepEqual(validateTaskForm(values({ when: 'at', at: '2026-10-12T09:00' }), NOW, null), { at: ZONE_PENDING });
+    assert.deepEqual(validateTaskForm(values({ when: 'manual' }), NOW, null), {});
+    assert.equal(taskRequest(values({ when: 'manual' }), null).at, null);
+    assert.equal(taskRequest(values({ when: 'at', at: '2026-10-12T09:00' }), null).at, null, 'never an instant of a guessed zone');
+    assert.equal(taskRequest(values({ when: 'at', at: '2026-10-12T09:00' }), 'Asia/Jerusalem').at, '2026-10-12T06:00:00.000Z');
+  });
+
+  it('zoneNoteWords: reading, and the failure with what still works', () => {
+    assert.equal(zoneNoteWords(null), 'Reading the schedule’s time zone — a schedule and a moment are read in it.');
+    assert.equal(zoneNoteWords('Internal error'), 'Couldn’t read the schedule’s time zone — Internal error. A schedule and a moment are read in it; “Manual only” needs none.');
   });
 });

@@ -43,7 +43,7 @@ import { Code, Quiet, Tag } from '../../ui/atoms/atoms.tsx';
 import { NewTask } from './NewTask.tsx';
 import { RunLog } from './RunLog.tsx';
 import { TaskDetail } from './TaskDetail.tsx';
-import { kindWords, lastRunWords, orderTasks, scheduleDetail, scheduleShell, taskMatches, triggerWords, whenLabel, withScheduleFilters } from './ScheduleScreen.logic.ts';
+import { kindWords, lastRunWords, newTaskRoute, orderTasks, scheduleDetail, scheduleShell, taskMatches, triggerWords, whenLabel, withScheduleFilters } from './ScheduleScreen.logic.ts';
 import { nextRunOf } from './next-run.ts';
 import { useLatestJobRuns } from './queries.ts';
 import './ScheduleScreen.css';
@@ -67,7 +67,7 @@ export function ScheduleScreen({ route }: { route: ScheduleRoute }) {
   const go = (patch: Parameters<typeof withScheduleFilters>[1]) => dispatch(routeTo(withScheduleFilters(route, patch), { replace: true }));
   // The form is a place of its own (a screen on the phone): entered, not
   // replaced — "Back" returns to the list.
-  const create = () => dispatch(routeTo(withScheduleFilters(route, { new: true })));
+  const create = () => dispatch(routeTo(newTaskRoute(route)));
   const selected = route.slug ? (tasks.find(task => task.slug === route.slug) ?? null) : null;
   const shell = scheduleShell(route, selected);
   const detailStage = scheduleDetail(route.slug, selected !== null, stage);
@@ -199,7 +199,7 @@ export function ScheduleScreen({ route }: { route: ScheduleRoute }) {
     );
 
     body = route.new ? (
-      <NewTask route={route} timezone={timezone} now={now}>
+      <NewTask route={route} zone={{ timezone, failure: timezone === null && facts.error ? facts.error.message : null, busy: facts.isFetching, retry: () => void facts.refetch() }} now={now}>
         {split}
       </NewTask>
     ) : (

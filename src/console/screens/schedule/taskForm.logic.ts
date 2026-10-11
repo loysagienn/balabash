@@ -4,7 +4,8 @@
 // the server's law, repeated here so a mistake shows under the field
 // before the call), the words beside the schedule (the expression spelled
 // out and its next run in the schedule's time zone) and the one-shot
-// moment (typed as a wall clock of that zone), the timeout as a person
+// moment (typed as a wall clock of that zone — neither is read before the
+// zone is known), the timeout as a person
 // writes it ("10m", "1h 30m"), the request the form sends, and which field
 // a server refusal belongs to. Pure, tested.
 
@@ -147,10 +148,17 @@ export function instantInZone(wall: string, timeZone: string): Date | null {
   }
 }
 
-// The zone the form reads a moment in: the schedule's when the facts have
-// come, else the browser's own (named, so the hint stays honest).
-export function formZone(timezone: string | null): string {
-  return timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
+// The schedule's time zone is a fact of the server (GET /api/settings):
+// until it has come, neither an expression nor a moment can be read — the
+// browser's own zone would promise a time the server does not keep, and a
+// typed moment would change its meaning when the fact comes. The form says
+// so and refuses those triggers; "Manual only" needs no zone.
+export const ZONE_PENDING = 'Can’t be read until the schedule’s time zone is known.';
+
+export function zoneNoteWords(failure: string | null): string {
+  return failure
+    ? `Couldn’t read the schedule’s time zone — ${failure}. A schedule and a moment are read in it; “Manual only” needs none.`
+    : 'Reading the schedule’s time zone — a schedule and a moment are read in it.';
 }
 
 export type CronFacts = { valid: boolean; words: string | null; next: Date | null };
@@ -170,8 +178,8 @@ export function cronFacts(cron: string, now: Date, zone: string): CronFacts {
   return { valid: next !== null, words: next ? cronWords(text) : null, next };
 }
 
-// "Daily at 4:00 · next run tomorrow, 4:00 (Europe/Moscow)" — the hint under
-// the schedule field; "On schedule · …" for a shape the words do not cover.
+// "Daily at 4:00 · next run tomorrow, 4:00 (Europe/Moscow)" — the words of a
+// valid expression; "On schedule · …" for a shape the words do not cover.
 export function cronHint(facts: CronFacts, now: Date, zone: string): string | null {
   if (!facts.valid || !facts.next) {
     return null;
@@ -182,9 +190,21 @@ export function cronHint(facts: CronFacts, now: Date, zone: string): string | nu
   return `${words.charAt(0).toUpperCase()}${words.slice(1)} · next run ${whenLabelIn(facts.next, now, zone)} (${zone})`;
 }
 
+// The hint under the schedule field: the expression's words and next run,
+// else what the five fields are, on the clock of the schedule's zone.
+export function cronFieldHint(cron: string, now: Date, zone: string | null): string {
+  const fields = `Minute, hour, day of month, month, day of week — the clock of ${zone ?? 'the schedule’s time zone'}.`;
+
+  return zone ? (cronHint(cronFacts(cron, now, zone), now, zone) ?? fields) : fields;
+}
+
 // The hint under the moment: when it fires, in the zone; a moment already
 // past fires at once (the server's rule) and the hint says so.
-export function atHint(instant: Date | null, now: Date, zone: string): string {
+export function atHint(instant: Date | null, now: Date, zone: string | null): string {
+  if (!zone) {
+    return 'The clock of the schedule’s time zone.';
+  }
+
   if (!instant) {
     return `The clock of ${zone}, the schedule’s time zone.`;
   }
@@ -229,8 +249,9 @@ export function cwdError(cwd: string): string | null {
 }
 
 // What the form shows under its fields before the call — the same rules as
-// the server's parser, in the form's words.
-export function validateTaskForm(values: TaskFormValues, now: Date, zone: string): TaskFormErrors {
+// the server's parser, in the form's words; a schedule or a moment while
+// the zone is unknown (null) is not sent.
+export function validateTaskForm(values: TaskFormValues, now: Date, zone: string | null): TaskFormErrors {
   const errors: TaskFormErrors = {};
   const name = values.name.trim();
   const slug = values.slug.trim();
@@ -256,12 +277,16 @@ export function validateTaskForm(values: TaskFormValues, now: Date, zone: string
   if (values.when === 'cron') {
     if (!values.cron.trim()) {
       errors.cron = 'A cron expression is required: minute, hour, day of month, month, day of week.';
+    } else if (!zone) {
+      errors.cron = ZONE_PENDING;
     } else if (!cronFacts(values.cron, now, zone).valid) {
       errors.cron = 'Not a cron expression croner reads, or one with no future moment.';
     }
   } else if (values.when === 'at') {
     if (!values.at.trim()) {
       errors.at = 'A moment is required.';
+    } else if (!zone) {
+      errors.at = ZONE_PENDING;
     } else if (!instantInZone(values.at, zone)) {
       errors.at = 'A date and a time of day.';
     }
@@ -295,7 +320,7 @@ export function validateTaskForm(values: TaskFormValues, now: Date, zone: string
 // The request the form sends, trimmed, the fields of other kinds null, the
 // moment as an instant with an explicit offset (the server's rule). Only
 // for values that passed validateTaskForm.
-export function taskRequest(values: TaskFormValues, zone: string): CreateTaskRequest {
+export function taskRequest(values: TaskFormValues, zone: string | null): CreateTaskRequest {
   const command = values.kind === 'command';
 
   return {
@@ -304,7 +329,7 @@ export function taskRequest(values: TaskFormValues, zone: string): CreateTaskReq
     description: values.description.trim() || null,
     kind: values.kind,
     cron: values.when === 'cron' ? values.cron.trim() : null,
-    at: values.when === 'at' ? (instantInZone(values.at, zone)?.toISOString() ?? null) : null,
+    at: values.when === 'at' && zone ? (instantInZone(values.at, zone)?.toISOString() ?? null) : null,
     note: values.kind === 'note' ? values.note.trim() : null,
     command: command ? values.command.trim() : null,
     cwd: command ? normalizeCwd(values.cwd) || null : null,

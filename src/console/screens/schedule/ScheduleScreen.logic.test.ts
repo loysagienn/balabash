@@ -14,6 +14,7 @@ import {
   lastRunTime,
   lastRunWords,
   logRunWords,
+  newTaskRoute,
   noJournalWords,
   orderTasks,
   runDuration,
@@ -285,6 +286,13 @@ describe('the "New task" form in the route', () => {
     assert.deepEqual(withScheduleFilters({ key: 'schedule', new: true }, { slug: 'db-backup' }), { key: 'schedule', slug: 'db-backup' });
     assert.deepEqual(withScheduleFilters({ key: 'schedule', new: true }, { tab: 'log' }), { key: 'schedule', tab: 'log' });
     assert.deepEqual(withScheduleFilters({ key: 'schedule', slug: 'db-backup' }, { slug: undefined, new: true }), { key: 'schedule', new: true });
+  });
+
+  it('newTaskRoute — what "Create" opens: the form from the list and from a selected task (the task gives way, the search stays)', () => {
+    assert.deepEqual(newTaskRoute({ key: 'schedule' }), { key: 'schedule', new: true });
+    assert.deepEqual(newTaskRoute({ key: 'schedule', q: 'back' }), { key: 'schedule', q: 'back', new: true });
+    assert.deepEqual(newTaskRoute({ key: 'schedule', slug: 'backup', q: 'back' }), { key: 'schedule', q: 'back', new: true });
+    assert.deepEqual(newTaskRoute({ key: 'schedule', slug: 'nightly' }), { key: 'schedule', new: true }, 'the next task right after the last one was created and opened');
   });
 
   it('scheduleShell: a screen of its own on the phone, "Back" to the list with the search kept', () => {

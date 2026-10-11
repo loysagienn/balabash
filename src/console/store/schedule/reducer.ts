@@ -9,6 +9,13 @@
 // flight (a run or a delete), one per task at a time, applied by identity.
 // create — the "New task" form (lib/forms/attempt.ts): the call in flight,
 // the refusal the form shows, how many creations the server accepted.
+// overtaken — what the store learned while that call was in flight: the
+// tasks the tail (or the operator's delete) dropped and whether a snapshot
+// replaced the list. The tail may bring the created row and its end (a
+// cancel from elsewhere, a past one-off consumed by its fire) before the
+// answer: the answer's row is folded only when nothing newer could have
+// spoken of it — a dropped id is not brought back, and after a snapshot the
+// snapshot and its tail say whether the row lives.
 // runsChanged — a stamp of the run journal (job_runs, read by place): it
 // moves when a manual run of a command job was accepted (RUN_TASK_DONE
 // with a runId), when a job reported through the log (schedule.fired with
@@ -25,15 +32,18 @@ import type { Action } from '../types.ts';
 
 export type TaskCall = { kind: 'run' } | { kind: 'delete' };
 
+export type CreateOvertaken = { dropped: string[]; reloaded: boolean };
+
 export type ScheduleState = {
   tasks: Record<string, TaskView>;
   ids: string[];
   calls: Record<string, TaskCall>;
   create: FormCallState;
+  overtaken: CreateOvertaken | null;
   runsChanged: number;
 };
 
-export const initialSchedule: ScheduleState = { tasks: {}, ids: [], calls: {}, create: idleForm, runsChanged: 0 };
+export const initialSchedule: ScheduleState = { tasks: {}, ids: [], calls: {}, create: idleForm, overtaken: null, runsChanged: 0 };
 
 function withTask(state: ScheduleState, task: TaskView): ScheduleState {
   return { ...state, tasks: { ...state.tasks, [task.id]: task }, ids: state.ids.includes(task.id) ? state.ids : [...state.ids, task.id] };
@@ -55,14 +65,33 @@ function withoutCall(state: ScheduleState, slug: string, request: TaskCall): Sch
   return { ...state, calls };
 }
 
+// A task dropped: the row goes, and a creation in flight remembers the id —
+// even one the store never held (its created event may still be ahead of
+// the answer, or the row came and went before it).
 function withoutTask(state: ScheduleState, id: string | undefined): ScheduleState {
-  if (!id || !state.tasks[id]) {
+  if (!id) {
     return state;
   }
 
-  const { [id]: dropped, ...tasks } = state.tasks;
+  const remembered = state.overtaken && !state.overtaken.dropped.includes(id) ? { ...state, overtaken: { ...state.overtaken, dropped: [...state.overtaken.dropped, id] } } : state;
 
-  return { ...state, tasks, ids: state.ids.filter(known => known !== id) };
+  if (!remembered.tasks[id]) {
+    return remembered;
+  }
+
+  const { [id]: dropped, ...tasks } = remembered.tasks;
+
+  return { ...remembered, tasks, ids: remembered.ids.filter(known => known !== id) };
+}
+
+// The answer's row, unless the store heard newer of it while the call was
+// in flight (overtaken above).
+function withCreated(state: ScheduleState, task: TaskView, overtaken: CreateOvertaken | null): ScheduleState {
+  if (overtaken && (overtaken.reloaded || overtaken.dropped.includes(task.id))) {
+    return state;
+  }
+
+  return withTask(state, task);
 }
 
 export function scheduleReducer(state: ScheduleState = initialSchedule, action: Action): ScheduleState {
@@ -74,7 +103,7 @@ export function scheduleReducer(state: ScheduleState = initialSchedule, action: 
         tasks[task.id] = task;
       }
 
-      return { ...state, tasks, ids: action.snapshot.tasks.map(task => task.id) };
+      return { ...state, tasks, ids: action.snapshot.tasks.map(task => task.id), overtaken: state.overtaken ? { ...state.overtaken, reloaded: true } : null };
     }
     case 'event/schedule.task.created': {
       const task = taskFromRecord(action.event.payload);
@@ -82,11 +111,11 @@ export function scheduleReducer(state: ScheduleState = initialSchedule, action: 
       return task ? withTask(state, task) : state;
     }
     case 'CREATE_TASK':
-      return { ...state, create: { ...state.create, pending: true, error: null } };
+      return { ...state, create: { ...state.create, pending: true, error: null }, overtaken: { dropped: [], reloaded: false } };
     case 'CREATE_TASK_DONE':
-      return state.create === action.request ? withTask({ ...state, create: { pending: false, error: null, done: state.create.done + 1 } }, action.created.task) : state;
+      return state.create === action.request ? withCreated({ ...state, create: { pending: false, error: null, done: state.create.done + 1 }, overtaken: null }, action.created.task, state.overtaken) : state;
     case 'CREATE_TASK_FAIL':
-      return state.create === action.request ? { ...state, create: { ...state.create, pending: false, error: action.error } } : state;
+      return state.create === action.request ? { ...state, create: { ...state.create, pending: false, error: action.error }, overtaken: null } : state;
     case 'event/schedule.task.cancelled':
       return withoutTask(state, action.event.payload.id);
     case 'event/schedule.fired':

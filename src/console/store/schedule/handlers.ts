@@ -1,7 +1,8 @@
 // The effects of the schedule domain: the operator's new task, manual run
 // and delete. A creation is a form (lib/forms/attempt.ts): the answer's row
-// is folded at once and, while the operator is still on the form (the
-// Schedule screen with `new`), the created task opens in its place; once
+// is folded at once (unless the tail told its end first — reducer.ts) and,
+// while the operator is still on the form (the Schedule screen with `new`),
+// the created task opens in its place (the list, when the row is gone); once
 // they have gone elsewhere during the call, a late answer must not pull
 // them back — the toast then carries "Open" instead; a refusal stays in
 // the form state for the form to show. One call per task at a time (schedule.calls[slug]), the
@@ -47,10 +48,17 @@ export const createTaskHandler: ActionHandler<'CREATE_TASK'> =
       const target = { key: 'schedule', slug: created.task.slug } as const;
 
       dispatch(createTaskDone(request, created));
-      dispatch(pushToast({ ...createdWords(created), action: stillHere ? undefined : { label: 'Open', route: target } }));
+
+      // The row may be gone by now — the tail told its end (deleted
+      // elsewhere, a past one-off consumed) before the answer came, or a
+      // snapshot that lacks it replaced the list: the created task is then
+      // not opened, and the form gives way to the list.
+      const lives = Object.hasOwn(getState().schedule.tasks, created.task.id);
+
+      dispatch(pushToast({ ...createdWords(created), action: stillHere || !lives ? undefined : { label: 'Open', route: target } }));
 
       if (stillHere) {
-        dispatch(routeTo(target, { replace: true }));
+        dispatch(routeTo(lives ? target : { key: 'schedule', ...(route.key === 'schedule' && route.q ? { q: route.q } : {}) }, { replace: true }));
       }
     } catch (error) {
       if (getState().schedule.create !== request) {

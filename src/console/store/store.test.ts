@@ -3128,6 +3128,88 @@ describe('a new task from the form', () => {
     assert.deepEqual(store.getState().ui.toasts[1]!.title, 'Reminder created');
   });
 
+  // The tail outran the answer: the created row and its end arrived first.
+  const createdEvent = (task: TaskView) => eventAction(event({ type: 'schedule.task.created', actor: 'user', payload: { ...task, at: null, createdAt: ISO_NOW, nextRunAt: ISO_NOW } }));
+  const cancelledEvent = (task: TaskView, reason: 'cancelled' | 'consumed') =>
+    eventAction(event({ type: 'schedule.task.cancelled', actor: reason === 'consumed' ? 'system' : 'user', payload: { id: task.id, slug: task.slug, name: task.name, kind: task.kind, createdAt: ISO_NOW, reason } }));
+
+  it('a late answer does not bring back a task the tail already ended (consumed, deleted elsewhere): the form is done, the list shows in its place, the search kept', async () => {
+    resetSeq(560n);
+
+    const answers: Answer<{ task: TaskView; sleeping: boolean }>[] = [];
+    const store = await onForm({ schedule: { createTask: held(answers) } }, [], { key: 'schedule', new: true, q: 'night' });
+    const row = taskRow('nightly', { name: 'Nightly', kind: 'note', cron: null, command: null, note: 'Call', createdBy: 'operator' });
+
+    store.dispatch(createTask({ ...INPUT, kind: 'note', cron: null, at: '2026-10-09T09:00:00.000Z', command: null, note: 'Call' }));
+    store.dispatch(createdEvent(row));
+    store.dispatch(cancelledEvent(row, 'consumed'));
+    assert.deepEqual(selectTasks(store.getState()).map(task => task.slug), ['backup']);
+
+    answers[0]!.resolve({ task: row, sleeping: false });
+    await settle();
+    assert.deepEqual(selectTasks(store.getState()).map(task => task.slug), ['backup'], 'the consumed task stays gone');
+    assert.deepEqual(selectTaskCreate(store.getState()), { pending: false, error: null, done: 1 });
+    assert.equal(store.getState().schedule.overtaken, null);
+    assert.deepEqual(store.getState().router.route, { key: 'schedule', q: 'night' });
+    assert.deepEqual(store.getState().ui.toasts.map(toast => [toast.title, toast.action]), [['Reminder created', undefined]]);
+  });
+
+  it('a late answer after the slug was taken again by a new row: one row per slug, the new one; the operator gone elsewhere gets no "Open"', async () => {
+    resetSeq(580n);
+
+    const answers: Answer<{ task: TaskView; sleeping: boolean }>[] = [];
+    const store = await onForm({ schedule: { createTask: held(answers) } });
+    const ours = taskRow('nightly', { name: 'Nightly', createdBy: 'operator' });
+    const theirs = taskRow('nightly', { id: 'task-nightly-2', name: 'Nightly again', createdBy: 'scheduler' });
+
+    store.dispatch(createTask(INPUT));
+    store.dispatch(routeTo({ key: 'home' }));
+    store.dispatch(createdEvent(ours));
+    store.dispatch(cancelledEvent(ours, 'cancelled'));
+    store.dispatch(createdEvent(theirs));
+
+    answers[0]!.resolve({ task: ours, sleeping: false });
+    await settle();
+    assert.deepEqual(
+      selectTasks(store.getState()).map(task => [task.id, task.slug]),
+      [
+        ['task-backup', 'backup'],
+        ['task-nightly-2', 'nightly'],
+      ],
+    );
+    assert.deepEqual(store.getState().router.route, { key: 'home' });
+    assert.deepEqual(store.getState().ui.toasts.map(toast => [toast.title, toast.action]), [['Task created', undefined]]);
+  });
+
+  it('a snapshot that replaced the list during the call has the last word: a row it lacks is not folded, a row it has opens', async () => {
+    resetSeq(600n);
+
+    const answers: Answer<{ task: TaskView; sleeping: boolean }>[] = [];
+    const store = await onForm({ schedule: { createTask: held(answers) } });
+    const row = taskRow('nightly', { name: 'Nightly', createdBy: 'operator' });
+
+    store.dispatch(createTask(INPUT));
+    store.dispatch(snapshotLoadDone(snapshot({ tasks: [taskRow('backup')] })));
+    answers[0]!.resolve({ task: row, sleeping: false });
+    await settle();
+    assert.deepEqual(selectTasks(store.getState()).map(task => task.slug), ['backup']);
+    assert.deepEqual(store.getState().router.route, { key: 'schedule' });
+
+    // The tail after that snapshot still brings the row if it lives.
+    store.dispatch(createdEvent(row));
+    assert.deepEqual(selectTasks(store.getState()).map(task => task.slug), ['backup', 'nightly']);
+
+    store.dispatch(routeTo({ key: 'schedule', new: true }));
+    store.dispatch(createTask({ ...INPUT, slug: 'digest' }));
+    const digest = taskRow('digest', { createdBy: 'operator' });
+
+    store.dispatch(snapshotLoadDone(snapshot({ tasks: [taskRow('backup'), row, digest] })));
+    answers[1]!.resolve({ task: digest, sleeping: false });
+    await settle();
+    assert.deepEqual(selectTasks(store.getState()).map(task => task.slug), ['backup', 'nightly', 'digest']);
+    assert.deepEqual(store.getState().router.route, { key: 'schedule', slug: 'digest' });
+  });
+
   it('an answer after the operator left the form: no navigation, the toast carries "Open"; an answer of another session’s form touches nothing', async () => {
     resetSeq(540n);
 

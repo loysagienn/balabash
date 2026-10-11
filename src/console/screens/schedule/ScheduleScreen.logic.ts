@@ -423,6 +423,12 @@ export function withScheduleFilters(route: ScheduleRoute, patch: ScheduleFilterP
   return next;
 }
 
+// The "New task" form entered from wherever the list is — the selected
+// task gives way (a selected task drops `new`), the search stays.
+export function newTaskRoute(route: ScheduleRoute): ScheduleRoute {
+  return withScheduleFilters(route, { slug: undefined, new: true });
+}
+
 export type ScheduleShell = { title: string; titleNarrow?: string; back?: AppRoute; backNarrow?: boolean; detail: boolean };
 
 // The shell of the split view: a selected task is a detail screen on the
