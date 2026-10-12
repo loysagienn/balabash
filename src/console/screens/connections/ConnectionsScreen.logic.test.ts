@@ -7,8 +7,8 @@
 
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import type { ConnectionView, InstallationServiceView, ServiceView } from '../../../api/contract.ts';
-import { accountMeta, canConnect, catalogCount, catalogEntries, installationWords, linkAlive, nameHint, nameRequired, objState, pendingWords, rowAction, scopeList, serviceIcon, statusWords, validateConnectName, validateRename } from './ConnectionsScreen.logic.ts';
+import type { ConnectionView, ConnectorServiceView, InstallationServiceView, ServiceView } from '../../../api/contract.ts';
+import { accountMeta, canConnect, catalogCount, catalogEntries, connectorWords, installationWords, linkAlive, nameHint, nameRequired, objState, pendingWords, rowAction, scopeList, serviceIcon, statusWords, validateConnectName, validateRename } from './ConnectionsScreen.logic.ts';
 
 const NOW = new Date(2026, 9, 10, 22, 30);
 
@@ -117,8 +117,26 @@ describe('the catalog with the services of the installation', () => {
     assert.deepEqual(installationWords({ state: 'failed' }), { label: 'connection failed', link: 'Manage', state: 'err' });
   });
 
+  it('puts the claude.ai connectors into the same list by name', () => {
+    const connector: ConnectorServiceView = { name: 'slack', description: null, state: 'connected', error: null, tokenExpiresAt: null };
+    const entries = catalogEntries([perUser('notion')], [installation('youtrack', 'connected')], [connector]);
+
+    assert.deepEqual(
+      entries.map(entry => `${entry.kind}:${entry.service.name}`),
+      ['accounts:notion', 'connector:slack', 'installation:youtrack'],
+    );
+    assert.deepEqual(catalogEntries([perUser('notion')], []).map(entry => entry.kind), ['accounts']);
+  });
+
+  it('words a claude.ai connector by its state, read-only', () => {
+    assert.deepEqual(connectorWords({ state: 'connected' }), { label: 'connected · via claude.ai', state: undefined });
+    assert.deepEqual(connectorWords({ state: 'token_expired' }), { label: 'Claude CLI token expired', state: 'act' });
+    assert.deepEqual(connectorWords({ state: 'failed' }), { label: 'connection failed', state: 'err' });
+  });
+
   it('gives the services of the installation their icons', () => {
     assert.equal(serviceIcon('perplexity'), 'search');
     assert.equal(serviceIcon('qase'), 'list-todo');
+    assert.equal(serviceIcon('slack'), 'messages-square');
   });
 });

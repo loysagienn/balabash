@@ -23,7 +23,7 @@ import { listApps } from '../apps/management.ts';
 import { publicAppsBase } from '../apps/urls.ts';
 import { taskView } from '../schedule/view.ts';
 import { connectionView, listUserConnections } from '../capabilities/connections/index.ts';
-import { listUserAuthServers } from '../capabilities/tool-manager.ts';
+import { effectiveBundleServers, listUserAuthServers } from '../capabilities/tool-manager.ts';
 import { readOpenSecretRequests } from '../capabilities/secret-requests.ts';
 import { getAgents } from '../capabilities/agent-catalog.ts';
 import { COORDINATOR_AGENT } from '../core/threads.ts';
@@ -157,7 +157,7 @@ function agentView(agent: AgentDeclaration, lastModel: string | null): AgentView
     description: agent.description,
     icon: agent.icon ?? null,
     sdk: agent.sdk,
-    tools: agent.tools,
+    tools: effectiveBundleServers(agent.tools),
     agents: agent.agents ?? [],
     headless: agent.headless ?? false,
     notification: agent.notification ?? null,
@@ -173,7 +173,7 @@ function agentView(agent: AgentDeclaration, lastModel: string | null): AgentView
 // The coordinator — the secretary of the main thread — is not a catalog
 // module (its loop is src/coordinator), so its view is built from its own
 // facts: the OpenAI backend and the model of the config, the tool servers of
-// its passport, every catalog agent as what it launches (its spawn functions
+// its passport (with the extension servers its "projects" brings), every catalog agent as what it launches (its spawn functions
 // derive from the whole catalog). Its requests name no reasoning effort and
 // its turns journal no session.started — effort, defaultEffort and
 // lastModel stay null.
@@ -183,7 +183,7 @@ function coordinatorView(catalog: AgentDeclaration[]): AgentView {
     description: COORDINATOR_DESCRIPTION,
     icon: null,
     sdk: 'openai',
-    tools: [...COORDINATOR_BUNDLE.declared],
+    tools: effectiveBundleServers(COORDINATOR_BUNDLE.declared),
     agents: catalog.map(agent => agent.name),
     headless: false,
     notification: null,

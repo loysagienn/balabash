@@ -1286,11 +1286,11 @@ describe('the plan limits over the api', () => {
 });
 
 describe('the installation services over the api', () => {
-  test('GET /installation-services lists the servers with installation credentials (none on the stand); a request and a forget name a known one or are a 404; the session is required', async () => {
+  test('GET /installation-services lists the servers with installation credentials and the claude.ai connectors (none on the stand); a request and a forget name a known one or are a 404; the session is required', async () => {
     const list = await stand.request('GET', '/api/installation-services');
 
     assert.equal(list.status, 200, list.text);
-    assert.deepEqual(list.json<InstallationServicesResponse>(), { services: [] });
+    assert.deepEqual(list.json<InstallationServicesResponse>(), { services: [], connectors: [] });
 
     const request = await stand.request('POST', '/api/installation-services/perplexity/secret-request', { body: {} });
 

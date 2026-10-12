@@ -906,9 +906,26 @@ export type InstallationServiceView = {
   error: string | null;
 };
 
+// A claude.ai connector of the installation (transport "claude-connector"
+// in mcp-servers): the provider's authorization lives in the operator's
+// claude.ai account, the proxy takes the operator's ambient Claude CLI
+// token — nothing to provide or forget here, the catalog shows it
+// read-only. state: connected; token_expired — connected, but the ambient
+// token on this box has expired (calls fail until a Claude Code session
+// rotates it; tokenExpiresAt says since when); failed — the connection
+// itself failed (error says why, retried on the next look).
+export type ConnectorServiceView = {
+  name: string;
+  description: string | null;
+  state: 'connected' | 'token_expired' | 'failed';
+  error: string | null;
+  tokenExpiresAt: Date | null;
+};
+
 // GET /api/installation-services — the second data layer: the states live
 // in the process's memory, read after a reconnect attempt where one is due.
-export type InstallationServicesResponse = { services: InstallationServiceView[] };
+// connectors is absent in the answer of a build that predates it.
+export type InstallationServicesResponse = { services: InstallationServiceView[]; connectors?: ConnectorServiceView[] };
 
 // POST /api/installation-services/:name/secret-request — the request the
 // secrets form at /secrets/<requestId> fulfils (addressed to the main
@@ -928,7 +945,8 @@ export type AgentView = {
   description: string;
   icon: string | null;
   sdk: 'claude' | 'codex' | 'openai';
-  // The tool servers of the passport (not the single tools).
+  // The tool servers of the passport as it acts (not the single tools): the
+  // names it lists plus the extension servers "projects" brings.
   tools: string[];
   agents: string[];
   headless: boolean;

@@ -41,7 +41,6 @@ export const MANAGER_TOOLS = [
   'storage',
   'storage_download_file',
   'workspace',
-  'yandex_ads',
 ];
 
 // Sub-agents the manager role may spawn.

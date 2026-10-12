@@ -35,7 +35,9 @@ import type { DispatchResult, FunctionCall, FunctionDefinition } from '../harnes
 // The coordinator's tool passport, listed explicitly like every agent's: the
 // coordinator has no native file tools, so the workspace_files hands ride
 // along; restart is the deliberately granted dangerous capability. A new
-// tool server reaches the coordinator only by being added here. Exported
+// repository tool server reaches the coordinator only by being added here;
+// the installation's extension servers come with "projects" (the bundle
+// rule of src/capabilities/tool-manager.ts). Exported
 // for the console's agent catalog, which shows the secretary beside the
 // catalog agents with the same passport (src/api/snapshot.ts).
 export const COORDINATOR_BUNDLE: ToolBundle = {
@@ -55,10 +57,6 @@ export const COORDINATOR_BUNDLE: ToolBundle = {
     'storage_download_file',
     'workspace',
     'workspace_files',
-    // An installation extension (data/tools/yandex_ads.ts). Dialogue
-    // contour only: scheduled tasks are withheld from it
-    // (TASK_WITHHELD_SERVERS in src/schedule/engine.ts).
-    'yandex_ads',
     RESTART_SERVER_NAME,
   ],
 };

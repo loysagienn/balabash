@@ -111,8 +111,12 @@ export function registerBuiltinToolServer(server: BuiltinToolServer): void {
 }
 
 // ---------------------------------------------------------------------------
-// Bundles: granularity is a whole tool server, and every grant is explicit —
-// a server reaches only the bundles that name it. A spawner may narrow the
+// Bundles: granularity is a whole tool server. A repository server reaches
+// only the bundles that name it; the installation's extension servers
+// (data/tools, data/mcp-servers — never named in the repository, they differ
+// per installation) reach every bundle that names "projects": a passport
+// with the project registry is a working one, and the operator's own
+// servers come with it (the operator's rule). A spawner may narrow the
 // declared bundle but never widen it.
 
 export type ToolBundle = {
@@ -120,9 +124,29 @@ export type ToolBundle = {
   narrowed?: string[];
 };
 
+// The server whose presence in a list brings the extension servers along
+// (src/projects/tools.ts PROJECTS_SERVER_NAME — not imported: the projects
+// module imports this one).
+const EXTENSIONS_GATE_SERVER = 'projects';
+
+// Whether a server list grants the server, given the installation's
+// extension servers. Pure — the rule itself, tested apart from the registry.
+export function listGrants(list: readonly string[], serverName: string, extensions: readonly string[]): boolean {
+  return list.includes(serverName) || (list.includes(EXTENSIONS_GATE_SERVER) && extensions.includes(serverName));
+}
+
 function isServerInBundle(bundle: ToolBundle, serverName: string): boolean {
+  const extensions = installationExtensionServers;
+
   // Narrowing intersects — it only ever shrinks.
-  return bundle.declared.includes(serverName) && (!bundle.narrowed || bundle.narrowed.includes(serverName));
+  return listGrants(bundle.declared, serverName, extensions) && (!bundle.narrowed || listGrants(bundle.narrowed, serverName, extensions));
+}
+
+// A passport's server list as it acts: the names it lists plus, when it
+// lists "projects", the installation's extension servers — for the views
+// that show a passport (the console's agent catalog).
+export function effectiveBundleServers(list: readonly string[], extensions: readonly string[] = installationExtensionServers): string[] {
+  return [...list, ...extensions.filter(name => listGrants(list, name, extensions) && !list.includes(name))];
 }
 
 // ---------------------------------------------------------------------------
@@ -133,14 +157,10 @@ let localToolSources = new Map<string, LocalToolSource>();
 
 // Names of the installation's extension servers (data/tools/<name>.ts that
 // loaded, data/mcp-servers/<name>.json), filled by loadToolServers. The
-// operator's own code and configs: scheduled tasks get them without a
-// passport entry (src/schedule/engine.ts), unlike repository servers which
-// every bundle names explicitly.
+// operator's own code and configs: every bundle that names "projects" gets
+// them without naming them (isServerInBundle), unlike repository servers
+// which every bundle names explicitly.
 let installationExtensionServers: string[] = [];
-
-export function listInstallationExtensionServers(): string[] {
-  return installationExtensionServers;
-}
 
 type PendingExternalServer = {
   name: string;
@@ -155,6 +175,14 @@ type PendingExternalServer = {
 };
 
 let pendingExternalServers = new Map<string, PendingExternalServer>();
+
+// The claude.ai connectors of the configuration (transport
+// "claude-connector"), name → description, filled by loadToolServers. They
+// need no credential of the installation (the provider's authorization lives
+// on claude.ai, the proxy takes the operator's ambient CLI token), so they
+// never enter pending unless their connection fails: the registry keeps them
+// apart for the console's catalog, which shows them read-only.
+let claudeConnectors = new Map<string, string | null>();
 
 // Servers with auth: "user" have no global connection: every user authorizes
 // their own account. The registry feeds the connections layer; per-user
@@ -421,6 +449,29 @@ export function listExternalSecretTargets(): ExternalSecretTarget[] {
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
+// The claude.ai connectors for the catalog: connected — the client is live
+// (a failed boot connection that a later retry brought up counts too);
+// otherwise the error of the last attempt from pending. Whether the
+// operator's ambient token is fresh right now is the caller's look (the
+// connection outlives the token, calls fail until it rotates).
+export type ClaudeConnectorTarget = {
+  name: string;
+  description: string | null;
+  connected: boolean;
+  error: string | null;
+};
+
+export function listClaudeConnectorTargets(): ClaudeConnectorTarget[] {
+  return [...claudeConnectors]
+    .map(([name, description]) => {
+      const pending = pendingExternalServers.get(name);
+      const connected = servers.has(name) && (!pending || pending.connected);
+
+      return { name, description, connected, error: connected ? null : (pending?.error ?? 'not connected') };
+    })
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
 // One line per external server for the auth agent:
 // connected / pending: secrets missing / pending: connection failed
 // (<error>) / per-user: N accounts — the only place a server that has no
@@ -604,6 +655,7 @@ export async function loadToolServers(input: Omit<LocalToolContext, keyof LocalT
   const nextPending = new Map<string, PendingExternalServer>();
   const nextLocalSources = new Map<string, LocalToolSource>();
   const nextExtensionServers: string[] = [];
+  const nextClaudeConnectors = new Map<string, string | null>();
   const discovered: Array<{
     name: string;
     config: ExternalServerConfig;
@@ -667,6 +719,10 @@ export async function loadToolServers(input: Omit<LocalToolContext, keyof LocalT
   }
 
   for (const { name: serverName, config, origin } of discovered) {
+    if (config.transport === 'claude-connector') {
+      nextClaudeConnectors.set(serverName, config.description ?? null);
+    }
+
     if (config.transport === 'http' && config.auth === 'user') {
       nextUserAuth.set(serverName, toUserAuthServer(serverName, config, origin));
       continue;
@@ -738,6 +794,7 @@ export async function loadToolServers(input: Omit<LocalToolContext, keyof LocalT
   localToolSources = nextLocalSources;
   installationExtensionServers = nextExtensionServers.sort();
   pendingExternalServers = nextPending;
+  claudeConnectors = nextClaudeConnectors;
 
   userAuthServers.clear();
 

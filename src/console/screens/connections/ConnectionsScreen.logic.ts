@@ -5,7 +5,7 @@
 // installation's state and link, the order of the catalog, the checks of
 // the two forms.
 
-import type { ConnectionView, InstallationServiceView, ServiceView } from '../../../api/contract.ts';
+import type { ConnectionView, ConnectorServiceView, InstallationServiceView, ServiceView } from '../../../api/contract.ts';
 import type { IconName } from '../../ui/Icon/Icon.tsx';
 import type { StateName } from '../../ui/atoms/atoms.tsx';
 import type { ConnectionLink } from '../../store/connections/reducer.ts';
@@ -63,6 +63,10 @@ export function serviceIcon(server: string): IconName {
 
   if (name.includes('qase')) {
     return 'list-todo';
+  }
+
+  if (name.includes('slack')) {
+    return 'messages-square';
   }
 
   return 'plug';
@@ -153,14 +157,32 @@ export function installationWords(service: Pick<InstallationServiceView, 'state'
   }
 }
 
-// The catalog is one list: the services of per-user accounts and the
-// services of the installation, by name.
-export type CatalogEntry = { kind: 'accounts'; service: ServiceView } | { kind: 'installation'; service: InstallationServiceView };
+// A claude.ai connector in the catalog: read-only — its authorization is
+// the operator's claude.ai account, so the tile says the state and opens
+// the details ("Details"), never a credentials flow.
+export function connectorWords(service: Pick<ConnectorServiceView, 'state'>): { label: string; state: StateName | undefined } {
+  switch (service.state) {
+    case 'connected':
+      return { label: 'connected · via claude.ai', state: undefined };
+    case 'token_expired':
+      return { label: 'Claude CLI token expired', state: 'act' };
+    default:
+      return { label: 'connection failed', state: 'err' };
+  }
+}
 
-export function catalogEntries(services: readonly ServiceView[], installation: readonly InstallationServiceView[]): CatalogEntry[] {
+// The catalog is one list: the services of per-user accounts, the services
+// of the installation and its claude.ai connectors, by name.
+export type CatalogEntry =
+  | { kind: 'accounts'; service: ServiceView }
+  | { kind: 'installation'; service: InstallationServiceView }
+  | { kind: 'connector'; service: ConnectorServiceView };
+
+export function catalogEntries(services: readonly ServiceView[], installation: readonly InstallationServiceView[], connectors: readonly ConnectorServiceView[] = []): CatalogEntry[] {
   return [
     ...services.map(service => ({ kind: 'accounts' as const, service })),
     ...installation.map(service => ({ kind: 'installation' as const, service })),
+    ...connectors.map(service => ({ kind: 'connector' as const, service })),
   ].sort((a, b) => a.service.name.localeCompare(b.service.name));
 }
 

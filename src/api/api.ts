@@ -29,7 +29,8 @@ import { WorkspacePathError, fileNodeOf, listDir, replaceFileContent, resolveFil
 import { FileNotFoundError, getFile, getUserFile, openFileContent } from '../files/index.ts';
 import { verifyDownloadLink } from '../files/storage/local.ts';
 import { forgetExternalServerSecrets, getExternalServerSecretRequest, isExternalSecretServer, openExternalServerCredentialsRequest, provisionExternalServerSecrets } from '../capabilities/external-secrets.ts';
-import { listExternalSecretTargets, refreshExternalServers } from '../capabilities/tool-manager.ts';
+import { listClaudeConnectorTargets, listExternalSecretTargets, refreshExternalServers } from '../capabilities/tool-manager.ts';
+import { resolveOperatorCredentials, tokenTtlMs } from '../adapters/ccr/token.ts';
 import { ConnectionError, disconnectConnection, getOauthClientRequest, getUserConnection, provisionOauthClient, reconnectConnection, renameConnection, startConnection, connectionView } from '../capabilities/connections/index.ts';
 import { AppManagementError, listApps, publishApp, unpublishApp } from '../apps/management.ts';
 import { ProjectError, archiveProject, createProject, parseProjectInput, parseProjectPatch, unarchiveProject, updateProject } from '../projects/mutations.ts';
@@ -55,6 +56,7 @@ import type {
   InstallationSecretRequestResponse,
   InstallationServiceView,
   InstallationServicesResponse,
+  ConnectorServiceView,
   ConnectionResponse,
   CreateProjectResponse,
   CreateTaskResponse,
@@ -1359,6 +1361,10 @@ router.post('/connections', requireSession, async ctx => {
 // secrets.provisioned tells the secretary), and the console opens its form;
 // forgetting is the auth agent's too — no event, the server disconnects for
 // everyone. Any workspace may manage them (decision of the operator).
+// Beside them, read-only, the claude.ai connectors (transport
+// "claude-connector"): their authorization is the operator's claude.ai
+// account, their one local dependency the ambient Claude CLI token — its
+// expiry is looked at here, since a live connection outlives it.
 
 function installationServiceView(target: ReturnType<typeof listExternalSecretTargets>[number]): InstallationServiceView {
   const state = target.connected ? 'connected' : target.error ? 'failed' : 'missing';
@@ -1366,10 +1372,44 @@ function installationServiceView(target: ReturnType<typeof listExternalSecretTar
   return { name: target.name, description: target.description, secretNames: target.secretNames, state, error: state === 'failed' ? target.error : null };
 }
 
+async function connectorServiceViews(): Promise<ConnectorServiceView[]> {
+  const targets = listClaudeConnectorTargets();
+
+  if (!targets.length) {
+    return [];
+  }
+
+  let tokenExpiresAt: Date | null = null;
+  let tokenError: string | null = null;
+
+  try {
+    const credentials = await resolveOperatorCredentials();
+    const ttl = tokenTtlMs(credentials);
+
+    if (ttl != null && ttl <= 0 && credentials.expiresAt != null) {
+      tokenExpiresAt = new Date(credentials.expiresAt);
+    }
+  } catch (error) {
+    tokenError = error instanceof Error ? error.message : String(error);
+  }
+
+  return targets.map(target => {
+    if (!target.connected) {
+      return { name: target.name, description: target.description, state: 'failed', error: target.error, tokenExpiresAt: null };
+    }
+
+    if (tokenError) {
+      return { name: target.name, description: target.description, state: 'failed', error: tokenError, tokenExpiresAt: null };
+    }
+
+    return { name: target.name, description: target.description, state: tokenExpiresAt ? 'token_expired' : 'connected', error: null, tokenExpiresAt };
+  });
+}
+
 router.get('/installation-services', requireSession, async ctx => {
   await refreshExternalServers();
 
-  const response: InstallationServicesResponse = { services: listExternalSecretTargets().map(installationServiceView) };
+  const response: InstallationServicesResponse = { services: listExternalSecretTargets().map(installationServiceView), connectors: await connectorServiceViews() };
 
   ctx.body = prepareObject(response);
 });

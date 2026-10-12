@@ -18,7 +18,6 @@ import { getMainThread } from '../core/threads.ts';
 import {
   callServerTool,
   getServerToolFunctions,
-  listInstallationExtensionServers,
   type ToolBundle,
 } from '../capabilities/tool-manager.ts';
 import type { ScheduledTaskModel } from '../../prisma-generated/models.ts';
@@ -40,10 +39,10 @@ const JOB_STDOUT_REPORT_CHARS = 1_000;
 // A task's tool passport: the repository servers are listed explicitly like
 // every agent's (tasks run with no native tools at all, so the
 // workspace_files hands ride along; restart and auth are deliberately
-// absent), and the installation's extension servers (data/tools,
-// data/mcp-servers — the operator's own code and configs, src/capabilities/extensions.ts)
-// are in by construction: a task body lives outside the repository too,
-// and the pair is the same trust domain — all but TASK_WITHHELD_SERVERS.
+// absent). It names "projects", so the installation's extension servers
+// (data/tools, data/mcp-servers — the operator's own code and configs,
+// src/capabilities/extensions.ts) come along by the bundle rule of
+// src/capabilities/tool-manager.ts, as for every such passport.
 // Calls are NOT journaled as tool.call.* — the envelope requires an author
 // thread and a task has none.
 const TASK_REPOSITORY_SERVERS = [
@@ -61,15 +60,8 @@ const TASK_REPOSITORY_SERVERS = [
     'workspace_files',
 ];
 
-// Extension servers a task does not get although the installation has
-// them: Yandex Ads (real advertising budgets) stays in the dialogue contour
-// until per-tool grant narrowing exists (eyes-only autonomy).
-const TASK_WITHHELD_SERVERS = ['yandex_ads'];
-
 function taskBundle(): ToolBundle {
-  const extensions = listInstallationExtensionServers().filter(name => !TASK_WITHHELD_SERVERS.includes(name));
-
-  return { declared: [...TASK_REPOSITORY_SERVERS, ...extensions] };
+  return { declared: [...TASK_REPOSITORY_SERVERS] };
 }
 
 function getErrorMessage(error: unknown): string {
