@@ -1,21 +1,23 @@
 @layer patterns{
-/* ── Thread header ──  .th-head > .av.th-av + h2.th-title + .th-acts (.th-act… .th-more) + .th-meta (.th-meta-i) + .th-chips
-   Inside .th (container “thread”): ≤ 560 — the title is already in the shell header, details are in the “⋯” menu. */
-.th-head{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:start;gap:var(--sp-1) var(--sp-3h);padding:var(--sp-4h) var(--gutter) var(--sp-4);border-bottom:1px solid var(--border)}
-.th-av{grid-row:1 / span 3}
-.th-title{grid-column:2;min-width:0;margin:0;font-size:var(--fs-h1);line-height:var(--lh-h1);font-weight:var(--fw-semibold);text-wrap:pretty}
-.th-acts{grid-column:3;grid-row:1;display:flex;align-items:center;gap:var(--sp-1h)}
-.th-act,.th-more{flex:none}   /* .th-act hides in a narrow thread, .th-more (“⋯”: details, links, copy link) is always visible */
-.th-meta{grid-column:2 / -1;display:flex;flex-wrap:wrap;align-items:center;gap:var(--sp-1) var(--sp-2);font-size:var(--fs-meta);line-height:var(--lh-meta);color:var(--text-3)}
-.th-meta-i{white-space:nowrap}
-.th-meta a{color:var(--text-2);text-decoration:none}
-.th-meta a:hover{color:var(--text)}
-.th-chips{grid-column:2 / -1;display:flex;flex-wrap:wrap;align-items:center;gap:var(--sp-2) var(--sp-3h);margin-top:var(--sp-1h)}
-@container thread (max-width:560px){
-  .th-head{grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:var(--sp-2);padding:var(--sp-2) var(--gutter)}
-  .th-av,.th-title,.th-meta,.th-act{display:none}
-  .th-chips{grid-column:1;grid-row:1;flex-wrap:nowrap;overflow:hidden;margin-top:0}
-  .th-chips > .link{display:none}   /* links — in the “⋯” menu */
-  .th-acts{grid-column:2;grid-row:1}
+/* ── Thread header strip (narrow thread) ──  .th-head[data-stuck] > .th-ph (.th-back) + .th-id (h2.th-title + .th-chips) + .th-acts (.th-act… .th-more)
+   Pinned on glass to the top of the scrolling body; data-stuck — the feed has scrolled under it (the hairline shows).
+   Inside .th (container “thread”): > 900 — no strip (the rail has it all); ≤ 560 — Stop/Cancel go into the details sheet;
+   on the phone it is the screen header — “back”, the title over state and context, “⋯”. */
+.th-head{position:sticky;top:0;z-index:var(--z-sticky);display:flex;align-items:center;gap:var(--sp-2h);min-height:var(--top-h);padding:var(--sp-2) var(--gutter);border-bottom:1px solid transparent;background:var(--bg-glass);-webkit-backdrop-filter:var(--glass-blur);backdrop-filter:var(--glass-blur)}
+.th-head[data-stuck]{border-bottom-color:var(--border)}
+.th-ph{display:none}   /* phone-only part of the strip: “back” */
+.th-back{margin-left:calc(-1 * var(--sp-2))}
+.th-id{flex:1;min-width:0;display:flex;flex-direction:column;gap:var(--sp-0h)}
+.th-title{display:none;min-width:0;margin:0;font-size:var(--fs-h2);line-height:var(--lh-h2);font-weight:var(--fw-semibold);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.th-chips{display:flex;align-items:center;gap:var(--sp-3h);min-width:0;overflow:hidden;font-size:var(--fs-meta);line-height:var(--lh-meta);white-space:nowrap}
+.th-acts{flex:none;display:flex;align-items:center;gap:var(--sp-1h)}
+.th-act,.th-more{flex:none}   /* .th-act hides in a thread ≤ 560 (then it is in the sheet); .th-more (“⋯” — thread details) is always there */
+@container thread (min-width:901px){ .th-head{display:none} }
+@container thread (max-width:560px){ .th-act{display:none} }
+/* phone: the strip is the screen header — header height, “back”, the title over state and context, “⋯” */
+@container shell (max-width:720px){
+  .th-head{gap:var(--sp-2);padding-block:0;padding-right:var(--sp-2)}
+  .th-ph{display:contents}
+  .th-title{display:block}
 }
 }

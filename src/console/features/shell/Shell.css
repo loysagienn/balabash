@@ -1,6 +1,6 @@
 @layer patterns{
 /* ════════════ Shell ════════════
-   .app (container) > .shell[data-detail] > aside.shell-side + .shell-main (header.shell-top, main.shell-body, nav.shell-tabs) */
+   .app (container) > .shell[data-detail][data-own-top] > aside.shell-side + .shell-main (header.shell-top, main.shell-body, nav.shell-tabs) */
 .app{position:relative;container:shell / inline-size;height:100%;min-height:0}
 .shell{display:grid;grid-template-columns:var(--side-w) minmax(0,1fr);height:100%;min-height:0;background:var(--bg);color:var(--text)}
 
@@ -81,5 +81,6 @@
   .shell-mt-btn{display:inline-flex}
   .shell-ws-btn{display:inline-flex}
   .shell[data-detail] .shell-tabs{display:none}
+  .shell[data-own-top] .shell-top{display:none}   /* the screen draws its own header inside the scrolling body (thread: the glass strip) */
 }
 }

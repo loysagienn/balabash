@@ -50,7 +50,19 @@ export function serviceIcon(server: string): IconName {
   }
 
   if (name.includes('calendar')) {
-    return 'calendar';
+    return 'calendar-days';
+  }
+
+  if (name.includes('drive')) {
+    return 'hard-drive';
+  }
+
+  if (name.includes('todoist')) {
+    return 'list-checks';
+  }
+
+  if (name.includes('yandex') || name.includes('direct')) {
+    return 'megaphone';
   }
 
   if (name.includes('github') || name.includes('gitlab')) {

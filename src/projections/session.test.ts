@@ -36,6 +36,21 @@ describe('foldSession', () => {
     assert.equal(foldSession(null, 'thread.cancelled', { reason: 'x' }), null);
   });
 
+  it('keeps the model and effort of the newest session.started through state and context', () => {
+    const started = foldSession(null, 'session.started', { model: 'claude-opus-5-5', effort: 'high', tools: [], mcpServers: [] });
+
+    assert.deepEqual(started, { state: 'wait', context: null, started: { model: 'claude-opus-5-5', effort: 'high' } });
+    assert.equal(foldSession(started, 'session.started', { model: 'claude-opus-5-5', effort: 'high' }), started);
+    // No model named: nothing to keep.
+    assert.equal(foldSession(started, 'session.started', { tools: [] }), started);
+
+    const running = foldSession(foldSession(started, 'session.state', { state: 'run' }), 'session.context', { totalTokens: 5, maxTokens: 50 });
+
+    assert.deepEqual(running, { state: 'run', context: { used: 5, max: 50 }, started: { model: 'claude-opus-5-5', effort: 'high' } });
+    // A resumed session on another model, without effort.
+    assert.deepEqual(foldSession(running, 'session.started', { model: 'gpt-5.6', effort: null }), { state: 'run', context: { used: 5, max: 50 }, started: { model: 'gpt-5.6', effort: null } });
+  });
+
   it('helpers', () => {
     assert.equal(sessionStateFrom({ state: 'act' }), 'act');
     assert.equal(sessionStateFrom({}), null);

@@ -1,8 +1,9 @@
-// Thread layout (design: .th): the `thread` container with the header
-// (ThreadHead) on top and the body below — the main column (feed and
-// composer) and the details rail on the right, which hides when the thread
-// is narrower than 900 px. RailSection is a titled group in the rail;
-// RailGauge — the context gauge with its caption.
+// Thread layout (design: .th): the `thread` container with the glass strip
+// (ThreadHead, a narrow thread only) on top and the body below — the main
+// column (feed and composer) and the details rail on the right, pinned
+// while the feed scrolls, which gives way to the strip when the thread is
+// 900 px or narrower. RailSection is a titled group in the rail; RailGauge —
+// the context gauge with its caption.
 
 import type { CSSProperties, ReactNode } from 'react';
 import { Gauge } from '../Ring/Gauge.tsx';

@@ -16,18 +16,17 @@ import { Feed } from '../../ui/Feed/Feed.tsx';
 import { IconBtn } from '../../ui/IconBtn/IconBtn.tsx';
 import { KeyValue } from '../../ui/KeyValue/KeyValue.tsx';
 import { Md } from '../../ui/Md/Md.tsx';
-import { Menu, MenuAnchor, MenuItem, MenuLabel, MenuSep } from '../../ui/Menu/Menu.tsx';
 import { Message } from '../../ui/Message/Message.tsx';
 import { MsgQuiet } from '../../ui/Message/MsgQuiet.tsx';
 import { Plan, PlanItem } from '../../ui/Plan/Plan.tsx';
-import { RailLink } from '../../ui/RailLink/RailLink.tsx';
-import { Status } from '../../ui/Status/Status.tsx';
+import { Avatar } from '../../ui/Avatar/Avatar.tsx';
+import { Badge } from '../../ui/Badge/Badge.tsx';
+import { Btn } from '../../ui/Btn/Btn.tsx';
 import { Subtask } from '../../ui/Subtask/Subtask.tsx';
 import { Summary } from '../../ui/Summary/Summary.tsx';
 import { SysLine } from '../../ui/SysLine/SysLine.tsx';
 import { RailGauge, RailSection, Thread, ThreadBody, ThreadMain, ThreadRail } from '../../ui/Thread/Thread.tsx';
 import { ThreadHead } from '../../ui/ThreadHead/ThreadHead.tsx';
-import { Icon } from '../../ui/Icon/Icon.tsx';
 import { ActGroup, Xp } from '../../ui/Xp/Xp.tsx';
 import { Caption, Code } from '../../ui/atoms/atoms.tsx';
 
@@ -103,47 +102,37 @@ function Label({ children }: { children: ReactNode }) {
   );
 }
 
-function MoreMenu({ running }: { running?: boolean }) {
-  const [open, setOpen] = useState(false);
 
-  return (
-    <MenuAnchor
-      open={open}
-      onClose={() => setOpen(false)}
-      menu={
-        <Menu label="Thread">
-          {running ? (
-            <>
-              <MenuLabel>Thread</MenuLabel>
-              <MenuItem icon="pause" label="Stop turn" onClick={() => setOpen(false)} />
-              <MenuItem icon="circle-stop" label="Cancel thread" variant="danger" onClick={() => setOpen(false)} />
-              <MenuSep />
-            </>
-          ) : null}
-          <MenuItem icon="git-fork" label="Parent thread" onClick={() => setOpen(false)} />
-          <MenuItem icon="link" label="Copy link" onClick={() => setOpen(false)} />
-        </Menu>
-      }
-    >
-      <IconBtn
-        icon="ellipsis"
-        label="More: details, links, copy link"
-        size="sm"
-        className="th-more"
-        expanded={open}
-        onClick={() => setOpen(value => !value)}
-      />
-    </MenuAnchor>
-  );
-}
-
+// The rail of a wide thread (design: ThreadRail), with static data.
 function Rail() {
   return (
     <ThreadRail>
+      <div className="th-rail-id">
+        <div className="th-rail-who">
+          <Avatar agent="engineer" />
+          <span className="th-rail-who-main">
+            <b className="th-rail-who-t">engineer</b>
+            <span className="th-rail-who-m">
+              from{' '}
+              <a href="#" onClick={stop}>
+                coordinator
+              </a>
+            </span>
+          </span>
+          <IconBtn icon="link" label="Copy link" size="sm" />
+        </div>
+        <h2 className="th-rail-t">Mini-apps: publishing by slug</h2>
+        <div className="th-rail-st">
+          <Badge state="run" label="running" />
+        </div>
+      </div>
+      <div className="th-rail-acts">
+        <Btn label="Stop turn" icon="pause" size="sm" block />
+        <Btn label="Cancel thread" icon="circle-stop" variant="danger" size="sm" block />
+      </div>
       <RailSection title="Session">
         <KeyValue
           items={[
-            { key: 'state', value: <Status state="run" label="running" /> },
             { key: 'model', value: <Code>claude-opus-5-5</Code> },
             { key: 'engine', value: 'Claude · effort high' },
           ]}
@@ -155,11 +144,6 @@ function Rail() {
           <br />
           compacted once
         </RailGauge>
-      </RailSection>
-      <RailSection title="Links">
-        <RailLink agent="coordinator" text="Coordinator · main thread" up href="#" onClick={stop} />
-        <RailLink agent="architect" text="Public URL scheme" state="done" href="#" onClick={stop} />
-        <RailLink agent="browser" text="Checking /p/kcal in the browser" state="wait" href="#" onClick={stop} />
       </RailSection>
       <RailSection title="Project and time">
         <KeyValue
@@ -181,23 +165,6 @@ function Rail() {
   );
 }
 
-const META = [
-  'engineer',
-  <>
-    from{' '}
-    <a href="#" onClick={stop}>
-      coordinator
-    </a>
-  </>,
-  <>
-    project{' '}
-    <a href="#" onClick={stop}>
-      Balabash
-    </a>
-  </>,
-  'since 14:02, running 2h 36m',
-];
-
 function RunningThread({ phone }: { phone?: boolean }) {
   const [draft, setDraft] = useState('');
   const [sent, setSent] = useState<string | null>(null);
@@ -205,20 +172,13 @@ function RunningThread({ phone }: { phone?: boolean }) {
   return (
     <Thread style={phone ? { height: '100%' } : undefined}>
       <ThreadHead
-        agent="engineer"
         title="Mini-apps: publishing by slug"
         state="run"
-        ctx={{ percentage: 62, usedTokens: 124_000, maxTokens: 200_000, text: '62% · 124k of 200k' }}
-        links={
-          <a className="link" href="#" onClick={stop}>
-            <Icon name="git-fork" />2 children
-          </a>
-        }
-        meta={META}
+        ctx={{ percentage: 62, usedTokens: 124_000, maxTokens: 200_000 }}
         running
         onStop={() => undefined}
         onCancel={() => undefined}
-        more={<MoreMenu running />}
+        onMore={() => undefined}
       />
       <ThreadBody>
         <ThreadMain>
@@ -350,33 +310,7 @@ function RunningThread({ phone }: { phone?: boolean }) {
 function CompletedThread() {
   return (
     <Thread>
-      <ThreadHead
-        agent="designer"
-        title="Web redesign: choosing a style"
-        state="done"
-        links={
-          <a className="link" href="#" onClick={stop}>
-            <Icon name="git-fork" />2 children
-          </a>
-        }
-        meta={[
-          'designer',
-          <>
-            from{' '}
-            <a href="#" onClick={stop}>
-              coordinator
-            </a>
-          </>,
-          <>
-            project{' '}
-            <a href="#" onClick={stop}>
-              Balabash
-            </a>
-          </>,
-          '13:17 → 13:59, 42m',
-        ]}
-        more={<MoreMenu />}
-      />
+      <ThreadHead title="Web redesign: choosing a style" state="done" ctx={{ percentage: 71, usedTokens: 142_000, maxTokens: 200_000 }} onMore={() => undefined} />
       <ThreadBody>
         <ThreadMain>
           <Feed>
@@ -410,7 +344,7 @@ export function DevUiFeed() {
 
   return (
     <>
-      <Section title="Thread · running (header, feed, composer, rail; the rail hides under 900 px, the header compacts under 560)">
+      <Section title="Thread · running (feed, composer, rail; ≤ 900 px the glass strip replaces the rail, ≤ 560 Stop/Cancel leave the strip)">
         <div className="dev-frame">
           <RunningThread />
         </div>
@@ -419,7 +353,7 @@ export function DevUiFeed() {
       <Section title="Thread · loading header">
         <div className="dev-frame">
           <Thread>
-            <ThreadHead agent="" title="" state="run" loading />
+            <ThreadHead title="" state="run" loading />
           </Thread>
         </div>
       </Section>

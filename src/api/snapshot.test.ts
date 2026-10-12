@@ -21,6 +21,8 @@ import { STAND_HOST, startStand } from '../test-support/stand.ts';
 import type { Stand } from '../test-support/stand.ts';
 import type { JsonObject, Thread } from '../core/contract.ts';
 import type { OpenSecretRequestView, SecretRequestResponse, ThreadResponse, ThreadsResponse } from './contract.ts';
+import { foldSession } from '../projections/session.ts';
+import type { SessionView } from '../projections/session.ts';
 import { eventAction } from '../console/store/events.ts';
 import { snapshot as snapshotFixture } from '../console/store/fixtures.ts';
 import { initialSecretRequests, secretRequestsReducer } from '../console/store/secret-requests/reducer.ts';
@@ -282,6 +284,50 @@ describe('the agent catalog of the snapshot', () => {
     assert.equal(replay.browser, null);
     assert.equal(replay.gardener, null);
     assert.deepEqual(await lastModels(), replay);
+  });
+});
+
+describe('the sessions of the snapshot', () => {
+  // The rail of a long thread reads the model of its session from here: the
+  // session.started that named it may lie far outside the loaded feed.
+  // The snapshot's agent catalog reads the coordinator's model from the config (stripped on the stand).
+  before(() => {
+    process.env.MAIN_OPENAI_MODEL = 'gpt-test-model';
+  });
+
+  after(() => {
+    delete process.env.MAIN_OPENAI_MODEL;
+  });
+
+  test('carry the newest state, context and model with effort of each active thread, as the tail folds them', async () => {
+    const engineer = await startChild('engineer');
+    const asOfSeq = (await prisma.event.aggregate({ _max: { seq: true } }))._max.seq ?? 0n;
+
+    await written({ type: 'session.started', actor: 'agent', agentName: 'engineer', userId: stand.userId, threadId: engineer, payload: { model: 'claude-fable-5-1', effort: 'low', tools: [], mcpServers: [] } });
+    await written({ type: 'session.state', actor: 'agent', agentName: 'engineer', userId: stand.userId, threadId: engineer, payload: { state: 'run' } });
+    await written({ type: 'session.context', actor: 'agent', agentName: 'engineer', userId: stand.userId, threadId: engineer, payload: { totalTokens: 10, maxTokens: 100, percentage: 10 } });
+    await written({ type: 'session.started', actor: 'agent', agentName: 'engineer', userId: stand.userId, threadId: engineer, payload: { model: 'claude-opus-5-5', effort: 'high', tools: [], mcpServers: [] } });
+    await written({ type: 'session.state', actor: 'agent', agentName: 'engineer', userId: stand.userId, threadId: engineer, payload: { state: 'wait' } });
+
+    const response = await stand.request('GET', '/api/snapshot');
+
+    assert.equal(response.status, 200, response.text);
+
+    const sessions = response.json<{ sessions: Record<string, SessionView> }>().sessions;
+    const expected = { state: 'wait', context: { used: 10, max: 100 }, started: { model: 'claude-opus-5-5', effort: 'high' } };
+
+    assert.deepEqual(sessions[engineer], expected);
+
+    // The tail folded in its own order lands on the same view.
+    let folded: SessionView | null = null;
+
+    for (const event of await getEventsAfter(asOfSeq, { limit: 1000 })) {
+      if (event.threadId === engineer) {
+        folded = foldSession(folded, event.type, event.payload);
+      }
+    }
+
+    assert.deepEqual(folded, expected);
   });
 });
 

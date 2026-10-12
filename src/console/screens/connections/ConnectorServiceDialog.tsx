@@ -8,7 +8,7 @@
 
 import type { ConnectorServiceView } from '../../../api/contract.ts';
 import { useNow } from '../../lib/format/useNow.ts';
-import { dateTimeLabel } from '../../lib/format/index.ts';
+import { startedLabel } from '../../lib/format/index.ts';
 import { Dialog } from '../../ui/Dialog/Dialog.tsx';
 import { Note } from '../../ui/Note/Note.tsx';
 
@@ -22,7 +22,7 @@ export function ConnectorServiceDialog({ service, onClose }: { service: Connecto
           <Note icon="circle-check">Connected through claude.ai. Its tools serve every workspace of this installation.</Note>
         ) : service.state === 'token_expired' ? (
           <Note state="act" icon="clock-alert">
-            The Claude CLI token on this box expired{service.tokenExpiresAt ? ` ${dateTimeLabel(service.tokenExpiresAt, now)}` : ''}: calls fail until a Claude Code session on the box
+            The Claude CLI token on this box expired{service.tokenExpiresAt ? ` ${startedLabel(service.tokenExpiresAt, now)}` : ''}: calls fail until a Claude Code session on the box
             rotates it. Nothing needs re-authorizing.
           </Note>
         ) : (

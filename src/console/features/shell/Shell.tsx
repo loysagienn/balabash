@@ -41,10 +41,13 @@ export type ShellProps = Omit<ShellTopProps, 'running' | 'main'> & {
   current: NavKey | null;
   // A detail screen: no bottom tabs on the phone.
   detail?: boolean;
+  // On the phone the screen draws its own header inside the scrolling body
+  // (the thread's glass strip) and the shell header hides.
+  ownTop?: boolean;
   children: ReactNode;
 };
 
-export function Shell({ current, detail, children, ...top }: ShellProps) {
+export function Shell({ current, detail, ownTop, children, ...top }: ShellProps) {
   const dispatch = useAppDispatch();
   const me = useAppSelector(selectMe);
   const running = useAppSelector(selectRunningCount);
@@ -120,7 +123,7 @@ export function Shell({ current, detail, children, ...top }: ShellProps) {
 
   return (
     <div className="app">
-      <div className="shell" data-detail={detail ? '' : undefined}>
+      <div className="shell" data-detail={detail ? '' : undefined} data-own-top={ownTop ? '' : undefined}>
         <aside className="shell-side">
           <div className="shell-brand">
             <img className="shell-logo" src="/static/icon-192.png" alt="" width="192" height="192" />

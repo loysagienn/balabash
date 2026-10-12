@@ -8,7 +8,14 @@ import { pushToast } from '../ui/actions.ts';
 import { commandThreadDone, commandThreadFail, loadThreadDone, loadThreadEventsDone, loadThreadEventsFail, loadThreadFail, loadThreadsDone, loadThreadsFail, sendMessageDone, sendMessageFail } from './actions.ts';
 
 export const THREADS_PAGE = 50;
-export const FEED_CHUNK = 500;
+// Events per chunk of a thread's history. The page draws only the end of
+// the feed (FEED_OPEN_ITEMS) and loads a chunk only when every loaded item
+// is drawn, so a chunk need only outgrow a few screens: 200 events of the
+// main thread are ~90 items and ~200 KB (500 were ~230 items, ~520 KB, all
+// before the first paint); a working agent's 200 are ~15–20 items — tool
+// pairs fold into groups — and its next chunk loads as the reader nears the
+// top.
+export const FEED_CHUNK = 200;
 // The first page of a searched set waits for the typing to pause.
 export const SEARCH_DEBOUNCE_MS = 300;
 

@@ -1,6 +1,8 @@
-// What the details rail reads from a thread's loaded events: the model and
-// effort of session.started, the latest session.context of a finished
-// thread (an active one has it in the store's sessions), the compactions.
+// What the details rail reads: the model and effort of the session — an
+// active one has them in the store's sessions (the newest session.started,
+// however far back), a finished one from the loaded events' session.started
+// — the latest session.context likewise, and the compactions of the loaded
+// events.
 
 import type { Event } from '../../../core/contract.ts';
 import type { EventOf } from '../../../core/event-types.ts';
@@ -8,7 +10,7 @@ import type { EventOf } from '../../../core/event-types.ts';
 export type RailSessionInfo = { model: string | null; effort: string | null; context: { used: number; max: number } | null; compactions: number };
 
 // What the rail reads from the thread's loaded events.
-export function railSessionInfo(events: readonly Event[], live: { used: number; max: number } | null): RailSessionInfo {
+export function railSessionInfo(events: readonly Event[], live: { used: number; max: number } | null, started?: { model: string; effort: string | null } | null): RailSessionInfo {
   let model: string | null = null;
   let effort: string | null = null;
   let context = live;
@@ -31,7 +33,7 @@ export function railSessionInfo(events: readonly Event[], live: { used: number; 
     }
   }
 
-  return { model, effort, context, compactions };
+  return started ? { model: started.model, effort: started.effort, context, compactions } : { model, effort, context, compactions };
 }
 
 export function compactionsLabel(n: number): string {

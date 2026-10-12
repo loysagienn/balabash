@@ -117,7 +117,7 @@ export function ConnectionsScreen() {
                 </Empty>
               )
             ) : (
-              <Tiles min="210px">
+              <Tiles min="210px" className="conn-cat">
                 {entries.map(entry => {
                   if (entry.kind === 'connector') {
                     const service = entry.service;
@@ -219,14 +219,14 @@ export function ConnectionsScreen() {
   );
 }
 
-// The banner of an account the provider rejects: its "Sign in" asks for a
+// The banner of an account the provider rejects: its "Sign in again" asks for a
 // link; the row below opens it once answered.
 function NeedsSignIn({ id, words }: { id: string; words: string }) {
   const dispatch = useAppDispatch();
   const call = useAppSelector(s => selectConnectionCall(s, id));
 
   return (
-    <Note state="act" icon="key-round" role="status" action="Sign in" actionIcon="log-in" actionBusy={call?.kind === 'reconnect'} onAction={() => (call ? undefined : dispatch(reconnectConnection(id)))}>
+    <Note state="act" icon="key-round" role="status" action="Sign in again" actionBusy={call?.kind === 'reconnect'} onAction={() => (call ? undefined : dispatch(reconnectConnection(id)))}>
       {words}
     </Note>
   );

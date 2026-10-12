@@ -14,7 +14,7 @@
 /* narrow thread: same layout, its own sizes. The field is one line and grows to six; buttons below it —
    “attach” aligned with the text, “send” round; the phone’s system bar is accounted for at the bottom */
 @container thread (max-width:480px){
-  .composer{padding:var(--sp-2) var(--gutter) calc(var(--sp-2) + env(safe-area-inset-bottom,0px));background:var(--bg)}
+  .composer{padding:var(--sp-2) var(--gutter) calc(var(--sp-2) + env(safe-area-inset-bottom,0px));background:var(--bg-glass);-webkit-backdrop-filter:var(--glass-blur);backdrop-filter:var(--glass-blur)}
   .composer-box{--composer-min-h:var(--lh-lg);gap:var(--sp-1);padding:var(--sp-2h) var(--sp-1h) var(--sp-1h) var(--sp-3h)}
   .composer-input{--composer-max-lines:6;padding:var(--sp-0h) 0;font-size:var(--fs-input-touch);line-height:var(--lh-lg);max-height:calc(var(--lh-lg) * var(--composer-max-lines) + var(--sp-1))}
   .composer-hint{display:none}

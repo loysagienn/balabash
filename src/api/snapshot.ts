@@ -47,9 +47,10 @@ async function readHeadSeq(): Promise<bigint> {
 }
 
 // The sessions behind the active threads of the window: the newest
-// session.state and session.context of each, folded like the console folds
-// the tail (src/projections/session.ts). A thread without session events
-// has no entry — the client derives a state from the thread then.
+// session.state, session.context and session.started of each (the model and
+// effort the rail names), folded like the console folds the tail
+// (src/projections/session.ts). A thread without session events has no
+// entry — the client derives a state from the thread then.
 async function readSessions(threads: Thread[]): Promise<Record<string, SessionView>> {
   const activeIds = threads.filter(thread => thread.status === 'active').map(thread => thread.id);
   const sessions: Record<string, SessionView> = {};

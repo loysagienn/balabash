@@ -31,9 +31,13 @@ describe('status words', () => {
   it('picks the service icon by name', () => {
     assert.equal(serviceIcon('notion'), 'book-open');
     assert.equal(serviceIcon('gmail'), 'mail');
-    assert.equal(serviceIcon('google-calendar'), 'calendar');
+    assert.equal(serviceIcon('google-calendar'), 'calendar-days');
+    assert.equal(serviceIcon('yandex'), 'megaphone');
+    assert.equal(serviceIcon('google-drive'), 'hard-drive');
     assert.equal(serviceIcon('github'), 'git-fork');
-    assert.equal(serviceIcon('yandex-direct'), 'plug');
+    assert.equal(serviceIcon('yandex-direct'), 'megaphone');
+    assert.equal(serviceIcon('todoist'), 'list-checks');
+    assert.equal(serviceIcon('something-else'), 'plug');
   });
 });
 

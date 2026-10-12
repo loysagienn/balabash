@@ -78,28 +78,111 @@ export function feedTop(feed: ThreadFeed): FeedTop {
 // What the scroll box of the feed does after its items changed (the hook
 // measures, this decides). The first ready view opens at the end — or, when
 // history brought the thread back with the place it was left at (`restore`,
-// the router's `scroll`), at that place. An
-// earlier chunk — knownFrom moved — keeps the same element under the eye:
+// the router's `scroll`), at that place. Any change while the end is in
+// view follows it — a short feed whose earlier part lands included (a
+// thread opened before its history loaded stays at its end). A change at
+// the top of the drawn feed — `top` moved: an earlier chunk landed, earlier
+// items were drawn — keeps a reader up in the history on the same element:
 // by the shift of an anchored item still in the DOM, else (the first items
-// re-keyed when older actions merged into their group) by the growth of
-// the content. Any other change while the end is in view follows it; a
-// reader up in the history is left in place.
-export type FeedScrollSeen = { knownFrom: bigint | null; height: number };
+// re-keyed when older actions merged into their group) by the growth of the
+// content. Otherwise a reader up in the history is left in place.
+export type FeedScrollSeen = { top: string; height: number };
 export type FeedScrollMove = { kind: 'open' } | { kind: 'to'; px: number } | { kind: 'end' } | { kind: 'by'; px: number } | null;
 
-export function feedScrollMove(input: { previous: FeedScrollSeen | null; knownFrom: bigint | null; atEnd: boolean; anchorShift: number | null; height: number; restore: number | null }): FeedScrollMove {
-  const { previous, knownFrom, atEnd, anchorShift, height, restore } = input;
+export function feedScrollMove(input: { previous: FeedScrollSeen | null; top: string; atEnd: boolean; anchorShift: number | null; height: number; restore: number | null }): FeedScrollMove {
+  const { previous, top, atEnd, anchorShift, height, restore } = input;
 
   if (!previous) {
     return restore === null ? { kind: 'open' } : { kind: 'to', px: restore };
   }
-  if (previous.knownFrom !== knownFrom) {
+  if (atEnd) {
+    return { kind: 'end' };
+  }
+  if (previous.top !== top) {
     const px = anchorShift ?? height - previous.height;
 
     return px === 0 ? null : { kind: 'by', px };
   }
 
-  return atEnd ? { kind: 'end' } : null;
+  return null;
+}
+
+// The drawn part of the feed. A long thread keeps its loaded history in the
+// store, but the page draws only its end — FEED_OPEN_ITEMS items, a few
+// screens of the main thread — and draws earlier items FEED_REVEAL_ITEMS at
+// a time as the reader nears the top; only when every loaded item is drawn
+// does the next chunk load from the network. The window is fixed by its
+// first item (`key`), so the tail growing at the bottom never moves what
+// the reader sees; `count` (items from the end when the key was set) stands
+// in when the key is gone — an earlier chunk re-keyed the first item (older
+// actions merged into its group, a card met its start). `knownFrom` — the
+// feed's lower bound the window has seen: a chunk landing draws the next
+// part of it.
+export const FEED_OPEN_ITEMS = 40;
+export const FEED_REVEAL_ITEMS = 30;
+
+export type FeedWindow = { key: string | null; count: number; knownFrom: bigint | null };
+
+export function openFeedWindow(knownFrom: bigint | null, key: string | null = null): FeedWindow {
+  return { key, count: FEED_OPEN_ITEMS, knownFrom };
+}
+
+// The index of the first drawn item.
+export function feedWindowStart(keys: readonly string[], win: FeedWindow): number {
+  if (win.key !== null) {
+    const index = keys.indexOf(win.key);
+
+    if (index >= 0) {
+      return index;
+    }
+  }
+
+  return Math.max(0, keys.length - win.count);
+}
+
+function windowAt(keys: readonly string[], start: number, knownFrom: bigint | null): FeedWindow {
+  return { key: keys[start] ?? null, count: keys.length - start, knownFrom };
+}
+
+// The window `step` items earlier.
+export function revealEarlier(keys: readonly string[], win: FeedWindow, step: number = FEED_REVEAL_ITEMS): FeedWindow {
+  return windowAt(keys, Math.max(0, feedWindowStart(keys, win) - step), win.knownFrom);
+}
+
+// The window for the feed as it is now, or the same object when nothing
+// changes (the page sets it while rendering): until the first chunk from
+// the head lands (`head` false) the window is the last items, whatever the
+// tail brings; then it is fixed by its first item; a later chunk landing
+// (knownFrom moved) draws the next part of it.
+export function settleFeedWindow(keys: readonly string[], win: FeedWindow, knownFrom: bigint | null, head: boolean): FeedWindow {
+  if (!head || keys.length === 0) {
+    return win;
+  }
+  if (win.key === null) {
+    return windowAt(keys, feedWindowStart(keys, win), knownFrom);
+  }
+  if (win.knownFrom !== knownFrom) {
+    return revealEarlier(keys, { ...win, knownFrom });
+  }
+
+  return win;
+}
+
+// What the reader nearing the top of the drawn feed asks for: earlier
+// items the store already holds, else the next chunk — unless one is in
+// flight, failed (Retry is the reader's call) or the history is complete.
+export function nearTopAction(start: number, feed: ThreadFeed): 'reveal' | 'load' | null {
+  if (start > 0) {
+    return 'reveal';
+  }
+
+  return feed.knownFrom !== null && !feed.exhausted && !feed.request && !feed.error ? 'load' : null;
+}
+
+// The reader is near the top when the top of the drawn feed is less than a
+// screen above the view — earlier items are drawn before they are reached.
+export function isNearTop(sentinelBottom: number, viewTop: number, viewHeight: number): boolean {
+  return sentinelBottom > viewTop - viewHeight;
 }
 
 // Which measured item the eye is on: the last one whose top is at or above

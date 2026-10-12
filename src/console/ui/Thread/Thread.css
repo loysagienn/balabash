@@ -1,14 +1,30 @@
 @layer patterns{
 /* ── Thread ──  .th (container “thread”) > .th-head (ThreadHead) + .th-body (.th-main > .feed + .composer, aside.th-rail)
-   ≤ 900 — no right rail (the header reflows on its own, ThreadHead.css). */
-.th{container:thread / inline-size;display:flex;flex-direction:column;min-width:0;min-height:0;background:var(--bg)}
-.th-body{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:start;flex:1;min-height:0}
-.th-main{display:flex;flex-direction:column;min-width:0;min-height:100%}
-.th-rail{--kv-dt-w:76px;width:var(--rail-w);display:flex;flex-direction:column;gap:var(--sp-4h);align-self:stretch;padding:var(--sp-4h) var(--sp-4h) var(--sp-6);border-left:1px solid var(--border)}
+   Wide (> 900): no strip — everything about the thread is in the right rail, pinned under the shell header while the
+   feed scrolls; the title is in the shell header. Narrow (≤ 900): no rail — the glass strip on top (ThreadHead.css).
+   .th grows with its content (min-height, not height): the sticky strip and rail need it to be the scrolled thing. */
+.th{container:thread / inline-size;display:flex;flex-direction:column;min-width:0;min-height:100%;background:var(--bg)}
+.th-body{display:grid;grid-template-columns:minmax(0,1fr) auto;flex:1}
+.th-main{display:flex;flex-direction:column;min-width:0;border-right:1px solid var(--border)}   /* the rail’s divider runs the full height of the feed */
+
+/* Rail: who and what, state and controls, then session, context, project and time. Scrolls on its own when the
+   window is lower than its content. */
+.th-rail{--kv-dt-w:76px;position:sticky;top:0;align-self:start;width:var(--rail-w);max-height:calc(100dvh - var(--top-h));overflow-y:auto;overscroll-behavior:contain;display:flex;flex-direction:column;gap:var(--sp-5);padding:var(--sp-4h) var(--sp-4h) var(--sp-6)}
+.th-rail-id{display:flex;flex-direction:column;gap:var(--sp-2h)}
+.th-rail-who{display:flex;align-items:center;gap:var(--sp-2h);min-width:0}
+.th-rail-who-main{flex:1;min-width:0;display:flex;flex-direction:column}
+.th-rail-who-t{font-size:var(--fs-ui);line-height:var(--lh-ui);font-weight:var(--fw-semibold);color:var(--text)}
+.th-rail-who-m{font-size:var(--fs-meta);line-height:var(--lh-meta);color:var(--text-3)}
+.th-rail-who-m a{color:var(--text-2);text-decoration:none}
+.th-rail-who-m a:hover{color:var(--text)}
+.th-rail-t{margin:0;font-size:var(--fs-lg);line-height:var(--lh-lg);font-weight:var(--fw-semibold);text-wrap:pretty}
+.th-rail-st{display:flex;flex-wrap:wrap;align-items:center;gap:var(--sp-2)}
+.th-rail-acts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--sp-2)}
 .th-rail-h{margin:0 0 var(--sp-2);font-size:var(--fs-micro);line-height:var(--lh-micro);font-weight:var(--fw-semibold);color:var(--text-3)}
 .th-rail-gauge{display:flex;align-items:center;gap:var(--sp-3);font-size:var(--fs-meta);line-height:var(--lh-meta);color:var(--text-3)}
 @container thread (max-width:900px){
   .th-body{grid-template-columns:minmax(0,1fr)}
+  .th-main{border-right:0}
   .th-rail{display:none}
 }
 }

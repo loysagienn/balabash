@@ -24,7 +24,7 @@ import { selectOperatorName } from './session/selectors.ts';
 import { commandThread, loadThread, loadThreadEvents, loadThreads, sendMessage } from './threads/actions.ts';
 import { setComposerDraft } from './ui/actions.ts';
 import { hasLoadedPage, makeSelectAgentThreads, makeSelectProjectThreads, selectActiveCountIn, selectKnownAgents, selectLatestFinishedThread, selectListThreads, selectMainThread, selectRunningCount, selectRunningCountByAgent, selectRunningCountByProject } from './threads/selectors.ts';
-import { SEARCH_DEBOUNCE_MS } from './threads/handlers.ts';
+import { FEED_CHUNK, SEARCH_DEBOUNCE_MS } from './threads/handlers.ts';
 import { createProject, setProjectArchived, updateProject } from './projects/actions.ts';
 import { selectActiveProjects, selectArchivedProjectCount, selectArchivedProjects, selectProjectCreate, selectProjectEdit, selectProjectFlagging } from './projects/selectors.ts';
 import { selectConnectionCall, selectConnectionFailure, selectConnectionLink, selectConnectionRename, selectConnections, selectConnectionsNeedingAction, selectServiceConnect } from './connections/selectors.ts';
@@ -247,7 +247,7 @@ describe('session start-up', () => {
       calls.map(call => call.name),
       ['me', 'snapshot', 'threads.events'],
     );
-    assert.deepEqual(calls[2].args, ['t1', { before: 51n, limit: 500 }]);
+    assert.deepEqual(calls[2].args, ['t1', { before: 51n, limit: FEED_CHUNK }]);
     assert.equal(state.feed.byThread.t1.exhausted, true);
     assert.equal(state.feed.byThread.t1.knownFrom, null);
   });
@@ -977,13 +977,13 @@ describe('thread events (feed)', () => {
     await dispatched(store, sessionCheck());
     await settle();
     await dispatched(store, loadThreadEvents('t1', null));
-    assert.deepEqual(eventsCalls(), [{ before: 101n, limit: 500 }]);
+    assert.deepEqual(eventsCalls(), [{ before: 101n, limit: FEED_CHUNK }]);
 
     // The tail has moved: the store holds everything after its last frame
     // (what an eviction took before it is the chunk's to bring back).
     store.dispatch(eventAction(event({ type: 'thread.progress', seq: 180n, threadId: 't2', payload: { text: 'x' } })));
     await dispatched(store, loadThreadEvents('t1', null));
-    assert.deepEqual(eventsCalls().at(-1), { before: 181n, limit: 500 });
+    assert.deepEqual(eventsCalls().at(-1), { before: 181n, limit: FEED_CHUNK });
 
     // A frame below the snapshot's stamp does not move the head below it.
     const other = createStore({ api: fakeApi({ threads: { events: async () => ({ events: [], nextCursor: null }) } }, calls), initialRoute: { key: 'home' } });
@@ -992,7 +992,7 @@ describe('thread events (feed)', () => {
     await settle();
     other.dispatch(eventAction(event({ type: 'thread.progress', seq: 25n, threadId: 't2', payload: { text: 'x' } })));
     await dispatched(other, loadThreadEvents('t1', null));
-    assert.deepEqual(eventsCalls().at(-1), { before: 101n, limit: 500 });
+    assert.deepEqual(eventsCalls().at(-1), { before: 101n, limit: FEED_CHUNK });
   });
 });
 

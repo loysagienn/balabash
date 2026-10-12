@@ -15,12 +15,16 @@ export type SessionView = {
   // The context window of the inner session after its latest turn
   // (session.context): tokens used of the maximum; null until measured.
   context: { used: number; max: number } | null;
+  // The model and the effort of the session (the newest session.started);
+  // absent until one is folded — and in a snapshot of a server older than
+  // the field.
+  started?: { model: string; effort: string | null };
 };
 
 export const SESSION_EVENT_PREFIX = 'session.';
 
 // The event types the view is folded from — the snapshot reads only these.
-export const SESSION_VIEW_TYPES = ['session.state', 'session.context'] as const;
+export const SESSION_VIEW_TYPES = ['session.state', 'session.context', 'session.started'] as const;
 
 export function isSessionEvent(type: string): boolean {
   return type.startsWith(SESSION_EVENT_PREFIX);
@@ -32,6 +36,16 @@ export function sessionStateFrom(payload: JsonObject): SessionState | null {
   const { state } = payload;
 
   return state === 'run' || state === 'wait' || state === 'act' ? state : null;
+}
+
+function sessionStartedFrom(payload: JsonObject): NonNullable<SessionView['started']> | null {
+  const { model, effort } = payload;
+
+  if (typeof model !== 'string' || model === '') {
+    return null;
+  }
+
+  return { model, effort: typeof effort === 'string' && effort !== '' ? effort : null };
 }
 
 function sessionContextFrom(payload: JsonObject): SessionView['context'] {
@@ -60,7 +74,7 @@ export function foldSession(view: SessionView | null, type: string, payload: Jso
         return view;
       }
 
-      return { state, context: view?.context ?? null };
+      return { ...view, state, context: view?.context ?? null };
     }
     case 'session.context': {
       const context = sessionContextFrom(payload);
@@ -69,7 +83,16 @@ export function foldSession(view: SessionView | null, type: string, payload: Jso
         return view;
       }
 
-      return { state: view?.state ?? 'wait', context };
+      return { ...view, state: view?.state ?? 'wait', context };
+    }
+    case 'session.started': {
+      const started = sessionStartedFrom(payload);
+
+      if (started === null || (view?.started?.model === started.model && view.started.effort === started.effort)) {
+        return view;
+      }
+
+      return { state: view?.state ?? 'wait', context: view?.context ?? null, started };
     }
     default:
       return view;
