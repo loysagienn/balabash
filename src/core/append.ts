@@ -126,8 +126,46 @@ async function createEvent(tx: Tx, input: AppendInput): Promise<Event> {
   return toEvent(row);
 }
 
+// ---------------------------------------------------------------------------
+// The log lock: seq order is commit order. events.seq is allocated at
+// insert, and without a lock transactions would commit in any order — a
+// reader strictly after a cursor (the live tail, the console's stream, the
+// consumers, the snapshot's stamp) that already stood on seq N+1 would
+// never see an N committed later (a thread's terminal, written while its
+// session journal appended the next event, stayed unseen in the console
+// until a reload). Every transaction that writes the log takes one
+// transaction-scoped advisory lock as its FIRST statement, so log writes
+// commit one at a time in seq order and every cursor reads a prefix of the
+// log. First, before any row lock: a log writer waiting for a row while
+// holding the log lock, against a holder of that row waiting for the log
+// lock, would be a deadlock — taken first, the log lock is never awaited
+// while holding a row of a log writer. Writers that do not write the log
+// never take it. The lock is per database: test stands on their own
+// databases do not contend.
+
+const LOG_LOCK_KEY = 0x62616c616261n; // "balaba" — one fixed key for the whole log
+
+// The transaction clients that hold the log lock: appendEventIn refuses
+// any other, so a write that skipped the lock fails loudly instead of
+// reopening the window.
+const logLocked = new WeakSet<Tx>();
+
+export type LogTransactionOptions = { timeout?: number; maxWait?: number };
+
+// A transaction that may write the log: the log lock first, then the
+// caller's work (row locks, registry writes, appendEventIn). The caller
+// tells the live tail after the commit (notifyAppended).
+export function logTransaction<T>(work: (tx: Tx) => Promise<T>, options?: LogTransactionOptions): Promise<T> {
+  return prisma.$transaction(async tx => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(${LOG_LOCK_KEY}::bigint)`;
+    logLocked.add(tx);
+
+    return work(tx);
+  }, options);
+}
+
 export async function appendEvent(input: AppendInput): Promise<AppendResult> {
-  const result = await prisma.$transaction(tx => appendEventIn(tx, input));
+  const result = await logTransaction(tx => appendEventIn(tx, input));
 
   // After the commit: the live tail (src/core/live.ts) learns that the log
   // grew. A cascade wrote more than one event — the hub reads from the log
@@ -139,13 +177,18 @@ export async function appendEvent(input: AppendInput): Promise<AppendResult> {
   return result;
 }
 
-// The append inside a transaction the caller owns: a registry table changes
-// and the event recording the change commit together, or neither does
+// The append inside a transaction the caller owns — opened by
+// logTransaction, which holds the log lock: a registry table changes and
+// the event recording the change commit together, or neither does
 // (src/core/registry-events.ts). The seq is allocated under the row locks
 // the caller holds, so the log's order is the mutations' order. The caller
 // tells the live tail after its commit (notifyAppended) — the hub reads the
 // log itself, so a missed hint only costs the safety poll's delay.
-export function appendEventIn(tx: Tx, raw: AppendInput): Promise<AppendResult> {
+export async function appendEventIn(tx: Tx, raw: AppendInput): Promise<AppendResult> {
+  if (!logLocked.has(tx)) {
+    throw new AppendError('log_lock_required', 'An append must run in a transaction opened by logTransaction (the log lock first)');
+  }
+
   const payload = storablePayload(raw.payload);
   const input = payload === raw.payload ? raw : { ...raw, payload };
 

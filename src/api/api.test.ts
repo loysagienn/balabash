@@ -165,8 +165,9 @@ describe('projects over the api', () => {
   // Two archives of one project at once: both read the live row before the
   // transaction, so the second must not re-stamp the date the first set, nor
   // journal a second archiving. The first is caught in the act — the test
-  // holds the archived row uncommitted in a transaction of its own, so the
-  // request's check sees a live project and its update waits on the row;
+  // holds the archived row uncommitted in a log transaction of its own, so
+  // the request's check sees a live project and its change waits behind it
+  // (the log lock, which also orders the row);
   // once the row commits the request's turn comes with nothing left to do:
   // the first date stays, one event, the answer tells the state as it is.
   // The same for two unarchives.
@@ -174,7 +175,7 @@ describe('projects over the api', () => {
     const flip = archived ? 'archive' : 'unarchive';
 
     test(`a ${flip} racing a concurrent one changes nothing: the first date and one event`, { timeout: 30_000 }, async () => {
-      const { appendEventIn } = await import('../core/append.ts');
+      const { appendEventIn, logTransaction } = await import('../core/append.ts');
       const { projectRecord } = await import('../projects/store.ts');
       const firstAt = archived ? new Date('2026-03-04T05:06:07.890Z') : null;
       let locked!: () => void;
@@ -191,7 +192,7 @@ describe('projects over the api', () => {
       });
 
       released.catch(() => {});
-      const held = prisma.$transaction(
+      const held = logTransaction(
         async tx => {
           const row = await tx.project.update({ where: { id }, data: { archived, archivedAt: firstAt } });
 

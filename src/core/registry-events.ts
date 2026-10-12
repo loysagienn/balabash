@@ -16,8 +16,7 @@
 // (src/api/contract.ts views with ISO dates), so a reducer upserts it as a
 // whole.
 
-import { prisma } from '../db/client.ts';
-import { appendEventIn } from './append.ts';
+import { appendEventIn, logTransaction } from './append.ts';
 import type { Tx } from './append.ts';
 import { notifyAppended } from './live.ts';
 import type { EventPayloads, EventType } from './event-types.ts';
@@ -41,11 +40,13 @@ export type RegistryJournal = <T extends RegistryEventType>(type: T, payload: Ev
 
 // One registry change: the table writes and the events recording them in
 // one transaction (tx is the transaction's client — every write of the
-// change goes through it). The live tail is told after the commit.
+// change goes through it), opened under the log lock (logTransaction), so
+// the change's own row locks come after it. The live tail is told after
+// the commit.
 export async function registryMutation<T>(change: (tx: Tx, journal: RegistryJournal) => Promise<T>): Promise<T> {
   const appended: bigint[] = [];
 
-  const result = await prisma.$transaction(async tx => {
+  const result = await logTransaction(async tx => {
     const journal: RegistryJournal = async (type, payload, by) => {
       const thread = by.kind === 'thread' ? await tx.thread.findUnique({ where: { id: by.threadId }, select: { id: true, agent: true } }) : null;
 

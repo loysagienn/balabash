@@ -134,11 +134,11 @@ export async function countThreads(userId: string, filters: ThreadCountFilters, 
 // log holds (the lifecycle events and their projection rows commit
 // together), and no terminal above the stamp. The console folds the tail's
 // terminals above the stamp onto the counts and leaves those below alone —
-// whichever of the page and the tail lands first. The stamp is the head of
-// what was committed, not a prefix of the sequence: seq is allocated at
-// insert and transactions commit in any order, so a terminal with a lower
-// seq that commits after the snapshot is in neither the counts nor a read
-// strictly after the stamp (the same holds for every cursor over the log).
+// whichever of the page and the tail lands first. The stamp is a prefix of
+// the log: log writes commit in seq order under the log lock
+// (logTransaction, src/core/append.ts), so every terminal with a seq at or
+// below the stamp is in the counts, and every one above it reaches a read
+// strictly after the stamp.
 export async function countThreadsAt(userId: string, filters: ThreadCountFilters): Promise<{ counts: ThreadCounts; asOfSeq: bigint }> {
   return prisma.$transaction(
     async tx => {

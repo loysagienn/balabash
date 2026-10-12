@@ -23,11 +23,12 @@ let stand: Stand;
 let prisma: typeof import('../db/client.ts')['prisma'];
 let appendEvent: typeof import('../core/append.ts')['appendEvent'];
 let appendEventIn: typeof import('../core/append.ts')['appendEventIn'];
+let logTransaction: typeof import('../core/append.ts')['logTransaction'];
 
 before(async () => {
   stand = await startStand();
   ({ prisma } = await import('../db/client.ts'));
-  ({ appendEvent, appendEventIn } = await import('../core/append.ts'));
+  ({ appendEvent, appendEventIn, logTransaction } = await import('../core/append.ts'));
 });
 
 after(() => stand.stop());
@@ -189,9 +190,10 @@ describe('thread commands over the api', () => {
   });
 
   for (const command of COMMANDS) {
-    // The test holds the thread's row lock in a transaction of its own: the
-    // handler's check (an unlocked read) sees the thread active, its append
-    // then waits for the lock — and what it sees once the lock is released
+    // The test holds the log lock and the thread's row lock in a log
+    // transaction of its own: the handler's check (an unlocked read) sees the
+    // thread active, its append then waits for the locks — and what it sees
+    // once they are released
     // is the terminal this transaction committed meanwhile. Every wait here
     // ends with a failure of what it waits for: the holding transaction
     // failing releases the wait for the lock, the request failing or
@@ -212,7 +214,7 @@ describe('thread commands over the api', () => {
         terminate = resolve;
         abandon = reject;
       });
-      const held = prisma.$transaction(
+      const held = logTransaction(
         async tx => {
           await tx.$queryRaw`SELECT id FROM threads WHERE id = ${child} FOR UPDATE`;
           locked();

@@ -21,6 +21,7 @@ let stand: Stand;
 let prisma: typeof import('../db/client.ts')['prisma'];
 let appendEvent: typeof import('./append.ts')['appendEvent'];
 let appendEventIn: typeof import('./append.ts')['appendEventIn'];
+let logTransaction: typeof import('./append.ts')['logTransaction'];
 let threads: typeof import('./threads.ts');
 let countThreadsAt: typeof import('./threads.ts')['countThreadsAt'];
 let countThreads: typeof import('./threads.ts')['countThreads'];
@@ -29,7 +30,7 @@ let Prisma: typeof import('../../prisma-generated/client.ts')['Prisma'];
 before(async () => {
   stand = await startStand();
   ({ prisma } = await import('../db/client.ts'));
-  ({ appendEvent, appendEventIn } = await import('./append.ts'));
+  ({ appendEvent, appendEventIn, logTransaction } = await import('./append.ts'));
   threads = await import('./threads.ts');
   ({ countThreadsAt, countThreads } = threads);
   ({ Prisma } = await import('../../prisma-generated/client.ts'));
@@ -204,7 +205,7 @@ async function countBetweenReads<T extends { counts: ThreadCounts; asOfSeq: bigi
     release = resolve;
     abandon = reject;
   });
-  const held = prisma.$transaction(
+  const held = logTransaction(
     async tx => {
       const result = await appendEventIn(tx, { type: 'thread.completed', actor: 'system', userId: stand.userId, threadId, payload: { summary: { text: 'between' } } });
 

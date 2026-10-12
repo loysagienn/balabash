@@ -2,8 +2,9 @@
 // stand.ts): a thread has exactly one terminal whoever races for it, a
 // command for a closed child is a no-op, a terminal cancels the active
 // subtree in its own transaction, a spawn racing the parent's terminal
-// never leaves an active orphan, and a registry change commits with its
-// event or not at all — the events of one row in the row's order.
+// never leaves an active orphan, a registry change commits with its
+// event or not at all — the events of one row in the row's order — and
+// log writes commit in seq order (the log lock).
 //
 // Run: npm test  (node:test, native type stripping — no build needed).
 
@@ -21,6 +22,8 @@ const TERMINALS = ['thread.completed', 'thread.failed', 'thread.cancelled'];
 let stand: Stand;
 let prisma: typeof import('../db/client.ts')['prisma'];
 let appendEvent: typeof import('./append.ts')['appendEvent'];
+let appendEventIn: typeof import('./append.ts')['appendEventIn'];
+let logTransaction: typeof import('./append.ts')['logTransaction'];
 let AppendError: typeof import('./envelope.ts')['AppendError'];
 let registryMutation: typeof import('./registry-events.ts')['registryMutation'];
 let projectRecord: typeof import('../projects/store.ts')['projectRecord'];
@@ -28,7 +31,7 @@ let projectRecord: typeof import('../projects/store.ts')['projectRecord'];
 before(async () => {
   stand = await startStand();
   ({ prisma } = await import('../db/client.ts'));
-  ({ appendEvent } = await import('./append.ts'));
+  ({ appendEvent, appendEventIn, logTransaction } = await import('./append.ts'));
   ({ AppendError } = await import('./envelope.ts'));
   ({ registryMutation } = await import('./registry-events.ts'));
   ({ projectRecord } = await import('../projects/store.ts'));
@@ -293,6 +296,106 @@ describe('registryMutation', () => {
     assert.deepEqual(last?.payload, projectRecord(row));
   });
 });
+
+// The log lock (logTransaction): seq order is commit order, so a reader
+// strictly after a cursor never steps over an event that commits later.
+// The scenario of the console's lost terminals: a thread's terminal is
+// written and not yet committed while its session journal appends the next
+// event of the same thread — the next one waits, and the log a reader sees
+// never holds it without the terminal before it.
+describe('the log lock', () => {
+  test('an append outside a log transaction is refused', async () => {
+    const childId = await startChild();
+
+    assert.equal(
+      await refusal(prisma.$transaction(tx => appendEventIn(tx, { type: 'thread.progress', actor: 'system', userId: stand.userId, threadId: childId, payload: { text: 'unlocked' } }))),
+      'log_lock_required',
+    );
+    assert.deepEqual((await lifecycleOf([childId])).map(event => event.type), ['thread.started']);
+  });
+
+  test('an event written while an earlier one is uncommitted commits after it: the log a reader sees is always a prefix', { timeout: 30_000 }, async () => {
+    const childId = await startChild();
+    let prepared!: (seq: bigint) => void;
+    let notPrepared!: (reason: unknown) => void;
+    const preparation = new Promise<bigint>((resolve, reject) => {
+      prepared = resolve;
+      notPrepared = reject;
+    });
+    let release!: () => void;
+    let abandon!: (reason: unknown) => void;
+    const released = new Promise<void>((resolve, reject) => {
+      release = resolve;
+      abandon = reject;
+    });
+
+    released.catch(() => {});
+
+    const held = logTransaction(
+      async tx => {
+        const result = await appendEventIn(tx, { type: 'thread.completed', actor: 'system', userId: stand.userId, threadId: childId, payload: { summary: { text: 'held' } } });
+
+        assert.equal(result.written, true);
+        prepared(result.written ? result.event.seq : -1n);
+        await released;
+      },
+      { timeout: 20_000 },
+    );
+
+    held.catch(notPrepared);
+
+    let next: Promise<unknown> | null = null;
+
+    try {
+      const terminalSeq = await preparation;
+      const head = async () => (await prisma.event.aggregate({ _max: { seq: true } }))._max.seq ?? 0n;
+      const headBefore = await head();
+
+      next = appendEvent({ type: 'session.state', actor: 'agent', agentName: 'engineer', userId: stand.userId, threadId: childId, payload: { state: 'idle' } });
+      await Promise.race([waitForLockWaiters(1), failureOf(held), failureOf(next)]);
+
+      // The next event waits behind the uncommitted terminal: nothing above
+      // it is visible, so no cursor can step over it.
+      assert.equal(await head(), headBefore);
+      assert.ok(headBefore < terminalSeq);
+
+      release();
+      await held;
+      await next;
+
+      const after = await prisma.event.findMany({ where: { seq: { gte: terminalSeq }, threadId: childId }, orderBy: { seq: 'asc' } });
+
+      assert.deepEqual(after.map(event => event.type), ['thread.completed', 'session.state']);
+    } finally {
+      abandon(new Error('the scenario is over'));
+      await Promise.allSettled([held, next]);
+    }
+  });
+});
+
+// A promise that rejects when the given one does and never resolves — to
+// race a wait against the failure of what it depends on.
+function failureOf(promise: Promise<unknown>): Promise<never> {
+  return promise.then(() => new Promise<never>(() => {}));
+}
+
+// Until at least n sessions of the stand's database wait for a lock.
+async function waitForLockWaiters(n: number): Promise<void> {
+  const deadline = Date.now() + 10_000;
+
+  while (Date.now() < deadline) {
+    const [row] = await prisma.$queryRaw<{ n: number }[]>`
+      SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'`;
+
+    if (row && row.n >= n) {
+      return;
+    }
+
+    await new Promise(resolve => setTimeout(resolve, 20));
+  }
+
+  assert.fail(`${n} lock waiter(s) never appeared`);
+}
 
 describe('the payload', () => {
   test('a string carrying U+0000 — which jsonb cannot hold — is stored with U+FFFD in its place, keys included, the rest untouched', async () => {

@@ -7,7 +7,7 @@
 // issued the link.
 
 import { prisma } from '../db/client.ts';
-import { appendEventIn } from '../core/append.ts';
+import { appendEventIn, logTransaction } from '../core/append.ts';
 import { notifyAppended } from '../core/live.ts';
 import { SECRETS_PROVISIONED } from '../core/envelope.ts';
 import { disconnectExternalServer, listExternalSecretTargets, type ExternalSecretTarget } from './tool-manager.ts';
@@ -170,7 +170,7 @@ export async function provisionExternalServerSecrets(
   // the row stays, and the operator submits again. The live tail is told
   // after the commit; the manager reconnects the server on its next
   // secretVersion check regardless of the event.
-  const seq = await prisma.$transaction(async tx => {
+  const seq = await logTransaction(async tx => {
     const row = await tx.externalServerSecretRequest.findUnique({ where: { id: request.id } });
 
     if (!row || row.userId !== userId) {

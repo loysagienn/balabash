@@ -19,7 +19,7 @@ import { prisma } from '../../db/client.ts';
 import type { JsonObject } from '../../core/contract.ts';
 import type { ConnectionView } from '../../api/contract.ts';
 import type { ConnectionRecord } from '../../core/event-types.ts';
-import { appendEvent, appendEventIn } from '../../core/append.ts';
+import { appendEvent, appendEventIn, logTransaction } from '../../core/append.ts';
 import { notifyAppended } from '../../core/live.ts';
 import { openSecretRequest, secretRequestUrl } from '../secret-requests.ts';
 import {
@@ -603,7 +603,7 @@ export async function provisionOauthClient(
   // a registry the console's snapshot shows (src/core/registry-events.ts).
   // A refused journal refuses the POST; the row stays for another try. The
   // live tail is told after the commit.
-  const seq = await prisma.$transaction(async tx => {
+  const seq = await logTransaction(async tx => {
     const row = await tx.oauthClientRequest.findUnique({ where: { id: request.id } });
 
     if (!row || row.userId !== userId) {
