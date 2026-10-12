@@ -6,9 +6,11 @@
 // both ways, the turn's final text is the reply.
 //
 // One handoff path: storage. Finished images reach the operator only as
-// stored fileIds attached to a message (send_images); reference images the
-// operator hands over as fileIds are downloaded to a scratch directory of the
-// run (fetch_image) for image_gen to take by local path. The working
+// stored fileIds attached to a message (send_images — the one tool of its
+// own: workspace_export_file reads only the workspace file area, and the
+// images live outside it); reference images the operator hands over as
+// fileIds come down through storage_get_file's download URL into a temporary
+// directory, for image_gen to take by local path. The working
 // directory is the user's workspace file area — for reading context the
 // brief points to; the agent writes nothing there (the prompt says so):
 // where an image is kept is the operator's decision.
@@ -19,14 +21,10 @@
 //
 // Fully declarative: the platform's session runner drives the Codex session,
 // the headless channel binding and the base verbs (end_thread, send_file);
-// the scratch directory and the two file tools are the declaration's
-// environment.
+// send_images is the declaration's environment.
 
-import { mkdir, readFile, rm, stat } from 'node:fs/promises';
-import { createWriteStream } from 'node:fs';
+import { readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
-import { Readable } from 'node:stream';
-import { pipeline } from 'node:stream/promises';
 import type {
   AgentDeclaration,
   JsonObject,
@@ -34,7 +32,6 @@ import type {
   SdkBridgeTool,
   SessionEnvironment,
 } from '../src/core/contract.ts';
-import { openFileContent } from '../src/files/index.ts';
 import { workspaceFilesDir } from '../src/workspace/layout.ts';
 import { BLOCKED_PATH_NOTE } from './world/index.ts';
 
@@ -55,15 +52,16 @@ const INSTRUCTIONS = `You are Balabash's image generator: a sub-agent working fo
 Protocol:
 - The first message carries the brief; later messages bring corrections, more variants or new images. Do the current instruction, then reply.
 - The final text of each of your turns IS your reply to the operator, in the language of its instructions. Make it a concise report: one line per image handed over — its fileId and what it shows (which variant, what changed) — plus any choice you made that the brief left open and anything you could not satisfy, and why. Tool calls, file paths and your prompt rewrites stay in this thread unless the operator asks for them.
-- When the brief leaves open something that changes the result substantially (what the image is for, the aspect ratio, the exact text on it), make a sensible choice and state it in the reply. Ask back instead only when a guess would most likely waste the work.
+- Before generating, settle with the operator anything the brief leaves open that changes the result substantially — what the image is for, its aspect ratio or size, the exact text on it, the style direction: ask in your reply and wait for the answer. Small details nobody would argue about you decide yourself and mention in the report.
 - Finishing an instruction NEVER ends the session: reply and wait — the operator iterates with you. Call end_thread only when the operator explicitly tells you to finish; its summary lists the fileIds of the final images.
 
 Making images:
 - Images are made ONLY with the built-in image_gen tool. Never draw them with code (SVG, canvas, PIL), never call an image API or an image CLI script yourself, never substitute pictures from the web. If image_gen is unavailable or keeps failing, report that to the operator.
-- One image_gen call per requested image or variant.
-- References and edits: image_gen takes reference images by local path. A file in the workspace file area goes by its path; a file the operator gives as a fileId goes through fetch_image first — it downloads the file and returns the local path.
-- image_gen saves each result under $CODEX_HOME/generated_images/ and its output names the exact file. Look at every result before handing it over; when it plainly misses the brief (misspelled text, wrong subject, broken composition), regenerate — within reason, and say so in the reply if it still falls short.
+- Make exactly as many images or variants as asked; when the brief names no number, make one. One image_gen call per image or variant.
+- References and edits: image_gen takes reference images by local path. A file in the workspace file area goes by its path. A file the operator gives as a fileId: storage_get_file returns a download URL — download it with curl into a temporary directory outside the workspace file area (mktemp -d) and pass that path.
+- image_gen saves each result under $CODEX_HOME/generated_images/ and its output names the exact file. Look at every result before handing it over. When it plainly misses the brief (misspelled text, wrong subject, broken composition), regenerate it once on your own; if it still falls short, hand over the best attempt, say what is wrong and let the operator decide.
 - Post-processing (crop, resize, format conversion) is fine with your native tools on the generated file; write derived files next to the original under $CODEX_HOME/generated_images/.
+- Codex's bundled imagegen skill describes other setups: its output paths (output/imagegen/ in the working directory) and its CLI or API fallback do not apply to you — where it disagrees with this brief, this brief wins.
 
 Handing images over:
 - Finished images reach the operator ONLY through send_images: it uploads local image files into Balabash file storage, attaches them to a message to the operator and returns their fileIds. Give each file a descriptive name — the filename travels all the way to the person who sees the image. Send all images of a step in one call, then finish the turn with your report naming those fileIds.
@@ -75,16 +73,6 @@ ${BLOCKED_PATH_NOTE}`;
 
 function imageContentType(filePath: string): string | null {
   return IMAGE_TYPES[path.extname(filePath).toLowerCase()] ?? null;
-}
-
-// A stored filename made safe as one path segment of the scratch directory.
-function scratchFilename(fileId: string, originalFilename: string | null): string {
-  const base = (originalFilename ?? '')
-    .replace(/[/\\\0]/g, '_')
-    .replace(/^\.+/, '')
-    .trim();
-
-  return `${fileId.slice(0, 8)}-${base || 'image'}`;
 }
 
 function createSendImagesTool(ctx: RunContext, cwd: string): SdkBridgeTool {
@@ -201,65 +189,8 @@ function createSendImagesTool(ctx: RunContext, cwd: string): SdkBridgeTool {
   };
 }
 
-function createFetchImageTool(ctx: RunContext, scratchDir: string): SdkBridgeTool {
-  return {
-    name: 'fetch_image',
-    description:
-      'Download a stored Balabash image (by fileId — a reference or an image to edit that the operator gave ' +
-      'you) to a local scratch file and return its path, for image_gen to take as a reference image. The ' +
-      'scratch file lives outside the workspace file area and goes away with the session.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        fileId: { type: 'string', description: 'The Balabash fileId of the image.' },
-      },
-      required: ['fileId'],
-      additionalProperties: false,
-    },
-    handler: async (args: JsonObject) => {
-      const fileId = typeof args.fileId === 'string' ? args.fileId.trim() : '';
-
-      if (!fileId) {
-        throw new Error('fetch_image requires fileId');
-      }
-
-      // Workspace-scoped: a foreign or missing fileId reads as missing.
-      const info = await ctx.files.getInfo(fileId);
-      const isImage = info.contentType
-        ? info.contentType.startsWith('image/')
-        : Boolean(info.originalFilename && imageContentType(info.originalFilename));
-
-      if (!isImage) {
-        throw new Error(`fetch_image: file ${fileId} is not an image (${info.contentType ?? 'unknown type'})`);
-      }
-
-      const localPath = path.join(scratchDir, scratchFilename(fileId, info.originalFilename));
-
-      await pipeline(Readable.fromWeb((await openFileContent(fileId)) as never), createWriteStream(localPath));
-
-      return {
-        path: localPath,
-        filename: info.originalFilename,
-        contentType: info.contentType,
-        width: info.width,
-        height: info.height,
-      };
-    },
-  };
-}
-
 async function createEnvironment(ctx: RunContext, cwd: string): Promise<SessionEnvironment> {
-  // The run's scratch directory: fetched references only; disposable.
-  const scratchDir = path.join(ctx.stateDir, 'runs', ctx.threadId);
-
-  await mkdir(scratchDir, { recursive: true });
-
-  return {
-    extraTools: [createSendImagesTool(ctx, cwd), createFetchImageTool(ctx, scratchDir)],
-    dispose: async () => {
-      await rm(scratchDir, { recursive: true, force: true }).catch(() => {});
-    },
-  };
+  return { extraTools: [createSendImagesTool(ctx, cwd)] };
 }
 
 export const agent = {
@@ -275,7 +206,7 @@ export const agent = {
   icon: '🖼️',
   sdk: 'codex',
   headless: true,
-  tools: [],
+  tools: ['storage'],
   notification: 'normal',
 
   session: {
