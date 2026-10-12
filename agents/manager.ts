@@ -4,31 +4,34 @@
 // per-user workbench (the workspace file area itself is its cwd, like the
 // power_point agent), and can spawn the browser sub-agent for operating real
 // websites. The brief and the passport are the manager role's (roles/manager),
-// shared with the codex agent — the same manager on OpenAI Codex. Fully
+// shared with the codex agent — the same manager on OpenAI Codex. On top of
+// the role this agent also spawns the image generator: Claude has no image
+// generation of its own, while the codex agent has Codex's built-in one. Fully
 // declarative: the platform's session runner drives the SDK session, the
 // channel binding and the base verbs (end_thread, send_file, spawn_agent).
 
 import type { AgentDeclaration } from '../src/core/contract.ts';
 import { workspaceFilesDir } from '../src/workspace/layout.ts';
 import { MANAGER_AGENTS, MANAGER_INSTRUCTIONS, MANAGER_TOOLS } from './roles/manager.ts';
+import { IMAGE_GENERATOR_SUBAGENT_NOTE } from './world/index.ts';
 
 export const agent = {
   name: 'manager',
   description:
     "Start a manager thread — a general-purpose assistant that takes on the user's tasks and sees them " +
     'through using the connected integrations, and can operate a real browser via a sub-agent when a task ' +
-    'requires it. The thread opens as a separate user-facing thread where the user talks to the manager directly; a task ' +
+    'requires it, and generate images via a sub-agent. The thread opens as a separate user-facing thread where the user talks to the manager directly; a task ' +
     'may be given upfront, or the prompt may say the thread starts open-ended — the manager then greets the ' +
     'user and takes tasks in the thread. Start it when the user asks for the manager or hands over a task of ' +
     'this kind.',
   icon: '🎩',
   sdk: 'claude',
   tools: MANAGER_TOOLS,
-  agents: MANAGER_AGENTS,
+  agents: [...MANAGER_AGENTS, 'image_generator'],
   notification: 'normal',
 
   session: {
-    instructions: MANAGER_INSTRUCTIONS,
+    instructions: `${MANAGER_INSTRUCTIONS}\n\n${IMAGE_GENERATOR_SUBAGENT_NOTE}`,
     model: 'claude-opus-5-5',
     preset: 'full',
     cwd: (userId: string) => workspaceFilesDir(userId),
