@@ -55,8 +55,9 @@ export const COORDINATOR_BUNDLE: ToolBundle = {
     'storage_download_file',
     'workspace',
     'workspace_files',
-    // Dialogue contour only: schedules (TASK_BUNDLE) deliberately do not see
-    // Yandex Ads until per-tool grant narrowing exists (eyes-only autonomy).
+    // An installation extension (data/tools/yandex_ads.ts). Dialogue
+    // contour only: scheduled tasks are withheld from it
+    // (TASK_WITHHELD_SERVERS in src/schedule/engine.ts).
     'yandex_ads',
     RESTART_SERVER_NAME,
   ],

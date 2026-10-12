@@ -1,10 +1,11 @@
 // The words of the Connections screen, pure: the state and label of an
 // account's badge, its meta line, the scopes as chips, the primary action
 // of a row, the banner of an account that needs sign-in, the catalog's
-// counts and whether a service takes another account, the checks of the
-// two forms.
+// counts and whether a service takes another account, a service of the
+// installation's state and link, the order of the catalog, the checks of
+// the two forms.
 
-import type { ConnectionView, ServiceView } from '../../../api/contract.ts';
+import type { ConnectionView, InstallationServiceView, ServiceView } from '../../../api/contract.ts';
 import type { IconName } from '../../ui/Icon/Icon.tsx';
 import type { StateName } from '../../ui/atoms/atoms.tsx';
 import type { ConnectionLink } from '../../store/connections/reducer.ts';
@@ -54,6 +55,14 @@ export function serviceIcon(server: string): IconName {
 
   if (name.includes('github') || name.includes('gitlab')) {
     return 'git-fork';
+  }
+
+  if (name.includes('perplexity')) {
+    return 'search';
+  }
+
+  if (name.includes('qase')) {
+    return 'list-todo';
   }
 
   return 'plug';
@@ -128,6 +137,31 @@ export function accountsOf(connections: ConnectionView[], server: string): Conne
 // "2 accounts" / "not connected" — the tile's footer.
 export function catalogCount(n: number): string {
   return n === 0 ? 'not connected' : countOf(n, 'account');
+}
+
+// A service of the installation in the catalog: the footer's words (the
+// credentials are one set for every workspace) and the tile's link — "Set
+// up" while a credential is missing, "Manage" otherwise.
+export function installationWords(service: Pick<InstallationServiceView, 'state'>): { label: string; link: string; state: StateName | undefined } {
+  switch (service.state) {
+    case 'connected':
+      return { label: 'connected · installation-wide', link: 'Manage', state: undefined };
+    case 'failed':
+      return { label: 'connection failed', link: 'Manage', state: 'err' };
+    default:
+      return { label: 'not set up', link: 'Set up', state: undefined };
+  }
+}
+
+// The catalog is one list: the services of per-user accounts and the
+// services of the installation, by name.
+export type CatalogEntry = { kind: 'accounts'; service: ServiceView } | { kind: 'installation'; service: InstallationServiceView };
+
+export function catalogEntries(services: readonly ServiceView[], installation: readonly InstallationServiceView[]): CatalogEntry[] {
+  return [
+    ...services.map(service => ({ kind: 'accounts' as const, service })),
+    ...installation.map(service => ({ kind: 'installation' as const, service })),
+  ].sort((a, b) => a.service.name.localeCompare(b.service.name));
 }
 
 // Whether the service takes another account: a service of several

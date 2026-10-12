@@ -402,6 +402,7 @@ function withAccountParameter(fn: ToolFunction, slugs: string[], described: stri
 // installation credentials, and how their last connection attempt went.
 export type ExternalSecretTarget = {
   name: string;
+  description: string | null;
   secretNames: string[];
   error: string | null;
   connected: boolean;
@@ -412,6 +413,7 @@ export function listExternalSecretTargets(): ExternalSecretTarget[] {
     .filter(pending => pending.secretNames.length)
     .map(pending => ({
       name: pending.name,
+      description: pending.config.description ?? null,
       secretNames: pending.secretNames,
       error: pending.error,
       connected: pending.connected,
@@ -532,7 +534,12 @@ function toUserAuthServer(
 
 // Retries pending servers whose secrets appeared or changed since the last
 // attempt (secretVersion), and servers whose last connection attempt failed
-// (after PENDING_RETRY_INTERVAL_MS), before tool definitions are handed out.
+// (after PENDING_RETRY_INTERVAL_MS), before tool definitions are handed out
+// — and before the console reads their states (refreshExternalServers).
+export async function refreshExternalServers(): Promise<void> {
+  await ensurePendingExternalServers();
+}
+
 async function ensurePendingExternalServers(): Promise<void> {
   for (const pending of [...pendingExternalServers.values()]) {
     const resolved = await resolveExternalServerSecrets(pending.name, pending.config);

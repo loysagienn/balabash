@@ -1,8 +1,9 @@
 // Thread composer (design: Composer): full-width text with "Attach", the
-// ⌘↵ hint and "Send" below it; sticks to the bottom of the main column.
+// ↵ hint and "Send" below it; sticks to the bottom of the main column.
 // Controlled: value / onChange (the store keeps a draft per thread);
-// onSend gets the text without the surrounding blank lines on ⌘↵ / Ctrl+↵
-// or the button; busy — the message is on its way: the field stays
+// onSend gets the text without the surrounding blank lines on Enter or the
+// button (Shift+Enter, ⌘↵, Ctrl+↵ — a new line; on a phone Enter is a new
+// line too); busy — the message is on its way: the field stays
 // editable for the next draft, "Send" spins and nothing is sent until the
 // message is through; onAttach absent — no "Attach" button. The field
 // grows with the text up to eight lines (six in a narrow thread) through
@@ -11,7 +12,8 @@
 import { useEffect, useRef } from 'react';
 import { IconBtn } from '../IconBtn/IconBtn.tsx';
 import { Kbd } from '../atoms/atoms.tsx';
-import { isSendKey, outgoingText } from './Composer.logic.ts';
+import { PHONE_MEDIA } from '../../lib/touch/pinch.ts';
+import { composerKeyAction, outgoingText } from './Composer.logic.ts';
 import './Composer.css';
 
 export type ComposerProps = {
@@ -26,6 +28,20 @@ export type ComposerProps = {
 };
 
 const FIELD_SIZING = typeof CSS !== 'undefined' && CSS.supports('field-sizing', 'content');
+
+const isPhone = () => typeof window !== 'undefined' && window.matchMedia(PHONE_MEDIA).matches;
+
+// ⌘↵ / Ctrl+↵ insert nothing on their own: put the break at the caret
+// through insertText — it keeps the browser's undo and fires the input
+// event that reaches onChange; setRangeText where insertText is refused.
+function insertLineBreak(node: HTMLTextAreaElement, onChange: (value: string) => void) {
+  if (document.execCommand('insertText', false, '\n')) {
+    return;
+  }
+
+  node.setRangeText('\n', node.selectionStart, node.selectionEnd, 'end');
+  onChange(node.value);
+}
 
 export function Composer({ to, value, onChange, onSend, onAttach, busy, disabled, autoFocus }: ComposerProps) {
   const input = useRef<HTMLTextAreaElement>(null);
@@ -46,7 +62,7 @@ export function Composer({ to, value, onChange, onSend, onAttach, busy, disabled
     node.style.height = `${node.scrollHeight}px`;
   }, [value]);
 
-  // Every path (⌘↵, the button, Enter on the focused button) goes through
+  // Every path (Enter, the button, Enter on the focused button) goes through
   // this guard — the busy button is not disabled, so the spinner keeps the
   // design's busy look; the guard is what stops a repeated send.
   const send = () => {
@@ -69,9 +85,14 @@ export function Composer({ to, value, onChange, onSend, onAttach, busy, disabled
           autoFocus={autoFocus}
           onChange={event => onChange(event.target.value)}
           onKeyDown={event => {
-            if (isSendKey(event.nativeEvent)) {
+            const action = composerKeyAction(event.nativeEvent, isPhone());
+
+            if (action === 'send') {
               event.preventDefault();
               send();
+            } else if (action === 'newline') {
+              event.preventDefault();
+              insertLineBreak(event.currentTarget, onChange);
             }
           }}
         />
@@ -87,7 +108,7 @@ export function Composer({ to, value, onChange, onSend, onAttach, busy, disabled
             />
           ) : null}
           <span className="composer-hint">
-            <Kbd>⌘↵</Kbd>send
+            <Kbd>↵</Kbd>send
           </span>
           <IconBtn
             icon="arrow-up"

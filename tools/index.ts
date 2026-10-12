@@ -10,7 +10,6 @@ import * as http_get from './http_get.ts';
 import * as storage_download_file from './storage_download_file.ts';
 import * as workspace from './workspace.ts';
 import * as workspace_files from './workspace_files.ts';
-import * as yandex_ads from './yandex_ads/index.ts';
 
 export const localToolModules: Record<string, Record<string, unknown>> = {
   apps,
@@ -20,5 +19,4 @@ export const localToolModules: Record<string, Record<string, unknown>> = {
   storage_download_file,
   workspace,
   workspace_files,
-  yandex_ads,
 };

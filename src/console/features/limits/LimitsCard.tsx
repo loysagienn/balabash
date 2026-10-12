@@ -9,7 +9,7 @@
 // without one says the app-server has not answered; a round of measuring
 // that brought nothing is a note with what the source said — over the rows
 // of the measurement before, or in place of the rows; an account without
-// plan limits says that; a Codex limit the backend is refusing requests
+// plan limits says that; Codex without a login is no group at all; a Codex limit the backend is refusing requests
 // against says why (a note per bucket). Home links to System ("Details"); System has a Refresh button. The
 // stages of the query — factsStage: a skeleton of the rows' shape, the
 // failure with Retry, the groups; a failed refetch over kept groups is a
@@ -137,7 +137,13 @@ function ClaudeGroup({ response, scope, now }: { response: ClaudeLimitsResponse;
 }
 
 function CodexGroup({ response, scope, now }: { response: CodexLimitsResponse; scope: Scope; now: Date }) {
-  const { limits, lastFailure } = response;
+  const { limits, lastFailure, signedOut } = response;
+
+  // No Codex login on the host: the account is not in use — no group.
+  if (signedOut === true) {
+    return null;
+  }
+
   const failure = lastFailure ? (
     <CardBody>
       <Note state="err" icon="triangle-alert" role="status">

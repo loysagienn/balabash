@@ -23,6 +23,7 @@ import type { SecretRequestView } from '../../../api/contract.ts';
 import { useApi } from '../../lib/api/context.tsx';
 import { toApiFailure } from '../../lib/api/index.ts';
 import { retryUnlessClient } from '../../lib/api/retry.ts';
+import { Link } from '../../lib/router/Link.tsx';
 import { Btn } from '../../ui/Btn/Btn.tsx';
 import { Field, focusFirstInvalid } from '../../ui/Field/Field.tsx';
 import { Input } from '../../ui/Input/Input.tsx';
@@ -223,7 +224,12 @@ function Saved({ server }: { server: string | null }) {
         ) : (
           'The values are in storage.'
         )}{' '}
-        You can close this tab — the agent is already carrying on.
+        You can close this tab.
+      </SoloText>
+      <SoloText>
+        <Link className="link" route={{ key: 'connections' }}>
+          Open Connections
+        </Link>
       </SoloText>
     </Solo>
   );

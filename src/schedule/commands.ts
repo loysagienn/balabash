@@ -84,14 +84,14 @@ export async function findTask(userId: string, slug: string): Promise<ScheduledT
   return prisma.scheduledTask.findFirst({ where: { slug, userId } });
 }
 
-// A code task without a run(ctx) body — neither bundled nor a workspace
-// file — sleeps: the heart never arms it and a manual run is refused.
+// A code task without its run(ctx) body file in the workspace sleeps: the
+// heart never arms it and a manual run is refused.
 export async function isSleeping(task: ScheduledTaskModel): Promise<boolean> {
   return task.kind === 'code' && !(await hasTaskBody(task.userId, task.slug));
 }
 
 export function sleepingText(task: ScheduledTaskModel): string {
-  return `task "${task.slug}" is sleeping — no run(ctx) body: neither ${workspaceTaskFile(task.userId, task.slug)} nor a bundled tasks/${task.slug}.ts.`;
+  return `task "${task.slug}" is sleeping — no run(ctx) body: ${workspaceTaskFile(task.userId, task.slug)} does not exist.`;
 }
 
 // The row the command means, when it named one: another row under the
@@ -162,6 +162,6 @@ export async function runTask(userId: string, slug: string, expectId?: string): 
     case 'no_main_thread':
       throw new ScheduleError('no_main_thread', 'workspace has no main thread to fire into');
     case 'sleeping':
-      throw new ScheduleError('sleeping', `task "${slug}" is sleeping — its body is not in the running bundle`);
+      throw new ScheduleError('sleeping', `task "${slug}" is sleeping — its body file does not exist`);
   }
 }

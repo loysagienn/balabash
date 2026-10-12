@@ -149,7 +149,7 @@ describe('createCodexPlanLimits', () => {
   it('reads nothing without a provider; a stale read measures, shares one measurement, and a fresh cache is answered as it is', async () => {
     const { service, tick } = stand();
 
-    assert.deepEqual(await service.read(), { limits: null, lastFailure: null });
+    assert.deepEqual(await service.read(), { limits: null, lastFailure: null, signedOut: false });
 
     let calls = 0;
     let release: (() => void) | null = null;
@@ -203,7 +203,7 @@ describe('createCodexPlanLimits', () => {
       return answer();
     });
 
-    assert.deepEqual(await service.read(), { limits: null, lastFailure: { at: new Date(T0), message: 'account/rateLimits/read: unauthorized (code 401)' } });
+    assert.deepEqual(await service.read(), { limits: null, lastFailure: { at: new Date(T0), message: 'account/rateLimits/read: unauthorized (code 401)' }, signedOut: false });
     tick(FRESH_MS);
     await service.read();
     assert.deepEqual(warnings, ['rate limits read failed: account/rateLimits/read: unauthorized (code 401)']);
@@ -224,6 +224,37 @@ describe('createCodexPlanLimits', () => {
     assert.equal(kept.limits?.planType, 'prolite');
     assert.equal(kept.lastFailure?.at.getTime(), T0 + 3 * FRESH_MS);
     assert.equal(warnings.length, 2);
+  });
+
+  it('a refusal for a missing login marks the account signed out until a measurement; other failures keep the mark', async () => {
+    const { service, tick } = stand();
+    let outcome: 'signed-out' | 'crash' | 'ok' = 'signed-out';
+
+    service.setProvider(async () => {
+      if (outcome === 'signed-out') {
+        throw new Error('account/rateLimits/read: codex account authentication required to read rate limits (code -32600)');
+      }
+
+      if (outcome === 'crash') {
+        throw new Error('codex app-server exited before answering (code 1)');
+      }
+
+      return answer();
+    });
+
+    assert.equal((await service.read()).signedOut, true);
+
+    outcome = 'crash';
+    tick(FRESH_MS);
+    assert.equal((await service.read()).signedOut, true);
+
+    outcome = 'ok';
+    tick(FRESH_MS);
+    assert.equal((await service.read()).signedOut, false);
+
+    outcome = 'crash';
+    tick(FRESH_MS);
+    assert.equal((await service.read()).signedOut, false);
   });
 
   it('a round that does not answer in time is abandoned through its signal', async () => {

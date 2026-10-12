@@ -30,10 +30,10 @@ const FUNCTIONS: ToolFunction[] = [
     description:
       'Register a named scheduled task. kind "note": at the trigger moment the note falls into the main ' +
       'thread as a schedule.fired event and the secretary interprets it — use this for reminders and ' +
-      'recurring instructions. kind "code": the trigger runs the run(ctx) body under the same slug — a ' +
-      'workspace task file data/workspace/<userId>/tasks/<slug>.ts (live at the next fire, no build) or a body ' +
-      'in the repository tasks/ catalog (built and restarted); the scheduler agent writes bodies; until a body ' +
-      'exists the task SLEEPS — no errors, no runs. kind "command": a workspace job — the ' +
+      'recurring instructions. kind "code": the trigger runs the run(ctx) body under the same slug — the ' +
+      'workspace task file data/workspace/<userId>/tasks/<slug>.ts (live at the next fire, no build); the ' +
+      'scheduler agent writes bodies; until the file exists the task SLEEPS — no errors, no runs. kind ' +
+      '"command": a workspace job — the ' +
       'trigger runs the given shell command (bash -c) inside the workspace file area, with WORKSPACE_DB in ' +
       'the environment; armed immediately, no build or restart needed. Exit code 0 = success (silent unless ' +
       'report_on_success), anything else (or a timeout) = failure surfaced as a system.exception; every run ' +
@@ -57,7 +57,7 @@ const FUNCTIONS: ToolFunction[] = [
           type: 'string',
           enum: ['note', 'code', 'command'],
           description:
-            'note = data interpreted by the secretary; code = run(ctx) body (workspace tasks/ or repository tasks/); command = a shell command run in the workspace file area.',
+            'note = data interpreted by the secretary; code = run(ctx) body (a file in the workspace tasks/ directory); command = a shell command run in the workspace file area.',
         },
         cron: {
           type: ['string', 'null'],
@@ -106,7 +106,7 @@ const FUNCTIONS: ToolFunction[] = [
     toolName: 'list_tasks',
     description:
       'List the scheduled tasks of this workspace: slug, kind, name, trigger, the next cron fire time, ' +
-      'whether a code task is sleeping (registered but without a body in the running bundle), and for ' +
+      'whether a code task is sleeping (registered but without its body file), and for ' +
       'command tasks the command, working directory, timeout and report flag.',
     inputSchema: {
       type: 'object',
@@ -121,7 +121,7 @@ const FUNCTIONS: ToolFunction[] = [
     toolName: 'cancel_task',
     description:
       'Delete a scheduled task from the registry by slug. The trigger is disarmed immediately; a code ' +
-      "task's body file in the repository is untouched (it just stops being scheduled).",
+      "task's body file in the workspace is untouched (it just stops being scheduled).",
     inputSchema: {
       type: 'object',
       properties: {
@@ -266,8 +266,7 @@ async function createTask(args: JsonObject, ctx: BuiltinServerCallContext): Prom
     if (outcome.sleeping) {
       lines.push(
         `The task SLEEPS: no run(ctx) body under slug "${slug}". It comes alive the moment ` +
-          `${workspaceTaskFile(task.userId, slug)} exists (a workspace task body, no build or restart), or after ` +
-          `tasks/${slug}.ts is added to the repository tasks/ index, the app is rebuilt and restarted.`,
+          `${workspaceTaskFile(task.userId, slug)} exists (no build or restart).`,
       );
     }
 
@@ -311,7 +310,7 @@ async function listTasks(ctx: BuiltinServerCallContext): Promise<string> {
 
   const lines = tasks.map(task => {
     const flags = [
-      ...(sleeping.has(task.id) ? ['SLEEPING — no run(ctx) body (workspace tasks/ or bundle)'] : []),
+      ...(sleeping.has(task.id) ? ['SLEEPING — no run(ctx) body file in the workspace tasks/'] : []),
       ...(isTaskRunning(task.slug) ? ['running right now'] : []),
     ];
 

@@ -56,6 +56,26 @@ describe('projectFeed — messages', () => {
     assert.equal(toChild!.to, 'browser');
   });
 
+  it('folds a long message between agents, never the user’s message or the agent’s answer to the user', () => {
+    resetSeq(1n);
+
+    const long = Array.from({ length: 20 }, (_, i) => `line ${i}`).join('\n');
+    const items = projectFeed(
+      [
+        event({ type: 'user.message', threadId: 't1', actor: 'user', payload: { text: long } }),
+        own('agent.message', { content: [{ type: 'text', text: long }] }),
+        event({ type: 'thread.message', threadId: 't1', targetThreadId: 'main', payload: { text: long } }),
+        event({ type: 'thread.message', threadId: 'main', targetThreadId: 't1', agentName: 'coordinator', payload: { text: long } }),
+      ],
+      ctx,
+    );
+
+    assert.deepEqual(
+      (items as MessageItem[]).map(item => item.fold),
+      [false, false, true, true],
+    );
+  });
+
   it('names the attachments by the facts the event recorded, and leaves the ones recorded by id alone to the meta', () => {
     resetSeq(1n);
 

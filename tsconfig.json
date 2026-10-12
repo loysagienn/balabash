@@ -15,7 +15,7 @@
     "forceConsistentCasingInFileNames": true,
     "noEmit": true
   },
-  "include": ["src/**/*", "agents/**/*", "tools/**/*", "tasks/**/*", "scripts/**/*", "prisma-generated/**/*", "prisma.config.ts"],
+  "include": ["src/**/*", "agents/**/*", "tools/**/*", "scripts/**/*", "prisma-generated/**/*", "prisma.config.ts"],
   // src/console (the console SPA) is a browser sub-project with its own
   // tsconfig (DOM libs, jsx) — the core typecheck must not touch it; `npm run
   // types` checks it through src/console/tsconfig.json.

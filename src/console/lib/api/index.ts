@@ -28,6 +28,9 @@ import type {
   RenameConnectionRequest,
   RunTaskResponse,
   SecretRequestResponse,
+  ForgetInstallationSecretsResponse,
+  InstallationSecretRequestResponse,
+  InstallationServicesResponse,
   SettingsFactsResponse,
   SettingsPatchRequest,
   SettingsResponse,
@@ -179,6 +182,15 @@ export type Api = {
     get(id: string, signal?: AbortSignal): Promise<SecretRequestResponse>;
     provision(id: string, values: Record<string, string>): Promise<ProvisionSecretsResponse>;
   };
+  // The services of the installation (the second data layer too): external
+  // servers on the installation's credentials with their states; a request
+  // for a service's credentials (the answer names the secrets form to open)
+  // and forgetting them — for every workspace.
+  installationServices: {
+    list(signal?: AbortSignal): Promise<InstallationServicesResponse>;
+    requestSecrets(name: string): Promise<InstallationSecretRequestResponse>;
+    forgetSecrets(name: string): Promise<ForgetInstallationSecretsResponse>;
+  };
 };
 
 // The URL of a file's bytes (/files/<rel>): inline for viewers, an
@@ -198,6 +210,7 @@ export function createApi(options: FetchOptions = {}): Api {
   const thread = (id: string) => `/api/threads/${encodeURIComponent(id)}`;
   const project = (id: string) => `/api/projects/${encodeURIComponent(id)}`;
   const secretRequest = (id: string) => `/api/secret-requests/${encodeURIComponent(id)}`;
+  const installationService = (name: string) => `/api/installation-services/${encodeURIComponent(name)}`;
   const task = (slug: string) => `/api/schedule/tasks/${encodeURIComponent(slug)}`;
   const connection = (id: string) => `/api/connections/${encodeURIComponent(id)}`;
 
@@ -267,6 +280,11 @@ export function createApi(options: FetchOptions = {}): Api {
     secretRequests: {
       get: (id, signal) => apiFetch<SecretRequestResponse>(secretRequest(id), { signal }),
       provision: (id, values) => apiFetch<ProvisionSecretsResponse>(secretRequest(id), { method: 'POST', body: { values } }),
+    },
+    installationServices: {
+      list: signal => apiFetch<InstallationServicesResponse>('/api/installation-services', { signal }),
+      requestSecrets: name => apiFetch<InstallationSecretRequestResponse>(`${installationService(name)}/secret-request`, { method: 'POST', body: {} }),
+      forgetSecrets: name => apiFetch<ForgetInstallationSecretsResponse>(`${installationService(name)}/secrets`, { method: 'DELETE' }),
     },
   };
 }

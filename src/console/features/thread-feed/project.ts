@@ -121,6 +121,9 @@ export function fileHref(fileId: string): string {
   return withWorkspace(`/api/files/${encodeURIComponent(fileId)}`);
 }
 
+// A long message between agents (a task, a report, a message to a child)
+// folds behind "Show more"; the conversation with the user — the user's
+// messages and the agent's answers — is always shown whole.
 function shouldFold(text: string): boolean {
   return text.length > FOLD_CHARS || text.split('\n').length > FOLD_LINES;
 }
@@ -469,7 +472,7 @@ class Builder {
     if (is(event, 'user.message')) {
       const text = event.payload.text ?? '';
 
-      this.push({ kind: 'message', key, at, from: 'you', to: this.ctx.agent, variant: 'user', text, atts: userAtts(event.payload, key), fold: shouldFold(text) });
+      this.push({ kind: 'message', key, at, from: 'you', to: this.ctx.agent, variant: 'user', text, atts: userAtts(event.payload, key), fold: false });
 
       return;
     }
@@ -478,7 +481,7 @@ class Builder {
       const content = Array.isArray(event.payload.content) ? event.payload.content : [];
       const text = contentText(content);
 
-      this.push({ kind: 'message', key, at, from: event.agentName ?? this.ctx.agent, to: 'you', text, atts: contentAtts(content, key), fold: shouldFold(text) });
+      this.push({ kind: 'message', key, at, from: event.agentName ?? this.ctx.agent, to: 'you', text, atts: contentAtts(content, key), fold: false });
 
       return;
     }

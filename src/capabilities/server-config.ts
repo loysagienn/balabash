@@ -63,6 +63,8 @@ export type ExternalServerConfig =
       command: string;
       args?: string[];
       env?: Record<string, string>;
+      // What the service is, for the operator (the console's catalog).
+      description?: string;
       enabledTools?: EnabledTools;
       toolOverrides?: Record<string, ToolOverride>;
     })
@@ -187,6 +189,10 @@ export function validateExternalServerConfig(raw: unknown, source: string): Exte
       (!isObject(raw.env) || Object.values(raw.env).some(value => typeof value !== 'string'))
     ) {
       throw new Error(`${source}: "env" must be an object with string values`);
+    }
+
+    if (raw.description !== undefined && typeof raw.description !== 'string') {
+      throw new Error(`${source}: "description" must be a string`);
     }
 
     return raw as ExternalServerConfig;

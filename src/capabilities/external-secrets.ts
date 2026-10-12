@@ -64,15 +64,31 @@ export async function requestExternalServerCredentials(
   threadId: string,
   serverName: string,
 ): Promise<string> {
+  const { id } = await openExternalServerCredentialsRequest(userId, threadId, serverName);
+
+  return secretRequestUrl(id, userId);
+}
+
+// The request itself, by id — the console opens it from the Connections
+// screen (addressed to the workspace's main thread) and goes to its form.
+export async function openExternalServerCredentialsRequest(
+  userId: string,
+  threadId: string,
+  serverName: string,
+): Promise<{ id: string }> {
   const target = getTarget(serverName);
 
   if (!target) {
     throw new Error(`External server "${serverName}" is not awaiting installation credentials`);
   }
 
-  const row = await openSecretRequest('external-secrets', { userId, threadId, server: target.name, fields: toFields(target) });
+  return openSecretRequest('external-secrets', { userId, threadId, server: target.name, fields: toFields(target) });
+}
 
-  return secretRequestUrl(row.id, userId);
+// Whether the installation has a server with installation credentials
+// under this name (the console's 404 otherwise).
+export function isExternalSecretServer(serverName: string): boolean {
+  return getTarget(serverName) !== null;
 }
 
 // The reverse of provisioning (auth agent):

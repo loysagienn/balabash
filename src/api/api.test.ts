@@ -16,7 +16,7 @@ import http from 'node:http';
 import path from 'node:path';
 import { STAND_HOST, sessionCookie, startStand } from '../test-support/stand.ts';
 import type { Reply, Stand } from '../test-support/stand.ts';
-import type { CreateProjectResponse, FileMetaResponse, LimitsResponse, ProjectResponse, SettingsFactsResponse, SettingsResponse, MeResponse, WorkspaceNodeResponse, WorkspaceWriteResponse } from './contract.ts';
+import type { CreateProjectResponse, FileMetaResponse, InstallationServicesResponse, LimitsResponse, ProjectResponse, SettingsFactsResponse, SettingsResponse, MeResponse, WorkspaceNodeResponse, WorkspaceWriteResponse } from './contract.ts';
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 
 type ErrorBody = { error: { code: string; message: string } };
@@ -1169,7 +1169,7 @@ describe('the plan limits over the api', () => {
     assert.equal(none.status, 200, none.text);
     assert.deepEqual(none.json<LimitsResponse>(), {
       claude: { limits: null, lastFailure: null, liveSessions: 0, lastSessionAt: null },
-      codex: { limits: null, lastFailure: null },
+      codex: { limits: null, lastFailure: null, signedOut: false },
     });
 
     // A live session's control, as sdk-session.ts registers it.
@@ -1282,6 +1282,24 @@ describe('the plan limits over the api', () => {
 
     // A reading, not a mutation: the session is still required.
     assert.equal((await stand.request('GET', '/api/limits', { cookie: null })).status, 401);
+  });
+});
+
+describe('the installation services over the api', () => {
+  test('GET /installation-services lists the servers with installation credentials (none on the stand); a request and a forget name a known one or are a 404; the session is required', async () => {
+    const list = await stand.request('GET', '/api/installation-services');
+
+    assert.equal(list.status, 200, list.text);
+    assert.deepEqual(list.json<InstallationServicesResponse>(), { services: [] });
+
+    const request = await stand.request('POST', '/api/installation-services/perplexity/secret-request', { body: {} });
+
+    assert.equal(request.status, 404, request.text);
+
+    const forget = await stand.request('DELETE', '/api/installation-services/perplexity/secrets');
+
+    assert.equal(forget.status, 404, forget.text);
+    assert.equal((await stand.request('GET', '/api/installation-services', { cookie: null })).status, 401);
   });
 });
 

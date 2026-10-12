@@ -44,7 +44,7 @@ type ApiOverrides = Omit<Partial<Api>, 'threads' | 'workspace' | 'files' | 'sett
 // The file area, the stored files' facts, the model requests and the secret
 // requests are Query, not the store: handlers never call them.
 const LLM_REQUESTS: Api['llmRequests'] = { list: async () => ({ requests: [] }) };
-const LIMITS: Api['limits'] = { get: async () => ({ claude: { limits: null, lastFailure: null, liveSessions: 0, lastSessionAt: null }, codex: { limits: null, lastFailure: null } }) };
+const LIMITS: Api['limits'] = { get: async () => ({ claude: { limits: null, lastFailure: null, liveSessions: 0, lastSessionAt: null }, codex: { limits: null, lastFailure: null, signedOut: false } }) };
 const SYSTEM: Api['system'] = {
   get: async () => {
     throw new Error('not here');
@@ -56,6 +56,16 @@ const FILES: Api['files'] = { meta: async fileId => ({ file: { fileId, name: nul
 const SECRET_REQUESTS: Api['secretRequests'] = {
   get: async id => ({ request: { id, kind: 'oauth-client', server: 'notion', fields: [] } }),
   provision: async () => ({ ok: true }),
+};
+
+const INSTALLATION_SERVICES: Api['installationServices'] = {
+  list: async () => ({ services: [] }),
+  requestSecrets: async () => {
+    throw new Error('not here');
+  },
+  forgetSecrets: async () => {
+    throw new Error('not here');
+  },
 };
 
 const WORKSPACE: Api['workspace'] = {
@@ -74,7 +84,7 @@ function fakeApi(overrides: ApiOverrides = {}, calls: Calls = []): Api {
 
       return impl(...args);
     };
-  const base: Omit<Api, 'threads' | 'workspace' | 'workspaces' | 'files' | 'settings' | 'llmRequests' | 'limits' | 'system' | 'secretRequests' | 'projects' | 'apps' | 'schedule' | 'connections'> = {
+  const base: Omit<Api, 'threads' | 'workspace' | 'workspaces' | 'files' | 'settings' | 'llmRequests' | 'limits' | 'system' | 'secretRequests' | 'installationServices' | 'projects' | 'apps' | 'schedule' | 'connections'> = {
     me: async () => ME,
     auth: async () => ME,
     consoleCode: async () => null,
@@ -171,6 +181,7 @@ function fakeApi(overrides: ApiOverrides = {}, calls: Calls = []): Api {
     limits: LIMITS,
     system: SYSTEM,
     secretRequests: SECRET_REQUESTS,
+    installationServices: INSTALLATION_SERVICES,
     schedule: {
       runs: schedule.runs,
       latestRuns: schedule.latestRuns,

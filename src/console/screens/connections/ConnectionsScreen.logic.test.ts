@@ -7,8 +7,8 @@
 
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import type { ConnectionView, ServiceView } from '../../../api/contract.ts';
-import { accountMeta, canConnect, catalogCount, linkAlive, nameHint, nameRequired, objState, pendingWords, rowAction, scopeList, serviceIcon, statusWords, validateConnectName, validateRename } from './ConnectionsScreen.logic.ts';
+import type { ConnectionView, InstallationServiceView, ServiceView } from '../../../api/contract.ts';
+import { accountMeta, canConnect, catalogCount, catalogEntries, installationWords, linkAlive, nameHint, nameRequired, objState, pendingWords, rowAction, scopeList, serviceIcon, statusWords, validateConnectName, validateRename } from './ConnectionsScreen.logic.ts';
 
 const NOW = new Date(2026, 9, 10, 22, 30);
 
@@ -95,5 +95,30 @@ describe('the catalog', () => {
     assert.equal(validateConnectName('x'.repeat(201), false), 'At most 200 characters.');
     assert.equal(validateRename(' '), 'Required.');
     assert.equal(validateRename('Personal'), null);
+  });
+});
+
+describe('the catalog with the services of the installation', () => {
+  const installation = (name: string, state: InstallationServiceView['state']): InstallationServiceView => ({ name, description: null, secretNames: ['KEY'], state, error: state === 'failed' ? 'refused' : null });
+  const perUser = (name: string): ServiceView => ({ name, description: null, multiAccount: false, manualClient: false });
+
+  it('is one list by name, each entry keeping its kind', () => {
+    const entries = catalogEntries([perUser('notion'), perUser('gmail')], [installation('perplexity', 'connected'), installation('qase', 'missing')]);
+
+    assert.deepEqual(
+      entries.map(entry => `${entry.kind}:${entry.service.name}`),
+      ['accounts:gmail', 'accounts:notion', 'installation:perplexity', 'installation:qase'],
+    );
+  });
+
+  it('words a service of the installation by its state: set up while missing, manage otherwise', () => {
+    assert.deepEqual(installationWords({ state: 'missing' }), { label: 'not set up', link: 'Set up', state: undefined });
+    assert.deepEqual(installationWords({ state: 'connected' }), { label: 'connected · installation-wide', link: 'Manage', state: undefined });
+    assert.deepEqual(installationWords({ state: 'failed' }), { label: 'connection failed', link: 'Manage', state: 'err' });
+  });
+
+  it('gives the services of the installation their icons', () => {
+    assert.equal(serviceIcon('perplexity'), 'search');
+    assert.equal(serviceIcon('qase'), 'list-todo');
   });
 });

@@ -129,7 +129,7 @@ const api: Api = {
     },
   },
   llmRequests: { list: async () => ({ requests: [] }) },
-  limits: { get: async () => ({ claude: { limits: null, lastFailure: null, liveSessions: 0, lastSessionAt: null }, codex: { limits: null, lastFailure: null } }) },
+  limits: { get: async () => ({ claude: { limits: null, lastFailure: null, liveSessions: 0, lastSessionAt: null }, codex: { limits: null, lastFailure: null, signedOut: false } }) },
   system: {
     get: async () => {
       throw new Error('not here');
@@ -148,6 +148,15 @@ const api: Api = {
       throw new Error('not here');
     },
     deleteTask: async () => {
+      throw new Error('not here');
+    },
+  },
+  installationServices: {
+    list: async () => ({ services: [] }),
+    requestSecrets: async () => {
+      throw new Error('not here');
+    },
+    forgetSecrets: async () => {
       throw new Error('not here');
     },
   },

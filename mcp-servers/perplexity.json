@@ -1,6 +1,7 @@
 {
   "transport": "http",
   "url": "https://api.perplexity.ai/mcp",
+  "description": "Perplexity web search and web-grounded answers (Perplexity API), on the installation's API key (PERPLEXITY_API_KEY).",
   "headers": { "Authorization": "Bearer ${secret:PERPLEXITY_API_KEY}" },
   "toolOverrides": {
     "perplexity_search": {

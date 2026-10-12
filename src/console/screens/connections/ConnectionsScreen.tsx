@@ -3,13 +3,19 @@
 // (store/connections): a banner over the list for every account the
 // provider rejects (with its "Sign in"), the "Accounts" card with a row per
 // account (AccountRow: the action of the moment, the badge, the menu), the
-// "Service catalog" card with a tile per service — how many accounts it
-// has and "Connect" where it takes another (a service of one account, once
-// connected, is re-authorized from its row). A failed first snapshot
-// replaces the screen with the error and Retry.
+// "Service catalog" card with a tile per service, by name: a service of
+// per-user accounts — how many accounts it has and "Connect" where it
+// takes another (a service of one account, once connected, is
+// re-authorized from its row); a service of the installation (one set of
+// credentials for every workspace, the second data layer — queries.ts) —
+// its state and "Set up" / "Manage", which open InstallationServiceDialog.
+// A failed first snapshot replaces the screen with the error and Retry; a
+// failed read of the installation's services is a note in the catalog (a
+// 404 — the server of an older build — is no services, quietly).
 
 import { useState } from 'react';
-import type { ServiceView } from '../../../api/contract.ts';
+import type { InstallationServiceView, ServiceView } from '../../../api/contract.ts';
+import { toApiFailure } from '../../lib/api/index.ts';
 import { useNow } from '../../lib/format/useNow.ts';
 import { useAppDispatch, useAppSelector } from '../../store/hooks.ts';
 import { snapshotLoad } from '../../store/stream/actions.ts';
@@ -28,7 +34,9 @@ import { Screen } from '../../ui/Screen/Screen.tsx';
 import { SkelRow } from '../../ui/Skel/Skel.tsx';
 import { AccountRow } from './AccountRow.tsx';
 import { ConnectServiceDialog } from './ConnectServiceDialog.tsx';
-import { accountsOf, canConnect, catalogCount, needsSignInWords, serviceIcon } from './ConnectionsScreen.logic.ts';
+import { InstallationServiceDialog } from './InstallationServiceDialog.tsx';
+import { accountsOf, canConnect, catalogCount, catalogEntries, installationWords, needsSignInWords, serviceIcon } from './ConnectionsScreen.logic.ts';
+import { useInstallationServices } from './queries.ts';
 import './ConnectionsScreen.css';
 
 const SKELETON = [[48, 70], [36, 62], [52, 68]];
@@ -42,6 +50,12 @@ export function ConnectionsScreen() {
   const now = useNow();
   const stage = snapshotStage(stream);
   const [connecting, setConnecting] = useState<ServiceView | null>(null);
+  const installation = useInstallationServices();
+  const [managing, setManaging] = useState<InstallationServiceView | null>(null);
+  const entries = catalogEntries(services, installation.data?.services ?? []);
+  // The server of an older build has no such route (404) until the app
+  // restarts: the catalog shows the per-user services alone, quietly.
+  const olderServer = installation.isError && toApiFailure(installation.error).status === 404;
 
   let body;
 
@@ -85,15 +99,47 @@ export function ConnectionsScreen() {
           )}
         </Card>
         <Card narrow="bare">
-          <CardHead title="Service catalog" count={services.length} />
+          <CardHead title="Service catalog" count={entries.length} />
           <CardBody>
-            {services.length === 0 ? (
-              <Empty icon="plug" title="No connectable services">
-                Services with per-user sign-in appear here when the installation declares them (mcp-servers with auth: user).
-              </Empty>
+            {installation.isError && !olderServer ? (
+              <Note state="err" icon="cloud-off" role="alert" action="Retry" actionIcon="refresh-cw" actionBusy={installation.isFetching} onAction={() => void installation.refetch()}>
+                Couldn’t load the services of the installation. {installation.error.message}
+              </Note>
+            ) : null}
+            {entries.length === 0 ? (
+              installation.isPending ? null : (
+                <Empty icon="plug" title="No services">
+                  Services appear here when the installation declares them: per-user sign-in (auth: user) or installation credentials (secret:NAME) in mcp-servers.
+                </Empty>
+              )
             ) : (
               <Tiles min="210px">
-                {services.map(service => {
+                {entries.map(entry => {
+                  if (entry.kind === 'installation') {
+                    const service = entry.service;
+                    const words = installationWords(service);
+
+                    return (
+                      <button key={service.name} type="button" className="tile conn-tile" data-size="sm" onClick={() => setManaging(service)}>
+                        <Obj icon={serviceIcon(service.name)} size="md" state={words.state} />
+                        <span className="tile-t">{service.name}</span>
+                        {service.description ? (
+                          <span className="tile-d" title={service.description}>
+                            {service.description}
+                          </span>
+                        ) : null}
+                        <span className="tile-f">
+                          <span>{words.label}</span>
+                          <span className="link">
+                            <Icon name={service.state === 'missing' ? 'key-round' : 'sliders-horizontal'} />
+                            {words.link}
+                          </span>
+                        </span>
+                      </button>
+                    );
+                  }
+
+                  const service = entry.service;
                   const accounts = accountsOf(connections, service.name).length;
                   const connectable = canConnect(service, accounts);
                   const inner = (
@@ -139,6 +185,7 @@ export function ConnectionsScreen() {
     <Shell current="connections" title="Connections">
       <Screen>{body}</Screen>
       {connecting ? <ConnectServiceDialog service={connecting} accounts={accountsOf(connections, connecting.name).length} onClose={() => setConnecting(null)} /> : null}
+      {managing ? <InstallationServiceDialog service={managing} onClose={() => setManaging(null)} /> : null}
     </Shell>
   );
 }

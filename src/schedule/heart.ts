@@ -6,8 +6,8 @@
 // skipped, the next one counts from "now"; a one-shot `at` means "not before
 // T" — a past T fires immediately, and firing consumes the row (failures
 // too: no retries). A task without a trigger is invisible to the heart. A
-// code task without a body in the running bundle sleeps: never armed, never
-// noisy — the boot sweep already journaled the gap loudly.
+// code task without its body file sleeps: never armed, never noisy — the
+// boot sweep already journaled the gap loudly.
 
 import { prisma } from '../db/client.ts';
 import { appendEvent } from '../core/append.ts';
@@ -25,9 +25,9 @@ export { assertValidCron, cronNextRun } from './cron.ts';
 const POLL_INTERVAL_MS = 5_000;
 
 // Boot sweep — the loud registry-vs-catalog reconciliation: every registered
-// code task without a body (neither bundled nor a workspace file) gets a
-// system.exception into its workspace's main thread. This closes the create_task → restart window
-// honestly: the task sleeps, and everyone can see why.
+// code task without its body file in the workspace gets a system.exception
+// into its workspace's main thread: the task sleeps, and everyone can see
+// why.
 async function sweepSleepingTasks(): Promise<void> {
   const rows = await prisma.scheduledTask.findMany({ where: { kind: 'code' }, orderBy: { createdAt: 'asc' } });
 
@@ -48,7 +48,7 @@ async function sweepSleepingTasks(): Promise<void> {
         slug: row.slug,
         error:
           `Scheduled task "${row.slug}" (kind code) has no body — it sleeps until ${workspaceTaskFile(row.userId, row.slug)} ` +
-          `exists (live at the next fire) or tasks/${row.slug}.ts is added to the repository index, built and restarted.`,
+          `exists (live at the next fire).`,
       },
     }).catch(error => {
       console.error(`[schedule] boot sweep failed to journal sleeping task "${row.slug}":`, error);

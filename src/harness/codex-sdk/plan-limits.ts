@@ -15,7 +15,10 @@
 // measurement in flight at a time; a round that fails (the server's error,
 // a process that exited, no answer within ATTEMPT_MS) leaves the cache as
 // it is and tells the reader its outcome (lastFailure), cleared by the next
-// measurement. Without a provider (a test stand, a host without the CLI)
+// measurement. A round refused because the CLI has no login (signedOut)
+// marks the account as signed out until a measurement succeeds; other
+// failures (a timeout, a crashed process) say nothing about the login and
+// leave the mark as it is. Without a provider (a test stand, a host without the CLI)
 // the cache stands: null until something measures.
 
 import type { CodexBucketView, CodexLimitWindowView, CodexLimitsResponse, CodexLimitsView, LimitFailureView } from '../../api/contract.ts';
@@ -124,6 +127,7 @@ export function createCodexPlanLimits(deps: CodexPlanLimitsDeps = {}): CodexPlan
   let lastFailure: LimitFailureView | null = null;
   let inFlight: Promise<void> | null = null;
   let lastWarning: string | null = null;
+  let signedOut = false;
 
   const measure = async (measureWith: CodexLimitsProvider): Promise<void> => {
     const controller = new AbortController();
@@ -135,10 +139,15 @@ export function createCodexPlanLimits(deps: CodexPlanLimitsDeps = {}): CodexPlan
       limits = limitsOfRateLimits(response, new Date(now()));
       lastFailure = null;
       lastWarning = null;
+      signedOut = false;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
 
       lastFailure = { at: new Date(now()), message };
+
+      if (isSignedOutMessage(message)) {
+        signedOut = true;
+      }
 
       if (message !== lastWarning) {
         lastWarning = message;
@@ -183,11 +192,18 @@ export function createCodexPlanLimits(deps: CodexPlanLimitsDeps = {}): CodexPlan
         });
       }
 
-      return { limits, lastFailure };
+      return { limits, lastFailure, signedOut };
     },
 
     settled: () => inFlight ?? Promise.resolve(),
   };
+}
+
+// The app-server's refusal for a CLI without a login, e.g.
+// "account/rateLimits/read: codex account authentication required to read
+// rate limits (code -32600)" — what an empty CODEX_HOME answers.
+export function isSignedOutMessage(message: string): boolean {
+  return /authentication required/i.test(message);
 }
 
 // The process's one service: the app registers the app-server at boot

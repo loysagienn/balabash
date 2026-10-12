@@ -524,10 +524,14 @@ export type CodexLimitsView = {
 // The Codex half of GET /api/limits: limits — the newest measurement, or
 // null when none has succeeded since the process started (a read measures
 // when the cache is stale, so null means the app-server has not answered
-// yet, or answered nothing but failures); lastFailure — as for Claude.
+// yet, or answered nothing but failures); lastFailure — as for Claude;
+// signedOut — the CLI has no login to read the limits with (the last round
+// that told anything about the login was refused for it; a measurement
+// clears it): the console then shows no Codex group at all.
 export type CodexLimitsResponse = {
   limits: CodexLimitsView | null;
   lastFailure: LimitFailureView | null;
+  signedOut: boolean;
 };
 
 // GET /api/limits — both accounts' newest measurements.
@@ -888,6 +892,32 @@ export type ServiceView = {
   // Whether an installation-level OAuth client must be provisioned by hand.
   manualClient: boolean;
 };
+
+// A service of the installation: an external MCP server whose credentials
+// are the installation's (${secret:NAME} in its config) — one set for every
+// workspace, provisioned through the secrets form, forgotten for everyone.
+// state: connected; missing — a credential is not provisioned; failed —
+// provisioned, but the last connection attempt failed (error says why).
+export type InstallationServiceView = {
+  name: string;
+  description: string | null;
+  secretNames: string[];
+  state: 'connected' | 'missing' | 'failed';
+  error: string | null;
+};
+
+// GET /api/installation-services — the second data layer: the states live
+// in the process's memory, read after a reconnect attempt where one is due.
+export type InstallationServicesResponse = { services: InstallationServiceView[] };
+
+// POST /api/installation-services/:name/secret-request — the request the
+// secrets form at /secrets/<requestId> fulfils (addressed to the main
+// thread; a request open for the server is replaced, its link kept).
+export type InstallationSecretRequestResponse = { requestId: string };
+
+// DELETE /api/installation-services/:name/secrets — the credentials
+// deleted (how many values) and the server disconnected for everyone.
+export type ForgetInstallationSecretsResponse = { server: string; forgotten: number };
 
 // An agent of the catalog as the console shows it, plus the coordinator —
 // the secretary of the main thread, which is not a catalog module: its

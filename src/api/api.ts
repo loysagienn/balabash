@@ -28,7 +28,8 @@ import type { FileRef, Thread, ThreadStatus } from '../core/contract.ts';
 import { WorkspacePathError, fileNodeOf, listDir, replaceFileContent, resolveFilePath, sanitizeRelPath, statFile, statWritable, withFileWriteLock } from '../workspace/files.ts';
 import { FileNotFoundError, getFile, getUserFile, openFileContent } from '../files/index.ts';
 import { verifyDownloadLink } from '../files/storage/local.ts';
-import { getExternalServerSecretRequest, provisionExternalServerSecrets } from '../capabilities/external-secrets.ts';
+import { forgetExternalServerSecrets, getExternalServerSecretRequest, isExternalSecretServer, openExternalServerCredentialsRequest, provisionExternalServerSecrets } from '../capabilities/external-secrets.ts';
+import { listExternalSecretTargets, refreshExternalServers } from '../capabilities/tool-manager.ts';
 import { ConnectionError, disconnectConnection, getOauthClientRequest, getUserConnection, provisionOauthClient, reconnectConnection, renameConnection, startConnection, connectionView } from '../capabilities/connections/index.ts';
 import { AppManagementError, listApps, publishApp, unpublishApp } from '../apps/management.ts';
 import { ProjectError, archiveProject, createProject, parseProjectInput, parseProjectPatch, unarchiveProject, updateProject } from '../projects/mutations.ts';
@@ -50,6 +51,10 @@ import { checkMutationOrigin } from './origin.ts';
 import type {
   AppsResponse,
   ConnectLinkResponse,
+  ForgetInstallationSecretsResponse,
+  InstallationSecretRequestResponse,
+  InstallationServiceView,
+  InstallationServicesResponse,
   ConnectionResponse,
   CreateProjectResponse,
   CreateTaskResponse,
@@ -1342,6 +1347,68 @@ router.post('/connections', requireSession, async ctx => {
 
     throw error;
   }
+});
+
+// --------------------------------------------------------------------------
+// The services of the installation (the Connections screen's catalog beside
+// the per-user ones): external servers whose credentials are the
+// installation's — one set for every workspace. The list reads the states
+// after a reconnect attempt where one is due (secrets that just landed
+// connect here, as before a tool catalog); a request for the credentials
+// is the auth agent's own, addressed to the main thread (its
+// secrets.provisioned tells the secretary), and the console opens its form;
+// forgetting is the auth agent's too — no event, the server disconnects for
+// everyone. Any workspace may manage them (decision of the operator).
+
+function installationServiceView(target: ReturnType<typeof listExternalSecretTargets>[number]): InstallationServiceView {
+  const state = target.connected ? 'connected' : target.error ? 'failed' : 'missing';
+
+  return { name: target.name, description: target.description, secretNames: target.secretNames, state, error: state === 'failed' ? target.error : null };
+}
+
+router.get('/installation-services', requireSession, async ctx => {
+  await refreshExternalServers();
+
+  const response: InstallationServicesResponse = { services: listExternalSecretTargets().map(installationServiceView) };
+
+  ctx.body = prepareObject(response);
+});
+
+router.post('/installation-services/:name/secret-request', requireSession, async ctx => {
+  const userId = ctx.state.userId as string;
+  const { name } = ctx.params;
+
+  if (!isExternalSecretServer(name)) {
+    sendError(ctx, 404, 'not_found', 'No such installation service');
+
+    return;
+  }
+
+  const mainThreadId = await requireMainThreadId(ctx);
+
+  if (!mainThreadId) {
+    return;
+  }
+
+  const { id } = await openExternalServerCredentialsRequest(userId, mainThreadId, name);
+  const response: InstallationSecretRequestResponse = { requestId: id };
+
+  ctx.body = prepareObject(response);
+});
+
+router.delete('/installation-services/:name/secrets', requireSession, async ctx => {
+  const { name } = ctx.params;
+
+  if (!isExternalSecretServer(name)) {
+    sendError(ctx, 404, 'not_found', 'No such installation service');
+
+    return;
+  }
+
+  const forgotten = await forgetExternalServerSecrets(name);
+  const response: ForgetInstallationSecretsResponse = { server: name, forgotten };
+
+  ctx.body = prepareObject(response);
 });
 
 // --------------------------------------------------------------------------

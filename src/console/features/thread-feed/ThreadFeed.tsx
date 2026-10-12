@@ -65,7 +65,9 @@ function FeedMessage({ item, now }: { item: MessageItem; now: Date }) {
 
   return (
     <Message agent={item.from} to={item.to} you={you} variant={item.variant} tag={item.tag} time={dateTimeLabel(item.at, now)} fold={item.fold}>
-      {item.text ? <Md source={item.text} /> : null}
+      {/* The user's own text keeps its single line breaks (typed, not
+          Markdown-wrapped); an agent's Markdown reads by the usual rules. */}
+      {item.text ? <Md source={item.text} breaks={item.variant === 'user'} /> : null}
       <Attachments atts={item.atts} />
     </Message>
   );

@@ -42,9 +42,10 @@ const JOB_STDOUT_REPORT_CHARS = 1_000;
 // workspace_files hands ride along; restart and auth are deliberately
 // absent), and the installation's extension servers (data/tools,
 // data/mcp-servers — the operator's own code and configs, src/capabilities/extensions.ts)
-// are all in by construction: a task body lives outside the repository too,
-// and the pair is the same trust domain. Calls are NOT journaled as
-// tool.call.* — the envelope requires an author thread and a task has none.
+// are in by construction: a task body lives outside the repository too,
+// and the pair is the same trust domain — all but TASK_WITHHELD_SERVERS.
+// Calls are NOT journaled as tool.call.* — the envelope requires an author
+// thread and a task has none.
 const TASK_REPOSITORY_SERVERS = [
     'current_datetime',
     'events',
@@ -60,8 +61,15 @@ const TASK_REPOSITORY_SERVERS = [
     'workspace_files',
 ];
 
+// Extension servers a task does not get although the installation has
+// them: Yandex Ads (real advertising budgets) stays in the dialogue contour
+// until per-tool grant narrowing exists (eyes-only autonomy).
+const TASK_WITHHELD_SERVERS = ['yandex_ads'];
+
 function taskBundle(): ToolBundle {
-  return { declared: [...TASK_REPOSITORY_SERVERS, ...listInstallationExtensionServers()] };
+  const extensions = listInstallationExtensionServers().filter(name => !TASK_WITHHELD_SERVERS.includes(name));
+
+  return { declared: [...TASK_REPOSITORY_SERVERS, ...extensions] };
 }
 
 function getErrorMessage(error: unknown): string {
@@ -194,15 +202,15 @@ export async function fireTask(task: ScheduledTaskModel, trigger: JobTrigger): P
   }
 
   // The command branch stays strictly BEFORE the code path: a workspace job
-  // has no body in the bundle, and falling through would misread it as a
-  // sleeping code task.
+  // has no body file, and falling through would misread it as a sleeping
+  // code task.
   if (task.kind === 'command') {
     return fireCommandTask(task, trigger, main.id, pushFired);
   }
 
-  const location = await locateTaskBody(task.userId, task.slug);
+  const file = await locateTaskBody(task.userId, task.slug);
 
-  if (!location) {
+  if (!file) {
     return { kind: 'sleeping' };
   }
 
@@ -213,17 +221,18 @@ export async function fireTask(task: ScheduledTaskModel, trigger: JobTrigger): P
   running.add(task.slug);
 
   const ctx: TaskContext = {
+    userId: task.userId,
     pushEvent: pushFired,
     prisma,
     tools: createTaskToolsApi(task.userId, main.id),
   };
 
   // Detached: the body must not block the heart's pass. An exception is the
-  // end of the run — journaled loudly, never retried. A workspace body is
-  // imported here, fresh: a broken file is this run's failure, not the heart's.
+  // end of the run — journaled loudly, never retried. The body is imported
+  // here, fresh: a broken file is this run's failure, not the heart's.
   void (async () => {
     try {
-      const body = await loadTaskBody(location);
+      const body = await loadTaskBody(file);
 
       await body(ctx);
     } catch (error) {

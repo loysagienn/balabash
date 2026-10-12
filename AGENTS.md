@@ -22,15 +22,15 @@ confidential from them.
   `console/` (the web interface: a browser SPA, its own tsconfig,
   served by the core on `CONSOLE_DOMAIN` through `src/api/console.ts`),
   `workspace/` (the per-user workbench: layout, sqlite, child processes),
-  `projects/` (the project registry), `schedule/` (scheduled tasks and jobs),
+  `projects/` (the project registry), `schedule/` (scheduled tasks and jobs;
+  `schedule/AGENTS.md` — the contract of task bodies, which live in the
+  workspace, not in the repository),
   `apps/` (the mini-app platform), `files/` (file storage), `runtime/`
   (restart, router, runs), `test-support/` (the test PostgreSQL `npm test`
   starts: embedded-postgres, one migrated template, a copy per test; `stand.ts`
   — the stand of one test file: the app's modules over their own copy and
   file area, reached over HTTP; `db/test-guard.ts` keeps test children off
   the live database).
-- `tasks/` — scheduled task bodies shipped with the product; `tasks/AGENTS.md`
-  is their contract.
 - `scripts/` — offline maintenance scripts (`scripts/AGENTS.md`); among them
   `render-context`, the verification instrument for any work on prompts and
   tool descriptions.

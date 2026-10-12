@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { isSendKey, outgoingText } from './Composer.logic.ts';
+import { composerKeyAction, outgoingText } from './Composer.logic.ts';
 
-const key = (overrides: Partial<Parameters<typeof isSendKey>[0]>) => ({
+const key = (overrides: Partial<Parameters<typeof composerKeyAction>[0]>) => ({
   key: 'Enter',
   metaKey: false,
   ctrlKey: false,
@@ -11,18 +11,29 @@ const key = (overrides: Partial<Parameters<typeof isSendKey>[0]>) => ({
   ...overrides,
 });
 
-describe('isSendKey', () => {
-  it('sends on ⌘↵ and Ctrl+↵', () => {
-    assert.equal(isSendKey(key({ metaKey: true })), true);
-    assert.equal(isSendKey(key({ ctrlKey: true })), true);
+describe('composerKeyAction', () => {
+  it('sends on Enter alone', () => {
+    assert.equal(composerKeyAction(key({}), false), 'send');
   });
 
-  it('keeps Enter, Shift+Enter and composition for the text', () => {
-    assert.equal(isSendKey(key({})), false);
-    assert.equal(isSendKey(key({ shiftKey: true })), false);
-    assert.equal(isSendKey(key({ metaKey: true, shiftKey: true })), false);
-    assert.equal(isSendKey(key({ metaKey: true, isComposing: true })), false);
-    assert.equal(isSendKey(key({ key: 'a', metaKey: true })), false);
+  it('breaks the line on ⌘↵ and Ctrl+↵ by hand, leaves Shift+Enter to the textarea', () => {
+    assert.equal(composerKeyAction(key({ metaKey: true }), false), 'newline');
+    assert.equal(composerKeyAction(key({ ctrlKey: true }), false), 'newline');
+    assert.equal(composerKeyAction(key({ shiftKey: true }), false), null);
+    assert.equal(composerKeyAction(key({ metaKey: true, shiftKey: true }), false), null);
+  });
+
+  it('leaves composition, Alt and other keys alone', () => {
+    assert.equal(composerKeyAction(key({ isComposing: true }), false), null);
+    assert.equal(composerKeyAction(key({ keyCode: 229 }), false), null);
+    assert.equal(composerKeyAction(key({ altKey: true }), false), null);
+    assert.equal(composerKeyAction(key({ key: 'a' }), false), null);
+    assert.equal(composerKeyAction(key({ key: 'a', metaKey: true }), false), null);
+  });
+
+  it('keeps Enter a new line on a phone', () => {
+    assert.equal(composerKeyAction(key({}), true), null);
+    assert.equal(composerKeyAction(key({ metaKey: true }), true), null);
   });
 });
 

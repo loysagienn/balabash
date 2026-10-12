@@ -19,7 +19,6 @@ import { createEventsToolServer, createStorageToolServer } from './capabilities/
 import { createRestartToolServer } from './capabilities/restart-tools.ts';
 import { startReauthDetector } from './capabilities/reauth-detector.ts';
 import { loadToolServers, registerBuiltinToolServer } from './capabilities/tool-manager.ts';
-import { loadTasks } from './schedule/catalog.ts';
 import { isAnyJobRunning, killRunningJobs } from './schedule/engine.ts';
 import { startScheduleHeart } from './schedule/heart.ts';
 import { startWorkspaceIndexer } from './workspace/indexer.ts';
@@ -78,10 +77,6 @@ if (tombstoned > 0) {
 }
 
 loadAgents();
-
-// Scheduled-task bodies ship in the bundle like agents; a broken module fails
-// the boot atomically (the supervisor rolls back to the last good bundle).
-loadTasks();
 
 // Dangerous-capability servers, granted only where deliberately listed: the
 // auth tools to the auth agent, the restart request to the coordinator and
