@@ -12,6 +12,7 @@ export { BALABASH_PREAMBLE } from './preamble.ts';
 export { BLOCKED_PATH_NOTE } from './blocked-path.ts';
 export { BROWSER_SUBAGENT_NOTE } from './browser-subagent.ts';
 export { CLAUDE_DESIGN_NOTE } from './claude-design.ts';
+export { IMAGE_GENERATOR_SUBAGENT_NOTE } from './image-generator-subagent.ts';
 export { OUTPUT_NOTE } from './output.ts';
 export { PROJECTS_NOTE, PROJECTS_WORLD_NOTE } from './projects.ts';
 export { REPO_RULES_NOTE } from './repo-rules.ts';

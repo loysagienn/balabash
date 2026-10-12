@@ -20,6 +20,9 @@
 // bytes — so every screenshot is written to a known path in the run's
 // disposable output directory (the model reads it with its native Read tool)
 // and ingested into file storage (a fileId for send_file and the report).
+//
+// Raster images a design needs (illustrations, photos, icons) come from the
+// image generator sub-agent: Claude has no image generation of its own.
 
 import { mkdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -31,6 +34,7 @@ import type { PlaywrightImageSink, PlaywrightMcp } from './kit/playwright.ts';
 import {
   BALABASH_PREAMBLE,
   CLAUDE_DESIGN_NOTE,
+  IMAGE_GENERATOR_SUBAGENT_NOTE,
   PROJECTS_NOTE,
   OUTPUT_NOTE,
   WORKBENCH_NOTE,
@@ -68,6 +72,8 @@ Working cycle:
 3. Author the files on the workbench; mcp__claude_design__ finalize_plan → create_support_js / copy_files for what the server generates; upload from disk with DesignSync (small inline files via mcp__claude_design__write_files with etags); verify loop; iterate.
 4. Deliver: the link and the screenshot; iterate on the user's feedback in the thread and on comments queued from the editor (list_comments).
 5. When the user is satisfied (or asks to stop), end the thread; your report states the project URL(s), what was produced and carries the fileIds of the final screenshots.
+
+${IMAGE_GENERATOR_SUBAGENT_NOTE} Images it hands over go into a design through the workbench: import them with workspace_import_file next to the files you upload.
 
 ${OUTPUT_NOTE}
 
@@ -150,6 +156,7 @@ export const agent = {
     'storage_download_file',
     'workspace',
   ],
+  agents: ['image_generator'],
   notification: 'normal',
 
   session: {
