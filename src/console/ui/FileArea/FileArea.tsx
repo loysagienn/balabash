@@ -9,19 +9,22 @@
 // the preview body scroll).
 
 import type { CSSProperties, ReactNode } from 'react';
+import type { FileDropHandlers } from '../../lib/upload/useFileDrop.ts';
 import './FileArea.css';
 
 export type FileAreaProps = {
   view: 'list' | 'preview';
   split?: boolean;
+  // The handlers of files dragged over the area (the feature shows Drop).
+  drop?: FileDropHandlers;
   children: ReactNode;
   className?: string;
   style?: CSSProperties;
 };
 
-export function FileArea({ view, split, children, className, style }: FileAreaProps) {
+export function FileArea({ view, split, drop, children, className, style }: FileAreaProps) {
   return (
-    <div className={className ? `fa ${className}` : 'fa'} data-view={view} data-split={split ? '' : undefined} style={style}>
+    <div className={className ? `fa ${className}` : 'fa'} data-view={view} data-split={split ? '' : undefined} style={style} {...drop}>
       {children}
     </div>
   );

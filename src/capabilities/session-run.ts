@@ -53,6 +53,23 @@ function speakerOf(payload: Record<string, unknown>): string | null {
   return name || username;
 }
 
+// A file's size as a person reads it: "820 B", "48 KB", "2.1 MB", "1.4 GB".
+function readableSize(bytes: number): string {
+  const units = ['B', 'KB', 'MB', 'GB'];
+  let value = bytes;
+  let unit = 0;
+
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+
+  return unit === 0 ? `${value} B` : `${value < 10 ? value.toFixed(1) : Math.round(value)} ${units[unit]}`;
+}
+
+// A user message as the session reads it: the text, then a line per
+// attached file (the facts the channel recorded) and one hint how to reach
+// them — the bytes are never in the prompt.
 function describeUserMessage(payload: Record<string, unknown>): string {
   const speaker = speakerOf(payload);
   const text = typeof payload.text === 'string' ? payload.text : '';
@@ -69,7 +86,17 @@ function describeUserMessage(payload: Record<string, unknown>): string {
     parts.push(
       `[the user sent a file: fileId=${typeof meta.fileId === 'string' ? meta.fileId : 'unknown'}${
         typeof meta.originalFilename === 'string' ? `, name=${meta.originalFilename}` : ''
-      }${typeof meta.contentType === 'string' ? `, type=${meta.contentType}` : ''}]\nUse the storage_get_file tool for its metadata and a download URL; fetch the URL when the contents are needed.`,
+      }${typeof meta.contentType === 'string' ? `, type=${meta.contentType}` : ''}${
+        typeof meta.sizeBytes === 'number' ? `, size=${readableSize(meta.sizeBytes)}` : ''
+      }]`,
+    );
+  }
+
+  if (files.length > 0) {
+    parts.push(
+      `Use the storage_get_file tool for ${files.length === 1 ? 'its' : 'their'} metadata and a download URL; fetch the URL when ` +
+        'the contents are needed. To work on a file in the workspace (scripts, workspace tools), put it there with ' +
+        'workspace_import_file where available.',
     );
   }
 
@@ -129,7 +156,7 @@ type EndResult = {
 
 type EndState = { result: EndResult | null };
 
-function createEndThreadTool(end: EndState): SdkBridgeTool {
+function createEndThreadTool(ctx: RunContext, end: EndState): SdkBridgeTool {
   return {
     name: 'end_thread',
     description:
@@ -176,8 +203,15 @@ function createEndThreadTool(end: EndState): SdkBridgeTool {
       }
 
       const fileIds = Array.isArray(args.fileIds)
-        ? args.fileIds.filter((id): id is string => typeof id === 'string' && Boolean(id.trim()))
+        ? [...new Set(args.fileIds.filter((id): id is string => typeof id === 'string' && Boolean(id.trim())).map(id => id.trim()))]
         : [];
+
+      // The files of the report are the workspace's own (getInfo — a
+      // foreign or missing fileId refuses the call, the same refusal for
+      // both): the summary is delivered to the user's channels as is.
+      for (const fileId of fileIds) {
+        await ctx.files.getInfo(fileId);
+      }
 
       end.result = {
         title,
@@ -381,7 +415,7 @@ export function describeSessionBridgeTools(declaration: AgentDeclaration): ToolD
   const inertCtx = null as unknown as RunContext;
 
   const tools: SdkBridgeTool[] = [
-    createEndThreadTool({ result: null }),
+    createEndThreadTool(inertCtx, { result: null }),
     createSendFileTool(inertCtx, headless),
     ...(allowedAgents.length ? createChildTools(inertCtx, allowedAgents, new Set()) : []),
   ];
@@ -461,7 +495,7 @@ export function createSessionRun(
       // workspace's task-body directory rides along for the scheduler.
       env: { WORKSPACE_DB: workspaceDbPath(ctx.userId), WORKSPACE_TASKS_DIR: workspaceTasksDir(ctx.userId) },
       extraTools: [
-        createEndThreadTool(end),
+        createEndThreadTool(ctx, end),
         createSendFileTool(ctx, headless),
         ...(allowedAgents.length ? createChildTools(ctx, allowedAgents, childThreadIds) : []),
         ...(environment?.extraTools ?? []),

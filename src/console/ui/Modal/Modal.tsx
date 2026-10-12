@@ -1,5 +1,5 @@
 // Modal over the screen (design: Modal): title, body (children), "Cancel"
-// and the main action; danger — confirmVariant="danger". Rendered through
+// an optional second action (alt) and the main action; danger — confirmVariant="danger". Rendered through
 // an Overlay (a portal into document.body), so the scrim covers everything
 // but the window, the rest of the page is inert and the focus stays
 // inside; Escape and a click outside the window close it (the click lands
@@ -23,6 +23,10 @@ export type ModalProps = {
   confirmVariant?: BtnVariant;
   confirmIcon?: IconName;
   confirmDisabled?: boolean;
+  // A second ordinary action between "Cancel" and the main one (design:
+  // Modal `alt` — "Replace" of the name clash).
+  alt?: string;
+  onAlt?: () => void;
   busy?: boolean;
   // Overrides --modal-w, e.g. "560px".
   width?: string;
@@ -34,7 +38,7 @@ export type ModalProps = {
   children?: ReactNode;
 };
 
-export function Modal({ title, cancel = 'Cancel', confirm, confirmVariant = 'primary', confirmIcon, confirmDisabled, busy, width, onClose, onConfirm, form, bare, children }: ModalProps) {
+export function Modal({ title, cancel = 'Cancel', confirm, confirmVariant = 'primary', confirmIcon, confirmDisabled, alt, onAlt, busy, width, onClose, onConfirm, form, bare, children }: ModalProps) {
   const id = useId();
 
   const window_ = (
@@ -48,6 +52,7 @@ export function Modal({ title, cancel = 'Cancel', confirm, confirmVariant = 'pri
       <div className="modal-b">{children}</div>
       <div className="modal-f">
         <Btn label={cancel} variant="ghost" onClick={onClose} />
+        {alt ? <Btn label={alt} onClick={onAlt} /> : null}
         {confirm ? <Btn label={confirm} icon={confirmIcon} variant={confirmVariant} busy={busy} disabled={confirmDisabled} type={form ? 'submit' : 'button'} form={form} onClick={form ? undefined : onConfirm} /> : null}
       </div>
     </div>

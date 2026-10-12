@@ -1,0 +1,22 @@
+@layer components{
+/* ── Image viewer ──  .lbox[role=dialog] (container lbox) > .lbox-bar (.lbox-t > .lbox-n .lbox-m, .lbox-acts) + .lbox-stage (img, .lbox-prev, .lbox-next, .lbox-count)
+   Full screen over everything (a portal: fixed to the window), one for every image; the stage's one track is definite, so the image fits it; ≤ 560 — the image edge to edge, swipe-sized arrows hidden. */
+.lbox{container:lbox / inline-size;position:fixed;inset:0;z-index:var(--z-modal);display:grid;grid-template-rows:auto minmax(0,1fr);background:color-mix(in srgb,var(--bg) 96%,transparent);-webkit-backdrop-filter:var(--glass-blur);backdrop-filter:var(--glass-blur);outline:none}
+.lbox-bar{display:flex;align-items:center;gap:var(--sp-3);min-width:0;padding:var(--sp-3) var(--sp-3) var(--sp-3) var(--sp-5)}
+.lbox-t{display:flex;flex-direction:column;min-width:0;margin-right:auto}
+.lbox-n{font-size:var(--fs-ui);line-height:var(--lh-ui);font-weight:var(--fw-semibold);color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lbox-m{font-size:var(--fs-meta);line-height:var(--lh-meta);color:var(--text-3);font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lbox-acts{display:flex;gap:var(--sp-1);flex:none}
+.lbox-stage{position:relative;display:grid;grid-template:minmax(0,1fr) / minmax(0,1fr);place-items:center;min-height:0;padding:0 var(--sp-12) var(--sp-10)}
+.lbox-stage > img{max-width:100%;max-height:100%;object-fit:contain;border-radius:var(--r-xs)}
+.lbox-prev,.lbox-next{position:absolute;top:50%;translate:0 -50%}
+.lbox-prev{left:var(--sp-2)}
+.lbox-next{right:var(--sp-2)}
+.lbox-count{position:absolute;left:50%;bottom:var(--sp-3);translate:-50% 0;font-size:var(--fs-meta);line-height:var(--lh-meta);color:var(--text-3);font-variant-numeric:tabular-nums}
+@container lbox (max-width:560px){
+  .lbox-bar{gap:var(--sp-1);padding:var(--sp-2) var(--sp-1h) var(--sp-2) var(--sp-4)}
+  .lbox-stage{padding:0 0 var(--sp-10)}
+  .lbox-stage > img{border-radius:0}
+  .lbox-prev,.lbox-next{display:none}
+}
+}

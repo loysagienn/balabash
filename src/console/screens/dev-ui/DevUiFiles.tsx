@@ -20,7 +20,15 @@ import { MetaCard } from '../../ui/MetaCard/MetaCard.tsx';
 import { Pin, Pins } from '../../ui/Pins/Pins.tsx';
 import { Pv, PvActBar, PvBody, PvHead, PvNote } from '../../ui/Pv/Pv.tsx';
 import { Upload, UploadItem } from '../../ui/Upload/Upload.tsx';
-import { Caption } from '../../ui/atoms/atoms.tsx';
+import { Caption, Code } from '../../ui/atoms/atoms.tsx';
+import { Clash, ClashItem } from '../../ui/ClashItem/ClashItem.tsx';
+import { Modal } from '../../ui/Modal/Modal.tsx';
+import { useAppDispatch } from '../../store/hooks.ts';
+import { openViewer } from '../../store/ui/actions.ts';
+import '../../features/file-area/FileUploads.css';
+
+// A 4:3 placeholder photo for the image viewer.
+const VIEWER_IMAGE = `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1200"><rect width="1600" height="1200" fill="#2a2d33"/><rect x="240" y="220" width="1120" height="760" rx="24" fill="#3a3e46"/></svg>')}`;
 
 const stop = (event: { preventDefault: () => void }) => event.preventDefault();
 const crumbs = (...labels: string[]): Crumb[] => labels.map(label => ({ label, href: '#', onClick: stop }));
@@ -152,6 +160,8 @@ function Editor({ narrow }: { narrow?: boolean }) {
 }
 
 export function DevUiFiles() {
+  const dispatch = useAppDispatch();
+
   return (
     <>
       <Section title="File area: the workspace folder, both panels (split), a Markdown preview with the agent’s note; row actions on hover, focus and selection">
@@ -230,15 +240,57 @@ export function DevUiFiles() {
                   <FileRow name="contractor-agreement.pdf" icon="file-type" caption="380 KB · yesterday" size="380 KB" time="yesterday" href="#" onClick={stop} />
                 </FaRows>
               </FaList>
-              <Drop path="Renovation/estimates" sub="3 files · 2.4 MB" />
+              <Drop path="renovation/estimates" sub="3 files" />
             </FileArea>
           </div>
           <div className="dev-col">
-            <Upload path="Renovation/estimates" onHide={() => undefined}>
-              <UploadItem state="done" icon="file-image" name="kitchen-photo-1.jpg" status="done" />
-              <UploadItem icon="file-image" name="kitchen-photo-2.jpg" status="1.3 of 2.1 MB" progress={62} />
-              <UploadItem state="err" icon="file-archive" name="measurements-video.mov" status="over 100 MB" progress={100} />
+            <Upload path="renovation/photos" title="Uploading to" finished={false} folded={false} count="Uploading 2 of 5" failed="2 failed" progress={48} onFold={() => undefined} onClose={() => undefined}>
+              <UploadItem state="done" icon="file-image" name="kitchen-photo-1.jpg" status="1.8 MiB" href="#" />
+              <UploadItem icon="file-image" name="kitchen-photo-2.jpg" status="1.3 of 2.1 MiB" progress={62} onRemove={() => undefined} />
+              <UploadItem icon="file-image" name="kitchen-photo-3.jpg" status="waiting" onRemove={() => undefined} />
+              <UploadItem state="err" icon="file-image" name="measurements-3.jpg" status="Connection lost" onRetry={() => undefined} onRemove={() => undefined} />
+              <UploadItem state="err" icon="file-video" name="walkthrough.mov" status="Larger than 2 GB" retry={false} onRemove={() => undefined} />
             </Upload>
+            <Upload path="renovation/photos" title="Uploading to" finished={false} folded count="Uploading 2 of 5" failed="2 failed" progress={48} onFold={() => undefined} onClose={() => undefined}>
+              {null}
+            </Upload>
+            <Upload path="renovation/photos" title="Uploaded 3 of 5 to" finished folded={false} count="" failed="" progress={100} onFold={() => undefined} onClose={() => undefined}>
+              <UploadItem state="done" icon="file-image" name="kitchen-photo-1.jpg" status="1.8 MiB" href="#" />
+              <UploadItem state="err" icon="file-image" name="measurements-3.jpg" status="Not enough space on the server" onRetry={() => undefined} onRemove={() => undefined} />
+            </Upload>
+          </div>
+        </div>
+      </Section>
+
+      <Section title="Name clash (one answer for all: Skip, Replace, Keep both) · the image viewer (full screen over everything; ←/→ step through one message’s images)">
+        <div className="dev-grid">
+          <Modal bare title="2 files already exist" cancel="Skip" alt="Replace" confirm="Keep both" width="520px" onClose={() => undefined}>
+            <Code>renovation/estimates</Code> already has files with these names. The other 3 files are uploading.
+            <Clash>
+              <ClashItem icon="file-spreadsheet" name="estimate-v3.xlsx" meta="here 84 KiB · today, 16:20 — new 91 KiB" />
+              <ClashItem icon="file-type" name="tile-invoice.pdf" meta="here 120 KiB · Oct 5, 09:12 — new 120 KiB" />
+            </Clash>
+            <p className="fil-clash-note">
+              Keep both saves the new ones as <Code>estimate-v3 (2).xlsx</Code> and <Code>tile-invoice (2).pdf</Code>.
+            </p>
+          </Modal>
+          <div className="dev-col">
+            <Btn
+              label="Open the image viewer"
+              icon="maximize-2"
+              onClick={() =>
+                dispatch(
+                  openViewer(
+                    [
+                      { src: VIEWER_IMAGE, name: 'kitchen-wall-a.jpg', meta: ['2.1 MiB', 'you → manager, 17:04'], download: null },
+                      { src: VIEWER_IMAGE, name: 'kitchen-wall-b.jpg', meta: ['1.9 MiB', 'you → manager, 17:04'], download: null },
+                    ],
+                    0,
+                  ),
+                )
+              }
+            />
+            <Caption>the viewer is the shell’s — one for every image of the console</Caption>
           </div>
         </div>
       </Section>

@@ -21,6 +21,7 @@ import { THREAD_CANCEL, THREAD_MESSAGE } from '../core/envelope.ts';
 import { startThread } from '../core/threads.ts';
 import { resolveSpawnProject } from '../projects/store.ts';
 import { getUserFile } from '../files/index.ts';
+import { messageFile } from '../core/file-blocks.ts';
 import { getAgent, getAgents } from '../capabilities/agent-catalog.ts';
 import { RESTART_SERVER_NAME } from '../capabilities/restart-tools.ts';
 import { callToolJournaled } from '../capabilities/tool-journal.ts';
@@ -124,8 +125,13 @@ const STATIC_FUNCTION_DEFINITIONS: FunctionDefinition[] = [
           type: 'string',
           description: 'The message text delivered to the child agent.',
         },
+        fileIds: {
+          type: ['array', 'null'],
+          items: { type: 'string' },
+          description: 'Stored file IDs to hand to the child with the message (it reads them by fileId), or null.',
+        },
       },
-      required: ['threadId', 'text'],
+      required: ['threadId', 'text', 'fileIds'],
       additionalProperties: false,
     },
   },
@@ -330,10 +336,19 @@ async function executeSpawn(agentName: string, args: JsonObject, ctx: DispatchCo
 async function executeSendToThread(args: JsonObject, ctx: DispatchContext): Promise<void> {
   const threadId = typeof args.threadId === 'string' ? args.threadId.trim() : '';
   const text = typeof args.text === 'string' ? args.text.trim() : '';
+  const fileIds = Array.isArray(args.fileIds)
+    ? [...new Set(args.fileIds.filter((id): id is string => typeof id === 'string' && Boolean(id.trim())).map(id => id.trim()))]
+    : [];
 
   if (!threadId || !text) {
     throw new Error('send_to_thread requires threadId and non-empty text');
   }
+
+  // The files go as a thread.message carries them (the agent runtime's
+  // sendToChild): validated up front against the workspace — a dead or
+  // foreign fileId rejects the call — the references for the model, the
+  // facts for the reader.
+  const files = await Promise.all(fileIds.map(fileId => getUserFile(ctx.userId, fileId)));
 
   // One-hop is validated by append: only a direct child can be addressed. A
   // child that terminated in between redirects back to the main thread, so
@@ -345,7 +360,7 @@ async function executeSendToThread(args: JsonObject, ctx: DispatchContext): Prom
     userId: ctx.userId,
     threadId: ctx.threadId,
     targetThreadId: threadId,
-    payload: { text },
+    payload: { text, ...(files.length ? { fileIds: files.map(file => file.id), files: files.map(messageFile) } : {}) },
   });
 }
 

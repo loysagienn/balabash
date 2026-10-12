@@ -12,7 +12,12 @@ import { createAppsHandoffMiddleware } from '../apps/handoff.ts';
 import { createMainDomainAppsMiddleware } from '../apps/index.ts';
 import { createConsoleMiddleware } from './console.ts';
 
-const CLIENT_ABORT_CODES = new Set(['ERR_STREAM_PREMATURE_CLOSE', 'ECONNRESET', 'ECONNABORTED', 'EPIPE']);
+// The longest a request may take in whole — 2 GB at about 200 KB/s.
+const REQUEST_TIMEOUT_MS = 3 * 60 * 60 * 1000;
+
+// HPE_INVALID_EOF_STATE — the connection closed in the middle of a request
+// body: an upload cancelled in the console (the proxy closes its side).
+const CLIENT_ABORT_CODES = new Set(['ERR_STREAM_PREMATURE_CLOSE', 'ECONNRESET', 'ECONNABORTED', 'EPIPE', 'HPE_INVALID_EOF_STATE']);
 
 export function startWebServer(): void {
   const app = new Koa();
@@ -21,7 +26,7 @@ export function startWebServer(): void {
   app.proxy = true;
 
   // A client leaving mid-stream (a download or preview abandoned, a tab
-  // closed) is not a server error, yet Koa's default reporter prints a
+  // closed, an upload cancelled) is not a server error, yet Koa's default reporter prints a
   // stack for each — enough to flush a real error out of a short log.
   // Everything else keeps Koa's own reporting.
   app.on('error', (error: NodeJS.ErrnoException) => {
@@ -63,7 +68,13 @@ export function startWebServer(): void {
     ctx.body = 'Not found';
   });
 
-  app.listen(config.httpPort);
+  const server = app.listen(config.httpPort);
+
+  // The whole of a request may take as long as an upload of up to 2 GB
+  // needs (POST /files/<rel>, POST /api/files) on a slow line: node's own
+  // limit of 5 minutes would cut it off. The headers keep node's short
+  // limit; idle connections are the proxy's to close.
+  server.requestTimeout = REQUEST_TIMEOUT_MS;
 
   console.log(`[web] listening on port ${config.httpPort}`);
 }

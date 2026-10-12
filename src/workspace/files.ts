@@ -15,10 +15,13 @@
 
 import path from 'node:path';
 import fs from 'node:fs/promises';
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
+import { constants as fsConstants, createReadStream, createWriteStream } from 'node:fs';
 import type { BigIntStats, Stats } from 'node:fs';
 import type { DatabaseSync } from 'node:sqlite';
-import { workspaceDbPath, workspaceFilesDir } from './layout.ts';
+import { pipeline } from 'node:stream/promises';
+import { numberedName } from '../utils/file-names.ts';
+import { workspaceDbPath, workspaceFilesDir, workspaceTmpDir } from './layout.ts';
 import { WorkspaceDbBusyError, inWriteTransaction, withWorkspaceDb, type WithDbOptions } from './sqlite.ts';
 
 const MAX_REL_PATH_LENGTH = 300;
@@ -527,4 +530,194 @@ export async function statFile(userId: string, relPath: string): Promise<Workspa
   const stats = await fs.stat(path.join(workspaceFilesDir(userId), rel)).catch(() => null);
 
   return stats?.isFile() ? fileNode(userId, rel, stats) : null;
+}
+
+// ---------------------------------------------------------------------------
+// Upload primitives: a new file of the area from a stream of bytes.
+// ---------------------------------------------------------------------------
+
+// The folder an upload lands in: the parent of the path must be a folder
+// that really lies inside the area (the realpath rule of statWritable — a
+// link to a folder outside does not carry the upload there). Null — no such
+// folder (the edge answers 404). Nothing is created: an upload goes into a
+// folder that is there.
+export async function uploadFolder(userId: string, relPath: string): Promise<string | null> {
+  const absPath = resolveFilePath(userId, relPath);
+  const [areaReal, parentReal] = await Promise.all([
+    fs.realpath(workspaceFilesDir(userId)).catch(() => null),
+    fs.realpath(path.dirname(absPath)).catch(() => null),
+  ]);
+
+  if (areaReal === null || parentReal === null) {
+    return null;
+  }
+
+  const inside = parentReal === areaReal || parentReal.startsWith(areaReal + path.sep);
+  const folder = inside ? await fs.stat(parentReal).catch(() => null) : null;
+
+  return folder?.isDirectory() ? parentReal : null;
+}
+
+// The bytes of an upload while they arrive: a file of the workspace's tmp/
+// (workspaceTmpDir — outside the area, so no listing shows it, on the same
+// volume, so placeUpload links it into place). The source is the caller's
+// stream, already limited; a source that fails (the client gone, the limit
+// passed) removes the temp file and rethrows.
+export async function receiveUpload(userId: string, source: NodeJS.ReadableStream): Promise<string> {
+  const dir = workspaceTmpDir(userId);
+
+  await fs.mkdir(dir, { recursive: true });
+
+  const temp = path.join(dir, `.upload-${randomBytes(8).toString('hex')}`);
+
+  try {
+    await pipeline(source, createWriteStream(temp, { flags: 'wx' }));
+  } catch (error) {
+    await fs.rm(temp, { force: true });
+    throw error;
+  }
+
+  return temp;
+}
+
+// What a clash of names does: create — refuse (the answer is "exists");
+// replace — the received file takes the name of the existing one; keep —
+// the received file takes the first free numbered name ("name (2).ext").
+export type UploadMode = 'create' | 'replace' | 'keep';
+
+export type PlacedUpload = { kind: 'placed'; path: string; stats: Stats } | { kind: 'exists' } | { kind: 'not_a_file' };
+
+// The highest number keep tries before it gives up (a folder of thousands of
+// copies of one name is not a case to serve).
+const KEEP_MAX = 10_000;
+
+// A new entry made of a temp file: a hard link, which refuses an existing
+// entry (EEXIST) — the "create, never overwrite" step; across volumes (a
+// file area mounted apart from tmp/) an exclusive copy does the same.
+async function linkNew(temp: string, absPath: string): Promise<void> {
+  try {
+    await fs.link(temp, absPath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EXDEV') {
+      throw error;
+    }
+
+    await fs.copyFile(temp, absPath, fsConstants.COPYFILE_EXCL);
+  }
+}
+
+function isExists(error: unknown): boolean {
+  return (error as NodeJS.ErrnoException).code === 'EEXIST';
+}
+
+// Puts a received temp file at the path (inside a folder uploadFolder has
+// approved): a new entry that refuses an existing one (linkNew) — so a file
+// that appeared since the client looked at the folder is never overwritten
+// unasked — or, for replace, the new bytes linked beside the existing
+// regular file and renamed over it in one step (a folder or a symbolic link
+// under the name is not replaced). The temp file is gone afterwards
+// whatever the outcome. The caller holds the write lock of the path
+// (withFileWriteLock): two uploads of one name end as one file and one
+// "exists", or two numbered files.
+export async function placeUpload(userId: string, relPath: string, temp: string, mode: UploadMode): Promise<PlacedUpload> {
+  const rel = sanitizeRelPath(relPath);
+
+  try {
+    if (mode === 'replace') {
+      const absPath = resolveFilePath(userId, rel);
+      const existing = await fs.lstat(absPath).catch(() => null);
+
+      if (existing && !existing.isFile()) {
+        return { kind: 'not_a_file' };
+      }
+
+      const sibling = path.join(path.dirname(absPath), `.write-${randomBytes(6).toString('hex')}.tmp`);
+
+      await linkNew(temp, sibling);
+
+      try {
+        await fs.rename(sibling, absPath);
+      } catch (error) {
+        await fs.rm(sibling, { force: true });
+        throw error;
+      }
+
+      return { kind: 'placed', path: rel, stats: await fs.stat(absPath) };
+    }
+
+    for (let n = 1; n <= (mode === 'keep' ? KEEP_MAX : 1); n += 1) {
+      const candidate = numberedName(rel, n);
+      const absPath = resolveFilePath(userId, candidate);
+
+      try {
+        await linkNew(temp, absPath);
+      } catch (error) {
+        if (isExists(error)) {
+          continue;
+        }
+
+        throw error;
+      }
+
+      return { kind: 'placed', path: candidate, stats: await fs.stat(absPath) };
+    }
+
+    return { kind: 'exists' };
+  } finally {
+    await fs.rm(temp, { force: true });
+  }
+}
+
+// The SHA-256 of a file's bytes, read as a stream.
+export async function fileDigest(absPath: string): Promise<string> {
+  const hash = createHash('sha256');
+
+  await pipeline(createReadStream(absPath), hash);
+
+  return hash.digest('hex');
+}
+
+// A stored file imported without a destination (workspace_import_file
+// without path): it never overwrites. At the name itself, then at "name
+// (2).ext", "name (3).ext"…: a free name takes the temp file; a regular file
+// with the same bytes (size, then SHA-256 — `digest` is the temp file's) is
+// the same import done before and its path is the answer (reused); anything
+// else under the name is passed by. The folder must exist; the temp file
+// is gone afterwards.
+export async function placeImport(userId: string, relPath: string, temp: string, digest: string): Promise<{ path: string; stats: Stats; reused: boolean }> {
+  const rel = sanitizeRelPath(relPath);
+
+  try {
+    const size = (await fs.stat(temp)).size;
+
+    for (let n = 1; n <= KEEP_MAX; n += 1) {
+      const candidate = numberedName(rel, n);
+      const absPath = resolveFilePath(userId, candidate);
+      const existing = await fs.lstat(absPath).catch(() => null);
+
+      if (existing) {
+        if (existing.isFile() && existing.size === size && (await fileDigest(absPath)) === digest) {
+          return { path: candidate, stats: existing, reused: true };
+        }
+
+        continue;
+      }
+
+      try {
+        await linkNew(temp, absPath);
+      } catch (error) {
+        if (isExists(error)) {
+          continue;
+        }
+
+        throw error;
+      }
+
+      return { path: candidate, stats: await fs.stat(absPath), reused: false };
+    }
+
+    throw new Error(`No free name for "${rel}" after ${KEEP_MAX} tries`);
+  } finally {
+    await fs.rm(temp, { force: true });
+  }
 }

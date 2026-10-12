@@ -9,6 +9,9 @@ export type ApiErrorBody = {
   error: {
     code: string;
     message: string;
+    // The files a message was refused for (400 file_not_accepted of
+    // POST /api/threads/:id/messages): the composer marks their chips.
+    fileIds?: string[];
   };
 };
 
@@ -214,13 +217,20 @@ export type ThreadEventsResponse = {
 // user.message to one of the session's own threads (the main thread or an
 // active child); the event comes back as written. A thread that is not
 // active answers 409 (thread_closed), a headless one 409 (thread_headless).
+// A message is text, files or both: fileIds are stored files of the
+// workspace (uploaded through POST /api/files), at most 20; one that is not
+// the session's (foreign, missing) refuses the whole message — 400
+// file_not_accepted naming them in error.fileIds. The event carries the
+// files as every channel writes them: text (null without one), blocks and
+// files (InboundFile).
 //
 // GET /api/files/:fileId streams a stored file of the workspace (the
 // attachments of user/agent messages: payload.files[].fileId, content
 // blocks' fileId) — inline, ?download=1 for an attachment; a foreign or
 // missing id is the same 404.
 export type PostThreadMessageRequest = {
-  text: string;
+  text?: string;
+  fileIds?: string[];
 };
 
 export type PostThreadMessageResponse = {
@@ -313,6 +323,18 @@ export type WorkspaceWriteResponse = {
   etag: string;
 };
 
+// POST /files/<rel>[?conflict=replace|keep] creates a file of the area from
+// the request body (the bytes of one file, any type, up to 2 GB — 413
+// too_large). The folder must exist (404 otherwise). A taken name is a 409
+// `exists` unless the request answers the clash: replace — the new bytes
+// take the name (a folder or a link under it is not replaced: 409
+// not_a_file); keep — the first free "name (n).ext". A full volume is a 507
+// no_space. The answer (201) is the file's node as placed: its path is the
+// name the file got. No event is written.
+export type WorkspaceUploadResponse = {
+  file: WorkspaceFileMeta;
+};
+
 // ---------------------------------------------------------------------------
 // A stored file's facts by id: GET /api/files/:fileId/meta, under the
 // session with the ownership rule of the bytes (GET /api/files/:fileId) — a
@@ -332,6 +354,14 @@ export type StoredFileMeta = {
 };
 
 export type FileMetaResponse = { file: StoredFileMeta };
+
+// POST /api/files: an attachment of the composer — the request body is the
+// bytes of one file, its name in X-Balabash-Filename (percent-encoded), its
+// type in Content-Type, its length declared (411 length_required without
+// one), up to 2 GB (413 too_large); a full volume is a 507 no_space. The
+// answer (201) is the stored file's facts: uploaded, ready to be named by a
+// message's fileIds. A request cut off midway stores nothing.
+export type UploadFileResponse = { file: StoredFileMeta };
 
 // ---------------------------------------------------------------------------
 // LLM request telemetry (read-only): the llm_requests table minus rawUsage,

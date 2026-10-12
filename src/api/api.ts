@@ -6,7 +6,7 @@
 // instead of falling through to other middleware.
 
 import { createReadStream } from 'node:fs';
-import { stat } from 'node:fs/promises';
+import fs, { stat } from 'node:fs/promises';
 import type { BigIntStats } from 'node:fs';
 import { Readable } from 'node:stream';
 import Router from '@koa/router';
@@ -24,9 +24,14 @@ import { getLiveHub } from '../core/live.ts';
 import { appendEvent } from '../core/append.ts';
 import { registryMutation } from '../core/registry-events.ts';
 import { THREAD_CANCEL, THREAD_INTERRUPT } from '../core/envelope.ts';
+import { fileContentBlock, messageFile } from '../core/file-blocks.ts';
 import type { FileRef, Thread, ThreadStatus } from '../core/contract.ts';
-import { WorkspacePathError, fileNodeOf, listDir, replaceFileContent, resolveFilePath, sanitizeRelPath, statFile, statWritable, withFileWriteLock } from '../workspace/files.ts';
-import { FileNotFoundError, getFile, getUserFile, openFileContent } from '../files/index.ts';
+import { WorkspacePathError, fileNodeOf, guessContentType, listDir, placeUpload, receiveUpload, replaceFileContent, resolveFilePath, sanitizeRelPath, statFile, statWritable, uploadFolder, withFileWriteLock } from '../workspace/files.ts';
+import type { UploadMode } from '../workspace/files.ts';
+import { BodyTooLargeError, clientLeft, declaredLength, isNoSpace, limitedBody } from './upload-body.ts';
+import { UPLOAD_MAX_BYTES } from '../utils/file-names.ts';
+import { FileNotFoundError, getFile, getUserFile, ingestFile, openFileContent } from '../files/index.ts';
+import type { StorageBody } from '../files/storage.ts';
 import { verifyDownloadLink } from '../files/storage/local.ts';
 import { forgetExternalServerSecrets, getExternalServerSecretRequest, isExternalSecretServer, openExternalServerCredentialsRequest, provisionExternalServerSecrets } from '../capabilities/external-secrets.ts';
 import { listClaudeConnectorTargets, listExternalSecretTargets, refreshExternalServers } from '../capabilities/tool-manager.ts';
@@ -50,6 +55,7 @@ import { buildSnapshot } from './snapshot.ts';
 import { buildSystem } from './system.ts';
 import { checkMutationOrigin } from './origin.ts';
 import type {
+  ApiErrorBody,
   AppsResponse,
   ConnectLinkResponse,
   ForgetInstallationSecretsResponse,
@@ -88,8 +94,10 @@ import type {
   ThreadResponse,
   ThreadsResponse,
   WorkspaceNodeResponse,
+  WorkspaceUploadResponse,
   WorkspaceWriteResponse,
   WorkspacesResponse,
+  UploadFileResponse,
 } from './contract.ts';
 
 function sendError(ctx: Context, status: number, code: string, message: string): void {
@@ -601,7 +609,31 @@ router.get('/threads/:id/events', requireSession, async ctx => {
 // operator's), the source marks the channel for adapters and renderers.
 
 const MESSAGE_TEXT_MAX_CHARS = 20_000;
+const MESSAGE_FILES_MAX = 20;
 const WEB_IDENTITY = { username: 'operator' };
+
+// The files of a message: the stored files of the session's workspace,
+// each by the rule of every model- and user-facing lookup (getUserFile — a
+// foreign file and a missing one are the same refusal). The refused ids
+// come back to name the chips that were not accepted.
+async function messageFiles(userId: string, fileIds: string[]): Promise<{ files: FileRef[]; refused: string[] }> {
+  const files: FileRef[] = [];
+  const refused: string[] = [];
+
+  for (const fileId of fileIds) {
+    try {
+      files.push(await getUserFile(userId, fileId));
+    } catch (error) {
+      if (!(error instanceof FileNotFoundError)) {
+        throw error;
+      }
+
+      refused.push(fileId);
+    }
+  }
+
+  return { files, refused };
+}
 
 router.post('/threads/:id/messages', requireSession, async ctx => {
   const thread = await requireOwnThread(ctx, ctx.params.id);
@@ -627,13 +659,14 @@ router.post('/threads/:id/messages', requireSession, async ctx => {
   if (!body) {
     return;
   }
-  const text = typeof body.text === 'string' ? body.text.trim() : '';
 
-  if (!text) {
-    sendError(ctx, 400, 'bad_request', 'text must be a non-empty string');
+  if (body.text !== undefined && body.text !== null && typeof body.text !== 'string') {
+    sendError(ctx, 400, 'bad_request', 'text must be a string');
 
     return;
   }
+
+  const text = typeof body.text === 'string' ? body.text.trim() : '';
 
   if (text.length > MESSAGE_TEXT_MAX_CHARS) {
     sendError(ctx, 400, 'bad_request', `text must be at most ${MESSAGE_TEXT_MAX_CHARS} characters`);
@@ -641,12 +674,52 @@ router.post('/threads/:id/messages', requireSession, async ctx => {
     return;
   }
 
+  const rawFileIds = body.fileIds ?? [];
+
+  if (!Array.isArray(rawFileIds) || rawFileIds.some(fileId => typeof fileId !== 'string' || !fileId.trim())) {
+    sendError(ctx, 400, 'bad_request', 'fileIds must be an array of file ids');
+
+    return;
+  }
+
+  const fileIds = [...new Set((rawFileIds as string[]).map(fileId => fileId.trim()))];
+
+  if (fileIds.length > MESSAGE_FILES_MAX) {
+    sendError(ctx, 400, 'bad_request', `A message carries at most ${MESSAGE_FILES_MAX} files`);
+
+    return;
+  }
+
+  if (!text && fileIds.length === 0) {
+    sendError(ctx, 400, 'bad_request', 'A message needs text or files');
+
+    return;
+  }
+
+  const { files, refused } = await messageFiles(thread.userId, fileIds);
+
+  if (refused.length > 0) {
+    ctx.status = 400;
+    ctx.body = prepareObject({
+      error: { code: 'file_not_accepted', message: refused.length === 1 ? '1 file was not accepted' : `${refused.length} files were not accepted`, fileIds: refused },
+    } satisfies ApiErrorBody);
+
+    return;
+  }
+
+  // The form a channel writes (Telegram, CCR): the text — null for a
+  // message of files alone — and, with files, their blocks and their facts.
   const result = await appendEvent({
     type: 'user.message',
     actor: 'user',
     userId: thread.userId,
     threadId: thread.id,
-    payload: { text, identity: WEB_IDENTITY, source: 'web' },
+    payload: {
+      text: text || null,
+      ...(files.length ? { blocks: files.map(fileContentBlock), files: files.map(messageFile) } : {}),
+      identity: WEB_IDENTITY,
+      source: 'web',
+    },
   });
 
   if (!result.written) {
@@ -840,6 +913,79 @@ router.get('/files/:fileId/meta', requireSession, async ctx => {
   };
 
   ctx.set('cache-control', 'private, max-age=3600');
+  ctx.body = prepareObject(response);
+});
+
+// An attachment of the composer: POST /api/files stores the request body —
+// the bytes of one file — as a stored file of the workspace (scope web,
+// the session's workspace), streamed into storage (ingestFile), never held
+// in memory. The name rides in X-Balabash-Filename (percent-encoded UTF-8:
+// a header is ASCII), the type in Content-Type (none or a generic one — the
+// name's extension). The length must be declared — the storage takes the
+// object at that length (411 without one) — and is held to UPLOAD_MAX_BYTES
+// before a byte is read and while reading (413). The row is written only
+// once the bytes are stored, so there is no "pending" file: the answer
+// (201, the file's facts) means uploaded; a client that leaves midway has
+// cancelled — nothing is stored, nobody is answered. Nothing is ever
+// deleted from storage: a file removed from a draft stays, unreferenced.
+const UPLOAD_NAME_MAX = 255;
+const GENERIC_CONTENT_TYPES = new Set(['', 'application/octet-stream', 'binary/octet-stream']);
+
+router.post('/files', requireSession, async ctx => {
+  const declared = declaredLength(ctx.get('content-length'));
+
+  if (declared === null || Number.isNaN(declared)) {
+    sendError(ctx, 411, 'length_required', 'The upload must declare its Content-Length');
+
+    return;
+  }
+
+  if (declared > UPLOAD_MAX_BYTES) {
+    sendError(ctx, 413, 'too_large', 'The file is larger than 2 GB');
+
+    return;
+  }
+
+  let name: string;
+
+  try {
+    name = decodeURIComponent(ctx.get('x-balabash-filename')).split(/[/\\]/).pop()?.trim() ?? '';
+  } catch {
+    name = '';
+  }
+
+  if (!name || name.length > UPLOAD_NAME_MAX || /[\u0000-\u001f\u007f]/.test(name)) {
+    sendError(ctx, 400, 'bad_request', `X-Balabash-Filename must name the file (percent-encoded, at most ${UPLOAD_NAME_MAX} characters)`);
+
+    return;
+  }
+
+  const declaredType = (ctx.get('content-type').split(';')[0] ?? '').trim().toLowerCase();
+  const contentType = GENERIC_CONTENT_TYPES.has(declaredType) ? guessContentType(name) : declaredType;
+  let file: FileRef;
+
+  try {
+    file = await ingestFile({
+      body: limitedBody(ctx.req, declared) as StorageBody,
+      userId: ctx.state.userId as string,
+      originalFilename: name,
+      contentType,
+      sizeBytes: declared,
+      scope: 'web',
+    });
+  } catch (error) {
+    if (!sendUploadRefusal(ctx, error)) {
+      throw error;
+    }
+
+    return;
+  }
+
+  const response: UploadFileResponse = {
+    file: { fileId: file.id, name: file.originalFilename, contentType: file.contentType, sizeBytes: file.sizeBytes, width: file.width, height: file.height },
+  };
+
+  ctx.status = 201;
   ctx.body = prepareObject(response);
 });
 
@@ -1820,6 +1966,138 @@ filesRouter.put('/files/*path', requireSession, async ctx => {
     ctx.body = prepareObject(response);
   });
 });
+
+// The upload of the file area: POST /files/*path creates the file at the
+// path from the request body — the bytes of one file, streamed into a temp
+// file of the workspace and linked into place (placeUpload), never held in
+// memory. The folder must be there and inside the area (uploadFolder — the
+// realpath rule of the editor's write); the file must not: a name already
+// taken is a 409 `exists` — the console asks the operator first, so this is
+// the guard against a listing out of date — unless the request names the
+// answer to a clash: ?conflict=replace (the new bytes take the name; a
+// folder or a link under it is not replaced, 409 `not_a_file`) or
+// ?conflict=keep (the first free "name (n).ext"). The answer is the node of
+// the file as placed — its path is the one to show. The limit is
+// UPLOAD_MAX_BYTES, refused by the declared length before a byte is read
+// and counted while reading (413 `too_large`); a full volume is a 507
+// `no_space`; the client leaving midway is the cancel — the temp file goes,
+// nothing is placed, nobody is answered. No event is written: the file area
+// is not the log.
+const UPLOAD_CONFLICT_MODES: Record<string, UploadMode> = { replace: 'replace', keep: 'keep' };
+
+filesRouter.post('/files/*path', requireSession, async ctx => {
+  const userId = ctx.state.userId as string;
+  const relPath = parseFilesPath(ctx);
+
+  if (relPath === null) {
+    return;
+  }
+
+  const conflict = queryValue(ctx.query.conflict);
+  const mode = conflict === undefined ? 'create' : UPLOAD_CONFLICT_MODES[conflict];
+
+  if (!mode) {
+    sendError(ctx, 400, 'bad_request', 'conflict must be "replace" or "keep"');
+
+    return;
+  }
+
+  const declared = declaredLength(ctx.get('content-length'));
+
+  if (Number.isNaN(declared)) {
+    sendError(ctx, 400, 'bad_request', 'Malformed Content-Length');
+
+    return;
+  }
+
+  if (declared !== null && declared > UPLOAD_MAX_BYTES) {
+    sendError(ctx, 413, 'too_large', 'The file is larger than 2 GB');
+
+    return;
+  }
+
+  if (!(await uploadFolder(userId, relPath))) {
+    sendError(ctx, 404, 'not_found', 'No such folder in the workspace file area');
+
+    return;
+  }
+
+  // The listing the client checked may be out of date: a taken name is
+  // refused before the bytes travel (and again at the placement).
+  if (mode === 'create' && (await fs.lstat(resolveFilePath(userId, relPath)).catch(() => null))) {
+    sendError(ctx, 409, 'exists', 'A file with this name already exists');
+
+    return;
+  }
+
+  let temp: string;
+
+  try {
+    temp = await receiveUpload(userId, limitedBody(ctx.req, declared ?? UPLOAD_MAX_BYTES));
+  } catch (error) {
+    if (!sendUploadRefusal(ctx, error)) {
+      throw error;
+    }
+
+    return;
+  }
+
+  try {
+    await withFileWriteLock(userId, relPath, async () => {
+      const placed = await placeUpload(userId, relPath, temp, mode);
+
+      if (placed.kind === 'exists') {
+        sendError(ctx, 409, 'exists', 'A file with this name already exists');
+
+        return;
+      }
+
+      if (placed.kind === 'not_a_file') {
+        sendError(ctx, 409, 'not_a_file', 'A folder or a link has this name — it is not replaced');
+
+        return;
+      }
+
+      const response: WorkspaceUploadResponse = { file: await fileNodeOf(userId, placed.path, placed.stats) };
+
+      ctx.status = 201;
+      ctx.body = prepareObject(response);
+    });
+  } catch (error) {
+    if (!sendUploadRefusal(ctx, error)) {
+      throw error;
+    }
+  }
+});
+
+// The refusals an upload's body may end in, answered; false for a failure
+// of the app (the middleware's 500). The client gone is answered by
+// nothing (nobody reads it); a body past the limit is drained, so the 413
+// reaches a client still sending instead of a reset.
+function sendUploadRefusal(ctx: Context, error: unknown): boolean {
+  if (clientLeft(ctx.req)) {
+    ctx.status = 499;
+    ctx.body = '';
+
+    return true;
+  }
+
+  if (error instanceof BodyTooLargeError) {
+    ctx.req.resume();
+    sendError(ctx, 413, 'too_large', 'The file is larger than 2 GB');
+
+    return true;
+  }
+
+  if (isNoSpace(error)) {
+    ctx.req.resume();
+    sendError(ctx, 507, 'no_space', 'Not enough space on the server');
+
+    return true;
+  }
+
+  return false;
+}
 
 // The validator of the workspace bytes: the size and the inode's two times
 // in nanoseconds. The modification time is what a write moves (sub-second,

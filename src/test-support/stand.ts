@@ -86,7 +86,8 @@ export type Reply = {
 export type RequestOptions = {
   // A JSON body (serialized as is — the tests of the body rule send text).
   body?: unknown;
-  // Raw body text, sent as application/json.
+  // Raw body text, sent as application/json unless headers name another
+  // content-type (an upload's bytes).
   text?: string;
   // The Cookie header; the stand's session by default, null for none.
   cookie?: string | null;
@@ -333,7 +334,7 @@ function send(port: number, method: string, urlPath: string, options: RequestOpt
   const text = options.text ?? (options.body === undefined ? undefined : JSON.stringify(options.body));
 
   if (text !== undefined) {
-    headers['content-type'] = 'application/json';
+    headers['content-type'] ??= 'application/json';
     headers['content-length'] = String(Buffer.byteLength(text));
   }
 

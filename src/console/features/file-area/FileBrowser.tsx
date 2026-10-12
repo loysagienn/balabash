@@ -9,14 +9,21 @@
 // Query keeps older data through a failed refetch: a 404 still means the
 // path is gone, any other failure keeps the rows under a banner with Retry.
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { WorkspaceFileMeta, WorkspaceFolderMeta } from '../../../api/contract.ts';
 import type { AppRoute } from '../../lib/router/routes.ts';
 import { useLinkProps, useLinkTargets } from '../../lib/router/Link.tsx';
 import { useAppDispatch } from '../../store/hooks.ts';
 import { routeTo } from '../../store/router/actions.ts';
-import { fileSize, fileTimeLabel, folderTimeLabel } from '../../lib/format/index.ts';
+import { countOf, fileSize, fileTimeLabel, folderTimeLabel } from '../../lib/format/index.ts';
+import { pick } from '../../lib/upload/pick.ts';
+import { useFileDrop } from '../../lib/upload/useFileDrop.ts';
+import { uploadFiles } from '../../store/uploads/actions.ts';
+import type { ExistingEntry } from '../../store/uploads/actions.ts';
+import { Btn } from '../../ui/Btn/Btn.tsx';
+import { Drop } from '../../ui/Drop/Drop.tsx';
+import { IconBtn } from '../../ui/IconBtn/IconBtn.tsx';
 import { useNow } from '../../lib/format/useNow.ts';
 import { Crumbs } from '../../ui/Crumbs/Crumbs.tsx';
 import type { Crumb } from '../../ui/Crumbs/Crumbs.tsx';
@@ -31,6 +38,7 @@ import { canEdit, editedFile } from './editor.logic.ts';
 import { FileEditor } from './FileEditor.tsx';
 import { FileMenu } from './FileMenu.tsx';
 import { FilePreview } from './FilePreview.tsx';
+import { ClashDialog, UploadPanel } from './FileUploads.tsx';
 import { crumbSegments, folderCaption, isNotFound, joinPath, listingSummary, nameOf, nodeOf, parentOf, underRoot } from './node.ts';
 import type { DirListing } from './node.ts';
 import { useWorkspaceNode } from './queries.ts';
@@ -92,11 +100,11 @@ function Row({ file, selected, now, routeFor }: { file: WorkspaceFileMeta; selec
   );
 }
 
-function Rows({ listing, selectedPath, now, routeFor }: { listing: DirListing; selectedPath: string | null; now: Date; routeFor: (path: string) => AppRoute }) {
+function Rows({ listing, selectedPath, now, routeFor, onUpload }: { listing: DirListing; selectedPath: string | null; now: Date; routeFor: (path: string) => AppRoute; onUpload?: () => void }) {
   if (listing.folders.length === 0 && listing.files.length === 0) {
     return (
-      <Empty icon="folder-open" title="Folder is empty">
-        Agents put their results here.
+      <Empty icon="folder-open" title="Folder is empty" action={onUpload ? 'Upload' : undefined} actionIcon="upload" onAction={onUpload}>
+        {onUpload ? 'Drag files here or use the button to upload. Agents put their results here too.' : 'Agents put their results here.'}
       </Empty>
     );
   }
@@ -165,6 +173,46 @@ export function FileBrowser({ root, rootLabel, lead, path, view, routeFor, pins,
   // out of it (../ from a project's folder) is the Files section's.
   const linkRoute = (target: string): AppRoute => (underRoot(root, target) ? routeFor(target) : { key: 'files', path: target });
 
+  // Uploads (design rule 23): into the folder shown — the Upload button
+  // (the system picker), files dropped anywhere over the area, the empty
+  // folder's Upload. The listing's names are what a clash is checked
+  // against; the editor and a path that is gone take nothing.
+  const picker = useRef<HTMLInputElement>(null);
+  const canUpload = !gone && !editing && kind !== null && (kind === 'dir' || listing !== null);
+  const upload = (files: File[]) => {
+    const existing: ExistingEntry[] = listing
+      ? [
+          ...listing.files.map(entry => ({ name: nameOf(entry.path), sizeBytes: entry.sizeBytes, modifiedAt: entry.modifiedAt, folder: false })),
+          ...listing.folders.map(entry => ({ name: nameOf(entry.path), sizeBytes: null, modifiedAt: entry.modifiedAt, folder: true })),
+        ]
+      : [];
+
+    dispatch(uploadFiles(listPath, pick(files), existing));
+  };
+  const openPicker = () => picker.current?.click();
+  const { drag, handlers: dropHandlers } = useFileDrop(canUpload, upload);
+  const uploadButtons = canUpload ? (
+    <>
+      <Btn label="Upload" icon="upload" size="sm" className="fil-up-btn" onClick={openPicker} />
+      <IconBtn icon="upload" label="Upload" size="sm" className="fil-up-icon" onClick={openPicker} />
+      <input
+        ref={picker}
+        type="file"
+        multiple
+        hidden
+        onChange={event => {
+          const files = Array.from(event.currentTarget.files ?? []);
+
+          event.currentTarget.value = '';
+
+          if (files.length > 0) {
+            upload(files);
+          }
+        }}
+      />
+    </>
+  ) : undefined;
+
   let body;
 
   if (gone) {
@@ -174,7 +222,7 @@ export function FileBrowser({ root, rootLabel, lead, path, view, routeFor, pins,
       </Empty>
     );
   } else if (listing) {
-    body = <Rows listing={listing} selectedPath={kind === 'file' ? path : null} now={now} routeFor={routeFor} />;
+    body = <Rows listing={listing} selectedPath={kind === 'file' ? path : null} now={now} routeFor={routeFor} onUpload={canUpload ? openPicker : undefined} />;
   } else if (listQuery.error) {
     body = (
       <Empty icon="cloud-off" state="err" title="Couldn’t load the folder" action="Retry" actionIcon="refresh-cw" onAction={() => void listQuery.refetch()}>
@@ -192,9 +240,9 @@ export function FileBrowser({ root, rootLabel, lead, path, view, routeFor, pins,
   }
 
   return (
-    <FileArea view={kind === 'file' ? 'preview' : 'list'} split={kind === 'file' && !editing} className={className}>
+    <FileArea view={kind === 'file' ? 'preview' : 'list'} split={kind === 'file' && !editing} drop={dropHandlers} className={className}>
       <FaList>
-        <FaBar>
+        <FaBar end={uploadButtons}>
           <Crumbs items={crumbs} current={current} lead={lead} fa />
         </FaBar>
         {pins}
@@ -224,6 +272,9 @@ export function FileBrowser({ root, rootLabel, lead, path, view, routeFor, pins,
           )}
         </FaPreview>
       ) : null}
+      {drag ? <Drop path={listPath || rootLabel} sub={countOf(drag.count, 'file')} /> : null}
+      <UploadPanel routeFor={linkRoute} rootLabel={rootLabel} />
+      <ClashDialog rootLabel={rootLabel} />
     </FileArea>
   );
 }

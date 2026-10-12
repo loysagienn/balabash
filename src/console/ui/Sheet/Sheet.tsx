@@ -26,12 +26,15 @@ export type SheetProps = {
   // The confirm button submits this form (so Enter in a field confirms).
   form?: string;
   onConfirm?: () => void;
+  // A second ordinary action under the main one (design: Sheet `alt`).
+  alt?: string;
+  onAlt?: () => void;
   cancel?: string;
   onClose: () => void;
   children?: ReactNode;
 };
 
-export function Sheet({ label, title, desc, confirm, confirmVariant = 'primary', confirmIcon, confirmDisabled, busy, form, onConfirm, cancel, onClose, children }: SheetProps) {
+export function Sheet({ label, title, desc, confirm, confirmVariant = 'primary', confirmIcon, confirmDisabled, busy, form, onConfirm, alt, onAlt, cancel, onClose, children }: SheetProps) {
   return (
     <Overlay onClose={onClose}>
       <div className="sheet" role="dialog" aria-modal="true" aria-label={label} aria-busy={busy ? 'true' : undefined} data-dock="bottom" tabIndex={-1}>
@@ -40,6 +43,7 @@ export function Sheet({ label, title, desc, confirm, confirmVariant = 'primary',
         {desc ? <p className="sheet-d">{desc}</p> : null}
         {children ? <div className="sheet-b">{children}</div> : null}
         {confirm ? <Btn label={confirm} icon={confirmIcon} variant={confirmVariant} block busy={busy} disabled={confirmDisabled} type={form ? 'submit' : 'button'} form={form} onClick={form ? undefined : onConfirm} /> : null}
+        {alt ? <Btn label={alt} block onClick={onAlt} /> : null}
         {cancel ? <Btn label={cancel} variant="ghost" block onClick={onClose} /> : null}
       </div>
     </Overlay>

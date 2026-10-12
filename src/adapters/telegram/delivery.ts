@@ -17,7 +17,7 @@ import type { Consumer } from '../../core/consumers.ts';
 import type { ContentBlock, Event, ThreadSummary } from '../../core/contract.ts';
 import { TERMINAL_TYPES, THREAD_NOTIFICATION, THREAD_STARTED } from '../../core/envelope.ts';
 import { getThread } from '../../core/threads.ts';
-import { getFile, getFileDownloadUrl, getFileSizeBytes, openFileContent } from '../../files/index.ts';
+import { getFile, getFileDownloadUrl, getFileSizeBytes, getUserFile, openFileContent } from '../../files/index.ts';
 import { MAX_PRESIGN_TTL_SECONDS } from '../../files/storage.ts';
 import { formatTelegramMarkdown, TELEGRAM_MESSAGE_LIMIT } from './format.ts';
 
@@ -362,6 +362,14 @@ export function startTelegramDelivery({ bot }: { bot: Bot }): Consumer {
 
     for (const fileId of fileIds) {
       try {
+        // Only the thread's workspace's own files leave for its chat: a
+        // summary recorded before end_thread checked its fileIds may name
+        // another's (getUserFile refuses it like a missing one).
+        if (!event.userId) {
+          throw new Error('the summary names no workspace');
+        }
+
+        await getUserFile(event.userId, fileId);
         await sendFile(target, fileId);
       } catch (error) {
         console.error(`[telegram-delivery] failed to send summary file ${fileId}:`, error);

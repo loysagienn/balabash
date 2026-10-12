@@ -1,11 +1,11 @@
 // Interface state that is not data: the "More" sheet on the phone, toasts,
 // composer drafts per thread, whether a thread's message or command is on
-// its way.
+// its way, the image viewer.
 // Navigation closes the sheet.
 
 import type { Action } from '../types.ts';
 import type { ThreadCommand } from '../threads/actions.ts';
-import type { ToastInput } from './actions.ts';
+import type { ToastInput, ViewerImage } from './actions.ts';
 
 export type Toast = ToastInput & { id: number };
 
@@ -23,9 +23,11 @@ export type UiState = {
   // Thread commands on their way (COMMAND_THREAD): the button stays busy
   // until the server answered — the outcome itself comes with the tail.
   threadCommands: Record<string, Partial<Record<ThreadCommand, true>>>;
+  // The image viewer, when open: the images and the one shown.
+  viewer: { images: ViewerImage[]; index: number } | null;
 };
 
-export const initialUi: UiState = { moreSheet: false, addWorkspace: false, toasts: [], nextToastId: 1, composerDrafts: {}, composerSending: {}, threadCommands: {} };
+export const initialUi: UiState = { moreSheet: false, addWorkspace: false, toasts: [], nextToastId: 1, composerDrafts: {}, composerSending: {}, threadCommands: {}, viewer: null };
 
 function withCommand(state: UiState, threadId: string, command: ThreadCommand, pending: boolean): UiState['threadCommands'] {
   const { [command]: current, ...rest } = state.threadCommands[threadId] ?? {};
@@ -54,8 +56,25 @@ export function uiReducer(state: UiState = initialUi, action: Action): UiState {
     case 'MORE_SHEET_OPEN':
       return { ...state, moreSheet: true };
     case 'MORE_SHEET_CLOSE':
-    case 'ROUTE_TO':
       return state.moreSheet ? { ...state, moreSheet: false } : state;
+    // Navigation closes the sheet and the viewer.
+    case 'ROUTE_TO':
+      return state.moreSheet || state.viewer ? { ...state, moreSheet: false, viewer: null } : state;
+    case 'VIEWER_OPEN':
+      return action.images.length ? { ...state, viewer: { images: action.images, index: Math.max(0, Math.min(action.index, action.images.length - 1)) } } : state;
+    case 'VIEWER_STEP': {
+      const viewer = state.viewer;
+
+      if (!viewer || viewer.images.length < 2) {
+        return state;
+      }
+
+      const count = viewer.images.length;
+
+      return { ...state, viewer: { ...viewer, index: (((viewer.index + action.by) % count) + count) % count } };
+    }
+    case 'VIEWER_CLOSE':
+      return state.viewer ? { ...state, viewer: null } : state;
     case 'ADD_WORKSPACE_OPEN':
       return state.addWorkspace ? state : { ...state, addWorkspace: true };
     case 'ADD_WORKSPACE_CLOSE':

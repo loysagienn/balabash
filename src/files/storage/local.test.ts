@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, readFile } from 'node:fs/promises';
+import { mkdtemp, readdir, rm, readFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { Readable } from 'node:stream';
@@ -33,6 +33,27 @@ async function readAll(stream: ReadableStream<Uint8Array>): Promise<string> {
 
   return Buffer.concat(chunks).toString('utf8');
 }
+
+test('local driver: a body that fails midway leaves nothing under the key', async () => {
+  await withRoot(async root => {
+    const key = 'web/5a6b7c8d/cut.bin';
+    const failing = new Readable({
+      read() {
+        this.push(Buffer.from('first part'));
+        this.destroy(new Error('connection cut'));
+      },
+    });
+
+    await assert.rejects(writeLocalObject(root, key, failing), /connection cut/);
+    assert.equal(await localObjectSize(root, key), null);
+    // Neither the temp file nor the uuid folder stays behind.
+    assert.deepEqual(await readdir(path.join(root, 'web')), []);
+
+    // The key is free for a whole write afterwards.
+    assert.equal((await writeLocalObject(root, key, 'whole')).sizeBytes, 5);
+    assert.deepEqual(await readdir(path.join(root, 'web/5a6b7c8d')), ['cut.bin']);
+  });
+});
 
 test('local driver: write, read, size, delete under the root', async () => {
   await withRoot(async root => {

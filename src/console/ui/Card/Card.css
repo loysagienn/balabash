@@ -20,5 +20,6 @@
   .card[data-narrow="bare"] .loadmore{border-top:0}
   .card[data-narrow="bare"] .list:not([data-narrow]) :is(.row,.listgrp),.card[data-narrow="bare"] > .card-f{padding-inline:0}
   .card[data-narrow="bare"] .dtable{--dtable-edge:0px}
+  .card[data-narrow="bare"] .card-f{border-top:0}   /* no card edge to divide from: the line would sit under the last tile */
 }
 }

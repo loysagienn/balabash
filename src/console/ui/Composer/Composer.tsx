@@ -5,23 +5,39 @@
 // button (Shift+Enter, ⌘↵, Ctrl+↵ — a new line; on a phone Enter is a new
 // line too); busy — the message is on its way: the field stays
 // editable for the next draft, "Send" spins and nothing is sent until the
-// message is through; onAttach absent — no "Attach" button. The field
-// grows with the text up to eight lines (six in a narrow thread) through
-// CSS field-sizing, with a measured height where the browser lacks it.
+// message is through. Attachments (design rule 23): onFiles — the
+// paperclip opens the system's file picker and a paste of files hands them
+// over (pasted: true); the draft's chips (AttDraft) come as `attachments`,
+// above the text; `ready` — some attached file can go, so a message of
+// files alone may be sent; `wait` — something still uploads: Send is
+// disabled and the text says why in place of the hint; `refusal` — why the
+// last send was refused, a strip above the box (the draft stays whole).
+// onFiles absent — no "Attach" button. The field grows with the text up to
+// eight lines (six in a narrow thread) through CSS field-sizing, with a
+// measured height where the browser lacks it.
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import type { ReactNode } from 'react';
+import type { IconName } from '../Icon/Icon.tsx';
 import { IconBtn } from '../IconBtn/IconBtn.tsx';
+import { Note } from '../Note/Note.tsx';
 import { Kbd } from '../atoms/atoms.tsx';
 import { PHONE_MEDIA } from '../../lib/touch/pinch.ts';
 import { composerKeyAction, outgoingText } from './Composer.logic.ts';
 import './Composer.css';
+
+export type ComposerRefusal = { text: string; action?: string; actionIcon?: IconName; onAction?: () => void };
 
 export type ComposerProps = {
   to: string;
   value: string;
   onChange: (value: string) => void;
   onSend: (text: string) => void;
-  onAttach?: () => void;
+  onFiles?: (files: File[], how: { pasted: boolean }) => void;
+  attachments?: ReactNode;
+  ready?: boolean;
+  wait?: string;
+  refusal?: ComposerRefusal | null;
   busy?: boolean;
   disabled?: boolean;
   autoFocus?: boolean;
@@ -43,11 +59,38 @@ function insertLineBreak(node: HTMLTextAreaElement, onChange: (value: string) =>
   onChange(node.value);
 }
 
-export function Composer({ to, value, onChange, onSend, onAttach, busy, disabled, autoFocus }: ComposerProps) {
+export function Composer({ to, value, onChange, onSend, onFiles, attachments, ready, wait, refusal, busy, disabled, autoFocus }: ComposerProps) {
   const input = useRef<HTMLTextAreaElement>(null);
+  const picker = useRef<HTMLInputElement>(null);
+  const atts = useRef<HTMLDivElement>(null);
+  const [more, setMore] = useState(false);
   const placeholder = `Message ${to}…`;
   const text = outgoingText(value);
-  const canSend = text !== '' && !disabled && !busy;
+  const canSend = (text !== '' || ready === true) && !wait && !disabled && !busy;
+
+  // The phone's row of chips scrolls sideways and fades at the right edge
+  // only while more chips are past it.
+  useLayoutEffect(() => {
+    const row = atts.current;
+
+    if (!row) {
+      setMore(false);
+
+      return undefined;
+    }
+
+    const read = () => setMore(row.scrollWidth - row.scrollLeft - row.clientWidth > 1);
+    const observer = new ResizeObserver(read);
+
+    observer.observe(row);
+    read();
+    row.addEventListener('scroll', read, { passive: true });
+
+    return () => {
+      observer.disconnect();
+      row.removeEventListener('scroll', read);
+    };
+  }, [attachments]);
 
   // Fallback for browsers without field-sizing: the height follows the
   // content, the CSS max-height still caps it.
@@ -73,7 +116,19 @@ export function Composer({ to, value, onChange, onSend, onAttach, busy, disabled
 
   return (
     <div className="composer">
+      {refusal ? (
+        <div className="composer-note">
+          <Note state="err" icon="circle-alert" role="alert" action={refusal.action} actionIcon={refusal.actionIcon} actionVariant="ghost" onAction={refusal.onAction}>
+            {refusal.text}
+          </Note>
+        </div>
+      ) : null}
       <div className="composer-box">
+        {attachments ? (
+          <div ref={atts} className="composer-atts" data-more={more ? '' : undefined}>
+            {attachments}
+          </div>
+        ) : null}
         <textarea
           ref={input}
           className="composer-input"
@@ -84,6 +139,14 @@ export function Composer({ to, value, onChange, onSend, onAttach, busy, disabled
           disabled={disabled}
           autoFocus={autoFocus}
           onChange={event => onChange(event.target.value)}
+          onPaste={event => {
+            const files = Array.from(event.clipboardData.files);
+
+            if (onFiles && files.length > 0) {
+              event.preventDefault();
+              onFiles(files, { pasted: true });
+            }
+          }}
           onKeyDown={event => {
             const action = composerKeyAction(event.nativeEvent, isPhone());
 
@@ -97,19 +160,35 @@ export function Composer({ to, value, onChange, onSend, onAttach, busy, disabled
           }}
         />
         <div className="composer-f">
-          {onAttach ? (
-            <IconBtn
-              icon="paperclip"
-              label="Attach file"
-              size="sm"
-              className="composer-attach"
-              disabled={disabled}
-              onClick={onAttach}
-            />
+          {onFiles ? (
+            <>
+              <IconBtn icon="paperclip" label="Attach file" size="sm" className="composer-attach" disabled={disabled} onClick={() => picker.current?.click()} />
+              <input
+                ref={picker}
+                type="file"
+                multiple
+                hidden
+                onChange={event => {
+                  const files = Array.from(event.currentTarget.files ?? []);
+
+                  event.currentTarget.value = '';
+
+                  if (files.length > 0) {
+                    onFiles(files, { pasted: false });
+                  }
+                }}
+              />
+            </>
           ) : null}
-          <span className="composer-hint">
-            <Kbd>↵</Kbd>send
-          </span>
+          {wait ? (
+            <span className="composer-wait" role="status">
+              {wait}
+            </span>
+          ) : (
+            <span className="composer-hint">
+              <Kbd>↵</Kbd>send
+            </span>
+          )}
           <IconBtn
             icon="arrow-up"
             label="Send"

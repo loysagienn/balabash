@@ -14,3 +14,21 @@ export const closeMoreSheet = () => ({ type: 'MORE_SHEET_CLOSE' }) as const;
 export const pushToast = (toast: ToastInput) => ({ type: 'TOAST_PUSH', toast }) as const;
 export const dismissToast = (id: number) => ({ type: 'TOAST_DISMISS', id }) as const;
 export const setComposerDraft = (threadId: string, text: string) => ({ type: 'COMPOSER_DRAFT_SET', threadId, text }) as const;
+
+// The full-screen image viewer (design: Lightbox, rule 23) — one for every
+// image of the console: the feed's and the summary's attachments, a draft
+// chip's preview, an image of the file area. images — the images it steps
+// through (those of one message; one alone elsewhere), index — the one
+// shown.
+export type ViewerImage = {
+  src: string;
+  name: string;
+  // The details line: the size, who sent it where, when — what is known.
+  meta: string[];
+  // The bytes as a download; null — no download link (a draft's preview).
+  download: string | null;
+};
+
+export const openViewer = (images: ViewerImage[], index: number) => ({ type: 'VIEWER_OPEN', images, index }) as const;
+export const stepViewer = (by: number) => ({ type: 'VIEWER_STEP', by }) as const;
+export const closeViewer = () => ({ type: 'VIEWER_CLOSE' }) as const;

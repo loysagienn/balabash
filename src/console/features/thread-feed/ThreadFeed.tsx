@@ -7,7 +7,10 @@
 import type { MouseEvent } from 'react';
 import { dateTimeLabel, fileSize } from '../../lib/format/index.ts';
 import { isPlainLeftClick, useLinkProps } from '../../lib/router/Link.tsx';
-import { useAppSelector } from '../../store/hooks.ts';
+import { useQueryClient } from '@tanstack/react-query';
+import type { FileMetaResponse } from '../../../api/contract.ts';
+import { useAppDispatch, useAppSelector } from '../../store/hooks.ts';
+import { openViewer } from '../../store/ui/actions.ts';
 import { selectOperatorName } from '../../store/session/selectors.ts';
 import { selectThreadState } from '../../store/sessions/selectors.ts';
 import { Att, AttThumb, Atts } from '../../ui/Att/Att.tsx';
@@ -24,7 +27,7 @@ import { ActGroup } from '../../ui/Xp/Xp.tsx';
 import { Code } from '../../ui/atoms/atoms.tsx';
 import { fileIcon } from '../../ui/atoms/fileIcon.ts';
 import { FeedAction } from './FeedAction.tsx';
-import { attachmentFacts, needsMeta } from './attachments.ts';
+import { attachmentFacts, downloadHref, needsMeta } from './attachments.ts';
 import type { Attachment, ChildItem, FeedItem, MessageItem } from './project.ts';
 import { useFileMeta } from './queries.ts';
 import { clipLine } from './actions.ts';
@@ -34,27 +37,65 @@ const SUMMARY_MAX = 320;
 
 // One attachment: the facts the event recorded, else the stored file's meta
 // (asked for a file the history names by id alone), else the word of its
-// kind — the chip is a link to the file either way (attachments.ts).
-function AttachmentView({ att }: { att: Attachment }) {
+// kind — the chip is a link to the file either way (attachments.ts). An
+// image opens in the image viewer (onOpen); a file — in a new tab.
+function AttachmentView({ att, onOpen }: { att: Attachment; onOpen: (key: string) => void }) {
   const meta = useFileMeta(att.fileId, needsMeta(att));
   const facts = attachmentFacts(att, meta.data);
 
   return facts.image ? (
-    <AttThumb src={att.href} alt={facts.name} href={att.href} />
+    <AttThumb
+      src={att.href}
+      alt={facts.name}
+      href={att.href}
+      onClick={event => {
+        if (isPlainLeftClick(event)) {
+          event.preventDefault();
+          onOpen(att.key);
+        }
+      }}
+    />
   ) : (
     <Att icon={fileIcon(facts.name)} file={facts.name} size={facts.size !== null ? fileSize(facts.size) : undefined} href={att.href} />
   );
 }
 
-export function Attachments({ atts }: { atts: Attachment[] }) {
+// The attachments of one message or summary; `context` — who sent them
+// where and when, for the viewer's details line. The viewer steps through
+// the images of this row alone.
+export function Attachments({ atts, context }: { atts: Attachment[]; context?: string }) {
+  const dispatch = useAppDispatch();
+  const queryClient = useQueryClient();
+
   if (atts.length === 0) {
     return null;
   }
 
+  const open = (key: string) => {
+    const images = atts.flatMap(att => {
+      const cached = att.fileId ? queryClient.getQueryData<FileMetaResponse>(['file-meta', att.fileId]) : undefined;
+      const facts = attachmentFacts(att, cached?.file);
+
+      return facts.image ? [{ att, facts }] : [];
+    });
+
+    dispatch(
+      openViewer(
+        images.map(({ att, facts }) => ({
+          src: att.href,
+          name: facts.name,
+          meta: [...(facts.size !== null ? [fileSize(facts.size)] : []), ...(context ? [context] : [])],
+          download: att.fileId ? downloadHref(att.href) : null,
+        })),
+        Math.max(0, images.findIndex(image => image.att.key === key)),
+      ),
+    );
+  };
+
   return (
     <Atts>
       {atts.map(att => (
-        <AttachmentView key={att.key} att={att} />
+        <AttachmentView key={att.key} att={att} onOpen={open} />
       ))}
     </Atts>
   );
@@ -68,7 +109,7 @@ function FeedMessage({ item, now }: { item: MessageItem; now: Date }) {
       {/* The user's own text keeps its single line breaks (typed, not
           Markdown-wrapped); an agent's Markdown reads by the usual rules. */}
       {item.text ? <Md source={item.text} breaks={item.variant === 'user'} /> : null}
-      <Attachments atts={item.atts} />
+      <Attachments atts={item.atts} context={`${item.from === 'you' ? (you ?? 'you') : item.from} → ${item.to === 'you' ? (you ?? 'you') : item.to}, ${dateTimeLabel(item.at, now)}`} />
     </Message>
   );
 }

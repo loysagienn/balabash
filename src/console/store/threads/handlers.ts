@@ -5,6 +5,7 @@
 import { toApiFailure } from '../../lib/api/index.ts';
 import type { ActionHandler } from '../types.ts';
 import { pushToast } from '../ui/actions.ts';
+import { forgetSent } from '../attachments/handlers.ts';
 import { commandThreadDone, commandThreadFail, loadThreadDone, loadThreadEventsDone, loadThreadEventsFail, loadThreadFail, loadThreadsDone, loadThreadsFail, sendMessageDone, sendMessageFail } from './actions.ts';
 
 export const THREADS_PAGE = 50;
@@ -130,8 +131,10 @@ export const loadThreadHandler: ActionHandler<'LOAD_THREAD'> =
   };
 
 // The message itself comes back as event/user.message through the tail;
-// here only the request's fate: the draft clears on success, a failure
-// keeps it and tells the user why.
+// here only the request's fate: the draft clears on success (the text while
+// it is the one sent, the files sent), a failure keeps the draft whole and
+// says why above the composer (store/attachments: the refusal, the chips
+// of files not accepted).
 export const sendMessageHandler: ActionHandler<'SEND_MESSAGE'> =
   ({ api, dispatch, getState, next }) =>
   async action => {
@@ -142,13 +145,11 @@ export const sendMessageHandler: ActionHandler<'SEND_MESSAGE'> =
     next(action);
 
     try {
-      await api.threads.sendMessage(action.threadId, action.text);
-      dispatch(sendMessageDone(action.threadId));
+      await api.threads.sendMessage(action.threadId, action.text, action.fileIds);
+      forgetSent(getState(), action.threadId, action.fileIds);
+      dispatch(sendMessageDone(action.threadId, action.fileIds));
     } catch (error) {
-      const failure = toApiFailure(error);
-
-      dispatch(sendMessageFail(action.threadId, failure));
-      dispatch(pushToast({ title: 'Message not sent', desc: failure.message, state: 'err' }));
+      dispatch(sendMessageFail(action.threadId, toApiFailure(error)));
     }
   };
 

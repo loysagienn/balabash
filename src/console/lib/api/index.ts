@@ -44,11 +44,14 @@ import type {
   ThreadsResponse,
   UnpublishAppRequest,
   UpdateProjectRequest,
+  UploadFileResponse,
   WorkspaceNodeResponse,
+  WorkspaceUploadResponse,
   WorkspaceWriteResponse,
   WorkspacesResponse,
 } from '../../../api/contract.ts';
 import { createFetch } from './fetch.ts';
+import { createUpload } from './upload.ts';
 import { withWorkspace } from '../workspace/state.ts';
 import type { EtaggedText, FetchOptions } from './fetch.ts';
 
@@ -56,6 +59,9 @@ export type { ApiFailure, EtaggedText } from './fetch.ts';
 export { ApiError, toApiFailure } from './fetch.ts';
 
 export type ThreadEventsQuery = { before?: bigint; after?: bigint; limit?: number };
+
+// An upload's progress (bytes sent) and its cancel.
+export type TransferOptions = { onProgress?: (loaded: number) => void; signal?: AbortSignal };
 
 export type Api = {
   me(): Promise<MeResponse>;
@@ -101,7 +107,10 @@ export type Api = {
     list(query: ThreadsQuery, signal?: AbortSignal): Promise<ThreadsResponse>;
     get(id: string): Promise<ThreadResponse>;
     events(id: string, query: ThreadEventsQuery): Promise<ThreadEventsResponse>;
-    sendMessage(id: string, text: string): Promise<unknown>;
+    // A message is text, files (stored fileIds) or both; a file that is not
+    // accepted refuses the whole message (ApiError file_not_accepted with
+    // the fileIds).
+    sendMessage(id: string, text: string, fileIds?: string[]): Promise<unknown>;
     // The commands from above: a soft stop of the turn in flight, the end
     // of the thread. The outcome arrives through the event stream.
     interrupt(id: string): Promise<unknown>;
@@ -118,12 +127,19 @@ export type Api = {
     node(path: string): Promise<WorkspaceNodeResponse>;
     text(path: string, signal?: AbortSignal): Promise<EtaggedText>;
     write(path: string, text: string, etag: string | null): Promise<WorkspaceWriteResponse>;
+    // A new file of the area from a picked file (POST /files/<rel>, XHR
+    // with progress): conflict — the answer to a clash of names (none — a
+    // taken name is a 409 `exists`); the answer's path is the name it got.
+    upload(path: string, file: Blob, options: TransferOptions & { conflict?: 'replace' | 'keep' }): Promise<WorkspaceUploadResponse>;
   };
   // A stored file's facts by id (the second data layer too): the name, type
   // and size of an attachment recorded by fileId alone. A 404 is the answer
   // "no such file of yours".
   files: {
     meta(fileId: string, signal?: AbortSignal): Promise<FileMetaResponse>;
+    // An attachment of the composer into storage (POST /api/files, XHR
+    // with progress): the answer is the stored file, ready for a message.
+    upload(file: Blob, name: string, options: TransferOptions): Promise<UploadFileResponse>;
   };
   // Model request telemetry (the second data layer too): the newest rows of
   // llm_requests, oldest first — one thread's window with threadId.
@@ -193,20 +209,27 @@ export type Api = {
   };
 };
 
-// The URL of a file's bytes (/files/<rel>): inline for viewers, an
-// attachment with download — in the tab's workspace (?ws=).
-export function fileUrl(path: string, download = false): string {
+// The path of a file's bytes on the byte surface: /files/<rel>, each
+// segment encoded.
+function fileBytesPath(path: string): string {
   const encoded = path
     .split('/')
     .filter(Boolean)
     .map(segment => encodeURIComponent(segment))
     .join('/');
 
-  return withWorkspace(`/files/${encoded}${download ? '?download=1' : ''}`);
+  return `/files/${encoded}`;
+}
+
+// The URL of a file's bytes (/files/<rel>): inline for viewers, an
+// attachment with download — in the tab's workspace (?ws=).
+export function fileUrl(path: string, download = false): string {
+  return withWorkspace(`${fileBytesPath(path)}${download ? '?download=1' : ''}`);
 }
 
 export function createApi(options: FetchOptions = {}): Api {
   const apiFetch = createFetch(options);
+  const upload = createUpload(options);
   const thread = (id: string) => `/api/threads/${encodeURIComponent(id)}`;
   const project = (id: string) => `/api/projects/${encodeURIComponent(id)}`;
   const secretRequest = (id: string) => `/api/secret-requests/${encodeURIComponent(id)}`;
@@ -242,7 +265,7 @@ export function createApi(options: FetchOptions = {}): Api {
       list: (query, signal) => apiFetch<ThreadsResponse>('/api/threads', { query, signal }),
       get: id => apiFetch<ThreadResponse>(thread(id)),
       events: (id, query) => apiFetch<ThreadEventsResponse>(`${thread(id)}/events`, { query }),
-      sendMessage: (id, text) => apiFetch(`${thread(id)}/messages`, { method: 'POST', body: { text } }),
+      sendMessage: (id, text, fileIds) => apiFetch(`${thread(id)}/messages`, { method: 'POST', body: fileIds?.length ? { text, fileIds } : { text } }),
       interrupt: id => apiFetch(`${thread(id)}/interrupt`, { method: 'POST', body: {} }),
       cancel: (id, reason) => apiFetch(`${thread(id)}/cancel`, { method: 'POST', body: reason ? { reason } : {} }),
     },
@@ -250,9 +273,13 @@ export function createApi(options: FetchOptions = {}): Api {
       node: path => apiFetch<WorkspaceNodeResponse>('/api/workspace/node', { query: { path } }),
       text: (path, signal) => apiFetch<EtaggedText>(fileUrl(path), { as: 'etagged', signal }),
       write: (path, text, etag) => apiFetch<WorkspaceWriteResponse>(fileUrl(path), { method: 'PUT', text, headers: etag === null ? undefined : { 'if-match': etag } }),
+      upload: (path, file, { conflict, ...transfer }) =>
+        upload<WorkspaceUploadResponse>({ url: `${fileBytesPath(path)}${conflict ? `?conflict=${conflict}` : ''}`, body: file, headers: { 'content-type': 'application/octet-stream' }, ...transfer }),
     },
     files: {
       meta: (fileId, signal) => apiFetch<FileMetaResponse>(`/api/files/${encodeURIComponent(fileId)}/meta`, { signal }),
+      upload: (file, name, transfer) =>
+        upload<UploadFileResponse>({ url: '/api/files', body: file, headers: { 'content-type': file.type || 'application/octet-stream', 'x-balabash-filename': encodeURIComponent(name) }, ...transfer }),
     },
     llmRequests: {
       list: (query, signal) => apiFetch<LlmRequestsResponse>('/api/llm-requests', { query, signal }),

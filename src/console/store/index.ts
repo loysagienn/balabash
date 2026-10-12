@@ -34,6 +34,10 @@ import { agentsReducer } from './agents/reducer.ts';
 import { notificationsReducer } from './notifications/reducer.ts';
 import { systemReducer } from './system/reducer.ts';
 import { uiReducer } from './ui/reducer.ts';
+import { attachmentsReducer } from './attachments/reducer.ts';
+import { uploadsReducer } from './uploads/reducer.ts';
+import { answerClashHandler, cancelUploadHandler, closeUploadsHandler, retryUploadHandler, startUploadHandler, uploadFilesHandler } from './uploads/handlers.ts';
+import { attachFilesHandler, removeAttachmentHandler, uploadAttachmentHandler } from './attachments/handlers.ts';
 
 export type { Action, ActionOf, ActionType, State } from './types.ts';
 
@@ -53,6 +57,15 @@ export const handlers = {
   LOAD_THREAD_EVENTS: loadThreadEventsHandler,
   LOAD_THREAD: loadThreadHandler,
   SEND_MESSAGE: sendMessageHandler,
+  ATTACH_FILES: attachFilesHandler,
+  ATTACHMENT_UPLOAD: uploadAttachmentHandler,
+  ATTACHMENT_REMOVE: removeAttachmentHandler,
+  UPLOAD_FILES: uploadFilesHandler,
+  UPLOAD_CLASH_ANSWER: answerClashHandler,
+  UPLOAD_START: startUploadHandler,
+  UPLOAD_CANCEL: cancelUploadHandler,
+  UPLOAD_RETRY: retryUploadHandler,
+  UPLOAD_CLOSE: closeUploadsHandler,
   COMMAND_THREAD: commandThreadHandler,
   CREATE_PROJECT: createProjectHandler,
   UPDATE_PROJECT: updateProjectHandler,
@@ -99,6 +112,8 @@ export function createStore({ api, initialRoute, initialHash = '', enhancer }: C
     notifications: notificationsReducer,
     system: systemReducer,
     ui: uiReducer,
+    attachments: attachmentsReducer,
+    uploads: uploadsReducer,
   }) as unknown as Reducer<Domains, Action>;
 
   const reduce = (state: State | undefined, action: Action): State => {

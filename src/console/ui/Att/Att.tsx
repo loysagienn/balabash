@@ -1,7 +1,8 @@
 // Attachments of a message or a summary (design: Att, AttThumb): Atts is
 // the row; Att — a file as a chip (type icon, name, size), AttThumb — an
-// image as a preview. Both are links to the file (href; onClick for a
-// feature that opens the preview in place). A long file name is cut with
+// image as a preview. Both are links to the file (design rule 23): a file
+// opens in a new browser tab (the browser shows a PDF or text itself,
+// downloads the rest); an image — onClick, the feature's image viewer. A long file name is cut with
 // an ellipsis inside the chip (the full name is the link's title), so an
 // attachment never widens the message.
 
@@ -24,7 +25,7 @@ export type AttProps = {
 
 export function Att({ icon = 'file-text', file, size, href, onClick }: AttProps) {
   return (
-    <a className="att" href={href} title={file} onClick={onClick}>
+    <a className="att" href={href} title={file} target="_blank" rel="noreferrer" onClick={onClick}>
       <Icon name={icon} />
       <span className="att-name">{file}</span>
       {size ? <small className="att-size">{size}</small> : null}

@@ -29,10 +29,12 @@ export const loadThread = (id: string) => ({ type: 'LOAD_THREAD', id }) as const
 export const loadThreadDone = (id: string, thread: Thread) => ({ type: 'LOAD_THREAD_DONE', id, thread }) as const;
 export const loadThreadFail = (id: string, error: ApiFailure) => ({ type: 'LOAD_THREAD_FAIL', id, error }) as const;
 
-// A message from the composer: its outcome is the user.message the tail
-// brings back; _DONE clears the draft, _FAIL keeps it and reports.
-export const sendMessage = (threadId: string, text: string) => ({ type: 'SEND_MESSAGE', threadId, text }) as const;
-export const sendMessageDone = (threadId: string) => ({ type: 'SEND_MESSAGE_DONE', threadId }) as const;
+// A message from the composer — text, the stored files of its draft
+// (fileIds) or both: its outcome is the user.message the tail brings back;
+// _DONE clears the draft (the text while it is still the one sent, the sent
+// files), _FAIL keeps it whole and says why above the composer.
+export const sendMessage = (threadId: string, text: string, fileIds: string[] = []) => ({ type: 'SEND_MESSAGE', threadId, text, fileIds }) as const;
+export const sendMessageDone = (threadId: string, fileIds: string[] = []) => ({ type: 'SEND_MESSAGE_DONE', threadId, fileIds }) as const;
 export const sendMessageFail = (threadId: string, error: ApiFailure) => ({ type: 'SEND_MESSAGE_FAIL', threadId, error }) as const;
 
 // The commands of the thread header: "Stop turn" (thread.interrupt — the

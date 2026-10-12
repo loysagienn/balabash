@@ -210,8 +210,14 @@ export const agent = {
         }
 
         const fileIds = Array.isArray(args.screenshot_file_ids)
-          ? args.screenshot_file_ids.filter((id): id is string => typeof id === 'string' && Boolean(id.trim()))
+          ? [...new Set(args.screenshot_file_ids.filter((id): id is string => typeof id === 'string' && Boolean(id.trim())).map(id => id.trim()))]
           : [];
+
+        // The workspace's own files only (getInfo refuses a foreign or a
+        // missing fileId alike): the report goes to the user's channels.
+        for (const fileId of fileIds) {
+          await ctx.files.getInfo(fileId);
+        }
 
         endSummary = { text: result, ...(fileIds.length ? { fileIds } : {}) };
 

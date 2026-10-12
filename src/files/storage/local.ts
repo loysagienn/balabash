@@ -12,7 +12,7 @@
 
 import crypto from 'node:crypto';
 import { createReadStream, createWriteStream } from 'node:fs';
-import { mkdir, rm, rmdir, stat } from 'node:fs/promises';
+import { link, mkdir, rm, rmdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
@@ -35,15 +35,22 @@ export function resolveLocalPath(root: string, key: string): string {
 }
 
 // Writes the body under root/key; returns the byte size and a content hash
-// playing the role of S3's ETag (the files row records it).
+// playing the role of S3's ETag (the files row records it). The object
+// appears whole or not at all, like a PutObject: the bytes go into a temp
+// file beside it and take the key's name by a link that refuses an
+// existing object — a body that fails midway (an upload cut off, a source
+// that errors) leaves nothing under the key, the temp file is removed and
+// so is the uuid folder it alone would have occupied.
 export async function writeLocalObject(
   root: string,
   key: string,
   body: LocalStorageBody,
 ): Promise<{ sizeBytes: number; etag: string }> {
   const filePath = resolveLocalPath(root, key);
+  const folder = path.dirname(filePath);
+  const temp = path.join(folder, `.part-${crypto.randomBytes(6).toString('hex')}`);
 
-  await mkdir(path.dirname(filePath), { recursive: true });
+  await mkdir(folder, { recursive: true });
 
   const source = typeof body === 'string' || body instanceof Uint8Array ? Readable.from([body]) : body;
   const hash = crypto.createHash('md5');
@@ -54,7 +61,20 @@ export async function writeLocalObject(
     }
   };
 
-  await pipeline(source, hashing, createWriteStream(filePath, { flags: 'wx' }));
+  try {
+    await pipeline(source, hashing, createWriteStream(temp, { flags: 'wx' }));
+    await link(temp, filePath);
+  } catch (error) {
+    await rm(temp, { force: true });
+
+    if (path.resolve(folder) !== path.resolve(root)) {
+      await rmdir(folder).catch(() => {});
+    }
+
+    throw error;
+  }
+
+  await rm(temp, { force: true });
 
   const { size } = await stat(filePath);
 

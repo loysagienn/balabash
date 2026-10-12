@@ -17,7 +17,8 @@ import { fileUrl } from '../../lib/api/index.ts';
 import { useLinkTargets } from '../../lib/router/Link.tsx';
 import type { AppRoute } from '../../lib/router/routes.ts';
 import { countOf, fileSize, startedLabel } from '../../lib/format/index.ts';
-import { useAppSelector } from '../../store/hooks.ts';
+import { useAppDispatch, useAppSelector } from '../../store/hooks.ts';
+import { openViewer } from '../../store/ui/actions.ts';
 import { Btn } from '../../ui/Btn/Btn.tsx';
 import { CodeView } from '../../ui/CodeView/CodeView.tsx';
 import { CsvView } from '../../ui/CsvView/CsvView.tsx';
@@ -99,6 +100,7 @@ export function FilePreview({ file, now, routeFor, editRoute }: FilePreviewProps
   // Stable while the file is: the text bodies memoize on it.
   const viewer = useMemo(() => viewerFor({ path, sizeBytes, mediaType }), [path, sizeBytes, mediaType]);
   const copyPath = useCopyPath();
+  const dispatch = useAppDispatch();
   const queryClient = useQueryClient();
   const linkTarget = useLinkTargets();
   // The editor is a mode of this page: the entry replaces the history record.
@@ -114,6 +116,16 @@ export function FilePreview({ file, now, routeFor, editRoute }: FilePreviewProps
     setImage(state => ({ ...IMAGE_START, attempt: state.attempt + 1 }));
     void queryClient.invalidateQueries({ queryKey: ['workspace', file.path] });
   };
+
+  // The image full screen (the one viewer of the console): its size and
+  // when it changed beside the name.
+  const openFull = () =>
+    dispatch(
+      openViewer(
+        [{ src: fileUrl(file.path), name, meta: [...(file.sizeBytes !== null ? [fileSize(file.sizeBytes)] : []), ...(file.modifiedAt ? [`modified ${startedLabel(new Date(file.modifiedAt), now)}`] : [])], download }],
+        0,
+      ),
+    );
 
   if (image.size) {
     meta.push(`${image.size.width} × ${image.size.height}`);
@@ -137,6 +149,7 @@ export function FilePreview({ file, now, routeFor, editRoute }: FilePreviewProps
         key={image.attempt}
         src={fileUrl(file.path)}
         alt={file.title ?? name}
+        onOpen={openFull}
         onSize={size => setImage(state => ({ ...state, size }))}
         onError={() => setImage(state => ({ ...state, size: null, failed: true }))}
       />
@@ -171,6 +184,7 @@ export function FilePreview({ file, now, routeFor, editRoute }: FilePreviewProps
     <Pv>
       <PvHead icon={icon} name={name} path={file.path} meta={meta}>
         {edit ? <Btn label="Edit" icon="pencil" size="sm" {...edit} /> : null}
+        {viewer.kind === 'image' && !image.failed ? <IconBtn icon="maximize-2" label="Full screen" size="sm" onClick={openFull} /> : null}
         <IconBtn icon="download" label="Download" size="sm" href={download} />
         <IconBtn icon="copy" label="Copy path" size="sm" onClick={() => void copyPath(file.path)} />
       </PvHead>

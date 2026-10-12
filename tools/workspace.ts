@@ -13,6 +13,7 @@
 // area -> storage, returns a fileId) and workspace_import_file (storage ->
 // file area).
 
+import { createHash, randomBytes } from 'node:crypto';
 import path from 'node:path';
 import fs from 'node:fs/promises';
 import { createReadStream, createWriteStream } from 'node:fs';
@@ -22,7 +23,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { ToolError, toErrorResult, toStructuredResult } from '../src/capabilities/tool-result.ts';
 import type { LocalToolFilesApi } from '../src/capabilities/local-tool-source.ts';
-import { guessContentType, sanitizeRelPath } from '../src/workspace/files.ts';
+import { guessContentType, placeImport, sanitizeRelPath } from '../src/workspace/files.ts';
 import { queryInChild } from '../src/workspace/child.ts';
 import { callerUserId, ensureWorkspace, serveMcp, type Workspace } from './workspace_shared.ts';
 
@@ -152,15 +153,16 @@ function createMcpServer(filesApi: LocalToolFilesApi) {
         'Download a stored Balabash file (by fileId) into the workspace file area, so scripts and ' +
         'workspace-side tools can work with its content. The reverse of workspace_export_file, and the way ' +
         'to bring binary content into the workspace. The content is streamed server-side, never through the ' +
-        'model context.',
+        'model context. The result names the path the file actually got.',
       inputSchema: {
         fileId: z.string().describe('The Balabash fileId to import (from an event or a tool result).'),
         path: z
           .string()
           .nullable()
           .describe(
-            'Destination relative path inside the workspace file area (an existing file is overwritten). ' +
-              'Null = "imports/<original filename>".',
+            'Destination relative path inside the workspace file area — an existing file there is ' +
+              'overwritten. Null = "imports/<original filename>", never overwriting: the same bytes imported ' +
+              'before keep their path, a different file of that name lands beside it as "name (2).ext".',
           ),
       },
     },
@@ -181,21 +183,51 @@ function createMcpServer(filesApi: LocalToolFilesApi) {
           throw new ToolError(`File "${fileId}" not found.`);
         }
 
-        const relPath = rawPath !== null ? sanitizeRelPath(rawPath) : defaultImportPath(fileId, file.originalFilename);
-        const absPath = path.join(workspace.filesDir, relPath);
+        const content = Readable.fromWeb((await filesApi.open(fileId)) as Parameters<typeof Readable.fromWeb>[0]);
 
-        const content = await filesApi.open(fileId);
+        // An explicit path is the agent's own choice: the file there is
+        // replaced by this version.
+        if (rawPath !== null) {
+          const relPath = sanitizeRelPath(rawPath);
+          const absPath = path.join(workspace.filesDir, relPath);
 
-        await fs.mkdir(path.dirname(absPath), { recursive: true });
-        await pipeline(Readable.fromWeb(content as Parameters<typeof Readable.fromWeb>[0]), createWriteStream(absPath));
+          await fs.mkdir(path.dirname(absPath), { recursive: true });
+          await pipeline(content, createWriteStream(absPath));
 
-        const stats = await fs.stat(absPath);
+          const stats = await fs.stat(absPath);
+
+          return toStructuredResult({ path: relPath, sizeBytes: stats.size, contentType: file.contentType, fileId });
+        }
+
+        // Without one nothing is overwritten (placeImport): the bytes land
+        // in tmp/ first, hashed on the way, and take the first name that is
+        // free or already holds the same bytes.
+        const wanted = defaultImportPath(fileId, file.originalFilename);
+        const temp = path.join(workspace.tmpDir, `.import-${randomBytes(8).toString('hex')}`);
+        const hash = createHash('sha256');
+
+        await fs.mkdir(path.dirname(path.join(workspace.filesDir, wanted)), { recursive: true });
+
+        try {
+          await pipeline(content, async function* (chunks: AsyncIterable<Buffer>) {
+            for await (const chunk of chunks) {
+              hash.update(chunk);
+              yield chunk;
+            }
+          }, createWriteStream(temp, { flags: 'wx' }));
+        } catch (error) {
+          await fs.rm(temp, { force: true });
+          throw error;
+        }
+
+        const placed = await placeImport(userId, wanted, temp, hash.digest('hex'));
 
         return toStructuredResult({
-          path: relPath,
-          sizeBytes: stats.size,
+          path: placed.path,
+          sizeBytes: placed.stats.size,
           contentType: file.contentType,
           fileId,
+          ...(placed.reused ? { note: 'The same file was imported here before; its path is returned.' } : {}),
         });
       } catch (error) {
         return toErrorResult(error);

@@ -1,6 +1,9 @@
 @layer patterns{
-/* ── Drop zone ──  .drop > .ic + text (.code) + .drop-sub — over the list while files are dragged */
-.drop{position:absolute;inset:var(--sp-2);z-index:var(--z-drop);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:var(--sp-2);padding:var(--sp-4);border:2px dashed var(--accent);border-radius:var(--r-lg);background:color-mix(in srgb,var(--bg) 93%,transparent);backdrop-filter:blur(2px);font-size:var(--fs-ui);color:var(--text);text-align:center}
+/* ── Drop zone ──  .drop > .ic + text (.code) + .drop-sub — over the whole file area (files land in the current folder)
+   or over the thread (they attach to the draft). [data-place] — fixed to the part of the owner in view
+   (--drop-top/-left/-w/-h, measured by the owner), with the same inset as the absolute frame. */
+.drop{position:absolute;inset:var(--sp-2);z-index:var(--z-drop);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:var(--sp-2);padding:var(--sp-4);border:2px dashed var(--accent);border-radius:var(--r-lg);background:color-mix(in srgb,var(--bg) 93%,transparent);backdrop-filter:blur(2px);font-size:var(--fs-ui);color:var(--text);text-align:center;pointer-events:none}
+.drop[data-place]{position:fixed;inset:auto;top:calc(var(--drop-top) + var(--sp-2));left:calc(var(--drop-left) + var(--sp-2));width:calc(var(--drop-w) - 2 * var(--sp-2));height:calc(var(--drop-h) - 2 * var(--sp-2))}
 .drop > .ic{font-size:var(--ico-xl);color:var(--accent)}
 .drop-sub{font-size:var(--fs-meta);line-height:var(--lh-meta);color:var(--text-3)}
 }

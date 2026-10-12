@@ -20,17 +20,17 @@ import { engineLabel } from '../../lib/format/engine.ts';
 import { makeSelectThreadEvents, selectThreadFeed } from '../../store/feed/selectors.ts';
 import { routeTo } from '../../store/router/actions.ts';
 import { selectSession, selectThreadState } from '../../store/sessions/selectors.ts';
-import { commandThread, loadThread, loadThreadEvents, sendMessage } from '../../store/threads/actions.ts';
+import { commandThread, loadThread, loadThreadEvents } from '../../store/threads/actions.ts';
 import { selectThread } from '../../store/threads/selectors.ts';
-import { setComposerDraft } from '../../store/ui/actions.ts';
-import { selectComposerDraft, selectComposerSending, selectThreadCommandPending } from '../../store/ui/selectors.ts';
+import { selectThreadCommandPending } from '../../store/ui/selectors.ts';
 import { Shell } from '../../features/shell/Shell.tsx';
 import { threadTitle, ctxOf } from '../../features/thread-list/rowData.ts';
 import { Attachments, FeedItems, hasRunningAction } from '../../features/thread-feed/ThreadFeed.tsx';
 import { fileIdAtts } from '../../features/thread-feed/project.ts';
 import { makeSelectFeedItems } from '../../features/thread-feed/selectors.ts';
-import { Composer } from '../../ui/Composer/Composer.tsx';
-import { ComposerLock } from '../../ui/Composer/ComposerLock.tsx';
+import { Drop } from '../../ui/Drop/Drop.tsx';
+import type { DropPlace } from '../../ui/Drop/Drop.tsx';
+import { useFileDrop } from '../../lib/upload/useFileDrop.ts';
 import { Confirm } from '../../ui/Confirm/Confirm.tsx';
 import { Empty } from '../../ui/Empty/Empty.tsx';
 import { Feed } from '../../ui/Feed/Feed.tsx';
@@ -45,6 +45,7 @@ import { Thread, ThreadBody, ThreadMain } from '../../ui/Thread/Thread.tsx';
 import { ThreadHead } from '../../ui/ThreadHead/ThreadHead.tsx';
 import { Code } from '../../ui/atoms/atoms.tsx';
 import { ThreadDetailsSheet, ThreadRail } from './ThreadRail.tsx';
+import { ThreadComposer, useAttach } from './ThreadComposer.tsx';
 import type { ThreadDetailCommands } from './ThreadRail.tsx';
 import { railSessionInfo } from './rail.ts';
 import {
@@ -82,6 +83,21 @@ function FeedSkeleton() {
       ))}
     </div>
   );
+}
+
+// The part of an element inside the window and its scroll box — where a
+// frame over it can be seen.
+function visiblePlace(node: HTMLElement | null): DropPlace | undefined {
+  if (!node) {
+    return undefined;
+  }
+
+  const rect = node.getBoundingClientRect();
+  const box = scrollBox(node)?.getBoundingClientRect();
+  const top = Math.max(rect.top, box?.top ?? 0, 0);
+  const bottom = Math.min(rect.bottom, box?.bottom ?? window.innerHeight, window.innerHeight);
+
+  return { top, left: rect.left, width: rect.width, height: Math.max(0, bottom - top) };
 }
 
 function scrollBox(node: HTMLElement | null): HTMLElement | null {
@@ -291,8 +307,6 @@ function ThreadPage({ thread }: { thread: ThreadRecord }) {
   const selectItems = useMemo(makeSelectFeedItems, []);
   const events = useAppSelector(s => selectEvents(s, id));
   const items = useAppSelector(s => selectItems(s, id));
-  const draft = useAppSelector(s => selectComposerDraft(s, id));
-  const sending = useAppSelector(s => selectComposerSending(s, id));
   const [detailsOpen, setDetailsOpen] = useState(false);
 
   // "Stop turn" and "Cancel thread": the commands go up as COMMAND_THREAD,
@@ -367,6 +381,12 @@ function ThreadPage({ thread }: { thread: ThreadRecord }) {
 
   const lock = composerLock(thread);
   const title = threadTitle(thread);
+  // Files dragged over the thread attach to the draft (a closed thread
+  // takes none); the frame covers the part of the column in view.
+  const attach = useAttach(id);
+  const mainRef = useRef<HTMLDivElement>(null);
+  const { drag, handlers: dropHandlers } = useFileDrop(lock === null, files => attach(files));
+  const dropPlace = drag ? visiblePlace(mainRef.current) : undefined;
   // The live context of an active session, else the last one the loaded
   // events measured (a finished thread's final context, as in the rail).
   const ctx = ctxOf(session) ?? (info.context && info.context.max > 0 ? { percentage: (info.context.used / info.context.max) * 100, usedTokens: info.context.used, maxTokens: info.context.max } : undefined);
@@ -418,13 +438,13 @@ function ThreadPage({ thread }: { thread: ThreadRecord }) {
         ) : null}
         {detailsOpen ? <ThreadDetailsSheet {...details} onClose={() => setDetailsOpen(false)} /> : null}
         <ThreadBody>
-          <ThreadMain>
+          <ThreadMain ref={mainRef} drop={dropHandlers}>
             <div ref={feedRef} style={{ display: 'contents' }}>
               <Feed align="end">
                 {thread.status === 'completed' && thread.summary ? (
                   <Summary time={dateTimeLabel(thread.updatedAt, now)}>
                     <Md source={thread.summary.text} />
-                    <Attachments atts={fileIdAtts(thread.summary.fileIds ?? [], 's')} />
+                    <Attachments atts={fileIdAtts(thread.summary.fileIds ?? [], 's')} context={`${thread.agent} · summary, ${dateTimeLabel(thread.updatedAt, now)}`} />
                   </Summary>
                 ) : null}
                 {stage === 'skeleton' ? <FeedSkeleton /> : null}
@@ -443,14 +463,8 @@ function ThreadPage({ thread }: { thread: ThreadRecord }) {
                 ) : null}
               </Feed>
             </div>
-            {lock ? (
-              <ComposerLock icon={lock.icon}>
-                {lock.strong ? <strong>{lock.strong}</strong> : null}
-                {lock.text}
-              </ComposerLock>
-            ) : (
-              <Composer to={thread.agent} value={draft} onChange={text => dispatch(setComposerDraft(id, text))} onSend={text => dispatch(sendMessage(id, text))} busy={sending} />
-            )}
+            <ThreadComposer thread={thread} lock={lock} />
+            {drag ? <Drop label="Drop to attach to your message" sub={`${countOf(drag.count, 'file')} · to ${thread.agent}`} place={dropPlace} /> : null}
           </ThreadMain>
           <ThreadRail {...details} />
         </ThreadBody>

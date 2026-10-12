@@ -29,6 +29,7 @@ import { SectionGrid } from '../../ui/SectionGrid/SectionGrid.tsx';
 import { Sheet } from '../../ui/Sheet/Sheet.tsx';
 import { useSystemFacts } from '../system/queries.ts';
 import { Toasts } from '../toasts/Toasts.tsx';
+import { ImageViewer } from '../viewer/ImageViewer.tsx';
 import { AddWorkspaceDialog, WorkspaceSwitcher } from '../workspaces/Workspaces.tsx';
 import { MORE, NAV, TABS } from './nav.ts';
 import { footerWords, isMainThreadOpen, isMainThreadShortcut, keepsScrollPlace, mainThreadRoute, mainThreadShortcutLabel } from './shell.logic.ts';
@@ -204,6 +205,7 @@ export function Shell({ current, detail, ownTop, children, ...top }: ShellProps)
         </div>
       </div>
       <Toasts tabs={!detail} />
+      <ImageViewer />
       <AddWorkspaceDialog />
       {moreOpen ? (
         <Sheet label="More sections" onClose={() => dispatch(closeMoreSheet())}>

@@ -54,7 +54,9 @@ export type EventPayloads = {
 
   // Dialogue.
   'user.message': {
-    text: string;
+    // Null for a message of files alone (Telegram, CCR and the console
+    // write it so).
+    text: string | null;
     identity?: UserIdentity;
     source?: string;
     files?: InboundFile[];

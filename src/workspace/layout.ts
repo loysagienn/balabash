@@ -29,3 +29,11 @@ export function workspaceDbPath(userId: string): string {
 export function workspaceTasksDir(userId: string): string {
   return path.join(workspaceRoot(), userId, 'tasks');
 }
+
+// Transient files of the workspace: inline scripts of the tools, the bytes
+// of an upload to the file area while they arrive (outside files/, so a
+// listing never shows a half-received file; the same volume, so the finished
+// file is linked into place, not copied).
+export function workspaceTmpDir(userId: string): string {
+  return path.join(workspaceRoot(), userId, 'tmp');
+}

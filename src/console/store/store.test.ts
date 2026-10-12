@@ -51,7 +51,12 @@ const SYSTEM: Api['system'] = {
   },
 };
 
-const FILES: Api['files'] = { meta: async fileId => ({ file: { fileId, name: null, contentType: null, sizeBytes: null, width: null, height: null } }) };
+const FILES: Api['files'] = {
+  meta: async fileId => ({ file: { fileId, name: null, contentType: null, sizeBytes: null, width: null, height: null } }),
+  upload: async () => {
+    throw new Error('not here');
+  },
+};
 
 const SECRET_REQUESTS: Api['secretRequests'] = {
   get: async id => ({ request: { id, kind: 'oauth-client', server: 'notion', fields: [] } }),
@@ -72,6 +77,9 @@ const WORKSPACE: Api['workspace'] = {
   node: async () => ({ kind: 'dir', path: '', directories: [], folders: [], files: [] }),
   text: async () => ({ text: '', etag: null }),
   write: async () => {
+    throw new Error('not here');
+  },
+  upload: async () => {
     throw new Error('not here');
   },
 };
@@ -1483,7 +1491,7 @@ describe('thread page data', () => {
     assert.equal(calls.filter(call => call.name === 'threads.get').length, 2);
   });
 
-  it('sends a composer message: the draft clears on success, stays with a toast on failure, one request at a time', async () => {
+  it('sends a composer message: the draft clears on success, stays with the refusal above the composer on failure, one request at a time', async () => {
     resetSeq(1n);
 
     const calls: Calls = [];
@@ -1540,10 +1548,17 @@ describe('thread page data', () => {
     await failing;
     assert.equal(store.getState().ui.composerSending.t1, undefined);
     assert.equal(store.getState().ui.composerDrafts.t1, 'later');
-    assert.deepEqual(
-      store.getState().ui.toasts.map(toast => [toast.title, toast.state]),
-      [['Message not sent', 'err']],
-    );
+    assert.deepEqual(store.getState().attachments.refusal.t1, { kind: 'closed', message: 'The thread is no longer active', count: 0 });
+    assert.deepEqual(store.getState().ui.toasts, []);
+
+    // The next send takes the refusal away.
+    fail = false;
+
+    const again = dispatched(store, sendMessage('t1', 'later'));
+
+    assert.equal(store.getState().attachments.refusal.t1, undefined);
+    resolveSend!();
+    await again;
   });
 });
 

@@ -1,11 +1,24 @@
 @layer patterns{
-/* ── Upload panel ──  .upl > .upl-h (.code, .upl-h-end) + .upl-i[data-state=done|err] (.obj.upl-ic, .upl-n, .upl-s, .prog.upl-prog) */
+/* ── Upload panel ──  .upl > .upl-h (.code, .upl-h-end) + .upl-rows > .upl-i[data-state=done|err] (.obj.upl-ic, .upl-n, .upl-s, .upl-act, .prog.upl-prog)
+   | .upl-fold — while files upload “Fold” leaves one line (total progress, counts, failures); “×” closes the panel only once nothing uploads. */
 .upl{--upl-w:380px;width:min(var(--upl-w),100%);background:var(--surface-2);border-radius:var(--r-md);box-shadow:var(--shadow-pop);overflow:hidden}
 .upl-h{display:flex;align-items:center;gap:var(--sp-2);padding:var(--sp-2h) var(--sp-3h);border-bottom:1px solid var(--border);font-size:var(--fs-ui);font-weight:var(--fw-semibold)}
+.upl-h .code{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .upl-h-end{margin-left:auto;display:flex;gap:var(--sp-1)}
-.upl-i{display:grid;grid-template-columns:var(--obj-sm) minmax(0,1fr) auto;align-items:center;gap:var(--sp-1) var(--sp-2h);padding:var(--sp-2) var(--sp-3h)}
+.upl-rows{max-height:var(--upl-rows-max,320px);overflow-y:auto}
+.upl-i{display:grid;grid-template-columns:var(--obj-sm) minmax(0,1fr) auto auto;align-items:center;gap:var(--sp-1) var(--sp-2h);padding:var(--sp-2) var(--sp-2) var(--sp-2) var(--sp-3h)}
 .upl-ic{grid-row:1 / span 2}
 .upl-n{min-width:0;font-size:var(--fs-meta);line-height:var(--lh-meta);font-weight:var(--fw-medium);color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .upl-s{font-size:var(--fs-micro);line-height:var(--lh-micro);color:var(--st-c,var(--text-3));font-variant-numeric:tabular-nums;white-space:nowrap}
 .upl-prog{grid-column:2 / span 2}
+.upl-i[data-state="err"] .upl-s{grid-column:2 / span 2;grid-row:2;white-space:normal}   /* the reason goes under the name: the name keeps its width */
+.upl-act{grid-column:4;grid-row:1 / span 2;display:flex;align-items:center;gap:var(--sp-0h)}   /* running: cancel · err: retry, remove · done: a check */
+.upl-ok{display:grid;place-items:center;width:var(--ctl-h-sm);color:var(--st-done)}
+a.upl-n{text-decoration:none}
+a.upl-n:hover{text-decoration:underline;text-underline-offset:2px}
+.upl-fold{display:grid;grid-template-columns:minmax(0,auto) minmax(0,1fr) auto;align-items:center;gap:var(--sp-1) var(--sp-2);padding:var(--sp-1h) var(--sp-2) var(--sp-2h) var(--sp-3h)}
+.upl-fold-t{font-size:var(--fs-ui);line-height:var(--lh-ui);font-weight:var(--fw-semibold);color:var(--text);white-space:nowrap}
+.upl-fold-s{min-width:0;font-size:var(--fs-meta);line-height:var(--lh-meta);color:var(--text-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.upl-fold-s em{font-style:normal;color:var(--st-err)}
+.upl-fold-prog{grid-column:1 / span 3}
 }

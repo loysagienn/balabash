@@ -21,6 +21,8 @@ import type { AgentsState } from './agents/reducer.ts';
 import type { NotificationsState } from './notifications/reducer.ts';
 import type { SystemState } from './system/reducer.ts';
 import type { UiState } from './ui/reducer.ts';
+import type { AttachmentsState } from './attachments/reducer.ts';
+import type { UploadsState } from './uploads/reducer.ts';
 
 type Creators = typeof import('./actions.ts');
 type CreatorAction = ReturnType<Creators[keyof Creators]>;
@@ -45,6 +47,8 @@ export type State = {
   notifications: NotificationsState;
   system: SystemState;
   ui: UiState;
+  attachments: AttachmentsState;
+  uploads: UploadsState;
 };
 
 export type Dispatch = (action: Action) => void;

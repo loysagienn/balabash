@@ -7,6 +7,8 @@
 import { useState } from 'react';
 import type { ReactNode } from 'react';
 import { Att, AttThumb, Atts } from '../../ui/Att/Att.tsx';
+import { AttDraft } from '../../ui/AttDraft/AttDraft.tsx';
+import { Drop } from '../../ui/Drop/Drop.tsx';
 import { ChildThread } from '../../ui/ChildThread/ChildThread.tsx';
 import { Composer } from '../../ui/Composer/Composer.tsx';
 import { ComposerLock } from '../../ui/Composer/ComposerLock.tsx';
@@ -294,7 +296,7 @@ function RunningThread({ phone }: { phone?: boolean }) {
             to="engineer"
             value={draft}
             onChange={setDraft}
-            onAttach={() => undefined}
+            onFiles={() => undefined}
             onSend={text => {
               setSent(text);
               setDraft('');
@@ -532,6 +534,122 @@ export function DevUiFeed() {
               <Composer to="engineer" value={stopped} onChange={setStopped} onSend={() => setStopped('')} busy />
             </Thread>
           </div>
+        </div>
+      </Section>
+
+      <Section title="Attachments (rule 23): your messages with files — with text and files only; the draft uploading (Send waits), a pasted image, a refused send, files dropped on the thread, the phone">
+        <div className="dev-frame">
+          <Thread>
+            <ThreadBody>
+              <ThreadMain>
+                <Feed align="end">
+                  <Message agent="you" to="manager" variant="user" time="17:04">
+                    <Md source="Here are the walls and the tile invoice" />
+                    <Atts>
+                      <AttThumb src={THUMB} alt="kitchen-wall-a.jpg" href="#" onClick={stop} />
+                      <AttThumb src={THUMB} alt="kitchen-wall-b.jpg" href="#" onClick={stop} />
+                      <Att icon="file-type" file="tile-invoice.pdf" size="120 KiB" href="#" onClick={stop} />
+                    </Atts>
+                  </Message>
+                  <Message agent="you" to="manager" variant="user" time="17:06">
+                    <Atts>
+                      <AttThumb src={THUMB} alt="kitchen-wall-c.jpg" href="#" onClick={stop} />
+                    </Atts>
+                  </Message>
+                </Feed>
+                <Composer
+                  to="manager"
+                  value="And the old tile layout, in case it helps"
+                  onChange={() => undefined}
+                  onSend={() => undefined}
+                  onFiles={() => undefined}
+                  wait="Uploading 1 file…"
+                  attachments={
+                    <>
+                      <AttDraft name="old-layout-scan.jpg" preview={THUMB} status="1.3 of 2.1 MiB" progress={62} onRemove={() => undefined} />
+                      <AttDraft name="tile-catalog-2026.pdf" icon="file-type" status="4.8 MiB" state="done" onRemove={() => undefined} />
+                      <AttDraft name="site-survey.zip" icon="file-archive" status="Connection lost" state="err" onRetry={() => undefined} onRemove={() => undefined} />
+                    </>
+                  }
+                />
+              </ThreadMain>
+            </ThreadBody>
+          </Thread>
+        </div>
+        <div className="dev-grid" data-wide="">
+          <div className="dev-frame">
+            <Thread>
+              <Composer
+                to="manager"
+                value=""
+                onChange={() => undefined}
+                onSend={() => undefined}
+                onFiles={() => undefined}
+                wait="Uploading 2 files…"
+                attachments={
+                  <>
+                    <AttDraft name="pasted-17-08.png" preview={THUMB} status="0.2 of 0.4 MiB" progress={45} onRemove={() => undefined} />
+                    <AttDraft name="a-very-long-name-of-the-old-layout-scan-from-the-archive.jpg" preview={THUMB} status="0.4 of 2.1 MiB" progress={18} onRemove={() => undefined} />
+                  </>
+                }
+              />
+            </Thread>
+          </div>
+          <div className="dev-frame">
+            <Thread>
+              <Composer
+                to="manager"
+                value="Wall C again, from the window side"
+                onChange={() => undefined}
+                onSend={() => undefined}
+                onFiles={() => undefined}
+                ready
+                refusal={{ text: 'Not sent — 1 file was not accepted. Remove it and send again.' }}
+                attachments={
+                  <>
+                    <AttDraft name="kitchen-wall-c2.jpg" preview={THUMB} status="2.4 MiB" state="done" onRemove={() => undefined} />
+                    <AttDraft name="tile-invoice.pdf" icon="file-type" status="Not accepted" state="err" retry={false} onRemove={() => undefined} />
+                  </>
+                }
+              />
+            </Thread>
+          </div>
+          <div className="dev-frame" style={{ minHeight: 220 }}>
+            <Thread>
+              <ThreadBody>
+                <ThreadMain>
+                  <Feed>
+                    <SysLine icon="check">Files dragged over the thread</SysLine>
+                  </Feed>
+                  <Composer to="manager" value="" onChange={() => undefined} onSend={() => undefined} onFiles={() => undefined} ready attachments={<AttDraft name="kitchen-window-wall.jpg" preview={THUMB} status="2.3 MiB" state="done" onRemove={() => undefined} />} />
+                  <Drop label="Drop to attach to your message" sub="2 files · to manager" />
+                </ThreadMain>
+              </ThreadBody>
+            </Thread>
+          </div>
+        </div>
+        <div className="dev-phone">
+          <Thread>
+            <Feed align="end">
+              <SysLine icon="check">Phone: the chips are one row that scrolls sideways</SysLine>
+            </Feed>
+            <Composer
+              to="manager"
+              value="And the old tile layout, in case it helps"
+              onChange={() => undefined}
+              onSend={() => undefined}
+              onFiles={() => undefined}
+              wait="Uploading 1 file…"
+              refusal={{ text: 'Not sent — the thread has completed. Your text and files are kept.', action: 'Copy text', actionIcon: 'copy', onAction: () => undefined }}
+              attachments={
+                <>
+                  <AttDraft name="site-survey.zip" icon="file-archive" status="Connection lost" state="err" onRetry={() => undefined} onRemove={() => undefined} />
+                  <AttDraft name="old-layout-scan.jpg" preview={THUMB} status="1.3 of 2.1 MiB" progress={62} onRemove={() => undefined} />
+                  <AttDraft name="tile-catalog-2026.pdf" icon="file-type" status="4.8 MiB" state="done" onRemove={() => undefined} />
+                </>
+              }
+            />
+          </Thread>
         </div>
       </Section>
 

@@ -3,6 +3,7 @@
 // here. A new creator anywhere joins the union by being re-exported.
 
 export * from './apps/actions.ts';
+export * from './attachments/actions.ts';
 export * from './connections/actions.ts';
 export * from './feed/actions.ts';
 export * from './notifications/actions.ts';
@@ -13,3 +14,4 @@ export * from './session/actions.ts';
 export * from './stream/actions.ts';
 export * from './threads/actions.ts';
 export * from './ui/actions.ts';
+export * from './uploads/actions.ts';

@@ -122,9 +122,15 @@ const api: Api = {
     write: async () => {
       throw new Error('not here');
     },
+    upload: async () => {
+      throw new Error('not here');
+    },
   },
   files: {
     meta: async () => {
+      throw new Error('not here');
+    },
+    upload: async () => {
       throw new Error('not here');
     },
   },

@@ -31,3 +31,9 @@ export function attachmentFacts(att: Attachment, meta: StoredFileMeta | null | u
     size: att.size ?? meta?.sizeBytes ?? null,
   };
 }
+
+// The bytes of a stored file as a download (the API's ?download=1 beside
+// the workspace's ?ws=).
+export function downloadHref(href: string): string {
+  return `${href}${href.includes('?') ? '&' : '?'}download=1`;
+}

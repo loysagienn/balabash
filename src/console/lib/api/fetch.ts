@@ -12,21 +12,27 @@ import { WORKSPACE_HEADER } from '../workspace/state.ts';
 export class ApiError extends Error {
   readonly status: number;
   readonly code: string;
+  // The files a message was refused for (file_not_accepted).
+  readonly fileIds?: string[];
 
-  constructor(status: number, code: string, message: string) {
+  constructor(status: number, code: string, message: string, fileIds?: string[]) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
     this.code = code;
+
+    if (fileIds) {
+      this.fileIds = fileIds;
+    }
   }
 }
 
 // The plain, serializable form an error takes inside the store.
-export type ApiFailure = { status: number; code: string; message: string };
+export type ApiFailure = { status: number; code: string; message: string; fileIds?: string[] };
 
 export function toApiFailure(error: unknown): ApiFailure {
   if (error instanceof ApiError) {
-    return { status: error.status, code: error.code, message: error.message };
+    return { status: error.status, code: error.code, message: error.message, ...(error.fileIds ? { fileIds: error.fileIds } : {}) };
   }
 
   return { status: 0, code: 'network', message: error instanceof Error ? error.message : String(error) };
@@ -130,7 +136,7 @@ export function createFetch({ onUnauthorized, workspace }: FetchOptions = {}) {
         onUnauthorized?.(error?.code ?? 'unknown');
       }
 
-      throw new ApiError(response.status, error?.code ?? 'unknown', error?.message ?? `HTTP ${response.status}`);
+      throw new ApiError(response.status, error?.code ?? 'unknown', error?.message ?? `HTTP ${response.status}`, Array.isArray(error?.fileIds) ? error.fileIds : undefined);
     }
 
     if (init?.as === 'etagged') {

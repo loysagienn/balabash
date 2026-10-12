@@ -5,7 +5,7 @@
    .th grows with its content (min-height, not height): the sticky strip and rail need it to be the scrolled thing. */
 .th{container:thread / inline-size;display:flex;flex-direction:column;min-width:0;min-height:100%;background:var(--bg)}
 .th-body{display:grid;grid-template-columns:minmax(0,1fr) auto;flex:1}
-.th-main{display:flex;flex-direction:column;min-width:0;border-right:1px solid var(--border)}   /* the rail’s divider runs the full height of the feed */
+.th-main{position:relative;display:flex;flex-direction:column;min-width:0;border-right:1px solid var(--border)}   /* position: the Drop frame covers the feed and the composer */   /* the rail’s divider runs the full height of the feed */
 
 /* Rail: who and what, state and controls, then session, context, project and time. Scrolls on its own when the
    window is lower than its content. */
