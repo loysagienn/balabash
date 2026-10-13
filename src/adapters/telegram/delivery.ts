@@ -188,12 +188,15 @@ export function startTelegramDelivery({ bot }: { bot: Bot }): Consumer {
   ): Promise<number | null> => {
     let firstMessageId: number | null = null;
 
-    for (const chunk of formatTelegramMarkdown(text, TELEGRAM_MESSAGE_LIMIT)) {
-      const sent = await bot.api.sendMessage(Number(target.chatId), chunk, {
-        parse_mode: 'HTML',
-        ...threadOptionsOf(target),
-        ...extra,
-      });
+    // A rich message: Telegram parses the agent's Markdown itself (tables,
+    // headings, lists, code); format.ts only adjusts it and splits a text
+    // over the rich message limits.
+    for (const chunk of formatTelegramMarkdown(text)) {
+      const sent = await bot.api.sendRichMessage(
+        Number(target.chatId),
+        { markdown: chunk },
+        { ...threadOptionsOf(target), ...extra },
+      );
 
       firstMessageId ??= sent.message_id;
     }
@@ -358,7 +361,16 @@ export function startTelegramDelivery({ bot }: { bot: Bot }): Consumer {
       text = `⛔ Тред отменён${reason ? ` (${reason})` : ''}.`;
     }
 
-    const firstMessageId = await sendText(target, text);
+    // The summary text failing must not keep the topic open or its files
+    // undelivered: the error is rethrown (journaled) once the rest is done.
+    let firstMessageId: number | null = null;
+    let textError: unknown = null;
+
+    try {
+      firstMessageId = await sendText(target, text);
+    } catch (error) {
+      textError = error;
+    }
 
     for (const fileId of fileIds) {
       try {
@@ -386,6 +398,10 @@ export function startTelegramDelivery({ bot }: { bot: Bot }): Consumer {
 
     if (firstMessageId !== null) {
       await recordDelivery(event.id, target, firstMessageId);
+    }
+
+    if (textError !== null) {
+      throw textError;
     }
   };
 
