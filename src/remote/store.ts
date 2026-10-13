@@ -11,7 +11,8 @@ import type { RemoteThreadModel } from '../../prisma-generated/models.ts';
 import { prisma } from '../db/client.ts';
 import { appendEventIn, logTransaction } from '../core/append.ts';
 import type { AppendInput } from '../core/envelope.ts';
-import type { JsonValue, NotificationLevel } from '../core/contract.ts';
+import type { Event, JsonValue, NotificationLevel } from '../core/contract.ts';
+import { THREAD_DECIDE, THREAD_FINISH, THREAD_MESSAGE, THREAD_PAUSE, toEvent } from '../core/envelope.ts';
 import { notifyAppended } from '../core/live.ts';
 import type { SessionState } from '../projections/session.ts';
 
@@ -60,17 +61,26 @@ export type RemoteRow = {
   cursor: JsonValue | null;
   watch: WatchState;
   phase: RemotePhase;
+  // The engine's durable position over the thread's inbound events: the
+  // seq of the last one applied to the session (listInboundEvents reads
+  // after it). Advanced in the same transaction as the verb's effect.
+  inboundSeq: bigint;
   nextPollAt: Date;
   pollFailures: number;
   lastActivityAt: Date;
 };
 
-export type RowPatch = Partial<Pick<RemoteRow, 'cursor' | 'watch' | 'phase' | 'nextPollAt' | 'pollFailures' | 'lastActivityAt' | 'link'>>;
+export type RowPatch = Partial<Pick<RemoteRow, 'cursor' | 'watch' | 'phase' | 'inboundSeq' | 'nextPollAt' | 'pollFailures' | 'lastActivityAt' | 'link'>>;
 
+// A second live thread for one session (the partial unique index of the
+// migration): the thread that has it, when it could be found.
 export class RemoteRowConflict extends Error {
-  constructor(kind: string, ref: string) {
-    super(`the session ${ref} of ${kind} already has a thread`);
+  readonly existingThreadId: string | null;
+
+  constructor(kind: string, ref: string, existingThreadId: string | null) {
+    super(`the session ${ref} of ${kind} already has a thread${existingThreadId ? ` (${existingThreadId})` : ''}`);
     this.name = 'RemoteRowConflict';
+    this.existingThreadId = existingThreadId;
   }
 }
 
@@ -98,6 +108,7 @@ function toRow(row: RemoteThreadModel): RemoteRow {
     cursor: (row.cursor ?? null) as JsonValue | null,
     watch: row.watch as WatchState,
     phase: row.phase as RemotePhase,
+    inboundSeq: row.inboundSeq,
     nextPollAt: row.nextPollAt,
     pollFailures: row.pollFailures,
     lastActivityAt: row.lastActivityAt,
@@ -122,11 +133,11 @@ async function appendAll(tx: Prisma.TransactionClient, events: AppendInput[]): P
   return seqs;
 }
 
-export type CreateRowInput = Pick<RemoteRow, 'threadId' | 'userId' | 'kind' | 'ref' | 'link' | 'watch' | 'phase'> & { lastActivityAt?: Date; nextPollAt?: Date };
+export type CreateRowInput = Pick<RemoteRow, 'threadId' | 'userId' | 'kind' | 'ref' | 'link' | 'watch' | 'phase' | 'inboundSeq'> & { cursor?: JsonValue | null; lastActivityAt?: Date; nextPollAt?: Date };
 
 // The row of a freshly opened or adopted thread with the events of its
 // opening (session.started, session.state) — one transaction. A second
-// thread for the same session is RemoteRowConflict.
+// live thread for the same session is RemoteRowConflict.
 export async function createRow(input: CreateRowInput, events: AppendInput[]): Promise<RemoteRow> {
   let seqs: bigint[] = [];
 
@@ -141,6 +152,8 @@ export async function createRow(input: CreateRowInput, events: AppendInput[]): P
           link: input.link,
           watch: input.watch as unknown as Prisma.InputJsonValue,
           phase: input.phase,
+          inboundSeq: input.inboundSeq,
+          ...(input.cursor !== undefined && input.cursor !== null ? { cursor: input.cursor as Prisma.InputJsonValue } : {}),
           ...(input.lastActivityAt ? { lastActivityAt: input.lastActivityAt } : {}),
           ...(input.nextPollAt ? { nextPollAt: input.nextPollAt } : {}),
         },
@@ -158,7 +171,7 @@ export async function createRow(input: CreateRowInput, events: AppendInput[]): P
     return toRow(row);
   } catch (error) {
     if (isUniqueViolation(error)) {
-      throw new RemoteRowConflict(input.kind, input.ref);
+      throw new RemoteRowConflict(input.kind, input.ref, (await findLiveRow(input.kind, input.ref))?.threadId ?? null);
     }
 
     throw error;
@@ -171,11 +184,53 @@ export async function getRow(threadId: string): Promise<RemoteRow | null> {
   return row ? toRow(row) : null;
 }
 
+export const LIVE_PHASES: RemotePhase[] = ['working', 'idle', 'asking', 'paused', 'finishing'];
+
+// The live thread of a session, if any.
+export async function findLiveRow(kind: string, ref: string): Promise<RemoteRow | null> {
+  const row = await prisma.remoteThread.findFirst({ where: { kind, ref, phase: { in: LIVE_PHASES } } });
+
+  return row ? toRow(row) : null;
+}
+
+// Every live row — the boot sweep of the engine (the inbound events a dead
+// process left unapplied).
+export async function listLiveRows(): Promise<RemoteRow[]> {
+  const rows = await prisma.remoteThread.findMany({ where: { phase: { in: LIVE_PHASES } }, orderBy: { threadId: 'asc' } });
+
+  return rows.map(toRow);
+}
+
+// The inbound events of a thread after a seq, oldest first: the owner's
+// messages authored in it (user.message — the mirror's own, source
+// 'remote', among them: the engine tells them apart) and the commands
+// addressed to it (thread.message of the parent, thread.decide,
+// thread.finish, thread.pause). What the facade is woken for; read by the
+// durable position, not from memory.
+export const INBOUND_ADDRESSED_TYPES = [THREAD_MESSAGE, THREAD_DECIDE, THREAD_FINISH, THREAD_PAUSE];
+
+export async function listInboundEvents(threadId: string, afterSeq: bigint, limit: number): Promise<Event[]> {
+  const rows = await prisma.event.findMany({
+    where: {
+      seq: { gt: afterSeq },
+      OR: [
+        { threadId, type: 'user.message' },
+        { targetThreadId: threadId, type: { in: INBOUND_ADDRESSED_TYPES } },
+      ],
+    },
+    orderBy: { seq: 'asc' },
+    take: limit,
+  });
+
+  return rows.map(toEvent);
+}
+
 // The rows due for a read: alive (not closed, not gone) and past their
-// next_poll_at, the longest waiting first.
+// next_poll_at, the longest waiting first. A candidate list: the engine
+// reads the row again under its lock before acting on it.
 export async function listDueRows(now: Date, limit: number): Promise<RemoteRow[]> {
   const rows = await prisma.remoteThread.findMany({
-    where: { phase: { notIn: ['closed', 'gone'] }, nextPollAt: { lte: now } },
+    where: { phase: { in: LIVE_PHASES }, nextPollAt: { lte: now } },
     orderBy: { nextPollAt: 'asc' },
     take: limit,
   });
@@ -196,6 +251,7 @@ export async function advanceRow(threadId: string, patch: RowPatch, events: Appe
         ...(patch.cursor !== undefined ? { cursor: patch.cursor === null ? Prisma.JsonNull : (patch.cursor as Prisma.InputJsonValue) } : {}),
         ...(patch.watch !== undefined ? { watch: patch.watch as unknown as Prisma.InputJsonValue } : {}),
         ...(patch.phase !== undefined ? { phase: patch.phase } : {}),
+        ...(patch.inboundSeq !== undefined ? { inboundSeq: patch.inboundSeq } : {}),
         ...(patch.nextPollAt !== undefined ? { nextPollAt: patch.nextPollAt } : {}),
         ...(patch.pollFailures !== undefined ? { pollFailures: patch.pollFailures } : {}),
         ...(patch.lastActivityAt !== undefined ? { lastActivityAt: patch.lastActivityAt } : {}),

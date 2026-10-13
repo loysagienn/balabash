@@ -43,6 +43,28 @@ describe('projectFeed — a question for the user (agent.ask)', () => {
 });
 
 describe('projectFeed — messages', () => {
+  it('shows a reply somebody else wrote into a remote session under their name, not as yours', () => {
+    resetSeq(1n);
+
+    const items = projectFeed(
+      [
+        event({ type: 'user.message', threadId: 't1', actor: 'user', payload: { text: 'from context', source: 'remote', identity: { username: 'alice' } } }),
+        event({ type: 'user.message', threadId: 't1', actor: 'user', payload: { text: 'from nobody', source: 'remote' } }),
+        event({ type: 'user.message', threadId: 't1', actor: 'user', payload: { text: 'mine', source: 'web' } }),
+      ],
+      ctx,
+    ) as MessageItem[];
+
+    assert.deepEqual(
+      items.map(item => [item.from, item.variant ?? null, item.tag ?? null, item.text]),
+      [
+        ['alice', null, 'external', 'from context'],
+        ['external', null, 'external', 'from nobody'],
+        ['you', 'user', null, 'mine'],
+      ],
+    );
+  });
+
   it('turns the task, user and agent messages into blocks with who → whom, folding a long task', () => {
     resetSeq(1n);
 

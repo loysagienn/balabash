@@ -3,15 +3,16 @@
 // turn of ours — so the facade holds no state: every call is forwarded to
 // the engine by threadId, and a facade may be risen again at any time (the
 // router rises one lazily on the first delivered event, after a restart as
-// before). Cheap by construction.
+// before). Cheap by construction. A delivered event is not handed over —
+// the engine reads the thread's inbound events from the log by its own
+// durable position; the facade only wakes it.
 
-import type { Event } from '../core/contract.ts';
 import type { RegisteredRun } from '../runtime/runs.ts';
 
 export type FacadeEngine = {
-  // An event delivered to the thread: queued per thread and applied in
-  // order (the engine's inbound side). Non-blocking.
-  inbound(threadId: string, event: Event): void;
+  // An event was delivered to the thread: apply the inbound events after
+  // the row's position (the engine's inbound side). Non-blocking.
+  wake(threadId: string): void;
   // thread.interrupt: stop the session's turn in flight.
   stop(threadId: string): void;
   // A terminal was routed for the thread: it is over here; the session is
@@ -21,8 +22,8 @@ export type FacadeEngine = {
 
 export function createRemoteFacade(threadId: string, engine: FacadeEngine): RegisteredRun {
   return {
-    accept: event => {
-      engine.inbound(threadId, event);
+    accept: () => {
+      engine.wake(threadId);
     },
     interrupt: () => {
       engine.stop(threadId);

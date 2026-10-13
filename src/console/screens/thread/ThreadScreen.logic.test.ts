@@ -37,9 +37,12 @@ describe('thread page words', () => {
     assert.deepEqual(threadCommands(thread({ id: 't', status: 'completed' }), 'done'), { running: false, stopEnabled: false, remote: false, pauseEnabled: false });
     assert.deepEqual(threadCommands(thread({ id: 'main', parentId: null }), 'run'), { running: false, stopEnabled: false, remote: false, pauseEnabled: false });
     assert.deepEqual(threadCommands(thread({ id: 'r', remote: true }), 'wait'), { running: true, stopEnabled: false, remote: true, pauseEnabled: true });
+    assert.deepEqual(threadCommands(thread({ id: 'r', remote: true }), 'run'), { running: true, stopEnabled: true, remote: true, pauseEnabled: false });
+    assert.deepEqual(threadCommands(thread({ id: 'r', remote: true }), 'act'), { running: true, stopEnabled: false, remote: true, pauseEnabled: false });
     assert.deepEqual(threadCommands(thread({ id: 'r', remote: true }), 'paused'), { running: true, stopEnabled: false, remote: true, pauseEnabled: false });
     assert.deepEqual(threadCommands(thread({ id: 'r', remote: true, status: 'cancelled' }), 'off'), { running: false, stopEnabled: false, remote: false, pauseEnabled: false });
     assert.match(cancelWords(thread({ id: 't', agent: 'engineer' })), /^The “engineer” agent will stop/);
+    assert.match(cancelWords(thread({ id: 'r', agent: 'fake_agent', remote: true })), /the “fake_agent” session itself is not touched/);
   });
 
   it('locks the composer for a finished or headless thread only', () => {

@@ -21,13 +21,14 @@ export function threadTimeLabel(thread: Thread, state: StateName, now: Date): st
 // turn" and "Cancel thread" (the main thread is eternal and takes neither);
 // a stop needs a turn in flight.
 // A remote thread (the mirror of a session elsewhere) also takes Finish —
-// the session's closing summary completes it — and Pause, unless it
-// already sleeps.
+// the session's closing summary completes it — and Pause, only while it
+// waits for a message (a working session is stopped, not paused; a
+// question waits for a decision; a sleeping thread sleeps already).
 export function threadCommands(thread: Thread, state: StateName): { running: boolean; stopEnabled: boolean; remote: boolean; pauseEnabled: boolean } {
   const running = thread.status === 'active' && thread.parentId !== null;
   const remote = running && thread.remote;
 
-  return { running, stopEnabled: running && state === 'run', remote, pauseEnabled: remote && state !== 'paused' };
+  return { running, stopEnabled: running && state === 'run', remote, pauseEnabled: remote && state === 'wait' };
 }
 
 // The words of the finish confirmation (a remote thread).
@@ -35,8 +36,14 @@ export function finishWords(thread: Thread): string {
   return `The “${thread.agent}” session will be asked for a closing summary, and the thread will end with it. The session itself stays where it is.`;
 }
 
-// The words of the cancel confirmation (design: ThreadScreen, modal).
+// The words of the cancel confirmation (design: ThreadScreen, modal). A
+// remote thread's cancel closes the mirror alone: the session elsewhere
+// is not touched — a turn in flight runs on there.
 export function cancelWords(thread: Thread): string {
+  if (thread.remote) {
+    return `The thread will end without a summary; the “${thread.agent}” session itself is not touched and keeps running where it is. The parent thread will be notified. This can’t be undone.`;
+  }
+
   return `The “${thread.agent}” agent will stop and the thread will end without a summary. The parent thread will be notified. This can’t be undone.`;
 }
 

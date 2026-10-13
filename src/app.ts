@@ -34,7 +34,7 @@ import { createProjectsToolServer } from './projects/tools.ts';
 import { createCoordinatorRun, hasActiveCoordinatorTurns, settleMainThreadStates } from './coordinator/index.ts';
 import { startWebServer } from './api/index.ts';
 import { startThreadRouter } from './runtime/router.ts';
-import { openRemoteThread, remoteFacade, startRemoteEngine } from './remote/engine.ts';
+import { isRemoteEngineBusy, openRemoteThread, remoteFacade, startRemoteEngine } from './remote/engine.ts';
 import { RESTART_EXIT_CODE, completePendingRestarts, startRestartModule } from './runtime/restart.ts';
 import { initTelegramBot } from './adapters/telegram/bot.ts';
 import { startTelegramDelivery } from './adapters/telegram/delivery.ts';
@@ -260,6 +260,9 @@ consumers.push(
     // Workspace jobs do not survive a restart — the safe window waits for
     // them (force skips the wait; the shutdown sweep then kills the groups).
     hasActiveJobs: isAnyJobRunning,
+    // The remote engine's verbs in flight (its state is durable; a verb
+    // half-way through is better finished than replayed).
+    hasRemoteWork: isRemoteEngineBusy,
     onRestartWindow: () => shutdown(RESTART_EXIT_CODE),
   }),
 );

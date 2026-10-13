@@ -19,7 +19,6 @@ function ctx(partial: Partial<MirrorContext> = {}, watch: Partial<ReturnType<typ
     threadId: 't1',
     userId: 'u1',
     kind: 'fake_agent',
-    phase: 'working',
     watch: initialWatch({ headless: false, parentId: 'main', notification: 'urgent', ownMessageIds: ['m-own'], ...watch }),
     ...partial,
   };
@@ -132,7 +131,7 @@ describe('mirrorRead', () => {
   });
 
   test('the closing summary’s turn finishes the thread with its text and is not told as a reply', () => {
-    const asked = ctx({ phase: 'finishing' }, { finish: { messageId: 'm-fin', turnId: null, startedAt: '2026-10-13T00:00:00Z' }, ownMessageIds: ['m-fin'] });
+    const asked = ctx({}, { finish: { messageId: 'm-fin', turnId: null, startedAt: '2026-10-13T00:00:00Z' }, ownMessageIds: ['m-fin'] });
     const result = mirrorRead(
       read([
         { kind: 'turn.started', turnId: 'turn-9', messageId: 'm-fin' },
@@ -146,6 +145,26 @@ describe('mirrorRead', () => {
     assert.deepEqual(result.events, []);
     assert.deepEqual(result.finished, { text: 'Did x; y remains.' });
     assert.equal(result.watch.finish?.turnId, 'turn-9');
+  });
+
+  test('the summary outstanding keeps the phase finishing over an idle read; a driver naming no prompt — the first turn after the ask is the summary’s', () => {
+    const asked = ctx({}, { finish: { messageId: 'm-fin', turnId: null, startedAt: '2026-10-13T00:00:00Z' }, ownMessageIds: ['m-fin'] });
+    const idle = mirrorRead(read([], 'idle'), asked);
+
+    assert.equal(idle.phase, 'finishing');
+    assert.ok(idle.watch.finish);
+
+    const foreign = mirrorRead(read([{ kind: 'turn.started', turnId: 'turn-a', messageId: 'm-other' }, { kind: 'text', turnId: 'turn-a', text: 'someone else’s turn' }, { kind: 'turn.finished', turnId: 'turn-a', outcome: 'completed', text: 'someone else’s turn' }], 'idle'), asked);
+
+    assert.equal(foreign.finished, null);
+    assert.equal(foreign.watch.finish?.turnId, null);
+    assert.equal(foreign.phase, 'finishing');
+    assert.deepEqual(foreign.events.map(event => event.type), ['agent.message']);
+
+    const nameless = mirrorRead(read([{ kind: 'turn.started', turnId: 'turn-b' }, { kind: 'text', turnId: 'turn-b', text: 'All done.' }, { kind: 'turn.finished', turnId: 'turn-b', outcome: 'completed', text: 'All done.' }], 'idle'), asked);
+
+    assert.deepEqual(nameless.finished, { text: 'All done.' });
+    assert.deepEqual(nameless.events, []);
   });
 
   test('a lost session is gone; a resync is noted silently; nothing read is no activity', () => {

@@ -21,9 +21,9 @@ export type MirrorContext = {
   threadId: string;
   userId: string;
   kind: string;
+  // The watch before the read: the closing summary in flight (watch.finish)
+  // keeps the phase at finishing whatever the session says of itself.
   watch: WatchState;
-  // The row's phase before the read (paused and finishing matter).
-  phase: RemotePhase;
 };
 
 export type MirrorResult = {
@@ -122,7 +122,10 @@ export function mirrorRead(read: RemoteRead, ctx: MirrorContext): MirrorResult {
         currentTurnId = item.turnId;
         watch = { ...watch, lastTurnText: '' };
 
-        if (watch.finish && item.messageId && item.messageId === watch.finish.messageId) {
+        // The closing summary's turn: told by our prompt's id — or, from a
+        // driver that names no prompt, the first turn opened after the
+        // summary was asked for.
+        if (watch.finish && !watch.finish.turnId && (item.messageId === undefined || item.messageId === watch.finish.messageId)) {
           watch = { ...watch, finish: { ...watch.finish, turnId: item.turnId } };
         }
 
@@ -266,8 +269,11 @@ export function mirrorRead(read: RemoteRead, ctx: MirrorContext): MirrorResult {
 
   watch = { ...watch, ownMessageIds: watch.ownMessageIds.slice(-OWN_IDS_KEEP) };
 
+  // The closing summary still outstanding keeps the thread finishing — an
+  // idle read before the summary's turn starts (or a lost one) does not
+  // reopen the thread; the engine's deadline settles it.
   const phase: MirrorResult['phase'] =
-    read.phase === 'gone' ? 'gone' : read.phase === 'working' ? (ctx.phase === 'finishing' && !finished ? 'finishing' : 'working') : read.phase === 'asking' || watch.openAsks.length ? 'asking' : 'idle';
+    read.phase === 'gone' ? 'gone' : watch.finish && !finished ? 'finishing' : read.phase === 'working' ? 'working' : read.phase === 'asking' || watch.openAsks.length ? 'asking' : 'idle';
 
   return { events, watch, phase, activity: activity || read.items.length > 0, finished };
 }

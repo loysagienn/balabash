@@ -267,8 +267,13 @@ export type RemoteDriverFilesApi = {
 // (stored as is, advanced together with the mirror), the phase the session
 // is in, and the items in the order of the external system. A driver keeps
 // no state beyond the cursor; read is idempotent and has no side effects on
-// the other side; after a resync it does not repeat what it already handed
-// out.
+// the other side. The cursor must carry enough for the driver to continue
+// from it even when the external system's own cursor lapsed: on such a
+// lapse the driver re-reads from the start, skips what the cursor says was
+// already handed out, and reports `resynced` (the engine notes it in the
+// mirror). Every verb of the driver is bounded in time by the engine (a
+// minute); a verb that overruns is an error of that verb, not of the
+// thread.
 export type RemoteRead = {
   cursor: JsonValue;
   // working — a turn is in flight; idle — the session waits; asking — a
@@ -276,7 +281,8 @@ export type RemoteRead = {
   phase: 'working' | 'idle' | 'asking' | 'gone';
   nextReadInSec?: number; // a hint; the engine clamps it to [5 s, 1 h]
   items: RemoteItem[];
-  // The cursor could not be served and the driver re-read from the start —
+  // The cursor could not be served as it was: the driver re-read from the
+  // start and continued from what the cursor said was already handed out —
   // the engine notes the resync in the mirror.
   resynced?: boolean;
 };
@@ -287,6 +293,14 @@ export type RemoteRead = {
 // twice; text and output are verbatim — but never base64 blobs (bytes cross
 // only through fetchFile) and never secrets; every string is untrusted text
 // of the external system.
+//
+// turn.started.messageId — our id when the turn was opened by our prompt
+// (a driver that knows it must hand it over: the closing summary's turn is
+// told apart by it; without it the engine takes the first turn opened
+// after the summary was asked for).
+// text — a WHOLE message of the agent, not a delta: one item is one reply
+// (a driver over a streaming system hands the message over once it is
+// complete).
 export type RemoteItem =
   | { kind: 'turn.started'; turnId: string; messageId?: string }
   | { kind: 'prompt'; messageId?: string; author?: string; text: string }
@@ -309,16 +323,27 @@ export type RemoteItem =
   | { kind: 'ask.closed'; askId: string; outcome: string }
   | { kind: 'artifact'; title: string; uri: string; mimeType?: string };
 
+// The verbs with a side effect on the other side (open, say, answer) may be
+// REPEATED by the engine with the same messageId / askId: a crash between
+// the verb and its record here replays the verb after the restart. A driver
+// makes them idempotent by that id (a prompt already accepted under the
+// id is not sent twice; a decision already given is not given again) —
+// the external system's own idempotency where it has one, the driver's
+// check otherwise.
 export type RemoteDriver = {
   // Start a new session with the prompt and the options (by the declared
   // schema); files — attachments of the prompt. ref — the session in the
   // external system (opaque to the core); link — where a human looks at it.
+  // messageId is stable for the thread: a repeat opens no second session.
   open(
     ctx: RemoteDriverContext,
     input: { prompt: string; options: JsonObject; files: FileRef[]; messageId: string },
   ): Promise<{ ref: string; link?: string; title?: string }>;
-  // Adoption: does the session exist, and how is it called.
-  describe(ctx: RemoteDriverContext, ref: string): Promise<{ exists: boolean; link?: string; title?: string }>;
+  // Adoption: does the session exist, and how is it called. cursor — where
+  // the mirror starts: absent, the whole history of the session is mirrored
+  // (every turn and tool call as events of the thread); a driver that
+  // would rather start from now hands the position of the present.
+  describe(ctx: RemoteDriverContext, ref: string): Promise<{ exists: boolean; link?: string; title?: string; cursor?: JsonValue }>;
   // cursor null = from the beginning.
   read(ctx: RemoteDriverContext, input: { ref: string; cursor: JsonValue | null }): Promise<RemoteRead>;
   say(ctx: RemoteDriverContext, input: { ref: string; text: string; files: FileRef[]; messageId: string }): Promise<void>;

@@ -195,13 +195,18 @@ type RestartModuleHooks = {
   // them; force skips the wait and the shutdown sweep kills their process
   // groups.
   hasActiveJobs(): boolean;
+  // In-memory truth about the remote engine (src/remote): a verb of a
+  // driver in flight or an inbound wake not yet served. Its state is
+  // durable and a replay after the restart is safe, but a verb half-way
+  // through is better finished than repeated; the safe window waits.
+  hasRemoteWork?(): boolean;
   // Graceful shutdown ending in process.exit(RESTART_EXIT_CODE).
   onRestartWindow(): Promise<void>;
   // How often the safe window is polled; the tests shorten it.
   pollIntervalMs?: number;
 };
 
-export function startRestartModule({ isBusy, hasActiveJobs, onRestartWindow, pollIntervalMs = POLL_INTERVAL_MS }: RestartModuleHooks): Consumer {
+export function startRestartModule({ isBusy, hasActiveJobs, hasRemoteWork, onRestartWindow, pollIntervalMs = POLL_INTERVAL_MS }: RestartModuleHooks): Consumer {
   let exiting = false;
 
   const notifyLongPending = async (current: PendingRestart, blockedBy: string[]): Promise<void> => {
@@ -270,6 +275,10 @@ export function startRestartModule({ isBusy, hasActiveJobs, onRestartWindow, pol
 
     if (workspaceJob) {
       blockedBy.push('a workspace job still running');
+    }
+
+    if (hasRemoteWork?.()) {
+      blockedBy.push('a remote thread’s command in flight');
     }
 
     const quietSeconds = await getLogQuietSeconds();

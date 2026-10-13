@@ -588,8 +588,17 @@ class Builder {
 
     if (is(event, 'user.message')) {
       const text = event.payload.text ?? '';
+      const atts = userAtts(event.payload, key);
 
-      this.push({ kind: 'message', key, at, from: 'you', to: this.ctx.agent, variant: 'user', text, atts: userAtts(event.payload, key), fold: false });
+      // A reply somebody else wrote into a remote session (the engine's
+      // mirror, source 'remote'): their words under their name, not yours.
+      if (event.payload.source === 'remote') {
+        this.push({ kind: 'message', key, at, from: event.payload.identity?.username || 'external', to: this.ctx.agent, tag: 'external', text, atts, fold: shouldFold(text) });
+
+        return;
+      }
+
+      this.push({ kind: 'message', key, at, from: 'you', to: this.ctx.agent, variant: 'user', text, atts, fold: false });
 
       return;
     }
