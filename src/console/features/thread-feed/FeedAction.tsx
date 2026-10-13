@@ -2,9 +2,10 @@
 // time on the right (a live timer while it runs — `now` ticks every second
 // then), and the details that mount when the row opens: a terminal with
 // the command and its output, a diff (with the tool's refusal above it
-// when the change failed), the thought as Markdown, the input
-// and the result of any other tool — each cut to a readable size with an
-// honest notice. The frames of a native sub-agent render under the row.
+// when the change failed), the thought as Markdown, a sub-agent's report
+// as Markdown, whole, the input
+// and the result of any other tool — each but the report cut to a
+// readable size with an honest notice. The frames of a native sub-agent render under the row.
 
 import { Md } from '../../ui/Md/Md.tsx';
 import { TermLine, Terminal, Trunc } from '../../ui/Terminal/Terminal.tsx';
@@ -72,6 +73,9 @@ function Details({ detail, error }: { detail: ActionDetail; error: boolean }) {
         </>
       );
     }
+    case 'report':
+      // Asked for whole: the row is the folded form, opening it is "show all".
+      return <Md quiet source={detail.text} />;
     case 'io': {
       const input = cutText(detail.input);
       const output = detail.output === null ? null : cutText(detail.output);

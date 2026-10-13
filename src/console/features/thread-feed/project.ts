@@ -7,7 +7,11 @@
 // progress, a child thread's start and terminal, the plan) are folded into
 // one item that stays where it first appeared; an end whose start lies
 // before the loaded range (the chunk boundary) stands on its own, where
-// it is — the result and the error are in the range, and they show.
+// it is — the result and the error are in the range, and they show. A
+// native sub-agent's frames are the exception: they live only under its
+// Agent row, so while that row is before the loaded range they are not
+// drawn (they would read as the thread's own actions and text) — what the
+// sub-agent brought back shows where it finished, as its report row.
 
 import type { Event, JsonObject } from '../../../core/contract.ts';
 import type { EventOf, EventPayloads, EventType, InboundFile, SessionPlanItem } from '../../../core/event-types.ts';
@@ -15,7 +19,7 @@ import { formatTokensK } from '../../ui/Ring/Ring.logic.ts';
 import type { IconName } from '../../ui/Icon/Icon.tsx';
 import type { StateName } from '../../ui/atoms/state.ts';
 import type { XpState } from '../../ui/Xp/Xp.tsx';
-import { actionDuration, bridgeAction, bridgeOutput, isPlanTool, nativeAction } from './actions.ts';
+import { actionDuration, bridgeAction, bridgeOutput, clipLine, isPlanTool, nativeAction } from './actions.ts';
 import type { ActionDetail, ActionLabel } from './actions.ts';
 import { withWorkspace } from '../../lib/workspace/state.ts';
 
@@ -222,6 +226,13 @@ class Builder {
   private readonly nestedGroups = new Map<string, ActionsItem>();
   private readonly tasks = new Map<string, SubtaskItem>();
   private readonly children = new Map<string, ChildItem>();
+  // The report rows of sub-agents, by the toolUseId their end names.
+  private readonly reports = new Map<string, ActionItem>();
+  // The calls of sub-agents not drawn (unplaced), and where each drawn
+  // call nests (its parentToolUseId): a task announced for such a call is
+  // the sub-agent's own, not the thread's.
+  private readonly unplacedCalls = new Set<string>();
+  private readonly callParents = new Map<string, string>();
   private plan: PlanItem | null = null;
   private readonly ctx: FeedContext;
 
@@ -262,6 +273,12 @@ class Builder {
         return group;
       },
     };
+  }
+
+  // A frame of a sub-agent whose Agent row is not in the loaded range: not
+  // drawn — the row brings it along once the range reaches back to it.
+  private unplaced(parentToolUseId: string | null | undefined): boolean {
+    return Boolean(parentToolUseId) && !this.tools.has(parentToolUseId!);
   }
 
   private action(item: ActionItem, parentToolUseId?: string | null): void {
@@ -327,7 +344,9 @@ class Builder {
     return this.ended ? 'off' : 'run';
   }
 
-  private quiet(item: QuietItem, parentToolUseId?: string | null): void {
+  // A block (not a row) where it belongs: under the Agent row of its
+  // sub-agent, or at the top level.
+  private place(item: QuietItem | SubtaskItem, parentToolUseId?: string | null): void {
     const nested = this.nestedOf(parentToolUseId);
 
     if (nested) {
@@ -338,6 +357,46 @@ class Builder {
     }
 
     this.push(item);
+  }
+
+  // A sub-agent ended (an agent's task: the harness reports its usage, a
+  // shell or monitor task has none): what it brought back to the thread —
+  // its last text, which the thread's agent received — as one collapsed row
+  // where it finished, the whole text on opening. The same text closes the
+  // sub-agent's frames under its Agent row; the row here stands whether
+  // that row is loaded or not, so it neither moves nor vanishes as the
+  // range grows.
+  private report(event: Event & EventOf<'session.task.completed'>, key: string, at: Date, state: StateName, task: SubtaskItem | undefined): void {
+    const { toolUseId, usage, summary, status } = event.payload;
+
+    // A sub-agent a sub-agent ran reports to that one: under its row, or
+    // not at all while that row is out of range.
+    if (!usage || (toolUseId && this.unplacedCalls.has(toolUseId))) {
+      return;
+    }
+
+    // The task's words, else its Agent row's (a continuation through
+    // SendMessage names the task its sub-agent first ran as).
+    const row = toolUseId ? this.tools.get(toolUseId) : undefined;
+    const description = task?.description ?? (row?.label.tool === 'Agent' ? row.label.arg : undefined);
+    const item: ActionItem = {
+      kind: 'action',
+      key,
+      at,
+      state: state === 'done' ? 'done' : state === 'err' ? 'err' : 'off',
+      label: { icon: 'bot', text: 'Subagent report', ...(description ? { textArg: clipLine(description) } : {}) },
+      endedAt: at,
+      untimed: true,
+      endNote: status === 'completed' ? null : status,
+      detail: summary.trim() ? { kind: 'report', text: summary } : null,
+      nested: [],
+    };
+
+    if (toolUseId) {
+      this.reports.set(toolUseId, item);
+    }
+
+    this.action(item, toolUseId ? this.callParents.get(toolUseId) : undefined);
   }
 
   add(event: Event): void {
@@ -486,6 +545,16 @@ class Builder {
       return;
     }
 
+    if (is(event, 'session.tool.started') && this.unplaced(event.payload.parentToolUseId)) {
+      this.unplacedCalls.add(event.payload.toolUseId);
+
+      return;
+    }
+
+    if ((is(event, 'session.thinking') || is(event, 'session.text')) && this.unplaced(event.payload.parentToolUseId)) {
+      return;
+    }
+
     if (is(event, 'session.thinking')) {
       // The event is written when the thought ends; a measured one began
       // durationMs earlier — the row's duration, as a tool's. Unmeasured
@@ -499,7 +568,7 @@ class Builder {
     }
 
     if (is(event, 'session.text')) {
-      this.quiet({ kind: 'quiet', key, at, text: event.payload.text }, event.payload.parentToolUseId);
+      this.place({ kind: 'quiet', key, at, text: event.payload.text }, event.payload.parentToolUseId);
 
       return;
     }
@@ -514,6 +583,11 @@ class Builder {
 
       this.tools.set(event.payload.toolUseId, item);
       this.toolIds.set(item, event.payload.toolUseId);
+
+      if (event.payload.parentToolUseId) {
+        this.callParents.set(event.payload.toolUseId, event.payload.parentToolUseId);
+      }
+
       this.inputs.set(item, event.payload.input ?? {});
       this.action(item, event.payload.parentToolUseId);
 
@@ -535,7 +609,9 @@ class Builder {
         return;
       }
 
-      if (isPlanTool(event.payload.name)) {
+      // A sub-agent's call whose Agent row is out of range; the end of an
+      // Agent whose report row already tells what it brought back.
+      if (isPlanTool(event.payload.name) || this.unplaced(event.payload.parentToolUseId) || this.reports.has(event.payload.toolUseId)) {
         return;
       }
 
@@ -589,9 +665,11 @@ class Builder {
       // description; the row of the tool already shows those. A card is for
       // a sub-agent (its Agent row holds the frames, the card the usage) or
       // a task without a tool row of its own (a backgrounded one).
+      // A call of a sub-agent not drawn is represented under its Agent row
+      // once that is loaded, its tasks with it.
       const tool = event.payload.toolUseId ? this.tools.get(event.payload.toolUseId) : undefined;
 
-      if (tool && tool.label.tool !== 'Agent' && !event.payload.backgrounded) {
+      if ((tool && tool.label.tool !== 'Agent' && !event.payload.backgrounded) || (event.payload.toolUseId && this.unplacedCalls.has(event.payload.toolUseId))) {
         return;
       }
 
@@ -632,7 +710,9 @@ class Builder {
       };
 
       this.tasks.set(event.payload.taskId, item);
-      this.push(item);
+      // A sub-agent's sub-agent: its card goes under the row of the one
+      // that ran it.
+      this.place(item, event.payload.toolUseId ? this.callParents.get(event.payload.toolUseId) : undefined);
 
       return;
     }
@@ -657,22 +737,20 @@ class Builder {
         item.state = state;
         item.meta = event.payload.usage ? taskMeta(event.payload.usage) : item.meta;
         item.summary = event.payload.summary || item.summary;
-
-        return;
-      }
-
-      // The start is before the loaded range. A task bound to a tool use is
-      // represented by that tool's row (an end alone when its start is out
-      // of range too); a task of its own gets its card from the end — and
-      // the card is the task's, so a later announcement of the same taskId
-      // (the harness announces a backgrounded task again) runs it again
-      // where it is instead of making a second one.
-      if (!event.payload.toolUseId) {
+      } else if (!event.payload.toolUseId) {
+        // The start is before the loaded range. A task bound to a tool use is
+        // represented by that tool's row (an end alone when its start is out
+        // of range too); a task of its own gets its card from the end — and
+        // the card is the task's, so a later announcement of the same taskId
+        // (the harness announces a backgrounded task again) runs it again
+        // where it is instead of making a second one.
         const card: SubtaskItem = { kind: 'subtask', key, at, taskKind: 'task', description: event.payload.summary, state, meta: taskMeta(event.payload.usage), lastTool: null, summary: null };
 
         this.tasks.set(event.payload.taskId, card);
         this.push(card);
       }
+
+      this.report(event, `${key}:report`, at, state, item);
 
       return;
     }

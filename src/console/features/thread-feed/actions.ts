@@ -25,6 +25,8 @@ export type ActionDetail =
   | { kind: 'diff'; diff: string; error?: string }
   // Markdown text (thinking).
   | { kind: 'md'; text: string }
+  // A sub-agent's report: Markdown, shown whole.
+  | { kind: 'report'; text: string }
   // The input and the result of any other tool, as text.
   | { kind: 'io'; input: string; output: string | null };
 

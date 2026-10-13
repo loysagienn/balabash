@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { event, resetSeq } from '../../store/fixtures.ts';
 import { projectFeed } from './project.ts';
-import type { ActionsItem, ChildItem, FeedContext, MessageItem, PlanItem, SubtaskItem } from './project.ts';
+import type { ActionItem, ActionsItem, ChildItem, FeedContext, FeedItem, MessageItem, PlanItem, SubtaskItem } from './project.ts';
 
 const ctx: FeedContext = { threadId: 't1', agent: 'engineer', parentAgent: 'coordinator', agentOf: id => (id === 'c9' ? 'browser' : null), you: null };
 
@@ -237,6 +237,157 @@ describe('projectFeed — actions', () => {
     );
   });
 
+  it('keeps a sub-agent’s frames off the feed while its Agent row is before the loaded range, its report where it finished', () => {
+    resetSeq(200n);
+
+    // Older: the Agent row and its task; newer: the chunk the thread opens with.
+    const older = [
+      own('session.tool.started', { toolUseId: 'ag', name: 'Agent', input: { description: 'Map attachments', prompt: 'trace it', run_in_background: true } }),
+      own('session.task.started', { taskId: 'tk', toolUseId: 'ag', description: 'Map attachments', backgrounded: true, subagentType: 'Explore' }),
+      own('session.tool.completed', { toolUseId: 'ag', name: 'Agent', result: 'Async agent launched', isError: false }),
+      own('session.thinking', { text: 'where to start', parentToolUseId: 'ag' }),
+    ];
+    const report = `I traced the whole path.\n\n${'## Section\n\nA finding with detail.\n\n'.repeat(400)}`;
+    const running = [
+      own('session.tool.started', { toolUseId: 's1', name: 'Grep', input: { pattern: 'fileId', path: '/src' }, parentToolUseId: 'ag' }),
+      own('session.tool.started', { toolUseId: 'm1', name: 'Bash', input: { command: 'ls' } }),
+      own('session.tool.completed', { toolUseId: 's1', name: 'Grep', result: '40 hits', isError: false, parentToolUseId: 'ag' }),
+      own('session.task.progress', { taskId: 'tk', toolUseId: 'ag', description: 'Running grep', usage: { totalTokens: 9000, toolUses: 1, durationMs: 4000 }, lastToolName: 'Grep' }),
+      own('session.tool.completed', { toolUseId: 'm1', name: 'Bash', result: 'a b', isError: false, exitCode: 0 }),
+      own('session.text', { text: 'Now the CCR adapter.', parentToolUseId: 'ag' }),
+      own('session.text', { text: 'Waiting for the sub-agent.', parentToolUseId: null }),
+    ];
+    const finished = [
+      own('session.text', { text: report, parentToolUseId: 'ag' }),
+      own('session.task.completed', { taskId: 'tk', toolUseId: 'ag', status: 'completed', summary: report, usage: { totalTokens: 123_000, toolUses: 47, durationMs: 187_000 } }),
+      // A shell task's end carries no usage: no report.
+      own('session.task.completed', { taskId: 'sh', toolUseId: 'm1', status: 'completed', summary: 'Background command finished' }),
+    ];
+
+    // Streaming, the Agent row out of range: the thread's own row and text
+    // only — the sub-agent's call, thought and words are not drawn.
+    const live = projectFeed(running, ctx);
+
+    assert.deepEqual(
+      live.map(item => item.kind),
+      ['actions', 'quiet'],
+    );
+    assert.deepEqual(
+      (live[0] as ActionsItem).items.map(row => row.label.tool),
+      ['Bash'],
+    );
+    assert.equal((live[1] as { text: string }).text, 'Waiting for the sub-agent.');
+
+    // It finished: one collapsed row with the whole report, no description
+    // to name it by.
+    const ended = projectFeed([...running, ...finished], ctx);
+
+    assert.deepEqual(
+      ended.map(item => item.kind),
+      ['actions', 'quiet', 'actions'],
+    );
+
+    const row = (ended[2] as ActionsItem).items[0]!;
+
+    assert.deepEqual([row.label.icon, row.label.text, row.label.textArg, row.state, row.endNote, row.untimed], ['bot', 'Subagent report', undefined, 'done', null, true]);
+    assert.deepEqual(row.detail, { kind: 'report', text: report });
+    assert.equal((ended[2] as ActionsItem).items.length, 1);
+
+    // The older chunk loads: the frames go under the Agent row, the report
+    // row stays the same row in the same place, now with its description.
+    const whole = projectFeed([...older, ...running, ...finished], ctx);
+
+    assert.deepEqual(
+      whole.map(item => item.kind),
+      ['actions', 'subtask', 'actions', 'quiet', 'actions'],
+    );
+
+    const agent = (whole[0] as ActionsItem).items[0]!;
+
+    assert.equal(agent.label.tool, 'Agent');
+    assert.deepEqual(
+      agent.nested.map(item => item.kind),
+      ['actions', 'quiet', 'quiet'],
+    );
+    assert.deepEqual(
+      (agent.nested[0] as ActionsItem).items.map(item => item.label.text ?? item.label.tool),
+      ['Thought', 'Grep'],
+    );
+    // Under the row the report closes the sub-agent's frames, whole.
+    assert.equal((agent.nested[2] as { text: string }).text, report);
+
+    const again = (whole[4] as ActionsItem).items[0]!;
+
+    assert.equal(again.key, row.key);
+    assert.equal(again.label.textArg, 'Map attachments');
+  });
+
+  it('keeps the tasks of a sub-agent’s own calls off the feed while its Agent row is out of range, and a nested sub-agent’s report under its parent', () => {
+    resetSeq(240n);
+
+    const frames = [
+      // The sub-agent's own Bash, announced as a task, and a sub-agent it ran.
+      own('session.tool.started', { toolUseId: 'sb', name: 'Bash', input: { command: 'sleep 60', description: 'Wait for the crawler' }, parentToolUseId: 'ag' }),
+      own('session.task.started', { taskId: 'kb', toolUseId: 'sb', description: 'Wait for the crawler', backgrounded: false }),
+      own('session.task.completed', { taskId: 'kb', toolUseId: 'sb', status: 'completed', summary: 'Wait for the crawler' }),
+      own('session.tool.completed', { toolUseId: 'sb', name: 'Bash', result: '', isError: false, exitCode: 0, parentToolUseId: 'ag' }),
+      own('session.tool.started', { toolUseId: 'in', name: 'Agent', input: { description: 'Inner look', prompt: 'look' }, parentToolUseId: 'ag' }),
+      own('session.task.started', { taskId: 'ki', toolUseId: 'in', description: 'Inner look', backgrounded: false, subagentType: 'Explore' }),
+      own('session.task.completed', { taskId: 'ki', toolUseId: 'in', status: 'completed', summary: 'inner findings', usage: { totalTokens: 1000, toolUses: 2, durationMs: 3000 } }),
+      own('session.tool.completed', { toolUseId: 'in', name: 'Agent', result: 'inner findings', isError: false, parentToolUseId: 'ag' }),
+    ];
+
+    assert.deepEqual(projectFeed(frames, ctx), []);
+
+    resetSeq(230n);
+
+    const start = own('session.tool.started', { toolUseId: 'ag', name: 'Agent', input: { description: 'Outer', prompt: 'go' } });
+    const items = projectFeed([start, ...frames], ctx);
+
+    assert.deepEqual(
+      items.map(item => item.kind),
+      ['actions'],
+    );
+
+    const outer = (items[0] as ActionsItem).items[0]!;
+    const nested = outer.nested.flatMap((item): (FeedItem | ActionItem)[] => (item.kind === 'actions' ? item.items : [item]));
+
+    assert.deepEqual(
+      nested.map(item => (item.kind === 'action' ? (item.label.text ?? item.label.tool) : item.kind)),
+      ['Bash', 'Agent', 'subtask', 'Subagent report'],
+    );
+  });
+
+  it('lets the report of a sub-agent the thread waited on stand for the end of its Agent call', () => {
+    resetSeq(260n);
+
+    const items = projectFeed(
+      [
+        own('session.tool.started', { toolUseId: 'v1', name: 'Read', input: { file_path: '/shot.png' }, parentToolUseId: 'fg' }),
+        own('session.tool.completed', { toolUseId: 'v1', name: 'Read', result: 'image', isError: false, parentToolUseId: 'fg' }),
+        own('session.text', { text: 'Canvas checked.', parentToolUseId: 'fg' }),
+        own('session.task.completed', { taskId: 'vt', toolUseId: 'fg', status: 'completed', summary: 'Canvas checked.', usage: { totalTokens: 50_000, toolUses: 13, durationMs: 90_000 } }),
+        own('session.tool.completed', { toolUseId: 'fg', name: 'Agent', result: [{ type: 'text', text: 'Canvas checked.' }], isError: false }),
+        // A continuation through SendMessage, its row loaded: named by its task.
+        own('session.task.started', { taskId: 'vt', toolUseId: 'sm', description: 'Verify the canvas', backgrounded: true, subagentType: 'design-verifier' }),
+        own('session.tool.started', { toolUseId: 'sm', name: 'SendMessage', input: { to: 'vt', message: 'check again' } }),
+        own('session.tool.completed', { toolUseId: 'sm', name: 'SendMessage', result: 'sent', isError: false }),
+        own('session.task.completed', { taskId: 'vt', toolUseId: 'sm', status: 'completed', summary: 'All fixed.', usage: { totalTokens: 60_000, toolUses: 15, durationMs: 120_000 } }),
+      ],
+      ctx,
+    );
+    const rows = items.flatMap(item => (item.kind === 'actions' ? item.items : []));
+
+    assert.deepEqual(
+      rows.map(row => [row.label.text ?? row.label.tool, row.label.textArg]),
+      [
+        ['Subagent report', undefined],
+        ['SendMessage', undefined],
+        ['Subagent report', 'Verify the canvas'],
+      ],
+    );
+  });
+
   it('folds a batch summary over its preceding rows and pairs bridge calls by callId', () => {
     resetSeq(30n);
 
@@ -377,7 +528,7 @@ describe('projectFeed — threads, tasks and lines', () => {
 
     assert.deepEqual(
       items.map(item => item.kind),
-      ['child', 'message', 'actions', 'subtask'],
+      ['child', 'message', 'actions', 'subtask', 'actions'],
     );
 
     const child = items[0] as ChildItem;
@@ -400,6 +551,12 @@ describe('projectFeed — threads, tasks and lines', () => {
     assert.deepEqual(task.meta, ['9k tokens', '4 calls', '1:30']);
     assert.equal(task.lastTool, 'Bash');
     assert.equal(task.summary, 'tests failed');
+
+    // An agent's task (the harness reports its usage) also leaves its
+    // report where it ended.
+    const report = (items[4] as ActionsItem).items[0]!;
+
+    assert.deepEqual([report.label.text, report.label.textArg, report.state, report.endNote], ['Subagent report', 'run tests', 'err', 'failed']);
   });
 
   it('names a backgrounded sub-agent by its agent and keeps one card through a repeated announcement of the task', () => {
@@ -420,12 +577,13 @@ describe('projectFeed — threads, tasks and lines', () => {
 
     assert.deepEqual(
       items.map(item => item.kind),
-      ['actions', 'subtask'],
+      ['actions', 'subtask', 'actions'],
     );
 
     const task = items[1] as SubtaskItem;
 
     assert.equal(task.taskKind, 'general-purpose subagent');
+    assert.deepEqual((items[2] as ActionsItem).items[0]!.detail, { kind: 'report', text: 'first word' });
     assert.equal(task.state, 'run');
     assert.equal(task.summary, 'first word');
     assert.deepEqual(task.meta, ['77k tokens', '33 calls', '6:22']);
@@ -443,12 +601,17 @@ describe('projectFeed — threads, tasks and lines', () => {
 
     assert.deepEqual(
       done.map(item => item.kind),
-      ['subtask', 'subtask'],
+      ['subtask', 'actions', 'subtask'],
+    );
+    // Each run of the sub-agent brought its own report.
+    assert.deepEqual(
+      (done[1] as ActionsItem).items.map(row => (row.detail?.kind === 'report' ? row.detail.text : null)),
+      ['first word', 'the late output'],
     );
     assert.equal((done[0] as SubtaskItem).state, 'done');
     assert.equal((done[0] as SubtaskItem).summary, 'the late output');
     assert.deepEqual((done[0] as SubtaskItem).meta, ['78k tokens', '33 calls', '8:12']);
-    assert.equal((done[1] as SubtaskItem).taskKind, 'background task');
+    assert.equal((done[2] as SubtaskItem).taskKind, 'background task');
   });
 
   it('keeps one card when the loaded range opens between the first start and the first end of a task announced again', () => {
@@ -464,7 +627,7 @@ describe('projectFeed — threads, tasks and lines', () => {
 
     assert.deepEqual(
       running.map(item => item.kind),
-      ['subtask'],
+      ['subtask', 'actions'],
     );
 
     const card = running[0] as SubtaskItem;
@@ -482,7 +645,10 @@ describe('projectFeed — threads, tasks and lines', () => {
       ctx,
     );
 
-    assert.equal(done.length, 1);
+    assert.deepEqual(
+      done.map(item => item.kind),
+      ['subtask', 'actions'],
+    );
     assert.equal((done[0] as SubtaskItem).state, 'done');
     assert.equal((done[0] as SubtaskItem).description, 'Data gaps');
     assert.equal((done[0] as SubtaskItem).summary, 'the late output');
