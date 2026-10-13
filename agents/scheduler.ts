@@ -12,6 +12,7 @@ import {
   BALABASH_PREAMBLE,
   BLOCKED_PATH_NOTE,
   OUTPUT_NOTE,
+  REMOTE_AGENTS_NOTE,
   REPO_RULES_NOTE,
   WORKSPACE_STORAGE_NOTE,
 } from './world/index.ts';
@@ -40,6 +41,8 @@ ${OUTPUT_NOTE}
 
 ${WORKSPACE_STORAGE_NOTE}
 
+${REMOTE_AGENTS_NOTE}
+
 End the thread when the task is done, cannot continue, or the user asks to stop; your report must state what was registered or changed, whether it was built, whether a restart was requested, and anything that remains. Stay with the assigned task: if the user clearly switches to an unrelated task or asks for the secretary, wrap up and end the thread.`;
 
 export const agent = {
@@ -60,6 +63,7 @@ export const agent = {
     'notion',
     'perplexity',
     'projects',
+    'remote',
     'restart',
     'schedule',
     'storage',

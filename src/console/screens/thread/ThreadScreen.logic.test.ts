@@ -32,10 +32,13 @@ describe('thread page words', () => {
   });
 
   it('offers the commands to an active child thread; a stop needs a turn in flight', () => {
-    assert.deepEqual(threadCommands(thread({ id: 't' }), 'run'), { running: true, stopEnabled: true });
-    assert.deepEqual(threadCommands(thread({ id: 't' }), 'wait'), { running: true, stopEnabled: false });
-    assert.deepEqual(threadCommands(thread({ id: 't', status: 'completed' }), 'done'), { running: false, stopEnabled: false });
-    assert.deepEqual(threadCommands(thread({ id: 'main', parentId: null }), 'run'), { running: false, stopEnabled: false });
+    assert.deepEqual(threadCommands(thread({ id: 't' }), 'run'), { running: true, stopEnabled: true, remote: false, pauseEnabled: false });
+    assert.deepEqual(threadCommands(thread({ id: 't' }), 'wait'), { running: true, stopEnabled: false, remote: false, pauseEnabled: false });
+    assert.deepEqual(threadCommands(thread({ id: 't', status: 'completed' }), 'done'), { running: false, stopEnabled: false, remote: false, pauseEnabled: false });
+    assert.deepEqual(threadCommands(thread({ id: 'main', parentId: null }), 'run'), { running: false, stopEnabled: false, remote: false, pauseEnabled: false });
+    assert.deepEqual(threadCommands(thread({ id: 'r', remote: true }), 'wait'), { running: true, stopEnabled: false, remote: true, pauseEnabled: true });
+    assert.deepEqual(threadCommands(thread({ id: 'r', remote: true }), 'paused'), { running: true, stopEnabled: false, remote: true, pauseEnabled: false });
+    assert.deepEqual(threadCommands(thread({ id: 'r', remote: true, status: 'cancelled' }), 'off'), { running: false, stopEnabled: false, remote: false, pauseEnabled: false });
     assert.match(cancelWords(thread({ id: 't', agent: 'engineer' })), /^The “engineer” agent will stop/);
   });
 

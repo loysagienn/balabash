@@ -4,8 +4,8 @@
 
 import type { AgentView } from '../../../api/contract.ts';
 
-const LABELS: Record<AgentView['sdk'], string> = { claude: 'Claude', codex: 'Codex', openai: 'OpenAI' };
-const NAMES: Record<AgentView['sdk'], string> = { claude: 'Claude Agent SDK', codex: 'Codex SDK', openai: 'OpenAI Responses API' };
+const LABELS: Record<AgentView['sdk'], string> = { claude: 'Claude', codex: 'Codex', openai: 'OpenAI', remote: 'Remote' };
+const NAMES: Record<AgentView['sdk'], string> = { claude: 'Claude Agent SDK', codex: 'Codex SDK', openai: 'OpenAI Responses API', remote: 'Remote agent — a session in an external system' };
 
 // "Claude" — the engine in a row.
 export function engineLabel(sdk: AgentView['sdk']): string {

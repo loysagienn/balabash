@@ -20,8 +20,8 @@ import type { ThreadFilters } from './thread-query.ts';
 export const COORDINATOR_AGENT = 'coordinator';
 
 // A threads row as the reads below select it: the projection's columns
-// plus `headless`, read from the thread's own thread.started.
-type ThreadReadRow = ThreadRow & { headless: boolean };
+// plus `headless` and `remote`, read from the thread's own thread.started.
+type ThreadReadRow = ThreadRow & { headless: boolean; remote: boolean };
 
 function toThread(row: ThreadReadRow): Thread {
   return {
@@ -35,6 +35,7 @@ function toThread(row: ThreadReadRow): Thread {
     summary: row.summary as ThreadSummary | null,
     projectId: row.projectId,
     headless: row.headless,
+    remote: row.remote,
     createdSeq: row.createdSeq,
     terminalSeq: row.terminalSeq,
     createdAt: row.createdAt,
@@ -43,15 +44,17 @@ function toThread(row: ThreadReadRow): Thread {
 }
 
 // Every read of threads is raw SQL over this shape: the columns of the
-// projection aliased to the model's field names, and the spawn-time policy
-// `headless` joined in from the thread.started the row was created by
-// (`created_seq` is its seq, the primary key of events — one lookup per
-// row). The row does not store the policy — the event is its only source;
-// `= 'true'::jsonb` reads a boolean and nothing else as headless (a missing
-// or odd value is not), with no cast that could fail on an odd payload.
+// projection aliased to the model's field names, and the spawn-time facts
+// `headless` and `remote` joined in from the thread.started the row was
+// created by (`created_seq` is its seq, the primary key of events — one
+// lookup per row). The row does not store them — the event is their only
+// source; `= 'true'::jsonb` reads a boolean and nothing else as true (a
+// missing or odd value is not), with no cast that could fail on an odd
+// payload.
 const THREAD_COLUMNS = Prisma.sql`threads.id, threads.user_id AS "userId", threads.parent_id AS "parentId", threads.agent, threads.title,
        threads.description, threads.status, threads.summary, threads.project_id AS "projectId",
        COALESCE(started.payload -> 'headless' = 'true'::jsonb, false) AS headless,
+       COALESCE(started.payload -> 'remote' = 'true'::jsonb, false) AS remote,
        threads.created_seq AS "createdSeq", threads.terminal_seq AS "terminalSeq",
        threads.created_at AS "createdAt", threads.updated_at AS "updatedAt"`;
 const THREADS_FROM = Prisma.sql`threads LEFT JOIN events started ON started.seq = threads.created_seq`;
@@ -151,10 +154,19 @@ export async function countThreadsAt(userId: string, filters: ThreadCountFilters
   );
 }
 
-// Every active non-main thread across all workspaces — the restart module's
-// safe-window check (a pending restart waits until this list is empty).
+// The threads whose life is a run of this process: every active non-main
+// thread except the remote ones — a remote agent's thread mirrors a session
+// elsewhere, holds nothing in memory and survives a restart as a row and a
+// cursor (src/remote). The restart's safe window and the boot tombstone
+// both ask for this set.
+const ACTIVE_RUN_THREADS = Prisma.sql`threads.status = 'active' AND threads.parent_id IS NOT NULL
+  AND NOT COALESCE(started.payload -> 'remote' = 'true'::jsonb, false)`;
+
+// Every active non-main, non-remote thread across all workspaces — the
+// restart module's safe-window check (a pending restart waits until this
+// list is empty; a remote thread is no obstacle).
 export async function listActiveChildThreads(): Promise<Thread[]> {
-  return readThreads(prisma, Prisma.sql`threads.status = 'active' AND threads.parent_id IS NOT NULL`, Prisma.sql`ORDER BY threads.created_seq`);
+  return readThreads(prisma, ACTIVE_RUN_THREADS, Prisma.sql`ORDER BY threads.created_seq`);
 }
 
 // Every main thread across all workspaces, oldest first — the boot sweep
@@ -279,6 +291,14 @@ type StartThreadInput = {
   // icon, the hint comes from the spawned agent's declaration and travels in
   // the event.
   headless?: boolean;
+  // A remote agent's thread (src/remote/engine.ts): the session runs in
+  // an external system, the thread mirrors it — no run here, survives
+  // restarts. `options` — the launch parameters by the kind's schema;
+  // `adopt` — `input` is the reference of an existing session to adopt, not
+  // a prompt.
+  remote?: boolean;
+  options?: JsonObject;
+  adopt?: boolean;
   // The project the thread works for (resolved by the spawner): the id is
   // what the projection stores and the console filters on, the slug is the
   // human-readable address at spawn time.
@@ -315,6 +335,18 @@ export async function startThread(options: StartThreadInput): Promise<Thread> {
     payload.headless = options.headless;
   }
 
+  if (options.remote !== undefined) {
+    payload.remote = options.remote;
+  }
+
+  if (options.options !== undefined) {
+    payload.options = options.options;
+  }
+
+  if (options.adopt !== undefined) {
+    payload.adopt = options.adopt;
+  }
+
   if (options.project !== undefined) {
     payload.projectId = options.project.id;
     payload.projectSlug = options.project.slug;
@@ -334,17 +366,17 @@ export async function startThread(options: StartThreadInput): Promise<Thread> {
 }
 
 // ---------------------------------------------------------------------------
-// Tombstone (§5.5): on process start every active non-main thread is
-// cancelled — runs live only in memory and did not survive the restart.
-// Cancelling a thread cascades over its subtree inside appendEvent, so
-// descendants reached later in the loop are already terminal no-ops.
+// Tombstone (§5.5): on process start every active non-main thread with a
+// run is cancelled — runs live only in memory and did not survive the
+// restart. Remote threads are left alone: their session lives on in the
+// external system and the remote engine resumes them from the row. The
+// forced restart uses the same sweep. Cancelling a thread cascades over its
+// subtree inside appendEvent, so descendants reached later in the loop are
+// already terminal no-ops (a remote child of a cancelled thread goes with
+// its parent — a thread does not outlive its parent, remote or not).
 
 export async function tombstoneActiveThreads(reason: string): Promise<number> {
-  const rows = await prisma.thread.findMany({
-    where: { status: 'active', parentId: { not: null } },
-    orderBy: { createdSeq: 'asc' },
-    select: { id: true, userId: true },
-  });
+  const rows = await readThreads(prisma, ACTIVE_RUN_THREADS, Prisma.sql`ORDER BY threads.created_seq`);
 
   let cancelled = 0;
 

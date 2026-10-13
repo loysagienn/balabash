@@ -97,6 +97,7 @@ function threadFromStarted(event: EventOf<'thread.started'>): Thread | null {
     summary: null,
     projectId,
     headless: event.payload.headless === true,
+    remote: event.payload.remote === true,
     createdSeq: event.seq,
     terminalSeq: null,
     createdAt: event.createdAt,

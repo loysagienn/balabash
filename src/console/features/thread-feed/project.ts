@@ -42,17 +42,23 @@ export type FeedContext = {
 // resource_link by uri (fileId null).
 export type Attachment = { key: string; href: string; fileId: string | null; name: string | null; image: boolean; size: number | null };
 
+// A question of the agent that needs the user's decision (agent.ask): the
+// options are its quick replies while it is open; the outcome, once
+// resolved (agent.ask.resolved in the loaded range), makes the card static.
+export type AskView = { threadId: string; askId: string; askKind: string; options: string[]; link: string | null; outcome: string | null };
+
 export type MessageItem = {
   kind: 'message';
   key: string;
   at: Date;
   from: string;
   to: string;
-  variant?: 'task' | 'user';
+  variant?: 'task' | 'user' | 'ask';
   tag?: string;
   text: string;
   atts: Attachment[];
   fold: boolean;
+  ask?: AskView;
 };
 
 export type QuietItem = { kind: 'quiet'; key: string; at: Date; text: string };
@@ -494,6 +500,58 @@ class Builder {
 
     if (is(event, 'thread.interrupt')) {
       this.push({ kind: 'sys', key, at, icon: 'pause', level: 'normal', text: `${who(event) === 'you' ? (this.ctx.you ?? 'You') : who(event)} stopped the turn — the agent halted and is awaiting a message` });
+
+      return;
+    }
+
+    // The commands of a remote thread: the words of who asked.
+    if (is(event, 'thread.finish')) {
+      this.push({ kind: 'sys', key, at, icon: 'check', text: `${who(event) === 'you' ? (this.ctx.you ?? 'You') : who(event)} asked the session for a closing summary — the thread ends with it` });
+
+      return;
+    }
+
+    if (is(event, 'thread.pause')) {
+      this.push({ kind: 'sys', key, at, icon: 'bell-off', text: `${who(event) === 'you' ? (this.ctx.you ?? 'You') : who(event)} paused the thread` });
+
+      return;
+    }
+
+    if (is(event, 'thread.decide')) {
+      this.push({ kind: 'sys', key, at, icon: 'check', text: `${who(event) === 'you' ? (this.ctx.you ?? 'You') : who(event)} decided: ${event.payload.decision}` });
+
+      return;
+    }
+
+    // A question for the user: a message card with the options as quick
+    // replies, static once resolved.
+    if (is(event, 'agent.ask')) {
+      const { askId, kind: askKind, text, link, options } = event.payload;
+
+      this.push({
+        kind: 'message',
+        key,
+        at,
+        from: event.agentName ?? this.ctx.agent,
+        to: 'you',
+        variant: 'ask',
+        text,
+        atts: [],
+        fold: false,
+        ask: { threadId: this.ctx.threadId, askId, askKind, options: Array.isArray(options) ? options : [], link: typeof link === 'string' ? link : null, outcome: null },
+      });
+
+      return;
+    }
+
+    if (is(event, 'agent.ask.resolved')) {
+      const card = this.items.find((item): item is MessageItem => item.kind === 'message' && item.ask?.askId === event.payload.askId && item.ask.outcome === null);
+
+      if (card) {
+        card.ask = { ...card.ask!, outcome: event.payload.outcome };
+      } else {
+        this.push({ kind: 'sys', key, at, icon: 'check', text: `Question resolved: ${event.payload.outcome}` });
+      }
 
       return;
     }

@@ -8,6 +8,40 @@ const ctx: FeedContext = { threadId: 't1', agent: 'engineer', parentAgent: 'coor
 
 const own = (type: string, payload: object, extra: object = {}) => event({ type, threadId: 't1', payload: payload as never, ...extra });
 
+describe('projectFeed — a question for the user (agent.ask)', () => {
+  it('is a card with the options while open, static with the outcome once resolved; a resolution without its card is a line', () => {
+    resetSeq(1n);
+
+    const items = projectFeed(
+      [
+        own('agent.ask', { askId: 'a1', kind: 'approval', text: 'POST /issues', link: 'https://x', options: ['allow', 'deny'] }, { agentName: 'fake_agent' }),
+        own('agent.ask', { askId: 'c1', kind: 'credential', text: 'Connect GitHub', link: 'https://x/oauth', options: [] }, { agentName: 'fake_agent' }),
+        event({ type: 'thread.decide', threadId: 'main', targetThreadId: 't1', actor: 'user', payload: { askId: 'a1', decision: 'allow', identity: { username: 'operator' } } }),
+        own('agent.ask.resolved', { askId: 'a1', outcome: 'allow' }, { agentName: 'fake_agent' }),
+        own('agent.ask.resolved', { askId: 'old', outcome: 'expired' }, { agentName: 'fake_agent' }),
+      ],
+      ctx,
+    );
+
+    assert.deepEqual(
+      items.map(item => item.kind),
+      ['message', 'message', 'sys', 'sys'],
+    );
+
+    const [approval, signIn] = items as MessageItem[];
+
+    assert.equal(approval.variant, 'ask');
+    assert.equal(approval.from, 'fake_agent');
+    assert.equal(approval.text, 'POST /issues');
+    assert.deepEqual(approval.ask, { threadId: 't1', askId: 'a1', askKind: 'approval', options: ['allow', 'deny'], link: 'https://x', outcome: 'allow' });
+    assert.deepEqual(signIn.ask, { threadId: 't1', askId: 'c1', askKind: 'credential', options: [], link: 'https://x/oauth', outcome: null });
+    assert.deepEqual(
+      items.slice(2).map(item => (item.kind === 'sys' ? item.text : null)),
+      ['You decided: allow', 'Question resolved: expired'],
+    );
+  });
+});
+
 describe('projectFeed — messages', () => {
   it('turns the task, user and agent messages into blocks with who → whom, folding a long task', () => {
     resetSeq(1n);

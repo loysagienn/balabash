@@ -8,8 +8,9 @@ import {
   BALABASH_PREAMBLE,
   BLOCKED_PATH_NOTE,
   BROWSER_SUBAGENT_NOTE,
-  PROJECTS_NOTE,
   OUTPUT_NOTE,
+  PROJECTS_NOTE,
+  REMOTE_AGENTS_NOTE,
   WORKBENCH_NOTE,
   WORKSPACE_STORAGE_NOTE,
 } from '../world/index.ts';
@@ -26,7 +27,9 @@ ${PROJECTS_NOTE}
 
 ${WORKSPACE_STORAGE_NOTE}
 
-${BROWSER_SUBAGENT_NOTE}`;
+${BROWSER_SUBAGENT_NOTE}
+
+${REMOTE_AGENTS_NOTE}`;
 
 // The tool passport of the manager role: the tool-server names it gets.
 export const MANAGER_TOOLS = [
@@ -37,6 +40,7 @@ export const MANAGER_TOOLS = [
   'notion',
   'perplexity',
   'projects',
+  'remote',
   'schedule',
   'storage',
   'storage_download_file',

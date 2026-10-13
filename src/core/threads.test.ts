@@ -293,6 +293,46 @@ describe('the rows of threads', () => {
     assert.equal('headless' in (await prisma.thread.findUniqueOrThrow({ where: { id: headless } })), false);
   });
 
+  test('carry the remote fact of their own thread.started the same way', async () => {
+    const remote = await startChild('fake_agent', 'A remote session', { remote: true });
+    const local = await startChild('engineer', 'A local session');
+    const odd = await startChild('engineer', 'Odd remote value', { remote: 1 });
+
+    assert.equal((await threads.getThread(remote))?.remote, true);
+    assert.equal((await threads.getThread(local))?.remote, false);
+    assert.equal((await threads.getThread(odd))?.remote, false);
+    assert.equal((await threads.getMainThread(stand.userId))?.remote, false);
+    assert.deepEqual(
+      Object.fromEntries((await threads.listThreads(stand.userId, { q: 'session' })).map(t => [t.id, t.remote])),
+      { [remote]: true, [local]: false },
+    );
+    assert.equal('remote' in (await prisma.thread.findUniqueOrThrow({ where: { id: remote } })), false);
+  });
+
+  test('a remote thread has no run to tombstone and does not block the restart window; its parent still takes it along', async () => {
+    const local = await startChild('engineer', 'A local run');
+    const remote = await startChild('fake_agent', 'A remote session', { remote: true });
+    const parent = await startChild('manager', 'A parent');
+    const remoteChild = randomUUID();
+
+    await appendEvent({ type: 'thread.started', actor: 'system', userId: stand.userId, threadId: remoteChild, targetThreadId: parent, payload: { agent: 'fake_agent', remote: true } });
+
+    const activeIds = (await threads.listActiveChildThreads()).map(t => t.id);
+
+    assert.ok(activeIds.includes(local) && activeIds.includes(parent));
+    assert.ok(!activeIds.includes(remote) && !activeIds.includes(remoteChild));
+
+    const cancelled = await threads.tombstoneActiveThreads('process_restart');
+
+    assert.ok(cancelled >= 2);
+    assert.equal((await threads.getThread(local))?.status, 'cancelled');
+    assert.equal((await threads.getThread(remote))?.status, 'active');
+    // The parent's tombstone cascades: a child does not outlive its parent, remote or not.
+    assert.equal((await threads.getThread(parent))?.status, 'cancelled');
+    assert.equal((await threads.getThread(remoteChild))?.status, 'cancelled');
+    assert.deepEqual(await threads.listActiveChildThreads(), []);
+  });
+
   test('the thread that ended last is the greatest terminal seq, whatever its age', async () => {
     const stranger = randomUUID();
 

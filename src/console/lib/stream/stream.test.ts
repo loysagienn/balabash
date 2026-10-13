@@ -115,6 +115,9 @@ const api: Api = {
     sendMessage: async () => ({}),
     interrupt: async () => ({}),
     cancel: async () => ({}),
+    finish: async () => ({}),
+    pause: async () => ({}),
+    decide: async () => ({}),
   },
   workspace: {
     node: async () => ({ kind: 'dir', path: '', directories: [], folders: [], files: [] }),

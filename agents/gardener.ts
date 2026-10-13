@@ -12,6 +12,7 @@ import {
   BALABASH_PREAMBLE,
   OUTPUT_NOTE,
   PROJECTS_WORLD_NOTE,
+  REMOTE_AGENTS_NOTE,
   WORKBENCH_NOTE,
   WORKSPACE_STORAGE_NOTE,
 } from './world/index.ts';
@@ -68,7 +69,7 @@ export const agent = {
     'suggestion to; name the project in the prompt.',
   icon: '🌿',
   sdk: 'claude',
-  tools: ['current_datetime', 'projects', 'storage', 'storage_download_file', 'workspace'],
+  tools: ['current_datetime', 'projects', 'remote', 'storage', 'storage_download_file', 'workspace'],
   notification: 'normal',
 
   session: {
@@ -85,6 +86,8 @@ ${GARDENER_CONTRACT}
 ${OUTPUT_NOTE}
 
 ${WORKSPACE_STORAGE_NOTE}
+
+${REMOTE_AGENTS_NOTE}
 
 End the thread when the pass is reported and the user has no follow-ups (or asks to stop); pending questions to the user keep the thread open. Stay with the assigned project: a request to tend another project is a new thread.`,
     model: 'claude-opus-5-5',

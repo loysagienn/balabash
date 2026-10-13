@@ -4,7 +4,9 @@
 // by design.
 //
 // The safe window is structural first, heuristic second:
-// - no active non-main thread in any workspace (the projection),
+// - no active non-main thread with a run in any workspace (the projection;
+//   a remote agent's thread — the mirror of a session elsewhere, no run
+//   here — neither blocks the window nor is cancelled by force),
 // - no coordinator turn in flight (injected — the in-memory truth; a pure
 //   "quiet log" heuristic would kill a turn mid-inference and lose the
 //   reply, because the lazy rise cannot replay it),

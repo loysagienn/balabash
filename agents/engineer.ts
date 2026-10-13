@@ -17,6 +17,7 @@ import {
   BROWSER_SUBAGENT_NOTE,
   OUTPUT_NOTE,
   PROJECTS_NOTE,
+  REMOTE_AGENTS_NOTE,
   WORKBENCH_NOTE,
   WORKSPACE_STORAGE_NOTE,
 } from './world/index.ts';
@@ -39,6 +40,8 @@ ${WORKSPACE_STORAGE_NOTE}
 
 ${BROWSER_SUBAGENT_NOTE}
 
+${REMOTE_AGENTS_NOTE}
+
 End the thread when the task is done, cannot continue, or the user asks to stop; your report must state what was changed, how it was verified, and anything that remains. Stay with the assigned task: if the user clearly switches to an unrelated task or asks for the secretary, wrap up and end the thread.`;
 
 export const agent = {
@@ -57,6 +60,7 @@ export const agent = {
     'notion',
     'perplexity',
     'projects',
+    'remote',
     'restart',
     'schedule',
     'storage',

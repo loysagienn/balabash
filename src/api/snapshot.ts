@@ -25,12 +25,12 @@ import { taskView } from '../schedule/view.ts';
 import { connectionView, listUserConnections } from '../capabilities/connections/index.ts';
 import { effectiveBundleServers, listUserAuthServers } from '../capabilities/tool-manager.ts';
 import { readOpenSecretRequests } from '../capabilities/secret-requests.ts';
-import { getAgents } from '../capabilities/agent-catalog.ts';
+import { getAgents, isRemoteAgent, type CatalogAgent } from '../capabilities/agent-catalog.ts';
 import { COORDINATOR_AGENT } from '../core/threads.ts';
 import { COORDINATOR_BUNDLE, COORDINATOR_DESCRIPTION } from '../coordinator/functions.ts';
 import { DEFAULT_EFFORT } from '../harness/default-effort.ts';
 import { config } from '../config/index.ts';
-import type { AgentDeclaration } from '../core/contract.ts';
+import type { AgentDeclaration, RemoteAgentDeclaration } from '../core/contract.ts';
 import type { AgentView, ConnectionView, MeResponse, ServiceView, SnapshotResponse, TaskView } from './contract.ts';
 
 export { SNAPSHOT_THREAD_WINDOW } from './thread-window.ts';
@@ -152,6 +152,26 @@ async function readLastModels(userId: string): Promise<Map<string, string | null
   return models;
 }
 
+// A remote agent kind: the session runs in an external system — no tool
+// passport, no sub-agents, no model of ours; the options schema is the
+// system's, shown nowhere yet.
+function remoteAgentView(agent: RemoteAgentDeclaration): AgentView {
+  return {
+    name: agent.name,
+    description: agent.description,
+    icon: agent.icon ?? null,
+    sdk: 'remote',
+    tools: [],
+    agents: [],
+    headless: false,
+    notification: agent.notification ?? null,
+    model: null,
+    effort: null,
+    defaultEffort: null,
+    lastModel: null,
+  };
+}
+
 function agentView(agent: AgentDeclaration, lastModel: string | null): AgentView {
   return {
     name: agent.name,
@@ -178,7 +198,7 @@ function agentView(agent: AgentDeclaration, lastModel: string | null): AgentView
 // derive from the whole catalog). Its requests name no reasoning effort and
 // its turns journal no session.started — effort, defaultEffort and
 // lastModel stay null.
-function coordinatorView(catalog: AgentDeclaration[]): AgentView {
+function coordinatorView(catalog: CatalogAgent[]): AgentView {
   return {
     name: COORDINATOR_AGENT,
     description: COORDINATOR_DESCRIPTION,
@@ -202,7 +222,10 @@ export async function readAgents(userId: string): Promise<AgentView[]> {
   const catalog = getAgents();
   const lastModels = await readLastModels(userId);
 
-  return [coordinatorView(catalog), ...catalog.map(agent => agentView(agent, lastModels.get(agent.name) ?? null))];
+  return [
+    coordinatorView(catalog),
+    ...catalog.map(agent => (isRemoteAgent(agent) ? remoteAgentView(agent) : agentView(agent, lastModels.get(agent.name) ?? null))),
+  ];
 }
 
 export async function buildSnapshot(userId: string, readMe: () => Promise<MeResponse>): Promise<SnapshotResponse> {

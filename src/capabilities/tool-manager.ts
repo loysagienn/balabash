@@ -436,17 +436,41 @@ export type ExternalSecretTarget = {
   connected: boolean;
 };
 
+// Other holders of installation secrets under the same form (the remote
+// agent kinds, src/capabilities/remote-agent-source.ts): they list their
+// targets here and refresh them when the external servers are refreshed,
+// so the Connections page, the auth agent and the secrets form see one
+// list.
+export type ExternalSecretTargetSource = {
+  list(): ExternalSecretTarget[];
+  refresh(): Promise<void>;
+};
+
+const externalSecretTargetSources: ExternalSecretTargetSource[] = [];
+
+export function registerExternalSecretTargetSource(source: ExternalSecretTargetSource): void {
+  externalSecretTargetSources.push(source);
+}
+
+export async function refreshExternalSecretTargetSources(): Promise<void> {
+  for (const source of externalSecretTargetSources) {
+    await source.refresh();
+  }
+}
+
 export function listExternalSecretTargets(): ExternalSecretTarget[] {
-  return [...pendingExternalServers.values()]
-    .filter(pending => pending.secretNames.length)
-    .map(pending => ({
-      name: pending.name,
-      description: pending.config.description ?? null,
-      secretNames: pending.secretNames,
-      error: pending.error,
-      connected: pending.connected,
-    }))
-    .sort((a, b) => a.name.localeCompare(b.name));
+  return [
+    ...[...pendingExternalServers.values()]
+      .filter(pending => pending.secretNames.length)
+      .map(pending => ({
+        name: pending.name,
+        description: pending.config.description ?? null,
+        secretNames: pending.secretNames,
+        error: pending.error,
+        connected: pending.connected,
+      })),
+    ...externalSecretTargetSources.flatMap(source => source.list()),
+  ].sort((a, b) => a.name.localeCompare(b.name));
 }
 
 // The claude.ai connectors for the catalog: connected — the client is live
@@ -589,6 +613,7 @@ function toUserAuthServer(
 // — and before the console reads their states (refreshExternalServers).
 export async function refreshExternalServers(): Promise<void> {
   await ensurePendingExternalServers();
+  await refreshExternalSecretTargetSources();
 }
 
 async function ensurePendingExternalServers(): Promise<void> {

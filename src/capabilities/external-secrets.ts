@@ -10,7 +10,7 @@ import { prisma } from '../db/client.ts';
 import { appendEventIn, logTransaction } from '../core/append.ts';
 import { notifyAppended } from '../core/live.ts';
 import { SECRETS_PROVISIONED } from '../core/envelope.ts';
-import { disconnectExternalServer, listExternalSecretTargets, type ExternalSecretTarget } from './tool-manager.ts';
+import { disconnectExternalServer, listExternalSecretTargets, refreshExternalSecretTargetSources, type ExternalSecretTarget } from './tool-manager.ts';
 import { openSecretRequest, secretRequestUrl } from './secret-requests.ts';
 
 const SECRET_KEY_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -104,7 +104,10 @@ export async function forgetExternalServerSecrets(serverName: string): Promise<n
 
   const { count } = await prisma.externalServerSecret.deleteMany({ where: { server: target.name } });
 
+  // An external server leaves the catalog; a holder of another source (a
+  // remote agent kind) only shows the values gone.
   await disconnectExternalServer(target.name);
+  await refreshExternalSecretTargetSources();
 
   return count;
 }
@@ -202,4 +205,6 @@ export async function provisionExternalServerSecrets(
   if (seq !== null) {
     notifyAppended(seq);
   }
+
+  await refreshExternalSecretTargetSources();
 }

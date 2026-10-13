@@ -12,11 +12,16 @@ import { prisma } from './db/client.ts';
 import { config } from './config/index.ts';
 import { COORDINATOR_AGENT, tombstoneActiveThreads } from './core/threads.ts';
 import { getFile, getFileDownloadUrl, ingestFile, openFileContent } from './files/index.ts';
-import { loadAgents } from './capabilities/agent-catalog.ts';
+import { loadAgents, repositoryAgentNames } from './capabilities/agent-catalog.ts';
 import { spawnAgentRun } from './capabilities/agent-runtime.ts';
+import { loadRemoteAgents } from './capabilities/remote-agent-source.ts';
+import { createRemoteDriverContext, refreshRemoteSecretTargets, registerRemoteSecretTargets } from './capabilities/remote-agent-secrets.ts';
+import { appendEvent } from './core/append.ts';
+import { SYSTEM_EXCEPTION } from './core/envelope.ts';
 import { createAuthToolServer } from './capabilities/auth-tools.ts';
 import { createEventsToolServer, createStorageToolServer } from './capabilities/builtin-tools.ts';
 import { createRestartToolServer } from './capabilities/restart-tools.ts';
+import { createRemoteToolServer } from './capabilities/remote-tools.ts';
 import { startReauthDetector } from './capabilities/reauth-detector.ts';
 import { loadToolServers, registerBuiltinToolServer } from './capabilities/tool-manager.ts';
 import { isAnyJobRunning, killRunningJobs } from './schedule/engine.ts';
@@ -29,6 +34,7 @@ import { createProjectsToolServer } from './projects/tools.ts';
 import { createCoordinatorRun, hasActiveCoordinatorTurns, settleMainThreadStates } from './coordinator/index.ts';
 import { startWebServer } from './api/index.ts';
 import { startThreadRouter } from './runtime/router.ts';
+import { openRemoteThread, remoteFacade, startRemoteEngine } from './remote/engine.ts';
 import { RESTART_EXIT_CODE, completePendingRestarts, startRestartModule } from './runtime/restart.ts';
 import { initTelegramBot } from './adapters/telegram/bot.ts';
 import { startTelegramDelivery } from './adapters/telegram/delivery.ts';
@@ -68,15 +74,45 @@ console.log('[app] balabash: database reachable');
 
 // Runs live only in memory: threads orphaned by the previous process death
 // are cancelled before anything can address them. A planned restart
-// leaves nothing to tombstone — the safe window required every child thread
-// to finish first.
+// leaves nothing to tombstone — the safe window required every non-remote
+// child thread to finish first. Remote threads (the mirrors of sessions in
+// external systems, src/remote) are not orphans: they have no run, and the
+// remote engine picks them up from their rows.
 const tombstoned = await tombstoneActiveThreads('process_restart');
 
 if (tombstoned > 0) {
   console.log(`[app] tombstoned ${tombstoned} orphaned threads`);
 }
 
-loadAgents();
+// The files surface of the installation's extensions (local tool servers
+// and remote agent drivers): global — workspace scoping happens at the
+// calling run.
+const extensionFilesApi = {
+  ingest: (input: Parameters<typeof ingestFile>[0]) => ingestFile(input),
+  get: (fileId: string) => getFile(fileId),
+  getDownloadUrl: (fileId: string, options?: { expiresInSeconds?: number }) => getFileDownloadUrl(fileId, options),
+  open: (fileId: string) => openFileContent(fileId),
+};
+
+// The catalog: the repository's agents, then the installation's remote agent
+// kinds (data/remote-agents) — a kind that fails to load is skipped loudly,
+// not fatal (remote-agent-source.ts).
+loadAgents(
+  await loadRemoteAgents({
+    context: kind => createRemoteDriverContext(kind, extensionFilesApi),
+    repositoryAgents: repositoryAgentNames(),
+    report: async ({ file, error }) => {
+      await appendEvent({
+        type: SYSTEM_EXCEPTION,
+        actor: 'system',
+        userId: null,
+        payload: { scope: 'remote-agents', error: `${file}: ${error}` },
+      });
+    },
+  }),
+);
+registerRemoteSecretTargets();
+await refreshRemoteSecretTargets();
 
 // Dangerous-capability servers, granted only where deliberately listed: the
 // auth tools to the auth agent, the restart request to the coordinator and
@@ -100,16 +136,13 @@ registerBuiltinToolServer(createScheduleToolServer());
 // server may list, read and maintain projects; the audit is the tool.call.* journal.
 registerBuiltinToolServer(createProjectsToolServer());
 
+// The remote agents' server: a file out of a remote session, for the
+// thread's owner (the coordinator, the agents that may spawn remote kinds).
+registerBuiltinToolServer(createRemoteToolServer());
+
 // Local tool servers see the global files surface; workspace scoping happens
 // at the calling run.
-await loadToolServers({
-  filesApi: {
-    ingest: input => ingestFile(input),
-    get: fileId => getFile(fileId),
-    getDownloadUrl: (fileId, options) => getFileDownloadUrl(fileId, options),
-    open: fileId => openFileContent(fileId),
-  },
-});
+await loadToolServers({ filesApi: extensionFilesApi });
 
 startWebServer();
 
@@ -145,10 +178,15 @@ await settleMainThreadStates();
 
 consumers.push(
   startThreadRouter({
-    // Lazy rise is for main threads only: dynamic runs are created explicitly
-    // on thread.started, and an active child without a run in memory is
-    // resume territory — deliberately deferred.
+    // Lazy rise: a remote thread's facade (no run — the engine answers for
+    // it, after a restart as before), and the coordinator of a main thread.
+    // Any other active child without a run in memory is resume territory —
+    // deliberately deferred.
     createRun: thread => {
+      if (thread.remote) {
+        return remoteFacade(thread);
+      }
+
       if (thread.parentId !== null || thread.agent !== COORDINATOR_AGENT) {
         return null;
       }
@@ -165,7 +203,9 @@ consumers.push(
       };
     },
 
-    spawnRun: (thread, startedEvent) => spawnAgentRun(thread, startedEvent),
+    // A remote thread opens (or adopts) its session through the engine; any
+    // other child is an agent run.
+    spawnRun: (thread, startedEvent) => (thread.remote ? openRemoteThread(thread, startedEvent) : spawnAgentRun(thread, startedEvent)),
   }),
 );
 
@@ -188,6 +228,11 @@ consumers.push(startReauthDetector());
 // The schedule heart: boot sweep of sleeping code tasks, then the timer that
 // fires due triggers. Not a log consumer, but it stops like one.
 consumers.push(startScheduleHeart());
+
+// The remote engine's heart: the remote threads' sessions read on their
+// rhythm, the mirror kept, the pause and the wake-up. Not a log consumer,
+// but it stops like one.
+consumers.push(startRemoteEngine());
 
 // The workspace annotation indexer: background hygiene giving workspace
 // files titles/descriptions when their writers left none. Not a log

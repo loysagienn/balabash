@@ -4,7 +4,7 @@
 // acceptsEvents/exclusive/triggersMainModel (gone by construction).
 
 import path from 'node:path';
-import type { AgentDeclaration, AgentRun } from '../core/contract.ts';
+import type { AgentDeclaration, AgentRun, RemoteAgentDeclaration } from '../core/contract.ts';
 import { RESERVED_DOMAINS } from '../core/envelope.ts';
 
 const AGENT_NAME_PATTERN = /^[a-z][a-z0-9_]*$/;
@@ -264,4 +264,116 @@ export function validateAgentRun(run: unknown, agentName: string): AgentRun {
   }
 
   return run as unknown as AgentRun;
+}
+
+// ---------------------------------------------------------------------------
+// Remote agents (RemoteAgentDeclaration — the third form): what an
+// installation extension's start() returned. Same hardness as validateAgent;
+// repositoryAgents — the names of the catalog's own agents, which an
+// extension never shadows (extensions.ts).
+
+const REMOTE_KEYS = new Set(['kind', 'name', 'description', 'icon', 'notification', 'options', 'secrets', 'driver']);
+const REMOTE_DRIVER_VERBS = ['open', 'describe', 'read', 'say', 'answer', 'stop'];
+const REMOTE_DRIVER_OPTIONAL_VERBS = ['fetchFile', 'list'];
+const SECRET_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+export function validateRemoteAgent(candidate: unknown, filename: string, repositoryAgents: ReadonlySet<string>): RemoteAgentDeclaration {
+  if (!isObject(candidate)) {
+    throw new Error(`${filename} start() must return a remote agent declaration object`);
+  }
+
+  const unknownKeys = Object.keys(candidate).filter(key => !REMOTE_KEYS.has(key));
+
+  if (unknownKeys.length) {
+    throw new Error(`${filename} remote agent has unknown keys: ${unknownKeys.join(', ')}`);
+  }
+
+  if (candidate.kind !== 'remote') {
+    throw new Error(`${filename} remote agent kind must be "remote"`);
+  }
+
+  if (typeof candidate.name !== 'string' || !AGENT_NAME_PATTERN.test(candidate.name)) {
+    throw new Error(`${filename} remote agent name must match ${AGENT_NAME_PATTERN}`);
+  }
+
+  const expectedName = path.basename(filename, '.ts');
+
+  if (candidate.name !== expectedName) {
+    throw new Error(`${filename} remote agent name must equal filename "${expectedName}"`);
+  }
+
+  if (RESERVED_DOMAINS.has(candidate.name) || RESERVED_AGENT_NAMES.has(candidate.name)) {
+    throw new Error(`${filename} remote agent name "${candidate.name}" is reserved`);
+  }
+
+  if (repositoryAgents.has(candidate.name)) {
+    throw new Error(`${filename} remote agent name "${candidate.name}" shadows a repository agent — extensions never shadow the repository's`);
+  }
+
+  if (typeof candidate.description !== 'string' || !candidate.description.trim()) {
+    throw new Error(`${filename} remote agent description must be a non-empty string`);
+  }
+
+  if (candidate.icon !== undefined && (typeof candidate.icon !== 'string' || !candidate.icon.trim())) {
+    throw new Error(`${filename} remote agent icon must be a non-empty string when present`);
+  }
+
+  if (candidate.notification !== undefined && !NOTIFICATION_LEVELS.has(candidate.notification as string)) {
+    throw new Error(`${filename} remote agent notification must be one of silent, normal, urgent`);
+  }
+
+  if (candidate.options !== undefined) {
+    const options = candidate.options;
+
+    if (!isObject(options) || options.type !== 'object' || !isObject(options.properties)) {
+      throw new Error(`${filename} remote agent options must be an object JSON Schema ({ type: "object", properties })`);
+    }
+
+    if (options.required !== undefined) {
+      throw new Error(`${filename} remote agent options must not declare required fields — every option is optional`);
+    }
+
+    for (const [key, property] of Object.entries(options.properties)) {
+      if (!AGENT_NAME_PATTERN.test(key) || !isObject(property)) {
+        throw new Error(`${filename} remote agent options.properties.${key} must be a schema object under a snake_case name`);
+      }
+    }
+  }
+
+  if (candidate.secrets !== undefined) {
+    const validSecrets =
+      Array.isArray(candidate.secrets) &&
+      candidate.secrets.every(name => typeof name === 'string' && SECRET_NAME_PATTERN.test(name)) &&
+      new Set(candidate.secrets).size === candidate.secrets.length;
+
+    if (!validSecrets) {
+      throw new Error(`${filename} remote agent secrets must be an array of unique secret names when present`);
+    }
+  }
+
+  const driver = candidate.driver;
+
+  if (!isObject(driver)) {
+    throw new Error(`${filename} remote agent driver must be an object`);
+  }
+
+  const unknownVerbs = Object.keys(driver).filter(key => !REMOTE_DRIVER_VERBS.includes(key) && !REMOTE_DRIVER_OPTIONAL_VERBS.includes(key));
+
+  if (unknownVerbs.length) {
+    throw new Error(`${filename} remote agent driver has unknown keys: ${unknownVerbs.join(', ')}`);
+  }
+
+  for (const verb of REMOTE_DRIVER_VERBS) {
+    if (typeof driver[verb] !== 'function') {
+      throw new Error(`${filename} remote agent driver.${verb} must be a function`);
+    }
+  }
+
+  for (const verb of REMOTE_DRIVER_OPTIONAL_VERBS) {
+    if (driver[verb] !== undefined && typeof driver[verb] !== 'function') {
+      throw new Error(`${filename} remote agent driver.${verb} must be a function when present`);
+    }
+  }
+
+  return candidate as unknown as RemoteAgentDeclaration;
 }

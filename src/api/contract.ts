@@ -192,7 +192,8 @@ export type ThreadsResponse = {
 
 // GET /api/threads/:id — the thread as the snapshot and the list carry it
 // (its `headless` included: a headless thread's chat is the read-only
-// dialogue with the parent and POST /messages answers 409).
+// dialogue with the parent and POST /messages answers 409; its `remote`
+// too: a remote agent's thread, the mirror of a session elsewhere).
 export type ThreadResponse = {
   thread: Thread;
 };
@@ -251,6 +252,20 @@ export type CancelThreadRequest = {
 
 export type ThreadCommandResponse = {
   event: Event;
+};
+
+// The commands of a remote agent's thread (src/remote/engine.ts), answered
+// like the two above; 409 thread_not_remote for any other thread.
+// POST /api/threads/:id/finish — the session is asked for a closing
+// summary, which completes the thread (thread.finish); POST
+// /api/threads/:id/pause — the thread sleeps now (thread.pause); POST
+// /api/threads/:id/decide — the operator's decision on an open question
+// (agent.ask): the decision must be one of the question's options (400
+// bad_request), a sign-in is completed by its link alone (400
+// decision_by_link_only), a question not open answers 409 ask_not_open.
+export type DecideThreadRequest = {
+  askId: string;
+  decision: string;
 };
 
 // ---------------------------------------------------------------------------
@@ -974,7 +989,9 @@ export type AgentView = {
   name: string;
   description: string;
   icon: string | null;
-  sdk: 'claude' | 'codex' | 'openai';
+  // 'remote' — a remote agent kind of the installation (src/remote): the
+  // session runs in an external system; no tools, no model of ours.
+  sdk: 'claude' | 'codex' | 'openai' | 'remote';
   // The tool servers of the passport as it acts (not the single tools): the
   // names it lists plus the extension servers "projects" brings.
   tools: string[];

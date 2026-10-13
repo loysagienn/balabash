@@ -13,8 +13,10 @@ import { fileContentBlock } from '../core/file-blocks.ts';
 import {
   CANCEL_REASON_PARAM_DESCRIPTION,
   CANCEL_THREAD_DESCRIPTION,
+  FINISH_THREAD_DESCRIPTION,
   SEND_TO_THREAD_DESCRIPTION,
 } from './thread-verbs.ts';
+import { spawnableRemoteAgents } from './agent-catalog.ts';
 import type {
   AgentDeclaration,
   AgentRun,
@@ -273,11 +275,39 @@ function createSendFileTool(ctx: RunContext, headless: boolean): SdkBridgeTool {
 // Child-operating verbs: granted when the declaration lists spawnable
 // sub-agents. Spawning makes this agent the child's operator — it drives the
 // child with send_to_thread and receives replies as thread messages.
+// The remote kinds a declaration may spawn, in one line each for the
+// spawn_agent words: the name, the description, the options schema.
+function remoteKindWords(declaration: Pick<AgentDeclaration, 'agents' | 'tools'>): string {
+  const kinds = spawnableRemoteAgents(declaration);
+
+  if (!kinds.length) {
+    return '';
+  }
+
+  return (
+    ' Remote agents (their session runs in an external system; the child thread mirrors it and is headless ' +
+    '— it talks only to you): ' +
+    kinds
+      .map(
+        kind =>
+          `${kind.name} — ${kind.description}${
+            kind.options && typeof kind.options.properties === 'object' && kind.options.properties
+              ? ` Options: ${JSON.stringify(kind.options.properties)}.`
+              : ''
+          }`,
+      )
+      .join(' ') +
+    ' For a remote agent, `options` carries its launch parameters and `adopt: true` makes `prompt` the ' +
+    'reference (id or link) of an existing session to adopt instead of a task.'
+  );
+}
+
 function createChildTools(
   ctx: RunContext,
-  allowedAgents: string[],
+  declaration: Pick<AgentDeclaration, 'agents' | 'tools'>,
   childThreadIds: Set<string>,
 ): SdkBridgeTool[] {
+  const allowedAgents = [...(declaration.agents ?? []), ...spawnableRemoteAgents(declaration).map(kind => kind.name)];
   const spawnAgentTool: SdkBridgeTool = {
     name: 'spawn_agent',
     description:
@@ -285,7 +315,8 @@ function createChildTools(
       'The call returns the child threadId, and the sub-agent starts working asynchronously. From then on you ' +
       'exchange messages: send it messages with send_to_thread, and its replies reach you automatically as ' +
       'incoming messages labeled with its threadId — end your turn to let them arrive. Cancel the child with ' +
-      'cancel_thread when it is no longer needed.',
+      'cancel_thread when it is no longer needed.' +
+      remoteKindWords(declaration),
     inputSchema: {
       type: 'object',
       properties: {
@@ -306,8 +337,17 @@ function createChildTools(
             'The slug of the project the work concerns (as listed by projects_list), or null when it concerns ' +
             'none. Links the child thread to the project — name it whenever the task is about a project.',
         },
+        options: {
+          type: ['object', 'null'],
+          description: 'Remote agents only: the launch parameters by the agent’s options schema; null otherwise.',
+          additionalProperties: true,
+        },
+        adopt: {
+          type: ['boolean', 'null'],
+          description: 'Remote agents only: true to adopt the existing session named by `prompt`; null or false to start a new one.',
+        },
       },
-      required: ['agent', 'title', 'prompt', 'project'],
+      required: ['agent', 'title', 'prompt', 'project', 'options', 'adopt'],
       additionalProperties: false,
     },
     handler: async args => {
@@ -315,6 +355,8 @@ function createChildTools(
       const title = typeof args.title === 'string' && args.title.trim() ? args.title.trim() : undefined;
       const prompt = typeof args.prompt === 'string' ? args.prompt.trim() : '';
       const project = typeof args.project === 'string' && args.project.trim() ? args.project.trim() : undefined;
+      const options = args.options && typeof args.options === 'object' && !Array.isArray(args.options) ? args.options : undefined;
+      const adopt = args.adopt === true;
 
       if (!agentName) {
         throw new Error('spawn_agent requires agent');
@@ -324,7 +366,12 @@ function createChildTools(
         throw new Error('spawn_agent requires a non-empty prompt');
       }
 
-      const child = await ctx.spawn(agentName, prompt, { ...(title ? { title } : {}), ...(project ? { project } : {}) });
+      const child = await ctx.spawn(agentName, prompt, {
+        ...(title ? { title } : {}),
+        ...(project ? { project } : {}),
+        ...(options ? { options } : {}),
+        ...(adopt ? { adopt } : {}),
+      });
 
       childThreadIds.add(child.threadId);
 
@@ -399,7 +446,38 @@ function createChildTools(
     },
   };
 
-  return [spawnAgentTool, sendToThreadTool, cancelThreadTool];
+  const finishThreadTool: SdkBridgeTool = {
+    name: 'finish_thread',
+    description: `${FINISH_THREAD_DESCRIPTION} The summary arrives as the child's thread.completed.`,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        threadId: { type: 'string', description: 'The remote child threadId to finish.' },
+      },
+      required: ['threadId'],
+      additionalProperties: false,
+    },
+    handler: async args => {
+      const threadId = typeof args.threadId === 'string' ? args.threadId.trim() : '';
+
+      if (!threadId) {
+        throw new Error('finish_thread requires threadId');
+      }
+
+      await ctx.finishChild(threadId);
+
+      return 'finish requested — the summary arrives with the child’s completion';
+    },
+  };
+
+  // finish_thread only makes sense where a remote kind may be spawned.
+  return [spawnAgentTool, sendToThreadTool, cancelThreadTool, ...(spawnableRemoteAgents(declaration).length ? [finishThreadTool] : [])];
+}
+
+// Child-operating verbs are granted when the declaration lists sub-agents or
+// may spawn the installation's remote kinds (the "projects" rule).
+function hasChildTools(declaration: Pick<AgentDeclaration, 'agents' | 'tools'>): boolean {
+  return Boolean(declaration.agents?.length) || spawnableRemoteAgents(declaration).length > 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -410,14 +488,13 @@ function createChildTools(
 // showcase must show the real texts, not a retelling.
 export function describeSessionBridgeTools(declaration: AgentDeclaration): ToolDefinition[] {
   const headless = declaration.headless === true;
-  const allowedAgents = declaration.agents ?? [];
   // Handlers of the built tools are never called here.
   const inertCtx = null as unknown as RunContext;
 
   const tools: SdkBridgeTool[] = [
     createEndThreadTool(inertCtx, { result: null }),
     createSendFileTool(inertCtx, headless),
-    ...(allowedAgents.length ? createChildTools(inertCtx, allowedAgents, new Set()) : []),
+    ...(hasChildTools(declaration) ? createChildTools(inertCtx, declaration, new Set()) : []),
   ];
 
   return tools.map(tool => ({
@@ -434,7 +511,6 @@ export function createSessionRun(
   ctx: RunContext,
 ): AgentRun {
   const headless = declaration.headless === true;
-  const allowedAgents = declaration.agents ?? [];
   // Children spawned by this run: their replies are labeled by threadId in
   // the dialogue (a thread.message whose author is not the parent).
   const childThreadIds = new Set<string>();
@@ -497,7 +573,7 @@ export function createSessionRun(
       extraTools: [
         createEndThreadTool(ctx, end),
         createSendFileTool(ctx, headless),
-        ...(allowedAgents.length ? createChildTools(ctx, allowedAgents, childThreadIds) : []),
+        ...(hasChildTools(declaration) ? createChildTools(ctx, declaration, childThreadIds) : []),
         ...(environment?.extraTools ?? []),
       ],
     });

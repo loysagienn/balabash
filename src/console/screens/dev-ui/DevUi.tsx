@@ -53,11 +53,12 @@ import { DevUiSections } from './DevUiSections.tsx';
 import { DevUiShell } from './DevUiShell.tsx';
 import './DevUi.css';
 
-const STATES: StateName[] = ['run', 'wait', 'act', 'done', 'err', 'off'];
+const STATES: StateName[] = ['run', 'wait', 'act', 'paused', 'done', 'err', 'off'];
 const STATE_LABEL: Record<StateName, string> = {
   run: 'running',
   wait: 'waiting',
   act: 'reply needed',
+  paused: 'paused',
   done: 'done',
   err: 'crashed',
   off: 'cancelled',

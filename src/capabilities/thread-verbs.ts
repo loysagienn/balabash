@@ -1,4 +1,4 @@
-// The inter-thread verbs send_to_thread and cancel_thread exist on two
+// The inter-thread verbs send_to_thread, cancel_thread and finish_thread exist on two
 // surfaces — the coordinator's function catalog (src/coordinator/functions.ts)
 // and the session-run child tools — one contract, two bundles. The shared
 // clauses live here so the two definitions cannot drift; each surface may
@@ -13,3 +13,8 @@ export const CANCEL_THREAD_DESCRIPTION =
   'The thread closes as cancelled; its agent stops.';
 
 export const CANCEL_REASON_PARAM_DESCRIPTION = 'A concise reason, or null when there is none.';
+
+export const FINISH_THREAD_DESCRIPTION =
+  'Finish an active remote-agent child thread gracefully: its session is asked for a closing summary, ' +
+  'which becomes the thread’s summary; the session itself stays. Only a remote agent’s thread takes it — ' +
+  'for other agents tell them to finish instead.';

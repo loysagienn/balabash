@@ -8,6 +8,8 @@
 // is injected through RunContext. The coordinator implements the same
 // contract, but statically, inside src/ — dynamic agents cannot replace it.
 
+import type { StorageBody } from '../files/storage.ts';
+
 export type JsonValue = string | number | boolean | null | JsonObject | JsonValue[];
 
 export type JsonObject = {
@@ -69,6 +71,11 @@ export type Thread = {
   // does not store it): a headless thread has no user surface — the
   // dialogue is with the parent only, no topic, no web chat input.
   headless: boolean;
+  // Spawn-time fact read from thread.started likewise: the thread mirrors a
+  // session of a remote agent (RemoteAgentDeclaration) — it has no run in
+  // this process, survives restarts and is driven by the remote engine
+  // (src/remote). The commands finish/pause/decide exist for it alone.
+  remote: boolean;
   createdSeq: bigint;
   terminalSeq: bigint | null;
   createdAt: Date;
@@ -204,6 +211,130 @@ export type AgentDeclaration = {
   run?(prompt: string, ctx: RunContext): AgentRun;
 };
 
+// ---------------------------------------------------------------------------
+// Remote agents: the third form of a catalog agent — its session runs in an
+// external system (Avride agents, ...); the thread in Balabash is a mirror of
+// that session, kept by the remote engine (src/remote) through a driver that
+// translates the external system into the neutral dialogue vocabulary below.
+// Only installation extensions declare them (data/remote-agents/<name>.ts,
+// export start(ctx) → RemoteAgentDeclaration); the repository ships none.
+// The engine that drives them: src/remote/engine.ts.
+
+export type RemoteAgentDeclaration = {
+  kind: 'remote';
+  name: string; // = the file name; /^[a-z][a-z0-9_]*$/, never a repository agent's name
+  description: string; // what the system is and when to start it — read by the spawners
+  icon?: string;
+  notification?: NotificationLevel; // the thread's default policy, as for every agent
+  // The launch parameters the external system knows (harness, model, effort,
+  // resources ...): an object JSON Schema whose properties carry description
+  // and default; every field optional (no `required`). The spawn verb of the
+  // kind takes `options` by this schema — the one exception to "every agent's
+  // input is one prompt", for the kinds of extensions only.
+  options?: JsonSchema;
+  // Installation secrets the driver reads through ctx.secrets (names); the
+  // operator provisions them through the secrets form like an external
+  // server's — the kind appears among the installation services.
+  secrets?: string[];
+  driver: RemoteDriver;
+};
+
+export type RemoteDriverContext = {
+  // The installation secrets of this kind (ExternalServerSecret rows with
+  // server = the kind's name); a missing one throws.
+  secrets: { get(name: string): Promise<string> };
+  // Stored files: open(fileId) streams an attachment into the session;
+  // ingest stores a file fetched out of it.
+  files: RemoteDriverFilesApi;
+};
+
+// The same surface a local tool server gets (LocalToolFilesApi); the body
+// type is the storage layer's.
+export type RemoteDriverFilesApi = {
+  ingest(input: {
+    body: StorageBody;
+    userId?: string | null;
+    originalFilename?: string | null;
+    contentType?: string | null;
+    sizeBytes?: number | null;
+    scope?: string | null;
+  }): Promise<FileRef>;
+  get(fileId: string): Promise<FileRef>;
+  open(fileId: string): Promise<ReadableStream<Uint8Array>>;
+};
+
+// One read of the session since the cursor: the driver's opaque position
+// (stored as is, advanced together with the mirror), the phase the session
+// is in, and the items in the order of the external system. A driver keeps
+// no state beyond the cursor; read is idempotent and has no side effects on
+// the other side; after a resync it does not repeat what it already handed
+// out.
+export type RemoteRead = {
+  cursor: JsonValue;
+  // working — a turn is in flight; idle — the session waits; asking — a
+  // question needs a human; gone — the session is irrecoverably lost.
+  phase: 'working' | 'idle' | 'asking' | 'gone';
+  nextReadInSec?: number; // a hint; the engine clamps it to [5 s, 1 h]
+  items: RemoteItem[];
+  // The cursor could not be served and the driver re-read from the start —
+  // the engine notes the resync in the mirror.
+  resynced?: boolean;
+};
+
+// The dialogue vocabulary every driver translates into. messageId is OUR
+// id of a prompt (RemoteDriver.say / open hand it to the system as the
+// message id), so the echo of our own prompt is recognised and not mirrored
+// twice; text and output are verbatim — but never base64 blobs (bytes cross
+// only through fetchFile) and never secrets; every string is untrusted text
+// of the external system.
+export type RemoteItem =
+  | { kind: 'turn.started'; turnId: string; messageId?: string }
+  | { kind: 'prompt'; messageId?: string; author?: string; text: string }
+  | { kind: 'text'; turnId: string; text: string }
+  | { kind: 'tool.started'; turnId: string; callId: string; name: string; input: JsonObject }
+  | { kind: 'tool.finished'; turnId: string; callId: string; name: string; output: string; isError?: boolean }
+  // text — the turn's last reply ('' when none)
+  | { kind: 'turn.finished'; turnId: string; outcome: 'completed' | 'failed' | 'stopped'; text: string }
+  // terminal — the turn failed; the thread itself never fails for it
+  | { kind: 'error'; text: string; terminal: boolean }
+  | {
+      kind: 'ask.opened';
+      askId: string;
+      askKind: 'approval' | 'credential' | 'other';
+      text: string;
+      link?: string;
+      options: string[]; // the decisions a human may answer with; [] when only the link resolves it
+      expiresAt?: string;
+    }
+  | { kind: 'ask.closed'; askId: string; outcome: string }
+  | { kind: 'artifact'; title: string; uri: string; mimeType?: string };
+
+export type RemoteDriver = {
+  // Start a new session with the prompt and the options (by the declared
+  // schema); files — attachments of the prompt. ref — the session in the
+  // external system (opaque to the core); link — where a human looks at it.
+  open(
+    ctx: RemoteDriverContext,
+    input: { prompt: string; options: JsonObject; files: FileRef[]; messageId: string },
+  ): Promise<{ ref: string; link?: string; title?: string }>;
+  // Adoption: does the session exist, and how is it called.
+  describe(ctx: RemoteDriverContext, ref: string): Promise<{ exists: boolean; link?: string; title?: string }>;
+  // cursor null = from the beginning.
+  read(ctx: RemoteDriverContext, input: { ref: string; cursor: JsonValue | null }): Promise<RemoteRead>;
+  say(ctx: RemoteDriverContext, input: { ref: string; text: string; files: FileRef[]; messageId: string }): Promise<void>;
+  answer(ctx: RemoteDriverContext, input: { ref: string; askId: string; decision: string }): Promise<void>;
+  // Interrupt the turn in flight; the session stays.
+  stop(ctx: RemoteDriverContext, ref: string): Promise<void>;
+  // A file of the session by path; null when it is not available (the
+  // sandbox asleep, the path missing).
+  fetchFile?(
+    ctx: RemoteDriverContext,
+    input: { ref: string; path: string },
+  ): Promise<{ body: StorageBody; filename: string; contentType?: string } | null>;
+  // The sessions a human may adopt.
+  list?(ctx: RemoteDriverContext): Promise<{ ref: string; title: string; link?: string }[]>;
+};
+
 export type AgentRun = {
   accept(event: Event): void;
   // Soft stop (thread.interrupt): abort the current turn, keep the run alive
@@ -221,6 +352,11 @@ export type SpawnOptions = {
   // workspace registry at spawn (an unknown slug rejects the spawn) and
   // recorded in thread.started — the thread ↔ project link of the log.
   project?: string;
+  // Remote kinds only (RemoteAgentDeclaration): the launch parameters by the
+  // kind's options schema, and adoption — the prompt is then the reference
+  // of an existing session rather than a task.
+  options?: JsonObject;
+  adopt?: boolean;
 };
 
 export type RunContext = {
@@ -239,6 +375,9 @@ export type RunContext = {
 
   spawn(agentName: string, prompt: string, options?: SpawnOptions): Promise<{ threadId: string }>;
   cancelChild(threadId: string, reason: string): Promise<void>;
+  // thread.finish to a remote child: its session is asked for a closing
+  // summary, which completes the thread (src/remote).
+  finishChild(threadId: string): Promise<void>;
 
   // Inter-thread dialogue (thread.message, one hop): drive a child agent with
   // instructions, or answer the parent that drives this run. The counterpart

@@ -20,10 +20,19 @@ export function threadTimeLabel(thread: Thread, state: StateName, now: Date): st
 // The commands of the header: an active thread with a parent takes "Stop
 // turn" and "Cancel thread" (the main thread is eternal and takes neither);
 // a stop needs a turn in flight.
-export function threadCommands(thread: Thread, state: StateName): { running: boolean; stopEnabled: boolean } {
+// A remote thread (the mirror of a session elsewhere) also takes Finish —
+// the session's closing summary completes it — and Pause, unless it
+// already sleeps.
+export function threadCommands(thread: Thread, state: StateName): { running: boolean; stopEnabled: boolean; remote: boolean; pauseEnabled: boolean } {
   const running = thread.status === 'active' && thread.parentId !== null;
+  const remote = running && thread.remote;
 
-  return { running, stopEnabled: running && state === 'run' };
+  return { running, stopEnabled: running && state === 'run', remote, pauseEnabled: remote && state !== 'paused' };
+}
+
+// The words of the finish confirmation (a remote thread).
+export function finishWords(thread: Thread): string {
+  return `The “${thread.agent}” session will be asked for a closing summary, and the thread will end with it. The session itself stays where it is.`;
 }
 
 // The words of the cancel confirmation (design: ThreadScreen, modal).

@@ -12,11 +12,14 @@ export const selectChildCount = (state: State, id: string): number => state.thre
 
 const newestFirst = (a: Thread, b: Thread) => (a.createdSeq > b.createdSeq ? -1 : a.createdSeq < b.createdSeq ? 1 : 0);
 
+const selectSessions = (state: State) => state.sessions;
+
 // Agent threads at work: active threads below the root (the workspace's
-// main thread is always active and is not "work in progress").
-export const selectRunningThreads = createSelector([selectThreadsById], byId =>
+// main thread is always active and is not "work in progress") — a remote
+// thread asleep (its session paused) is alive but not at work.
+export const selectRunningThreads = createSelector([selectThreadsById, selectSessions], (byId, sessions) =>
   Object.values(byId)
-    .filter(thread => thread.status === 'active' && thread.parentId !== null)
+    .filter(thread => thread.status === 'active' && thread.parentId !== null && sessions[thread.id]?.state !== 'paused')
     .sort(newestFirst),
 );
 
