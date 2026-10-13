@@ -20,6 +20,7 @@ import { connectStoreToVisibility } from './lib/visibility/index.ts';
 import { bootWorkspace, currentWorkspace, leaveSignedOutWorkspace } from './lib/workspace/index.ts';
 import { connectStoreToWorkspace } from './lib/workspace/process.ts';
 import { connectStoreToFeedEviction } from './lib/feed-eviction/index.ts';
+import { connectDocumentToTheme } from './lib/theme/index.ts';
 import { connectQueryClientToSession } from './lib/query/session.ts';
 import { connectQueryClientToSecretRequests } from './lib/query/secret-requests.ts';
 import { connectQueryClientToSchedule } from './lib/query/schedule.ts';
@@ -29,6 +30,11 @@ import { PHONE_MEDIA, installPinchGuard } from './lib/touch/pinch.ts';
 import { createStore } from './store/index.ts';
 import type { AppStore } from './store/index.ts';
 import { sessionCheck, sessionLost } from './store/session/actions.ts';
+
+// The color theme (lib/theme): the shell's boot script put it on the page
+// before the first paint; from here on the console keeps it there — a
+// choice in another tab included.
+connectDocumentToTheme();
 
 const root = document.getElementById('root');
 

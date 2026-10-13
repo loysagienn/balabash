@@ -10,7 +10,7 @@
 .mi-end{margin-left:auto;display:flex;align-items:center;gap:var(--sp-1);color:var(--text-3);font-size:var(--fs-meta);line-height:var(--lh-meta)}
 .mi[aria-checked="true"]{color:var(--text)}
 .mi[aria-checked="true"] .mi-end{color:var(--accent)}
-.mi[data-variant="danger"],.mi[data-variant="danger"] .ic{color:var(--st-err)}
+.mi[data-variant="danger"],.mi[data-variant="danger"] .ic{color:var(--st-err-ink)}
 .menu-sep{height:1px;background:var(--border);margin:var(--sp-1) calc(-1 * var(--sp-1))}
 .menu-label{padding:var(--sp-1h) var(--sp-2) var(--sp-1);font-size:var(--fs-micro);line-height:var(--lh-micro);font-weight:var(--fw-semibold);color:var(--text-3)}
 /* Menu anchor at a “⋯” button in a row or header:  <span class="menu-anchor"> button; the open menu floats next to it

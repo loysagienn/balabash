@@ -30,6 +30,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createReadStream } from 'node:fs';
+import { DEFAULT_THEME, themeBootScript, themeById } from '../utils/console-themes.ts';
 import type { Context, Next } from 'koa';
 import { config } from '../config/index.ts';
 
@@ -54,8 +55,10 @@ const WEB_APP_MANIFEST = `${STATIC_PREFIX}manifest.webmanifest`;
 const FAVICON_32 = `${STATIC_PREFIX}favicon-32.png`;
 const FAVICON_192 = `${STATIC_PREFIX}favicon-192.png`;
 const APPLE_TOUCH_ICON = `${STATIC_PREFIX}apple-touch-icon.png`;
-// tokens.css --bg: the status bar of the installed app and the browser's chrome take it.
-const THEME_COLOR = '#0c0d0f';
+// tokens.css --bg of Graphite, the default theme: the status bar of the
+// installed app and the browser's chrome take it. The boot script of the
+// shell (src/utils/console-themes.ts) rewrites it for the browser's theme.
+const THEME_COLOR = themeById(DEFAULT_THEME).bg;
 
 // Paths that belong to the shared surfaces of the main chain, not to the
 // SPA: the whole prefix (the path itself and anything under it)…
@@ -185,6 +188,7 @@ export function renderConsoleShell(manifest: ConsoleManifest): string {
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
   <meta name="color-scheme" content="dark">
   <meta name="theme-color" content="${THEME_COLOR}">
+  <script>${themeBootScript()}</script>
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Balabash">

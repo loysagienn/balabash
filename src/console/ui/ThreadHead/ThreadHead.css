@@ -4,7 +4,7 @@
    Inside .th (container “thread”): > 900 — no strip (the rail has it all); ≤ 560 — Stop/Cancel go into the details sheet;
    on the phone it is the screen header — “back”, the title over state and context, “⋯”. */
 .th-head{position:sticky;top:0;z-index:var(--z-sticky);display:flex;align-items:center;gap:var(--sp-2h);min-height:var(--top-h);padding:var(--sp-2) var(--gutter);border-bottom:1px solid transparent;background:var(--bg-glass);-webkit-backdrop-filter:var(--glass-blur);backdrop-filter:var(--glass-blur)}
-.th-head[data-stuck]{border-bottom-color:var(--border)}
+.th-head[data-stuck]{border-bottom-color:var(--border-surface)}
 .th-ph{display:none}   /* phone-only part of the strip: “back” */
 .th-back{margin-left:calc(-1 * var(--sp-2))}
 .th-id{flex:1;min-width:0;display:flex;flex-direction:column;gap:var(--sp-0h)}

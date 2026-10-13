@@ -7,7 +7,7 @@
 .seclink:hover{background-image:var(--layer-hover)}
 .seclink-t{font-size:var(--fs-ui);font-weight:var(--fw-semibold);color:var(--text)}
 .seclink-m{font-size:var(--fs-meta);line-height:var(--lh-meta);color:var(--text-3);text-wrap:pretty}
-.seclink-m[data-state]{color:var(--st-c)}
+.seclink-m[data-state]{color:var(--st-ink)}
 @container shell (max-width:720px){
   .seclinks[data-narrow="tiles"]{grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--sp-2);margin-inline:0}
   .seclinks[data-narrow="tiles"] .seclink{grid-template-columns:minmax(0,1fr);align-content:start;gap:var(--sp-1h);min-height:var(--seclink-tile-h);padding:var(--sp-3) var(--sp-2h);border-radius:var(--r-md);background:var(--surface)}

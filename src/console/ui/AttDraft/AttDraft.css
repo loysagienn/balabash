@@ -7,7 +7,7 @@
 .attd-th > img{width:100%;height:100%;object-fit:cover}
 .attd-main{display:flex;flex-direction:column;min-width:0}
 .attd-n{font-size:var(--fs-meta);line-height:var(--lh-meta);font-weight:var(--fw-medium);color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.attd-s{font-size:var(--fs-micro);line-height:var(--lh-micro);color:var(--st-c,var(--text-3));font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.attd-s{font-size:var(--fs-micro);line-height:var(--lh-micro);color:var(--st-ink,var(--text-3));font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .attd-acts{display:flex}
 .attd-prog{--prog-h:2px;position:absolute;left:0;right:0;bottom:0;border-radius:0;background:transparent}
 .attd[data-state="err"]{border-color:color-mix(in srgb,var(--st-err) 45%,transparent);background:linear-gradient(var(--st-err-bg),var(--st-err-bg)),var(--surface-2)}

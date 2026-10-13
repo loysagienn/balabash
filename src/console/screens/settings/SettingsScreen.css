@@ -16,9 +16,34 @@
 .set-sw{display:grid;padding:var(--sp-1);border-radius:var(--r-sm);box-shadow:inset 0 0 0 1px transparent}
 .set-sw:hover{background-image:var(--layer-hover)}
 .set-sw[aria-checked="true"]{box-shadow:inset 0 0 0 2px var(--text)}
+/* The theme: one tile per theme (radio buttons), four in a row; the preview is drawn in its own theme — data-bb-theme on it. */
+.set-themes{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:var(--sp-3)}
+.set-theme{display:flex;flex-direction:column;gap:var(--sp-2);min-width:0;padding:var(--sp-1h) var(--sp-1h) var(--sp-2h);border-radius:var(--r-md);text-align:left;box-shadow:inset 0 0 0 1px var(--border);transition:box-shadow var(--dur-1) var(--ease)}
+.set-theme:hover{background-image:var(--layer-hover);box-shadow:inset 0 0 0 1px var(--border-hover)}
+.set-theme[aria-checked="true"]{box-shadow:inset 0 0 0 2px var(--text)}   /* the same mark as the selected workspace color */
+.set-theme-pv{--pv-h:84px;display:grid;grid-template-columns:30% minmax(0,1fr);height:var(--pv-h);border-radius:var(--r-inner);overflow:hidden;background:var(--bg);box-shadow:inset 0 0 0 1px var(--border)}
+.set-theme-side{display:flex;flex-direction:column;gap:var(--sp-1h);padding:var(--sp-2) var(--sp-1h);border-right:1px solid var(--border-surface);background:var(--surface)}
+.set-theme-side > i{height:var(--sp-1);border-radius:var(--sp-0h);background:var(--text-4)}
+.set-theme-side > i:nth-child(2){background:var(--accent)}   /* the current section */
+.set-theme-side > i:nth-child(3){width:70%}
+.set-theme-main{display:flex;padding:var(--sp-2)}
+.set-theme-card{flex:1;display:flex;flex-direction:column;gap:var(--sp-1);padding:var(--sp-1h) var(--sp-2);border-radius:var(--r-xs);background:var(--surface);box-shadow:inset 0 0 0 1px var(--border-surface)}
+.set-theme-card > i{height:var(--sp-1);border-radius:var(--sp-0h);background:var(--text-3)}
+.set-theme-card > i:first-child{width:62%;background:var(--text)}
+.set-theme-card > i:nth-child(2){width:88%;background:var(--text-2)}
+.set-theme-card > i:nth-child(3){width:48%}
+.set-theme-ft{display:flex;align-items:center;gap:var(--sp-1);margin-top:auto}
+.set-theme-ft > i{width:var(--sp-1h);height:var(--sp-1h);border-radius:var(--r-pill);background:var(--st-run)}
+.set-theme-ft > i:nth-child(2){width:28%;height:var(--sp-1);background:var(--link)}
+.set-theme-ft > i:last-child{width:26%;height:var(--sp-2h);margin-left:auto;border-radius:var(--sp-0h);background:var(--primary-bg)}
+.set-theme-cap{display:flex;align-items:center;justify-content:space-between;gap:var(--sp-1);padding:0 var(--sp-1)}
+.set-theme-n{font-size:var(--fs-ui);line-height:var(--lh-ui);font-weight:var(--fw-medium);color:var(--text)}
+.set-theme-cap .ic{color:var(--text)}
+.set-theme-d{padding:0 var(--sp-1);font-size:var(--fs-meta);line-height:var(--lh-meta);color:var(--text-3);text-wrap:pretty}
 /* On the phone the facts of a tile (the group's id and day, the session's browser and source) are the row's whole
    point and are short: they wrap instead of the list's ellipsis. */
 @container shell (max-width:720px){
+  .set-themes{grid-template-columns:repeat(2,minmax(0,1fr))}
   .set-col .list[data-narrow="tiles"] .row-m{white-space:normal}
 }
 }

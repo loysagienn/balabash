@@ -4,5 +4,5 @@
 .st-dot{width:var(--st-dot);height:var(--st-dot);border-radius:50%;flex:none;background:var(--st-c,var(--text-3))}
 .st .ic{font-size:var(--ico-xs);color:var(--st-c,var(--text-3))}
 .st[data-state="run"] .st-dot{animation:bb-blink var(--blink) infinite}
-.st[data-state="err"]{color:var(--st-err)}
+.st[data-state="err"]{color:var(--st-err-ink)}
 }

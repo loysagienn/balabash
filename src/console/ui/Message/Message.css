@@ -9,7 +9,7 @@
 .msg-to{color:var(--text-2)}
 .msg-time{margin-left:auto;font-variant-numeric:tabular-nums}
 .msg-b{grid-column:2;min-width:0}
-.msg:is([data-variant="task"],[data-variant="ask"]) .msg-b{padding:var(--sp-3) var(--sp-4);border:1px solid var(--border);border-radius:var(--r-md);background:var(--surface)}
+.msg:is([data-variant="task"],[data-variant="ask"]) .msg-b{padding:var(--sp-3) var(--sp-4);border:1px solid var(--border-surface);border-radius:var(--r-md);background:var(--surface)}
 .msg[data-variant="ask"] .msg-b{border-color:color-mix(in srgb,var(--st-act) 30%,var(--border))}
 .msg[data-variant="user"] .msg-b{padding:var(--sp-2h) var(--sp-3h);border-radius:var(--r-md);background:var(--surface-2)}
 .msg[data-variant="quiet"]{display:block;padding-left:var(--feed-indent,0px)}

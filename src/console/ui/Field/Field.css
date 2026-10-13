@@ -4,6 +4,6 @@
 .fld-l{display:flex;align-items:baseline;gap:var(--sp-1h);font-size:var(--fs-meta);line-height:var(--lh-meta);font-weight:var(--fw-semibold);color:var(--text)}
 .fld-opt{font-weight:var(--fw-regular);color:var(--text-3)}
 .fld-h{font-size:var(--fs-meta);line-height:var(--lh-meta);color:var(--text-3)}
-.fld-e{display:flex;align-items:center;gap:var(--sp-1h);font-size:var(--fs-meta);line-height:var(--lh-meta);color:var(--st-err)}
+.fld-e{display:flex;align-items:center;gap:var(--sp-1h);font-size:var(--fs-meta);line-height:var(--lh-meta);color:var(--st-err-ink)}
 .fld-e .ic{font-size:var(--ico-sm)}
 }

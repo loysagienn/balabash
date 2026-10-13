@@ -7,8 +7,8 @@
 .lim-t{font-size:var(--fs-ui);font-weight:var(--fw-semibold);color:var(--text)}
 .lim-m{font-size:var(--fs-meta);line-height:var(--lh-meta);color:var(--text-3);font-variant-numeric:tabular-nums}
 .lim-s{font-size:var(--fs-meta);line-height:var(--lh-meta);font-weight:var(--fw-semibold);color:var(--lvl-ok)}
-.lim-s[data-level="warn"]{color:var(--lvl-warn)}
-.lim-s[data-level="over"]{color:var(--lvl-over)}
+.lim-s[data-level="warn"]{color:var(--st-act-ink)}
+.lim-s[data-level="over"]{color:var(--st-err-ink)}
 .lims[data-layout="stack"]{grid-template-columns:minmax(0,1fr)}
 .lims[data-layout="stack"] .lim{grid-template-columns:auto minmax(0,1fr);justify-items:stretch}
 /* ── Limit group ──  .limgrp > .listgrp + (.card-b notes) + .lims + .card-f — the windows of one account in the "Plan limits" card.

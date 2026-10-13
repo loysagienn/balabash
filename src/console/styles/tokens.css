@@ -1,8 +1,9 @@
-/* Balabash console — tokens (dark theme).
-   The only place where values are written. Components and screens take them via var(--…).
-   Light theme = a [data-theme="light"] block with the same names; only these groups need
-   overriding: “Surfaces”, “State layers”, “Lines”, “Text”, “Accent”, “Primary button”,
-   “Statuses”, “Identifiers”, “Code highlighting”, “Depth” — everything else is theme-independent.
+/* Balabash console — tokens. The colors here are the default theme, Graphite.
+   The only place where values are written (the other color themes — themes.css, the design's file taken over
+   as it is). Components and screens take them via var(--…).
+   A theme overrides only these groups, with the same names: “Surfaces”, “State layers”, “Lines”, “Text”, “Accent”,
+   “Primary button”, “Statuses”, “Fill levels”, “Identifiers”, “Token series”, “Code highlighting”, the shadows
+   of “Depth” — everything else is theme-independent. index.css loads themes.css right after this file.
 
    Carried over from design/design-system/tokens.css with the same names; fonts
    are local (fonts.css). */
@@ -16,7 +17,7 @@
   --surface-2:#18191d;     /* overlays (menus, popovers, toasts) and insets inside a card */
   --surface-3:#222329;     /* chips, counters, ring track; text on it — no darker than --text-2 */
   --overlay:rgba(5,6,8,.72);  /* backdrop of modals and sheets */
-  --bg-glass:color-mix(in srgb,var(--bg) 72%,transparent);  /* sticky bars the feed scrolls under (thread strip, phone composer), with --glass-blur */
+  --bg-glass:color-mix(in srgb,var(--surface) 72%,transparent);  /* sticky bars the feed scrolls under (thread strip, phone composer), with --glass-blur */
 
   /* ── State layers: translucent fill over any surface ── */
   --hover:rgba(255,255,255,.045);
@@ -31,6 +32,7 @@
   --border-strong:#2e3036; /* outline on hover, “cancelled” outline, overlay layers */
   --border-ctl:#393b42;    /* input, checkbox outline, filter dashed line — 1.65:1 to --surface */
   --border-hover:#45474f;  /* field outline on hover */
+  --border-surface:var(--border);  /* edge of a --surface block on --bg: cards, feed blocks, sidebar and header edges; the page color on the light themes */
   --focus:#7d86ff;         /* focus ring (= accent) */
 
   /* ── Text (contrast given against --surface) ── */
@@ -59,6 +61,10 @@
   --st-done:#9a9da6;       /* done — neutral */
   --st-err:#f0645a;        /* error */
   --st-off:#83868f;        /* cancelled, off */
+  --st-run-ink:var(--st-run);   /* status text (≥ 4.5:1); the --st-* above draw graphics (≥ 3:1) — one color on the dark themes */
+  --st-wait-ink:var(--st-wait);
+  --st-act-ink:var(--st-act);
+  --st-err-ink:var(--st-err);
   --st-run-bg:color-mix(in srgb,var(--st-run) 12%,transparent);
   --st-wait-bg:color-mix(in srgb,var(--st-wait) 12%,transparent);
   --st-act-bg:color-mix(in srgb,var(--st-act) 13%,transparent);
@@ -67,6 +73,8 @@
   --st-err-bg-strong:color-mix(in srgb,var(--st-err) 18%,transparent);
   --st-err-bg-press:color-mix(in srgb,var(--st-err) 26%,transparent);
   --st-off-bg:transparent;
+  --st-act-fill:var(--st-act);  /* solid fills of counters (the bell), under --on-act / --on-err */
+  --st-err-fill:var(--st-err);
   --on-act:#1a1200;        /* text on a solid --st-act fill */
   --on-err:#1f0605;        /* text on a solid --st-err fill */
 
@@ -102,8 +110,8 @@
   --code-fn:oklch(0.80 0.10 245);   /* functions, attributes */
   --code-num:oklch(0.80 0.12 75);   /* numbers */
   --code-com:var(--text-3);         /* comments */
-  --diff-add:var(--st-run);
-  --diff-del:var(--st-err);
+  --diff-add:var(--st-run-ink);
+  --diff-del:var(--st-err-ink);
 
   /* ── Typography ── */
   --font:'Inter',system-ui,sans-serif;

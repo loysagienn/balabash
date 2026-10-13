@@ -4,7 +4,7 @@
 .app{position:relative;container:shell / inline-size;height:100%;min-height:0}
 .shell{display:grid;grid-template-columns:var(--side-w) minmax(0,1fr);height:100%;min-height:0;background:var(--bg);color:var(--text)}
 
-.shell-side{display:flex;flex-direction:column;gap:var(--sp-3);min-width:0;padding:var(--sp-3h) var(--sp-2h);border-right:1px solid var(--border);background:var(--bg);overflow-y:auto}
+.shell-side{display:flex;flex-direction:column;gap:var(--sp-3);min-width:0;padding:var(--sp-3h) var(--sp-2h);border-right:1px solid var(--border-surface);background:var(--surface);overflow-y:auto}
 /* brand: the service icon (the Balabash mark, its own colors and padding) and the service name */
 .shell-brand{display:flex;align-items:center;gap:var(--sp-2h);padding:0 var(--sp-1h);font-size:var(--fs-ui);line-height:var(--lh-ui);font-weight:var(--fw-semibold);color:var(--text-2)}
 .shell-logo{width:var(--ctl-h-sm);height:var(--ctl-h-sm);flex:none;display:block;object-fit:contain}
@@ -38,7 +38,7 @@
 .shell-foot-v{color:var(--text-2);font-weight:var(--fw-medium)}
 
 .shell-main{display:flex;flex-direction:column;min-width:0;min-height:0}
-.shell-top{display:flex;align-items:center;gap:var(--sp-2h);height:var(--top-h);padding:0 var(--gutter);border-bottom:1px solid var(--border);flex:none;min-width:0}
+.shell-top{display:flex;align-items:center;gap:var(--sp-2h);height:var(--top-h);padding:0 var(--gutter);border-bottom:1px solid var(--border-surface);background:var(--surface);flex:none;min-width:0}
 .shell-back{margin-left:calc(-1 * var(--sp-2))}
 .shell-crumb{flex:none;font-size:var(--fs-ui);color:var(--text-3);text-decoration:none}
 .shell-crumb:hover{color:var(--text)}
@@ -55,7 +55,7 @@
 /* "back" only on the phone (backNarrow): the detail of a split view, whose list stays beside it when wide */
 .shell-top[data-back="narrow"] .shell-back{display:none}
 
-.shell-tabs{display:none;grid-template-columns:repeat(5,minmax(0,1fr));min-height:calc(var(--tabs-h) + env(safe-area-inset-bottom,0px));padding-bottom:env(safe-area-inset-bottom,0px);border-top:1px solid var(--border);background:var(--bg);flex:none}
+.shell-tabs{display:none;grid-template-columns:repeat(5,minmax(0,1fr));min-height:calc(var(--tabs-h) + env(safe-area-inset-bottom,0px));padding-bottom:env(safe-area-inset-bottom,0px);border-top:1px solid var(--border-surface);background:var(--surface);flex:none}
 .shell-tab{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:var(--sp-0h);font-size:var(--fs-micro);line-height:var(--lh-micro);font-weight:var(--fw-medium);color:var(--text-3);text-decoration:none}
 .shell-tab .ic{font-size:var(--ico-lg)}
 .shell-tab[aria-current="page"]{color:var(--text)}

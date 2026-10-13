@@ -1,6 +1,6 @@
 @layer components{
 /* ── Card ──  .card > .card-h (h3.card-t, .card-h-end) + .card-b | .list + .card-f */
-.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);overflow:hidden;min-width:0}
+.card{background:var(--surface);border:1px solid var(--border-surface);border-radius:var(--r-lg);overflow:hidden;min-width:0}
 .card-h{--card-h-min:50px;display:flex;align-items:center;gap:var(--sp-2);min-height:var(--card-h-min);padding:var(--sp-3h) var(--sp-4h);border-bottom:1px solid var(--border)}
 .card-t{margin:0;font-size:var(--fs-ui);font-weight:var(--fw-semibold)}
 .card-h-end{margin-left:auto;display:flex;align-items:center;gap:var(--sp-1h)}

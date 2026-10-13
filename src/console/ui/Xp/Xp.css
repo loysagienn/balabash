@@ -16,8 +16,8 @@
 .xp-name{font-family:var(--mono);letter-spacing:0;font-weight:var(--fw-medium);font-size:var(--fs-code);color:var(--text);margin-right:var(--sp-2)}
 .xp-arg{font-family:var(--mono);letter-spacing:0;font-size:var(--fs-code-sm);color:var(--text-3)}
 .xp-end{display:flex;align-items:center;gap:var(--sp-2h);font-size:var(--fs-meta);line-height:var(--lh-meta);color:var(--text-3);font-variant-numeric:tabular-nums}
-.xp-end[data-state="run"]{color:var(--st-run)}
-.xp-end[data-state="err"]{color:var(--st-err)}
+.xp-end[data-state="run"]{color:var(--st-run-ink)}
+.xp-end[data-state="err"]{color:var(--st-err-ink)}
 .xp-add{color:var(--diff-add)}
 .xp-del{color:var(--diff-del)}
 .xp-b{display:flex;flex-direction:column;gap:var(--sp-2h);padding:var(--sp-0h) var(--xp-px,var(--sp-4)) var(--sp-3h) var(--xp-b-indent,calc(var(--xp-px,var(--sp-4)) + var(--ico-sm) + var(--sp-2h) * 2 + var(--ico)))}
@@ -25,6 +25,6 @@
 }
 @layer patterns{
 /* ── Action group ──  .actgroup — consecutive .xp rows in the feed, indented to the avatar column */
-.actgroup{--xp-px:var(--sp-3);margin-left:var(--feed-indent,0px);border:1px solid var(--border);border-radius:var(--r-md);background:var(--surface);overflow:hidden}
+.actgroup{--xp-px:var(--sp-3);margin-left:var(--feed-indent,0px);border:1px solid var(--border-surface);border-radius:var(--r-md);background:var(--surface);overflow:hidden}
 @container thread (max-width:480px){ .actgroup{--xp-b-indent:var(--sp-3)} }
 }

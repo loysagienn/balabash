@@ -1,9 +1,9 @@
 @layer components{
 /* ── Counter ──  <span class="count" data-state="run|act|err" data-size="sm">4</span> */
 .count{--count-h:20px;display:inline-block;flex:none;min-width:var(--count-h);height:var(--count-h);padding:0 var(--sp-1h);border-radius:var(--r-pill);background:var(--surface-3);color:var(--text-2);font-size:var(--fs-micro);font-weight:var(--fw-semibold);line-height:var(--count-h);text-align:center;font-variant-numeric:tabular-nums}
-.count[data-state]{background:var(--st-bg);color:var(--st-c)}
-.count[data-state="act"]{background:var(--st-act);color:var(--on-act);font-weight:var(--fw-bold)}
-.count[data-state="err"]{background:var(--st-err);color:var(--on-err);font-weight:var(--fw-bold)}
+.count[data-state]{background:var(--st-bg);color:var(--st-ink)}
+.count[data-state="act"]{background:var(--st-act-fill);color:var(--on-act);font-weight:var(--fw-bold)}
+.count[data-state="err"]{background:var(--st-err-fill);color:var(--on-err);font-weight:var(--fw-bold)}
 .count[data-size="sm"]{--count-h:16px;padding:0 var(--sp-1)}
 
 /* ── Small labels ── */
@@ -28,6 +28,6 @@
 .caption{font-size:var(--fs-micro);line-height:var(--lh-micro);color:var(--text-3)}
 
 /* ── Inline error ──  <span class="errline"><svg class="ic"></svg><span>text with .code</span></span> */
-.errline{display:flex;align-items:flex-start;gap:var(--sp-1h);color:var(--st-err);font-size:var(--fs-meta);line-height:var(--lh-meta)}
+.errline{display:flex;align-items:flex-start;gap:var(--sp-1h);color:var(--st-err-ink);font-size:var(--fs-meta);line-height:var(--lh-meta)}
 .errline .ic{flex:none;margin-top:var(--sp-0h);font-size:var(--ico-sm)}
 }

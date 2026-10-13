@@ -2,16 +2,17 @@
 // the color of its mark — this browser's choice, lib/workspace) and "You"
 // (the operator's name), each name saving on its own through
 // PATCH /api/settings — the answer updates `me`, so the sidebar and the
-// feed follow, and a toast confirms; the cards of facts read by place from
-// GET /api/settings (queries.ts; the words — SettingsScreen.logic.ts):
+// feed follow, and a toast confirms; "Appearance" — the color theme, this
+// browser's choice (lib/theme), applied on choice; the cards of facts read
+// by place from GET /api/settings (queries.ts; the words — SettingsScreen.logic.ts):
 // "Telegram" — the group bound to the workspace, or that none is;
 // "Schedule time zone" — the zone the server evaluates cron in, read-only
 // (it is the server's environment, SCHEDULE_TIMEZONE); "Signed in on this
 // browser" — the workspaces of this browser (GET /api/workspaces), the way
 // out of this tab's one, one more workspace, and "Reload page".
 
-import { useEffect, useRef, useState } from 'react';
-import type { FormEvent, ReactNode } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import type { FormEvent, KeyboardEvent, ReactNode } from 'react';
 import type { SettingsFactsResponse, TelegramView } from '../../../api/contract.ts';
 import { useAppDispatch, useAppSelector } from '../../store/hooks.ts';
 import { logout, saveSettings } from '../../store/session/actions.ts';
@@ -23,6 +24,7 @@ import { Btn } from '../../ui/Btn/Btn.tsx';
 import { Card, CardBody, CardFoot, CardHead } from '../../ui/Card/Card.tsx';
 import { Caption, Code, Tag } from '../../ui/atoms/atoms.tsx';
 import { Field } from '../../ui/Field/Field.tsx';
+import { Icon } from '../../ui/Icon/Icon.tsx';
 import { Input } from '../../ui/Input/Input.tsx';
 import { List, Row } from '../../ui/List/List.tsx';
 import { Note } from '../../ui/Note/Note.tsx';
@@ -33,6 +35,8 @@ import { Status } from '../../ui/Status/Status.tsx';
 import { WsMark } from '../../ui/WsMark/WsMark.tsx';
 import { useWorkspaces } from '../../features/workspaces/queries.ts';
 import { WORKSPACE_COLORS, setWorkspaceColor } from '../../lib/workspace/index.ts';
+import { DEFAULT_THEME, THEMES, setTheme, subscribeTheme, themeSnapshot } from '../../lib/theme/index.ts';
+import type { ThemeId } from '../../lib/theme/index.ts';
 import { openAddWorkspace } from '../../store/ui/actions.ts';
 import { useSettingsFacts } from './queries.ts';
 import { useFactsStage } from '../../lib/query/useFactsStage.ts';
@@ -102,23 +106,120 @@ function NameCard({ title, label, fid, hint, field, current, saving, saved, onSa
   );
 }
 
+// The radio groups of buttons (the color swatches, the theme tiles) move
+// with the arrow keys like a native radio group: the arrows pick the next or
+// previous option and focus it, Home and End the first and the last. The
+// group's buttons are its direct children in option order.
+function pickWithArrows<T>(event: KeyboardEvent<HTMLElement>, options: readonly T[], current: T, pick: (option: T) => void): void {
+  const index = options.indexOf(current);
+  let next: number;
+
+  switch (event.key) {
+    case 'ArrowRight':
+    case 'ArrowDown':
+      next = (index + 1) % options.length;
+      break;
+    case 'ArrowLeft':
+    case 'ArrowUp':
+      next = (index - 1 + options.length) % options.length;
+      break;
+    case 'Home':
+      next = 0;
+      break;
+    case 'End':
+      next = options.length - 1;
+      break;
+    default:
+      return;
+  }
+
+  event.preventDefault();
+  pick(options[next]!);
+  event.currentTarget.querySelectorAll<HTMLElement>('[role="radio"]')[next]?.focus();
+}
+
 // The workspace's mark color — this browser's choice (lib/workspace): the
 // mark in each of the eight identity colors, saved on choice.
 function ColorField({ name, userId, color }: { name: string; userId: string; color: number }) {
+  const pick = (option: number) => setWorkspaceColor(userId, option);
+
   return (
     <div className="fld set-color">
       <span className="fld-l" id="ws-c">
         Color
       </span>
-      <div className="set-sws" role="radiogroup" aria-labelledby="ws-c">
+      <div className="set-sws" role="radiogroup" aria-labelledby="ws-c" onKeyDown={event => pickWithArrows(event, WORKSPACE_COLORS, color, pick)}>
         {WORKSPACE_COLORS.map(option => (
-          <button key={option} type="button" className="set-sw" role="radio" aria-checked={option === color} aria-label={`Color ${option}`} onClick={() => setWorkspaceColor(userId, option)}>
+          <button key={option} type="button" className="set-sw" role="radio" aria-checked={option === color} tabIndex={option === color ? 0 : -1} aria-label={`Color ${option}`} onClick={() => pick(option)}>
             <WsMark name={name} color={option} />
           </button>
         ))}
       </div>
       <p className="fld-h">Tells this workspace apart from the others signed in on this browser. Kept in this browser, saved on choice.</p>
     </div>
+  );
+}
+
+// The color theme — this browser's choice (lib/theme): four tiles, each a
+// preview drawn in its own theme (data-bb-theme on the preview, Graphite's
+// included — its block in themes.css repeats :root, so the preview keeps its
+// colors inside a page of another theme), the name and one line under
+// it; picking one repaints the whole console at once, this page included.
+// A choice made in another tab shows here too (subscribeTheme).
+function ThemePreview({ theme }: { theme: ThemeId }) {
+  return (
+    <span className="set-theme-pv" data-bb-theme={theme} aria-hidden="true">
+      <span className="set-theme-side">
+        <i />
+        <i />
+        <i />
+        <i />
+      </span>
+      <span className="set-theme-main">
+        <span className="set-theme-card">
+          <i />
+          <i />
+          <i />
+          <span className="set-theme-ft">
+            <i />
+            <i />
+            <i />
+          </span>
+        </span>
+      </span>
+    </span>
+  );
+}
+
+const THEME_IDS: readonly ThemeId[] = THEMES.map(theme => theme.id);
+
+function AppearanceCard() {
+  const current = useSyncExternalStore(subscribeTheme, themeSnapshot, () => DEFAULT_THEME);
+
+  return (
+    <Card narrow="bare" label="Appearance">
+      <CardHead title="Appearance" />
+      <CardBody>
+        <div className="fld">
+          <span className="fld-l" id="th-l">
+            Theme
+          </span>
+          <div className="set-themes" role="radiogroup" aria-labelledby="th-l" onKeyDown={event => pickWithArrows(event, THEME_IDS, current, setTheme)}>
+            {THEMES.map(theme => (
+              <button key={theme.id} type="button" className="set-theme" role="radio" aria-checked={theme.id === current} tabIndex={theme.id === current ? 0 : -1} onClick={() => setTheme(theme.id)}>
+                <ThemePreview theme={theme.id} />
+                <span className="set-theme-cap">
+                  <span className="set-theme-n">{theme.name}</span>
+                  {theme.id === current ? <Icon name="check" /> : null}
+                </span>
+                <span className="set-theme-d">{theme.desc}</span>
+              </button>
+            ))}
+          </div>
+          <p className="fld-h">Changes colors only. Kept in this browser, applied on choice.</p>
+        </div>
+      </CardBody>
+    </Card>
   );
 }
 
@@ -341,6 +442,7 @@ export function SettingsScreen() {
             saved={saved.operatorName}
             onSave={value => dispatch(saveSettings({ operatorName: value }))}
           />
+          <AppearanceCard />
           {stage.kind === 'facts' && stage.stale ? <FactsStale facts={facts} error={stage.stale} /> : null}
           <TelegramCard facts={facts} stage={stage} now={now} />
           <TimezoneCard facts={facts} stage={stage} now={now} />
