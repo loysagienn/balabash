@@ -31,6 +31,15 @@ export function cpuAverage(perCore: number[] | null): number | null {
   return perCore && perCore.length ? perCore.reduce((sum, value) => sum + value, 0) / perCore.length : null;
 }
 
+// The per-core bars, one per core: up to 32 they fit the meter at the
+// narrowest (2px a bar, 2px between); past that they would spill out of it
+// and tell nothing core by core — the meter keeps the gauge and the load.
+export const PER_CORE_BARS_MAX = 32;
+
+export function showsPerCore(perCore: readonly number[]): boolean {
+  return perCore.length <= PER_CORE_BARS_MAX;
+}
+
 // "CPU · 8 cores" / "load 0.42 · 0.51 · 0.48".
 export function cpuWords(cpu: MachineView['cpu']): { title: string; load: string } {
   return { title: `CPU · ${countOf(cpu.cores, 'core')}`, load: `load ${cpu.loadAvg.map(value => value.toFixed(2)).join(' · ')}` };

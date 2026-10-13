@@ -18,6 +18,7 @@ import {
   restartNote,
   restartRows,
   sessionsWords,
+  showsPerCore,
   sparkOf,
   systemSummary,
   tookLabel,
@@ -37,6 +38,8 @@ describe('the machine', () => {
     assert.equal(cpuAverage([22, 9, 31, 6]), 17);
     assert.equal(cpuAverage(null), null);
     assert.equal(cpuAverage([]), null);
+    assert.equal(showsPerCore(Array(32).fill(10)), true);
+    assert.equal(showsPerCore(Array(33).fill(10)), false);
     assert.deepEqual(memoryWords({ totalBytes: 16 * GB, usedBytes: 9.8 * GB, swapTotalBytes: 8 * GB, swapUsedBytes: 0.3 * GB }), { percent: 61.25, main: '9.8 of 16 GB', swap: 'swap 4% · 0.3 of 8 GB' });
     assert.equal(memoryWords({ totalBytes: 4 * GB, usedBytes: GB, swapTotalBytes: 0, swapUsedBytes: 0 }).swap, 'no swap');
     assert.deepEqual(diskWords({ totalBytes: 200 * GB, usedBytes: 131 * GB, freeBytes: 69 * GB }), { percent: 65.5, main: '131 of 200 GB · 69 GB free' });

@@ -59,6 +59,7 @@ import {
   restartNote,
   restartRows,
   sessionsWords,
+  showsPerCore,
   sparkOf,
   trafficCaption,
   updatedWords,
@@ -178,10 +179,12 @@ function MachineCard({ facts }: { facts: Facts }) {
       <div className="sys-meters">
         <Meter gauge={average} title={cpu.title} lines={[cpu.load]}>
           {machine.cpu.perCore ? (
-            <>
-              <Spark values={machine.cpu.perCore} />
-              <Caption>per core · now</Caption>
-            </>
+            showsPerCore(machine.cpu.perCore) ? (
+              <>
+                <Spark values={machine.cpu.perCore} />
+                <Caption>per core · now</Caption>
+              </>
+            ) : null
           ) : (
             <Caption>measuring the load…</Caption>
           )}
