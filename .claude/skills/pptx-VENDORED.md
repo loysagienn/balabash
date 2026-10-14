@@ -15,4 +15,5 @@ Host dependencies the skill relies on (provisioned outside the repo):
 apt: libreoffice, poppler-utils, ttf-mscorefonts-installer,
 fonts-crosextra-carlito, fonts-crosextra-caladea;
 python: markitdown[pptx], Pillow, defusedxml, lxml;
-node: pptxgenjs (resolvable from the pptx agent's working directory).
+node: pptxgenjs (resolvable from the workbench — the workspace file area,
+the manager's working directory).

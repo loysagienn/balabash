@@ -15,7 +15,6 @@ import * as engineer from './engineer.ts';
 import * as gardener from './gardener.ts';
 import * as image_generator from './image_generator.ts';
 import * as manager from './manager.ts';
-import * as power_point from './power_point.ts';
 import * as scheduler from './scheduler.ts';
 
 export const agentModules: Record<string, Record<string, unknown>> = {
@@ -28,6 +27,5 @@ export const agentModules: Record<string, Record<string, unknown>> = {
   gardener,
   image_generator,
   manager,
-  power_point,
   scheduler,
 };

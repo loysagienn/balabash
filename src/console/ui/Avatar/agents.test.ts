@@ -6,7 +6,7 @@ describe('avatarVals', () => {
   it('maps the catalog agents to their fixed letter and identity color', () => {
     assert.deepEqual(avatarVals('engineer'), { letter: 'E', id: 1, title: 'engineer' });
     assert.deepEqual(avatarVals('coordinator'), { letter: 'C', id: 5, title: 'coordinator' });
-    assert.deepEqual(avatarVals('power_point'), { letter: 'P', id: 3, title: 'power_point' });
+    assert.deepEqual(avatarVals('designer'), { letter: 'D', id: 3, title: 'designer' });
     assert.deepEqual(avatarVals('you'), { letter: 'Y', id: 'you', title: 'you' });
   });
 

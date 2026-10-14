@@ -17,7 +17,6 @@ export const AGENT_AVATARS: Record<string, readonly [letter: string, id: AvatarI
   scheduler: ['S', 7],
   gardener: ['G', 4],
   auth: ['A', 6],
-  power_point: ['P', 3],
   codex: ['C', 1],
   you: ['Y', 'you'],
 };

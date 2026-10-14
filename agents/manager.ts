@@ -2,7 +2,7 @@
 // directly in its own thread and hands it everyday tasks; it acts through the
 // Balabash tool bundle plus the full native tool preset working on the
 // per-user workbench (the workspace file area itself is its cwd, like the
-// power_point agent), and can spawn the browser sub-agent for operating real
+// engineer), and can spawn the browser sub-agent for operating real
 // websites. The brief and the passport are the manager role's (roles/manager),
 // shared with the codex agent — the same manager on OpenAI Codex. On top of
 // the role this agent also spawns the image generator: Claude has no image
