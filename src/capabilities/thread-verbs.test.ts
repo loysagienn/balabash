@@ -17,5 +17,7 @@ describe('describeFinishRequest', () => {
     assert.match(byParent, /^\[Your operator asks you to finish this thread\]\n/);
     assert.match(byUser, /end the thread with end_thread in this turn/);
     assert.match(byUser, /start nothing new/);
+    // The browser agent ends with its own tool.
+    assert.match(describeFinishRequest({ actor: 'user', payload: {} }, 'finish'), /end the thread with finish in this turn/);
   });
 });

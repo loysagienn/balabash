@@ -25,15 +25,18 @@ export const FINISH_THREAD_DESCRIPTION =
 // thread.finish delivered to an agent's own run (src/capabilities/session-run.ts,
 // agents/browser.ts): the one who asked — the user from a surface, or the
 // operator (the parent, the secretary) — wants the thread wrapped up by
-// the agent itself: no new work, the report, end_thread. One rendering for
-// every runner. (A remote thread's engine answers the same command by
-// asking the session for its closing summary — src/remote/engine.ts.)
-export function describeFinishRequest(event: { actor: string; payload: Record<string, unknown> }): string {
+// the agent itself: no new work, the report, the end verb. One rendering
+// for every runner; the verb is the runner's own — end_thread of the
+// session run, `finish` of the browser agent (whose session ends with its
+// own tool, after the browser is closed). (A remote thread's engine answers
+// the same command by asking the session for its closing summary —
+// src/remote/engine.ts.)
+export function describeFinishRequest(event: { actor: string; payload: Record<string, unknown> }, endVerb: string = 'end_thread'): string {
   const who = event.actor === 'user' ? 'The user asks' : 'Your operator asks';
 
   return (
     `[${who} you to finish this thread]\n` +
     'Wrap up now: start nothing new, bring what is in flight to a safe stop, write your final report and ' +
-    'end the thread with end_thread in this turn.'
+    `end the thread with ${endVerb} in this turn.`
   );
 }

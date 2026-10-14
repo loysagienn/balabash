@@ -407,7 +407,9 @@ export const agent = {
         }
 
         if (event.type === 'thread.finish') {
-          sessionPush(describeFinishRequest(event));
+          // The browser's end verb is its own `finish` tool (after
+          // browser_close), not the session run's end_thread.
+          sessionPush(describeFinishRequest(event, 'finish'));
 
           return;
         }
