@@ -213,7 +213,7 @@ export type AgentDeclaration = {
 
 // ---------------------------------------------------------------------------
 // Remote agents: the third form of a catalog agent — its session runs in an
-// external system (Avride agents, ...); the thread in Balabash is a mirror of
+// external system; the thread in Balabash is a mirror of
 // that session, kept by the remote engine (src/remote) through a driver that
 // translates the external system into the neutral dialogue vocabulary below.
 // Only installation extensions declare them (data/remote-agents/<name>.ts,

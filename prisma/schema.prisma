@@ -492,7 +492,7 @@ model File {
 model RemoteThread {
   threadId        String    @id @map("thread_id")
   userId          String    @map("user_id")
-  kind            String // catalog name of the remote agent, e.g. 'avride_agent'
+  kind            String // catalog name of the remote agent
   ref             String // the session in the external system (opaque to the core)
   link            String? // where a human looks at it in the external UI
   cursor          Json? // the driver's opaque position, advanced atomically with the mirror events

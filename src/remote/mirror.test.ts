@@ -124,10 +124,36 @@ describe('mirrorRead', () => {
     assert.deepEqual(
       result.events.map(event => event.payload),
       [
-        { level: 'normal', text: 'usage limit' },
+        { level: 'normal', text: 'The turn failed: usage limit' },
         { level: 'normal', text: 'The turn ended with an error.' },
       ],
     );
+  });
+
+  test('a failed turn of a headless thread is told to the parent, who is waiting for a reply; a non-terminal error is a notification alone', () => {
+    const result = mirrorRead(
+      read([
+        { kind: 'turn.started', turnId: 'turn-3' },
+        { kind: 'error', text: 'rate limited, retrying', terminal: false },
+        { kind: 'error', text: 'usage limit', terminal: true },
+        { kind: 'turn.finished', turnId: 'turn-3', outcome: 'failed', text: '' },
+        { kind: 'turn.started', turnId: 'turn-4' },
+        { kind: 'turn.finished', turnId: 'turn-4', outcome: 'failed', text: '' },
+      ]),
+      ctx({}, { headless: true, parentId: 'parent-1' }),
+    );
+
+    assert.deepEqual(
+      result.events.map(event => [event.type, event.targetThreadId ?? null, event.payload]),
+      [
+        ['thread.notification', null, { level: 'normal', text: 'rate limited, retrying' }],
+        ['thread.notification', null, { level: 'urgent', text: 'The turn failed: usage limit' }],
+        ['thread.message', 'parent-1', { text: '[The turn failed — the session stays open and waits for your next message] usage limit' }],
+        ['thread.notification', null, { level: 'normal', text: 'The turn ended with an error.' }],
+        ['thread.message', 'parent-1', { text: '[The turn failed — the session stays open and waits for your next message] The turn ended with an error.' }],
+      ],
+    );
+    assert.equal(result.phase, 'idle');
   });
 
   test('the closing summary’s turn finishes the thread with its text and is not told as a reply', () => {

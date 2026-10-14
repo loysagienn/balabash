@@ -7,8 +7,9 @@
 //
 // The owner decides the surface: in an ordinary thread the agent's text is
 // an agent.message to the user; in a headless thread it is a thread.message
-// to the parent. Everything else (tool calls, asks, state) is the same in
-// both.
+// to the parent — and so is whatever the parent would otherwise wait for
+// in vain: a question of the agent, a turn that failed. Everything else
+// (tool calls, asks, state) is the same in both.
 
 import type { ContentBlock, JsonObject, NotificationLevel, RemoteItem, RemoteRead } from '../core/contract.ts';
 import type { AppendInput } from '../core/envelope.ts';
@@ -110,6 +111,21 @@ export function mirrorRead(read: RemoteRead, ctx: MirrorContext): MirrorResult {
   const author = (): Pick<AppendInput, 'actor' | 'agentName' | 'userId' | 'threadId'> => ({ actor: 'agent', agentName: kind, userId, threadId });
   const says = (level: NotificationLevel, text: string) => events.push(notification({ threadId, userId, kind, watch }, level, text));
   const tells = (text: string) => events.push(agentText({ threadId, userId, kind, watch }, text));
+  // A turn that failed: the notification says so (the owner of an ordinary
+  // thread reads it in the thread and the bell); the parent of a headless
+  // thread is told as well — it is waiting for a reply, and none is coming.
+  const failed = (level: NotificationLevel, notice: string, reason: string) => {
+    says(level, notice);
+
+    if (watch.headless) {
+      events.push({
+        type: THREAD_MESSAGE,
+        ...author(),
+        targetThreadId: watch.parentId,
+        payload: { text: `[The turn failed — the session stays open and waits for your next message] ${reason}` },
+      });
+    }
+  };
 
   if (read.resynced) {
     says('silent', 'The mirror was resynchronised with the session.');
@@ -187,15 +203,21 @@ export function mirrorRead(read: RemoteRead, ctx: MirrorContext): MirrorResult {
         if (watch.finish && watch.finish.turnId === item.turnId) {
           finished = { text: item.text || watch.lastTurnText };
         } else if (item.outcome === 'failed' && !erroredTurns.has(item.turnId)) {
-          says('normal', 'The turn ended with an error.');
+          failed('normal', 'The turn ended with an error.', 'The turn ended with an error.');
         }
 
         break;
       }
       case 'error': {
-        says(item.terminal ? 'urgent' : 'normal', item.text);
+        if (!item.terminal) {
+          says('normal', item.text);
 
-        if (item.terminal && currentTurnId) {
+          break;
+        }
+
+        failed('urgent', `The turn failed: ${item.text}`, item.text);
+
+        if (currentTurnId) {
           erroredTurns.add(currentTurnId);
         }
 
