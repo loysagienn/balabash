@@ -326,8 +326,8 @@ function ThreadPage({ thread }: { thread: ThreadRecord }) {
     setConfirmCancel(false);
     dispatch(commandThread(id, 'cancel'));
   };
-  // A remote thread: Finish asks first (like Cancel — the thread ends);
-  // Pause acts at once.
+  // Finish asks first (like Cancel — the thread ends); Pause (a remote
+  // thread) acts at once.
   const askFinish = () => setConfirmFinish(true);
   const finish = () => {
     setConfirmFinish(false);
@@ -410,7 +410,9 @@ function ThreadPage({ thread }: { thread: ThreadRecord }) {
         stopDisabled: !commands.stopEnabled,
         onCancel: askCancel,
         cancelBusy: cancelling,
-        ...(commands.remote ? { remote: { onFinish: askFinish, finishBusy: finishing, onPause: pause, pauseBusy: pausing, pauseDisabled: !commands.pauseEnabled } } : {}),
+        onFinish: askFinish,
+        finishBusy: finishing,
+        ...(commands.remote ? { remote: { onPause: pause, pauseBusy: pausing, pauseDisabled: !commands.pauseEnabled } } : {}),
       }
     : null;
   const details = { thread, title, state, engine: agentView ? engineLabel(agentView.sdk) : null, info, parent, project: project ? { slug: project.slug, title: project.title } : null, commands: detailCommands, now };

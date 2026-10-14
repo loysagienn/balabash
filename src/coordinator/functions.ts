@@ -168,7 +168,7 @@ const STATIC_FUNCTION_DEFINITIONS: FunctionDefinition[] = [
       properties: {
         threadId: {
           type: 'string',
-          description: 'The remote child thread to finish, as shown in thread.started or the active-threads status.',
+          description: 'The child thread to finish, as shown in thread.started or the active-threads status.',
         },
       },
       required: ['threadId'],
@@ -538,9 +538,9 @@ async function executeFinishThread(args: JsonObject, ctx: DispatchContext): Prom
     throw new Error('finish_thread requires threadId');
   }
 
-  // One-hop and liveness are validated by append; a thread that is not a
-  // remote one gets the command and ignores it (its run sees a Balabash
-  // event) — the description tells the model to tell such agents instead.
+  // One-hop and liveness are validated by append. An agent's run turns the
+  // command into the request to wrap up and end the thread itself; a remote
+  // thread's engine asks the session for its closing summary.
   await appendEvent({
     type: THREAD_FINISH,
     actor: 'agent',

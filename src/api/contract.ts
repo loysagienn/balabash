@@ -254,10 +254,12 @@ export type ThreadCommandResponse = {
   event: Event;
 };
 
-// The commands of a remote agent's thread (src/remote/engine.ts), answered
-// like the two above; 409 thread_not_remote for any other thread.
-// POST /api/threads/:id/finish — the session is asked for a closing
-// summary, which completes the thread (thread.finish); POST
+// POST /api/threads/:id/finish — the thread is asked to wrap up
+// (thread.finish): the agent writes its report and ends the thread itself;
+// a remote agent's session is asked for a closing summary, which completes
+// the thread. Any active child thread takes it, answered like the two
+// above. The commands of a remote agent's thread alone (src/remote/engine.ts;
+// 409 thread_not_remote for any other thread): POST
 // /api/threads/:id/pause — the thread sleeps now (thread.pause); POST
 // /api/threads/:id/decide — the operator's decision on an open question
 // (agent.ask): the decision must be one of the question's options (400

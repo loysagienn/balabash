@@ -835,12 +835,15 @@ router.post('/threads/:id/cancel', requireSession, async ctx => {
 });
 
 // --------------------------------------------------------------------------
-// The commands of a remote thread (src/remote/engine.ts): finish — the
-// session is asked for a closing summary that completes the thread; pause
-// — the thread sleeps now; decide — the operator's decision on an open
-// question of the agent (agent.ask). Authored like interrupt and cancel:
-// at the parent, one hop down, the operator's identity in the payload.
-// Only a remote thread takes them (409 thread_not_remote).
+// finish — the thread is asked to wrap up: an agent's run turns it into
+// the request to write its report and end the thread itself; a remote
+// thread's engine (src/remote/engine.ts) asks the session for a closing
+// summary that completes the thread. Any active child thread takes it.
+// The commands of a remote thread alone (409 thread_not_remote): pause —
+// the thread sleeps now; decide — the operator's decision on an open
+// question of the agent (agent.ask). All authored like interrupt and
+// cancel: at the parent, one hop down, the operator's identity in the
+// payload.
 
 async function requireRemoteThread(ctx: Context, id: string): Promise<(Thread & { parentId: string }) | null> {
   const thread = await requireCommandableThread(ctx, id);
@@ -880,7 +883,7 @@ async function writeRemoteCommand(ctx: Context, thread: Thread & { parentId: str
 }
 
 router.post('/threads/:id/finish', requireSession, async ctx => {
-  const thread = await requireRemoteThread(ctx, ctx.params.id);
+  const thread = await requireCommandableThread(ctx, ctx.params.id);
 
   if (!thread) {
     return;

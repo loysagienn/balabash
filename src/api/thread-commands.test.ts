@@ -292,24 +292,29 @@ async function waitForLockWaiter(): Promise<void> {
   assert.fail('the handler never waited for the lock');
 }
 
-// The commands of a remote agent's thread (src/remote): finish, pause and
-// the decision on an open question — one-hop commands from the parent like
-// the two above, for a remote thread alone.
-describe('the remote thread commands over the api', () => {
-  test('finish and pause write their commands from the parent; a thread that is not remote refuses them', async () => {
+// finish — any active child thread (the agent wraps up and ends the thread
+// itself; a remote session is asked for its closing summary); pause and
+// the decision on an open question — a remote thread alone (src/remote).
+// One-hop commands from the parent like the two above.
+describe('the finish, pause and decide commands over the api', () => {
+  test('finish is written for any child thread; pause for a remote one alone', async () => {
     const remote = await startChild('Remote', { agent: 'fake_agent', remote: true });
     const local = await startChild('Local');
 
-    for (const command of ['finish', 'pause'] as const) {
-      const reply = await stand.request('POST', `/api/threads/${remote}/${command}`);
+    for (const threadId of [remote, local]) {
+      const reply = await stand.request('POST', `/api/threads/${threadId}/finish`);
 
       assert.equal(reply.status, 200, reply.text);
-
-      const refused = await stand.request('POST', `/api/threads/${local}/${command}`);
-
-      assert.equal(refused.status, 409, refused.text);
-      assert.equal(refused.json<ErrorBody>().error.code, 'thread_not_remote');
     }
+
+    const paused = await stand.request('POST', `/api/threads/${remote}/pause`);
+
+    assert.equal(paused.status, 200, paused.text);
+
+    const refused = await stand.request('POST', `/api/threads/${local}/pause`);
+
+    assert.equal(refused.status, 409, refused.text);
+    assert.equal(refused.json<ErrorBody>().error.code, 'thread_not_remote');
 
     assert.deepEqual(
       (await commandsTo(remote)).map(command => [command.type, command.actor, command.threadId, command.payload]),
@@ -318,8 +323,12 @@ describe('the remote thread commands over the api', () => {
         ['thread.pause', 'user', stand.mainThreadId, { identity: { username: 'operator' }, source: 'web' }],
       ],
     );
-    assert.deepEqual(await commandsTo(local), []);
+    assert.deepEqual(
+      (await commandsTo(local)).map(command => [command.type, command.payload]),
+      [['thread.finish', { reason: 'finished_by_user', identity: { username: 'operator' }, source: 'web' }]],
+    );
     assert.equal(await threadStatus(remote), 'active');
+    assert.equal(await threadStatus(local), 'active');
   });
 
   test('decide: one of the open question’s options, never a sign-in, never a question not open', async () => {

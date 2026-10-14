@@ -13,6 +13,7 @@ import { fileContentBlock } from '../core/file-blocks.ts';
 import {
   CANCEL_REASON_PARAM_DESCRIPTION,
   CANCEL_THREAD_DESCRIPTION,
+  describeFinishRequest,
   FINISH_THREAD_DESCRIPTION,
   SEND_TO_THREAD_DESCRIPTION,
 } from './thread-verbs.ts';
@@ -314,8 +315,9 @@ function createChildTools(
       `Spawn a sub-agent in a child thread and become its operator. Allowed agents: ${allowedAgents.join(', ')}. ` +
       'The call returns the child threadId, and the sub-agent starts working asynchronously. From then on you ' +
       'exchange messages: send it messages with send_to_thread, and its replies reach you automatically as ' +
-      'incoming messages labeled with its threadId — end your turn to let them arrive. Cancel the child with ' +
-      'cancel_thread when it is no longer needed.' +
+      'incoming messages labeled with its threadId — end your turn to let them arrive. When its work is done, ' +
+      'finish_thread asks it to wrap up and report (its summary arrives as its thread.completed — not at ' +
+      'once; wait for it); cancel_thread only when the child is no longer needed at all.' +
       remoteKindWords(declaration),
     inputSchema: {
       type: 'object',
@@ -452,7 +454,7 @@ function createChildTools(
     inputSchema: {
       type: 'object',
       properties: {
-        threadId: { type: 'string', description: 'The remote child threadId to finish.' },
+        threadId: { type: 'string', description: 'The child threadId to finish.' },
       },
       required: ['threadId'],
       additionalProperties: false,
@@ -470,8 +472,7 @@ function createChildTools(
     },
   };
 
-  // finish_thread only makes sense where a remote kind may be spawned.
-  return [spawnAgentTool, sendToThreadTool, cancelThreadTool, ...(spawnableRemoteAgents(declaration).length ? [finishThreadTool] : [])];
+  return [spawnAgentTool, sendToThreadTool, cancelThreadTool, finishThreadTool];
 }
 
 // Child-operating verbs are granted when the declaration lists sub-agents or
@@ -705,6 +706,14 @@ export function createSessionRun(
         if (text) {
           pushText(text);
         }
+
+        return;
+      }
+
+      // thread.finish: the user's or the operator's request to wrap up —
+      // the agent ends the thread itself, with its report.
+      if (event.type === 'thread.finish') {
+        pushText(describeFinishRequest(event));
 
         return;
       }
