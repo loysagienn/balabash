@@ -15,6 +15,7 @@
 
 import type { Event, JsonObject } from '../../../core/contract.ts';
 import type { EventOf, EventPayloads, EventType, InboundFile, SessionPlanItem } from '../../../core/event-types.ts';
+import { dateTimeLabel } from '../../lib/format/index.ts';
 import { formatTokensK } from '../../ui/Ring/Ring.logic.ts';
 import type { IconName } from '../../ui/Icon/Icon.tsx';
 import type { StateName } from '../../ui/atoms/state.ts';
@@ -44,8 +45,27 @@ export type Attachment = { key: string; href: string; fileId: string | null; nam
 
 // A question of the agent that needs the user's decision (agent.ask): the
 // options are its quick replies while it is open; the outcome, once
-// resolved (agent.ask.resolved in the loaded range), makes the card static.
-export type AskView = { threadId: string; askId: string; askKind: string; options: string[]; link: string | null; outcome: string | null };
+// resolved (agent.ask.resolved in the loaded range), makes the card static
+// — decided from Balabash (`by.identity`: the name and the time) or closed
+// in the external system (decidedBy null).
+export type AskView = { threadId: string; askId: string; askKind: string; options: string[]; link: string | null; outcome: string | null; decidedBy: string | null; decidedAt: Date | null };
+
+// The kind of a question as the card tags it (design: Message askKind):
+// approval · sign-in (a credential, completed only by its link) · question.
+export function askKindTag(kind: string): 'approval' | 'sign-in' | 'question' {
+  return kind === 'approval' ? 'approval' : kind === 'credential' ? 'sign-in' : 'question';
+}
+
+// The line under a resolved question: "Decided: allow · Vladimir, 15:45"
+// from Balabash, "Closed in the external system: allow" otherwise; null
+// while it is open.
+export function askDecidedWords(ask: AskView, now: Date): string | null {
+  if (ask.outcome === null) {
+    return null;
+  }
+
+  return ask.decidedBy !== null ? `Decided: ${ask.outcome} · ${ask.decidedBy}${ask.decidedAt ? `, ${dateTimeLabel(ask.decidedAt, now)}` : ''}` : `Closed in the external system: ${ask.outcome}`;
+}
 
 export type MessageItem = {
   kind: 'message';
@@ -117,7 +137,8 @@ export type ChildItem = {
 
 export type SysItem = { kind: 'sys'; key: string; at: Date; icon?: IconName; level?: 'normal' | 'urgent'; state?: StateName; text: string };
 export type EvItem = { kind: 'ev'; key: string; at: Date; icon: IconName; state?: StateName; text: string };
-export type ErrorItem = { kind: 'error'; key: string; at: Date; icon: IconName; title: string; text: string };
+// plain — the text is prose, not an error's output.
+export type ErrorItem = { kind: 'error'; key: string; at: Date; icon: IconName; title: string; text: string; plain?: true };
 
 export type FeedItem = MessageItem | QuietItem | ActionsItem | PlanItem | SubtaskItem | ChildItem | SysItem | EvItem | ErrorItem;
 
@@ -215,9 +236,26 @@ function terminalState(type: string): ChildItem['state'] {
   return type === 'thread.completed' ? 'done' : type === 'thread.failed' ? 'err' : type === 'thread.cancelled' ? 'off' : null;
 }
 
-function notificationIcon(level: string): { icon: IconName; level?: SysItem['level'] } {
-  return level === 'urgent' ? { icon: 'bell-ring', level: 'urgent' } : level === 'silent' ? { icon: 'bell-off' } : { icon: 'bell', level: 'normal' };
+// The words the remote engine writes (src/remote/engine.ts, mirror.ts),
+// drawn as the design shows them (Thread Feed §06); the first words are the
+// engine's, kept in step with it by hand.
+const REMOTE_NOTIFICATION_ICONS: readonly [prefix: string, icon: IconName][] = [
+  ['Needs your decision:', 'triangle-alert'],
+  ['The session cannot be watched:', 'eye-off'],
+  ['The session is watched again.', 'eye'],
+  ['The thread was not paused:', 'info'],
+  ['The thread is finishing —', 'info'],
+];
+
+function notificationIcon(level: string, text: string): { icon: IconName; level?: SysItem['level'] } {
+  const own = REMOTE_NOTIFICATION_ICONS.find(([prefix]) => text.startsWith(prefix))?.[1];
+
+  return level === 'urgent' ? { icon: own ?? 'bell-ring', level: 'urgent' } : level === 'silent' ? { icon: own ?? 'bell-off' } : { icon: own ?? 'bell', level: 'normal' };
 }
+
+// A remote thread crashed because its session is gone (the engine's one
+// failure: src/remote/engine.ts) — the block says so in words.
+const REMOTE_GONE = 'the remote session is gone';
 
 // Builds the items; the group under construction collects consecutive
 // actions, nested frames go to the row of their parent tool use.
@@ -482,7 +520,11 @@ class Builder {
       if (is(event, 'thread.completed')) {
         this.push({ kind: 'sys', key, at, icon: 'check', state: 'done', text: 'Thread completed' });
       } else if (is(event, 'thread.failed')) {
-        this.push({ kind: 'error', key, at, icon: 'octagon-x', title: 'Thread crashed', text: event.payload.error });
+        if (event.payload.error === REMOTE_GONE) {
+          this.push({ kind: 'error', key, at, icon: 'unplug', title: 'The remote session is gone', text: 'The external system no longer has this session, so the thread ended. The parent thread was notified.', plain: true });
+        } else {
+          this.push({ kind: 'error', key, at, icon: 'octagon-x', title: 'Thread crashed', text: event.payload.error });
+        }
       } else {
         const by = event.payload.requestedBy === 'user' ? (this.ctx.you ?? 'you') : event.payload.requestedBy;
 
@@ -499,29 +541,29 @@ class Builder {
     }
 
     if (is(event, 'thread.interrupt')) {
-      this.push({ kind: 'sys', key, at, icon: 'pause', level: 'normal', text: `${who(event) === 'you' ? (this.ctx.you ?? 'You') : who(event)} stopped the turn — the agent halted and is awaiting a message` });
+      this.push({ kind: 'sys', key, at, icon: 'square', level: 'normal', text: `${who(event) === 'you' ? (this.ctx.you ?? 'You') : who(event)} stopped the turn — the agent halted and is awaiting a message` });
 
       return;
     }
 
     // The one-hop commands: the words of who asked. Finish — the agent
     // wraps up and ends the thread with its report (a remote session, with
-    // its closing summary); pause and decide — a remote thread's.
+    // its closing summary); pause — a remote thread's. A decision
+    // (thread.decide) draws no line of its own: the resolved card says it
+    // (agent.ask.resolved, with who decided).
     if (is(event, 'thread.finish')) {
-      this.push({ kind: 'sys', key, at, icon: 'check', text: `${who(event) === 'you' ? (this.ctx.you ?? 'You') : who(event)} asked the agent to finish the thread — it wraps up and ends with its report` });
+      this.push({ kind: 'sys', key, at, icon: 'flag', level: 'normal', text: `${who(event) === 'you' ? (this.ctx.you ?? 'You') : who(event)} asked the agent to finish the thread — it wraps up and ends with its report` });
 
       return;
     }
 
     if (is(event, 'thread.pause')) {
-      this.push({ kind: 'sys', key, at, icon: 'bell-off', text: `${who(event) === 'you' ? (this.ctx.you ?? 'You') : who(event)} paused the thread` });
+      this.push({ kind: 'sys', key, at, icon: 'moon', level: 'normal', text: `${who(event) === 'you' ? (this.ctx.you ?? 'You') : who(event)} paused the thread` });
 
       return;
     }
 
     if (is(event, 'thread.decide')) {
-      this.push({ kind: 'sys', key, at, icon: 'check', text: `${who(event) === 'you' ? (this.ctx.you ?? 'You') : who(event)} decided: ${event.payload.decision}` });
-
       return;
     }
 
@@ -540,7 +582,7 @@ class Builder {
         text,
         atts: [],
         fold: false,
-        ask: { threadId: this.ctx.threadId, askId, askKind, options: Array.isArray(options) ? options : [], link: typeof link === 'string' ? link : null, outcome: null },
+        ask: { threadId: this.ctx.threadId, askId, askKind, options: Array.isArray(options) ? options : [], link: typeof link === 'string' ? link : null, outcome: null, decidedBy: null, decidedAt: null },
       });
 
       return;
@@ -550,7 +592,11 @@ class Builder {
       const card = this.items.find((item): item is MessageItem => item.kind === 'message' && item.ask?.askId === event.payload.askId && item.ask.outcome === null);
 
       if (card) {
-        card.ask = { ...card.ask!, outcome: event.payload.outcome };
+        // Decided from Balabash — the operator by name (the name Settings
+        // holds, else the identity's); closed in the external system — no one.
+        const identity = event.payload.by?.identity;
+
+        card.ask = { ...card.ask!, outcome: event.payload.outcome, decidedBy: identity ? (this.ctx.you ?? identity.username ?? 'you') : null, decidedAt: identity ? at : null };
       } else {
         this.push({ kind: 'sys', key, at, icon: 'check', text: `Question resolved: ${event.payload.outcome}` });
       }
@@ -565,7 +611,7 @@ class Builder {
     }
 
     if (is(event, 'thread.notification')) {
-      this.push({ kind: 'sys', key, at, ...notificationIcon(event.payload.level), text: event.payload.text });
+      this.push({ kind: 'sys', key, at, ...notificationIcon(event.payload.level, event.payload.text), text: event.payload.text });
 
       return;
     }

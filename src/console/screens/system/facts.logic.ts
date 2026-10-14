@@ -8,7 +8,7 @@
 
 import type { MachineView, PendingRestartView, ProcessVersionView, ProcessView, SystemResponse } from '../../../api/contract.ts';
 import type { Event } from '../../../core/contract.ts';
-import { byteLabel, byteShareLabel, countOf, dateTimeLabel, durationLabel, plural, sinceLabel, timeOfDay } from '../../lib/format/index.ts';
+import { byteLabel, byteShareLabel, countOf, dateTimeLabel, durationLabel, plural, timeOfDay } from '../../lib/format/index.ts';
 import type { IconName } from '../../ui/Icon/icons.ts';
 import type { StateName } from '../../ui/atoms/state.ts';
 import { lastCompletedSeq, pendingRestartOf } from '../../store/system/selectors.ts';
@@ -131,7 +131,7 @@ export function diskConsumers(facts: Pick<SystemResponse, 'fileArea' | 'fileStor
 
 // "16h 17m · since Oct 8, 00:21".
 export function processUptimeWords(startedAt: Date, now: Date): string {
-  return `${durationLabel(now.getTime() - startedAt.getTime())} · ${sinceLabel(startedAt, now)}`;
+  return `${durationLabel(now.getTime() - startedAt.getTime())} · since ${dateTimeLabel(startedAt, now)}`;
 }
 
 // "4 live · 1 workspace job" — the runs alive in the process, every

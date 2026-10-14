@@ -57,8 +57,8 @@ describe('format', () => {
 
   it('writes since, ranges and short dates', () => {
     assert.equal(sinceLabel(at(2026, 10, 9, 14, 2), NOW), 'since 14:02');
-    assert.equal(sinceLabel(at(2026, 10, 7, 14, 2), NOW), 'since Oct 7, 14:02');
-    assert.equal(sinceLabel(at(2025, 10, 7, 14, 2), NOW), 'since Oct 7, 2025, 14:02');
+    assert.equal(sinceLabel(at(2026, 10, 7, 14, 2), NOW), 'since Oct 7');
+    assert.equal(sinceLabel(at(2025, 10, 7, 14, 2), NOW), 'since Oct 7, 2025');
     assert.equal(rangeLabel(at(2026, 10, 9, 13, 17), at(2026, 10, 9, 13, 59), NOW), '13:17 → 13:59');
     assert.equal(rangeLabel(at(2026, 10, 7, 23, 10), at(2026, 10, 8, 0, 14), NOW), '23:10 → Oct 8, 00:14');
     assert.equal(shortDate(at(2026, 10, 7), NOW), 'Oct 7');

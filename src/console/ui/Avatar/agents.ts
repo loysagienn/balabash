@@ -2,8 +2,9 @@
 // identity color are fixed per agent of the catalog (agents/index.ts in
 // the repository; the coordinator is the secretary of the main thread,
 // "you" is the user — named, it keeps the user's color under its own
-// initial). An agent outside the table gets its initial and the neutral
-// color.
+// initial). Anyone else — a remote agent kind (it comes from the
+// installation, not the catalog), the author of a reply written in an
+// external system — gets the initial of the name on the neutral color.
 
 export type AvatarId = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 'you';
 
@@ -17,6 +18,7 @@ export const AGENT_AVATARS: Record<string, readonly [letter: string, id: AvatarI
   scheduler: ['S', 7],
   gardener: ['G', 4],
   auth: ['A', 6],
+  image_generator: ['I', 3],
   codex: ['C', 1],
   you: ['Y', 'you'],
 };

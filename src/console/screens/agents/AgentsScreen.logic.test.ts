@@ -19,17 +19,19 @@ describe('agents screen rules', () => {
   });
 
   it('names the model of a row: the declared one, else the newest session’s, else the engine’s unseen default', () => {
-    assert.equal(catalogModel({ model: 'claude-opus-5-5', lastModel: 'claude-opus-5-5-20260301' }), 'claude-opus-5-5');
-    assert.equal(catalogModel({ model: null, lastModel: 'claude-opus-5-5' }), 'claude-opus-5-5');
-    assert.equal(catalogModel({ model: null, lastModel: null }), 'default model');
+    assert.equal(catalogModel({ model: 'claude-opus-5-5', lastModel: 'claude-opus-5-5-20260301', sdk: 'claude' }), 'claude-opus-5-5');
+    assert.equal(catalogModel({ model: null, lastModel: 'claude-opus-5-5', sdk: 'claude' }), 'claude-opus-5-5');
+    assert.equal(catalogModel({ model: null, lastModel: null, sdk: 'codex' }), 'default model');
+    assert.equal(catalogModel({ model: null, lastModel: 'claude-code', sdk: 'remote' }), 'external system');
   });
 
   it('words the model setting: a named model with a note when the newest session ran on another id, the resolved default, or nothing seen', () => {
-    assert.deepEqual(modelWords({ model: 'claude-opus-5-5', lastModel: null }), { value: 'claude-opus-5-5', note: null });
-    assert.deepEqual(modelWords({ model: 'claude-opus-5-5', lastModel: 'claude-opus-5-5' }), { value: 'claude-opus-5-5', note: null });
-    assert.deepEqual(modelWords({ model: 'opus', lastModel: 'claude-opus-5-5' }), { value: 'opus', note: 'last session ran claude-opus-5-5' });
-    assert.deepEqual(modelWords({ model: null, lastModel: 'claude-opus-5-5' }), { value: 'claude-opus-5-5', note: 'default of the engine · last session' });
-    assert.deepEqual(modelWords({ model: null, lastModel: null }), { value: null, note: 'default of the engine' });
+    assert.deepEqual(modelWords({ model: 'claude-opus-5-5', lastModel: null, sdk: 'claude' }), { value: 'claude-opus-5-5', note: null });
+    assert.deepEqual(modelWords({ model: 'claude-opus-5-5', lastModel: 'claude-opus-5-5', sdk: 'claude' }), { value: 'claude-opus-5-5', note: null });
+    assert.deepEqual(modelWords({ model: 'opus', lastModel: 'claude-opus-5-5', sdk: 'claude' }), { value: 'opus', note: 'last session ran claude-opus-5-5' });
+    assert.deepEqual(modelWords({ model: null, lastModel: 'claude-opus-5-5', sdk: 'claude' }), { value: 'claude-opus-5-5', note: 'default of the engine · last session' });
+    assert.deepEqual(modelWords({ model: null, lastModel: null, sdk: 'claude' }), { value: null, note: 'default of the engine' });
+    assert.deepEqual(modelWords({ model: null, lastModel: 'claude-code', sdk: 'remote' }), { value: null, note: 'external system' });
   });
 
   it('words the effort setting: the named one, the platform default a session runs with, or the model’s own', () => {

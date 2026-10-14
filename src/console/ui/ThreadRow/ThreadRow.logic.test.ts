@@ -3,10 +3,11 @@ import { describe, it } from 'node:test';
 import { isActiveState, threadRowMeta } from './ThreadRow.logic.ts';
 
 describe('isActiveState', () => {
-  it('counts the three session states as live', () => {
+  it('counts the session states as live, paused among them', () => {
     assert.equal(isActiveState('run'), true);
     assert.equal(isActiveState('wait'), true);
     assert.equal(isActiveState('act'), true);
+    assert.equal(isActiveState('paused'), true);
     assert.equal(isActiveState('done'), false);
     assert.equal(isActiveState('err'), false);
     assert.equal(isActiveState('off'), false);
@@ -14,10 +15,11 @@ describe('isActiveState', () => {
 });
 
 describe('threadRowMeta', () => {
-  it('lists agent, headless tag, project, children and the last command', () => {
-    assert.deepEqual(threadRowMeta({ agent: 'engineer', headless: true, project: 'Balabash', kids: 2, lastCode: 'npm run build' }), [
+  it('lists agent, headless and remote tags, project, children and the last command', () => {
+    assert.deepEqual(threadRowMeta({ agent: 'engineer', headless: true, remote: true, project: 'Balabash', kids: 2, lastCode: 'npm run build' }), [
       { kind: 'text', text: 'engineer' },
       { kind: 'tag', text: 'headless' },
+      { kind: 'tag', text: 'remote' },
       { kind: 'text', text: 'Balabash' },
       { kind: 'kids', text: '2 children' },
       { kind: 'code', text: 'npm run build' },

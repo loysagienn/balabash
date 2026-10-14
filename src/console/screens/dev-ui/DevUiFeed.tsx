@@ -30,7 +30,8 @@ import { SysLine } from '../../ui/SysLine/SysLine.tsx';
 import { RailGauge, RailSection, Thread, ThreadBody, ThreadMain, ThreadRail } from '../../ui/Thread/Thread.tsx';
 import { ThreadHead } from '../../ui/ThreadHead/ThreadHead.tsx';
 import { ActGroup, Xp } from '../../ui/Xp/Xp.tsx';
-import { Caption, Code } from '../../ui/atoms/atoms.tsx';
+import { Caption, Code, Tag } from '../../ui/atoms/atoms.tsx';
+import type { StateName } from '../../ui/atoms/state.ts';
 
 const stop = (event: { preventDefault: () => void }) => event.preventDefault();
 
@@ -105,15 +106,36 @@ function Label({ children }: { children: ReactNode }) {
 }
 
 
-// The rail of a wide thread (design: ThreadRail), with static data.
-function Rail() {
+const RAIL_LABEL: Record<StateName, string> = { run: 'running', wait: 'awaiting message', act: 'action needed', paused: 'paused', done: 'completed', err: 'crashed', off: 'cancelled' };
+
+type RailProps = {
+  agent?: string;
+  title?: string;
+  state?: StateName;
+  // A remote thread: the tag, Pause beside Stop turn, no context, the notes.
+  remote?: boolean;
+  // A finish already asked: "Finish requested" and its note.
+  finish?: boolean;
+};
+
+// The rail of a wide thread (design: ThreadRail), with static data: the
+// controls in two groups — the turn (Stop turn; remote: Stop turn · Pause),
+// the thread (Finish / Finish requested, Cancel) — the ones that do not
+// apply disabled; a remote thread asleep or closed notes its session.
+function Rail({ agent = 'engineer', title = 'Mini-apps: publishing by slug', state = 'run', remote, finish }: RailProps) {
+  const active = state === 'run' || state === 'wait' || state === 'act' || state === 'paused';
+  const note = remote && state === 'paused' ? 'Asleep: the session is checked every 15 minutes. A message, or activity in the external system, wakes it.' : remote && (state === 'done' || state === 'off') ? 'The session itself stays open in the external system — ending the thread doesn’t close it.' : null;
+  const finishNote = remote
+    ? 'Asked at 15:31 — the session writes a closing summary and the thread ends with it; with no summary by 15:41, it ends with the session’s last words.'
+    : 'Asked at 15:31 — the agent finishes its turn, wraps up and ends the thread with its report. To stop at once, cancel the thread.';
+
   return (
     <ThreadRail>
       <div className="th-rail-id">
         <div className="th-rail-who">
-          <Avatar agent="engineer" />
+          <Avatar agent={agent} />
           <span className="th-rail-who-main">
-            <b className="th-rail-who-t">engineer</b>
+            <b className="th-rail-who-t">{agent}</b>
             <span className="th-rail-who-m">
               from{' '}
               <a href="#" onClick={stop}>
@@ -123,30 +145,43 @@ function Rail() {
           </span>
           <IconBtn icon="link" label="Copy link" size="sm" />
         </div>
-        <h2 className="th-rail-t">Mini-apps: publishing by slug</h2>
+        <h2 className="th-rail-t">{title}</h2>
         <div className="th-rail-st">
-          <Badge state="run" label="running" />
+          <Badge state={state} label={RAIL_LABEL[state]} />
+          {remote ? <Tag>remote</Tag> : null}
         </div>
+        {note ? <p className="th-rail-note">{note}</p> : null}
       </div>
-      <div className="th-rail-acts">
-        <Btn label="Stop turn" icon="pause" size="sm" block />
-        <Btn label="Cancel thread" icon="circle-stop" variant="danger" size="sm" block />
-      </div>
+      {active ? (
+        <div className="th-rail-acts">
+          <div className="th-rail-turn" data-split={remote ? '' : undefined}>
+            <Btn label="Stop turn" icon="square" size="sm" block disabled={state !== 'run'} />
+            {remote ? <Btn label="Pause" icon="moon" size="sm" block disabled={state !== 'wait' || finish} /> : null}
+          </div>
+          <div className="th-rail-end">
+            {finish ? <Btn label="Finish requested" icon="hourglass" size="sm" block disabled /> : <Btn label="Finish thread" icon="flag" size="sm" block />}
+            <Btn label="Cancel thread" icon="circle-stop" variant="danger" size="sm" block />
+            {finish ? <p className="th-rail-note">{finishNote}</p> : null}
+          </div>
+        </div>
+      ) : null}
       <RailSection title="Session">
         <KeyValue
           items={[
-            { key: 'model', value: <Code>claude-opus-5-5</Code> },
-            { key: 'engine', value: 'Claude · effort high' },
+            { key: 'model', value: <Code>{remote ? 'claude-code' : 'claude-opus-5-5'}</Code> },
+            { key: 'engine', value: remote ? 'Remote' : 'Claude · effort high' },
           ]}
         />
       </RailSection>
-      <RailSection title="Context">
-        <RailGauge value={62}>
-          124k of 200k tokens
-          <br />
-          compacted once
-        </RailGauge>
-      </RailSection>
+      {remote ? null : (
+        <RailSection title="Context">
+          <RailGauge value={62}>
+            124k of 200k tokens
+            <br />
+            compacted once
+          </RailGauge>
+        </RailSection>
+      )}
       <RailSection title="Project and time">
         <KeyValue
           items={[
@@ -154,12 +189,12 @@ function Rail() {
               key: 'project',
               value: (
                 <a href="#" onClick={stop}>
-                  Balabash
+                  {remote ? 'Caloriu' : 'Balabash'}
                 </a>
               ),
             },
-            { key: 'started', value: 'today, 14:02' },
-            { key: 'running', value: '2h 36m' },
+            { key: 'started', value: remote ? 'today, 14:20' : 'today, 14:02' },
+            { key: 'running', value: remote ? '1h 12m' : '2h 36m' },
           ]}
         />
       </RailSection>
@@ -177,9 +212,7 @@ function RunningThread({ phone }: { phone?: boolean }) {
         title="Mini-apps: publishing by slug"
         state="run"
         ctx={{ percentage: 62, usedTokens: 124_000, maxTokens: 200_000 }}
-        running
-        onStop={() => undefined}
-        onCancel={() => undefined}
+        controls={{ stop: { onClick: () => undefined }, pause: null, finish: { onClick: () => undefined } }}
         onMore={() => undefined}
       />
       <ThreadBody>
@@ -357,6 +390,90 @@ export function DevUiFeed() {
           <Thread>
             <ThreadHead title="" state="run" loading />
           </Thread>
+        </div>
+      </Section>
+
+      <Section title="Ending a thread · remote agents (design: Thread Feed §06) — the rail in four states, a remote agent’s questions, the feed lines">
+        <div className="dev-grid" data-wide="">
+          <div className="dev-frame dev-rail">
+            <Label>rail · running</Label>
+            <Rail />
+          </div>
+          <div className="dev-frame dev-rail">
+            <Label>rail · finish requested</Label>
+            <Rail state="wait" finish />
+          </div>
+          <div className="dev-frame dev-rail">
+            <Label>rail · remote, awaiting message</Label>
+            <Rail agent="cloud_agent" title="Flaky e2e: checkout timeout" state="wait" remote />
+          </div>
+          <div className="dev-frame dev-rail">
+            <Label>rail · remote, paused</Label>
+            <Rail agent="cloud_agent" title="Flaky e2e: checkout timeout" state="paused" remote />
+          </div>
+        </div>
+        <div className="dev-grid" data-wide="">
+          <div className="dev-frame">
+            <Thread>
+              <Feed>
+                <Label>approval — options as quick replies, a link into the system</Label>
+                <Message agent="cloud_agent" to="you" you="Vladimir" variant="ask" tag="approval" time="15:44" quick={['Approve', 'Reject']} link={{ href: '#', label: 'Open in the external system' }}>
+                  <Md source="Apply the migration `0042_slug_release` to the staging database?" />
+                </Message>
+                <Label>sign-in — only by its link</Label>
+                <Message agent="cloud_agent" to="you" you="Vladimir" variant="ask" tag="sign-in" time="15:46" link={{ href: '#', label: 'Sign in', variant: 'primary' }}>
+                  <Md source="The GitHub token of the workspace has expired — sign in again to continue." />
+                </Message>
+                <Label>decided here</Label>
+                <Message agent="cloud_agent" to="you" you="Vladimir" variant="ask" tag="approval" time="15:44" decided="Decided: Approve · Vladimir, 15:45">
+                  <Md source="Apply the migration `0042_slug_release` to the staging database?" />
+                </Message>
+                <Label>closed in the external system</Label>
+                <Message agent="cloud_agent" to="you" you="Vladimir" variant="ask" tag="question" time="15:50" decided="Closed in the external system: skip flaky test">
+                  <Md source="Quarantine the test or keep retrying it?" />
+                </Message>
+              </Feed>
+            </Thread>
+          </div>
+          <div className="dev-frame">
+            <Thread>
+              <Feed>
+                <Label>a reply written in the external system</Label>
+                <Message agent="marta" to="cloud_agent" tag="external" time="15:52">
+                  <Md source="Use the retry helper from `e2e/utils`, don’t add sleeps." />
+                </Message>
+                <Label>system lines</Label>
+                <SysLine icon="flag" level="normal">
+                  Vladimir asked the agent to finish the thread — it wraps up and ends with its report
+                </SysLine>
+                <SysLine icon="square" level="normal">
+                  Vladimir stopped the turn — the agent halted and is awaiting a message
+                </SysLine>
+                <SysLine icon="moon" level="normal">
+                  Vladimir paused the thread
+                </SysLine>
+                <SysLine icon="info" level="normal">
+                  The thread was not paused: the session is working — stop the turn first.
+                </SysLine>
+                <SysLine icon="triangle-alert" level="urgent">
+                  Needs your decision: apply the migration to staging?
+                </SysLine>
+                <SysLine icon="eye-off" level="urgent">
+                  The session cannot be watched: the external system answers 503
+                </SysLine>
+                <SysLine icon="eye" level="normal">
+                  The session is watched again.
+                </SysLine>
+                <SysLine icon="info" level="normal">
+                  The thread is finishing — the message was not passed on.
+                </SysLine>
+                <Label>the session is gone</Label>
+                <ErrorBlock icon="unplug" title="The remote session is gone">
+                  The external system no longer has this session, so the thread ended. The parent thread was notified.
+                </ErrorBlock>
+              </Feed>
+            </Thread>
+          </div>
         </div>
       </Section>
 

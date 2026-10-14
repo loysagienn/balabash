@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { event, resetSeq } from '../../store/fixtures.ts';
-import { projectFeed } from './project.ts';
+import { askDecidedWords, askKindTag, projectFeed } from './project.ts';
 import type { ActionItem, ActionsItem, ChildItem, FeedContext, FeedItem, MessageItem, PlanItem, SubtaskItem } from './project.ts';
 
 const ctx: FeedContext = { threadId: 't1', agent: 'engineer', parentAgent: 'coordinator', agentOf: id => (id === 'c9' ? 'browser' : null), you: null };
@@ -23,9 +23,10 @@ describe('projectFeed — a question for the user (agent.ask)', () => {
       ctx,
     );
 
+    // The decision draws no line of its own: the resolved card says it.
     assert.deepEqual(
       items.map(item => item.kind),
-      ['message', 'message', 'sys', 'sys'],
+      ['message', 'message', 'sys'],
     );
 
     const [approval, signIn] = items as MessageItem[];
@@ -33,12 +34,34 @@ describe('projectFeed — a question for the user (agent.ask)', () => {
     assert.equal(approval.variant, 'ask');
     assert.equal(approval.from, 'fake_agent');
     assert.equal(approval.text, 'POST /issues');
-    assert.deepEqual(approval.ask, { threadId: 't1', askId: 'a1', askKind: 'approval', options: ['allow', 'deny'], link: 'https://x', outcome: 'allow' });
-    assert.deepEqual(signIn.ask, { threadId: 't1', askId: 'c1', askKind: 'credential', options: [], link: 'https://x/oauth', outcome: null });
-    assert.deepEqual(
-      items.slice(2).map(item => (item.kind === 'sys' ? item.text : null)),
-      ['You decided: allow', 'Question resolved: expired'],
-    );
+    assert.deepEqual(approval.ask, { threadId: 't1', askId: 'a1', askKind: 'approval', options: ['allow', 'deny'], link: 'https://x', outcome: 'allow', decidedBy: null, decidedAt: null });
+    assert.deepEqual(signIn.ask, { threadId: 't1', askId: 'c1', askKind: 'credential', options: [], link: 'https://x/oauth', outcome: null, decidedBy: null, decidedAt: null });
+    assert.equal(items[2]!.kind === 'sys' ? items[2]!.text : null, 'Question resolved: expired');
+    assert.equal(askDecidedWords(approval.ask!, new Date()), 'Closed in the external system: allow');
+    assert.equal(askDecidedWords(signIn.ask!, new Date()), null);
+    assert.equal(askKindTag('approval'), 'approval');
+    assert.equal(askKindTag('credential'), 'sign-in');
+    assert.equal(askKindTag('other'), 'question');
+  });
+
+  it('names who decided from Balabash — the operator by the name Settings holds, else the identity', () => {
+    resetSeq(1n);
+
+    const at = new Date(2026, 9, 9, 15, 45);
+    const resolved = (you: string | null) =>
+      (
+        projectFeed(
+          [
+            own('agent.ask', { askId: 'a1', kind: 'approval', text: 'Apply?', options: ['Approve', 'Reject'] }, { agentName: 'fake_agent' }),
+            own('agent.ask.resolved', { askId: 'a1', outcome: 'Approve', by: { identity: { username: 'operator' }, source: 'web' } }, { agentName: 'fake_agent', createdAt: at }),
+          ],
+          { ...ctx, you },
+        )[0] as MessageItem
+      ).ask!;
+
+    assert.deepEqual(resolved('Vladimir'), { threadId: 't1', askId: 'a1', askKind: 'approval', options: ['Approve', 'Reject'], link: null, outcome: 'Approve', decidedBy: 'Vladimir', decidedAt: at });
+    assert.equal(askDecidedWords(resolved('Vladimir'), at), 'Decided: Approve · Vladimir, 15:45');
+    assert.equal(askDecidedWords(resolved(null), at), 'Decided: Approve · operator, 15:45');
   });
 });
 

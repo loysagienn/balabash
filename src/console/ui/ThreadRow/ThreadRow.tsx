@@ -1,6 +1,8 @@
-// Thread row (design: ThreadRow). Active (run · wait · act) — a dot on the
-// avatar, the session state, "since 14:02 / running 2h 36m" and the context
-// ring with its tooltip. Closed (done · err · off) — the summary, "start →
+// Thread row (design: ThreadRow). Active (run · wait · act · paused — a
+// remote session asleep, a hollow dot) — a dot on the avatar, the session
+// state, "since 14:02 / running 2h 36m" and the context ring with its
+// tooltip; remote — the "remote" tag, no ring (the session runs in an
+// external system). Closed (done · err · off) — the summary, "start →
 // end / duration". hit — the search match highlighted in the title and the
 // summary. In a columned list (List endCols) the badge, the time and the
 // ring line up across rows. pinned — the main thread above a list: a pin
@@ -29,6 +31,7 @@ export type ThreadRowProps = {
   label?: string;
   project?: string;
   headless?: boolean;
+  remote?: boolean;
   kids?: number;
   // The last action: as text, or as a command chip (wins over text).
   last?: string;
@@ -81,6 +84,7 @@ export function ThreadRow({
   label,
   project,
   headless,
+  remote,
   kids,
   last,
   lastCode,
@@ -97,7 +101,7 @@ export function ThreadRow({
   onClick,
 }: ThreadRowProps) {
   const active = isActiveState(state);
-  const meta = threadRowMeta({ agent, noAgent, headless, project, kids, last, lastCode });
+  const meta = threadRowMeta({ agent, noAgent, headless, remote, project, kids, last, lastCode });
   const metaNodes: ReactNode[] = meta.map((item, i) => (
     <span key={i}>
       {i > 0 ? ' · ' : null}
@@ -129,7 +133,7 @@ export function ThreadRow({
             {time}
             {sub ? <small className="row-time-sub">{sub}</small> : null}
           </span>
-          {ctx && !pinned ? <Ctx {...ctx} /> : null}
+          {ctx && !pinned && !remote ? <Ctx {...ctx} /> : null}
         </>
       }
     />

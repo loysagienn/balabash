@@ -1,5 +1,5 @@
 @layer patterns{
-/* ── Message ──  article.msg[data-variant=task|user|ask|quiet] > .av.msg-av + .msg-h (.msg-from → .msg-to, .tag, .badge, .msg-time) + .msg-b (.msg-fold, .msg-more, .msg-quick)
+/* ── Message ──  article.msg[data-variant=task|user|ask|quiet][data-decided] > .av.msg-av + .msg-h (.msg-from → .msg-to, .tag, .badge, .msg-time) + .msg-b (.msg-fold, .msg-more, .msg-quick, .msg-decided)
    Inside .feed (--feed-indent) in a .th (container “thread”): ≤ 480 — no avatar column. */
 .msg{display:grid;grid-template-columns:var(--av-sm) minmax(0,1fr);gap:var(--sp-1h) var(--sp-3);align-items:start}
 .msg-av{grid-row:1 / span 2;margin-top:1px}
@@ -18,6 +18,9 @@
 .msg-more{display:inline-flex;align-items:center;gap:var(--sp-1);margin-top:var(--sp-2);font-size:var(--fs-meta);line-height:var(--lh-meta);font-weight:var(--fw-medium);color:var(--link)}
 .msg-more:hover{color:var(--text)}
 .msg-quick{display:flex;flex-wrap:wrap;gap:var(--sp-1h);margin-top:var(--sp-3)}
+.msg[data-variant="ask"][data-decided] .msg-b{border-color:var(--border-surface)}   /* resolved: an ordinary card again */
+.msg-decided{display:flex;align-items:center;gap:var(--sp-1h);margin:var(--sp-3) 0 0;padding-top:var(--sp-2h);border-top:1px solid var(--border);font-size:var(--fs-meta);line-height:var(--lh-meta);color:var(--text-2)}
+.msg-decided .ic{font-size:var(--ico-xs);color:var(--st-done)}
 @container thread (max-width:480px){
   .msg{grid-template-columns:minmax(0,1fr)}
   .msg-av{display:none}

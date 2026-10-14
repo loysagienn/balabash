@@ -9,4 +9,5 @@
 .av[data-size="sm"]{--av-size:var(--av-sm);--av-letter:var(--av-fs-sm);border-radius:var(--r-inner)}
 .av[data-size="lg"]{--av-size:var(--av-lg);--av-letter:var(--av-fs-lg);border-radius:var(--r-md)}
 .av-pip{--pip:11px;--pip-out:-3px;--pip-ring:2.5px;position:absolute;right:var(--pip-out);bottom:var(--pip-out);width:var(--pip);height:var(--pip);border-radius:50%;background:var(--st-c,var(--text-3));border:var(--pip-ring) solid var(--av-ring,var(--surface))}
+.av-pip[data-state="paused"]{background:var(--av-ring,var(--surface));box-shadow:inset 0 0 0 2px var(--st-c)}   /* paused: hollow */
 }

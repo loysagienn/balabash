@@ -1,11 +1,13 @@
 // Thread header strip (design: ThreadHead) — shown in a narrow thread
 // (≤ 900; a wide thread carries everything in its rail, ThreadRail). Pinned
 // to the top of the scrolling body on glass; stuck — the feed has scrolled
-// under it (the hairline shows). State, context and the tag; on the right
-// "Stop turn" and "Cancel thread" of an active thread (hidden ≤ 560, the
-// details sheet has them) and "⋯" — the thread details as a bottom sheet.
-// On the phone the strip is the screen header: "back" and the title over
-// the state and the context. loading — a skeleton.
+// under it (the hairline shows). State, context and the tags; on the right
+// only the controls that apply right now (hidden ≤ 560, the details sheet
+// has them all): "Stop turn" while a turn runs, "Pause" for a remote
+// thread awaiting a message, "Finish thread" (or "Finish requested",
+// disabled); "Cancel thread" lives in "⋯" — the thread details as a bottom
+// sheet. On the phone the strip is the screen header: "back" and the title
+// over the state and the context. loading — a skeleton.
 
 import { Btn } from '../Btn/Btn.tsx';
 import { IconBtn } from '../IconBtn/IconBtn.tsx';
@@ -18,21 +20,26 @@ import type { StateName } from '../atoms/state.ts';
 import { threadStateLabel } from './ThreadHead.logic.ts';
 import './ThreadHead.css';
 
+export type ThreadHeadControl = { onClick: () => void; busy?: boolean };
+
+// The controls that apply right now; null — not this one.
+export type ThreadHeadControls = {
+  stop: ThreadHeadControl | null;
+  pause: ThreadHeadControl | null;
+  finish: ThreadHeadControl | 'requested' | null;
+};
+
 export type ThreadHeadProps = {
   title: string;
   state: StateName;
   label?: string;
   ctx?: CtxInput;
   tag?: string;
+  // A remote agent's thread: the "remote" tag.
+  remote?: boolean;
   stuck?: boolean;
   onBack?: () => void;
-  running?: boolean;
-  onStop?: () => void;
-  stopBusy?: boolean;
-  // No turn in flight to stop (the session waits) — the button stays, inert.
-  stopDisabled?: boolean;
-  onCancel?: () => void;
-  cancelBusy?: boolean;
+  controls?: ThreadHeadControls;
   // "⋯": the details sheet.
   onMore?: () => void;
   moreOpen?: boolean;
@@ -47,7 +54,7 @@ function Back({ onBack }: { onBack?: () => void }) {
   );
 }
 
-export function ThreadHead({ title, state, label, ctx, tag, stuck, onBack, running, onStop, stopBusy, stopDisabled, onCancel, cancelBusy, onMore, moreOpen, loading }: ThreadHeadProps) {
+export function ThreadHead({ title, state, label, ctx, tag, remote, stuck, onBack, controls, onMore, moreOpen, loading }: ThreadHeadProps) {
   if (loading) {
     return (
       <div className="th-head" aria-busy="true">
@@ -69,14 +76,16 @@ export function ThreadHead({ title, state, label, ctx, tag, stuck, onBack, runni
           <Status state={state} label={threadStateLabel(state, label)} />
           {ctx ? <Ctx {...ctx} /> : null}
           {tag ? <Tag>{tag}</Tag> : null}
+          {remote ? <Tag>remote</Tag> : null}
         </div>
       </div>
       <div className="th-acts">
-        {running ? (
-          <>
-            <Btn label="Stop turn" icon="pause" size="sm" className="th-act" busy={stopBusy} disabled={stopDisabled} onClick={onStop} />
-            <Btn label="Cancel thread" icon="circle-stop" variant="danger" size="sm" className="th-act" busy={cancelBusy} onClick={onCancel} />
-          </>
+        {controls?.stop ? <Btn label="Stop turn" icon="square" size="sm" className="th-act" busy={controls.stop.busy} onClick={controls.stop.onClick} /> : null}
+        {controls?.pause ? <Btn label="Pause" icon="moon" size="sm" className="th-act" busy={controls.pause.busy} onClick={controls.pause.onClick} /> : null}
+        {controls?.finish === 'requested' ? (
+          <Btn label="Finish requested" icon="hourglass" size="sm" className="th-act" disabled />
+        ) : controls?.finish ? (
+          <Btn label="Finish thread" icon="flag" size="sm" className="th-act" busy={controls.finish.busy} onClick={controls.finish.onClick} />
         ) : null}
         <IconBtn icon="ellipsis" label="Thread details" size="sm" className="th-more" expanded={moreOpen} onClick={onMore} />
       </div>

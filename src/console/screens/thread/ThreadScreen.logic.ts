@@ -3,7 +3,7 @@
 
 import type { Thread } from '../../../core/contract.ts';
 import type { ThreadFeed } from '../../store/feed/reducer.ts';
-import { durationLabel, rangeLabel, sinceLabel } from '../../lib/format/index.ts';
+import { durationLabel, rangeLabel, sinceLabel, timeOfDay } from '../../lib/format/index.ts';
 import type { IconName } from '../../ui/Icon/Icon.tsx';
 import { isActiveState } from '../../ui/ThreadRow/ThreadRow.logic.ts';
 import type { StateName } from '../../ui/atoms/state.ts';
@@ -17,63 +17,124 @@ export function threadTimeLabel(thread: Thread, state: StateName, now: Date): st
   return `${rangeLabel(thread.createdAt, thread.updatedAt, now)}, ${durationLabel(thread.updatedAt.getTime() - thread.createdAt.getTime())}`;
 }
 
-// The commands of the header: an active thread with a parent takes "Stop
-// turn", "Finish thread" (the agent is asked to wrap up and end the
-// thread itself — a remote session, for its closing summary) and "Cancel
-// thread" (the main thread is eternal and takes none); a stop needs a
-// turn in flight. A remote thread (the mirror of a session elsewhere)
-// also takes Pause, only while it waits for a message (a working session
-// is stopped, not paused; a question waits for a decision; a sleeping
-// thread sleeps already).
-export function threadCommands(thread: Thread, state: StateName): { running: boolean; stopEnabled: boolean; remote: boolean; pauseEnabled: boolean } {
+// The controls of an active child thread (design-system rule 16, spec
+// thread-controls-and-remote-agents.md §1), in two groups. The turn: "Stop
+// turn" — enabled only while a turn runs; a remote thread (the mirror of a
+// session elsewhere) adds "Pause" — enabled only while the session awaits
+// a message and no Finish was asked (a working session is stopped, not
+// paused; a question waits for a decision; a sleeping thread sleeps
+// already). The thread: "Finish thread" (the agent is asked to wrap up and
+// end the thread itself — a remote session, for its closing summary) and
+// "Cancel thread". The main thread is eternal and takes none; a closed
+// thread has none.
+export function threadCommands(thread: Thread, state: StateName, finishAsked: boolean = false): { running: boolean; stopEnabled: boolean; remote: boolean; pauseEnabled: boolean } {
   const running = thread.status === 'active' && thread.parentId !== null;
   const remote = running && thread.remote;
 
-  return { running, stopEnabled: running && state === 'run', remote, pauseEnabled: remote && state === 'wait' };
+  return { running, stopEnabled: running && state === 'run', remote, pauseEnabled: remote && state === 'wait' && !finishAsked };
 }
 
-// A finish already asked for (a thread.finish among the loaded events of
-// an active thread): the agent is wrapping up, asking again only repeats
-// the request — the button says so and waits.
-export function finishRequested(events: readonly { type: string }[]): boolean {
-  return events.some(event => event.type === 'thread.finish');
+// A finish already asked for — the time of the thread.finish among the
+// loaded events of an active thread (any requester), null when none: the
+// agent is wrapping up, asking again only repeats the request — the
+// button reads "Finish requested" and a note says what happens next.
+export function finishAskedAt(events: readonly { type: string; createdAt: Date }[]): Date | null {
+  const asked = events.find(event => event.type === 'thread.finish');
+
+  return asked ? asked.createdAt : null;
 }
 
-// The words of the finish confirmation: the agent ends the thread itself,
-// in its own time — a remote session with its closing summary.
+// The deadline of a remote finish: with no closing summary in 10 minutes
+// (src/remote/engine.ts FINISH_TIMEOUT_MS) the thread ends with the
+// session's last words.
+export const REMOTE_FINISH_TIMEOUT_MS = 10 * 60_000;
+
+// The note under the controls once Finish was asked (design: ThreadRail
+// finishNote).
+export function finishNote(thread: Thread, askedAt: Date): string {
+  if (thread.remote) {
+    return `Asked at ${timeOfDay(askedAt)} — the session writes a closing summary and the thread ends with it; with no summary by ${timeOfDay(new Date(askedAt.getTime() + REMOTE_FINISH_TIMEOUT_MS))}, it ends with the session’s last words.`;
+  }
+
+  return `Asked at ${timeOfDay(askedAt)} — the agent finishes its turn, wraps up and ends the thread with its report. To stop at once, cancel the thread.`;
+}
+
+// The note under the state of a remote thread (design: ThreadRail
+// stateNote): asleep, or closed with its session still open; null otherwise.
+export function stateNote(thread: Thread, state: StateName): string | null {
+  if (!thread.remote) {
+    return null;
+  }
+  if (state === 'paused') {
+    return 'Asleep: the session is checked every 15 minutes. A message, or activity in the external system, wakes it.';
+  }
+  if (state === 'done' || state === 'off') {
+    return 'The session itself stays open in the external system — ending the thread doesn’t close it.';
+  }
+
+  return null;
+}
+
+// The words of the finish confirmation (spec §3): the agent ends the
+// thread itself, in its own time — a remote session with its closing
+// summary, and the session stays open.
 export function finishWords(thread: Thread): string {
   if (thread.remote) {
-    return `The “${thread.agent}” session will be asked for a closing summary, and the thread will end with it. The session itself stays where it is.`;
+    return `The “${thread.agent}” session will be asked for a closing summary, and the thread will end with it — with no summary in 10 minutes, it ends with the session’s last words. The session itself stays open in the external system.`;
   }
 
-  return `The “${thread.agent}” agent will be asked to wrap up, write its report and end the thread itself — it finishes its current turn first, so this takes a moment. To stop at once, cancel the thread instead.`;
+  return `The “${thread.agent}” agent will be asked to wrap up, write its report and end the thread itself. It finishes its current turn first, so this takes a moment. To stop at once, cancel the thread instead.`;
 }
 
-// The words of the cancel confirmation (design: ThreadScreen, modal). A
-// remote thread's cancel closes the mirror alone: the session elsewhere
-// is not touched — a turn in flight runs on there.
+// The words of the cancel confirmation (spec §3). A remote thread's cancel
+// closes the mirror alone: the session elsewhere is not touched — a turn
+// in flight runs on there.
 export function cancelWords(thread: Thread): string {
   if (thread.remote) {
-    return `The thread will end without a summary; the “${thread.agent}” session itself is not touched and keeps running where it is. The parent thread will be notified. This can’t be undone.`;
+    return `The thread will end now, without a summary. The “${thread.agent}” session is not touched and keeps running in the external system. The parent thread will be notified. This can’t be undone.`;
   }
 
-  return `The “${thread.agent}” agent will stop and the thread will end without a summary. The parent thread will be notified. This can’t be undone.`;
+  return `The “${thread.agent}” agent will stop and the thread will end now, without a summary. The parent thread will be notified. This can’t be undone.`;
 }
 
 export type ComposerLockWords = { icon: IconName; text: string; strong?: string };
 
-// Why there is no composer: the thread is headless, or it is over.
-export function composerLock(thread: Thread): ComposerLockWords | null {
+export type ComposerLockInput = {
+  // The agent of the parent thread; null while unknown.
+  parentAgent: string | null;
+  // A remote thread crashed because its session is gone (the engine's
+  // failure, read from the loaded thread.failed).
+  sessionGone: boolean;
+};
+
+// Why there is no composer: the thread is headless (a remote child's
+// questions are still the user's to decide), or it is over (a remote
+// thread's session outlives it).
+export function composerLock(thread: Thread, input: ComposerLockInput = { parentAgent: null, sessionGone: false }): ComposerLockWords | null {
   switch (thread.status) {
     case 'completed':
-      return { icon: 'lock', text: 'Thread completed. To continue, ask the coordinator to start a new thread.' };
+      return thread.remote
+        ? { icon: 'lock', text: 'Thread completed. The session stays open in the external system; to continue, ask the coordinator to adopt it in a new thread.' }
+        : { icon: 'lock', text: 'Thread completed. To continue, ask the coordinator to start a new thread.' };
     case 'failed':
-      return { icon: 'octagon-x', text: 'Thread crashed. The parent agent or the coordinator can restart it.' };
+      return thread.remote && input.sessionGone ? { icon: 'octagon-x', text: 'Thread crashed: the session is gone.' } : { icon: 'octagon-x', text: 'Thread crashed. The parent agent or the coordinator can restart it.' };
     case 'cancelled':
       return { icon: 'circle-slash', text: 'Thread cancelled.' };
     default:
-      return thread.headless ? { icon: 'eye-off', strong: 'Headless thread', text: ` — the ${thread.agent} talks only to its parent thread. You can’t write here, but everything is visible.` } : null;
+      if (!thread.headless) {
+        return null;
+      }
+
+      return thread.remote
+        ? { icon: 'eye-off', strong: 'Headless thread', text: ` — ${thread.agent} talks only to ${input.parentAgent ?? 'its parent thread'}. You can’t write here; its questions are still yours to decide.` }
+        : { icon: 'eye-off', strong: 'Headless thread', text: ` — the ${thread.agent} talks only to ${input.parentAgent ? `the ${input.parentAgent}` : 'its parent thread'}. You can’t write here, but you can see everything.` };
   }
+}
+
+// Whether the loaded events say the remote session is gone (the engine's
+// one failure: src/remote/engine.ts).
+export function remoteSessionGone(events: readonly { type: string; payload: unknown }[]): boolean {
+  return events.some(event => event.type === 'thread.failed' && (event.payload as { error?: unknown }).error === 'the remote session is gone');
 }
 
 export type FeedStage = 'skeleton' | 'failed' | 'ready';

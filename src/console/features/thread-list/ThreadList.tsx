@@ -50,7 +50,7 @@ export function ThreadList({ threads, pinned, now, hit, hitTotal, freshAfter = n
   );
 
   return (
-    <List className={className ? `thl-list ${className}` : 'thl-list'} endCols="auto var(--thl-time-w, 140px) var(--thl-ctx-w, 60px)" narrow="tiles">
+    <List className={className ? `thl-list ${className}` : 'thl-list'} endCols="auto minmax(var(--thl-time-w, 140px), max-content) var(--thl-ctx-w, 60px)" narrow="tiles">
       {pinned ? <ThreadListRow thread={pinned} now={now} current={pinned.id === currentId} main /> : null}
       {hit ? (
         <>

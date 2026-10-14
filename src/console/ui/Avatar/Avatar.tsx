@@ -1,7 +1,7 @@
 // Agent avatar (design: Avatar): the letter and the identity color are
 // fixed per agent (agents.ts); agent = "you" is the operator — with a name
 // (you) it takes the initial and the name as the title. pip — the session
-// state dot on the corner.
+// state dot on the corner (hollow for paused).
 
 import { avatarVals } from './agents.ts';
 import './Avatar.css';
@@ -10,7 +10,7 @@ export type AvatarProps = {
   agent: string;
   you?: string;
   size?: 'xs' | 'sm' | 'lg';
-  pip?: 'run' | 'wait' | 'act' | 'err';
+  pip?: 'run' | 'wait' | 'act' | 'paused' | 'err';
   className?: string;
 };
 

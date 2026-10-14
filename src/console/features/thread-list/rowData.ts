@@ -57,6 +57,7 @@ export function threadRowData({ thread, state, session, project, kids, headless,
     state,
     ...(project ? { project } : {}),
     ...(headless ? { headless: true } : {}),
+    ...(thread.remote ? { remote: true } : {}),
     ...(kids > 0 && !main ? { kids } : {}),
     time: '',
   };
@@ -75,7 +76,7 @@ export function threadRowData({ thread, state, session, project, kids, headless,
       ...(last?.lastCode ? { lastCode: last.lastCode } : last?.last ? { last: last.last } : {}),
       time: sinceLabel(thread.createdAt, now),
       sub: `running ${durationLabel(now.getTime() - thread.createdAt.getTime())}`,
-      ...(ctxOf(session) ? { ctx: ctxOf(session) } : {}),
+      ...(ctxOf(session) && !thread.remote ? { ctx: ctxOf(session) } : {}),
     };
   }
 

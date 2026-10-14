@@ -88,9 +88,10 @@ export function dayLabel(date: Date, now: Date): string {
   return date.getFullYear() === now.getFullYear() ? monthDay : `${monthDay}, ${date.getFullYear()}`;
 }
 
-// "since 14:02" today, "since Oct 7, 14:02" on another day.
+// "since 14:02" today, "since Oct 7" on another day — the date alone (the
+// duration under it says how long; the time column stays narrow).
 export function sinceLabel(date: Date, now: Date): string {
-  return sameDay(date, now) ? `since ${timeOfDay(date)}` : `since ${shortDate(date, now)}, ${timeOfDay(date)}`;
+  return sameDay(date, now) ? `since ${timeOfDay(date)}` : `since ${shortDate(date, now)}`;
 }
 
 // "13:17 → 13:59"; an end on another day names it: "23:10 → Oct 8, 00:14".

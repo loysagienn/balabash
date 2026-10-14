@@ -12,8 +12,11 @@ import {
   feedScrollMove,
   feedStage,
   feedTop,
-  finishRequested,
+  finishAskedAt,
+  finishNote,
   finishWords,
+  remoteSessionGone,
+  stateNote,
   feedWindowStart,
   isNearTop,
   nearTopAction,
@@ -43,20 +46,53 @@ describe('thread page words', () => {
     assert.deepEqual(threadCommands(thread({ id: 'r', remote: true }), 'act'), { running: true, stopEnabled: false, remote: true, pauseEnabled: false });
     assert.deepEqual(threadCommands(thread({ id: 'r', remote: true }), 'paused'), { running: true, stopEnabled: false, remote: true, pauseEnabled: false });
     assert.deepEqual(threadCommands(thread({ id: 'r', remote: true, status: 'cancelled' }), 'off'), { running: false, stopEnabled: false, remote: false, pauseEnabled: false });
-    assert.match(cancelWords(thread({ id: 't', agent: 'engineer' })), /^The “engineer” agent will stop/);
-    assert.match(cancelWords(thread({ id: 'r', agent: 'fake_agent', remote: true })), /the “fake_agent” session itself is not touched/);
-    assert.equal(finishRequested([{ type: 'user.message' }, { type: 'thread.finish' }]), true);
-    assert.equal(finishRequested([{ type: 'user.message' }, { type: 'thread.cancel' }]), false);
-    assert.match(finishWords(thread({ id: 't', agent: 'engineer' })), /^The “engineer” agent will be asked to wrap up/);
-    assert.match(finishWords(thread({ id: 'r', agent: 'fake_agent', remote: true })), /^The “fake_agent” session will be asked for a closing summary/);
+    // A finish asked: no pause any more (the session is writing its summary).
+    assert.deepEqual(threadCommands(thread({ id: 'r', remote: true }), 'wait', true), { running: true, stopEnabled: false, remote: true, pauseEnabled: false });
+    assert.match(cancelWords(thread({ id: 't', agent: 'engineer' })), /^The “engineer” agent will stop and the thread will end now, without a summary\./);
+    assert.match(cancelWords(thread({ id: 'r', agent: 'fake_agent', remote: true })), /^The thread will end now, without a summary\. The “fake_agent” session is not touched and keeps running in the external system\./);
+    assert.match(finishWords(thread({ id: 't', agent: 'engineer' })), /^The “engineer” agent will be asked to wrap up, write its report and end the thread itself\. It finishes/);
+    assert.match(finishWords(thread({ id: 'r', agent: 'fake_agent', remote: true })), /^The “fake_agent” session will be asked for a closing summary.*with no summary in 10 minutes.*stays open in the external system\.$/);
   });
 
-  it('locks the composer for a finished or headless thread only', () => {
+  it('reads when a finish was asked and words the note under the controls', () => {
+    const askedAt = new Date(2026, 9, 9, 15, 31);
+
+    assert.equal(finishAskedAt([{ type: 'user.message', createdAt: new Date() }, { type: 'thread.finish', createdAt: askedAt }]), askedAt);
+    assert.equal(finishAskedAt([{ type: 'user.message', createdAt: new Date() }, { type: 'thread.cancel', createdAt: askedAt }]), null);
+    assert.equal(finishNote(thread({ id: 't' }), askedAt), 'Asked at 15:31 — the agent finishes its turn, wraps up and ends the thread with its report. To stop at once, cancel the thread.');
+    assert.equal(
+      finishNote(thread({ id: 'r', remote: true }), askedAt),
+      'Asked at 15:31 — the session writes a closing summary and the thread ends with it; with no summary by 15:41, it ends with the session’s last words.',
+    );
+  });
+
+  it('notes a remote thread asleep or closed with its session open; a local thread has no note', () => {
+    assert.match(stateNote(thread({ id: 'r', remote: true }), 'paused') ?? '', /^Asleep: the session is checked every 15 minutes/);
+    assert.match(stateNote(thread({ id: 'r', remote: true, status: 'completed' }), 'done') ?? '', /^The session itself stays open in the external system/);
+    assert.match(stateNote(thread({ id: 'r', remote: true, status: 'cancelled' }), 'off') ?? '', /^The session itself stays open/);
+    assert.equal(stateNote(thread({ id: 'r', remote: true }), 'wait'), null);
+    assert.equal(stateNote(thread({ id: 'r', remote: true, status: 'failed' }), 'err'), null);
+    assert.equal(stateNote(thread({ id: 't' }), 'paused'), null);
+    assert.equal(stateNote(thread({ id: 't', status: 'completed' }), 'done'), null);
+  });
+
+  it('locks the composer for a finished or headless thread only; a remote thread says its session stays', () => {
     assert.equal(composerLock(thread({ id: 't' })), null);
     assert.equal(composerLock(thread({ id: 't', agent: 'gardener', headless: true }))?.icon, 'eye-off');
-    assert.equal(composerLock(thread({ id: 't', status: 'completed' }))?.icon, 'lock');
+    assert.equal(composerLock(thread({ id: 't', agent: 'gardener', headless: true }), { parentAgent: 'coordinator', sessionGone: false })?.text, ' — the gardener talks only to the coordinator. You can’t write here, but you can see everything.');
+    assert.equal(composerLock(thread({ id: 't', agent: 'gardener', headless: true }))?.text, ' — the gardener talks only to its parent thread. You can’t write here, but you can see everything.');
+    assert.equal(
+      composerLock(thread({ id: 'r', agent: 'fake_agent', headless: true, remote: true }), { parentAgent: 'engineer', sessionGone: false })?.text,
+      ' — fake_agent talks only to engineer. You can’t write here; its questions are still yours to decide.',
+    );
+    assert.equal(composerLock(thread({ id: 't', status: 'completed' }))?.text, 'Thread completed. To continue, ask the coordinator to start a new thread.');
+    assert.equal(composerLock(thread({ id: 'r', status: 'completed', remote: true }))?.text, 'Thread completed. The session stays open in the external system; to continue, ask the coordinator to adopt it in a new thread.');
     assert.equal(composerLock(thread({ id: 't', status: 'failed' }))?.icon, 'octagon-x');
+    assert.equal(composerLock(thread({ id: 'r', status: 'failed', remote: true }), { parentAgent: null, sessionGone: true })?.text, 'Thread crashed: the session is gone.');
+    assert.equal(composerLock(thread({ id: 'r', status: 'failed', remote: true }), { parentAgent: null, sessionGone: false })?.text, 'Thread crashed. The parent agent or the coordinator can restart it.');
     assert.equal(composerLock(thread({ id: 't', status: 'cancelled', headless: true }))?.icon, 'circle-slash');
+    assert.equal(remoteSessionGone([{ type: 'thread.failed', payload: { error: 'the remote session is gone' } }]), true);
+    assert.equal(remoteSessionGone([{ type: 'thread.failed', payload: { error: 'boom' } }]), false);
   });
 
   it('stages the feed body and its top line from the chunk state', () => {

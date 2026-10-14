@@ -21,10 +21,19 @@ export function agentMatches(agent: Pick<AgentView, 'name' | 'description'>, q: 
   return agent.name.toLowerCase().includes(needle) || agent.description.toLowerCase().includes(needle);
 }
 
+// What a remote kind shows in place of a model: its session runs in an
+// external system, with no model, tools or effort of ours.
+export const REMOTE_MODEL = 'external system';
+
 // The model of a catalog row: the one the declaration names, else the one
 // the agent's newest session ran on (what the engine's default resolved
-// to), else the engine's choice, not yet seen.
-export function catalogModel(agent: Pick<AgentView, 'model' | 'lastModel'>): string {
+// to), else the engine's choice, not yet seen; a remote kind — the external
+// system.
+export function catalogModel(agent: Pick<AgentView, 'model' | 'lastModel' | 'sdk'>): string {
+  if (agent.sdk === 'remote') {
+    return REMOTE_MODEL;
+  }
+
   return agent.model ?? agent.lastModel ?? 'default model';
 }
 
@@ -35,8 +44,11 @@ export type SettingWords = { value: string | null; note: string | null };
 // The model row: a named model as it is, with a note when the newest
 // session ran on another id (an alias resolved, a changed default); no
 // named model — the engine's default as the newest session resolved it,
-// or nothing seen yet.
-export function modelWords(agent: Pick<AgentView, 'model' | 'lastModel'>): SettingWords {
+// or nothing seen yet; a remote kind — the external system, in words.
+export function modelWords(agent: Pick<AgentView, 'model' | 'lastModel' | 'sdk'>): SettingWords {
+  if (agent.sdk === 'remote') {
+    return { value: null, note: REMOTE_MODEL };
+  }
   if (agent.model) {
     return { value: agent.model, note: agent.lastModel && agent.lastModel !== agent.model ? `last session ran ${agent.lastModel}` : null };
   }

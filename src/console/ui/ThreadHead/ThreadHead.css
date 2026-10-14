@@ -1,7 +1,7 @@
 @layer patterns{
 /* ── Thread header strip (narrow thread) ──  .th-head[data-stuck] > .th-ph (.th-back) + .th-id (h2.th-title + .th-chips) + .th-acts (.th-act… .th-more)
    Pinned on glass to the top of the scrolling body; data-stuck — the feed has scrolled under it (the hairline shows).
-   Inside .th (container “thread”): > 900 — no strip (the rail has it all); ≤ 560 — Stop/Cancel go into the details sheet;
+   Inside .th (container “thread”): > 900 — no strip (the rail has it all); ≤ 560 — the controls go into the details sheet;
    on the phone it is the screen header — “back”, the title over state and context, “⋯”. */
 .th-head{position:sticky;top:0;z-index:var(--z-sticky);display:flex;align-items:center;gap:var(--sp-2h);min-height:var(--top-h);padding:var(--sp-2) var(--gutter);border-bottom:1px solid transparent;background:var(--bg-glass);-webkit-backdrop-filter:var(--glass-blur);backdrop-filter:var(--glass-blur)}
 .th-head[data-stuck]{border-bottom-color:var(--border-surface)}

@@ -32,6 +32,21 @@ describe('threadRowData', () => {
     });
   });
 
+  it('words a paused remote thread as active — the remote tag, "since <date>" on another day, no ring', () => {
+    const row = threadRowData({
+      thread: thread({ id: 'r1', title: 'Nightly dependency upgrade', agent: 'fake_agent', remote: true, createdAt: new Date(2026, 9, 8, 9, 5) }),
+      state: 'paused',
+      session: { state: 'paused', context: { used: 10, max: 100 } },
+      project: null,
+      kids: 0,
+      headless: false,
+      last: null,
+      now: NOW,
+    });
+
+    assert.deepEqual(row, { agent: 'fake_agent', title: 'Nightly dependency upgrade', state: 'paused', remote: true, time: 'since Oct 8', sub: 'running 1d 7h' });
+  });
+
   it('words a closed thread with its range, duration and summary', () => {
     const row = threadRowData({
       thread: thread({ id: 't2', title: 'Public URL scheme', status: 'completed', createdAt: at(14, 9), updatedAt: at(14, 31), description: 'slug is globally unique' }),

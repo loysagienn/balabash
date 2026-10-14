@@ -1,6 +1,6 @@
 @layer screens{
-/* threads on Home: time column narrower than in the full list */
-.home-ths{--thl-time-w:72px}
+/* threads on Home: time column narrower than in the full list (fits “since 14:02” and “since Oct 13”) */
+.home-ths{--thl-time-w:76px}
 /* Home: on phone the columns (.grid12 > [data-stack]) dissolve and blocks line up by importance */
 @container shell (max-width:720px){
   .home-col{display:contents}

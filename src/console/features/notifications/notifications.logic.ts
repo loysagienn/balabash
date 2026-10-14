@@ -127,10 +127,12 @@ function viewOf(item: NotificationItem, input: NotificationsInput): Notification
     return { key: item.key, group: 'errors', icon: 'circle-alert', state: 'err', title: exceptionTitle(item), desc: exceptionDesc(item), action: openThread(item.threadId), at: item.at, unread };
   }
 
+  // Urgent — amber with the alert icon (a remote agent's "Needs your
+  // decision: …" among them, design: App Shell); normal — the bell.
   return {
     key: item.key,
     group: 'agents',
-    icon: 'bell',
+    icon: item.level === 'urgent' ? 'triangle-alert' : 'bell',
     state: item.level === 'urgent' ? 'act' : undefined,
     title: clip(plainLine(item.text), TITLE_MAX),
     desc: threadWords({ agent: item.agent, threadId: item.threadId, threads: input.threads, mainThreadId: input.mainThreadId }),

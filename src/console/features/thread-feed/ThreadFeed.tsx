@@ -13,7 +13,6 @@ import { useAppDispatch, useAppSelector } from '../../store/hooks.ts';
 import { openViewer } from '../../store/ui/actions.ts';
 import { commandThread } from '../../store/threads/actions.ts';
 import { selectThreadCommandPending } from '../../store/ui/selectors.ts';
-import { Btn } from '../../ui/Btn/Btn.tsx';
 import { selectOperatorName } from '../../store/session/selectors.ts';
 import { selectThreadState } from '../../store/sessions/selectors.ts';
 import { Att, AttThumb, Atts } from '../../ui/Att/Att.tsx';
@@ -31,6 +30,7 @@ import { Code } from '../../ui/atoms/atoms.tsx';
 import { fileIcon } from '../../ui/atoms/fileIcon.ts';
 import { FeedAction } from './FeedAction.tsx';
 import { attachmentFacts, downloadHref, needsMeta } from './attachments.ts';
+import { askDecidedWords, askKindTag } from './project.ts';
 import type { Attachment, ChildItem, FeedItem, MessageItem } from './project.ts';
 import { useFileMeta } from './queries.ts';
 import { clipLine } from './actions.ts';
@@ -110,10 +110,13 @@ function FeedMessage({ item, now }: { item: MessageItem; now: Date }) {
   const ask = item.ask;
   const deciding = useAppSelector(s => (ask ? selectThreadCommandPending(s, ask.threadId, 'decide') : false));
   // An open question: its options as quick replies (the decision goes up
-  // as COMMAND_THREAD decide; the outcome comes back with the tail), and
-  // its link into the external system. A resolved one shows the outcome.
-  const open = ask && ask.outcome === null;
-  const quick = open && !deciding ? ask.options : undefined;
+  // as COMMAND_THREAD decide; the outcome comes back with the tail — while
+  // it is in flight the buttons are gone) and its link into the external
+  // system (a sign-in is completed only by its link). A resolved one shows
+  // the outcome under the text and who decided.
+  const open = ask && ask.outcome === null && !deciding;
+  const quick = open ? ask.options : undefined;
+  const link = open && ask.link ? (ask.askKind === 'credential' ? { href: ask.link, label: 'Sign in', variant: 'primary' as const } : { href: ask.link, label: 'Open in the external system' }) : undefined;
 
   return (
     <Message
@@ -121,27 +124,20 @@ function FeedMessage({ item, now }: { item: MessageItem; now: Date }) {
       to={item.to}
       you={you}
       variant={item.variant}
-      tag={ask ? (ask.outcome !== null ? `decided: ${ask.outcome}` : askTag(ask.askKind)) : item.tag}
+      tag={ask ? askKindTag(ask.askKind) : item.tag}
       time={dateTimeLabel(item.at, now)}
       fold={item.fold}
       quick={quick}
       onQuick={reply => ask && dispatch(commandThread(ask.threadId, 'decide', undefined, { askId: ask.askId, decision: reply }))}
+      link={link}
+      decided={ask ? (askDecidedWords(ask, now) ?? undefined) : undefined}
     >
       {/* The user's own text keeps its single line breaks (typed, not
           Markdown-wrapped); an agent's Markdown reads by the usual rules. */}
       {item.text ? <Md source={item.text} breaks={item.variant === 'user'} /> : null}
       <Attachments atts={item.atts} context={`${item.from === 'you' ? (you ?? 'you') : item.from} → ${item.to === 'you' ? (you ?? 'you') : item.to}, ${dateTimeLabel(item.at, now)}`} />
-      {ask?.link ? (
-        <div className="msg-quick">
-          <Btn label={ask.askKind === 'credential' ? 'Sign in' : 'Open in the external system'} icon="arrow-up-right" size="sm" href={ask.link} />
-        </div>
-      ) : null}
     </Message>
   );
-}
-
-function askTag(kind: string): string {
-  return kind === 'approval' ? 'approval' : kind === 'credential' ? 'sign-in' : 'question';
 }
 
 function FeedChild({ item, now }: { item: ChildItem; now: Date }) {
@@ -226,7 +222,7 @@ export function FeedItemView({ item, now }: { item: FeedItem; now: Date }) {
     case 'error':
       return (
         <ErrorBlock icon={item.icon} title={item.title}>
-          <Code wrap>{item.text}</Code>
+          {item.plain ? item.text : <Code wrap>{item.text}</Code>}
         </ErrorBlock>
       );
   }

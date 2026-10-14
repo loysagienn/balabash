@@ -1,5 +1,7 @@
 // Agents — the catalog from the snapshot and the selected agent: its
-// settings (engine, model, effort, mode, whom it launches), its tool
+// settings (engine, model, effort, mode, whom it launches; a remote kind —
+// engine “Remote”, the external system in place of a model, the "remote"
+// tag, no effort or tools of ours), its tool
 // servers (the passport names the servers, not the single tools) and its
 // activity — the threads of the agent the store knows, active first, under
 // the agent's whole count and its count of the last 30 days, read by place
@@ -106,7 +108,8 @@ function AgentDetail({ agent, running }: { agent: AgentView; running: number }) 
           items={[
             { key: 'engine', value: engineName(agent.sdk) },
             { key: 'model', value: <Setting value={model.value} note={model.note} code /> },
-            { key: 'effort', value: <Setting value={effort.value} note={effort.note} /> },
+            // A remote kind has no effort of ours.
+            ...(agent.sdk === 'remote' ? [] : [{ key: 'effort', value: <Setting value={effort.value} note={effort.note} /> }]),
             { key: 'mode', value: modeLabel(agent.headless) },
             {
               key: 'launches',
@@ -203,6 +206,7 @@ export function AgentsScreen({ route }: { route: AgentsRoute }) {
                 <>
                   {agent.name}
                   {agent.headless ? <Tag>headless</Tag> : null}
+                  {agent.sdk === 'remote' ? <Tag>remote</Tag> : null}
                 </>
               }
               meta={agent.description}

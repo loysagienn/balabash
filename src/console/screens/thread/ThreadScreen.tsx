@@ -3,7 +3,9 @@
 // and what the page says about the thread: wide (> 900) — the right rail
 // pinned beside the feed, the title in the shell header; narrow — the glass
 // strip pinned on top, the rail's content in the "⋯" sheet; on the phone
-// the strip is the screen header (Shell ownTop). The feed is the store's
+// the strip is the screen header (Shell ownTop). The controls of an active
+// child thread (Stop turn, Pause of a remote thread, Finish, Cancel) and
+// their confirmations — design/thread-controls-and-remote-agents.md. The feed is the store's
 // projection of the thread's events, and the page draws only its end:
 // earlier items are drawn as the reader nears the top, and when every
 // loaded item is drawn the next chunk loads (the scroll position stays on
@@ -43,6 +45,7 @@ import { Summary } from '../../ui/Summary/Summary.tsx';
 import { SysLine } from '../../ui/SysLine/SysLine.tsx';
 import { Thread, ThreadBody, ThreadMain } from '../../ui/Thread/Thread.tsx';
 import { ThreadHead } from '../../ui/ThreadHead/ThreadHead.tsx';
+import type { ThreadHeadControls } from '../../ui/ThreadHead/ThreadHead.tsx';
 import { Code } from '../../ui/atoms/atoms.tsx';
 import { ThreadDetailsSheet, ThreadRail } from './ThreadRail.tsx';
 import { ThreadComposer, useAttach } from './ThreadComposer.tsx';
@@ -51,7 +54,7 @@ import { railSessionInfo } from './rail.ts';
 import {
   anchorIndex,
   cancelWords,
-  finishRequested,
+  finishAskedAt,
   finishWords,
   composerLock,
   feedScrollMove,
@@ -61,6 +64,7 @@ import {
   isNearTop,
   nearTopAction,
   openFeedWindow,
+  remoteSessionGone,
   revealEarlier,
   settleFeedWindow,
   threadCommands,
@@ -311,10 +315,12 @@ function ThreadPage({ thread }: { thread: ThreadRecord }) {
   const items = useAppSelector(s => selectItems(s, id));
   const [detailsOpen, setDetailsOpen] = useState(false);
 
-  // "Stop turn" and "Cancel thread": the commands go up as COMMAND_THREAD,
-  // the outcome comes back with the tail (thread.cancelled ends the thread
-  // and the buttons with it). A cancel asks first (rule 13).
-  const commands = threadCommands(thread, state);
+  // The controls (ThreadScreen.logic threadCommands): the commands go up as
+  // COMMAND_THREAD, the outcome comes back with the tail (thread.cancelled
+  // ends the thread and the buttons with it; thread.finish turns Finish
+  // into "Finish requested"). Finish and Cancel ask first (rule 13).
+  const finishAsked = finishAskedAt(events);
+  const commands = threadCommands(thread, state, finishAsked !== null);
   const stopping = useAppSelector(s => selectThreadCommandPending(s, id, 'interrupt'));
   const cancelling = useAppSelector(s => selectThreadCommandPending(s, id, 'cancel'));
   const finishing = useAppSelector(s => selectThreadCommandPending(s, id, 'finish'));
@@ -393,7 +399,7 @@ function ThreadPage({ thread }: { thread: ThreadRecord }) {
   const top = `${feed.knownFrom ?? ''}:${feed.exhausted}:${drawn[0]?.key ?? ''}`;
   const stuck = useFeedScroll({ feedRef, itemsRef, topRef, ready, drawn, top, requesting: feed.request !== null, restore, onNearTop });
 
-  const lock = composerLock(thread);
+  const lock = composerLock(thread, { parentAgent: parent?.agent ?? null, sessionGone: remoteSessionGone(events) });
   const title = threadTitle(thread);
   // Files dragged over the thread attach to the draft (a closed thread
   // takes none); the frame covers the part of the column in view.
@@ -409,15 +415,25 @@ function ThreadPage({ thread }: { thread: ThreadRecord }) {
         onStop: stop,
         stopBusy: stopping,
         stopDisabled: !commands.stopEnabled,
-        onCancel: askCancel,
-        cancelBusy: cancelling,
+        pause: commands.remote ? { onClick: pause, busy: pausing, disabled: !commands.pauseEnabled } : null,
         onFinish: askFinish,
         finishBusy: finishing,
-        finishDisabled: finishRequested(events),
-        ...(commands.remote ? { remote: { onPause: pause, pauseBusy: pausing, pauseDisabled: !commands.pauseEnabled } } : {}),
+        finishAsked,
+        onCancel: askCancel,
+        cancelBusy: cancelling,
       }
     : null;
-  const details = { thread, title, state, engine: agentView ? engineLabel(agentView.sdk) : null, info, parent, project: project ? { slug: project.slug, title: project.title } : null, commands: detailCommands, now };
+  // The strip shows only what applies right now; "Cancel thread" is in "⋯".
+  const headControls: ThreadHeadControls | undefined = commands.running
+    ? {
+        stop: commands.stopEnabled ? { onClick: stop, busy: stopping } : null,
+        pause: commands.pauseEnabled ? { onClick: pause, busy: pausing } : null,
+        finish: finishAsked ? 'requested' : { onClick: askFinish, busy: finishing },
+      }
+    : undefined;
+  // A remote thread's engine is "Remote" whatever the catalog knows of its kind.
+  const engine = thread.remote ? engineLabel('remote') : agentView ? engineLabel(agentView.sdk) : null;
+  const details = { thread, title, state, engine, info, parent, project: project ? { slug: project.slug, title: project.title } : null, commands: detailCommands, now };
   const feedState = start > 0 ? 'more' : feedTop(feed);
 
   let topLine = null;
@@ -444,16 +460,12 @@ function ThreadPage({ thread }: { thread: ThreadRecord }) {
         <ThreadHead
           title={title}
           state={state}
-          ctx={ctx}
+          ctx={thread.remote ? undefined : ctx}
           tag={thread.headless ? 'headless' : undefined}
+          remote={thread.remote}
           stuck={stuck}
           onBack={() => dispatch(routeTo(BACK))}
-          running={commands.running}
-          onStop={stop}
-          stopBusy={stopping}
-          stopDisabled={!commands.stopEnabled}
-          onCancel={askCancel}
-          cancelBusy={cancelling}
+          controls={headControls}
           onMore={() => setDetailsOpen(open => !open)}
           moreOpen={detailsOpen}
         />
@@ -463,7 +475,7 @@ function ThreadPage({ thread }: { thread: ThreadRecord }) {
           </Confirm>
         ) : null}
         {confirmFinish ? (
-          <Confirm title="Finish thread?" confirm="Finish thread" confirmIcon="check" cancel="Keep running" onConfirm={finish} onClose={() => setConfirmFinish(false)}>
+          <Confirm title="Finish thread?" confirm="Finish thread" confirmVariant="primary" confirmIcon="flag" cancel="Keep running" onConfirm={finish} onClose={() => setConfirmFinish(false)}>
             {finishWords(thread)}
           </Confirm>
         ) : null}
