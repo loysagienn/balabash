@@ -504,9 +504,11 @@ class Builder {
       return;
     }
 
-    // The commands of a remote thread: the words of who asked.
+    // The one-hop commands: the words of who asked. Finish — the agent
+    // wraps up and ends the thread with its report (a remote session, with
+    // its closing summary); pause and decide — a remote thread's.
     if (is(event, 'thread.finish')) {
-      this.push({ kind: 'sys', key, at, icon: 'check', text: `${who(event) === 'you' ? (this.ctx.you ?? 'You') : who(event)} asked the session for a closing summary — the thread ends with it` });
+      this.push({ kind: 'sys', key, at, icon: 'check', text: `${who(event) === 'you' ? (this.ctx.you ?? 'You') : who(event)} asked the agent to finish the thread — it wraps up and ends with its report` });
 
       return;
     }

@@ -51,6 +51,7 @@ import { railSessionInfo } from './rail.ts';
 import {
   anchorIndex,
   cancelWords,
+  finishRequested,
   finishWords,
   composerLock,
   feedScrollMove,
@@ -412,6 +413,7 @@ function ThreadPage({ thread }: { thread: ThreadRecord }) {
         cancelBusy: cancelling,
         onFinish: askFinish,
         finishBusy: finishing,
+        finishDisabled: finishRequested(events),
         ...(commands.remote ? { remote: { onPause: pause, pauseBusy: pausing, pauseDisabled: !commands.pauseEnabled } } : {}),
       }
     : null;

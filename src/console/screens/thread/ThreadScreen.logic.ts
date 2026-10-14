@@ -32,6 +32,13 @@ export function threadCommands(thread: Thread, state: StateName): { running: boo
   return { running, stopEnabled: running && state === 'run', remote, pauseEnabled: remote && state === 'wait' };
 }
 
+// A finish already asked for (a thread.finish among the loaded events of
+// an active thread): the agent is wrapping up, asking again only repeats
+// the request — the button says so and waits.
+export function finishRequested(events: readonly { type: string }[]): boolean {
+  return events.some(event => event.type === 'thread.finish');
+}
+
 // The words of the finish confirmation: the agent ends the thread itself,
 // in its own time — a remote session with its closing summary.
 export function finishWords(thread: Thread): string {

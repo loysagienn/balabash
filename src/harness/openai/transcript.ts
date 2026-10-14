@@ -331,6 +331,28 @@ const renderers: Record<string, Renderer> = {
       reason: payload.reason,
     }),
 
+  // The coordinator's own one-hop commands (finish_thread, and the user's
+  // from a surface): which child, and what was asked — so the model sees
+  // that the request is already out and waits for the child's completion
+  // instead of asking again.
+  'thread.finish': (payload, event) =>
+    omitNullish({
+      targetThreadId: event.targetThreadId,
+      reason: payload.reason,
+    }),
+
+  'thread.pause': (_payload, event) =>
+    omitNullish({
+      targetThreadId: event.targetThreadId,
+    }),
+
+  'thread.decide': (payload, event) =>
+    omitNullish({
+      targetThreadId: event.targetThreadId,
+      askId: payload.askId,
+      decision: payload.decision,
+    }),
+
   'thread.notification': payload => ({
     level: payload.level,
     text: payload.text,

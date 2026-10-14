@@ -12,6 +12,7 @@ import {
   feedScrollMove,
   feedStage,
   feedTop,
+  finishRequested,
   finishWords,
   feedWindowStart,
   isNearTop,
@@ -44,6 +45,8 @@ describe('thread page words', () => {
     assert.deepEqual(threadCommands(thread({ id: 'r', remote: true, status: 'cancelled' }), 'off'), { running: false, stopEnabled: false, remote: false, pauseEnabled: false });
     assert.match(cancelWords(thread({ id: 't', agent: 'engineer' })), /^The “engineer” agent will stop/);
     assert.match(cancelWords(thread({ id: 'r', agent: 'fake_agent', remote: true })), /the “fake_agent” session itself is not touched/);
+    assert.equal(finishRequested([{ type: 'user.message' }, { type: 'thread.finish' }]), true);
+    assert.equal(finishRequested([{ type: 'user.message' }, { type: 'thread.cancel' }]), false);
     assert.match(finishWords(thread({ id: 't', agent: 'engineer' })), /^The “engineer” agent will be asked to wrap up/);
     assert.match(finishWords(thread({ id: 'r', agent: 'fake_agent', remote: true })), /^The “fake_agent” session will be asked for a closing summary/);
   });
