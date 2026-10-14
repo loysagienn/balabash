@@ -35,7 +35,7 @@ after(() => stand.stop());
 
 // A child of the main thread, started the way a spawn starts it: the
 // thread.started is authored by the new thread and addressed to the parent.
-async function startChild(title: string): Promise<string> {
+async function startChild(title: string, policy: Record<string, unknown> = {}): Promise<string> {
   const id = randomUUID();
 
   await appendEvent({
@@ -44,7 +44,7 @@ async function startChild(title: string): Promise<string> {
     userId: stand.userId,
     threadId: id,
     targetThreadId: stand.mainThreadId,
-    payload: { agent: 'engineer', title },
+    payload: { agent: 'engineer', title, ...policy },
   });
 
   return id;
@@ -62,7 +62,7 @@ async function threadStatus(id: string): Promise<string> {
 
 // The commands addressed to a thread, in log order.
 async function commandsTo(targetThreadId: string): Promise<Command[]> {
-  const rows = await prisma.event.findMany({ where: { targetThreadId, type: { in: ['thread.interrupt', 'thread.cancel'] } }, orderBy: { seq: 'asc' } });
+  const rows = await prisma.event.findMany({ where: { targetThreadId, type: { in: ['thread.interrupt', 'thread.cancel', 'thread.finish', 'thread.pause', 'thread.decide'] } }, orderBy: { seq: 'asc' } });
 
   return rows.map(row => ({ type: row.type, actor: row.actor, agentName: row.agentName, threadId: row.threadId, payload: row.payload as Record<string, unknown> }));
 }
@@ -291,3 +291,85 @@ async function waitForLockWaiter(): Promise<void> {
 
   assert.fail('the handler never waited for the lock');
 }
+
+// finish — any active child thread (the agent wraps up and ends the thread
+// itself; a remote session is asked for its closing summary); pause and
+// the decision on an open question — a remote thread alone (src/remote).
+// One-hop commands from the parent like the two above.
+describe('the finish, pause and decide commands over the api', () => {
+  test('finish is written for any child thread; pause for a remote one alone', async () => {
+    const remote = await startChild('Remote', { agent: 'fake_agent', remote: true });
+    const local = await startChild('Local');
+
+    for (const threadId of [remote, local]) {
+      const reply = await stand.request('POST', `/api/threads/${threadId}/finish`);
+
+      assert.equal(reply.status, 200, reply.text);
+    }
+
+    const paused = await stand.request('POST', `/api/threads/${remote}/pause`);
+
+    assert.equal(paused.status, 200, paused.text);
+
+    const refused = await stand.request('POST', `/api/threads/${local}/pause`);
+
+    assert.equal(refused.status, 409, refused.text);
+    assert.equal(refused.json<ErrorBody>().error.code, 'thread_not_remote');
+
+    assert.deepEqual(
+      (await commandsTo(remote)).map(command => [command.type, command.actor, command.threadId, command.payload]),
+      [
+        ['thread.finish', 'user', stand.mainThreadId, { reason: 'finished_by_user', identity: { username: 'operator' }, source: 'web' }],
+        ['thread.pause', 'user', stand.mainThreadId, { identity: { username: 'operator' }, source: 'web' }],
+      ],
+    );
+    assert.deepEqual(
+      (await commandsTo(local)).map(command => [command.type, command.payload]),
+      [['thread.finish', { reason: 'finished_by_user', identity: { username: 'operator' }, source: 'web' }]],
+    );
+    assert.equal(await threadStatus(remote), 'active');
+    assert.equal(await threadStatus(local), 'active');
+  });
+
+  test('decide: one of the open question’s options, never a sign-in, never a question not open', async () => {
+    const remote = await startChild('Asking', { agent: 'fake_agent', remote: true });
+    const ask = (askId: string, kind: string, options: string[]) =>
+      appendEvent({ type: 'agent.ask', actor: 'agent', agentName: 'fake_agent', userId: stand.userId, threadId: remote, payload: { askId, kind, text: 'q', options } });
+
+    await ask('a1', 'approval', ['allow', 'deny']);
+    await ask('c1', 'credential', []);
+
+    const missing = await stand.request('POST', `/api/threads/${remote}/decide`, { body: { askId: 'nope', decision: 'allow' } });
+
+    assert.equal(missing.status, 409);
+    assert.equal(missing.json<ErrorBody>().error.code, 'ask_not_open');
+
+    const wrong = await stand.request('POST', `/api/threads/${remote}/decide`, { body: { askId: 'a1', decision: 'maybe' } });
+
+    assert.equal(wrong.status, 400);
+    assert.match(wrong.json<ErrorBody>().error.message, /one of: allow, deny/);
+
+    const signIn = await stand.request('POST', `/api/threads/${remote}/decide`, { body: { askId: 'c1', decision: 'allow' } });
+
+    assert.equal(signIn.status, 400);
+    assert.equal(signIn.json<ErrorBody>().error.code, 'decision_by_link_only');
+
+    const empty = await stand.request('POST', `/api/threads/${remote}/decide`, { body: { askId: 'a1' } });
+
+    assert.equal(empty.status, 400);
+
+    const decided = await stand.request('POST', `/api/threads/${remote}/decide`, { body: { askId: 'a1', decision: 'deny' } });
+
+    assert.equal(decided.status, 200, decided.text);
+    assert.deepEqual(decided.json<ThreadCommandResponse>().event.payload, { askId: 'a1', decision: 'deny', identity: { username: 'operator' }, source: 'web' });
+
+    // Resolved: no longer open.
+    await appendEvent({ type: 'agent.ask.resolved', actor: 'agent', agentName: 'fake_agent', userId: stand.userId, threadId: remote, payload: { askId: 'a1', outcome: 'deny' } });
+
+    const again = await stand.request('POST', `/api/threads/${remote}/decide`, { body: { askId: 'a1', decision: 'deny' } });
+
+    assert.equal(again.status, 409);
+    assert.equal(again.json<ErrorBody>().error.code, 'ask_not_open');
+    assert.deepEqual((await commandsTo(remote)).map(command => command.type), ['thread.decide']);
+  });
+});

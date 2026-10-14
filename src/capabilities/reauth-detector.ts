@@ -11,7 +11,7 @@ import { appendEvent } from '../core/append.ts';
 import { startConsumer, type Consumer } from '../core/consumers.ts';
 import { CONNECTION_REAUTHORIZATION_REQUIRED, THREAD_NOTIFICATION } from '../core/envelope.ts';
 import { getMainThread, listThreads, startThread } from '../core/threads.ts';
-import { getAgent } from './agent-catalog.ts';
+import { getAgent, isRemoteAgent } from './agent-catalog.ts';
 
 const AUTH_AGENT = 'auth';
 
@@ -28,7 +28,7 @@ export function startReauthDetector(): Consumer {
 
       const declaration = getAgent(AUTH_AGENT);
 
-      if (!declaration) {
+      if (!declaration || isRemoteAgent(declaration)) {
         console.warn('[reauth] auth agent is not in the catalog; skipping');
         return;
       }

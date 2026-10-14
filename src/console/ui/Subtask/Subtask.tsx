@@ -13,6 +13,7 @@ const LABEL: Record<StateName, string> = {
   run: 'running',
   wait: 'waiting',
   act: 'action needed',
+  paused: 'paused',
   done: 'done',
   err: 'error',
   off: 'cancelled',

@@ -151,6 +151,9 @@ function fakeApi(overrides: ApiOverrides = {}, calls: Calls = []): Api {
     sendMessage: async () => ({}),
     interrupt: async () => ({}),
     cancel: async () => ({}),
+    finish: async () => ({}),
+    pause: async () => ({}),
+    decide: async () => ({}),
     ...overrides.threads,
   };
 
@@ -181,6 +184,9 @@ function fakeApi(overrides: ApiOverrides = {}, calls: Calls = []): Api {
       sendMessage: wrap('threads.sendMessage', threads.sendMessage),
       interrupt: wrap('threads.interrupt', threads.interrupt),
       cancel: wrap('threads.cancel', threads.cancel),
+      finish: wrap('threads.finish', threads.finish),
+      pause: wrap('threads.pause', threads.pause),
+      decide: wrap('threads.decide', threads.decide),
     },
     workspaces: { list: async () => ({ current: ME.userId, workspaces: [] }) },
     workspace: WORKSPACE,

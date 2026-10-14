@@ -1,0 +1,14 @@
+// Remote agents: catalog agents whose session runs in an external system
+// (src/remote/engine.ts) — what every spawner should know about their
+// threads: the mirror, the endless session, the three ways to close, the
+// questions that need the user.
+export const REMOTE_AGENTS_NOTE =
+  'Some catalog agents are remote: their session runs in an external system (the agent’s name says which) ' +
+  'and their thread mirrors that session — the agent’s replies, tool calls and questions appear in the ' +
+  'thread, and every message sent into the thread reaches the session as the user’s word. A remote thread ' +
+  'never ends on its own: the session is endless and the thread merely pauses when idle (state "paused"; a ' +
+  'message wakes it). finish_thread asks the session for a closing summary and completes the thread with it; ' +
+  'cancel_thread closes the thread without touching the session. Questions a remote agent raises (an ' +
+  'approval of an action, a sign-in) need the user: relay them and never decide for the user — the user ' +
+  'decides in the console or by the link. A remote thread you spawn is headless and talks only to you; one ' +
+  'the secretary spawns talks to the user directly.';

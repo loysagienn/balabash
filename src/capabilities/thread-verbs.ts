@@ -1,4 +1,4 @@
-// The inter-thread verbs send_to_thread and cancel_thread exist on two
+// The inter-thread verbs send_to_thread, cancel_thread and finish_thread exist on two
 // surfaces — the coordinator's function catalog (src/coordinator/functions.ts)
 // and the session-run child tools — one contract, two bundles. The shared
 // clauses live here so the two definitions cannot drift; each surface may
@@ -13,3 +13,27 @@ export const CANCEL_THREAD_DESCRIPTION =
   'The thread closes as cancelled; its agent stops.';
 
 export const CANCEL_REASON_PARAM_DESCRIPTION = 'A concise reason, or null when there is none.';
+
+export const FINISH_THREAD_DESCRIPTION =
+  'Finish an active child thread gracefully: the agent is asked to wrap up, write its report and end the ' +
+  'thread itself (a remote agent’s session is asked for a closing summary, which becomes the thread’s ' +
+  'summary; the session itself stays). NOT instant: the child first finishes its current turn, then wraps ' +
+  'up and writes its summary — its thread.completed arrives later, as its reply. Wait for it; do not ' +
+  'cancel the thread meanwhile. cancel_thread is the other verb: for work that is no longer needed at all, ' +
+  'at once and without a summary.';
+
+// thread.finish delivered to an agent's own run (src/capabilities/session-run.ts,
+// agents/browser.ts): the one who asked — the user from a surface, or the
+// operator (the parent, the secretary) — wants the thread wrapped up by
+// the agent itself: no new work, the report, end_thread. One rendering for
+// every runner. (A remote thread's engine answers the same command by
+// asking the session for its closing summary — src/remote/engine.ts.)
+export function describeFinishRequest(event: { actor: string; payload: Record<string, unknown> }): string {
+  const who = event.actor === 'user' ? 'The user asks' : 'Your operator asks';
+
+  return (
+    `[${who} you to finish this thread]\n` +
+    'Wrap up now: start nothing new, bring what is in flight to a safe stop, write your final report and ' +
+    'end the thread with end_thread in this turn.'
+  );
+}

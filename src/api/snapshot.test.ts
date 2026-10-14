@@ -36,6 +36,7 @@ let readMainLastMessage: typeof import('./snapshot.ts')['readMainLastMessage'];
 let readAgents: typeof import('./snapshot.ts')['readAgents'];
 let loadAgents: typeof import('../capabilities/agent-catalog.ts')['loadAgents'];
 let getAgents: typeof import('../capabilities/agent-catalog.ts')['getAgents'];
+let isRemoteAgent: typeof import('../capabilities/agent-catalog.ts')['isRemoteAgent'];
 let COORDINATOR_BUNDLE: typeof import('../coordinator/functions.ts')['COORDINATOR_BUNDLE'];
 let getEventsAfter: typeof import('../core/events.ts')['getEventsAfter'];
 let prisma: typeof import('../db/client.ts')['prisma'];
@@ -47,7 +48,7 @@ before(async () => {
   stand = await startStand();
   ({ appendEvent } = await import('../core/append.ts'));
   ({ readMainLastMessage, readAgents } = await import('./snapshot.ts'));
-  ({ loadAgents, getAgents } = await import('../capabilities/agent-catalog.ts'));
+  ({ loadAgents, getAgents, isRemoteAgent } = await import('../capabilities/agent-catalog.ts'));
   ({ COORDINATOR_BUNDLE } = await import('../coordinator/functions.ts'));
   ({ getEventsAfter } = await import('../core/events.ts'));
   ({ prisma } = await import('../db/client.ts'));
@@ -192,6 +193,10 @@ describe('the agent catalog of the snapshot', () => {
 
     for (const agent of catalog) {
       const decl = declared.get(agent.name)!;
+
+      if (isRemoteAgent(decl)) {
+        continue;
+      }
 
       assert.equal(agent.defaultEffort, 'high', agent.name);
       assert.equal(agent.effort, decl.session?.effort ?? null, agent.name);

@@ -9,20 +9,21 @@
 // 'accepted' — their consequences arrive as events. do_nothing ends the
 // turn (the only way it ends).
 
-import type { ContentBlock, JsonObject } from '../core/contract.ts';
+import type { ContentBlock, JsonObject, JsonSchema, RemoteAgentDeclaration } from '../core/contract.ts';
 import { THREAD_NAMING_NOTE } from '../../agents/world/index.ts';
 import {
   CANCEL_REASON_PARAM_DESCRIPTION,
   CANCEL_THREAD_DESCRIPTION,
+  FINISH_THREAD_DESCRIPTION,
   SEND_TO_THREAD_DESCRIPTION,
 } from '../capabilities/thread-verbs.ts';
 import { appendEvent } from '../core/append.ts';
-import { THREAD_CANCEL, THREAD_MESSAGE } from '../core/envelope.ts';
+import { THREAD_CANCEL, THREAD_FINISH, THREAD_MESSAGE } from '../core/envelope.ts';
 import { startThread } from '../core/threads.ts';
 import { resolveSpawnProject } from '../projects/store.ts';
 import { getUserFile } from '../files/index.ts';
 import { messageFile } from '../core/file-blocks.ts';
-import { getAgent, getAgents } from '../capabilities/agent-catalog.ts';
+import { getAgent, getAgents, isRemoteAgent } from '../capabilities/agent-catalog.ts';
 import { RESTART_SERVER_NAME } from '../capabilities/restart-tools.ts';
 import { callToolJournaled } from '../capabilities/tool-journal.ts';
 import {
@@ -53,6 +54,7 @@ export const COORDINATOR_BUNDLE: ToolBundle = {
     // agents that carry the server (manager, engineer, ...).
     'perplexity',
     'projects',
+    'remote',
     'schedule',
     'storage',
     'storage_download_file',
@@ -156,6 +158,23 @@ const STATIC_FUNCTION_DEFINITIONS: FunctionDefinition[] = [
       additionalProperties: false,
     },
   },
+  {
+    type: 'function',
+    name: 'finish_thread',
+    description: `${FINISH_THREAD_DESCRIPTION} The summary arrives as the child's thread.completed.`,
+    strict: true,
+    parameters: {
+      type: 'object',
+      properties: {
+        threadId: {
+          type: 'string',
+          description: 'The child thread to finish, as shown in thread.started or the active-threads status.',
+        },
+      },
+      required: ['threadId'],
+      additionalProperties: false,
+    },
+  },
 ];
 
 // The builtin pull tools ('storage', 'events') arrive through the server
@@ -165,7 +184,7 @@ const RESERVED_FUNCTION_NAMES = new Set(STATIC_FUNCTION_DEFINITIONS.map(definiti
 // The spawn function of an agent: every agent takes the same input — one
 // text prompt — plus the thread_title (every user surface shows the title,
 // so the model names every thread it starts).
-const AGENT_SPAWN_PARAMETERS: Record<string, unknown> = {
+const AGENT_SPAWN_PARAMETERS = {
   type: 'object',
   properties: {
     prompt: {
@@ -190,7 +209,115 @@ const AGENT_SPAWN_PARAMETERS: Record<string, unknown> = {
   },
   required: ['prompt', 'thread_title', 'project'],
   additionalProperties: false,
-};
+} satisfies Record<string, unknown>;
+
+// A JSON Schema as the strict function format wants it: every property
+// required and nullable, no additional properties, recursively — the
+// model passes null for what it leaves out, and the spawn drops the nulls
+// (compactOptions). An enum admits null too; defaults are words of the
+// description, not of the schema.
+export function strictNullableSchema(schema: JsonSchema): JsonSchema {
+  const out: Record<string, unknown> = { ...schema };
+  const type = out.type;
+  const types = Array.isArray(type) ? (type as unknown[]) : type === undefined ? [] : [type];
+
+  if (types.length && !types.includes('null')) {
+    out.type = [...types, 'null'];
+  }
+
+  if (Array.isArray(out.enum) && !out.enum.includes(null)) {
+    out.enum = [...out.enum, null];
+  }
+
+  if (types.includes('object') || (out.properties && typeof out.properties === 'object')) {
+    const properties = Object.fromEntries(
+      Object.entries((out.properties ?? {}) as Record<string, JsonSchema>).map(([key, property]) => [key, strictNullableSchema(property)]),
+    );
+
+    out.properties = properties;
+    out.required = Object.keys(properties);
+    out.additionalProperties = false;
+  }
+
+  if (out.items && typeof out.items === 'object' && !Array.isArray(out.items)) {
+    out.items = strictNullableSchema(out.items as JsonSchema);
+  }
+
+  if (out.default !== undefined) {
+    out.description = `${typeof out.description === 'string' ? `${out.description} ` : ''}Default: ${JSON.stringify(out.default)}.`;
+    delete out.default;
+  }
+
+  return out;
+}
+
+// The launch options the model named: nulls dropped, recursively; an
+// object left empty is dropped too.
+export function compactOptions(value: unknown): JsonObject {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return {};
+  }
+
+  const out: JsonObject = {};
+
+  for (const [key, item] of Object.entries(value)) {
+    if (item === null || item === undefined) {
+      continue;
+    }
+
+    if (item && typeof item === 'object' && !Array.isArray(item)) {
+      const nested = compactOptions(item);
+
+      if (Object.keys(nested).length) {
+        out[key] = nested;
+      }
+
+      continue;
+    }
+
+    out[key] = item as JsonObject[string];
+  }
+
+  return out;
+}
+
+// The spawn function of a remote kind (RemoteAgentDeclaration): the prompt
+// OR the session to adopt, the title and the project like every agent's,
+// plus the options by the kind's own schema — the one exception to "every
+// agent takes one prompt", for the kinds of extensions only.
+export function remoteSpawnParameters(kind: Pick<RemoteAgentDeclaration, 'options'>): Record<string, unknown> {
+  const options = strictNullableSchema(kind.options ?? { type: 'object', properties: {} });
+
+  return {
+    type: 'object',
+    properties: {
+      prompt: {
+        type: ['string', 'null'],
+        description:
+          'The task for the remote agent, with everything it should start from (the ask, known context, ' +
+          'constraints, references). Null when adopting an existing session.',
+      },
+      adopt: {
+        type: ['string', 'null'],
+        description: 'The id or link of an existing session of this system to adopt as the thread, or null to start a new one. Exactly one of prompt and adopt.',
+      },
+      thread_title: AGENT_SPAWN_PARAMETERS.properties.thread_title,
+      project: AGENT_SPAWN_PARAMETERS.properties.project,
+      options: {
+        ...options,
+        type: ['object', 'null'],
+        description: 'The launch parameters of the external system (each null for its default), or null for all defaults.',
+      },
+    },
+    required: ['prompt', 'adopt', 'thread_title', 'project', 'options'],
+    additionalProperties: false,
+  };
+}
+
+const REMOTE_SPAWN_NOTE =
+  ' The thread mirrors a session in an external system and talks to the user directly; you only start ' +
+  'it and get its summary when it ends (finish_thread asks the session for one; the session itself is ' +
+  'endless and the thread merely pauses when idle). ';
 
 // Agents are sorted by name in the catalog, so the serialized bytes — and
 // with them the prompt-cache head — do not depend on load order.
@@ -200,6 +327,17 @@ function getAgentFunctionDefinitions(): FunctionDefinition[] {
   for (const agent of getAgents()) {
     if (RESERVED_FUNCTION_NAMES.has(agent.name)) {
       console.warn(`[coordinator] agent "${agent.name}" is shadowed by a builtin function and not exposed`);
+      continue;
+    }
+
+    if (isRemoteAgent(agent)) {
+      definitions.push({
+        type: 'function',
+        name: agent.name,
+        description: `${agent.description}${REMOTE_SPAWN_NOTE}${THREAD_NAMING_NOTE}`,
+        strict: true,
+        parameters: remoteSpawnParameters(agent),
+      });
       continue;
     }
 
@@ -315,6 +453,35 @@ async function executeSpawn(agentName: string, args: JsonObject, ctx: DispatchCo
   const declaration = getAgent(agentName);
   const projectSlug = typeof args.project === 'string' && args.project.trim() ? args.project.trim() : undefined;
 
+  // A remote kind: a new session from the prompt, or an existing one
+  // adopted — exactly one. The secretary's remote thread talks to the user
+  // (not headless): the owner is whoever spawned it (src/remote/engine.ts).
+  if (declaration && isRemoteAgent(declaration)) {
+    const adopt = typeof args.adopt === 'string' ? args.adopt.trim() : '';
+
+    if (Boolean(prompt) === Boolean(adopt)) {
+      throw new Error(`Spawning "${agentName}" takes exactly one of prompt (a new session) and adopt (an existing one)`);
+    }
+
+    await startThread({
+      userId: ctx.userId,
+      parentThreadId: ctx.threadId,
+      agent: agentName,
+      title,
+      input: prompt || adopt,
+      icon: declaration.icon,
+      headless: false,
+      remote: true,
+      options: compactOptions(args.options),
+      adopt: Boolean(adopt),
+      project: await resolveSpawnProject(ctx.userId, projectSlug),
+      actor: 'agent',
+      agentName: 'coordinator',
+    });
+
+    return;
+  }
+
   if (!prompt) {
     throw new Error(`Spawning "${agentName}" requires a non-empty prompt`);
   }
@@ -361,6 +528,27 @@ async function executeSendToThread(args: JsonObject, ctx: DispatchContext): Prom
     threadId: ctx.threadId,
     targetThreadId: threadId,
     payload: { text, ...(files.length ? { fileIds: files.map(file => file.id), files: files.map(messageFile) } : {}) },
+  });
+}
+
+async function executeFinishThread(args: JsonObject, ctx: DispatchContext): Promise<void> {
+  const threadId = typeof args.threadId === 'string' ? args.threadId.trim() : '';
+
+  if (!threadId) {
+    throw new Error('finish_thread requires threadId');
+  }
+
+  // One-hop and liveness are validated by append. An agent's run turns the
+  // command into the request to wrap up and end the thread itself; a remote
+  // thread's engine asks the session for its closing summary.
+  await appendEvent({
+    type: THREAD_FINISH,
+    actor: 'agent',
+    agentName: 'coordinator',
+    userId: ctx.userId,
+    threadId: ctx.threadId,
+    targetThreadId: threadId,
+    payload: { reason: 'finished_by_coordinator' },
   });
 }
 
@@ -424,6 +612,16 @@ export async function dispatchCoordinatorFunction(call: FunctionCall, ctx: Dispa
   if (call.name === 'cancel_thread') {
     try {
       await executeCancelThread(args, ctx);
+
+      return { kind: 'async' };
+    } catch (error) {
+      return { kind: 'rejected', error: getErrorMessage(error) };
+    }
+  }
+
+  if (call.name === 'finish_thread') {
+    try {
+      await executeFinishThread(args, ctx);
 
       return { kind: 'async' };
     } catch (error) {

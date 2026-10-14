@@ -40,6 +40,7 @@ import type {
   SdkBridgeTool,
 } from '../src/core/contract.ts';
 import { describeEvent, describeThreadMessage } from '../src/capabilities/session-run.ts';
+import { describeFinishRequest } from '../src/capabilities/thread-verbs.ts';
 import { connectPlaywrightMcp, createPlaywrightBridgeTools, imageExtension } from './kit/playwright.ts';
 import type { PlaywrightImageSink } from './kit/playwright.ts';
 import { workspaceDbPath, workspaceFilesDir } from '../src/workspace/layout.ts';
@@ -401,6 +402,12 @@ export const agent = {
           if (text) {
             sessionPush(text);
           }
+
+          return;
+        }
+
+        if (event.type === 'thread.finish') {
+          sessionPush(describeFinishRequest(event));
 
           return;
         }

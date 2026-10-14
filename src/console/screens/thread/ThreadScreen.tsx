@@ -51,6 +51,8 @@ import { railSessionInfo } from './rail.ts';
 import {
   anchorIndex,
   cancelWords,
+  finishRequested,
+  finishWords,
   composerLock,
   feedScrollMove,
   feedStage,
@@ -315,17 +317,29 @@ function ThreadPage({ thread }: { thread: ThreadRecord }) {
   const commands = threadCommands(thread, state);
   const stopping = useAppSelector(s => selectThreadCommandPending(s, id, 'interrupt'));
   const cancelling = useAppSelector(s => selectThreadCommandPending(s, id, 'cancel'));
+  const finishing = useAppSelector(s => selectThreadCommandPending(s, id, 'finish'));
+  const pausing = useAppSelector(s => selectThreadCommandPending(s, id, 'pause'));
   const [confirmCancel, setConfirmCancel] = useState(false);
+  const [confirmFinish, setConfirmFinish] = useState(false);
   const stop = () => dispatch(commandThread(id, 'interrupt'));
   const askCancel = () => setConfirmCancel(true);
   const cancel = () => {
     setConfirmCancel(false);
     dispatch(commandThread(id, 'cancel'));
   };
+  // Finish asks first (like Cancel — the thread ends); Pause (a remote
+  // thread) acts at once.
+  const askFinish = () => setConfirmFinish(true);
+  const finish = () => {
+    setConfirmFinish(false);
+    dispatch(commandThread(id, 'finish'));
+  };
+  const pause = () => dispatch(commandThread(id, 'pause'));
 
   useEffect(() => {
     if (!commands.running) {
       setConfirmCancel(false);
+      setConfirmFinish(false);
     }
   }, [commands.running]);
 
@@ -390,7 +404,19 @@ function ThreadPage({ thread }: { thread: ThreadRecord }) {
   // The live context of an active session, else the last one the loaded
   // events measured (a finished thread's final context, as in the rail).
   const ctx = ctxOf(session) ?? (info.context && info.context.max > 0 ? { percentage: (info.context.used / info.context.max) * 100, usedTokens: info.context.used, maxTokens: info.context.max } : undefined);
-  const detailCommands: ThreadDetailCommands | null = commands.running ? { onStop: stop, stopBusy: stopping, stopDisabled: !commands.stopEnabled, onCancel: askCancel, cancelBusy: cancelling } : null;
+  const detailCommands: ThreadDetailCommands | null = commands.running
+    ? {
+        onStop: stop,
+        stopBusy: stopping,
+        stopDisabled: !commands.stopEnabled,
+        onCancel: askCancel,
+        cancelBusy: cancelling,
+        onFinish: askFinish,
+        finishBusy: finishing,
+        finishDisabled: finishRequested(events),
+        ...(commands.remote ? { remote: { onPause: pause, pauseBusy: pausing, pauseDisabled: !commands.pauseEnabled } } : {}),
+      }
+    : null;
   const details = { thread, title, state, engine: agentView ? engineLabel(agentView.sdk) : null, info, parent, project: project ? { slug: project.slug, title: project.title } : null, commands: detailCommands, now };
   const feedState = start > 0 ? 'more' : feedTop(feed);
 
@@ -434,6 +460,11 @@ function ThreadPage({ thread }: { thread: ThreadRecord }) {
         {confirmCancel ? (
           <Confirm title="Cancel thread?" confirm="Cancel thread" confirmIcon="circle-stop" cancel="Keep running" onConfirm={cancel} onClose={() => setConfirmCancel(false)}>
             {cancelWords(thread)}
+          </Confirm>
+        ) : null}
+        {confirmFinish ? (
+          <Confirm title="Finish thread?" confirm="Finish thread" confirmIcon="check" cancel="Keep running" onConfirm={finish} onClose={() => setConfirmFinish(false)}>
+            {finishWords(thread)}
           </Confirm>
         ) : null}
         {detailsOpen ? <ThreadDetailsSheet {...details} onClose={() => setDetailsOpen(false)} /> : null}

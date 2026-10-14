@@ -115,6 +115,11 @@ export type Api = {
     // of the thread. The outcome arrives through the event stream.
     interrupt(id: string): Promise<unknown>;
     cancel(id: string, reason?: string): Promise<unknown>;
+    // The commands of a remote agent's thread: the closing summary, the
+    // sleep, the operator's decision on an open question.
+    finish(id: string): Promise<unknown>;
+    pause(id: string): Promise<unknown>;
+    decide(id: string, askId: string, decision: string): Promise<unknown>;
   };
   // The file area (the second data layer — TanStack Query in
   // features/file-area, not the store): a node is a directory listing or
@@ -268,6 +273,9 @@ export function createApi(options: FetchOptions = {}): Api {
       sendMessage: (id, text, fileIds) => apiFetch(`${thread(id)}/messages`, { method: 'POST', body: fileIds?.length ? { text, fileIds } : { text } }),
       interrupt: id => apiFetch(`${thread(id)}/interrupt`, { method: 'POST', body: {} }),
       cancel: (id, reason) => apiFetch(`${thread(id)}/cancel`, { method: 'POST', body: reason ? { reason } : {} }),
+      finish: id => apiFetch(`${thread(id)}/finish`, { method: 'POST', body: {} }),
+      pause: id => apiFetch(`${thread(id)}/pause`, { method: 'POST', body: {} }),
+      decide: (id, askId, decision) => apiFetch(`${thread(id)}/decide`, { method: 'POST', body: { askId, decision } }),
     },
     workspace: {
       node: path => apiFetch<WorkspaceNodeResponse>('/api/workspace/node', { query: { path } }),

@@ -24,6 +24,7 @@ import {
   THREAD_CANCEL,
   THREAD_COMPLETED,
   THREAD_FAILED,
+  THREAD_FINISH,
   THREAD_MESSAGE,
   THREAD_NOTIFICATION,
   THREAD_PROGRESS,
@@ -35,7 +36,7 @@ import type { StorageBody } from '../files/storage.ts';
 import { createClaudeSession } from '../harness/claude-sdk/sdk-session.ts';
 import { createCodexSession } from '../harness/codex-sdk/sdk-session.ts';
 import type { RoutedRun } from '../runtime/router.ts';
-import { getAgent } from './agent-catalog.ts';
+import { getAgent, isRemoteAgent, mayAgentSpawn } from './agent-catalog.ts';
 import { createSessionRun } from './session-run.ts';
 import { callToolJournaled } from './tool-journal.ts';
 import { callServerTool, getServerToolFunctions, type ToolBundle } from './tool-manager.ts';
@@ -169,6 +170,15 @@ export async function spawnAgentRun(thread: Thread, startedEvent: Event): Promis
     return null;
   }
 
+  // A remote kind's thread is the remote engine's (the router's spawn hook
+  // branches on thread.remote); reaching here means the thread was started
+  // without the flag.
+  if (isRemoteAgent(declaration)) {
+    await failThread(`Agent "${thread.agent}" is a remote kind — its thread must be started as remote`);
+
+    return null;
+  }
+
   const { userId } = thread;
   const threadId = thread.id;
   const agentName = declaration.name;
@@ -232,9 +242,10 @@ export async function spawnAgentRun(thread: Thread, startedEvent: Event): Promis
     },
 
     spawn: async (childAgentName: string, prompt: string, options?: SpawnOptions) => {
-      // Spawning is a declared need (the passport's `agents` list), not an
-      // ambient right: anything not listed rejects.
-      if (!declaration.agents?.includes(childAgentName)) {
+      // Spawning is a declared need (the passport's `agents` list; the
+      // remote kinds come with "projects"), not an ambient right: anything
+      // not granted rejects.
+      if (!mayAgentSpawn(declaration, childAgentName)) {
         throw new Error(`Agent "${agentName}" may not spawn "${childAgentName}": it is not in its declaration's agents list`);
       }
 
@@ -242,6 +253,14 @@ export async function spawnAgentRun(thread: Thread, startedEvent: Event): Promis
 
       if (!childDeclaration) {
         throw new Error(`Unknown agent "${childAgentName}"`);
+      }
+
+      // A remote kind spawned by an agent is headless: the owner is the
+      // spawner (src/remote/engine.ts: the owner is whoever spawned it).
+      const remote = isRemoteAgent(childDeclaration);
+
+      if (!remote && (options?.options || options?.adopt)) {
+        throw new Error(`Agent "${childAgentName}" is not a remote kind: it takes no options and no adoption`);
       }
 
       const child = await startThread({
@@ -253,13 +272,26 @@ export async function spawnAgentRun(thread: Thread, startedEvent: Event): Promis
         notification: options?.notification,
         tools: options?.tools,
         icon: childDeclaration.icon,
-        headless: childDeclaration.headless,
+        headless: remote ? true : childDeclaration.headless,
+        ...(remote ? { remote: true, options: options?.options ?? {}, adopt: options?.adopt === true } : {}),
         project: await resolveSpawnProject(userId, options?.project),
         actor: 'agent',
         agentName,
       });
 
       return { threadId: child.id };
+    },
+
+    finishChild: async (childThreadId: string) => {
+      await appendEvent({
+        type: THREAD_FINISH,
+        actor: 'agent',
+        agentName,
+        userId,
+        threadId,
+        targetThreadId: childThreadId,
+        payload: { reason: 'finished_by_parent' },
+      });
     },
 
     cancelChild: async (childThreadId: string, reason: string) => {

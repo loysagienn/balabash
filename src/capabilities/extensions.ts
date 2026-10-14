@@ -8,11 +8,14 @@
 //
 //   data/tools/<name>.ts                      in-process tool server, export start(ctx)
 //   data/mcp-servers/<name>.json              external MCP server config
+//   data/remote-agents/<name>.ts              remote agent kind: export start(ctx) →
+//                                             RemoteAgentDeclaration (remote-agent-source.ts,
+//                                             the driver contract in src/core/contract.ts)
 //   data/workspace/<userId>/tasks/<slug>.ts   scheduled task body, export run(ctx)
 //
-// Tools and server configs are installation-wide (shared by every workspace,
-// like the repository's tools/ and mcp-servers/); a task is a workspace
-// notion and lives with the workspace. Names never shadow the repository's:
+// Tools, server configs and remote agent kinds are installation-wide (shared
+// by every workspace, like the repository's tools/ and mcp-servers/); a task
+// is a workspace notion and lives with the workspace. Names never shadow the repository's:
 // a clash is a loud error. The contract of an extension module is the same
 // as its repository twin's, with one rule: no runtime imports from the
 // repository tree — packages from node_modules and `import type` only;
@@ -26,6 +29,7 @@ import { pathToFileURL } from 'node:url';
 
 export const INSTALLATION_TOOLS_DIR = path.resolve('data', 'tools');
 export const INSTALLATION_SERVERS_DIR = path.resolve('data', 'mcp-servers');
+export const INSTALLATION_REMOTE_AGENTS_DIR = path.resolve('data', 'remote-agents');
 
 export function isMissingDirectoryError(error: unknown): boolean {
   return Boolean(error) && typeof error === 'object' && (error as { code?: string }).code === 'ENOENT';

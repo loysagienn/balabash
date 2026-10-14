@@ -18,7 +18,7 @@ import { startConsumer } from '../../core/consumers.ts';
 import type { Consumer } from '../../core/consumers.ts';
 import type { Event, ThreadSummary } from '../../core/contract.ts';
 import { TERMINAL_TYPES, THREAD_NOTIFICATION, THREAD_STARTED } from '../../core/envelope.ts';
-import { getAgent } from '../../capabilities/agent-catalog.ts';
+import { getAgent, isRemoteAgent } from '../../capabilities/agent-catalog.ts';
 import { assistantTextFrame, systemInitFrame } from './frames.ts';
 import { isSessionGoneError } from './session.ts';
 import { archiveOlderSessions } from './archive.ts';
@@ -139,7 +139,8 @@ export function startCcrDelivery({ mux, isThreadBusy, bindThread, releaseThread 
     const agentName = typeof event.payload.agent === 'string' ? event.payload.agent : '';
     const agent = getAgent(agentName);
 
-    if (agent?.sdk !== 'claude') {
+    // (A remote kind has no SDK session here at all.)
+    if (!agent || isRemoteAgent(agent) || agent.sdk !== 'claude') {
       return;
     }
 

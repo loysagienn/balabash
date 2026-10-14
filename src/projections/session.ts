@@ -7,8 +7,11 @@ import type { JsonObject } from '../core/contract.ts';
 import { threadStatusFrom } from './thread.ts';
 
 // run — a turn is in flight; wait — the session idles for the next message;
-// act — the session asks for an action (the SDK's requires_action).
-export type SessionState = 'run' | 'wait' | 'act';
+// act — the session asks for an action (the SDK's requires_action, a remote
+// session's question); paused — a remote session idle long enough (or
+// paused by hand): the thread is alive but out of the active lists, woken
+// by a message or by activity on the other side (src/remote).
+export type SessionState = 'run' | 'wait' | 'act' | 'paused';
 
 export type SessionView = {
   state: SessionState;
@@ -35,7 +38,7 @@ export function isSessionEvent(type: string): boolean {
 export function sessionStateFrom(payload: JsonObject): SessionState | null {
   const { state } = payload;
 
-  return state === 'run' || state === 'wait' || state === 'act' ? state : null;
+  return state === 'run' || state === 'wait' || state === 'act' || state === 'paused' ? state : null;
 }
 
 function sessionStartedFrom(payload: JsonObject): NonNullable<SessionView['started']> | null {

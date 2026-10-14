@@ -33,7 +33,22 @@ import type { RailSessionInfo } from './rail.ts';
 const LINK_WORDS = { done: 'Link copied', fail: 'Couldn’t copy the link' };
 
 // The commands of an active thread with a parent, or null when it takes none.
-export type ThreadDetailCommands = { onStop: () => void; stopBusy: boolean; stopDisabled: boolean; onCancel: () => void; cancelBusy: boolean };
+export type ThreadDetailCommands = {
+  onStop: () => void;
+  stopBusy: boolean;
+  stopDisabled: boolean;
+  onCancel: () => void;
+  cancelBusy: boolean;
+  // Finish: the agent is asked to wrap up and end the thread itself (a
+  // remote session — for its closing summary).
+  onFinish: () => void;
+  finishBusy: boolean;
+  // A finish already asked for: the agent is wrapping up — asking again
+  // only repeats the request.
+  finishDisabled: boolean;
+  // A remote thread's own: pause.
+  remote?: { onPause: () => void; pauseBusy: boolean; pauseDisabled: boolean };
+};
 
 export type ThreadDetailsProps = {
   thread: Thread;
@@ -91,6 +106,8 @@ export function ThreadRail({ thread, title, state, engine, info, parent, project
       {commands ? (
         <div className="th-rail-acts">
           <Btn label="Stop turn" icon="pause" size="sm" block busy={commands.stopBusy} disabled={commands.stopDisabled} onClick={commands.onStop} />
+          {commands.remote ? <Btn label="Pause thread" icon="bell-off" size="sm" block busy={commands.remote.pauseBusy} disabled={commands.remote.pauseDisabled} onClick={commands.remote.onPause} /> : null}
+          <Btn label={commands.finishDisabled ? 'Finish requested' : 'Finish thread'} icon="check" size="sm" block busy={commands.finishBusy} disabled={commands.finishDisabled} onClick={commands.onFinish} />
           <Btn label="Cancel thread" icon="circle-stop" variant="danger" size="sm" block busy={commands.cancelBusy} onClick={commands.onCancel} />
         </div>
       ) : null}
@@ -189,6 +206,32 @@ export function ThreadDetailsSheet({ thread, title, state, engine, info, parent,
             onClick={() => {
               onClose();
               commands.onStop();
+            }}
+          />
+        ) : null}
+        {commands?.remote ? (
+          <Btn
+            label="Pause thread"
+            icon="bell-off"
+            block
+            busy={commands.remote.pauseBusy}
+            disabled={commands.remote.pauseDisabled}
+            onClick={() => {
+              onClose();
+              commands.remote!.onPause();
+            }}
+          />
+        ) : null}
+        {commands ? (
+          <Btn
+            label={commands.finishDisabled ? 'Finish requested' : 'Finish thread'}
+            icon="check"
+            block
+            busy={commands.finishBusy}
+            disabled={commands.finishDisabled}
+            onClick={() => {
+              onClose();
+              commands.onFinish();
             }}
           />
         ) : null}

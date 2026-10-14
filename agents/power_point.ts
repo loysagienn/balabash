@@ -15,6 +15,7 @@ import {
   BALABASH_PREAMBLE,
   OUTPUT_NOTE,
   PROJECTS_NOTE,
+  REMOTE_AGENTS_NOTE,
   WORKBENCH_NOTE,
   WORKSPACE_STORAGE_NOTE,
 } from './world/index.ts';
@@ -28,6 +29,8 @@ const SYSTEM_PROMPT = `You are the presentation specialist of Balabash, talking 
 ${WORKBENCH_NOTE}
 
 ${WORKSPACE_STORAGE_NOTE}
+
+${REMOTE_AGENTS_NOTE}
 
 ${PROJECTS_NOTE}
 
@@ -67,6 +70,7 @@ export const agent = {
     'notion',
     'perplexity',
     'projects',
+    'remote',
     'schedule',
     'storage',
     'storage_download_file',

@@ -476,3 +476,38 @@ model File {
   @@unique([bucket, objectKey])
   @@map("files")
 }
+
+// The remote session behind a remote-agent thread (src/remote): the
+// external reference, the driver's cursor and the watch state. One row per
+// thread for life; one LIVE thread per session — (kind, ref) is unique
+// among the rows whose phase is not closed/gone (a partial unique index,
+// written by hand in the migration: Prisma's schema cannot say it), so a
+// session whose thread ended can be adopted again. `watch` is the engine's
+// own memory of the mirror (our message ids, the open asks, the finish in
+// flight) — opaque JSON, advanced atomically with the mirror events like
+// the cursor. `inboundSeq` is the engine's durable position over the
+// thread's inbound events (the owner's messages, the commands): advanced
+// atomically with each verb's effect, so a restart replays what was never
+// delivered to the session.
+model RemoteThread {
+  threadId        String    @id @map("thread_id")
+  userId          String    @map("user_id")
+  kind            String // catalog name of the remote agent, e.g. 'avride_agent'
+  ref             String // the session in the external system (opaque to the core)
+  link            String? // where a human looks at it in the external UI
+  cursor          Json? // the driver's opaque position, advanced atomically with the mirror events
+  watch           Json? // the engine's watch state (src/remote/store.ts)
+  phase           String    @default("idle") // working | idle | asking | paused | finishing | closed | gone
+  inboundSeq      BigInt    @default(0) @map("inbound_seq") // the last inbound event (seq) applied to the session
+  nextPollAt      DateTime  @default(now()) @map("next_poll_at")
+  pollFailures    Int       @default(0) @map("poll_failures")
+  lastActivityAt  DateTime  @default(now()) @map("last_activity_at") // last turn boundary / inbound — the pause clock
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  // remote_threads_kind_ref_live_key: UNIQUE (kind, ref) WHERE phase NOT IN ('closed', 'gone') — in the migration.
+  @@index([kind, ref])
+  @@index([phase, nextPollAt])
+  @@index([userId, phase])
+  @@map("remote_threads")
+}

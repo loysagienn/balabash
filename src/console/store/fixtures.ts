@@ -41,6 +41,7 @@ export function thread(partial: Partial<Thread> & { id: string }): Thread {
     summary: null,
     projectId: null,
     headless: false,
+    remote: false,
     createdSeq: 1n,
     terminalSeq: null,
     createdAt,

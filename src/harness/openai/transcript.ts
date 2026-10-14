@@ -331,9 +331,48 @@ const renderers: Record<string, Renderer> = {
       reason: payload.reason,
     }),
 
+  // The coordinator's own one-hop commands (finish_thread, and the user's
+  // from a surface): which child, and what was asked — so the model sees
+  // that the request is already out and waits for the child's completion
+  // instead of asking again.
+  'thread.finish': (payload, event) =>
+    omitNullish({
+      targetThreadId: event.targetThreadId,
+      reason: payload.reason,
+    }),
+
+  'thread.pause': (_payload, event) =>
+    omitNullish({
+      targetThreadId: event.targetThreadId,
+    }),
+
+  'thread.decide': (payload, event) =>
+    omitNullish({
+      targetThreadId: event.targetThreadId,
+      askId: payload.askId,
+      decision: payload.decision,
+    }),
+
   'thread.notification': payload => ({
     level: payload.level,
     text: payload.text,
+  }),
+
+  // A question of a (remote) agent that needs the user's decision, and its
+  // resolution. askId is the key of a decision; the model relays, never
+  // decides (no tool of ours decides).
+  'agent.ask': payload =>
+    omitNullish({
+      askId: payload.askId,
+      kind: payload.kind,
+      text: payload.text,
+      options: Array.isArray(payload.options) && payload.options.length ? payload.options : undefined,
+      link: typeof payload.link === 'string' ? payload.link : undefined,
+      note: 'needs the user’s decision — relay it; the user decides in the console or by the link',
+    }),
+  'agent.ask.resolved': payload => ({
+    askId: payload.askId,
+    outcome: payload.outcome,
   }),
 
   'system.exception': payload =>

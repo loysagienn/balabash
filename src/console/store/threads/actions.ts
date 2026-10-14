@@ -39,10 +39,16 @@ export const sendMessageFail = (threadId: string, error: ApiFailure) => ({ type:
 
 // The commands of the thread header: "Stop turn" (thread.interrupt — the
 // run stays and waits) and "Cancel thread" (thread.cancel → the thread
-// ends). The outcome is the event the tail brings back; _DONE only frees
-// the button, _FAIL frees it and reports.
-export type ThreadCommand = 'interrupt' | 'cancel';
+// ends); of a remote thread also "Finish" (thread.finish — the session's
+// closing summary completes it), "Pause" (thread.pause) and a decision on
+// an open question (thread.decide, with askId and the chosen option). The
+// outcome is the event the tail brings back; _DONE only frees the button,
+// _FAIL frees it and reports.
+export type ThreadCommand = 'interrupt' | 'cancel' | 'finish' | 'pause' | 'decide';
 
-export const commandThread = (threadId: string, command: ThreadCommand, reason?: string) => ({ type: 'COMMAND_THREAD', threadId, command, reason }) as const;
+export type ThreadDecision = { askId: string; decision: string };
+
+export const commandThread = (threadId: string, command: ThreadCommand, reason?: string, decision?: ThreadDecision) =>
+  ({ type: 'COMMAND_THREAD', threadId, command, reason, decision }) as const;
 export const commandThreadDone = (threadId: string, command: ThreadCommand) => ({ type: 'COMMAND_THREAD_DONE', threadId, command }) as const;
 export const commandThreadFail = (threadId: string, command: ThreadCommand, error: ApiFailure) => ({ type: 'COMMAND_THREAD_FAIL', threadId, command, error }) as const;

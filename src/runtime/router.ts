@@ -13,11 +13,15 @@
 // - terminals           → abort+drop the terminated thread's run, wake the
 //                         addressed parent
 // - thread.progress     → wake the addressed parent
+// - thread.interrupt    → the addressee's soft stop (risen lazily like any
+//                         delivered event — a remote thread's facade)
+// - thread.finish/pause/decide → wake the addressed remote thread's facade
 //
 // Runs come from hooks injected by the composition root: the runtime routes,
 // it does not know which agent implements a thread (layering §3: runtime
-// knows only core; the coordinator factory and the dynamic-agent spawner
-// plug in from above).
+// knows only core; the coordinator factory, the dynamic-agent spawner and
+// the remote engine's facade — a remote thread has no run, its "run" is a
+// stateless facade over the engine, risen on demand — plug in from above).
 
 import type { Event, Thread } from '../core/contract.ts';
 import { appendEvent } from '../core/append.ts';
@@ -34,8 +38,11 @@ import {
   TERMINAL_TYPES,
   THREAD_CANCEL,
   THREAD_CANCELLED,
+  THREAD_DECIDE,
+  THREAD_FINISH,
   THREAD_INTERRUPT,
   THREAD_MESSAGE,
+  THREAD_PAUSE,
   THREAD_PROGRESS,
   THREAD_STARTED,
 } from '../core/envelope.ts';
@@ -46,8 +53,9 @@ import type { RegisteredRun } from './runs.ts';
 export type RoutedRun = RegisteredRun;
 
 type RouterHooks = {
-  // Lazy rise (§5.5) on a delivered event — today only coordinator runs of
-  // main threads; null = this thread has no lazily risable run.
+  // Lazy rise (§5.5) on a delivered event — coordinator runs of main
+  // threads and the facades of remote threads; null = this thread has no
+  // lazily risable run.
   createRun(thread: Thread): RoutedRun | null;
   // Explicit spawn on thread.started of a child thread. Returning null means
   // the spawn failed; the hook is responsible for journaling the failure.
@@ -61,6 +69,12 @@ const ROUTED_TYPES = [
   THREAD_INTERRUPT,
   THREAD_MESSAGE,
   THREAD_PROGRESS,
+  // The remote thread's commands: delivered to the addressee like any other
+  // addressed event — its facade hands them to the engine (a session run,
+  // should one ever be addressed, sees a [Balabash event]).
+  THREAD_FINISH,
+  THREAD_PAUSE,
+  THREAD_DECIDE,
   ...TERMINAL_TYPES,
   // Integration outcomes (stage 4): thread-addressed facts from the web
   // callbacks and detectors — delivered to the addressee like any other
@@ -79,28 +93,37 @@ const ROUTED_TYPES = [
 ];
 
 export function startThreadRouter({ createRun, spawnRun }: RouterHooks): Consumer {
-  // Wake the run owning threadId, lazily rising it when the hook allows.
-  const deliver = async (threadId: string, event: Event): Promise<void> => {
-    let run = getRun(threadId);
+  // The run owning threadId, lazily risen when the hook allows; null when
+  // the thread is over or has no risable run.
+  const riseRun = async (threadId: string): Promise<RoutedRun | null> => {
+    const run = getRun(threadId);
 
-    if (!run) {
-      const thread = await getThread(threadId);
-
-      if (!thread || thread.status !== 'active') {
-        return;
-      }
-
-      const created = createRun(thread);
-
-      if (!created) {
-        return;
-      }
-
-      registerRun(threadId, created);
-      run = created;
+    if (run) {
+      return run;
     }
 
-    run.accept(event);
+    const thread = await getThread(threadId);
+
+    if (!thread || thread.status !== 'active') {
+      return null;
+    }
+
+    const created = createRun(thread);
+
+    if (!created) {
+      return null;
+    }
+
+    registerRun(threadId, created);
+
+    return created;
+  };
+
+  // Wake the run owning threadId.
+  const deliver = async (threadId: string, event: Event): Promise<void> => {
+    const run = await riseRun(threadId);
+
+    run?.accept(event);
   };
 
   return startConsumer({
@@ -156,7 +179,9 @@ export function startThreadRouter({ createRun, spawnRun }: RouterHooks): Consume
       // The soft stop: interrupt the addressee's turn in flight — the run
       // itself stays registered and alive. Addressed to a child (one hop
       // down, like thread.cancel). A redirected command (the child died in
-      // between) is dropped rather than stopping the main thread.
+      // between) is dropped rather than stopping the main thread. The run
+      // rises lazily like for a delivered event: a remote thread has none
+      // in memory after a restart, and its stop must still reach the engine.
       if (event.type === THREAD_INTERRUPT) {
         const targetId = event.targetThreadId;
 
@@ -164,10 +189,10 @@ export function startThreadRouter({ createRun, spawnRun }: RouterHooks): Consume
           return;
         }
 
-        const run = getRun(targetId);
+        const run = await riseRun(targetId);
 
         if (!run) {
-          console.log(`[router] interrupt ignored: no run in memory for thread ${targetId}`);
+          console.log(`[router] interrupt ignored: no run for thread ${targetId}`);
 
           return;
         }

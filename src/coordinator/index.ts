@@ -9,6 +9,8 @@ import { appendEvent } from '../core/append.ts';
 import { getLastThreadEvent, getTranscript } from '../core/events.ts';
 import { SYSTEM_EXCEPTION } from '../core/envelope.ts';
 import { listMainThreads, listThreads } from '../core/threads.ts';
+import { prisma } from '../db/client.ts';
+import { Prisma } from '../../prisma-generated/client.ts';
 import { config } from '../config/index.ts';
 import { listProjects } from '../projects/store.ts';
 import type { ProjectModel } from '../projects/store.ts';
@@ -77,7 +79,29 @@ export function hasActiveCoordinatorTurns(): boolean {
 // function definitions — spawns must not reset the cache head. Direct
 // children only: grandchildren are invisible by construction (§5.2).
 // Exported for offline rendering (scripts/render-context.ts).
-export function buildStatusText(children: Thread[], projects: ProjectModel[], userId: string): string {
+// The newest session.state of each remote child — what the secretary must
+// know to tell a sleeping (paused) or asking (act) remote thread from a
+// working one; other children have no such word in the status (their
+// lifecycle events say enough).
+export async function readRemoteChildStates(children: Thread[]): Promise<Record<string, string>> {
+  const remote = children.filter(child => child.remote).map(child => child.id);
+
+  if (!remote.length) {
+    return {};
+  }
+
+  const rows = await prisma.$queryRaw<Array<{ threadId: string; state: string | null }>>`
+    SELECT DISTINCT ON (thread_id) thread_id AS "threadId", payload ->> 'state' AS state
+    FROM events
+    WHERE thread_id IN (${Prisma.join(remote)}) AND type = 'session.state'
+    ORDER BY thread_id, seq DESC`;
+
+  return Object.fromEntries(rows.filter(row => row.state).map(row => [row.threadId, row.state!]));
+}
+
+const REMOTE_STATE_WORDS: Record<string, string> = { run: 'working', wait: 'idle', act: 'needs a decision', paused: 'paused (asleep; a message wakes it)' };
+
+export function buildStatusText(children: Thread[], projects: ProjectModel[], userId: string, remoteStates: Record<string, string> = {}): string {
   const lines = [`[status — authoritative, overrides the transcript]`, `time: ${new Date().toISOString()}`];
   // The restart in the way as this workspace may see it: the reason only
   // when the request is its own (src/runtime/restart.ts).
@@ -110,8 +134,10 @@ export function buildStatusText(children: Thread[], projects: ProjectModel[], us
     lines.push('active child threads:');
 
     for (const child of children) {
+      const remoteState = child.remote ? ` remote state=${REMOTE_STATE_WORDS[remoteStates[child.id] ?? ''] ?? 'working'}` : '';
+
       lines.push(
-        `- threadId=${child.id} agent=${child.agent}${child.title ? ` title=${JSON.stringify(child.title)}` : ''} started=${child.createdAt.toISOString()}`,
+        `- threadId=${child.id} agent=${child.agent}${child.title ? ` title=${JSON.stringify(child.title)}` : ''} started=${child.createdAt.toISOString()}${remoteState}`,
       );
     }
   } else {
@@ -243,7 +269,7 @@ export function createCoordinatorRun({ threadId, userId }: { threadId: string; u
         model: config.mainOpenaiModel,
         instructions: COORDINATOR_INSTRUCTIONS,
         tools,
-        statusText: buildStatusText(children, projects, userId),
+        statusText: buildStatusText(children, projects, userId, await readRemoteChildStates(children)),
       });
 
       // Nothing to keep warm: the state was reset, the head changed or the
@@ -296,7 +322,7 @@ export function createCoordinatorRun({ threadId, userId }: { threadId: string; u
       model: config.mainOpenaiModel,
       instructions: COORDINATOR_INSTRUCTIONS,
       tools,
-      statusText: buildStatusText(children, projects, userId),
+      statusText: buildStatusText(children, projects, userId, await readRemoteChildStates(children)),
     });
 
     // The new events rendered to nothing — the model has nothing to react

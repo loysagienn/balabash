@@ -153,7 +153,13 @@ export const sendMessageHandler: ActionHandler<'SEND_MESSAGE'> =
     }
   };
 
-const COMMAND_FAILED_WORDS = { interrupt: 'Couldn’t stop the turn', cancel: 'Couldn’t cancel the thread' };
+const COMMAND_FAILED_WORDS = {
+  interrupt: 'Couldn’t stop the turn',
+  cancel: 'Couldn’t cancel the thread',
+  finish: 'Couldn’t finish the thread',
+  pause: 'Couldn’t pause the thread',
+  decide: 'Couldn’t send the decision',
+};
 
 export const commandThreadHandler: ActionHandler<'COMMAND_THREAD'> =
   ({ api, dispatch, getState, next }) =>
@@ -169,6 +175,16 @@ export const commandThreadHandler: ActionHandler<'COMMAND_THREAD'> =
     try {
       if (command === 'interrupt') {
         await api.threads.interrupt(threadId);
+      } else if (command === 'finish') {
+        await api.threads.finish(threadId);
+      } else if (command === 'pause') {
+        await api.threads.pause(threadId);
+      } else if (command === 'decide') {
+        if (!action.decision) {
+          throw new Error('a decision names the question and the option');
+        }
+
+        await api.threads.decide(threadId, action.decision.askId, action.decision.decision);
       } else {
         await api.threads.cancel(threadId, action.reason);
       }

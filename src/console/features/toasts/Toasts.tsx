@@ -20,6 +20,7 @@ const ICON: Record<StateName, IconName> = {
   run: 'loader-circle',
   wait: 'clock',
   act: 'triangle-alert',
+  paused: 'pause',
   done: 'circle-check',
   err: 'circle-alert',
   off: 'circle-slash',

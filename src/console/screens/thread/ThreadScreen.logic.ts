@@ -18,16 +18,45 @@ export function threadTimeLabel(thread: Thread, state: StateName, now: Date): st
 }
 
 // The commands of the header: an active thread with a parent takes "Stop
-// turn" and "Cancel thread" (the main thread is eternal and takes neither);
-// a stop needs a turn in flight.
-export function threadCommands(thread: Thread, state: StateName): { running: boolean; stopEnabled: boolean } {
+// turn", "Finish thread" (the agent is asked to wrap up and end the
+// thread itself — a remote session, for its closing summary) and "Cancel
+// thread" (the main thread is eternal and takes none); a stop needs a
+// turn in flight. A remote thread (the mirror of a session elsewhere)
+// also takes Pause, only while it waits for a message (a working session
+// is stopped, not paused; a question waits for a decision; a sleeping
+// thread sleeps already).
+export function threadCommands(thread: Thread, state: StateName): { running: boolean; stopEnabled: boolean; remote: boolean; pauseEnabled: boolean } {
   const running = thread.status === 'active' && thread.parentId !== null;
+  const remote = running && thread.remote;
 
-  return { running, stopEnabled: running && state === 'run' };
+  return { running, stopEnabled: running && state === 'run', remote, pauseEnabled: remote && state === 'wait' };
 }
 
-// The words of the cancel confirmation (design: ThreadScreen, modal).
+// A finish already asked for (a thread.finish among the loaded events of
+// an active thread): the agent is wrapping up, asking again only repeats
+// the request — the button says so and waits.
+export function finishRequested(events: readonly { type: string }[]): boolean {
+  return events.some(event => event.type === 'thread.finish');
+}
+
+// The words of the finish confirmation: the agent ends the thread itself,
+// in its own time — a remote session with its closing summary.
+export function finishWords(thread: Thread): string {
+  if (thread.remote) {
+    return `The “${thread.agent}” session will be asked for a closing summary, and the thread will end with it. The session itself stays where it is.`;
+  }
+
+  return `The “${thread.agent}” agent will be asked to wrap up, write its report and end the thread itself — it finishes its current turn first, so this takes a moment. To stop at once, cancel the thread instead.`;
+}
+
+// The words of the cancel confirmation (design: ThreadScreen, modal). A
+// remote thread's cancel closes the mirror alone: the session elsewhere
+// is not touched — a turn in flight runs on there.
 export function cancelWords(thread: Thread): string {
+  if (thread.remote) {
+    return `The thread will end without a summary; the “${thread.agent}” session itself is not touched and keeps running where it is. The parent thread will be notified. This can’t be undone.`;
+  }
+
   return `The “${thread.agent}” agent will stop and the thread will end without a summary. The parent thread will be notified. This can’t be undone.`;
 }
 

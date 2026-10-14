@@ -25,6 +25,9 @@ confidential from them.
   `projects/` (the project registry), `schedule/` (scheduled tasks and jobs;
   `schedule/AGENTS.md` — the contract of task bodies, which live in the
   workspace, not in the repository),
+  `remote/` (remote agents: an external system's session mirrored as a
+  thread; `remote/AGENTS.md` — the pieces and the invariants; the drivers
+  live in the installation's `data/remote-agents/`, not in the repository),
   `apps/` (the mini-app platform), `files/` (file storage), `runtime/`
   (restart, router, runs), `test-support/` (the test PostgreSQL `npm test`
   starts: embedded-postgres, one migrated template, a copy per test; `stand.ts`

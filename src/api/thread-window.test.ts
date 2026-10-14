@@ -12,7 +12,7 @@ import type { ThreadWindowReads } from './thread-window.ts';
 function thread(id: string, createdSeq: bigint, status: ThreadStatus, parentId: string | null = 'main'): Thread {
   const createdAt = new Date(1_700_000_000_000 + Number(createdSeq) * 1000);
 
-  return { id, userId: 'u1', parentId, agent: 'engineer', title: null, description: null, status, summary: null, projectId: null, headless: false, createdSeq, terminalSeq: null, createdAt, updatedAt: createdAt };
+  return { id, userId: 'u1', parentId, agent: 'engineer', title: null, description: null, status, summary: null, projectId: null, headless: false, remote: false, createdSeq, terminalSeq: null, createdAt, updatedAt: createdAt };
 }
 
 // A log of `active` active children above the root (createdSeq 1) and

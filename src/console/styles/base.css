@@ -51,6 +51,7 @@ body{background:var(--bg);color:var(--text);font:var(--fs-body)/var(--lh-body) v
 [data-state="done"]{--st-c:var(--st-done);--st-ink:var(--st-done);--st-bg:var(--st-done-bg)}
 [data-state="err"]{--st-c:var(--st-err);--st-ink:var(--st-err-ink);--st-bg:var(--st-err-bg)}
 [data-state="off"]{--st-c:var(--st-off);--st-ink:var(--st-off);--st-bg:var(--st-off-bg)}
+[data-state="paused"]{--st-c:var(--st-off);--st-ink:var(--st-off);--st-bg:var(--st-off-bg)}
 
 /* ── Identifier context ── */
 [data-id="1"]{--id-c:var(--id-1)} [data-id="2"]{--id-c:var(--id-2)} [data-id="3"]{--id-c:var(--id-3)} [data-id="4"]{--id-c:var(--id-4)}

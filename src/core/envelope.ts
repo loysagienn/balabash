@@ -15,8 +15,22 @@ export const THREAD_CANCEL = 'thread.cancel';
 // thread — the run stays alive and waits for the next message (a surface's
 // Stop button). Authored like thread.cancel: at the parent, one hop down.
 export const THREAD_INTERRUPT = 'thread.interrupt';
+// The commands of a remote thread (src/remote), authored like thread.cancel
+// at the parent, one hop down: finish — ask the session for a closing
+// summary and complete the thread with it; pause — put the thread to sleep
+// now; decide — a human's decision on an open agent.ask (askId, decision).
+export const THREAD_FINISH = 'thread.finish';
+export const THREAD_PAUSE = 'thread.pause';
+export const THREAD_DECIDE = 'thread.decide';
 export const THREAD_MESSAGE = 'thread.message';
 export const THREAD_NOTIFICATION = 'thread.notification';
+// An agent asked a question that needs a human's decision (an approval of
+// an action, a sign-in, anything else) and its resolution — universal
+// types; today written by the remote engine (src/remote) for the questions
+// of a remote session, open to the agents of the repository. Authored by
+// the thread's agent like agent.message.
+export const AGENT_ASK = 'agent.ask';
+export const AGENT_ASK_RESOLVED = 'agent.ask.resolved';
 export const SYSTEM_EXCEPTION = 'system.exception';
 export const SYSTEM_RESTART_REQUESTED = 'system.restart.requested';
 export const SYSTEM_RESTART_COMPLETED = 'system.restart.completed';
@@ -50,6 +64,8 @@ export const TERMINAL_TYPES: ReadonlySet<string> = new Set([THREAD_COMPLETED, TH
 const CANONICAL_TYPES: ReadonlySet<string> = new Set([
   'user.message',
   'agent.message',
+  AGENT_ASK,
+  AGENT_ASK_RESOLVED,
   THREAD_STARTED,
   THREAD_PROGRESS,
   THREAD_COMPLETED,
@@ -57,6 +73,9 @@ const CANONICAL_TYPES: ReadonlySet<string> = new Set([
   THREAD_CANCELLED,
   THREAD_CANCEL,
   THREAD_INTERRUPT,
+  THREAD_FINISH,
+  THREAD_PAUSE,
+  THREAD_DECIDE,
   THREAD_MESSAGE,
   THREAD_NOTIFICATION,
   'tool.call.started',
@@ -177,6 +196,25 @@ export const threadNotificationPayloadSchema = z.looseObject({
   level: z.enum(['silent', 'normal', 'urgent']),
   text: z.string(),
 });
+// The question: its id (the external system's, the key of the decision),
+// its kind, the words, an optional link into the external UI, the
+// decisions a human may answer with (empty when only the link resolves it).
+export const agentAskPayloadSchema = z.looseObject({
+  askId: z.string().min(1),
+  kind: z.enum(['approval', 'credential', 'other']),
+  text: z.string(),
+  link: z.string().optional(),
+  options: z.array(z.string()),
+  expiresAt: z.string().optional(),
+});
+export const agentAskResolvedPayloadSchema = z.looseObject({
+  askId: z.string().min(1),
+  outcome: z.string(),
+});
+export const threadDecidePayloadSchema = z.looseObject({
+  askId: z.string().min(1),
+  decision: z.string().min(1),
+});
 
 const LIFECYCLE_PAYLOAD_SCHEMAS: Record<string, z.ZodType> = {
   [THREAD_STARTED]: threadStartedPayloadSchema,
@@ -185,6 +223,9 @@ const LIFECYCLE_PAYLOAD_SCHEMAS: Record<string, z.ZodType> = {
   [THREAD_FAILED]: threadFailedPayloadSchema,
   [THREAD_CANCELLED]: threadCancelledPayloadSchema,
   [THREAD_NOTIFICATION]: threadNotificationPayloadSchema,
+  [AGENT_ASK]: agentAskPayloadSchema,
+  [AGENT_ASK_RESOLVED]: agentAskResolvedPayloadSchema,
+  [THREAD_DECIDE]: threadDecidePayloadSchema,
 };
 
 // ---------------------------------------------------------------------------
@@ -248,11 +289,11 @@ function validateCanonicalActor(input: AppendInput): void {
     throw new AppendError('actor_mismatch', `user.message requires actor 'user'`);
   }
 
-  if (type === 'agent.message' && actor !== 'agent') {
-    throw new AppendError('actor_mismatch', `agent.message requires actor 'agent'`);
+  if ((type === 'agent.message' || type === AGENT_ASK || type === AGENT_ASK_RESOLVED) && actor !== 'agent') {
+    throw new AppendError('actor_mismatch', `${type} requires actor 'agent'`);
   }
 
-  const requiresThread = ['user.message', 'agent.message', THREAD_NOTIFICATION, THREAD_PROGRESS, THREAD_MESSAGE];
+  const requiresThread = ['user.message', 'agent.message', AGENT_ASK, AGENT_ASK_RESOLVED, THREAD_NOTIFICATION, THREAD_PROGRESS, THREAD_MESSAGE];
   const isToolCall = type.startsWith('tool.call.');
   // The session journal is authored by the thread whose session it is.
   const isSessionEvent = type.startsWith(SESSION_EVENT_PREFIX);
@@ -264,7 +305,10 @@ function validateCanonicalActor(input: AppendInput): void {
       TERMINAL_TYPES.has(type) ||
       type === THREAD_STARTED ||
       type === THREAD_CANCEL ||
-      type === THREAD_INTERRUPT) &&
+      type === THREAD_INTERRUPT ||
+      type === THREAD_FINISH ||
+      type === THREAD_PAUSE ||
+      type === THREAD_DECIDE) &&
     !threadId
   ) {
     throw new AppendError('thread_required', `Event "${type}" requires threadId`);

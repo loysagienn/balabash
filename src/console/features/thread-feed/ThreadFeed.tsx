@@ -11,6 +11,9 @@ import { useQueryClient } from '@tanstack/react-query';
 import type { FileMetaResponse } from '../../../api/contract.ts';
 import { useAppDispatch, useAppSelector } from '../../store/hooks.ts';
 import { openViewer } from '../../store/ui/actions.ts';
+import { commandThread } from '../../store/threads/actions.ts';
+import { selectThreadCommandPending } from '../../store/ui/selectors.ts';
+import { Btn } from '../../ui/Btn/Btn.tsx';
 import { selectOperatorName } from '../../store/session/selectors.ts';
 import { selectThreadState } from '../../store/sessions/selectors.ts';
 import { Att, AttThumb, Atts } from '../../ui/Att/Att.tsx';
@@ -103,15 +106,42 @@ export function Attachments({ atts, context }: { atts: Attachment[]; context?: s
 
 function FeedMessage({ item, now }: { item: MessageItem; now: Date }) {
   const you = useAppSelector(selectOperatorName) ?? undefined;
+  const dispatch = useAppDispatch();
+  const ask = item.ask;
+  const deciding = useAppSelector(s => (ask ? selectThreadCommandPending(s, ask.threadId, 'decide') : false));
+  // An open question: its options as quick replies (the decision goes up
+  // as COMMAND_THREAD decide; the outcome comes back with the tail), and
+  // its link into the external system. A resolved one shows the outcome.
+  const open = ask && ask.outcome === null;
+  const quick = open && !deciding ? ask.options : undefined;
 
   return (
-    <Message agent={item.from} to={item.to} you={you} variant={item.variant} tag={item.tag} time={dateTimeLabel(item.at, now)} fold={item.fold}>
+    <Message
+      agent={item.from}
+      to={item.to}
+      you={you}
+      variant={item.variant}
+      tag={ask ? (ask.outcome !== null ? `decided: ${ask.outcome}` : askTag(ask.askKind)) : item.tag}
+      time={dateTimeLabel(item.at, now)}
+      fold={item.fold}
+      quick={quick}
+      onQuick={reply => ask && dispatch(commandThread(ask.threadId, 'decide', undefined, { askId: ask.askId, decision: reply }))}
+    >
       {/* The user's own text keeps its single line breaks (typed, not
           Markdown-wrapped); an agent's Markdown reads by the usual rules. */}
       {item.text ? <Md source={item.text} breaks={item.variant === 'user'} /> : null}
       <Attachments atts={item.atts} context={`${item.from === 'you' ? (you ?? 'you') : item.from} → ${item.to === 'you' ? (you ?? 'you') : item.to}, ${dateTimeLabel(item.at, now)}`} />
+      {ask?.link ? (
+        <div className="msg-quick">
+          <Btn label={ask.askKind === 'credential' ? 'Sign in' : 'Open in the external system'} icon="arrow-up-right" size="sm" href={ask.link} />
+        </div>
+      ) : null}
     </Message>
   );
+}
+
+function askTag(kind: string): string {
+  return kind === 'approval' ? 'approval' : kind === 'credential' ? 'sign-in' : 'question';
 }
 
 function FeedChild({ item, now }: { item: ChildItem; now: Date }) {

@@ -23,7 +23,7 @@ import { getEventsAfter, listThreadEvents } from '../core/events.ts';
 import { getLiveHub } from '../core/live.ts';
 import { appendEvent } from '../core/append.ts';
 import { registryMutation } from '../core/registry-events.ts';
-import { THREAD_CANCEL, THREAD_INTERRUPT } from '../core/envelope.ts';
+import { AGENT_ASK, AGENT_ASK_RESOLVED, THREAD_CANCEL, THREAD_DECIDE, THREAD_FINISH, THREAD_INTERRUPT, THREAD_PAUSE } from '../core/envelope.ts';
 import { fileContentBlock, messageFile } from '../core/file-blocks.ts';
 import type { FileRef, Thread, ThreadStatus } from '../core/contract.ts';
 import { WorkspacePathError, fileNodeOf, guessContentType, listDir, placeUpload, receiveUpload, replaceFileContent, resolveFilePath, sanitizeRelPath, statFile, statWritable, uploadFolder, withFileWriteLock } from '../workspace/files.ts';
@@ -832,6 +832,142 @@ router.post('/threads/:id/cancel', requireSession, async ctx => {
   const response: ThreadCommandResponse = { event: result.event };
 
   ctx.body = prepareObject(response);
+});
+
+// --------------------------------------------------------------------------
+// finish — the thread is asked to wrap up: an agent's run turns it into
+// the request to write its report and end the thread itself; a remote
+// thread's engine (src/remote/engine.ts) asks the session for a closing
+// summary that completes the thread. Any active child thread takes it.
+// The commands of a remote thread alone (409 thread_not_remote): pause —
+// the thread sleeps now; decide — the operator's decision on an open
+// question of the agent (agent.ask). All authored like interrupt and
+// cancel: at the parent, one hop down, the operator's identity in the
+// payload.
+
+async function requireRemoteThread(ctx: Context, id: string): Promise<(Thread & { parentId: string }) | null> {
+  const thread = await requireCommandableThread(ctx, id);
+
+  if (!thread) {
+    return null;
+  }
+
+  if (!thread.remote) {
+    sendError(ctx, 409, 'thread_not_remote', 'Only a remote agent’s thread takes this command');
+
+    return null;
+  }
+
+  return thread;
+}
+
+async function writeRemoteCommand(ctx: Context, thread: Thread & { parentId: string }, type: string, payload: Record<string, unknown>): Promise<void> {
+  const result = await appendEvent({
+    type,
+    actor: 'user',
+    userId: thread.userId,
+    threadId: thread.parentId,
+    targetThreadId: thread.id,
+    payload: { ...payload, identity: WEB_IDENTITY, source: 'web' },
+  });
+
+  if (!result.written) {
+    sendError(ctx, 409, 'thread_closed', 'The thread is no longer active');
+
+    return;
+  }
+
+  const response: ThreadCommandResponse = { event: result.event };
+
+  ctx.body = prepareObject(response);
+}
+
+router.post('/threads/:id/finish', requireSession, async ctx => {
+  const thread = await requireCommandableThread(ctx, ctx.params.id);
+
+  if (!thread) {
+    return;
+  }
+
+  await writeRemoteCommand(ctx, thread, THREAD_FINISH, { reason: 'finished_by_user' });
+});
+
+router.post('/threads/:id/pause', requireSession, async ctx => {
+  const thread = await requireRemoteThread(ctx, ctx.params.id);
+
+  if (!thread) {
+    return;
+  }
+
+  await writeRemoteCommand(ctx, thread, THREAD_PAUSE, {});
+});
+
+// The open question with this askId: the newest agent.ask of the thread
+// naming it, unless an agent.ask.resolved for it came after; null when
+// there is none open.
+async function findOpenAsk(threadId: string, askId: string): Promise<{ kind: string; options: string[] } | null> {
+  const rows = await prisma.event.findMany({
+    where: { threadId, type: { in: [AGENT_ASK, AGENT_ASK_RESOLVED] }, payload: { path: ['askId'], equals: askId } },
+    orderBy: { seq: 'desc' },
+    take: 1,
+  });
+  const newest = rows[0];
+
+  if (!newest || newest.type !== AGENT_ASK) {
+    return null;
+  }
+
+  const payload = newest.payload as { kind?: unknown; options?: unknown };
+
+  return {
+    kind: typeof payload.kind === 'string' ? payload.kind : 'other',
+    options: Array.isArray(payload.options) ? payload.options.filter((option): option is string => typeof option === 'string') : [],
+  };
+}
+
+router.post('/threads/:id/decide', requireSession, async ctx => {
+  const thread = await requireRemoteThread(ctx, ctx.params.id);
+
+  if (!thread) {
+    return;
+  }
+
+  const body = await readJsonBody(ctx);
+
+  if (!body) {
+    return;
+  }
+
+  const askId = typeof body.askId === 'string' ? body.askId.trim() : '';
+  const decision = typeof body.decision === 'string' ? body.decision.trim() : '';
+
+  if (!askId || !decision) {
+    sendError(ctx, 400, 'bad_request', 'askId and decision are required');
+
+    return;
+  }
+
+  const ask = await findOpenAsk(thread.id, askId);
+
+  if (!ask) {
+    sendError(ctx, 409, 'ask_not_open', 'The question is not open');
+
+    return;
+  }
+
+  if (ask.kind === 'credential') {
+    sendError(ctx, 400, 'decision_by_link_only', 'A sign-in is completed by its link, not by a decision');
+
+    return;
+  }
+
+  if (!ask.options.includes(decision)) {
+    sendError(ctx, 400, 'bad_request', `decision must be one of: ${ask.options.join(', ')}`);
+
+    return;
+  }
+
+  await writeRemoteCommand(ctx, thread, THREAD_DECIDE, { askId, decision });
 });
 
 // --------------------------------------------------------------------------

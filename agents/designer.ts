@@ -35,8 +35,9 @@ import {
   BALABASH_PREAMBLE,
   CLAUDE_DESIGN_NOTE,
   IMAGE_GENERATOR_SUBAGENT_NOTE,
-  PROJECTS_NOTE,
   OUTPUT_NOTE,
+  PROJECTS_NOTE,
+  REMOTE_AGENTS_NOTE,
   WORKBENCH_NOTE,
   WORKSPACE_STORAGE_NOTE,
 } from './world/index.ts';
@@ -51,6 +52,8 @@ const SYSTEM_PROMPT = `You are the design specialist of Balabash, talking to the
 ${WORKBENCH_NOTE}
 
 ${WORKSPACE_STORAGE_NOTE}
+
+${REMOTE_AGENTS_NOTE}
 
 ${PROJECTS_NOTE}
 
@@ -151,6 +154,7 @@ export const agent = {
     'notion',
     'perplexity',
     'projects',
+    'remote',
     'schedule',
     'storage',
     'storage_download_file',

@@ -17,6 +17,7 @@ import {
   BROWSER_SUBAGENT_NOTE,
   OUTPUT_NOTE,
   PROJECTS_NOTE,
+  REMOTE_AGENTS_NOTE,
   WORKBENCH_NOTE,
   WORKSPACE_STORAGE_NOTE,
 } from './world/index.ts';
@@ -51,6 +52,8 @@ ${WORKSPACE_STORAGE_NOTE}
 
 ${BROWSER_SUBAGENT_NOTE}
 
+${REMOTE_AGENTS_NOTE}
+
 End the thread when the work is done or the user asks to stop; your report is the handoff: the agreed meaning and abstract ideal, the audit's key findings, and the convergence plan — written so an engineering agent can execute it without this thread's context. Stay with architectural reasoning: if the user asks you to implement, decline briefly and propose ending this thread with the plan so the secretary can hand it to an engineering agent; if the user clearly switches to an unrelated task, wrap up and end the thread.`;
 
 export const agent = {
@@ -71,6 +74,7 @@ export const agent = {
     'notion',
     'perplexity',
     'projects',
+    'remote',
     'schedule',
     'storage',
     'storage_download_file',

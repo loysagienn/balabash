@@ -22,13 +22,16 @@
 
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import type { AgentDeclaration, ToolDefinition } from '../src/core/contract.ts';
+import type { AgentDeclaration, RemoteAgentDeclaration, ToolDefinition } from '../src/core/contract.ts';
 import { prisma } from '../src/db/client.ts';
 import { getFile, getFileDownloadUrl, ingestFile, openFileContent } from '../src/files/index.ts';
-import { getAgents, loadAgents } from '../src/capabilities/agent-catalog.ts';
+import { getAgents, isRemoteAgent, loadAgents, repositoryAgentNames } from '../src/capabilities/agent-catalog.ts';
+import { loadRemoteAgents } from '../src/capabilities/remote-agent-source.ts';
+import { createRemoteDriverContext } from '../src/capabilities/remote-agent-secrets.ts';
 import { createAuthToolServer } from '../src/capabilities/auth-tools.ts';
 import { createEventsToolServer, createStorageToolServer } from '../src/capabilities/builtin-tools.ts';
 import { createRestartToolServer } from '../src/capabilities/restart-tools.ts';
+import { createRemoteToolServer } from '../src/capabilities/remote-tools.ts';
 import { describeSessionBridgeTools } from '../src/capabilities/session-run.ts';
 import {
   getServerToolFunctions,
@@ -150,6 +153,29 @@ async function renderAgent(declaration: AgentDeclaration, userId: string): Promi
   return `${sections.join('\n\n')}\n`;
 }
 
+// A remote agent kind: the spawner reads the description and the options
+// schema of the external system; there is no prompt and no bundle of ours.
+function renderRemoteAgent(declaration: RemoteAgentDeclaration): string {
+  const header = [
+    `# Agent: ${declaration.name}`,
+    '',
+    '- kind: remote (the session runs in an external system; the thread mirrors it — src/remote/engine.ts)',
+    ...(declaration.secrets?.length ? [`- secrets: ${declaration.secrets.join(', ')}`] : []),
+    ...(declaration.notification ? [`- notification: ${declaration.notification}`] : []),
+  ].join('\n');
+
+  const sections = [
+    header,
+    renderSection('Spawn surface (what the spawner reads: description; the input is a prompt or a session to adopt)', declaration.description),
+    renderSection(
+      'Launch options (the schema the driver declares; every field optional)',
+      declaration.options ? `\`\`\`json\n${JSON.stringify(declaration.options, null, 2)}\n\`\`\`` : '(none)',
+    ),
+  ];
+
+  return `${sections.join('\n\n')}\n`;
+}
+
 async function renderCoordinator(userId: string): Promise<string> {
   const sections = [
     '# Coordinator (the secretary)',
@@ -207,7 +233,21 @@ async function resolveUserId(): Promise<string> {
 
 const userId = await resolveUserId();
 
-loadAgents();
+const filesApi = {
+  ingest: (input: Parameters<typeof ingestFile>[0]) => ingestFile(input),
+  get: (fileId: string) => getFile(fileId),
+  getDownloadUrl: (fileId: string, options?: { expiresInSeconds?: number }) => getFileDownloadUrl(fileId, options),
+  open: (fileId: string) => openFileContent(fileId),
+};
+
+// The installation's remote agent kinds join the catalog as at boot; a kind
+// that fails to load is reported here, not journaled.
+loadAgents(
+  await loadRemoteAgents({
+    context: kind => createRemoteDriverContext(kind, filesApi),
+    repositoryAgents: repositoryAgentNames(),
+  }),
+);
 
 registerBuiltinToolServer(createAuthToolServer());
 registerBuiltinToolServer(createRestartToolServer());
@@ -215,15 +255,9 @@ registerBuiltinToolServer(createStorageToolServer());
 registerBuiltinToolServer(createEventsToolServer());
 registerBuiltinToolServer(createScheduleToolServer());
 registerBuiltinToolServer(createProjectsToolServer());
+registerBuiltinToolServer(createRemoteToolServer());
 
-await loadToolServers({
-  filesApi: {
-    ingest: input => ingestFile(input),
-    get: fileId => getFile(fileId),
-    getDownloadUrl: (fileId, options) => getFileDownloadUrl(fileId, options),
-    open: fileId => openFileContent(fileId),
-  },
-});
+await loadToolServers({ filesApi });
 
 await mkdir(OUT_DIR, { recursive: true });
 
@@ -237,7 +271,7 @@ written.push(coordinatorPath);
 for (const declaration of getAgents()) {
   const filePath = path.join(OUT_DIR, `${declaration.name}.md`);
 
-  await writeFile(filePath, await renderAgent(declaration, userId), 'utf8');
+  await writeFile(filePath, isRemoteAgent(declaration) ? renderRemoteAgent(declaration) : await renderAgent(declaration, userId), 'utf8');
   written.push(filePath);
 }
 

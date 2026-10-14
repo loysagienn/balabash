@@ -12,7 +12,10 @@ import {
   THREAD_CANCEL,
   THREAD_CANCELLED,
   THREAD_COMPLETED,
+  THREAD_DECIDE,
+  THREAD_FINISH,
   THREAD_INTERRUPT,
+  THREAD_PAUSE,
   THREAD_PROGRESS,
   THREAD_STARTED,
   toEvent,
@@ -202,7 +205,13 @@ export async function appendEventIn(tx: Tx, raw: AppendInput): Promise<AppendRes
     return appendTerminal(tx, input);
   }
 
-  if (input.type === THREAD_CANCEL || input.type === THREAD_INTERRUPT) {
+  if (
+    input.type === THREAD_CANCEL ||
+    input.type === THREAD_INTERRUPT ||
+    input.type === THREAD_FINISH ||
+    input.type === THREAD_PAUSE ||
+    input.type === THREAD_DECIDE
+  ) {
     return appendChildCommand(tx, input);
   }
 
@@ -359,10 +368,11 @@ async function cascadeCancel(tx: Tx, root: ThreadRow, cascadeFromThreadId: strin
 }
 
 // ---------------------------------------------------------------------------
-// thread.cancel and thread.interrupt: commands from parent to direct child.
-// A command for an already-terminated child is a no-op — its goal (no run,
-// no turn in flight) is already met, and the dead-target redirect would only
-// spam the main thread with a command nothing acts on.
+// thread.cancel, thread.interrupt and the remote thread's finish / pause /
+// decide: commands from parent to direct child. A command for an
+// already-terminated child is a no-op — its goal (no run, no turn in flight)
+// is already met, and the dead-target redirect would only spam the main
+// thread with a command nothing acts on.
 
 async function appendChildCommand(tx: Tx, input: AppendInput): Promise<AppendResult> {
   const { threadId, targetThreadId } = input;

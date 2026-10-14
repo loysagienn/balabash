@@ -36,6 +36,11 @@ export type EventPayloads = {
     tools?: string[];
     projectId?: string;
     projectSlug?: string;
+    // A remote agent's thread (src/remote): the launch options by the
+    // kind's schema; adopt — `input` names an existing session.
+    remote?: boolean;
+    options?: JsonObject;
+    adopt?: boolean;
   };
   'thread.progress': { text: string };
   // fileIds — the references the model reads; files — the same files with
@@ -51,6 +56,10 @@ export type EventPayloads = {
   'thread.cancel': { reason: string; identity?: UserIdentity; source?: string };
   'thread.cancelled': { reason: string; requestedBy?: string; cascadeFromThreadId?: string };
   'thread.interrupt': { reason?: string; identity?: UserIdentity; source?: string } & JsonObject;
+  // The remote thread's commands (src/remote), authored like the two above.
+  'thread.finish': { reason?: string; identity?: UserIdentity; source?: string };
+  'thread.pause': { identity?: UserIdentity; source?: string };
+  'thread.decide': { askId: string; decision: string; identity?: UserIdentity; source?: string };
 
   // Dialogue.
   'user.message': {
@@ -58,11 +67,22 @@ export type EventPayloads = {
     // write it so).
     text: string | null;
     identity?: UserIdentity;
+    // The channel: 'web', 'telegram', 'ccr' — or 'remote' for a reply
+    // somebody else wrote into a remote session, mirrored by the engine
+    // (never forwarded back).
     source?: string;
     files?: InboundFile[];
     blocks?: ContentBlock[];
   };
   'agent.message': { content: ContentBlock[] };
+  // A question of the agent that needs a human's decision (src/remote: the
+  // approvals and sign-ins of a remote session; the remote engine writes
+  // them): the id to decide by, the kind, the words, a link into the
+  // external UI, the decisions offered (none — the link alone resolves it,
+  // e.g. a sign-in). Resolved: the outcome, and who decided when it was
+  // decided from Balabash.
+  'agent.ask': { askId: string; kind: 'approval' | 'credential' | 'other'; text: string; link?: string; options: string[]; expiresAt?: string };
+  'agent.ask.resolved': { askId: string; outcome: string; by?: { identity?: UserIdentity; source?: string } };
 
   // Journaled tool calls of the bundle (src/capabilities/tool-journal.ts).
   'tool.call.started': { callId: string; functionName: string; input: JsonObject };
