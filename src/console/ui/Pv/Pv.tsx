@@ -3,8 +3,8 @@
 // children are the actions: "Edit" for .md, download, copy path); the
 // agent's description of the file above the content (PvNote); the
 // scrolling body (PvBody — Markdown, a viewer or a MetaCard); and the
-// action bar at the bottom (PvActBar) that replaces the header actions
-// when the area is narrower than 720 px. On the phone the file name is
+// action bar at the bottom (PvActBar — a glass bottom bar, ui/Glass) that
+// replaces the header actions when the area is narrower than 720 px. On the phone the file name is
 // already in the shell header — the preview header keeps the details.
 
 import type { ReactNode } from 'react';
@@ -12,6 +12,7 @@ import { Avatar } from '../Avatar/Avatar.tsx';
 import type { IconName } from '../Icon/Icon.tsx';
 import { Obj } from '../Obj/Obj.tsx';
 import { Code } from '../atoms/atoms.tsx';
+import '../Glass/Glass.css';
 import './Pv.css';
 
 export function Pv({ children, className }: { children: ReactNode; className?: string }) {
@@ -75,5 +76,9 @@ export function PvBody({ children, fill, className }: { children: ReactNode; fil
 }
 
 export function PvActBar({ children }: { children: ReactNode }) {
-  return <div className="pv-actbar">{children}</div>;
+  return (
+    <div className="pv-actbar glass" data-edge="bottom">
+      {children}
+    </div>
+  );
 }

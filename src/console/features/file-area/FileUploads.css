@@ -1,11 +1,13 @@
 @layer screens{
-/* Uploads of the file area: the corner panel (on the phone — across the bottom, above the tabs), the note of the
-   name-clash dialog, and the Upload button — labelled when wide, an icon on the phone. */
+/* Uploads of the file area: the corner panel — floating over the frame, positioned against the shell's main column
+   (.shell-main), so it stays put while the area scrolls as the page on the phone (there — across the bottom, above the
+   tabs' glass: --frame-foot) — the note of the name-clash dialog, and the Upload button — labelled when wide, an icon on
+   the phone. */
 .fil-upl{position:absolute;right:var(--sp-5);bottom:var(--sp-5);z-index:var(--z-toast)}
 .fil-clash-note{margin:var(--sp-2h) 0 0;font-size:var(--fs-meta);line-height:var(--lh-meta);color:var(--text-3)}   /* the name “Keep both” will give */
 .fil-up-icon{display:none}
 @container shell (max-width:720px){
-  .fil-upl{left:var(--sp-3);right:var(--sp-3);bottom:var(--sp-3);width:auto}
+  .fil-upl{left:var(--sp-3);right:var(--sp-3);bottom:calc(var(--frame-foot,0px) + var(--sp-3));width:auto}
   .fil-upl[data-clash]{display:none}   /* the clash sheet docks where the panel is: the panel gives way while it asks */
   .fil-up-btn{display:none}
   .fil-up-icon{display:inline-flex}

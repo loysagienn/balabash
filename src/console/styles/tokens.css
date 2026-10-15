@@ -17,7 +17,7 @@
   --surface-2:#18191d;     /* overlays (menus, popovers, toasts) and insets inside a card */
   --surface-3:#222329;     /* chips, counters, ring track; text on it — no darker than --text-2 */
   --overlay:rgba(5,6,8,.72);  /* backdrop of modals and sheets */
-  --bg-glass:color-mix(in srgb,var(--surface) 72%,transparent);  /* sticky bars the feed scrolls under (thread strip, phone composer), with --glass-blur */
+  --bg-glass:color-mix(in srgb,var(--bg) 30%,transparent);  /* glass bars the content scrolls under (header, bottom tabs, thread strip, composer, file actions): the page color, see-through, with --glass-blur */
 
   /* ── State layers: translucent fill over any surface ── */
   --hover:rgba(255,255,255,.045);
@@ -172,7 +172,12 @@
   --ring-focus:0 0 0 2px var(--bg), 0 0 0 4px var(--focus);   /* buttons and tiles */
   --ring-field:0 0 0 3px var(--accent-bg);                   /* focused field */
   --ring-field-err:0 0 0 3px var(--st-err-bg);               /* field with an error */
-  --glass-blur:saturate(1.4) blur(16px);                     /* backdrop of --bg-glass bars */
+  /* Glass bars (.glass): the fill is --bg-glass; the edge that meets the content melts over --glass-fade — the color and the
+     blur fade together: a strong blur layer gives way to a soft one (a progressive blur); a top bar is opaque at its very top
+     edge and reaches the glass over --glass-solid. --glass-pad — the bar’s own field on the content side (the header’s
+     bottom, a bottom bar’s top): the content has no gap of its own to the bars, the fade starts in the bar */
+  --glass-blur:saturate(1.2) blur(4px); --glass-blur-soft:blur(1px);
+  --glass-fade:48px; --glass-solid:24px; --glass-pad:24px;
   --z-raised:1; --z-sticky:10; --z-drop:20; --z-pop:40; --z-scrim:50; --z-modal:60; --z-toast:80;
 
   /* ── Motion ── */

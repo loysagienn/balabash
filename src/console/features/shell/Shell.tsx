@@ -1,8 +1,10 @@
 // The app shell (design: Shell): sidebar with the workspace and sections
 // — the main thread first among them, with its shortcut (⌘J / Ctrl+J from
-// any screen) — header (ShellTop), the screen's body, bottom tabs and the
-// "More" sheet on the phone — one markup, reflowing by the `shell`
-// container width. Counts and attention marks come from the store: running
+// any screen) — and the frame: header (ShellTop), the screen's body and the
+// bottom tabs of the phone in one scroller (.shell-frame), the bars glass
+// the content passes under (ui/Glass), sticky and in the flow; the "More"
+// sheet on the phone — one markup, reflowing by the `shell` container
+// width. Counts and attention marks come from the store: running
 // threads on "Threads", a dot on a section that awaits the user. The
 // toasts of the store stack in the corner of the shell (features/toasts).
 // The sidebar head is the service icon with "Balabash", then the workspace
@@ -36,14 +38,15 @@ import { footerWords, isMainThreadOpen, isMainThreadShortcut, keepsScrollPlace, 
 import { restoreScroll } from './scroll.ts';
 import { ShellTop } from './ShellTop.tsx';
 import type { ShellTopProps } from './ShellTop.tsx';
+import '../../ui/Glass/Glass.css';
 import './Shell.css';
 
 export type ShellProps = Omit<ShellTopProps, 'running' | 'main'> & {
   current: NavKey | null;
   // A detail screen: no bottom tabs on the phone.
   detail?: boolean;
-  // On the phone the screen draws its own header inside the scrolling body
-  // (the thread's glass strip) and the shell header hides.
+  // On the phone the screen draws its own header inside the frame (the
+  // thread's glass strip) and the shell header hides.
   ownTop?: boolean;
   children: ReactNode;
 };
@@ -59,7 +62,7 @@ export function Shell({ current, detail, ownTop, children, ...top }: ShellProps)
   // have moved the body since), and only the state's identity says it happened.
   const router = useAppSelector(state => state.router);
   const { route, source, scroll } = router;
-  const body = useRef<HTMLElement>(null);
+  const frame = useRef<HTMLDivElement>(null);
   const mainThreadId = me?.mainThreadId ?? null;
   // One route object per id: the key listener below binds once, not per render.
   const mainRoute = useMemo(() => mainThreadRoute(mainThreadId), [mainThreadId]);
@@ -71,14 +74,14 @@ export function Shell({ current, detail, ownTop, children, ...top }: ShellProps)
   // A new screen starts at the top; a move inside the same page
   // (keepsScrollPlace) keeps its place; a history navigation brings back
   // the place the entry was left at (restoreScroll: now, and again as the
-  // screen grows into it, until the reader or the screen moves the body
-  // itself). Before paint, so the body never shows at the top first. Keyed
+  // screen grows into it, until the reader or the screen moves the frame
+  // itself). Before paint, so the frame never shows at the top first. Keyed
   // by the router state: a new state is a navigation, a kept one is not.
   const previous = useRef<AppRoute | null>(null);
 
   useLayoutEffect(() => {
     const from = previous.current;
-    const box = body.current;
+    const box = frame.current;
 
     previous.current = route;
 
@@ -171,37 +174,37 @@ export function Shell({ current, detail, ownTop, children, ...top }: ShellProps)
           ) : null}
         </aside>
         <div className="shell-main">
-          <ShellTop {...top} running={running} main={main} />
-          <main className="shell-body" ref={body}>
-            {children}
-          </main>
-          <nav className="shell-tabs" aria-label="Sections">
-            {TABS.map(item => (
-              <Link key={item.key} className="shell-tab" route={item.route} current={item.key === tabCurrent}>
-                <Icon name={item.icon} />
-                {item.name}
-                {item.key === 'threads' && running > 0 ? (
-                  <Count state="run" size="sm" className="shell-tab-badge">
-                    {running}
-                  </Count>
-                ) : null}
-              </Link>
-            ))}
-            <a
-              className="shell-tab"
-              href="#more"
-              aria-current={tabCurrent === 'more' ? 'page' : undefined}
-              aria-expanded={moreOpen}
-              onClick={event => {
-                event.preventDefault();
-                dispatch(moreOpen ? closeMoreSheet() : openMoreSheet());
-              }}
-            >
-              <Icon name="ellipsis" />
-              More
-              {moreAttention ? <Attn className="shell-tab-badge" /> : null}
-            </a>
-          </nav>
+          <div className="shell-frame" ref={frame}>
+            <ShellTop {...top} running={running} main={main} />
+            <main className="shell-body">{children}</main>
+            <nav className="shell-tabs glass" data-edge="bottom" aria-label="Sections">
+              {TABS.map(item => (
+                <Link key={item.key} className="shell-tab" route={item.route} current={item.key === tabCurrent}>
+                  <Icon name={item.icon} />
+                  {item.name}
+                  {item.key === 'threads' && running > 0 ? (
+                    <Count state="run" size="sm" className="shell-tab-badge">
+                      {running}
+                    </Count>
+                  ) : null}
+                </Link>
+              ))}
+              <a
+                className="shell-tab"
+                href="#more"
+                aria-current={tabCurrent === 'more' ? 'page' : undefined}
+                aria-expanded={moreOpen}
+                onClick={event => {
+                  event.preventDefault();
+                  dispatch(moreOpen ? closeMoreSheet() : openMoreSheet());
+                }}
+              >
+                <Icon name="ellipsis" />
+                More
+                {moreAttention ? <Attn className="shell-tab-badge" /> : null}
+              </a>
+            </nav>
+          </div>
         </div>
       </div>
       <Toasts tabs={!detail} />

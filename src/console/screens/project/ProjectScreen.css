@@ -1,6 +1,8 @@
 @layer screens{
 /* Project: the file area as a card body — a framed, fixed-height area on wide screens
-   (its rows and the preview scroll inside), the plain list to the screen edges on the phone */
+   (its rows and the preview scroll inside), the plain list to the screen edges on the phone.
+   Brought to the top of the frame (a move inside the folder), the card lands under the glass header, not behind it. */
+.proj-files{scroll-margin-top:var(--frame-top,0px)}
 .proj-fa{--proj-fa-h:620px;height:var(--proj-fa-h);border:1px solid var(--border-surface);border-radius:var(--r-lg);overflow:hidden}
 .proj-fa-wrap{padding:0 var(--sp-4) var(--sp-4)}
 /* The header's actions in one box (a ref for the focus after Archive / Unarchive), laid out by .phead-acts as before */

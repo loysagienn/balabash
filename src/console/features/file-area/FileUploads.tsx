@@ -4,8 +4,9 @@
 // while anything runs, "×" once all is over — and the dialog of the names
 // already taken, one answer for all of them: Skip, Replace, Keep both (a
 // modal when wide, a sheet on the phone; "×" is Skip). The panel shows on
-// every file area while there are uploads (Files and a project's page);
-// the dialog — wherever it was asked.
+// every file area while there are uploads (Files and a project's page),
+// floating over the frame beside the area (FileBrowser); the dialog —
+// wherever it was asked.
 
 import { useRef } from 'react';
 import type { AppRoute } from '../../lib/router/routes.ts';

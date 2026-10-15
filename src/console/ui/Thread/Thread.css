@@ -1,7 +1,8 @@
 @layer patterns{
 /* ── Thread ──  .th (container “thread”) > .th-head (ThreadHead) + .th-body (.th-main > .feed + .composer, aside.th-rail)
-   Wide (> 900): no strip — everything about the thread is in the right rail, pinned under the shell header while the
-   feed scrolls; the title is in the shell header. Narrow (≤ 900): no rail — the glass strip on top (ThreadHead.css).
+   Wide (> 900): no strip — everything about the thread is in the right rail, pinned under the whole shell header (its glass
+   field included, --frame-top) while the feed scrolls; the title is in the shell header. Narrow (≤ 900): no rail — the glass
+   strip on top (ThreadHead.css). The strip and the composer are glass bars of the frame.
    .th grows with its content (min-height, not height): the sticky strip and rail need it to be the scrolled thing. */
 .th{container:thread / inline-size;display:flex;flex-direction:column;min-width:0;min-height:100%;background:var(--bg)}
 .th-body{display:grid;grid-template-columns:minmax(0,1fr) auto;flex:1}
@@ -10,7 +11,7 @@
 /* Rail: who and what, state (a note under it for a remote thread asleep or closed) and the controls in two groups —
    the turn (Stop turn; remote: Stop turn · Pause side by side), the thread (Finish / Finish requested with its note,
    Cancel as danger-line) — regular-size buttons (32), full width — then session, context, project and time. Scrolls on its own when the window is lower than its content. */
-.th-rail{--kv-dt-w:76px;position:sticky;top:0;align-self:start;width:var(--rail-w);max-height:calc(100dvh - var(--top-h));overflow-y:auto;overscroll-behavior:contain;display:flex;flex-direction:column;gap:var(--sp-5);padding:var(--sp-4h) var(--sp-4h) var(--sp-6)}
+.th-rail{--kv-dt-w:76px;position:sticky;top:var(--frame-top,0px);align-self:start;width:var(--rail-w);max-height:calc(100dvh - var(--frame-top,0px));overflow-y:auto;overscroll-behavior:contain;display:flex;flex-direction:column;gap:var(--sp-5);padding:var(--sp-4h) var(--sp-4h) var(--sp-6)}
 .th-rail-id{display:flex;flex-direction:column;gap:var(--sp-2h)}
 .th-rail-who{display:flex;align-items:center;gap:var(--sp-2h);min-width:0}
 .th-rail-who-main{flex:1;min-width:0;display:flex;flex-direction:column}

@@ -1,7 +1,7 @@
 // Thread header strip (design: ThreadHead) — shown in a narrow thread
-// (≤ 900; a wide thread carries everything in its rail, ThreadRail). Pinned
-// to the top of the scrolling body on glass; stuck — the feed has scrolled
-// under it (the hairline shows). State, context and the tags; on the right
+// (≤ 900; a wide thread carries everything in its rail, ThreadRail). A glass
+// bar of the frame (ui/Glass) pinned on top; the feed melts into its soft
+// edge. State, context and the tags; on the right
 // only the controls that apply right now (hidden ≤ 560, the details sheet
 // has them all): "Stop turn" while a turn runs, "Pause" for a remote
 // thread awaiting a message, "Finish thread" (or "Finish requested",
@@ -18,6 +18,7 @@ import { Status } from '../Status/Status.tsx';
 import { Tag } from '../atoms/atoms.tsx';
 import type { StateName } from '../atoms/state.ts';
 import { threadStateLabel } from './ThreadHead.logic.ts';
+import '../Glass/Glass.css';
 import './ThreadHead.css';
 
 export type ThreadHeadControl = { onClick: () => void; busy?: boolean };
@@ -37,7 +38,6 @@ export type ThreadHeadProps = {
   tag?: string;
   // A remote agent's thread: the "remote" tag.
   remote?: boolean;
-  stuck?: boolean;
   onBack?: () => void;
   controls?: ThreadHeadControls;
   // "⋯": the details sheet.
@@ -54,10 +54,10 @@ function Back({ onBack }: { onBack?: () => void }) {
   );
 }
 
-export function ThreadHead({ title, state, label, ctx, tag, remote, stuck, onBack, controls, onMore, moreOpen, loading }: ThreadHeadProps) {
+export function ThreadHead({ title, state, label, ctx, tag, remote, onBack, controls, onMore, moreOpen, loading }: ThreadHeadProps) {
   if (loading) {
     return (
-      <div className="th-head" aria-busy="true">
+      <div className="th-head glass" data-edge="top" aria-busy="true">
         <Back onBack={onBack} />
         <span className="skel-stack th-id">
           <Skel w={60} />
@@ -68,7 +68,7 @@ export function ThreadHead({ title, state, label, ctx, tag, remote, stuck, onBac
   }
 
   return (
-    <div className="th-head" data-stuck={stuck ? '' : undefined}>
+    <div className="th-head glass" data-edge="top">
       <Back onBack={onBack} />
       <div className="th-id">
         <h2 className="th-title">{title}</h2>

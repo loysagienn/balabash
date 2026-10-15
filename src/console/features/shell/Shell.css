@@ -1,6 +1,9 @@
 @layer patterns{
 /* ════════════ Shell ════════════
-   .app (container) > .shell[data-detail][data-own-top] > aside.shell-side + .shell-main (header.shell-top, main.shell-body, nav.shell-tabs) */
+   .app (container) > .shell[data-detail][data-own-top] > aside.shell-side + .shell-main > .shell-frame (header.shell-top, main.shell-body, nav.shell-tabs)
+   Frame: one scroller per screen (.shell-frame). Its bars are glass (ui/Glass), sticky and in the flow: the header on top,
+   the bottom bar — the tabs on the phone, or the screen’s own (the composer, the file actions). The content scrolls under
+   them, and its empty fields at the top and the bottom are their heights by themselves — the growing composer too. */
 .app{position:relative;container:shell / inline-size;height:100%;min-height:0}
 .shell{display:grid;grid-template-columns:var(--side-w) minmax(0,1fr);height:100%;min-height:0;background:var(--bg);color:var(--text)}
 
@@ -37,8 +40,9 @@
 .shell-foot{margin-top:auto;padding:var(--sp-2h) var(--sp-3);border-radius:var(--r-md);background:var(--surface-2);font-size:var(--fs-meta);line-height:var(--lh-meta);color:var(--text-3)}
 .shell-foot-v{color:var(--text-2);font-weight:var(--fw-medium)}
 
-.shell-main{display:flex;flex-direction:column;min-width:0;min-height:0}
-.shell-top{display:flex;align-items:center;gap:var(--sp-2h);height:var(--top-h);padding:0 var(--gutter);border-bottom:1px solid var(--border-surface);background:var(--surface);flex:none;min-width:0}
+.shell-main{--frame-top:calc(var(--top-h) + var(--glass-pad));--frame-foot:0px;position:relative;display:flex;flex-direction:column;min-width:0;min-height:0}   /* position: what floats over the frame covers the column, not the scrolled content; --frame-top / --frame-foot — the bars’ heights (their glass fields included) for what floats over the frame */
+.shell-frame{container:frame / inline-size;display:flex;flex-direction:column;flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain}
+.shell-top{position:sticky;top:0;z-index:calc(var(--z-sticky) + 1);display:flex;align-items:center;gap:var(--sp-2h);height:calc(var(--top-h) + var(--glass-pad));padding:0 var(--gutter) var(--glass-pad);flex:none;min-width:0}   /* .glass data-edge="top"; the row is --top-h, the field below it is the glass’s; above a thread strip that continues it */
 .shell-back{margin-left:calc(-1 * var(--sp-2))}
 .shell-crumb{flex:none;font-size:var(--fs-ui);color:var(--text-3);text-decoration:none}
 .shell-crumb:hover{color:var(--text)}
@@ -46,7 +50,7 @@
 .shell-title{min-width:0;margin:0;font-size:var(--fs-h2);line-height:var(--lh-h2);font-weight:var(--fw-semibold);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .shell-sub{min-width:0;font-size:var(--fs-ui);color:var(--text-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .shell-top-end{margin-left:auto;display:flex;align-items:center;gap:var(--sp-2h);flex:none}
-.shell-body{position:relative;flex:1;min-height:0;overflow:auto}
+.shell-body{position:relative;flex:1 0 auto}   /* at least the frame between the bars (the basis is the content, so a bottom bar follows it); a screen that fills the frame instead of scrolling in it (desktop Files) is absolute inside: a percentage height would resolve against the content’s own height */
 /* the page has its own titled header (.th-head, .phead): when wide, the shell header holds only “← Section”; the title appears once, in the page header */
 .shell-top[data-title="narrow"] .shell-title{display:none}
 .shell-top[data-title="narrow"] .shell-crumb-sep{display:none}
@@ -55,12 +59,21 @@
 /* "back" only on the phone (backNarrow): the detail of a split view, whose list stays beside it when wide */
 .shell-top[data-back="narrow"] .shell-back{display:none}
 
-.shell-tabs{display:none;grid-template-columns:repeat(5,minmax(0,1fr));min-height:calc(var(--tabs-h) + env(safe-area-inset-bottom,0px));padding-bottom:env(safe-area-inset-bottom,0px);border-top:1px solid var(--border-surface);background:var(--surface);flex:none}
+.shell-tabs{position:sticky;bottom:0;z-index:var(--z-sticky);display:none;grid-template-columns:repeat(5,minmax(0,1fr));min-height:calc(var(--glass-pad) + var(--tabs-h) + env(safe-area-inset-bottom,0px));padding:var(--glass-pad) 0 env(safe-area-inset-bottom,0px);flex:none}   /* .glass data-edge="bottom"; the field above the tabs is the glass’s */
 .shell-tab{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:var(--sp-0h);font-size:var(--fs-micro);line-height:var(--lh-micro);font-weight:var(--fw-medium);color:var(--text-3);text-decoration:none}
 .shell-tab .ic{font-size:var(--ico-lg)}
 .shell-tab[aria-current="page"]{color:var(--text)}
 .shell-tab[aria-current="page"]::before{content:"";position:absolute;top:-1px;left:30%;right:30%;height:2px;border-radius:var(--r-pill);background:var(--accent)}
 .shell-tab-badge{position:absolute;top:var(--sp-1h);left:calc(50% + var(--sp-1h))}
+
+/* a narrow thread under the shell header (a wide shell): one glass of two rows — the strip (ThreadHead.css) draws it from
+   the top of the frame; the header is only its row, with no glass field and no glass of its own */
+@container frame (max-width:900px){
+  @container shell (min-width:721px){
+    .shell-frame:has(.th-head) .shell-top{height:var(--top-h);padding-bottom:0}
+    .shell-frame:has(.th-head) .shell-top.glass::before,.shell-frame:has(.th-head) .shell-top.glass::after{display:none}
+  }
+}
 
 @container shell (max-width:720px){
   .shell{grid-template-columns:minmax(0,1fr)}
@@ -78,9 +91,13 @@
   .shell-title-narrow{display:inline}
   .shell-top[data-back="narrow"] .shell-back{display:inline-flex}
   .shell-tabs{display:grid}
+  .shell-main{--frame-foot:calc(var(--glass-pad) + var(--tabs-h) + env(safe-area-inset-bottom,0px))}
+  .shell:not([data-detail]) .screen{padding-bottom:0}   /* the tabs’ glass field is the gap */
   .shell-mt-btn{display:inline-flex}
   .shell-ws-btn{display:inline-flex}
   .shell[data-detail] .shell-tabs{display:none}
-  .shell[data-own-top] .shell-top{display:none}   /* the screen draws its own header inside the scrolling body (thread: the glass strip) */
+  .shell[data-detail] .shell-main{--frame-foot:0px}
+  .shell[data-own-top] .shell-top{display:none}   /* the screen draws its own header inside the frame (thread: the glass strip) */
+  .shell[data-own-top] .shell-main{--frame-top:0px}
 }
 }

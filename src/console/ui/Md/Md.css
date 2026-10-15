@@ -9,6 +9,7 @@
 .md :is(h1,h2,h3,h4,h5,h6){font-weight:var(--fw-semibold);color:var(--text)}
 /* a heading brought into view by a fragment keeps the page's top rhythm instead of touching the edge of the scroll box */
 .md :is(h1,h2,h3,h4,h5,h6)[id]{scroll-margin-top:var(--sp-4)}
+@container shell (max-width:720px){ .md :is(h1,h2,h3,h4,h5,h6)[id]{scroll-margin-top:calc(var(--frame-top,0px) + var(--sp-4))} }   /* on the phone the page scrolls in the frame: a heading brought to the top lands under the glass header without it */
 .md h1{font-size:var(--fs-lg);line-height:var(--lh-lg)}
 .md h2{font-size:var(--fs-h2);line-height:var(--lh-h2)}
 .md h3{font-size:var(--fs-body);line-height:var(--lh-body)}

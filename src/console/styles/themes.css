@@ -20,7 +20,7 @@
   color-scheme:dark;
   --bg:#0c0d0f; --surface:#131417; --surface-2:#18191d; --surface-3:#222329;
   --overlay:rgba(5,6,8,.72);
-  --bg-glass:color-mix(in srgb,var(--surface) 72%,transparent);
+  --bg-glass:color-mix(in srgb,var(--bg) 30%,transparent);
   --hover:rgba(255,255,255,0.045); --selected:rgba(255,255,255,0.07); --press:rgba(255,255,255,0.09);
   --layer-hover:linear-gradient(var(--hover),var(--hover)); --layer-selected:linear-gradient(var(--selected),var(--selected)); --layer-press:linear-gradient(var(--press),var(--press));
   --border:#1f2024; --border-strong:#2e3036; --border-ctl:#393b42; --border-hover:#45474f;   /* --border-ctl 1.65:1 to --surface */
@@ -54,7 +54,7 @@
   color-scheme:dark;
   --bg:#1a1817; --surface:#21201e; --surface-2:#282624; --surface-3:#343230;   /* a gray with a trace of warmth: every neutral on one hue (oklch h 70–75), chroma ≤ 0.008 */
   --overlay:rgba(12,11,10,.62);
-  --bg-glass:color-mix(in srgb,var(--surface) 72%,transparent);
+  --bg-glass:color-mix(in srgb,var(--bg) 30%,transparent);
   --hover:rgba(255,248,240,0.05); --selected:rgba(255,248,240,0.075); --press:rgba(255,248,240,0.1);
   --layer-hover:linear-gradient(var(--hover),var(--hover)); --layer-selected:linear-gradient(var(--selected),var(--selected)); --layer-press:linear-gradient(var(--press),var(--press));
   --border:#2e2c2a; --border-strong:#3d3b38; --border-ctl:#524f4c; --border-hover:#66635f;   /* --border-ctl 2.0:1 to --surface */
@@ -88,7 +88,7 @@
   color-scheme:light;
   --bg:#f3f4f6; --surface:#ffffff; --surface-2:#f8f9fa; --surface-3:#e8e9ed;
   --overlay:rgba(18,20,28,.36);
-  --bg-glass:color-mix(in srgb,var(--surface) 72%,transparent);
+  --bg-glass:color-mix(in srgb,var(--bg) 30%,transparent);
   --hover:rgba(16,20,32,0.045); --selected:rgba(16,20,32,0.07); --press:rgba(16,20,32,0.1);
   --layer-hover:linear-gradient(var(--hover),var(--hover)); --layer-selected:linear-gradient(var(--selected),var(--selected)); --layer-press:linear-gradient(var(--press),var(--press));
   --border:#e1e3e6; --border-strong:#d2d4d8; --border-ctl:#bbbec2; --border-hover:#9c9ea3;   /* --border-ctl 1.9:1 to --surface: a calm field outline, as on the dark themes */
@@ -122,7 +122,7 @@
   color-scheme:light;
   --bg:#f2efe7; --surface:#fcfaf5; --surface-2:#f7f4ee; --surface-3:#e8e3da;
   --overlay:rgba(40,30,18,.34);
-  --bg-glass:color-mix(in srgb,var(--surface) 72%,transparent);
+  --bg-glass:color-mix(in srgb,var(--bg) 30%,transparent);
   --hover:rgba(70,50,20,0.05); --selected:rgba(70,50,20,0.075); --press:rgba(70,50,20,0.11);
   --layer-hover:linear-gradient(var(--hover),var(--hover)); --layer-selected:linear-gradient(var(--selected),var(--selected)); --layer-press:linear-gradient(var(--press),var(--press));
   --border:#e0dcd3; --border-strong:#d3cdc3; --border-ctl:#c3bdb4; --border-hover:#a59d93;   /* --border-ctl 1.8:1 to --surface: a calm field outline, as on the dark themes */

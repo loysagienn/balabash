@@ -1,5 +1,7 @@
 // Thread composer (design: Composer): full-width text with "Attach", the
-// ↵ hint and "Send" below it; sticks to the bottom of the main column.
+// ↵ hint and "Send" below it; the bottom glass bar of the frame (ui/Glass),
+// sticky at the bottom of the main column — the feed melts into it, and
+// the box is see-through.
 // Controlled: value / onChange (the store keeps a draft per thread);
 // onSend gets the text without the surrounding blank lines on Enter or the
 // button (Shift+Enter, ⌘↵, Ctrl+↵ — a new line; on a phone Enter is a new
@@ -24,6 +26,7 @@ import { Note } from '../Note/Note.tsx';
 import { Kbd } from '../atoms/atoms.tsx';
 import { PHONE_MEDIA } from '../../lib/touch/pinch.ts';
 import { composerKeyAction, outgoingText } from './Composer.logic.ts';
+import '../Glass/Glass.css';
 import './Composer.css';
 
 export type ComposerRefusal = { text: string; action?: string; actionIcon?: IconName; onAction?: () => void };
@@ -115,7 +118,7 @@ export function Composer({ to, value, onChange, onSend, onFiles, attachments, re
   };
 
   return (
-    <div className="composer">
+    <div className="composer glass" data-edge="bottom">
       {refusal ? (
         <div className="composer-note">
           <Note state="err" icon="circle-alert" role="alert" action={refusal.action} actionIcon={refusal.actionIcon} actionVariant="ghost" onAction={refusal.onAction}>

@@ -107,7 +107,7 @@ function visiblePlace(node: HTMLElement | null): DropPlace | undefined {
 }
 
 function scrollBox(node: HTMLElement | null): HTMLElement | null {
-  return node?.closest('.shell-body') ?? null;
+  return node?.closest('.shell-frame') ?? null;
 }
 
 // The offset of a node from the top of the scroll box's content — the same
@@ -152,14 +152,12 @@ type FeedScrollInput = {
 // inside the last group included. Native scroll anchoring is off for the
 // feed (ThreadScreen.css), so this is the only hand on the box. After every
 // change and on scroll, a reader less than a screen from the top of the
-// drawn feed asks for more (onNearTop). Returns whether the feed has
-// scrolled under the thread's strip.
-function useFeedScroll({ feedRef, itemsRef, topRef, ready, drawn, top, requesting, restore, onNearTop }: FeedScrollInput): boolean {
+// drawn feed asks for more (onNearTop).
+function useFeedScroll({ feedRef, itemsRef, topRef, ready, drawn, top, requesting, restore, onNearTop }: FeedScrollInput): void {
   const seen = useRef<(FeedScrollSeen & { anchors: FeedAnchor[] }) | null>(null);
   const atEnd = useRef(true);
   const scrollTop = useRef(0);
   const nearTop = useRef(onNearTop);
-  const [stuck, setStuck] = useState(false);
 
   nearTop.current = onNearTop;
 
@@ -191,7 +189,6 @@ function useFeedScroll({ feedRef, itemsRef, topRef, ready, drawn, top, requestin
     const onScroll = () => {
       scrollTop.current = box.scrollTop;
       atEnd.current = box.scrollHeight - box.scrollTop - box.clientHeight < 48;
-      setStuck(box.scrollTop > 0);
 
       if (!frame) {
         frame = requestAnimationFrame(() => {
@@ -210,11 +207,14 @@ function useFeedScroll({ feedRef, itemsRef, topRef, ready, drawn, top, requestin
   }, [feedRef, ready, checkTop]);
 
   // The drawn items keep growing after they are placed — the Markdown
-  // renderer arrives, an image loads, details open: a reader at the end
-  // stays at the end (the feed opens there and the tail follows it).
+  // renderer arrives, an image loads, details open — and the composer grows
+  // with the draft typed into it (the bottom bar stands in the flow, so its
+  // field grows too): a reader at the end stays at the end (the feed opens
+  // there and the tail follows it). Watched on the main column, which holds
+  // both the feed and the composer.
   useEffect(() => {
     const box = scrollBox(feedRef.current);
-    const content = feedRef.current?.firstElementChild;
+    const content = feedRef.current?.parentElement;
 
     if (!box || !content || !ready) {
       return undefined;
@@ -288,16 +288,12 @@ function useFeedScroll({ feedRef, itemsRef, topRef, ready, drawn, top, requestin
       scrollTop.current = box.scrollTop;
     }
 
-    setStuck(box.scrollTop > 0);
-
     // Measured while a chunk is in flight: it lands at the next change.
     seen.current = { top, height: box.scrollHeight, anchors: requesting ? measure(box) : [] };
 
     // A short drawn feed, or a reader already near its top: draw more.
     checkTop();
   }, [feedRef, ready, drawn, top, requesting, restore, measure, checkTop]);
-
-  return stuck;
 }
 
 function ThreadPage({ thread }: { thread: ThreadRecord }) {
@@ -397,7 +393,7 @@ function ThreadPage({ thread }: { thread: ThreadRecord }) {
   const itemsRef = useRef<HTMLDivElement>(null);
   const topRef = useRef<HTMLDivElement>(null);
   const top = `${feed.knownFrom ?? ''}:${feed.exhausted}:${drawn[0]?.key ?? ''}`;
-  const stuck = useFeedScroll({ feedRef, itemsRef, topRef, ready, drawn, top, requesting: feed.request !== null, restore, onNearTop });
+  useFeedScroll({ feedRef, itemsRef, topRef, ready, drawn, top, requesting: feed.request !== null, restore, onNearTop });
 
   const lock = composerLock(thread, { parentAgent: parent?.agent ?? null, sessionGone: remoteSessionGone(events) });
   const title = threadTitle(thread);
@@ -463,7 +459,6 @@ function ThreadPage({ thread }: { thread: ThreadRecord }) {
           ctx={thread.remote ? undefined : ctx}
           tag={thread.headless ? 'headless' : undefined}
           remote={thread.remote}
-          stuck={stuck}
           onBack={() => dispatch(routeTo(BACK))}
           controls={headControls}
           onMore={() => setDetailsOpen(open => !open)}

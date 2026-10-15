@@ -1,0 +1,18 @@
+@layer patterns{
+/* ── Glass ──  a bar the content scrolls under: the shell header, the bottom tabs, the thread strip, the composer, the file actions.
+   Mixin on a positioned (sticky) bar:  <header class="shell-top glass" data-edge="top"> · <nav class="shell-tabs glass" data-edge="bottom">
+   The fill is the page color, see-through (--bg-glass), with a blur. There is no line: the edge that meets the content melts
+   over --glass-fade — the color and the blur fade together. data-edge="top": opaque at the very top edge, glass by
+   --glass-solid, transparent at the bottom edge; "bottom": transparent at the top edge, glass below.
+   Two layers under the bar’s content (a progressive blur): ::before — the strong blur, gone by the middle of the fade;
+   ::after — the color and a soft blur, fading over the whole of it. The bar itself has no background, filter, opacity or
+   mask: any of those makes it a backdrop root and cuts the layers off from the content behind. */
+.glass{isolation:isolate}
+.glass::before,.glass::after{content:"";position:absolute;inset:0;z-index:-1;pointer-events:none}
+.glass::before{-webkit-backdrop-filter:var(--glass-blur);backdrop-filter:var(--glass-blur)}
+.glass::after{background:var(--bg-glass);-webkit-backdrop-filter:var(--glass-blur-soft);backdrop-filter:var(--glass-blur-soft)}
+.glass[data-edge="top"]::before{-webkit-mask-image:linear-gradient(#000 calc(100% - var(--glass-fade)),transparent calc(100% - var(--glass-fade) / 2));mask-image:linear-gradient(#000 calc(100% - var(--glass-fade)),transparent calc(100% - var(--glass-fade) / 2))}
+.glass[data-edge="top"]::after{background:linear-gradient(var(--bg),var(--bg-glass) var(--glass-solid));-webkit-mask-image:linear-gradient(#000 calc(100% - var(--glass-fade)),transparent);mask-image:linear-gradient(#000 calc(100% - var(--glass-fade)),transparent)}
+.glass[data-edge="bottom"]::before{-webkit-mask-image:linear-gradient(transparent calc(var(--glass-fade) / 2),#000 var(--glass-fade));mask-image:linear-gradient(transparent calc(var(--glass-fade) / 2),#000 var(--glass-fade))}
+.glass[data-edge="bottom"]::after{-webkit-mask-image:linear-gradient(transparent,#000 var(--glass-fade));mask-image:linear-gradient(transparent,#000 var(--glass-fade))}
+}

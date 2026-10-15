@@ -101,10 +101,11 @@ function ProjectPage({ project, route }: { project: ProjectView; route: ProjectR
   const files = useRef<HTMLElement>(null);
   const acts = useRef<HTMLSpanElement>(null);
 
-  // A move inside the folder keeps the body's scroll place (Shell); when
-  // the file card is then out of view — its head scrolled past above, or
-  // still below — it comes to the top, so the rows or the opened file are
-  // where the eye is, not the project header. Not on the first render:
+  // A move inside the folder keeps the frame's scroll place (Shell); when
+  // the file card is then out of view — its head scrolled past above (under
+  // the glass header), or still below — it comes to the top, under the
+  // header (scroll-margin-top, ProjectScreen.css), so the rows or the
+  // opened file are where the eye is, not the project header. Not on the first render:
   // a page opened at a path starts at the top as any screen. Not on a
   // history navigation with a place to bring back: the shell restores it,
   // wherever the card was then.
@@ -122,7 +123,7 @@ function ProjectPage({ project, route }: { project: ProjectView; route: ProjectR
     }
 
     const card = files.current;
-    const box = card?.closest('.shell-body');
+    const box = card?.closest('.shell-frame');
 
     if (!card || !box) {
       return;
@@ -130,8 +131,10 @@ function ProjectPage({ project, route }: { project: ProjectView; route: ProjectR
 
     const top = card.getBoundingClientRect().top;
     const view = box.getBoundingClientRect();
+    // The content in view starts under the sticky header (its glass field included).
+    const viewTop = box.querySelector('.shell-top')?.getBoundingClientRect().bottom ?? view.top;
 
-    if (top < view.top || top > view.bottom - 1) {
+    if (top < viewTop || top > view.bottom - 1) {
       card.scrollIntoView({ block: 'start' });
     }
   }, [route.path]);
@@ -198,7 +201,7 @@ function ProjectPage({ project, route }: { project: ProjectView; route: ProjectR
           </Empty>
         )}
       </Card>
-      <Card narrow="bare" ref={files}>
+      <Card narrow="bare" className="proj-files" ref={files}>
         <CardHead title="Project files">
           <ProjectFilesSummary slug={project.slug} />
         </CardHead>

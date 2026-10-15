@@ -1,10 +1,11 @@
 @layer patterns{
-/* ── Thread header strip (narrow thread) ──  .th-head[data-stuck] > .th-ph (.th-back) + .th-id (h2.th-title + .th-chips) + .th-acts (.th-act… .th-more)
-   Pinned on glass to the top of the scrolling body; data-stuck — the feed has scrolled under it (the hairline shows).
-   Inside .th (container “thread”): > 900 — no strip (the rail has it all); ≤ 560 — the controls go into the details sheet;
-   on the phone it is the screen header — “back”, the title over state and context, “⋯”. */
-.th-head{position:sticky;top:0;z-index:var(--z-sticky);display:flex;align-items:center;gap:var(--sp-2h);min-height:var(--top-h);padding:var(--sp-2) var(--gutter);border-bottom:1px solid transparent;background:var(--bg-glass);-webkit-backdrop-filter:var(--glass-blur);backdrop-filter:var(--glass-blur)}
-.th-head[data-stuck]{border-bottom-color:var(--border-surface)}
+/* ── Thread header strip (narrow thread) ──  .th-head.glass[data-edge=top] > .th-ph (.th-back) + .th-id (h2.th-title + .th-chips) + .th-acts (.th-act… .th-more)
+   A glass bar of the frame (ui/Glass) pinned on top: the feed scrolls under it, the field below its row is the glass’s —
+   no hairline, the soft edge replaces it. Inside .th (container “thread”): > 900 — no strip (the rail has it all); ≤ 560 — the
+   controls go into the details sheet; on the phone it is the screen header — “back”, the title over state and context, “⋯”.
+   Under a shell header (a wide shell, a frame ≤ 900) it continues the header’s glass — one bar of two rows: pinned right under
+   the header’s row, its layers reach up to the top of the frame (Shell.css leaves that header with no glass of its own). */
+.th-head{position:sticky;top:0;z-index:var(--z-sticky);display:flex;align-items:center;gap:var(--sp-2h);min-height:calc(var(--top-h) + var(--glass-pad));padding:var(--sp-2) var(--gutter) calc(var(--sp-2) + var(--glass-pad))}
 .th-ph{display:none}   /* phone-only part of the strip: “back” */
 .th-back{margin-left:calc(-1 * var(--sp-2))}
 .th-id{flex:1;min-width:0;display:flex;flex-direction:column;gap:var(--sp-0h)}
@@ -14,9 +15,16 @@
 .th-act,.th-more{flex:none}   /* .th-act hides in a thread ≤ 560 (then it is in the sheet); .th-more (“⋯” — thread details) is always there */
 @container thread (min-width:901px){ .th-head{display:none} }
 @container thread (max-width:560px){ .th-act{display:none} }
+/* a narrow thread under the shell header (a wide shell): one glass of two rows */
+@container frame (max-width:900px){
+  @container shell (min-width:721px){
+    .th-head{top:var(--top-h)}
+    .th-head.glass::before,.th-head.glass::after{top:calc(-1 * var(--top-h))}
+  }
+}
 /* phone: the strip is the screen header — header height, “back”, the title over state and context, “⋯” */
 @container shell (max-width:720px){
-  .th-head{gap:var(--sp-2);padding-block:0;padding-right:var(--sp-2)}
+  .th-head{gap:var(--sp-2);padding-block:0 var(--glass-pad);padding-right:var(--sp-2)}
   .th-ph{display:contents}
   .th-title{display:block}
 }

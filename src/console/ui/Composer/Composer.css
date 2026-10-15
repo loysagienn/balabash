@@ -1,11 +1,12 @@
 @layer patterns{
 /* ── Thread composer ──  .composer > .composer-note? + .composer-box (.composer-atts? + textarea.composer-input + .composer-f > .composer-attach .composer-hint | .composer-wait .composer-send) | .composer-lock
-   Sticks to the bottom of the main column. In a narrow thread (≤ 480): same layout, its own sizes.
+   The bottom glass bar of the frame (.glass data-edge="bottom", ui/Glass), sticky at the bottom of the main column: the feed
+   melts into it, and its field above the box (--glass-pad) is the feed’s bottom gap. In a narrow thread (≤ 480): same layout, its own sizes.
    Attachments upload the moment they are picked (paperclip, drop on the thread, paste); Send stays disabled while any of them uploads —
    .composer-wait says why in place of the hint. A message may be files only. A refused send keeps the draft whole and shows .composer-note. */
-.composer{position:sticky;bottom:0;z-index:var(--z-sticky);margin-top:auto;padding:var(--sp-3) var(--gutter) var(--sp-4);background:linear-gradient(transparent,var(--bg) var(--sp-4h))}
-.composer-box{--composer-min-h:40px;display:flex;flex-direction:column;gap:var(--sp-1h);max-width:calc(var(--feed-max) - 2 * var(--gutter));   /* = feed column width */margin:0 auto;padding:var(--sp-2h) var(--sp-2h) var(--sp-2) var(--sp-3h);border:1px solid var(--border-ctl);border-radius:var(--r-lg);background:var(--surface)}
-.composer-box:focus-within{border-color:var(--accent);box-shadow:var(--ring-field)}
+.composer{position:sticky;bottom:0;z-index:var(--z-sticky);margin-top:auto;padding:var(--glass-pad) var(--gutter) var(--sp-4)}
+.composer-box{--composer-min-h:40px;display:flex;flex-direction:column;gap:var(--sp-1h);max-width:calc(var(--feed-max) - 2 * var(--gutter));   /* = feed column width */margin:0 auto;padding:var(--sp-2h) var(--sp-2h) var(--sp-2) var(--sp-3h);border:1px solid var(--border-ctl);border-radius:var(--r-lg);background:color-mix(in srgb,var(--surface) 50%,transparent)}   /* see-through like the glass under it: the feed shows through as it melts into the composer */
+.composer-box:focus-within{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}   /* focus — a 2 px accent line on the very edge, no halo outside it */
 .composer-input{--composer-max-lines:8;width:100%;min-height:var(--composer-min-h);max-height:calc(var(--lh-body) * var(--composer-max-lines));field-sizing:content;margin:0;padding:0;border:0;background:transparent;outline:none;resize:none;font-size:var(--fs-body);line-height:var(--lh-body);color:var(--text)}
 .composer-input::placeholder{color:var(--text-3)}
 .composer-f{display:flex;align-items:center;gap:var(--sp-1h)}
@@ -19,9 +20,9 @@
 /* narrow thread: same layout, its own sizes. The field is one line and grows to six; buttons below it —
    “attach” aligned with the text, “send” round; the phone’s system bar is accounted for at the bottom */
 @container thread (max-width:480px){
-  .composer{padding:var(--sp-2) var(--gutter) calc(var(--sp-2) + env(safe-area-inset-bottom,0px));background:var(--bg-glass);-webkit-backdrop-filter:var(--glass-blur);backdrop-filter:var(--glass-blur)}
+  .composer{padding:var(--glass-pad) var(--gutter) calc(var(--sp-2) + env(safe-area-inset-bottom,0px))}
   .composer-box{--composer-min-h:var(--lh-lg);gap:var(--sp-1);padding:var(--sp-2h) var(--sp-1h) var(--sp-1h) var(--sp-3h)}
-  .composer-input{--composer-max-lines:6;padding:var(--sp-0h) 0;font-size:var(--fs-input-touch);line-height:var(--lh-lg);max-height:calc(var(--lh-lg) * var(--composer-max-lines) + var(--sp-1))}
+  .composer-input{--composer-max-lines:6;padding:var(--sp-0h) var(--sp-2) var(--sp-0h) 0;font-size:var(--fs-input-touch);line-height:var(--lh-lg);max-height:calc(var(--lh-lg) * var(--composer-max-lines) + var(--sp-1))}
   .composer-hint{display:none}
   .composer-attach{margin-left:calc(-1 * var(--sp-2h))}
   .composer-send{margin-left:auto;border-radius:var(--r-pill)}

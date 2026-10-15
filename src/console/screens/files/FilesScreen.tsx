@@ -2,7 +2,8 @@
 // 17); the project page mounts the same FileBrowser with its own root. The
 // path is the route; the node behind it decides whether the screen is a
 // folder or a file (the shell changes with it, FilesScreen.logic.ts). The
-// area fills the shell body: its rows and the preview scroll on their own.
+// area fills the shell body: its rows and the preview scroll on their own;
+// on the phone it is the page and scrolls in the frame (FilesScreen.css).
 
 import type { FilesRoute } from '../../lib/router/routes.ts';
 import { Shell } from '../../features/shell/Shell.tsx';

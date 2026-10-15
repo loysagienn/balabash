@@ -1,4 +1,9 @@
 @layer screens{
-/* Files: the area takes the whole shell body; the list and the preview scroll inside it. */
-.fil-fa{height:100%}
+/* Files: the area fills the shell body between the bars (absolute: the body’s height follows its content, so a percentage
+   height would not hold the area to the frame); the list and the preview scroll inside it.
+   Phone: the file area is the page — it scrolls in the frame, under the glass header; the preview’s file actions are the bottom glass bar. */
+.fil-fa{position:absolute;inset:0}
+@container shell (max-width:720px){
+  .fil-fa{position:relative;inset:auto;min-height:100%}
+}
 }

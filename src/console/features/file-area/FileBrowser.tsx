@@ -8,6 +8,9 @@
 // serves both roots.
 // Query keeps older data through a failed refetch: a 404 still means the
 // path is gone, any other failure keeps the rows under a banner with Retry.
+// The upload panel floats beside the area, not inside it: positioned against
+// the shell's main column, it stays in the corner of the frame while the
+// area scrolls as the page on the phone (FileUploads.css).
 
 import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
@@ -239,7 +242,7 @@ export function FileBrowser({ root, rootLabel, lead, path, view, routeFor, pins,
     );
   }
 
-  return (
+  const area = (
     <FileArea view={kind === 'file' ? 'preview' : 'list'} split={kind === 'file' && !editing} drop={dropHandlers} className={className}>
       <FaList>
         <FaBar end={uploadButtons}>
@@ -273,8 +276,14 @@ export function FileBrowser({ root, rootLabel, lead, path, view, routeFor, pins,
         </FaPreview>
       ) : null}
       {drag ? <Drop path={listPath || rootLabel} sub={countOf(drag.count, 'file')} /> : null}
+    </FileArea>
+  );
+
+  return (
+    <>
+      {area}
       <UploadPanel routeFor={linkRoute} rootLabel={rootLabel} />
       <ClashDialog rootLabel={rootLabel} />
-    </FileArea>
+    </>
   );
 }

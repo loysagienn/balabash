@@ -1,4 +1,4 @@
-// Shell header (design: ShellTop): on the phone, a top-level screen starts
+// Shell header (design: ShellTop) — the glass top bar of the frame (ui/Glass): on the phone, a top-level screen starts
 // with the current workspace's mark (the workspaces sheet, features/workspaces;
 // a page with "back" leaves the room to its title); "back" and the section above the page,
 // the title, a subtitle; on the right the main thread button (phone only,
@@ -46,7 +46,7 @@ export function ShellTop({ title, titleNarrow, sub, crumb, back, backNarrow, pag
   const dispatch = useAppDispatch();
 
   return (
-    <header className="shell-top" data-title={pageHead ? 'narrow' : undefined} data-back={backNarrow ? 'narrow' : undefined}>
+    <header className="shell-top glass" data-edge="top" data-title={pageHead ? 'narrow' : undefined} data-back={backNarrow ? 'narrow' : undefined}>
       {back ? null : <WorkspaceSheetButton />}
       {back ? <IconBtn icon="arrow-left" label="Back" size="sm" className="shell-back" onClick={() => dispatch(routeTo(back))} /> : null}
       {crumb ? (

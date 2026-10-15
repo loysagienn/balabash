@@ -111,7 +111,7 @@ export function ThreadsScreen({ route }: { route: ThreadsRoute }) {
   const stage = threadsBody(list, threads.length);
   const firstPage = stage === 'skeleton' || stage === 'failed';
   const retry = () => dispatch(loadThreads(filters, firstPage ? null : nextCursor));
-  const toTop = () => topNode.current?.closest('.shell-body')?.scrollTo({ top: 0, behavior: 'smooth' });
+  const toTop = () => topNode.current?.closest('.shell-frame')?.scrollTo({ top: 0, behavior: 'smooth' });
 
   // The status line of the loaded range: under the rows, or under the empty
   // state when the browser-side filters hide every loaded row.
