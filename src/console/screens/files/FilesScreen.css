@@ -1,9 +1,13 @@
 @layer screens{
-/* Files: the area fills the shell body between the bars (absolute: the body’s height follows its content, so a percentage
-   height would not hold the area to the frame); the list and the preview scroll inside it.
-   Phone: the file area is the page — it scrolls in the frame, under the glass header; the preview’s file actions are the bottom glass bar. */
+/* Files: the area fills the shell body between the bars — absolute in the body, which only this screen positions (the
+   body’s height follows its content, so a percentage height would not hold the area to the frame); the list and the
+   preview scroll inside it. Phone: the body is not positioned and the file area is the page — it scrolls in the frame,
+   under the glass header; the preview’s file actions are the bottom glass bar, and the upload panel holds on to
+   .shell-main (FileUploads.css). */
+.shell-body:has(> .fil-fa){position:relative}
 .fil-fa{position:absolute;inset:0}
 @container shell (max-width:720px){
+  .shell-body:has(> .fil-fa){position:static}
   .fil-fa{position:relative;inset:auto;min-height:100%}
 }
 }

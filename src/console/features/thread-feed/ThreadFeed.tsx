@@ -25,7 +25,7 @@ import { MsgQuiet } from '../../ui/Message/MsgQuiet.tsx';
 import { Plan, PlanItem } from '../../ui/Plan/Plan.tsx';
 import { Subtask } from '../../ui/Subtask/Subtask.tsx';
 import { SysLine } from '../../ui/SysLine/SysLine.tsx';
-import { ActGroup } from '../../ui/Xp/Xp.tsx';
+import { ActGroup, actFold } from '../../ui/Xp/Xp.tsx';
 import { Code } from '../../ui/atoms/atoms.tsx';
 import { fileIcon } from '../../ui/atoms/fileIcon.ts';
 import { FeedAction } from './FeedAction.tsx';
@@ -182,7 +182,7 @@ export function FeedItemView({ item, now }: { item: FeedItem; now: Date }) {
       );
     case 'actions':
       return (
-        <ActGroup>
+        <ActGroup fold={actFold(item.items)}>
           {item.items.map(action => (
             <FeedAction key={action.key} item={action} now={now} />
           ))}

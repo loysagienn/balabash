@@ -1,14 +1,29 @@
-@layer patterns{
 /* ── Glass ──  a bar the content scrolls under: the shell header, the bottom tabs, the thread strip, the composer, the file actions.
    Mixin on a positioned (sticky) bar:  <header class="shell-top glass" data-edge="top"> · <nav class="shell-tabs glass" data-edge="bottom">
-   The fill is the page color, see-through (--bg-glass), with a blur. There is no line: the edge that meets the content melts
-   over --glass-fade — the color and the blur fade together. data-edge="top": opaque at the very top edge, glass by
-   --glass-solid, transparent at the bottom edge; "bottom": transparent at the top edge, glass below.
+   The fill is the page color, see-through (--bg-glass), with a blur. A bar is only its row. There is no line: the edge that
+   meets the content melts — the color and the blur fade together — over --glass-fade, which straddles the row’s edge:
+   --glass-edge-in inside the row (always there, so content entering under the bar never meets a hard line) plus
+   --glass-ext over the content, outside the bar. --glass-ext grows with the frame’s scroll (a scroll timeline, no script):
+   the header’s from 0 to --glass-edge-out over the first --glass-reveal px of scroll; a bottom bar’s is full while there is
+   content below and goes to 0 over the last --glass-reveal px. A frame that does not scroll has no outer edges at all — at
+   rest the bars are just the page. data-edge="top": opaque at the very top edge, glass by --glass-solid, transparent at
+   the end of the fade; "bottom": transparent at the start of the fade, glass below.
    Two layers under the bar’s content (a progressive blur): ::before — the strong blur, gone by the middle of the fade;
    ::after — the color and a soft blur, fading over the whole of it. The bar itself has no background, filter, opacity or
-   mask: any of those makes it a backdrop root and cuts the layers off from the content behind. */
-.glass{isolation:isolate}
+   mask: any of those would make it a backdrop root and cut the layers off from the content behind.
+   The timeline is the scroller’s (.shell-frame{scroll-timeline:--frame block}, Shell.css); the registered --glass-k and the
+   keyframes live outside the layers — at-rules of the whole document. */
+@property --glass-k{syntax:"<number>";inherits:true;initial-value:0}   /* 0…1 — how far the outer edge has grown */
+@keyframes glass-edge-in{from{--glass-k:0}to{--glass-k:1}}
+@keyframes glass-edge-out{from{--glass-k:1}to{--glass-k:0}}
+@layer patterns{
+.glass{--glass-ext:calc(var(--glass-edge-out) * var(--glass-k));--glass-fade:calc(var(--glass-edge-in) + var(--glass-ext));isolation:isolate}
+.glass[data-edge="top"]{animation:glass-edge-in linear both;animation-timeline:--frame;animation-range:0px var(--glass-reveal)}
+.glass[data-edge="bottom"]{animation:glass-edge-out linear both;animation-timeline:--frame;animation-range:calc(100% - var(--glass-reveal)) 100%}
 .glass::before,.glass::after{content:"";position:absolute;inset:0;z-index:-1;pointer-events:none}
+.glass[data-edge="top"]::before,.glass[data-edge="top"]::after{bottom:calc(-1 * var(--glass-ext))}   /* the outer edge lies over the content */
+.glass[data-edge="bottom"]::before,.glass[data-edge="bottom"]::after{top:calc(-1 * var(--glass-ext))}
+.glass[data-edge="top"] :is(.btn:not([data-variant]),.btn[data-variant=""],.btn[data-variant="danger-line"],.actchip){background-color:var(--surface-glass)}   /* the header’s buttons are see-through like the composer’s box */
 .glass::before{-webkit-backdrop-filter:var(--glass-blur);backdrop-filter:var(--glass-blur)}
 .glass::after{background:var(--bg-glass);-webkit-backdrop-filter:var(--glass-blur-soft);backdrop-filter:var(--glass-blur-soft)}
 .glass[data-edge="top"]::before{-webkit-mask-image:linear-gradient(#000 calc(100% - var(--glass-fade)),transparent calc(100% - var(--glass-fade) / 2));mask-image:linear-gradient(#000 calc(100% - var(--glass-fade)),transparent calc(100% - var(--glass-fade) / 2))}

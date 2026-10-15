@@ -1,7 +1,7 @@
 @layer patterns{
 /* ── File preview ──  .pv > .pv-h (.obj, .pv-t > .pv-name + .pv-m, .pv-acts) + .pv-note + .pv-b [data-fill] + .pv-actbar.glass (narrow only)
-   The action bar is a glass bottom bar (ui/Glass): on the phone the file area is the page, the body scrolls in the frame
-   and melts into the bar; its field above the buttons (--glass-pad) is the body’s bottom gap. */
+   The action bar is a glass bottom bar (ui/Glass), only its row (--sp-3 around the buttons): on the phone the file area is
+   the page, the body scrolls in the frame and melts into the soft edge that straddles the bar’s top. */
 .pv{display:flex;flex-direction:column;min-width:0;min-height:0;flex:1}
 .pv-h{display:flex;flex-wrap:wrap;align-items:flex-start;gap:var(--sp-3);padding:var(--sp-3) var(--sp-4);border-bottom:1px solid var(--border)}
 .pv-t{flex:1 1 0;min-width:0}
@@ -15,12 +15,12 @@
 .pv-b{--pv-md-max:720px;flex:1;min-height:0;overflow:auto;padding:var(--sp-4) var(--sp-5) var(--sp-6)}
 .pv-b > .md{max-width:var(--pv-md-max)}
 .pv-b[data-fill]{display:flex;flex-direction:column}
-.pv-actbar{position:sticky;bottom:0;z-index:var(--z-sticky);display:none;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);gap:var(--sp-2);padding:var(--glass-pad) var(--gutter) calc(var(--sp-3) + env(safe-area-inset-bottom,0px));flex:none}   /* .glass data-edge="bottom" — the bottom bar of a file preview on the phone */
+.pv-actbar{position:sticky;bottom:0;z-index:var(--z-sticky);display:none;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);gap:var(--sp-2);padding:var(--sp-3) var(--gutter) calc(var(--sp-3) + env(safe-area-inset-bottom,0px));flex:none}   /* .glass data-edge="bottom" — the bottom bar of a file preview on the phone */
 @container fa (max-width:720px){
   .pv-acts{display:none}
   .pv-actbar{display:grid}
   .fa[data-split] .pv-h{min-height:0}
-  .pv-b{padding:var(--sp-3) var(--gutter) 0}   /* the file actions’ glass field is the gap */
+  .pv-b{padding:var(--sp-3) var(--gutter) 0}   /* the content runs to the file actions’ row */
   .pv-note{margin:var(--sp-3) var(--gutter) 0}
 }
 /* on phone the file name is already in the detail screen header — the preview keeps only the details */

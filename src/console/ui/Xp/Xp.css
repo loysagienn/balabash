@@ -27,4 +27,22 @@
 /* ── Action group ──  .actgroup — consecutive .xp rows in the feed, indented to the avatar column */
 .actgroup{--xp-px:var(--sp-3);margin-left:var(--feed-indent,0px);border:1px solid var(--border-surface);border-radius:var(--r-md);background:var(--surface);overflow:hidden}
 @container thread (max-width:480px){ .actgroup{--xp-b-indent:var(--sp-3)} }
+/* Folding a group of actions — every group of two or more top-level actions folds; folded by default.
+   <div class="actgroup" data-fold="closed|open"> … the earlier actions … <button class="actfold"> + the last action (.xp, with
+   its depth-1 rows after it).
+   closed — only the last action shows; the earlier ones fold into a counter at its left (“+4”; on errors “+4 · 1 failed”,
+   data-state="err" — a folded action failed). The last action is always the latest: while a turn runs it is the running
+   one, and a finished one moves into the counter. open — every action shows (an open group stays open as actions
+   arrive); the counter turns into “fold”. The counter folds and unfolds the group; the row opens its own details. */
+.actgroup[data-fold]{display:grid;grid-template-columns:auto minmax(0,1fr)}
+.actgroup[data-fold] .xp{grid-column:2}
+.actgroup[data-fold="closed"] > :has(~ .actfold){display:none}
+.actgroup[data-fold="closed"] > .actfold + .xp{border-top:0}
+.actfold{grid-column:1;align-self:start;display:flex;align-items:center;min-height:max(var(--xp-h),var(--ctl-h));padding:0 0 0 var(--xp-px,var(--sp-4));border:0;background:none;color:var(--text-2);cursor:pointer}
+.actfold-n{display:inline-flex;align-items:center;justify-content:center;gap:var(--sp-1);min-width:28px;height:20px;padding:0 var(--sp-1h);border-radius:var(--r-pill);background-color:var(--selected);font-size:var(--fs-meta);line-height:1;font-weight:var(--fw-medium);font-variant-numeric:tabular-nums;white-space:nowrap}
+.actfold-n .ic{font-size:var(--ico-xs)}
+.actfold:hover .actfold-n{background-image:var(--layer-hover);color:var(--text)}
+.actfold:focus-visible{outline:none}
+.actfold:focus-visible .actfold-n{box-shadow:var(--ring-focus)}
+.actfold[data-state="err"] .actfold-n{background-color:var(--st-err-bg);color:var(--st-err-ink)}
 }

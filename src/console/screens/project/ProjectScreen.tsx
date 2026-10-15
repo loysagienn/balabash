@@ -131,7 +131,7 @@ function ProjectPage({ project, route }: { project: ProjectView; route: ProjectR
 
     const top = card.getBoundingClientRect().top;
     const view = box.getBoundingClientRect();
-    // The content in view starts under the sticky header (its glass field included).
+    // The content in view starts under the sticky header's row.
     const viewTop = box.querySelector('.shell-top')?.getBoundingClientRect().bottom ?? view.top;
 
     if (top < viewTop || top > view.bottom - 1) {

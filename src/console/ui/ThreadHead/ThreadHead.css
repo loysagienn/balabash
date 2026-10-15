@@ -1,11 +1,12 @@
 @layer patterns{
 /* ── Thread header strip (narrow thread) ──  .th-head.glass[data-edge=top] > .th-ph (.th-back) + .th-id (h2.th-title + .th-chips) + .th-acts (.th-act… .th-more)
-   A glass bar of the frame (ui/Glass) pinned on top: the feed scrolls under it, the field below its row is the glass’s —
-   no hairline, the soft edge replaces it. Inside .th (container “thread”): > 900 — no strip (the rail has it all); ≤ 560 — the
+   A glass bar of the frame (ui/Glass) pinned on top, only its row: the feed scrolls under it and melts into the soft edge
+   that straddles its bottom — no hairline. Inside .th (container “thread”): > 900 — no strip (the rail has it all); ≤ 560 — the
    controls go into the details sheet; on the phone it is the screen header — “back”, the title over state and context, “⋯”.
-   Under a shell header (a wide shell, a frame ≤ 900) it continues the header’s glass — one bar of two rows: pinned right under
-   the header’s row, its layers reach up to the top of the frame (Shell.css leaves that header with no glass of its own). */
-.th-head{position:sticky;top:0;z-index:var(--z-sticky);display:flex;align-items:center;gap:var(--sp-2h);min-height:calc(var(--top-h) + var(--glass-pad));padding:var(--sp-2) var(--gutter) calc(var(--sp-2) + var(--glass-pad))}
+   Under a shell header (a wide shell, a frame ≤ 900) it continues the header’s glass — one bar of two rows, set close: pinned
+   right under the header’s controls, --sp-3 below them, the header’s inset under its own row; its layers reach up to the top
+   of the frame (Shell.css leaves that header with no glass of its own). */
+.th-head{position:sticky;top:0;z-index:var(--z-sticky);display:flex;align-items:center;gap:var(--sp-2h);min-height:var(--top-h);padding:var(--sp-2) var(--gutter)}
 .th-ph{display:none}   /* phone-only part of the strip: “back” */
 .th-back{margin-left:calc(-1 * var(--sp-2))}
 .th-id{flex:1;min-width:0;display:flex;flex-direction:column;gap:var(--sp-0h)}
@@ -18,13 +19,13 @@
 /* a narrow thread under the shell header (a wide shell): one glass of two rows */
 @container frame (max-width:900px){
   @container shell (min-width:721px){
-    .th-head{top:var(--top-h)}
-    .th-head.glass::before,.th-head.glass::after{top:calc(-1 * var(--top-h))}
+    .th-head{top:calc((var(--top-h) + var(--ctl-h)) / 2);min-height:0;padding:var(--sp-3) var(--gutter) calc((var(--top-h) - var(--ctl-h)) / 2)}
+    .th-head.glass::before,.th-head.glass::after{top:calc(-1 * (var(--top-h) + var(--ctl-h)) / 2)}
   }
 }
 /* phone: the strip is the screen header — header height, “back”, the title over state and context, “⋯” */
 @container shell (max-width:720px){
-  .th-head{gap:var(--sp-2);padding-block:0 var(--glass-pad);padding-right:var(--sp-2)}
+  .th-head{gap:var(--sp-2);padding-block:0;padding-right:calc((var(--top-h) - var(--ctl-h)) / 2)}   /* the last button as far from the right edge as from the top */
   .th-ph{display:contents}
   .th-title{display:block}
 }

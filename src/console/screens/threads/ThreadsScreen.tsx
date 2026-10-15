@@ -179,13 +179,9 @@ export function ThreadsScreen({ route }: { route: ThreadsRoute }) {
 
   return (
     <Shell current="threads" title="Threads" sub={total === undefined ? undefined : countOf(total, 'thread')}>
+      {waiting > 0 ? <NewPill className="thl-pill" label={countOf(waiting, 'new thread')} onClick={toTop} /> : null}
       <Screen>
         <div ref={topRef} className="thl-top" aria-hidden="true" />
-        {waiting > 0 ? (
-          <div className="thl-pillbar">
-            <NewPill label={countOf(waiting, 'new thread')} onClick={toTop} />
-          </div>
-        ) : null}
         <ThreadFilters route={route} counts={list.counts} active={active} />
         {body}
       </Screen>

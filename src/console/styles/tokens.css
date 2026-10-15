@@ -17,7 +17,9 @@
   --surface-2:#18191d;     /* overlays (menus, popovers, toasts) and insets inside a card */
   --surface-3:#222329;     /* chips, counters, ring track; text on it — no darker than --text-2 */
   --overlay:rgba(5,6,8,.72);  /* backdrop of modals and sheets */
-  --bg-glass:color-mix(in srgb,var(--bg) 30%,transparent);  /* glass bars the content scrolls under (header, bottom tabs, thread strip, composer, file actions): the page color, see-through, with --glass-blur */
+  --bg-glass:color-mix(in srgb,var(--bg) 60%,transparent);  /* glass bars the content scrolls under (header, bottom tabs, thread strip, composer, file actions): the page color, see-through, with --glass-blur */
+  --surface-glass:color-mix(in srgb,var(--surface) 60%,transparent);  /* see-through controls on the glass: the composer's box, the header's buttons */
+  --msg-you:var(--surface-2);   /* your message's bubble in the thread: a step above the page — dark themes --surface-2, light themes --surface (white) */
 
   /* ── State layers: translucent fill over any surface ── */
   --hover:rgba(255,255,255,.045);
@@ -138,9 +140,9 @@
   --sp-4:16px; --sp-4h:18px; --sp-5:20px; --sp-6:24px; --sp-7:28px; --sp-8:32px; --sp-10:40px; --sp-12:48px;
 
   /* ── Layout frame ── */
-  --side-w:236px; --top-h:56px; --tabs-h:60px;
+  --side-w:236px; --top-h:68px; --tabs-h:60px;
   --gutter:28px;  --gap:16px;  --tile-gap:8px;       /* desktop: gutters, gap, 12 columns */
-  --m-gutter:16px; --m-gap:12px; --m-top-h:60px;      /* phone: substituted for --gutter/--gap/--top-h */
+  --m-gutter:16px; --m-gap:12px; --m-top-h:72px;      /* phone: substituted for --gutter/--gap/--top-h */
   --content-max:1600px; --feed-max:800px; --rail-w:300px;
   --hit:44px;                                         /* minimum hit area on a touch screen */
   --hit-ext:0px;                                      /* how far to extend the hit area of small controls (< 0 in touch) */
@@ -172,12 +174,13 @@
   --ring-focus:0 0 0 2px var(--bg), 0 0 0 4px var(--focus);   /* buttons and tiles */
   --ring-field:0 0 0 3px var(--accent-bg);                   /* focused field */
   --ring-field-err:0 0 0 3px var(--st-err-bg);               /* field with an error */
-  /* Glass bars (.glass): the fill is --bg-glass; the edge that meets the content melts over --glass-fade — the color and the
-     blur fade together: a strong blur layer gives way to a soft one (a progressive blur); a top bar is opaque at its very top
-     edge and reaches the glass over --glass-solid. --glass-pad — the bar’s own field on the content side (the header’s
-     bottom, a bottom bar’s top): the content has no gap of its own to the bars, the fade starts in the bar */
-  --glass-blur:saturate(1.2) blur(4px); --glass-blur-soft:blur(1px);
-  --glass-fade:48px; --glass-solid:24px; --glass-pad:24px;
+  /* Glass bars (.glass): the fill is --bg-glass; a bar is only its row. The edge that meets the content melts — the color and
+     the blur fade together: a strong blur layer gives way to a soft one (a progressive blur). The soft edge straddles the
+     row’s edge: --glass-edge-in inside the row, always there; --glass-edge-out over the content, grown by the frame’s scroll —
+     the header’s over the first --glass-reveal px of scroll, a bottom bar’s gone over the last --glass-reveal px. A top bar
+     is opaque at its very top edge and reaches the glass over --glass-solid */
+  --glass-blur:saturate(1.2) blur(6px); --glass-blur-soft:blur(1px);
+  --glass-edge-in:20px; --glass-edge-out:20px; --glass-reveal:32px; --glass-solid:24px;
   --z-raised:1; --z-sticky:10; --z-drop:20; --z-pop:40; --z-scrim:50; --z-modal:60; --z-toast:80;
 
   /* ── Motion ── */

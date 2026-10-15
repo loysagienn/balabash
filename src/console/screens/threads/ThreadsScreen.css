@@ -1,7 +1,8 @@
 @layer screens{
-/* Threads: the "N new" pill floats over the list while it is scrolled — a sticky zero-height bar at the top of the
-   screen keeps it in view inside the scrolling frame, under the glass header (--frame-top); the top sentinel tells whether
-   the list is at its head. */
-.thl-top{height:1px;margin-bottom:-1px}
-.thl-pillbar{position:sticky;top:calc(var(--frame-top,0px) + var(--sp-3));z-index:var(--z-raised);display:flex;justify-content:center;height:0}
+/* Threads: the "N new" pill floats over the list while it is scrolled — held by the shell's main column (.shell-main;
+   the pill sits beside the screen, not in it), centered under the header's row (--frame-top), as in the design. The
+   top sentinel tells whether the list is at its head; it takes no room in the screen's rhythm (its negative margin
+   swallows the flex gap after it), so the filters start right under the header's row. */
+.thl-top{height:1px;margin-bottom:calc(-1px - var(--gap))}
+.thl-pill{position:absolute;top:calc(var(--frame-top,0px) + var(--sp-3));left:50%;transform:translateX(-50%);z-index:var(--z-raised)}
 }

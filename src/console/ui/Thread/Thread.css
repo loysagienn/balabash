@@ -1,17 +1,17 @@
 @layer patterns{
 /* ── Thread ──  .th (container “thread”) > .th-head (ThreadHead) + .th-body (.th-main > .feed + .composer, aside.th-rail)
-   Wide (> 900): no strip — everything about the thread is in the right rail, pinned under the whole shell header (its glass
-   field included, --frame-top) while the feed scrolls; the title is in the shell header. Narrow (≤ 900): no rail — the glass
-   strip on top (ThreadHead.css). The strip and the composer are glass bars of the frame.
+   Wide (> 900): no strip — everything about the thread is in the right rail, pinned under the shell header’s row
+   (--frame-top) while the feed scrolls, with no divider toward the feed; the title is in the shell header. Narrow (≤ 900):
+   no rail — the glass strip on top (ThreadHead.css). The strip and the composer are glass bars of the frame.
    .th grows with its content (min-height, not height): the sticky strip and rail need it to be the scrolled thing. */
 .th{container:thread / inline-size;display:flex;flex-direction:column;min-width:0;min-height:100%;background:var(--bg)}
 .th-body{display:grid;grid-template-columns:minmax(0,1fr) auto;flex:1}
-.th-main{position:relative;display:flex;flex-direction:column;min-width:0;border-right:1px solid var(--border)}   /* position: the Drop frame covers the feed and the composer */   /* the rail’s divider runs the full height of the feed */
+.th-main{position:relative;display:flex;flex-direction:column;min-width:0}   /* position: the Drop frame covers the feed and the composer; no divider toward the rail */
 
 /* Rail: who and what, state (a note under it for a remote thread asleep or closed) and the controls in two groups —
    the turn (Stop turn; remote: Stop turn · Pause side by side), the thread (Finish / Finish requested with its note,
    Cancel as danger-line) — regular-size buttons (32), full width — then session, context, project and time. Scrolls on its own when the window is lower than its content. */
-.th-rail{--kv-dt-w:76px;position:sticky;top:var(--frame-top,0px);align-self:start;width:var(--rail-w);max-height:calc(100dvh - var(--frame-top,0px));overflow-y:auto;overscroll-behavior:contain;display:flex;flex-direction:column;gap:var(--sp-5);padding:var(--sp-4h) var(--sp-4h) var(--sp-6)}
+.th-rail{--kv-dt-w:76px;position:sticky;top:var(--frame-top,0px);align-self:start;width:var(--rail-w);max-height:calc(100dvh - var(--frame-top,0px));overflow-y:auto;overscroll-behavior:contain;display:flex;flex-direction:column;gap:var(--sp-5);padding:0 var(--sp-4h) var(--sp-6)}   /* no top gap: like the feed, the rail starts right under the header’s row */
 .th-rail-id{display:flex;flex-direction:column;gap:var(--sp-2h)}
 .th-rail-who{display:flex;align-items:center;gap:var(--sp-2h);min-width:0}
 .th-rail-who-main{flex:1;min-width:0;display:flex;flex-direction:column}
@@ -31,7 +31,6 @@
 .th-rail-gauge{display:flex;align-items:center;gap:var(--sp-3);font-size:var(--fs-meta);line-height:var(--lh-meta);color:var(--text-3)}
 @container thread (max-width:900px){
   .th-body{grid-template-columns:minmax(0,1fr)}
-  .th-main{border-right:0}
   .th-rail{display:none}
 }
 }

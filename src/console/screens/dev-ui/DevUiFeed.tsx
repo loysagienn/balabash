@@ -29,7 +29,7 @@ import { Summary } from '../../ui/Summary/Summary.tsx';
 import { SysLine } from '../../ui/SysLine/SysLine.tsx';
 import { RailGauge, RailSection, Thread, ThreadBody, ThreadMain, ThreadRail } from '../../ui/Thread/Thread.tsx';
 import { ThreadHead } from '../../ui/ThreadHead/ThreadHead.tsx';
-import { ActGroup, Xp } from '../../ui/Xp/Xp.tsx';
+import { ActGroup, Xp, actFold } from '../../ui/Xp/Xp.tsx';
 import { Caption, Code, Tag } from '../../ui/atoms/atoms.tsx';
 import type { StateName } from '../../ui/atoms/state.ts';
 
@@ -87,6 +87,9 @@ const n = 42;
 \`\`\`bash
 npm run types && npm run build  # both must pass
 \`\`\``;
+
+// Rows of the folded group above, for actFold: four top-level actions.
+const FOLD_ROWS = [{ state: 'done' }, { state: 'done' }, { state: 'done' }, { state: 'done' }] as const;
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -477,6 +480,90 @@ export function DevUiFeed() {
         </div>
       </Section>
 
+      <Section title="Action groups fold (design: Thread Feed §02) — a group of two or more actions folds to its last one; the counter shows the earlier ones">
+        <div className="dev-grid" data-wide="">
+          <div className="dev-frame">
+            <Thread>
+              <Feed>
+                <Label>folded — the default: the last action, the earlier ones in the counter</Label>
+                <ActGroup fold={actFold(FOLD_ROWS)}>
+                  <Xp state="done" icon="brain" end="9s" text="Thought" />
+                  <Xp state="done" icon="files" end="3 calls · 0.4s" text="Read 3 files in" textArg="src/api/apps" />
+                  <Xp state="done" icon="file-pen-line" add="+38" del="−6" end="0.1s" tool="Edit" arg="src/api/apps/slug.ts" />
+                  <Xp state="done" icon="square-terminal" end="exit 0 · 4.2s" tool="Bash" arg="npm run build" />
+                </ActGroup>
+                <Label>folded, running — the running action is the row; each finished one moves into the counter</Label>
+                <ActGroup fold={{ at: 3, earlier: 3, failed: 0 }}>
+                  <Xp state="done" icon="brain" end="6s" text="Thought" />
+                  <Xp state="done" icon="file-pen-line" add="+12" end="0.1s" tool="Edit" arg="prisma/schema.prisma" />
+                  <Xp state="done" icon="file-pen-line" add="+14" end="0.1s" tool="Write" arg="migrations/0042_slug_release.sql" />
+                  <Xp state="run" endState="run" end="0:12" tool="Bash" arg="npm run types" />
+                </ActGroup>
+                <Label>folded — a folded action failed: the counter says so</Label>
+                <ActGroup fold={{ at: 2, earlier: 2, failed: 1 }}>
+                  <Xp state="err" icon="square-terminal" endState="err" end="exit 1 · 12.0s" tool="Bash" arg="npm test -- publish" />
+                  <Xp state="done" icon="file-pen-line" add="+3" del="−1" end="0.1s" tool="Edit" arg="publish.test.ts" />
+                  <Xp state="done" icon="square-terminal" end="exit 0 · 11.4s" tool="Bash" arg="npm test -- publish" />
+                </ActGroup>
+              </Feed>
+            </Thread>
+          </div>
+          <div className="dev-frame">
+            <Thread>
+              <Feed>
+                <Label>batch summary last — its nested calls stay with it; the counter counts top-level actions</Label>
+                <ActGroup fold={{ at: 2, earlier: 2, failed: 0 }}>
+                  <Xp state="done" icon="brain" end="9s" text="Thought" />
+                  <Xp state="done" icon="square-terminal" end="exit 0 · 4.2s" tool="Bash" arg="npm run build" />
+                  <Xp state="done" icon="files" end="3 calls · 0.4s" text="Read 3 files in" textArg="src/api/apps" />
+                  <Xp state="done" icon="file-text" end="0.1s" depth={1} tool="Read" arg="index.ts" />
+                  <Xp state="done" icon="file-text" end="0.1s" depth={1} tool="Read" arg="publish.ts" />
+                </ActGroup>
+                <Label>folded — the last action’s details open; the counter keeps to its row</Label>
+                <ActGroup fold={{ at: 3, earlier: 3, failed: 0 }}>
+                  <Xp state="done" icon="brain" end="9s" text="Thought" />
+                  <Xp state="done" icon="files" end="3 calls · 0.4s" text="Read 3 files in" textArg="src/api/apps" />
+                  <Xp state="done" icon="file-pen-line" add="+38" del="−6" end="0.1s" tool="Edit" arg="src/api/apps/slug.ts" />
+                  <Xp state="done" icon="square-terminal" end="exit 0 · 4.2s" defaultOpen tool="Bash" arg="npm run build">
+                    <Md quiet source="Build finished: 3 bundles, no warnings." />
+                  </Xp>
+                </ActGroup>
+                <Label>one action — no counter</Label>
+                <ActGroup fold={actFold([{ state: 'done' }])}>
+                  <Xp state="done" icon="brain" end="9s" text="Thought" />
+                </ActGroup>
+              </Feed>
+            </Thread>
+          </div>
+        </div>
+      </Section>
+
+      <Section title="System lines — one line always (design: Thread Feed §02): a longer text ends in an ellipsis and the line is a button that shows it whole">
+        <div className="dev-grid" data-wide="">
+          <div className="dev-frame">
+            <Thread>
+              <Feed>
+                <Label>fits — a plain separator</Label>
+                <SysLine icon="flag" level="normal">
+                  Stage 2 of 3 — database migration
+                </SysLine>
+                <SysLine icon="key-round" state="act">
+                  Yandex.Direct: sign-in required
+                </SysLine>
+                <Label>a longer text — one line, an ellipsis; the line is a button, pressed it shows the whole text under the rule</Label>
+                <SysLine icon="circle-slash" level="normal">
+                  Thread cancelled by Vladimir — a duplicate of the publishing thread; the work moved to “Mini-apps v2”, where the slug table and the
+                  public route are already done
+                </SysLine>
+                <SysLine icon="triangle-alert" level="urgent">
+                  Needs your decision: apply the migration 0042_slug_release to the staging database, or wait for the review of the slug table first?
+                </SysLine>
+              </Feed>
+            </Thread>
+          </div>
+        </div>
+      </Section>
+
       <Section title="Feed items">
         <div className="dev-grid" data-wide="">
           <div className="dev-frame">
@@ -530,8 +617,8 @@ export function DevUiFeed() {
                   <Xp state="done" icon="file-text" end="0.1s" depth={1} tool="Read" arg="publish.ts" />
                   <Xp state="done" icon="file-text" end="0.2s" depth={1} tool="Read" arg="manifest.ts" />
                 </ActGroup>
-                <Label>commands and a tool error</Label>
-                <ActGroup>
+                <Label>commands and a tool error — open</Label>
+                <ActGroup fold={{ at: 3, earlier: 3, failed: 2 }}>
                   <Xp state="done" icon="square-terminal" end="exit 0 · 4.2s" tool="Bash" arg="npm run build" />
                   <Xp
                     state="err"

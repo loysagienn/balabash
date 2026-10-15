@@ -1,9 +1,17 @@
 @layer patterns{
-/* ── System divider ──  .sysline — an event of the whole thread. data-level="normal|urgent" (notifications, stages), data-state="act|err" */
-.sysline{display:flex;align-items:center;gap:var(--sp-2h);font-size:var(--fs-meta);line-height:var(--lh-meta);color:var(--st-ink,var(--text-3));white-space:nowrap}
-.sysline::before,.sysline::after{content:"";flex:1;min-width:var(--sp-4);height:1px;background:var(--border)}   /* the lines stay visible even when the text wraps to two lines */
-.sysline .ic{font-size:var(--ico-xs)}
-.sysline-t{white-space:normal;text-align:center}
+/* ── System divider ──  .sysline — an event of the whole thread. data-level="normal|urgent" (notifications, stages), data-state="act|err"
+   One line always: a text that does not fit ends in an ellipsis, and the line becomes a button (<button class="sysline"
+   aria-expanded>) — pressed, it shows the whole text under the rule, centered across the feed; pressed again, it folds. */
+.sysline{display:flex;align-items:center;column-gap:var(--sp-2h);row-gap:var(--sp-1);width:100%;font-size:var(--fs-meta);line-height:var(--lh-meta);color:var(--st-ink,var(--text-3));white-space:nowrap}
+.sysline::before,.sysline::after{content:"";flex:1;min-width:var(--sp-6);height:1px;background:var(--border)}   /* the rules keep at least --sp-6 each side, so a folded line still reads as a divider */
+.sysline .ic{flex:none;font-size:var(--ico-xs)}
+.sysline-t{min-width:0;overflow:hidden;text-overflow:ellipsis;text-align:center}
+button.sysline{padding:0;border:0;background:none;font-family:inherit;text-align:inherit;cursor:pointer}
+button.sysline:hover .sysline-t{color:var(--text)}
+button.sysline:focus-visible{outline:none}
+button.sysline:focus-visible .sysline-t{border-radius:var(--r-inner);box-shadow:var(--ring-focus)}
+.sysline[aria-expanded="true"]{flex-wrap:wrap}
+.sysline[aria-expanded="true"] .sysline-t{order:1;flex-basis:100%;overflow:visible;white-space:normal}   /* the whole text on its own row under the rule */
 .sysline[data-level="normal"]{color:var(--text-2)}
 .sysline[data-level="urgent"]{color:var(--st-act-ink);font-weight:var(--fw-medium)}
 }
