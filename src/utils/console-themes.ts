@@ -23,7 +23,7 @@ export type Theme = {
 
 export const THEMES: readonly Theme[] = [
   { id: 'graphite', name: 'Graphite', desc: 'Dark · neutral, high contrast', bg: '#0c0d0f', scheme: 'dark' },
-  { id: 'dusk', name: 'Dusk', desc: 'Dark · warm, softer contrast', bg: '#1b1917', scheme: 'dark' },
+  { id: 'dusk', name: 'Dusk', desc: 'Dark · warm gray, softer contrast', bg: '#1a1817', scheme: 'dark' },
   { id: 'light', name: 'Light', desc: 'Light · white, high contrast', bg: '#f3f4f6', scheme: 'light' },
   { id: 'paper', name: 'Paper', desc: 'Light · warm, softer contrast', bg: '#f2efe7', scheme: 'light' },
 ];

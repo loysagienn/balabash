@@ -49,6 +49,7 @@ const SYSTEM: Api['system'] = {
   get: async () => {
     throw new Error('not here');
   },
+  log: async () => ({ events: [], total: 0 }),
 };
 
 const FILES: Api['files'] = {

@@ -11,7 +11,8 @@
 /* ── Details section ──  .dsec > .dsec-h (h3.dsec-t, .dsec-end) + content; sections inside a card are separated by a line */
 .dsec{display:flex;flex-direction:column;gap:var(--sp-2h);padding:var(--sp-4) var(--sp-4h);border-top:1px solid var(--border)}
 .dsec:first-child{border-top:0}
+.card-h + .dsec{border-top:0}   /* the header’s own line already separates the first section */
 .dsec-h{display:flex;align-items:center;gap:var(--sp-2)}
-.dsec-t{margin:0;font-size:var(--fs-micro);line-height:var(--lh-micro);font-weight:var(--fw-semibold);color:var(--text-3)}
+.dsec-t{margin:0;font-size:var(--fs-micro);line-height:var(--lh-micro);font-weight:var(--fw-medium);color:var(--text-3)}
 .dsec-end{margin-left:auto;display:flex;align-items:center;gap:var(--sp-2)}
 }

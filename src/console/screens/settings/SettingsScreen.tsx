@@ -22,7 +22,7 @@ import { Shell } from '../../features/shell/Shell.tsx';
 import { useNow } from '../../lib/format/useNow.ts';
 import { Btn } from '../../ui/Btn/Btn.tsx';
 import { Card, CardBody, CardFoot, CardHead } from '../../ui/Card/Card.tsx';
-import { Caption, Code, Tag } from '../../ui/atoms/atoms.tsx';
+import { Code, Tag } from '../../ui/atoms/atoms.tsx';
 import { Field } from '../../ui/Field/Field.tsx';
 import { Icon } from '../../ui/Icon/Icon.tsx';
 import { Input } from '../../ui/Input/Input.tsx';
@@ -285,7 +285,7 @@ function TelegramRow({ telegram, now }: { telegram: TelegramView; now: Date }) {
         />
       </List>
       <CardFoot>
-        <Caption>
+        <span className="set-note">
           {telegram.enabled ? 'The coordinator posts here and takes your messages.' : 'Remembered, but not served: the server has no bot token.'}
           {telegram.botUsername ? (
             <>
@@ -293,7 +293,7 @@ function TelegramRow({ telegram, now }: { telegram: TelegramView; now: Date }) {
               <Code>@{telegram.botUsername}</Code>.
             </>
           ) : null}
-        </Caption>
+        </span>
       </CardFoot>
     </>
   );
@@ -391,11 +391,11 @@ function BrowserCard({ facts, stage, now, logoutPending, onLogout, onAdd }: { fa
       ) : null}
       <CardBody>
         <div className="set-act">
-          <Caption>{browser ? `This browser: ${browser}.` : 'Sign in to one more workspace on this browser with its one-time code.'}</Caption>
+          <span className="set-note">{browser ? `This browser: ${browser}.` : 'Sign in to one more workspace on this browser with its one-time code.'}</span>
           <Btn label="Sign in to another workspace" icon="plus" onClick={onAdd} />
         </div>
         <div className="set-act">
-          <Caption>Reloads the console in this tab — the way to pick up a newly published build in the installed app. The server keeps running.</Caption>
+          <span className="set-note">Reloads the console in this tab — the way to pick up a newly published build in the installed app. The server keeps running.</span>
           <Btn label="Reload page" icon="refresh-cw" onClick={() => window.location.reload()} />
         </div>
       </CardBody>

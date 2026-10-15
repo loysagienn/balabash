@@ -51,7 +51,7 @@ import type { SessionModel } from '../../prisma-generated/models.ts';
 import { createEventStreamHandler } from './event-stream.ts';
 import { planLimits } from '../harness/claude-sdk/plan-limits.ts';
 import { codexPlanLimits } from '../harness/codex-sdk/plan-limits.ts';
-import { buildSnapshot } from './snapshot.ts';
+import { buildSnapshot, readSystemLogPage } from './snapshot.ts';
 import { buildSystem } from './system.ts';
 import { checkMutationOrigin } from './origin.ts';
 import type {
@@ -88,6 +88,7 @@ import type {
   SettingsFactsResponse,
   SignedInWorkspaceView,
   SettingsResponse,
+  SystemLogResponse,
   SystemResponse,
   TelegramView,
   ThreadEventsResponse,
@@ -1767,6 +1768,41 @@ router.get('/limits', requireSession, async ctx => {
 router.get('/system', requireSession, async ctx => {
   const userId = ctx.state.userId as string;
   const response: SystemResponse = await buildSystem(userId);
+
+  ctx.body = prepareObject(response);
+});
+
+// A page of the system's own events for "Show more" (contract:
+// SystemLogQuery / SystemLogResponse): the newest `limit` of the kind before
+// `before`, and the count of every one the workspace may see — the same
+// ownership rule as the snapshot's systemLog (readSystemLogPage).
+router.get('/system/log', requireSession, async ctx => {
+  const userId = ctx.state.userId as string;
+  const kind = queryValue(ctx.query.kind);
+
+  if (kind !== undefined && kind !== 'restart' && kind !== 'exception') {
+    sendError(ctx, 400, 'bad_request', 'kind must be restart or exception');
+
+    return;
+  }
+
+  const before = queryValue(ctx.query.before);
+
+  if (before !== undefined && !/^\d+$/.test(before)) {
+    sendError(ctx, 400, 'bad_request', 'before must be a seq');
+
+    return;
+  }
+
+  const limit = parseLimitParam(queryValue(ctx.query.limit));
+
+  if (limit === null) {
+    sendError(ctx, 400, 'bad_request', `limit must be an integer between 1 and ${LIST_LIMIT_MAX}`);
+
+    return;
+  }
+
+  const response: SystemLogResponse = await readSystemLogPage(userId, kind, before === undefined ? null : BigInt(before), limit);
 
   ctx.body = prepareObject(response);
 });

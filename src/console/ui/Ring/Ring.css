@@ -12,5 +12,5 @@
 .ctx{display:inline-flex;align-items:center;gap:var(--sp-1h);font-size:var(--fs-meta);line-height:var(--lh-meta);font-weight:var(--fw-medium);color:var(--text-2);font-variant-numeric:tabular-nums;white-space:nowrap}
 /* large ring with a number inside */
 .gauge{position:relative;display:grid;place-items:center;flex:none}
-.gauge-v{position:absolute;font-size:var(--fs-meta);line-height:var(--lh-meta);font-weight:var(--fw-bold);color:var(--text);font-variant-numeric:tabular-nums}
+.gauge-v{position:absolute;font-size:var(--fs-meta);line-height:var(--lh-meta);font-weight:var(--fw-semibold);color:var(--text);font-variant-numeric:tabular-nums}
 }

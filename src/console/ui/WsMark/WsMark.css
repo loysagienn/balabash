@@ -5,6 +5,6 @@
 .wsm{
   --wsm-size:var(--obj-md);
   position:relative;width:var(--wsm-size);height:var(--wsm-size);border-radius:var(--r-inner);display:grid;place-items:center;flex:none;
-  background:var(--id-c,var(--text-2));color:var(--id-ink);font-size:var(--fs-ui);font-weight:var(--fw-bold);line-height:1;letter-spacing:0}
+  background:var(--id-c,var(--text-2));color:var(--id-ink);font-size:var(--fs-ui);font-weight:var(--fw-semibold);line-height:1;letter-spacing:0}
 .wsm[data-size="sm"]{--wsm-size:var(--obj-sm);font-size:var(--fs-meta)}
 }

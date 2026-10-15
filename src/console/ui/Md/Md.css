@@ -29,7 +29,7 @@
 .md-table{overflow-x:auto;max-width:100%}
 .md table{width:100%;font-size:var(--fs-meta);line-height:var(--lh-meta);font-variant-numeric:tabular-nums}
 .md :is(th,td){text-align:left;padding:var(--sp-1h) var(--sp-2h);border-bottom:1px solid var(--border)}
-.md th{color:var(--text-3);font-weight:var(--fw-semibold)}
+.md th{color:var(--text-3);font-weight:var(--fw-medium)}
 /* task list: the renderer's bare <input type="checkbox"> drawn like .chk-box (ui/Check), the bullet gone */
 .md .task-list-item{list-style:none;margin-left:calc(-1 * var(--sp-5))}
 .md input[type="checkbox"]{--chk-size:16px;--chk-mark-w:5px;--chk-mark-h:9px;appearance:none;display:inline-grid;place-items:center;width:var(--chk-size);height:var(--chk-size);margin:0 var(--sp-1h) 0 0;vertical-align:-0.2em;border:1.5px solid var(--border-ctl);border-radius:var(--r-xs);background:var(--surface)}

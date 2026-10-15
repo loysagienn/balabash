@@ -76,7 +76,7 @@ function ProjectRow({ project, running, now }: { project: ProjectView; running: 
 // (appLink).
 function HomeAppRow({ app, base }: { app: AppListingView; base: string }) {
   const section = useLinkProps({ key: 'apps' });
-  const { address, href } = appLink(app, base);
+  const { address, href } = appLink(app, base, window.location.origin);
   const common = { title: appTitle(app), desc: app.description ?? undefined, err: app.manifestError ?? undefined, url: address === null ? undefined : appUrlText(address) };
 
   return href ? <AppRow {...common} appHref={href} href={href} external /> : <AppRow {...common} {...section} />;

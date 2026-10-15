@@ -632,6 +632,10 @@ export type AppListingView = {
   description: string | null;
   manifestError: string | null;
   slug: string | null;
+  // The owner page of the app, https://<CONSOLE_DOMAIN>/apps/<path>
+  // (ownerAppUrl of src/apps/urls.ts): only the signed-in owner, published
+  // or not. Absent in the listing of an older server.
+  ownerUrl?: string;
 };
 
 export type AppsResponse = {
@@ -1138,6 +1142,27 @@ export type PendingRestartView = {
     workspaceJob: boolean;
     logQuiet: boolean;
   } | null;
+};
+
+// GET /api/system/log?kind=restart|exception&before=<seq>&limit=N — the
+// system's own events as the snapshot's systemLog shows them (this
+// workspace's and the installation's), for the "Show more" of the System
+// screen's Restarts and System event log cards: the newest N older than
+// `before` (every one without it), in seq order, and the count of every
+// such event. kind — restarts (requested and completed) or exceptions;
+// none — all three.
+export type SystemLogKind = 'restart' | 'exception';
+
+export type SystemLogQuery = {
+  kind?: SystemLogKind;
+  // A seq; only events before it.
+  before?: string;
+  limit?: number;
+};
+
+export type SystemLogResponse = {
+  events: Event[];
+  total: number;
 };
 
 export type SystemResponse = {

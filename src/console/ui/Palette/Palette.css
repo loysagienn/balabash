@@ -6,7 +6,7 @@
 .pal-in > input{flex:1;min-width:0;border:0;background:transparent;outline:none;padding:0}
 .pal-in-end{margin-left:auto;flex:none}
 .pal-list{display:flex;flex-direction:column;padding-bottom:var(--sp-2)}
-.pal-g{padding:var(--sp-2h) var(--sp-4) var(--sp-1);font-size:var(--fs-micro);line-height:var(--lh-micro);font-weight:var(--fw-semibold);color:var(--text-3)}
+.pal-g{padding:var(--sp-2h) var(--sp-4) var(--sp-1);font-size:var(--fs-micro);line-height:var(--lh-micro);font-weight:var(--fw-medium);color:var(--text-3)}
 .pal-i{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:var(--sp-2h);margin:0 var(--sp-1h);padding:var(--sp-1h) var(--sp-2h);border-radius:var(--r-sm);font-size:var(--fs-ui);color:var(--text-2);cursor:pointer}
 .pal-i:hover{background-image:var(--layer-hover)}
 .pal-i[aria-selected="true"]{background-image:var(--layer-press);color:var(--text)}

@@ -4,8 +4,10 @@
 // state and the tags (a note under them for a remote thread asleep or
 // closed), the controls of an active child thread in two groups — the
 // turn (Stop turn; remote: Stop turn · Pause side by side), the thread
-// (Finish thread / Finish requested with its note, Cancel thread) — a
-// control that does not apply stays, disabled, so the rail never reflows;
+// (Finish thread / Finish requested with its note, Cancel thread as
+// danger-line: the confirmation's own button is the tinted danger) —
+// regular-size buttons, full width; a control that does not apply stays,
+// disabled, so the rail never reflows;
 // "Copy link"; then the session (model, engine), the context (the gauge of
 // the latest session.context, compactions counted; a remote thread has
 // none), the project and the time — and the same content as the bottom
@@ -117,16 +119,16 @@ export function ThreadRail({ thread, title, state, engine, info, parent, project
       {commands ? (
         <div className="th-rail-acts">
           <div className="th-rail-turn" data-split={commands.pause ? '' : undefined}>
-            <Btn label="Stop turn" icon="square" size="sm" block busy={commands.stopBusy} disabled={commands.stopDisabled} onClick={commands.onStop} />
-            {commands.pause ? <Btn label="Pause" icon="moon" size="sm" block busy={commands.pause.busy} disabled={commands.pause.disabled} onClick={commands.pause.onClick} /> : null}
+            <Btn label="Stop turn" icon="square" block busy={commands.stopBusy} disabled={commands.stopDisabled} onClick={commands.onStop} />
+            {commands.pause ? <Btn label="Pause" icon="moon" block busy={commands.pause.busy} disabled={commands.pause.disabled} onClick={commands.pause.onClick} /> : null}
           </div>
           <div className="th-rail-end">
             {commands.finishAsked ? (
-              <Btn label="Finish requested" icon="hourglass" size="sm" block disabled />
+              <Btn label="Finish requested" icon="hourglass" block disabled />
             ) : (
-              <Btn label="Finish thread" icon="flag" size="sm" block busy={commands.finishBusy} onClick={commands.onFinish} />
+              <Btn label="Finish thread" icon="flag" block busy={commands.finishBusy} onClick={commands.onFinish} />
             )}
-            <Btn label="Cancel thread" icon="circle-stop" variant="danger" size="sm" block busy={commands.cancelBusy} onClick={commands.onCancel} />
+            <Btn label="Cancel thread" icon="circle-stop" variant="danger-line" block busy={commands.cancelBusy} onClick={commands.onCancel} />
             {commands.finishAsked ? <p className="th-rail-note">{finishNote(thread, commands.finishAsked)}</p> : null}
           </div>
         </div>
@@ -238,7 +240,7 @@ export function ThreadDetailsSheet({ thread, title, state, engine, info, parent,
           )
         ) : null}
         <Btn label="Copy link" icon="link" variant="ghost" block onClick={then(copyLink)} />
-        {commands ? <Btn label="Cancel thread" icon="circle-stop" variant="danger" block busy={commands.cancelBusy} onClick={then(commands.onCancel)} /> : null}
+        {commands ? <Btn label="Cancel thread" icon="circle-stop" variant="danger-line" block busy={commands.cancelBusy} onClick={then(commands.onCancel)} /> : null}
       </div>
     </Sheet>
   );

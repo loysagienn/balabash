@@ -12,7 +12,7 @@
 .mi[aria-checked="true"] .mi-end{color:var(--accent)}
 .mi[data-variant="danger"],.mi[data-variant="danger"] .ic{color:var(--st-err-ink)}
 .menu-sep{height:1px;background:var(--border);margin:var(--sp-1) calc(-1 * var(--sp-1))}
-.menu-label{padding:var(--sp-1h) var(--sp-2) var(--sp-1);font-size:var(--fs-micro);line-height:var(--lh-micro);font-weight:var(--fw-semibold);color:var(--text-3)}
+.menu-label{padding:var(--sp-1h) var(--sp-2) var(--sp-1);font-size:var(--fs-micro);line-height:var(--lh-micro);font-weight:var(--fw-medium);color:var(--text-3)}
 /* Menu anchor at a “⋯” button in a row or header:  <span class="menu-anchor"> button; the open menu floats next to it
    in a .float-layer.menu-layer in document.body (ui/Float: position: fixed at the button) */
 .menu-anchor{display:inline-flex}

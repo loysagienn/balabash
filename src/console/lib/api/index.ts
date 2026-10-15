@@ -36,6 +36,8 @@ import type {
   SettingsResponse,
   SnapshotResponse,
   StartConnectionRequest,
+  SystemLogQuery,
+  SystemLogResponse,
   SystemResponse,
   TaskCommandRequest,
   ThreadEventsResponse,
@@ -162,6 +164,9 @@ export type Api = {
   // footer, the summaries of Home and a project's files.
   system: {
     get(signal?: AbortSignal): Promise<SystemResponse>;
+    // A page of the system's own events older than `before` (the Restarts
+    // and System event log cards' "Show more"), with the count of them all.
+    log(query: SystemLogQuery, signal?: AbortSignal): Promise<SystemLogResponse>;
   };
   // The schedule: the run journal of workspace jobs (the second data layer
   // — a page of runs newest first on a cursor, one run with its output,
@@ -297,6 +302,7 @@ export function createApi(options: FetchOptions = {}): Api {
     },
     system: {
       get: signal => apiFetch<SystemResponse>('/api/system', { signal }),
+      log: (query, signal) => apiFetch<SystemLogResponse>('/api/system/log', { query, signal }),
     },
     schedule: {
       runs: (query, signal) => apiFetch<JobRunsResponse>('/api/schedule/runs', { query, signal }),

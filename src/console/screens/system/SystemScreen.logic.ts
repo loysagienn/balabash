@@ -1,8 +1,11 @@
 // System's pure rules: the rows of GET /api/llm-requests as the token
-// chart's requests, and the caption of the "Main thread · tokens per
-// request" card (spec: design/main-thread-token-chart.md).
+// chart's requests, the caption of the "Main thread · tokens per request"
+// card (spec: design/main-thread-token-chart.md), and the log of a card
+// as one list — the store's newest events with the older pages read for
+// "Show more" (queries.ts).
 
 import type { LlmRequestItem } from '../../../api/contract.ts';
+import type { Event } from '../../../core/contract.ts';
 import { shortDate, timeOfDay } from '../../lib/format/index.ts';
 import type { TokenRequest, TokenVerdict } from '../../ui/TokenChart/TokenChart.logic.ts';
 
@@ -71,4 +74,21 @@ export function windowModels(rows: LlmRequestItem[]): string[] {
   }
 
   return models;
+}
+
+// The store's log and the older pages as one log in seq order, each seq
+// once (a page read before the store dropped its oldest overlaps it; the
+// store's copy of an event wins).
+export function mergedLog(log: readonly Event[], older: readonly Event[]): Event[] {
+  const bySeq = new Map<bigint, Event>();
+
+  for (const event of older) {
+    bySeq.set(event.seq, event);
+  }
+
+  for (const event of log) {
+    bySeq.set(event.seq, event);
+  }
+
+  return [...bySeq.values()].sort((a, b) => (a.seq < b.seq ? -1 : a.seq > b.seq ? 1 : 0));
 }

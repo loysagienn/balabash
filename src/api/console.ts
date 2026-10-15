@@ -81,7 +81,7 @@ type ConsoleManifest = {
 };
 
 // The faces worth a preload: what the first paint of any screen uses.
-const PRELOAD_FONTS = ['Inter-Regular', 'Inter-Medium', 'Inter-SemiBold', 'JetBrainsMono-Regular'];
+const PRELOAD_FONTS = ['InterVariable', 'JetBrainsMono-Regular'];
 
 const ASSET_TYPES: Record<string, string> = {
   '.js': 'text/javascript; charset=utf-8',

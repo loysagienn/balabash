@@ -8,6 +8,7 @@
 // status line at the end while earlier rows load.
 
 import type { CSSProperties, MouseEvent, ReactNode } from 'react';
+import { Btn } from '../Btn/Btn.tsx';
 import { Icon } from '../Icon/Icon.tsx';
 import './List.css';
 
@@ -101,6 +102,20 @@ export function ListGroup({ children, end }: { children: ReactNode; end?: ReactN
     <div className="listgrp">
       {children}
       {end ? <span className="listgrp-end">{end}</span> : null}
+    </div>
+  );
+}
+
+// "Show more" at a list's end (design: .listmore): a long list shows its
+// first items; the button adds the next page in place, the caption says
+// "5 of 248". While the page loads the caller shows LoadMore instead.
+export function ListMore({ shown, total, onMore }: { shown: number; total: number; onMore: () => void }) {
+  return (
+    <div className="listmore">
+      <Btn label="Show more" icon="chevron-down" variant="ghost" size="sm" onClick={onMore} />
+      <span className="caption">
+        {shown} of {total}
+      </span>
     </div>
   );
 }

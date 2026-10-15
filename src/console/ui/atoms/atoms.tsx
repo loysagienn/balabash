@@ -49,23 +49,25 @@ export function Caption({ children }: { children: ReactNode }) {
   return <span className="caption">{children}</span>;
 }
 
-// A published address as a chip (design: .url): a link when href is given,
-// plain text otherwise (inside a row that is itself a link). The chip is one
-// line and shrinks with its place: a long address (a slug may be 64
-// characters) ends in an ellipsis, the full value stays in `title`.
-export function Url({ children, href, onClick }: { children: string; href?: string; onClick?: (event: MouseEvent<HTMLAnchorElement>) => void }) {
+// The address chip (design: .url), one line that shrinks with its place —
+// a long address (a slug may be 64 characters) ends in an ellipsis: the public link (a globe, the accent chip) or, with
+// variant "owner", the owner link (a lock, a neutral chip). A link when
+// href is given, text otherwise; the whole value is in its title.
+export function Url({ children, href, onClick, variant, title }: { children: string; href?: string; onClick?: (event: MouseEvent<HTMLAnchorElement>) => void; variant?: 'owner'; title?: string }) {
+  const icon = <Icon name={variant === 'owner' ? 'lock' : 'globe'} />;
+
   if (href) {
     return (
-      <a className="url" href={href} target="_blank" rel="noreferrer" title={children} onClick={onClick}>
-        <Icon name="globe" />
+      <a className="url" data-variant={variant} href={href} target="_blank" rel="noreferrer" title={title ?? children} onClick={onClick}>
+        {icon}
         <span className="url-t">{children}</span>
       </a>
     );
   }
 
   return (
-    <span className="url" title={children}>
-      <Icon name="globe" />
+    <span className="url" data-variant={variant} title={title ?? children}>
+      {icon}
       <span className="url-t">{children}</span>
     </span>
   );

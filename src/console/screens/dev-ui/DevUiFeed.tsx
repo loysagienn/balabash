@@ -155,12 +155,12 @@ function Rail({ agent = 'engineer', title = 'Mini-apps: publishing by slug', sta
       {active ? (
         <div className="th-rail-acts">
           <div className="th-rail-turn" data-split={remote ? '' : undefined}>
-            <Btn label="Stop turn" icon="square" size="sm" block disabled={state !== 'run'} />
-            {remote ? <Btn label="Pause" icon="moon" size="sm" block disabled={state !== 'wait' || finish} /> : null}
+            <Btn label="Stop turn" icon="square" block disabled={state !== 'run'} />
+            {remote ? <Btn label="Pause" icon="moon" block disabled={state !== 'wait' || finish} /> : null}
           </div>
           <div className="th-rail-end">
-            {finish ? <Btn label="Finish requested" icon="hourglass" size="sm" block disabled /> : <Btn label="Finish thread" icon="flag" size="sm" block />}
-            <Btn label="Cancel thread" icon="circle-stop" variant="danger" size="sm" block />
+            {finish ? <Btn label="Finish requested" icon="hourglass" block disabled /> : <Btn label="Finish thread" icon="flag" block />}
+            <Btn label="Cancel thread" icon="circle-stop" variant="danger-line" block />
             {finish ? <p className="th-rail-note">{finishNote}</p> : null}
           </div>
         </div>

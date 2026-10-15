@@ -189,8 +189,9 @@ export function appsReducer(state: AppsState = initialApps, action: Action): App
         return stamped(state, state.items, action.event.seq);
       }
 
-      const row: AppListingView = { path, slug, name: name ?? null, description: description ?? null, manifestError: null };
       const known = state.items.find(item => item.path === path);
+      // The owner link is the listing's word (the event carries none).
+      const row: AppListingView = { path, slug, name: name ?? null, description: description ?? null, manifestError: null, ...(known?.ownerUrl ? { ownerUrl: known.ownerUrl } : {}) };
 
       if (known) {
         return stamped(state, sameRow(known, row) ? state.items : state.items.map(item => (item === known ? row : item)), action.event.seq);

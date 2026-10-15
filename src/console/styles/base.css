@@ -2,7 +2,7 @@
    Carried over from design/design-system/base.css. Requires tokens.css.
 
    Shared contexts — attributes every component understands:
-   data-state="run|wait|act|done|err|off"  object state → --st-c (graphics), --st-ink (text), --st-bg (tinted background)
+   data-state="run|wait|act|paused|done|err|off"  object state → --st-c (graphics), --st-ink (text), --st-bg (tinted background)
    data-id="1…8|you"                       identifier (agent, project) → --id-c
    data-density="touch"                    touch density for a subtree (controls 36/44/48, fields 16px)
 
@@ -24,7 +24,7 @@ html,body,#root{height:100%}
 @media (pointer:coarse) and (hover:none){
   html,body{touch-action:pan-x pan-y}
 }
-body{background:var(--bg);color:var(--text);font:var(--fs-body)/var(--lh-body) var(--font);letter-spacing:var(--tracking);-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+body{background:var(--bg);color:var(--text);font:var(--fs-body)/var(--lh-body) var(--font);letter-spacing:var(--tracking);font-optical-sizing:auto;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
 :where(h1,h2,h3,h4,h5,h6,p,ul,ol,dl,dd,figure,blockquote,pre){margin:0}
 :where(ul,ol){padding:0}
 :where(button){font:inherit;letter-spacing:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer;text-align:inherit}

@@ -31,7 +31,7 @@ import { COORDINATOR_BUNDLE, COORDINATOR_DESCRIPTION } from '../coordinator/func
 import { DEFAULT_EFFORT } from '../harness/default-effort.ts';
 import { config } from '../config/index.ts';
 import type { AgentDeclaration, RemoteAgentDeclaration } from '../core/contract.ts';
-import type { AgentView, ConnectionView, MeResponse, ServiceView, SnapshotResponse, TaskView } from './contract.ts';
+import type { AgentView, ConnectionView, MeResponse, ServiceView, SnapshotResponse, TaskView, SystemLogKind, SystemLogResponse } from './contract.ts';
 
 export { SNAPSHOT_THREAD_WINDOW } from './thread-window.ts';
 
@@ -98,6 +98,24 @@ export async function readMainLastMessage(mainThreadId: string | null): Promise<
 // completed for no thread, an exception outside a workspace) — the newest
 // SYSTEM_LOG_KEEP in seq order. The console's system domain folds the
 // tail by the same rule (store/system/reducer.ts).
+// The types a kind of the log page names (contract: SystemLogKind).
+export function systemLogTypes(kind: SystemLogKind | undefined): string[] {
+  return kind === 'restart' ? [SYSTEM_RESTART_REQUESTED, SYSTEM_RESTART_COMPLETED] : kind === 'exception' ? [SYSTEM_EXCEPTION] : [...SYSTEM_LOG_TYPES];
+}
+
+// A page of the same log for "Show more": the newest `limit` events of the
+// kind before `before` (every one when null), in seq order, with the count
+// of every event of the kind the workspace may see.
+export async function readSystemLogPage(userId: string, kind: SystemLogKind | undefined, before: bigint | null, limit: number): Promise<SystemLogResponse> {
+  const where = { type: { in: systemLogTypes(kind) }, OR: [{ userId }, { userId: null }] };
+  const [rows, total] = await Promise.all([
+    prisma.event.findMany({ where: { ...where, ...(before === null ? {} : { seq: { lt: before } }) }, orderBy: { seq: 'desc' }, take: limit }),
+    prisma.event.count({ where }),
+  ]);
+
+  return { events: rows.reverse().map(toEvent), total };
+}
+
 export async function readSystemLog(userId: string): Promise<Event[]> {
   const rows = await prisma.event.findMany({
     where: { type: { in: [...SYSTEM_LOG_TYPES] }, OR: [{ userId }, { userId: null }] },

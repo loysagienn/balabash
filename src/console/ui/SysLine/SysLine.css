@@ -5,5 +5,5 @@
 .sysline .ic{font-size:var(--ico-xs)}
 .sysline-t{white-space:normal;text-align:center}
 .sysline[data-level="normal"]{color:var(--text-2)}
-.sysline[data-level="urgent"]{color:var(--st-act-ink);font-weight:var(--fw-semibold)}
+.sysline[data-level="urgent"]{color:var(--st-act-ink);font-weight:var(--fw-medium)}
 }

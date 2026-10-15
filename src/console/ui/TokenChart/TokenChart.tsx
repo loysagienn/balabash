@@ -1,7 +1,10 @@
 // Token chart (design: TokenChart): the composition of model tokens per
 // request — two panels on one request axis, input (cached → cache write →
 // uncached) and output (text → reasoning), each on its own scale; a legend
-// with the window's totals; a tooltip on hover and keyboard focus of a
+// with the window's totals. Every column has the same whole-pixel width —
+// floor((plot width + gap) / n) − gap, never below --tchart-slot (then the
+// plot scrolls) — set as --tchart-col on the scroll box from its width, again
+// on every resize (fitColumns); a tooltip on hover and keyboard focus of a
 // column, opening towards the side of the visible plot with the room for it,
 // dismissed by Escape until the next column. Narrower than 560 the plot
 // scrolls sideways, opened at the newest request, and a detail block under
@@ -18,7 +21,7 @@ import type { DataTableCol } from '../DataTable/DataTable.tsx';
 import { Tip } from '../Hint/Hint.tsx';
 import { Icon } from '../Icon/Icon.tsx';
 import { ErrorLine } from '../atoms/atoms.tsx';
-import { buildTokenChart, tokenTableRows } from './TokenChart.logic.ts';
+import { buildTokenChart, columnWidth, tokenTableRows } from './TokenChart.logic.ts';
 import type { TokenDetail, TokenRequest } from './TokenChart.logic.ts';
 import './TokenChart.css';
 
@@ -73,6 +76,20 @@ function Detail({ detail }: { detail: TokenDetail }) {
 // The tooltip's width plus its offset from the column (TokenChart.css).
 const TIP_ROOM = 264 + 8;
 
+// One whole-pixel width for every column, from the scroll box's width and
+// the gap and the least width of TokenChart.css.
+function fitColumns(box: HTMLElement, n: number): void {
+  if (n === 0) {
+    return;
+  }
+
+  const style = getComputedStyle(box);
+  const gap = parseFloat(style.getPropertyValue('--tchart-gap')) || 2;
+  const least = parseFloat(style.getPropertyValue('--tchart-slot')) || 4;
+
+  box.style.setProperty('--tchart-col', `${columnWidth(box.clientWidth, n, gap, least)}px`);
+}
+
 function Chart({ reqs, now, className }: { reqs: TokenRequest[]; now: Date; className?: string }) {
   const model = useMemo(() => buildTokenChart(reqs, now), [reqs, now]);
   const tipId = useId();
@@ -116,11 +133,38 @@ function Chart({ reqs, now, className }: { reqs: TokenRequest[]; now: Date; clas
     }
   };
 
+  const n = model.cols.length;
+
+  // The columns' width from the scroll box's width: set at once and on
+  // every resize of the box (the window, the rail, the sidebar).
+  useEffect(() => {
+    const box = scroll.current;
+
+    if (!box) {
+      return;
+    }
+
+    const fit = () => fitColumns(box, n);
+
+    fit();
+
+    if (typeof ResizeObserver === 'undefined') {
+      return;
+    }
+
+    const observer = new ResizeObserver(fit);
+
+    observer.observe(box);
+
+    return () => observer.disconnect();
+  }, [n]);
+
   // Open at the newest request once the layout and the fonts have settled;
   // again when newer requests arrive.
   useEffect(() => {
     const end = () => {
       if (scroll.current) {
+        fitColumns(scroll.current, n);
         scroll.current.scrollLeft = scroll.current.scrollWidth;
       }
     };
@@ -136,7 +180,7 @@ function Chart({ reqs, now, className }: { reqs: TokenRequest[]; now: Date; clas
       cancelAnimationFrame(frame);
       clearTimeout(timer);
     };
-  }, [newest]);
+  }, [newest, n]);
 
   return (
     <div className={className ? `tchart ${className}` : 'tchart'}>
@@ -233,7 +277,6 @@ function Chart({ reqs, now, className }: { reqs: TokenRequest[]; now: Date; clas
                 key={col.key}
                 className="tchart-req"
                 data-first={col.first ? '' : undefined}
-                data-turn={col.turnStart ? '' : undefined}
                 data-hour={col.hour ? '' : undefined}
                 data-tail={col.tail ? '' : undefined}
                 data-flip={(placed?.key === col.key ? placed.flip : col.flip) ? '' : undefined}

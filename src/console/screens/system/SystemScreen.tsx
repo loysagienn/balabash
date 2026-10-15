@@ -7,11 +7,15 @@
 // by place every SYSTEM_REFRESH_MS (features/system/queries.ts, GET
 // /api/system; the words — facts.logic.ts); the restarts and the log are
 // the store's system domain — the snapshot's system events and the tail
-// (store/system). The usage over time waits for its data (backlog.md).
+// (store/system) — shown a page at a time: the first LOG_PAGE rows, then
+// "Show more" (ListMore) reveals the next page, reading older events from
+// GET /api/system/log once the store's are shown (queries.ts). The usage
+// over time waits for its data (backlog.md).
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
-import type { SystemResponse } from '../../../api/contract.ts';
+import type { SystemLogKind, SystemResponse } from '../../../api/contract.ts';
+import type { Event } from '../../../core/contract.ts';
 import { ApiError } from '../../lib/api/index.ts';
 import { Link, useLinkTargets } from '../../lib/router/Link.tsx';
 import { dateTimeLabel } from '../../lib/format/index.ts';
@@ -30,7 +34,7 @@ import { FChip } from '../../ui/FChip/FChip.tsx';
 import { Grid12, Grid12Col } from '../../ui/Grid12/Grid12.tsx';
 import { IconBtn } from '../../ui/IconBtn/IconBtn.tsx';
 import { KeyValue } from '../../ui/KeyValue/KeyValue.tsx';
-import { List, Row } from '../../ui/List/List.tsx';
+import { List, ListMore, LoadMore, Row } from '../../ui/List/List.tsx';
 import { Menu, MenuAnchor, MenuItem } from '../../ui/Menu/Menu.tsx';
 import { Note } from '../../ui/Note/Note.tsx';
 import { Obj } from '../../ui/Obj/Obj.tsx';
@@ -67,8 +71,8 @@ import {
   versionWords,
 } from './facts.logic.ts';
 import type { LogFilter, LogRow } from './facts.logic.ts';
-import { TOKEN_WINDOW, toTokenRequest, windowCount, windowModels, windowRange } from './SystemScreen.logic.ts';
-import { useThreadRequests } from './queries.ts';
+import { TOKEN_WINDOW, mergedLog, toTokenRequest, windowCount, windowModels, windowRange } from './SystemScreen.logic.ts';
+import { LOG_PAGE, useOlderSystemLog, useThreadRequests } from './queries.ts';
 import './SystemScreen.css';
 
 // The table shows this many rows at first and grows by as many per "Show more".
@@ -319,12 +323,45 @@ function LogRows({ rows, now }: { rows: LogRow[]; now: Date }) {
   );
 }
 
+// The rows of a card a page at a time: the store's log and the older pages
+// read so far as one log, its rows of the kind, the first `shown` of them;
+// "Show more" asks for one more page — from what is held, else from the
+// server (the next page is read once the held rows run out). The caption
+// counts against the server's total of the kind (the held rows when it
+// is not known yet, or the server of an older build has no page to give).
+function usePagedLog(log: readonly Event[], kind: SystemLogKind | undefined, pick: (rows: readonly LogRow[]) => LogRow[]) {
+  // The oldest seq the store held when the card opened: the pages start
+  // before it.
+  const [before] = useState<bigint | null>(() => log[0]?.seq ?? null);
+  const older = useOlderSystemLog(kind, before);
+  const pages = older.data?.pages;
+  const merged = useMemo(() => mergedLog(log, pages?.flatMap(page => page.events) ?? []), [log, pages]);
+  const rows = useMemo(() => pick(logRows(merged)), [merged, pick]);
+  const [shown, setShown] = useState(LOG_PAGE);
+  // A failed read (an older server without the page, a refused call) ends
+  // the paging quietly: the held rows are what there is.
+  const wanted = shown > rows.length && older.hasNextPage && !older.isFetchingNextPage && !older.isError;
+
+  const { fetchNextPage } = older;
+
+  useEffect(() => {
+    if (wanted) {
+      void fetchNextPage();
+    }
+  }, [wanted, fetchNextPage]);
+
+  const visible = Math.min(shown, rows.length);
+  const total = Math.max(pages?.[0]?.total ?? 0, rows.length);
+
+  return { rows: rows.slice(0, visible), visible, total, loading: older.isFetchingNextPage || (older.isPending && shown > rows.length), more: visible < total || (older.hasNextPage === true && !older.isError), onMore: () => setShown(n => n + LOG_PAGE) };
+}
+
 // The restart in the way comes from the facts checked against the log
 // (pendingOf): the log alone holds the newest 50 system events, and a
 // request behind 50 exceptions would be lost from it.
 function RestartsCard({ facts, now }: { facts: Facts; now: Date }) {
   const log = useAppSelector(selectSystemLog);
-  const rows = useMemo(() => restartRows(logRows(log)), [log]);
+  const page = usePagedLog(log, 'restart', restartRows);
   const pending = pendingOf(log, facts.data?.restart.pending);
   const note = pending ? restartNote(pending.request, pending.waiting, now) : null;
 
@@ -347,8 +384,11 @@ function RestartsCard({ facts, now }: { facts: Facts; now: Date }) {
           </Note>
         </CardBody>
       ) : null}
-      {rows.length > 0 ? (
-        <LogRows rows={rows} now={now} />
+      {page.rows.length > 0 ? (
+        <>
+          <LogRows rows={page.rows} now={now} />
+          {page.loading ? <LoadMore>Loading earlier…</LoadMore> : page.more ? <ListMore shown={page.visible} total={page.total} onMore={page.onMore} /> : null}
+        </>
       ) : (
         <Empty icon="rotate-ccw" title="No restarts yet">
           Restarts and what broke a boot appear here as they happen.
@@ -358,16 +398,37 @@ function RestartsCard({ facts, now }: { facts: Facts; now: Date }) {
   );
 }
 
-function EventLogCard({ now }: { now: Date }) {
+// The log under a filter: the pages are the filter's own (the hook is
+// keyed by it), so a change of filter starts at the first page again.
+function EventLogRows({ filter, now }: { filter: LogFilter; now: Date }) {
   const log = useAppSelector(selectSystemLog);
+  const pick = useMemo(() => (rows: readonly LogRow[]) => filteredRows(rows, filter), [filter]);
+  const page = usePagedLog(log, filter === 'all' ? undefined : filter, pick);
+
+  if (page.rows.length === 0) {
+    return (
+      <Empty icon="activity" title={emptyLogWords(filter)}>
+        Restarts, exceptions and migration failures of the system land here.
+      </Empty>
+    );
+  }
+
+  return (
+    <>
+      <LogRows rows={page.rows} now={now} />
+      {page.loading ? <LoadMore>Loading earlier…</LoadMore> : page.more ? <ListMore shown={page.visible} total={page.total} onMore={page.onMore} /> : null}
+    </>
+  );
+}
+
+function EventLogCard({ now }: { now: Date }) {
   const [filter, setFilter] = useState<LogFilter>('all');
   const [menu, setMenu] = useState(false);
-  const rows = useMemo(() => filteredRows(logRows(log), filter), [log, filter]);
   const current = LOG_FILTERS.find(item => item.key === filter) ?? LOG_FILTERS[0];
 
   return (
     <Card narrow="bare" label="System event log">
-      <CardHead title="System event log" count={rows.length} />
+      <CardHead title="System event log" />
       <CardBody className="fbar">
         <div className="fbar-filters">
           <MenuAnchor
@@ -394,13 +455,7 @@ function EventLogCard({ now }: { now: Date }) {
           </MenuAnchor>
         </div>
       </CardBody>
-      {rows.length > 0 ? (
-        <LogRows rows={rows} now={now} />
-      ) : (
-        <Empty icon="activity" title={emptyLogWords(filter)}>
-          Restarts, exceptions and migration failures of the system land here.
-        </Empty>
-      )}
+      <EventLogRows key={filter} filter={filter} now={now} />
     </Card>
   );
 }
@@ -498,10 +553,10 @@ export function SystemScreen() {
           <Grid12Col span={12}>
             <MachineCard facts={facts} />
           </Grid12Col>
-          <Grid12Col span={5}>
+          <Grid12Col span={5} className="sys-pair">
             <ProcessCard facts={facts} now={now} />
           </Grid12Col>
-          <Grid12Col span={7}>
+          <Grid12Col span={7} className="sys-pair">
             <RestartsCard facts={facts} now={now} />
           </Grid12Col>
           <Grid12Col span={12}>

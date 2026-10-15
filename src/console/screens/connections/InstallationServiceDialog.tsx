@@ -113,7 +113,7 @@ export function InstallationServiceDialog({ service, onClose }: { service: Insta
         </p>
         {missing ? null : (
           <div>
-            <Btn label="Forget secrets" icon="unplug" variant="danger" size="sm" disabled={busy} onClick={() => setForgetting(true)} />
+            <Btn label="Forget secrets" icon="unplug" variant="danger-line" size="sm" disabled={busy} onClick={() => setForgetting(true)} />
           </div>
         )}
       </div>

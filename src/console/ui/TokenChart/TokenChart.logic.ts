@@ -2,8 +2,9 @@
 // design/main-thread-token-chart.md): what each model request was made of.
 // Two panels on one request axis, each on its own scale — input = cached
 // (read from the prompt cache) + cache write + uncached, output = text +
-// reasoning; the column height is the total. The requests of one turn stand
-// close, a new turn starts after a wider gap; every hour boundary is a
+// reasoning; the column height is the total. Every column has the same
+// whole-pixel width (columnWidth) and every gap is 2 px — turns get no wider
+// gap and time does not space the columns; every hour boundary is a
 // hairline and, where there is room, the hour. The same rows feed the table
 // view, newest first.
 
@@ -61,7 +62,8 @@ export type TokenColumn = {
   key: string;
   // The first column: no gap on the left.
   first: boolean;
-  // A wider gap: the first request of a turn, a ping, a failed request.
+  // The first request of a turn, a ping, a failed request (the turn's
+  // length is counted from it; the columns stand at one gap regardless).
   turnStart: boolean;
   // An hour boundary before this column: a hairline; label — the hour under
   // it, or '' when a label stood too close.
@@ -418,6 +420,12 @@ export function buildTokenChart(reqs: TokenRequest[], now: Date): TokenChartMode
 
 // The table view: the same requests, newest first; a failed request has
 // dashes for its counts.
+// The width of every column: floor((plot width + gap) / n) − gap, whole
+// pixels, never below `least` (then the plot scrolls).
+export function columnWidth(plotWidth: number, n: number, gap: number, least: number): number {
+  return Math.max(least, Math.floor((plotWidth + gap) / n) - gap);
+}
+
 export function tokenTableRows(reqs: TokenRequest[], now: Date): TokenTableRow[] {
   const dash = (q: Measured, value: number) => (q.ok ? exact(value) : '—');
 

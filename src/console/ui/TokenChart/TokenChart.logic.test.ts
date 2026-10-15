@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { buildTokenChart, idleBefore, idleLabel, requestTime, share, shortTokens, ticks, tokenTableRows } from './TokenChart.logic.ts';
+import { buildTokenChart, columnWidth, idleBefore, idleLabel, requestTime, share, shortTokens, ticks, tokenTableRows } from './TokenChart.logic.ts';
 import type { TokenRequest } from './TokenChart.logic.ts';
 
 const at = (h: number, m: number, s = 0, day = 9) => new Date(2026, 9, day, h, m, s);
@@ -261,5 +261,17 @@ describe('token chart — columns', () => {
     assert.equal(rows[5].kind, 'turn · 2/3');
     assert.equal(rows[3].kind, 'keepalive');
     assert.equal(rows[0].fresh, '9,000');
+  });
+});
+
+describe('the columns', () => {
+  it('give every column one whole-pixel width from the plot width, never below the least', () => {
+    // 100 requests in 400 px: floor(402 / 100) − 2 = 2 → the least, the plot scrolls.
+    assert.equal(columnWidth(400, 100, 2, 4), 4);
+    // 20 in 400: floor(402 / 20) − 2 = 18; 18 × 20 + 19 × 2 = 398 ≤ 400.
+    assert.equal(columnWidth(400, 20, 2, 4), 18);
+    // 3 in 401: floor(403 / 3) − 2 = 132; 132 × 3 + 2 × 2 = 400 — the remainder stays empty.
+    assert.equal(columnWidth(401, 3, 2, 4), 132);
+    assert.equal(columnWidth(0, 5, 2, 4), 4);
   });
 });

@@ -28,7 +28,7 @@
   --layer-press:linear-gradient(var(--press),var(--press));
 
   /* ── Lines ── */
-  --border:#232429;        /* dividers, card and control outline at rest */
+  --border:#1f2024;        /* dividers, control outline at rest — a step below --surface-3, so a chip never reads as a line */
   --border-strong:#2e3036; /* outline on hover, “cancelled” outline, overlay layers */
   --border-ctl:#393b42;    /* input, checkbox outline, filter dashed line — 1.65:1 to --surface */
   --border-hover:#45474f;  /* field outline on hover */
@@ -37,7 +37,7 @@
 
   /* ── Text (contrast given against --surface) ── */
   --text:#ebecef;          /* primary             15.6:1 */
-  --text-2:#9a9da6;        /* secondary            6.8:1 */
+  --text-2:#a8abb3;        /* secondary            8.0:1 */
   --text-3:#83868f;        /* meta: time, captions 5.1:1 (on --surface-2 4.8:1; do not use on --surface-3) */
   --text-4:#62656f;        /* disabled and decorative only, no contrast requirement */
 
@@ -48,7 +48,7 @@
   --accent-ink:#ffffff;    /* text and icons on an accent fill */
   --link:#9ea5ff;
 
-  /* ── Primary button: light neutral fill ── */
+  /* ── Primary button: neutral fill in the text color ── */
   --primary-bg:var(--text);
   --primary-bg-hover:#ffffff;
   --primary-bg-press:#cfd1d6;
@@ -58,10 +58,11 @@
   --st-run:#4ccf8e;        /* work in progress — the only thing that moves */
   --st-wait:#5cb8f0;       /* waiting */
   --st-act:#f2b33d;        /* user action needed */
-  --st-done:#9a9da6;       /* done — neutral */
+  --st-done:var(--text-2); /* done — neutral */
   --st-err:#f0645a;        /* error */
-  --st-off:#83868f;        /* cancelled, off */
-  --st-run-ink:var(--st-run);   /* status text (≥ 4.5:1); the --st-* above draw graphics (≥ 3:1) — one color on the dark themes */
+  --st-off:var(--text-3);  /* cancelled, off */
+  /* the colors above draw graphics — dots, icons, rings, bars, solid fills, outlines (≥ 3:1); status text takes the -ink pair (≥ 4.5:1) */
+  --st-run-ink:var(--st-run);
   --st-wait-ink:var(--st-wait);
   --st-act-ink:var(--st-act);
   --st-err-ink:var(--st-err);
@@ -116,7 +117,7 @@
   /* ── Typography ── */
   --font:'Inter',system-ui,sans-serif;
   --mono:'JetBrains Mono',ui-monospace,monospace;
-  --tracking:0.012em;            /* for --font; --mono is always 0 */
+  --tracking:0;                  /* Inter with optical sizes (font-optical-sizing:auto) spaces itself; --mono is always 0 too */
   --fs-display:28px; --lh-display:34px;   /* large metric figures */
   --fs-h1:20px;      --lh-h1:28px;        /* page and thread title */
   --fs-lg:16px;      --lh-lg:22px;        /* header title on phone, Markdown heading */
@@ -127,7 +128,7 @@
   --fs-micro:11px;   --lh-micro:15px;     /* counters, tags, tab labels */
   --fs-code:12.5px;  --lh-code:21px;      /* monospace: blocks, source */
   --fs-code-sm:11.5px; --lh-code-sm:18px; /* monospace: chips, terminal, code */
-  --fw-regular:400; --fw-medium:500; --fw-semibold:600; --fw-bold:700;
+  --fw-regular:400; --fw-medium:500; --fw-semibold:600;   /* 600 — titles of a surface; 500 — items, controls, labels; 400 — text */
 
   /* ── Icons (Lucide, outline) ── */
   --ico-xs:13px; --ico-sm:14px; --ico:16px; --ico-md:18px; --ico-lg:20px; --ico-xl:24px;
@@ -151,8 +152,8 @@
   --nav-h:36px; --row-h:56px; --xp-h:38px;
 
   /* ── Avatars and object icons ── */
-  --av-xs:16px; --av-sm:24px; --av:34px; --av-lg:44px;
-  --av-fs-xs:9px; --av-fs-sm:11px; --av-fs:14px; --av-fs-lg:18px;
+  --av-xs:18px; --av-sm:24px; --av:34px; --av-lg:44px;
+  --av-fs-xs:10px; --av-fs-sm:11px; --av-fs:14px; --av-fs-lg:18px;
   --obj-sm:24px; --obj-md:28px; --obj:34px; --obj-lg:40px; --obj-xl:48px;
   --ring-sm:22px; --ring-lg:56px;
 

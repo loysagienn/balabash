@@ -3,7 +3,7 @@
 .av{
   --av-size:var(--av);--av-letter:var(--av-fs);
   position:relative;width:var(--av-size);height:var(--av-size);border-radius:var(--r-av);display:grid;place-items:center;flex:none;
-  font-size:var(--av-letter);font-weight:var(--fw-bold);line-height:1;letter-spacing:0;
+  font-size:var(--av-letter);font-weight:var(--fw-semibold);line-height:1;letter-spacing:0;
   color:var(--id-c,var(--text-2));background:color-mix(in srgb,var(--id-c,var(--text-2)) var(--id-tint),transparent)}
 .av[data-size="xs"]{--av-size:var(--av-xs);--av-letter:var(--av-fs-xs);border-radius:var(--r-xs)}
 .av[data-size="sm"]{--av-size:var(--av-sm);--av-letter:var(--av-fs-sm);border-radius:var(--r-inner)}

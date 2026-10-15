@@ -99,6 +99,7 @@ const CHART_COLS = [18, 42, 36, 58, 24, 8, 4, 62, 71, 55, 80, 66, 30, 48].map((v
   x: i % 7 === 0 || i === 13 ? CHART_DAYS[i] : undefined,
   title: `${Math.round(v * 0.62)}M tokens`,
   detail: i === 13 ? `${CHART_DAYS[i]} · today` : `${CHART_DAYS[i]}, 2026`,
+  detail2: `input ${(v * 0.18).toFixed(1)}M · cache ${(v * 0.4).toFixed(1)}M`,
   current: i === 13,
 }));
 
@@ -215,7 +216,7 @@ function AppRows({ menuOpen, onMenu }: { menuOpen: boolean; onMenu: (open: boole
     <>
       <Label>link rows: published · not published · manifest error · the longest allowed slug (64 characters)</Label>
       <List>
-        <AppRow title="Calorie tracker" desc="Food diary with macro counts" url="/p/kcal" href="#" onClick={stop} />
+        <AppRow title="Calorie tracker" desc="Food diary with macro counts" url="balabash.app/kcal" href="#" onClick={stop} />
         <AppRow title="Reading list" desc="Books to read, with notes" href="#" onClick={stop} />
         <AppRow title="Long slug" desc="The address ends in an ellipsis, the whole value is in its title" url={LONG_URL} href="#" onClick={stop} />
         <AppRow
@@ -226,14 +227,15 @@ function AppRows({ menuOpen, onMenu }: { menuOpen: boolean; onMenu: (open: boole
           onClick={stop}
         />
       </List>
-      <Label>rows with actions (the “Apps” section): folder, URL as a link, “Open”, “⋯”</Label>
+      <Label>rows with actions (the “Apps” section): the owner link (a lock, always) and the public one (a globe, while published) under the description, “Open”, “⋯”</Label>
       <List>
         <AppRow
           actions
           title="Calorie tracker"
           desc="Food diary with macro counts"
-          folder="apps/kcal"
-          url="/p/kcal"
+          owner={{ text: 'console.balabash.app/apps/apps/kcal', href: '#' }}
+          url="balabash.app/kcal"
+          urlHref="https://kcal.apps.example"
           appHref="https://kcal.apps.example"
           more={
             <MenuAnchor
@@ -256,16 +258,17 @@ function AppRows({ menuOpen, onMenu }: { menuOpen: boolean; onMenu: (open: boole
           actions
           title="Expenses"
           desc="Monthly budget by category"
-          folder="apps/expenses"
+          owner={{ text: 'console.balabash.app/apps/apps/expenses', href: '#' }}
           err="endpoints[2].sql: expected a string, got number"
           more={<IconBtn icon="ellipsis" label="App actions" size="sm" />}
         />
         <AppRow
           actions
           title="Long slug"
-          desc="The address takes at most half the row; the title keeps its place"
-          folder="apps/long-slug"
+          desc="A long address ends in an ellipsis; the title keeps its place"
+          owner={{ text: 'console.balabash.app/apps/apps/long-slug', href: '#' }}
           url={LONG_URL}
+          urlHref="https://long.apps.example"
           appHref="https://long.apps.example"
           more={<IconBtn icon="ellipsis" label="App actions" size="sm" />}
         />
@@ -701,7 +704,7 @@ export function DevUiSections() {
                 <Card narrow="bare">
                   <CardHead title="Apps" />
                   <List narrow="tiles">
-                    <AppRow title="Calorie tracker" desc="Food diary with macro counts" url="/p/kcal" href="#" onClick={stop} />
+                    <AppRow title="Calorie tracker" desc="Food diary with macro counts" url="balabash.app/kcal" href="#" onClick={stop} />
                     <AppRow title="Reading list" desc="Books to read, with notes" href="#" onClick={stop} />
                   </List>
                 </Card>

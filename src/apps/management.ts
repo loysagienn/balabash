@@ -11,6 +11,7 @@ import { WorkspacePathError, sanitizeRelPath } from '../workspace/files.ts';
 import { workspaceFilesDir } from '../workspace/layout.ts';
 import { APP_MANIFEST_FILENAME, readAppManifest } from './manifest.ts';
 import { registryMutation } from '../core/registry-events.ts';
+import { ownerAppUrl } from './urls.ts';
 
 // The user-facing message of a rejected management call (a 400, not a 500).
 export class AppManagementError extends Error {}
@@ -41,6 +42,8 @@ export type AppListing = {
   manifestError: string | null;
   /** Published slug, or null. */
   slug: string | null;
+  /** The owner page: https://<CONSOLE_DOMAIN>/apps/<path> (urls.ts). */
+  ownerUrl: string;
 };
 
 function isSkippedName(name: string): boolean {
@@ -125,6 +128,7 @@ export async function listApps(userId: string): Promise<AppListing[]> {
       description: manifest.status === 'ok' ? manifest.manifest.description : null,
       manifestError: manifest.status === 'invalid' ? manifest.error : null,
       slug: slugByPath.get(appPath) ?? null,
+      ownerUrl: ownerAppUrl(appPath),
     });
   }
 

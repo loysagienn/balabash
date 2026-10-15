@@ -83,7 +83,7 @@ export function AppsScreen({ route }: { route: AppsRoute }) {
     body = (
       <List narrow="tiles">
         {visible.map(app => {
-          const link = appLink(app, base);
+          const link = appLink(app, base, window.location.origin);
 
           return (
             <AppRow
@@ -92,9 +92,10 @@ export function AppsScreen({ route }: { route: AppsRoute }) {
               title={appTitle(app)}
               desc={app.description ?? undefined}
               url={link.address === null ? undefined : appUrlText(link.address)}
+              urlHref={link.href ?? undefined}
               appHref={link.open ?? undefined}
               err={app.manifestError ?? undefined}
-              folder={app.path}
+              owner={{ text: link.ownerText, href: link.owner }}
               more={<AppMenu app={app} link={link} />}
             />
           );

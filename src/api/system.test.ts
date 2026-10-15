@@ -15,7 +15,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { startStand } from '../test-support/stand.ts';
 import type { Stand } from '../test-support/stand.ts';
-import type { SnapshotResponse, SystemResponse } from './contract.ts';
+import type { SnapshotResponse, SystemLogResponse, SystemResponse } from './contract.ts';
 import { eventAction } from '../console/store/events.ts';
 import { snapshot as snapshotFixture } from '../console/store/fixtures.ts';
 import { initialSystem, systemReducer } from '../console/store/system/reducer.ts';
@@ -151,6 +151,61 @@ describe('the system log of the snapshot', () => {
       state.log.map(event => [event.seq, event.type]),
       next.map(event => [event.seq, event.type]),
     );
+  });
+});
+
+describe('GET /api/system/log', () => {
+  test('pages the same log for “Show more”: the newest of a kind before a seq, in seq order, with the count of the kind; never another workspace’s', async () => {
+    const total = async (query: string) => (await stand.request('GET', `/api/system/log?limit=1${query}`)).json<SystemLogResponse>().total;
+    // The tests before this one left events of their own: the counts are deltas.
+    const were = { all: await total(''), restart: await total('&kind=restart'), exception: await total('&kind=exception') };
+    const foreign = randomUUID();
+    const r1 = await appendEvent({ type: 'system.restart.requested', actor: 'system', userId: stand.userId, threadId: stand.mainThreadId, payload: { reason: 'a build', requestedBy: 'engineer' } });
+
+    assert.ok(r1.written);
+
+    const x1 = await appendEvent({ type: 'system.exception', actor: 'system', userId: null, payload: { scope: 'migrate-deploy', error: 'one' } });
+
+    await appendEvent({ type: 'system.exception', actor: 'system', userId: foreign, payload: { scope: 'workspace-job', error: 'not ours' } });
+
+    const c1 = await appendEvent({ type: 'system.restart.completed', actor: 'system', userId: stand.userId, threadId: null, targetThreadId: stand.mainThreadId, payload: { reason: 'a build', requestSeq: Number(r1.event.seq) } });
+    const x2 = await appendEvent({ type: 'system.exception', actor: 'system', userId: stand.userId, payload: { scope: 'workspace-job', error: 'two' } });
+
+    assert.ok(x1.written);
+    assert.ok(c1.written);
+    assert.ok(x2.written);
+
+    // Every kind, the newest two: the count is of every event the workspace may see (not the foreign one).
+    const all = (await stand.request('GET', '/api/system/log?limit=2')).json<SystemLogResponse>();
+
+    assert.deepEqual(
+      all.events.map(e => e.seq),
+      [c1.event.seq, x2.event.seq],
+    );
+    assert.equal(all.total, were.all + 4);
+
+    // Before the completion, restarts only: the request, counted with the completion.
+    const restarts = (await stand.request('GET', `/api/system/log?kind=restart&before=${c1.event.seq}&limit=1`)).json<SystemLogResponse>();
+
+    assert.deepEqual(
+      restarts.events.map(e => [e.seq, e.type]),
+      [[r1.event.seq, 'system.restart.requested']],
+    );
+    assert.equal(restarts.total, were.restart + 2);
+
+    // Exceptions: the installation's and this workspace's, not the other workspace's.
+    const exceptions = (await stand.request('GET', '/api/system/log?kind=exception&limit=2')).json<SystemLogResponse>();
+
+    assert.deepEqual(
+      exceptions.events.map(e => e.payload.error),
+      ['one', 'two'],
+    );
+    assert.equal(exceptions.total, were.exception + 2);
+
+    assert.equal((await stand.request('GET', '/api/system/log?kind=other')).status, 400);
+    assert.equal((await stand.request('GET', '/api/system/log?before=abc')).status, 400);
+    assert.equal((await stand.request('GET', '/api/system/log?limit=0')).status, 400);
+    assert.equal((await stand.request('GET', '/api/system/log', { cookie: null })).status, 401);
   });
 });
 

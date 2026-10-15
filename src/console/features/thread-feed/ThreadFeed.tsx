@@ -20,7 +20,7 @@ import { ChildThread } from '../../ui/ChildThread/ChildThread.tsx';
 import { ErrorBlock } from '../../ui/ErrorBlock/ErrorBlock.tsx';
 import { EvLine } from '../../ui/EvLine/EvLine.tsx';
 import { Md } from '../../ui/Md/Md.tsx';
-import { Message } from '../../ui/Message/Message.tsx';
+import { Message, showsRecipient } from '../../ui/Message/Message.tsx';
 import { MsgQuiet } from '../../ui/Message/MsgQuiet.tsx';
 import { Plan, PlanItem } from '../../ui/Plan/Plan.tsx';
 import { Subtask } from '../../ui/Subtask/Subtask.tsx';
@@ -135,7 +135,7 @@ function FeedMessage({ item, now }: { item: MessageItem; now: Date }) {
       {/* The user's own text keeps its single line breaks (typed, not
           Markdown-wrapped); an agent's Markdown reads by the usual rules. */}
       {item.text ? <Md source={item.text} breaks={item.variant === 'user'} /> : null}
-      <Attachments atts={item.atts} context={`${item.from === 'you' ? (you ?? 'you') : item.from} → ${item.to === 'you' ? (you ?? 'you') : item.to}, ${dateTimeLabel(item.at, now)}`} />
+      <Attachments atts={item.atts} context={`${item.from === 'you' ? (you ?? 'you') : item.from}${showsRecipient(item.from, item.to, item.tag) ? ` → ${item.to}` : ''}, ${dateTimeLabel(item.at, now)}`} />
     </Message>
   );
 }

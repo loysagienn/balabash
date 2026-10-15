@@ -6,8 +6,10 @@
 // on this very host: the console host passes it through to the handoff of
 // the apps domain (src/api/console.ts, src/apps/handoff.ts) — the
 // operator's own view of the app, published or not, and the page that
-// shows the manifest error of a broken one. The chip text is the address
-// without the scheme.
+// shows the manifest error of a broken one; its absolute address is the
+// listing's ownerUrl (ownerAppUrl of src/apps/urls.ts), built from the
+// page's origin when an older server gave none. The chip text is the
+// address without the scheme.
 
 import type { AppListingView } from '../../../api/contract.ts';
 
@@ -16,8 +18,10 @@ export type AppLink = {
   address: string | null;
   // The public app, when it opens there (published, valid manifest).
   href: string | null;
-  // The owner page of the app on this host.
+  // The owner page of the app on this host (a path).
   owner: string;
+  // The owner link as the chip shows it: the absolute address without the scheme.
+  ownerText: string;
   // Where "Open" leads: the public app when it opens there, the owner page
   // of an unpublished app with a valid manifest, nothing for a broken one
   // (its red line is the news; the owner page stays in the menu).
@@ -32,13 +36,13 @@ export function publicAppAddress(base: string, slug: string): string {
   return `${base}/${encodeURIComponent(slug)}`;
 }
 
-export function appLink(app: Pick<AppListingView, 'path' | 'slug' | 'manifestError'>, base: string): AppLink {
+export function appLink(app: Pick<AppListingView, 'path' | 'slug' | 'manifestError' | 'ownerUrl'>, base: string, origin: string): AppLink {
   const address = app.slug ? publicAppAddress(base, app.slug) : null;
   const valid = app.manifestError === null;
   const href = address !== null && valid ? address : null;
   const owner = ownerAppHref(app.path);
 
-  return { address, href, owner, open: href ?? (valid ? owner : null) };
+  return { address, href, owner, ownerText: appUrlText(app.ownerUrl ?? `${origin}${owner}`), open: href ?? (valid ? owner : null) };
 }
 
 export function appUrlText(href: string): string {

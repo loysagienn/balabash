@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import type { LlmRequestItem } from '../../../api/contract.ts';
-import { TOKEN_WINDOW, toTokenRequest, windowCount, windowModels, windowRange } from './SystemScreen.logic.ts';
+import { event, resetSeq } from '../../store/fixtures.ts';
+import { TOKEN_WINDOW, mergedLog, toTokenRequest, windowCount, windowModels, windowRange } from './SystemScreen.logic.ts';
 
 const at = (y: number, m: number, d: number, h = 0, min = 0) => new Date(y, m - 1, d, h, min);
 const NOW = at(2026, 10, 9, 16, 38);
@@ -80,5 +81,25 @@ describe('system — the main thread card', () => {
     assert.equal(windowRange(at(2026, 10, 7, 9, 0), at(2026, 10, 7, 18, 0), NOW), 'Oct 7, 09:00 – 18:00');
     assert.equal(windowRange(at(2025, 10, 7, 9, 0), at(2026, 10, 9, 1, 0), NOW), 'Oct 7, 2025, 09:00 – today 01:00');
     assert.deepEqual(windowModels([row({ model: 'gpt-5.1' }), row({ model: 'gpt-5.2' }), row({ model: 'gpt-5.2' })]), ['gpt-5.2', 'gpt-5.1']);
+  });
+});
+
+describe('system — the log of a card', () => {
+  it('joins the store’s log and the older pages in seq order, each seq once, the store’s copy first', () => {
+    resetSeq();
+
+    const exception = (seq: bigint, error = 'x') => event({ seq, type: 'system.exception', actor: 'system', payload: { scope: 'migrate-deploy', error } });
+    const merged = mergedLog([exception(7n), exception(9n, 'store')], [exception(2n), exception(5n), exception(9n, 'page')]);
+
+    assert.deepEqual(
+      merged.map(e => [e.seq, e.payload.error]),
+      [
+        [2n, 'x'],
+        [5n, 'x'],
+        [7n, 'x'],
+        [9n, 'store'],
+      ],
+    );
+    assert.deepEqual(mergedLog([], []), []);
   });
 });

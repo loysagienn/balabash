@@ -2,7 +2,8 @@
 // hairline grid, a tooltip on every bar (hover and keyboard focus), the
 // current one highlighted. y — the scale labels bottom to top (the grid
 // draws one line per label); cols — the bars: v in percent of the height,
-// x — the label under the bar (or none), title and detail — the tooltip.
+// x — the label under the bar (or none), title, detail and detail2 — the
+// tooltip's lines, kept short so it stays narrow over its neighbors.
 // Single series — no legend; a chart always has a table view next to it.
 // Every column knows its index and the count (--i, --n): the CSS keeps the
 // tooltip of an edge column inside the plot, where a card would clip it.
@@ -16,6 +17,7 @@ export type BarChartCol = {
   x?: string;
   title: string;
   detail?: string;
+  detail2?: string;
   current?: boolean;
 };
 
@@ -52,7 +54,8 @@ export function BarChart({ label, y, cols, className }: BarChartProps) {
             <i className="chart-bar" />
             <Tip className="chart-tip">
               <b>{col.title}</b>
-              {col.detail}
+              {col.detail ? <span>{col.detail}</span> : null}
+              {col.detail2 ? <span>{col.detail2}</span> : null}
             </Tip>
           </span>
         ))}

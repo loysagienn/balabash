@@ -182,7 +182,7 @@ describe('console host branch', () => {
     assert.match(html, /<meta name="theme-color" content="#0c0d0f">/);
     // The browser's theme is on the page before the stylesheet: the script
     // is inline in <head>, ahead of the stylesheet link.
-    assert.match(html, /<script>\(function\(\)\{try\{var T=\{"dusk":\["#1b1917","dark"\],"light":\["#f3f4f6","light"\],"paper":\["#f2efe7","light"\]\},t=localStorage\.getItem\("balabash\.theme"\)[\s\S]*<\/script>[\s\S]*<link rel="stylesheet"/);
+    assert.match(html, /<script>\(function\(\)\{try\{var T=\{"dusk":\["#1a1817","dark"\],"light":\["#f3f4f6","light"\],"paper":\["#f2efe7","light"\]\},t=localStorage\.getItem\("balabash\.theme"\)[\s\S]*<\/script>[\s\S]*<link rel="stylesheet"/);
     assert.match(html, /<meta name="mobile-web-app-capable" content="yes">/);
     assert.match(html, /<meta name="apple-mobile-web-app-capable" content="yes">/);
     assert.match(html, /<meta name="apple-mobile-web-app-title" content="Balabash">/);

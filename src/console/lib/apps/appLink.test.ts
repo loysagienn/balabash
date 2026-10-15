@@ -10,13 +10,20 @@ describe('app links', () => {
 
   it('opens a published app with a valid manifest, keeps the address of a broken one without opening it', () => {
     const owner = '/apps/apps/kcal';
+    const ownerUrl = 'https://console.example/apps/apps/kcal';
+    const ownerText = 'console.example/apps/apps/kcal';
+    const origin = 'https://console.example';
 
-    assert.deepEqual(appLink({ path: 'apps/kcal', slug: 'kcal', manifestError: null }, 'https://apps.example'), { address: 'https://apps.example/kcal', href: 'https://apps.example/kcal', owner, open: 'https://apps.example/kcal' });
-    assert.deepEqual(appLink({ path: 'apps/kcal', slug: 'kcal', manifestError: 'bad' }, 'https://apps.example'), { address: 'https://apps.example/kcal', href: null, owner, open: null });
+    assert.deepEqual(appLink({ path: 'apps/kcal', slug: 'kcal', manifestError: null, ownerUrl }, 'https://apps.example', origin), { address: 'https://apps.example/kcal', href: 'https://apps.example/kcal', owner, ownerText, open: 'https://apps.example/kcal' });
+    assert.deepEqual(appLink({ path: 'apps/kcal', slug: 'kcal', manifestError: 'bad', ownerUrl }, 'https://apps.example', origin), { address: 'https://apps.example/kcal', href: null, owner, ownerText, open: null });
     // Unpublished: "Open" is the owner page; a broken manifest opens nothing.
-    assert.deepEqual(appLink({ path: 'apps/kcal', slug: null, manifestError: null }, 'https://apps.example'), { address: null, href: null, owner, open: owner });
-    assert.deepEqual(appLink({ path: 'apps/kcal', slug: null, manifestError: 'Invalid manifest' }, 'https://apps.example'), { address: null, href: null, owner, open: null });
-    assert.deepEqual(appLink({ path: 'apps/kcal', slug: 'a b', manifestError: null }, 'https://apps.example'), { address: 'https://apps.example/a%20b', href: 'https://apps.example/a%20b', owner, open: 'https://apps.example/a%20b' });
+    assert.deepEqual(appLink({ path: 'apps/kcal', slug: null, manifestError: null, ownerUrl }, 'https://apps.example', origin), { address: null, href: null, owner, ownerText, open: owner });
+    assert.deepEqual(appLink({ path: 'apps/kcal', slug: null, manifestError: 'Invalid manifest', ownerUrl }, 'https://apps.example', origin), { address: null, href: null, owner, ownerText, open: null });
+    assert.deepEqual(appLink({ path: 'apps/kcal', slug: 'a b', manifestError: null, ownerUrl }, 'https://apps.example', origin), { address: 'https://apps.example/a%20b', href: 'https://apps.example/a%20b', owner, ownerText, open: 'https://apps.example/a%20b' });
+  });
+
+  it('builds the owner link from the page’s origin when the listing of an older server gives none', () => {
+    assert.equal(appLink({ path: 'apps/kcal', slug: null, manifestError: null }, 'https://apps.example', 'https://console.example').ownerText, 'console.example/apps/apps/kcal');
   });
 
   it('builds the owner page and the public address by segments', () => {

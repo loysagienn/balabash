@@ -1,9 +1,8 @@
-/* Local fonts (ui.md): Inter 400/500/600/700 and JetBrains Mono 400/500 as
-   woff2 from the official releases (styles/fonts/, OFL). The shell preloads
-   the main faces (src/api/console.ts, names from the build manifest). */
-@font-face{font-family:'Inter';font-style:normal;font-weight:400;font-display:swap;src:url('./fonts/Inter-Regular.woff2') format('woff2')}
-@font-face{font-family:'Inter';font-style:normal;font-weight:500;font-display:swap;src:url('./fonts/Inter-Medium.woff2') format('woff2')}
-@font-face{font-family:'Inter';font-style:normal;font-weight:600;font-display:swap;src:url('./fonts/Inter-SemiBold.woff2') format('woff2')}
-@font-face{font-family:'Inter';font-style:normal;font-weight:700;font-display:swap;src:url('./fonts/Inter-Bold.woff2') format('woff2')}
+/* Local fonts (ui.md): the variable Inter 4 with its opsz and wght axes
+   (body sets font-optical-sizing:auto, so small text gets the text cut and
+   20–28 px the tighter display cut) and JetBrains Mono 400/500 as woff2
+   from the official releases (styles/fonts/, OFL). The shell preloads the
+   main faces (src/api/console.ts, names from the build manifest). */
+@font-face{font-family:'Inter';font-style:normal;font-weight:100 900;font-display:swap;src:url('./fonts/InterVariable.woff2') format('woff2')}
 @font-face{font-family:'JetBrains Mono';font-style:normal;font-weight:400;font-display:swap;src:url('./fonts/JetBrainsMono-Regular.woff2') format('woff2')}
 @font-face{font-family:'JetBrains Mono';font-style:normal;font-weight:500;font-display:swap;src:url('./fonts/JetBrainsMono-Medium.woff2') format('woff2')}

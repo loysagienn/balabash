@@ -1,5 +1,6 @@
 @layer components{
-/* ── Button ──  <button class="btn" data-variant="primary|ghost|danger" data-size="sm|lg" data-icon-only data-block> */
+/* ── Button ──  <button class="btn" data-variant="primary|ghost|danger|danger-line" data-size="sm|lg" data-icon-only data-block>
+   danger — confirms the irreversible (in a modal or sheet); danger-line — opens an irreversible action: red ink on a regular button, tinted only on hover and press (rule 13). */
 .btn{
   --btn-px:var(--sp-3);
   position:relative;display:inline-flex;align-items:center;justify-content:center;gap:var(--sp-1h);
@@ -13,7 +14,7 @@
 .btn:focus-visible{outline:none;box-shadow:var(--ring-focus)}
 .btn:is(:disabled,[aria-disabled="true"]){opacity:.4;pointer-events:none}
 .btn[aria-busy="true"]{pointer-events:none;cursor:progress}
-.btn[data-variant="primary"]{background-color:var(--primary-bg);border-color:transparent;color:var(--primary-ink);font-weight:var(--fw-semibold)}
+.btn[data-variant="primary"]{background-color:var(--primary-bg);border-color:transparent;color:var(--primary-ink)}
 .btn[data-variant="primary"] .ic{color:var(--primary-ink)}
 .btn[data-variant="primary"]:hover{background-image:none;background-color:var(--primary-bg-hover);border-color:transparent;color:var(--primary-ink)}
 .btn[data-variant="primary"]:active{background-image:none;background-color:var(--primary-bg-press)}
@@ -24,6 +25,10 @@
 .btn[data-variant="danger"] .ic{color:var(--st-err-ink)}
 .btn[data-variant="danger"]:hover{background-image:none;background-color:var(--st-err-bg-strong);border-color:transparent;color:var(--st-err-ink)}
 .btn[data-variant="danger"]:active{background-image:none;background-color:var(--st-err-bg-press)}
+.btn[data-variant="danger-line"]{color:var(--st-err-ink)}
+.btn[data-variant="danger-line"] .ic{color:var(--st-err-ink)}
+.btn[data-variant="danger-line"]:hover{background-image:none;background-color:var(--st-err-bg);border-color:transparent;color:var(--st-err-ink)}
+.btn[data-variant="danger-line"]:active{background-image:none;background-color:var(--st-err-bg-strong)}
 .btn[data-size="sm"]{--btn-px:var(--sp-2h);height:var(--ctl-h-sm);font-size:var(--fs-meta);border-radius:var(--r-inner)}
 .btn[data-size="sm"] .ic{font-size:var(--ico-sm)}
 .btn[data-size="sm"]::after{content:"";position:absolute;inset:var(--hit-ext)}   /* hit area ≥ --hit in touch */

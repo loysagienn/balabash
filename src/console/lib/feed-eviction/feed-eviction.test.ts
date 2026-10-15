@@ -115,6 +115,7 @@ const api: Api = {
     get: async () => {
       throw new Error('not here');
     },
+    log: async () => ({ events: [], total: 0 }),
   },
   schedule: {
     runs: async () => ({ runs: [], nextCursor: null }),

@@ -1,5 +1,9 @@
-// Message in the feed (design: Message): "from → to" and the time in the
-// header, the body below. variant: task (a task as a card, usually with
+// Message in the feed (design: Message): the author and the time in the
+// header, the body below — "author → recipient" only between two agents
+// (a task, a report, a child's message); an agent writes into the thread,
+// not to a person (a workspace may have several people), so a message from
+// or to a person — the operator, a reply written in an external system —
+// shows its author alone (showsRecipient). variant: task (a task as a card, usually with
 // the "task" tag), user (yours, on --surface-2), ask (a question for you,
 // with a "reply needed" badge). children — the body: an <Md> and, after
 // it, the attachments (<Atts>). fold — a long body starts collapsed with
@@ -27,6 +31,13 @@ export type MessageVariant = 'task' | 'user' | 'ask';
 
 export type MessageLink = { href: string; label: string; variant?: BtnVariant };
 
+// Whether the header names the recipient: only between two agents — never
+// when the operator ("you") writes or is written to, nor for a reply from
+// a person in an external system (tag "external").
+export function showsRecipient(agent: string, to: string, tag?: string): boolean {
+  return agent !== 'you' && to !== 'you' && to !== '' && tag !== 'external';
+}
+
 export type MessageProps = {
   agent: string;
   to: string;
@@ -53,8 +64,12 @@ export function Message({ agent, to, you, time, variant, tag, fold, quick, onQui
       <Avatar agent={agent} you={you} size="sm" className="msg-av" />
       <div className="msg-h">
         <b className="msg-from">{name(agent)}</b>
-        <Icon name="arrow-right" className="msg-arrow" />
-        <span className="msg-to">{name(to)}</span>
+        {showsRecipient(agent, to, tag) ? (
+          <>
+            <Icon name="arrow-right" className="msg-arrow" />
+            <span className="msg-to">{to}</span>
+          </>
+        ) : null}
         {tag ? <Tag>{tag}</Tag> : null}
         {open ? <Badge state="act" label="reply needed" size="sm" /> : null}
         {time ? <span className="msg-time">{time}</span> : null}

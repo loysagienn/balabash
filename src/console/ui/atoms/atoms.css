@@ -2,12 +2,12 @@
 /* ── Counter ──  <span class="count" data-state="run|act|err" data-size="sm">4</span> */
 .count{--count-h:20px;display:inline-block;flex:none;min-width:var(--count-h);height:var(--count-h);padding:0 var(--sp-1h);border-radius:var(--r-pill);background:var(--surface-3);color:var(--text-2);font-size:var(--fs-micro);font-weight:var(--fw-semibold);line-height:var(--count-h);text-align:center;font-variant-numeric:tabular-nums}
 .count[data-state]{background:var(--st-bg);color:var(--st-ink)}
-.count[data-state="act"]{background:var(--st-act-fill);color:var(--on-act);font-weight:var(--fw-bold)}
-.count[data-state="err"]{background:var(--st-err-fill);color:var(--on-err);font-weight:var(--fw-bold)}
+.count[data-state="act"]{background:var(--st-act-fill);color:var(--on-act)}
+.count[data-state="err"]{background:var(--st-err-fill);color:var(--on-err)}
 .count[data-size="sm"]{--count-h:16px;padding:0 var(--sp-1)}
 
-/* ── Small labels ── */
-.tag{--tag-h:18px;display:inline-flex;align-items:center;height:var(--tag-h);padding:0 var(--sp-1h);border-radius:var(--r-xs);background:var(--surface-3);color:var(--text-2);font-size:var(--fs-micro);line-height:var(--lh-micro);font-weight:var(--fw-medium);white-space:nowrap;flex:none}
+/* ── Small labels ──  the tag is an outline (headless, remote, task, external…), the code chip a filled mono chip — never confused */
+.tag{--tag-h:18px;display:inline-flex;align-items:center;height:var(--tag-h);padding:0 var(--sp-1h);border-radius:var(--r-xs);box-shadow:inset 0 0 0 1px var(--border-strong);color:var(--text-2);font-size:var(--fs-micro);line-height:var(--lh-micro);font-weight:var(--fw-medium);white-space:nowrap;flex:none}
 .code{font-family:var(--mono);letter-spacing:0;font-size:var(--fs-code-sm);color:var(--text-2);background:var(--surface-3);border-radius:var(--r-xs);padding:1px var(--sp-1);white-space:nowrap}
 .code[data-wrap]{white-space:normal;overflow-wrap:anywhere}
 .kbd{--kbd-h:18px;display:inline-flex;align-items:center;justify-content:center;min-width:var(--kbd-h);height:var(--kbd-h);padding:0 var(--sp-1);border-radius:var(--r-xs);background:var(--surface-3);box-shadow:inset 0 -1px 0 var(--border-strong);color:var(--text-2);font:var(--fw-medium) var(--fs-micro) var(--font);letter-spacing:0}
@@ -17,6 +17,8 @@
 .url{--url-h:22px;display:inline-flex;align-items:center;gap:var(--sp-1);min-width:0;max-width:100%;height:var(--url-h);padding:0 var(--sp-2);border-radius:var(--r-pill);background:var(--accent-bg);color:var(--link);font-family:var(--mono);letter-spacing:0;font-size:var(--fs-code-sm);white-space:nowrap;text-decoration:none}
 .url .ic{flex:none;font-size:var(--ico-xs)}
 .url-t{min-width:0;overflow:hidden;text-overflow:ellipsis}   /* the chip never widens its place: a long address is cut with an ellipsis, the whole value is in title */
+.url[data-variant="owner"]{background:var(--surface-3);color:var(--text-2)}   /* the owner link: only the signed-in owner, always there; the public one is the accent chip */
+a.url:hover{color:var(--text)}
 
 /* ── Search match ──  <mark class="hit">slug</mark> */
 .hit{background:var(--accent-bg);color:var(--text);border-radius:var(--r-xs);padding:0 var(--sp-0h)}

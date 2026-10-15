@@ -3,7 +3,7 @@
 .dtable-wrap{container:dtable / inline-size;overflow-x:auto;min-width:0}
 .dtable{--dtable-edge:var(--sp-4h);width:100%;font-size:var(--fs-meta);line-height:var(--lh-meta);font-variant-numeric:tabular-nums}   /* --dtable-edge — padding at the outer columns (= card padding) */
 .dtable :is(th,td){padding:var(--sp-2) var(--sp-3);border-bottom:1px solid var(--border);text-align:left;white-space:nowrap}
-.dtable th{font-size:var(--fs-micro);line-height:var(--lh-micro);font-weight:var(--fw-semibold);color:var(--text-3)}
+.dtable th{font-size:var(--fs-micro);line-height:var(--lh-micro);font-weight:var(--fw-medium);color:var(--text-3)}
 .dtable td{color:var(--text)}
 .dtable :is(th,td):first-child{padding-left:var(--dtable-edge)}
 .dtable :is(th,td):last-child{padding-right:var(--dtable-edge)}

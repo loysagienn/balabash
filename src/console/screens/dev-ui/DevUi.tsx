@@ -145,10 +145,11 @@ export function DevUi() {
         </Section>
 
         <Section title="Btn · IconBtn">
-          <Row label="regular · primary · ghost · danger">
+          <Row label="regular · primary · ghost · danger-line (opens an irreversible action) · danger (its confirmation)">
             <Btn label="Save" />
             <Btn label="Save" variant="primary" />
             <Btn label="Save" variant="ghost" />
+            <Btn label="Cancel thread" variant="danger-line" icon="circle-stop" />
             <Btn label="Delete" variant="danger" icon="trash-2" />
           </Row>
           <Row label="sm · default · lg · with icon · icon after · kbd">
@@ -784,7 +785,7 @@ export function DevUi() {
 
         <Section title="Confirm: a Modal in a wide shell, a Sheet in a narrow one · toasts of the store stack in the corner of the shell">
           <Row>
-            <Btn label="Cancel thread…" variant="danger" icon="trash-2" onClick={() => setConfirm(true)} />
+            <Btn label="Cancel thread…" variant="danger-line" icon="trash-2" onClick={() => setConfirm(true)} />
             <Btn label="Toast: saved" onClick={() => dispatch(pushToast({ state: 'done', title: 'Saved', desc: 'balabash/inbox.md' }))} />
             <Btn label="Toast: error (stays)" onClick={() => dispatch(pushToast({ state: 'err', title: 'Task didn’t start', desc: '“DB backup”: the command exited with code 127.' }))} />
             <Btn label="Toast: plain" onClick={() => dispatch(pushToast({ title: 'Copied', desc: 'The path is in the clipboard.' }))} />

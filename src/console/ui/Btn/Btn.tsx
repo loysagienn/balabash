@@ -1,5 +1,7 @@
 // Button (design: Btn). variant: primary (one per screen or form) · regular
-// (default) · ghost (toolbars, rows) · danger (irreversible). busy — the
+// (default) · ghost (toolbars, rows) · danger (confirms the irreversible, in
+// a modal or sheet) · danger-line (opens an irreversible action: red ink on
+// a regular button — the rail's Cancel thread, Forget secrets). busy — the
 // action is in flight: a spinner instead of the icon, and the button does
 // not act — a click, Enter or Space, a form's implicit submission through
 // it are swallowed. It is not disabled on purpose: the focus stays where it
@@ -11,7 +13,7 @@ import type { IconName } from '../Icon/Icon.tsx';
 import { Kbd } from '../atoms/atoms.tsx';
 import './Btn.css';
 
-export type BtnVariant = 'primary' | 'ghost' | 'danger';
+export type BtnVariant = 'primary' | 'ghost' | 'danger' | 'danger-line';
 export type BtnSize = 'sm' | 'lg';
 
 export type BtnProps = {

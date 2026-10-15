@@ -3,7 +3,7 @@
    Its own “shell” container: on a narrow screen the card loses its frame and the fields take the touch density. */
 .solo{--solo-w:440px;container:shell / inline-size;height:100%;overflow:auto;background:var(--bg)}
 .solo-wrap{min-height:100%;display:grid;grid-template-columns:minmax(0,1fr);place-items:center;padding:var(--sp-10) var(--sp-4)}
-.solo-card{width:min(var(--solo-w),100%);min-width:0;display:flex;flex-direction:column;gap:var(--sp-4);padding:var(--sp-7) var(--sp-7) var(--sp-6);border-radius:var(--r-lg);background:var(--surface);border:1px solid var(--border)}
+.solo-card{width:min(var(--solo-w),100%);min-width:0;display:flex;flex-direction:column;gap:var(--sp-4);padding:var(--sp-7) var(--sp-7) var(--sp-6);border-radius:var(--r-lg);background:var(--surface);border:1px solid var(--border-surface)}
 .solo-brand{display:flex;align-items:center;gap:var(--sp-2);font-size:var(--fs-meta);line-height:var(--lh-meta);font-weight:var(--fw-medium);color:var(--text-3)}
 .solo-logo{width:var(--obj-sm);height:var(--obj-sm);flex:none;display:block;object-fit:contain}   /* the service icon (src/console/public/icon-192.png) */
 .solo-t{margin:0;font-size:var(--fs-h1);line-height:var(--lh-h1);font-weight:var(--fw-semibold);text-wrap:pretty}
