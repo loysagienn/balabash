@@ -4,7 +4,9 @@
 // but the window, the rest of the page is inert and the focus stays
 // inside; Escape and a click outside the window close it (the click lands
 // on the centering layer, which sits over the scrim). It can submit a form
-// in its body (form="<id>"). On the phone the same question is a Sheet.
+// in its body (form="<id>"). It fades in, a touch smaller, and fades out
+// (Overlay, motion "modal"; the way out plays when a Presence keeps it —
+// ui/Overlay/presence). On the phone the same question is a Sheet.
 // bare — the window alone, for the showcase.
 
 import { useId } from 'react';
@@ -63,7 +65,7 @@ export function Modal({ title, cancel = 'Cancel', confirm, confirmVariant = 'pri
   }
 
   return (
-    <Overlay onClose={onClose}>
+    <Overlay onClose={onClose} motion="modal">
       <div
         className="modal-layer"
         onClick={event => {

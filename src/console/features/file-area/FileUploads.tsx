@@ -17,6 +17,7 @@ import { answerClash, cancelUpload, closeUploads, foldUploads, retryUpload } fro
 import { selectUploads } from '../../store/uploads/selectors.ts';
 import { isRunning } from '../../store/uploads/reducer.ts';
 import { useNarrowShell } from '../../ui/Dialog/Dialog.tsx';
+import { Presence } from '../../ui/Overlay/presence.tsx';
 import { Clash, ClashItem } from '../../ui/ClashItem/ClashItem.tsx';
 import { Modal } from '../../ui/Modal/Modal.tsx';
 import { Sheet } from '../../ui/Sheet/Sheet.tsx';
@@ -89,15 +90,6 @@ export function ClashDialog({ rootLabel }: { rootLabel: string }) {
   const narrow = useNarrowShell(probe);
   const { clashes, rows, taken } = useAppSelector(selectUploads);
 
-  if (clashes.length === 0) {
-    return (
-      <>
-        <span ref={probe} className="dialog-probe" hidden />
-        {null}
-      </>
-    );
-  }
-
   const folder = clashes[0]?.folder ?? '';
   const where = folder || rootLabel;
   const kept = keptNames(clashes, taken);
@@ -127,21 +119,23 @@ export function ClashDialog({ rootLabel }: { rootLabel: string }) {
   return (
     <>
       <span ref={probe} className="dialog-probe" hidden />
-      {narrow === null ? null : narrow ? (
-        <Sheet label="Name clash" title={title} confirm="Keep both" alt="Replace" cancel="Skip" onConfirm={() => dispatch(answerClash('keep'))} onAlt={() => dispatch(answerClash('replace'))} onClose={skip}>
-          <p className="fil-clash-note">
-            in <Code>{where}</Code> · {keepNote}
-          </p>
-          {list}
-        </Sheet>
-      ) : (
-        <Modal title={title} cancel="Skip" alt="Replace" confirm="Keep both" width="520px" onConfirm={() => dispatch(answerClash('keep'))} onAlt={() => dispatch(answerClash('replace'))} onClose={skip}>
-          <Code>{where}</Code> already has {clashes.length === 1 ? 'a file with this name' : 'files with these names'}.
-          {others > 0 ? ` The other ${others === 1 ? 'file is' : `${others} files are`} uploading.` : null}
-          {list}
-          <p className="fil-clash-note">{keepNote}</p>
-        </Modal>
-      )}
+      <Presence>
+        {clashes.length === 0 || narrow === null ? null : narrow ? (
+          <Sheet label="Name clash" title={title} confirm="Keep both" alt="Replace" cancel="Skip" onConfirm={() => dispatch(answerClash('keep'))} onAlt={() => dispatch(answerClash('replace'))} onClose={skip}>
+            <p className="fil-clash-note">
+              in <Code>{where}</Code> · {keepNote}
+            </p>
+            {list}
+          </Sheet>
+        ) : (
+          <Modal title={title} cancel="Skip" alt="Replace" confirm="Keep both" width="520px" onConfirm={() => dispatch(answerClash('keep'))} onAlt={() => dispatch(answerClash('replace'))} onClose={skip}>
+            <Code>{where}</Code> already has {clashes.length === 1 ? 'a file with this name' : 'files with these names'}.
+            {others > 0 ? ` The other ${others === 1 ? 'file is' : `${others} files are`} uploading.` : null}
+            {list}
+            <p className="fil-clash-note">{keepNote}</p>
+          </Modal>
+        )}
+      </Presence>
     </>
   );
 }

@@ -18,6 +18,7 @@ import { selectRunningCountByProject } from '../../store/threads/selectors.ts';
 import { Shell } from '../../features/shell/Shell.tsx';
 import { NewProjectDialog } from '../../features/projects/NewProjectDialog.tsx';
 import { Btn } from '../../ui/Btn/Btn.tsx';
+import { Presence } from '../../ui/Overlay/presence.tsx';
 import { Card } from '../../ui/Card/Card.tsx';
 import { Empty } from '../../ui/Empty/Empty.tsx';
 import { FBar } from '../../ui/FBar/FBar.tsx';
@@ -136,7 +137,7 @@ export function ProjectsScreen({ route }: { route: ProjectsRoute }) {
           }
         />
         {body}
-        {creating !== null ? <NewProjectDialog initialTitle={creating} onClose={() => setCreating(null)} /> : null}
+        <Presence>{creating !== null ? <NewProjectDialog initialTitle={creating} onClose={() => setCreating(null)} /> : null}</Presence>
       </Screen>
     </Shell>
   );

@@ -14,6 +14,7 @@ import { useAppDispatch, useAppSelector } from '../../store/hooks.ts';
 import { runTask } from '../../store/schedule/actions.ts';
 import { selectTaskCall } from '../../store/schedule/selectors.ts';
 import { Btn } from '../../ui/Btn/Btn.tsx';
+import { Presence } from '../../ui/Overlay/presence.tsx';
 import { Card, CardHead } from '../../ui/Card/Card.tsx';
 import { Empty } from '../../ui/Empty/Empty.tsx';
 import { Icon } from '../../ui/Icon/Icon.tsx';
@@ -58,7 +59,7 @@ function TaskMenu({ task }: { task: TaskView }) {
       >
         <IconBtn icon="ellipsis" label="More: delete" size="sm" expanded={open} onClick={() => setOpen(!open)} />
       </MenuAnchor>
-      {confirm ? <DeleteTaskDialog task={task} onClose={() => setConfirm(false)} /> : null}
+      <Presence>{confirm ? <DeleteTaskDialog task={task} onClose={() => setConfirm(false)} /> : null}</Presence>
     </>
   );
 }

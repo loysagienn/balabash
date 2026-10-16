@@ -8,12 +8,21 @@
 // snapshot has just brought is not asked for again, and a route change
 // within the same section ('within' — the segment, the search, the id of
 // the thread shown) is not an entry into it ('enter').
+//
+// GO_BACK is the one "back" of the app (the header's arrow, the swipe of a
+// page): when the history entry behind the current one is the page's
+// parent, the browser goes back (its popstate brings the parent as a
+// ROUTE_TO from history, and the stage brings its scroll place back);
+// otherwise the parent is pushed as a new entry, marked as a step back.
 
 import type { AppRoute } from '../../lib/router/routes.ts';
 import type { ActionHandler, Dispatch, State } from '../types.ts';
 import { loadApps } from '../apps/actions.ts';
 import { loadThread, loadThreadEvents, loadThreads } from '../threads/actions.ts';
 import { threadsFiltersOf, sameFilters } from '../threads/filters.ts';
+import { routeTo } from './actions.ts';
+import { pageBehind, sameRoute } from './reducer.ts';
+import type { RouterState } from './reducer.ts';
 
 export type LoadTrigger = 'enter' | 'within' | 'snapshot' | 'visible';
 
@@ -84,4 +93,30 @@ export const tabVisibleHandler: ActionHandler<'TAB_VISIBLE'> =
   action => {
     next(action);
     loadRouteData(getState().router.route, dispatch, getState, 'visible');
+  };
+
+// Whether the browser's back lands on the parent: the entry behind the
+// current one is known and says the same URL.
+export function backThroughHistory(router: RouterState, fallback: AppRoute): boolean {
+  const behind = pageBehind(router);
+
+  return behind !== null && sameRoute(behind.route, fallback);
+}
+
+// The browser's history as the handler sees it; the test gives a stand-in.
+export type BackHistory = { back(): void };
+
+export const goBackHandler =
+  (history: () => BackHistory | null): ActionHandler<'GO_BACK'> =>
+  ({ dispatch, getState, next }) =>
+  action => {
+    next(action);
+
+    const browser = history();
+
+    if (browser && backThroughHistory(getState().router, action.fallback)) {
+      browser.back();
+    } else {
+      dispatch(routeTo(action.fallback, { back: true }));
+    }
   };

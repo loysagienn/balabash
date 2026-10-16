@@ -14,6 +14,7 @@ import { useAppDispatch, useAppSelector } from '../../store/hooks.ts';
 import { reconnectConnection } from '../../store/connections/actions.ts';
 import { selectConnectionCall, selectConnectionFailure, selectConnectionLink } from '../../store/connections/selectors.ts';
 import { Badge } from '../../ui/Badge/Badge.tsx';
+import { Presence } from '../../ui/Overlay/presence.tsx';
 import { Btn } from '../../ui/Btn/Btn.tsx';
 import { IconBtn } from '../../ui/IconBtn/IconBtn.tsx';
 import { Row } from '../../ui/List/List.tsx';
@@ -108,8 +109,8 @@ export function AccountRow({ connection, now }: { connection: ConnectionView; no
           </>
         }
       />
-      {dialog === 'rename' ? <RenameConnectionDialog connection={connection} onClose={() => setDialog(null)} /> : null}
-      {dialog === 'disconnect' ? <DisconnectConnectionDialog connection={connection} onClose={() => setDialog(null)} /> : null}
+      <Presence>{dialog === 'rename' ? <RenameConnectionDialog connection={connection} onClose={() => setDialog(null)} /> : null}</Presence>
+      <Presence>{dialog === 'disconnect' ? <DisconnectConnectionDialog connection={connection} onClose={() => setDialog(null)} /> : null}</Presence>
     </>
   );
 }

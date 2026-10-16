@@ -12,7 +12,8 @@ import type { AppRoute } from '../lib/router/routes.ts';
 import { actionHandlersMiddleware } from './middleware.ts';
 import type { Action, ActionHandlers, State } from './types.ts';
 import { createRouterReducer } from './router/reducer.ts';
-import { routeToHandler, tabVisibleHandler } from './router/handlers.ts';
+import { goBackHandler, routeToHandler, tabVisibleHandler } from './router/handlers.ts';
+import type { BackHistory } from './router/handlers.ts';
 import { sessionReducer } from './session/reducer.ts';
 import { consoleCodeHandler, loginDoneHandler, loginHandler, logoutHandler, saveSettingsHandler, sessionCheckDoneHandler, sessionCheckHandler } from './session/handlers.ts';
 import { streamReducer } from './stream/reducer.ts';
@@ -41,46 +42,48 @@ import { attachFilesHandler, removeAttachmentHandler, uploadAttachmentHandler } 
 
 export type { Action, ActionOf, ActionType, State } from './types.ts';
 
-export const handlers = {
-  ROUTE_TO: routeToHandler,
-  TAB_VISIBLE: tabVisibleHandler,
-  SESSION_CHECK: sessionCheckHandler,
-  SESSION_CHECK_DONE: sessionCheckDoneHandler,
-  LOGIN: loginHandler,
-  LOGIN_DONE: loginDoneHandler,
-  CONSOLE_CODE_REQUEST: consoleCodeHandler,
-  LOGOUT: logoutHandler,
-  SAVE_SETTINGS: saveSettingsHandler,
-  SNAPSHOT_LOAD: snapshotLoadHandler,
-  SNAPSHOT_LOAD_DONE: snapshotLoadDoneHandler,
-  LOAD_THREADS: loadThreadsHandler,
-  LOAD_THREAD_EVENTS: loadThreadEventsHandler,
-  LOAD_THREAD: loadThreadHandler,
-  SEND_MESSAGE: sendMessageHandler,
-  ATTACH_FILES: attachFilesHandler,
-  ATTACHMENT_UPLOAD: uploadAttachmentHandler,
-  ATTACHMENT_REMOVE: removeAttachmentHandler,
-  UPLOAD_FILES: uploadFilesHandler,
-  UPLOAD_CLASH_ANSWER: answerClashHandler,
-  UPLOAD_START: startUploadHandler,
-  UPLOAD_CANCEL: cancelUploadHandler,
-  UPLOAD_RETRY: retryUploadHandler,
-  UPLOAD_CLOSE: closeUploadsHandler,
-  COMMAND_THREAD: commandThreadHandler,
-  CREATE_PROJECT: createProjectHandler,
-  UPDATE_PROJECT: updateProjectHandler,
-  SET_PROJECT_ARCHIVED: setProjectArchivedHandler,
-  LOAD_APPS: loadAppsHandler,
-  PUBLISH_APP: publishAppHandler,
-  UNPUBLISH_APP: unpublishAppHandler,
-  CREATE_TASK: createTaskHandler,
-  RUN_TASK: runTaskHandler,
-  DELETE_TASK: deleteTaskHandler,
-  RENAME_CONNECTION: renameConnectionHandler,
-  DISCONNECT_CONNECTION: disconnectConnectionHandler,
-  RECONNECT_CONNECTION: reconnectConnectionHandler,
-  CONNECT_SERVICE: connectServiceHandler,
-} satisfies ActionHandlers;
+export const handlers = (back: () => BackHistory | null) =>
+  ({
+    ROUTE_TO: routeToHandler,
+    GO_BACK: goBackHandler(back),
+    TAB_VISIBLE: tabVisibleHandler,
+    SESSION_CHECK: sessionCheckHandler,
+    SESSION_CHECK_DONE: sessionCheckDoneHandler,
+    LOGIN: loginHandler,
+    LOGIN_DONE: loginDoneHandler,
+    CONSOLE_CODE_REQUEST: consoleCodeHandler,
+    LOGOUT: logoutHandler,
+    SAVE_SETTINGS: saveSettingsHandler,
+    SNAPSHOT_LOAD: snapshotLoadHandler,
+    SNAPSHOT_LOAD_DONE: snapshotLoadDoneHandler,
+    LOAD_THREADS: loadThreadsHandler,
+    LOAD_THREAD_EVENTS: loadThreadEventsHandler,
+    LOAD_THREAD: loadThreadHandler,
+    SEND_MESSAGE: sendMessageHandler,
+    ATTACH_FILES: attachFilesHandler,
+    ATTACHMENT_UPLOAD: uploadAttachmentHandler,
+    ATTACHMENT_REMOVE: removeAttachmentHandler,
+    UPLOAD_FILES: uploadFilesHandler,
+    UPLOAD_CLASH_ANSWER: answerClashHandler,
+    UPLOAD_START: startUploadHandler,
+    UPLOAD_CANCEL: cancelUploadHandler,
+    UPLOAD_RETRY: retryUploadHandler,
+    UPLOAD_CLOSE: closeUploadsHandler,
+    COMMAND_THREAD: commandThreadHandler,
+    CREATE_PROJECT: createProjectHandler,
+    UPDATE_PROJECT: updateProjectHandler,
+    SET_PROJECT_ARCHIVED: setProjectArchivedHandler,
+    LOAD_APPS: loadAppsHandler,
+    PUBLISH_APP: publishAppHandler,
+    UNPUBLISH_APP: unpublishAppHandler,
+    CREATE_TASK: createTaskHandler,
+    RUN_TASK: runTaskHandler,
+    DELETE_TASK: deleteTaskHandler,
+    RENAME_CONNECTION: renameConnectionHandler,
+    DISCONNECT_CONNECTION: disconnectConnectionHandler,
+    RECONNECT_CONNECTION: reconnectConnectionHandler,
+    CONNECT_SERVICE: connectServiceHandler,
+  }) satisfies ActionHandlers;
 
 export type AppStore = Store<State, Action>;
 
@@ -92,11 +95,14 @@ export type CreateStoreOptions = {
   initialHash?: string;
   // An extra enhancer (Redux DevTools in the browser).
   enhancer?: StoreEnhancer;
+  // The browser's history for GO_BACK (window.history in the browser; a
+  // test gives a stand-in, or nothing — then "back" always pushes).
+  back?: () => BackHistory | null;
 };
 
 type Domains = Omit<State, 'sessions'>;
 
-export function createStore({ api, initialRoute, initialHash = '', enhancer }: CreateStoreOptions): AppStore {
+export function createStore({ api, initialRoute, initialHash = '', enhancer, back = () => (typeof window === 'undefined' ? null : window.history) }: CreateStoreOptions): AppStore {
   const domains = combineReducers({
     router: createRouterReducer(initialRoute, initialHash),
     session: sessionReducer,
@@ -136,7 +142,7 @@ export function createStore({ api, initialRoute, initialHash = '', enhancer }: C
     return reduce(state, action);
   };
 
-  const middleware = applyMiddleware(actionHandlersMiddleware(handlers, api));
+  const middleware = applyMiddleware(actionHandlersMiddleware(handlers(back), api));
   // The extra enhancer goes INSIDE the middleware (Redux's "devtools last"):
   // the DevTools instrument replaces the reducer with a lifted one and feeds
   // the store it builds PERFORM_ACTION wrappers, so a middleware composed

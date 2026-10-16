@@ -1,30 +1,18 @@
-// The root: the session gate and the route switch. Anonymous — the sign-in
-// card over any route (the route stays; after sign-in the screen the link
-// led to appears; the /login door itself leads on to its `next`). The
-// document title follows the route and its data.
+// The root: the session gate and the stage of the screens (app/stage —
+// the route's screen, and the pages sliding over one another on the
+// phone). Anonymous — the sign-in card over any route (the route stays;
+// after sign-in the screen the link led to appears; the /login door itself
+// leads on to its `next`). The document title follows the route and its
+// data.
 
 import { useEffect } from 'react';
 import { useAppSelector } from '../store/hooks.ts';
 import { selectRoute } from '../store/router/selectors.ts';
 import { selectSession } from '../store/session/selectors.ts';
-import { ProjectScreen } from '../screens/project/ProjectScreen.tsx';
-import { ProjectsScreen } from '../screens/projects/ProjectsScreen.tsx';
-import { LoginLanding } from '../screens/outside/LoginLanding.tsx';
 import { NotFound } from '../screens/outside/NotFound.tsx';
-import { Secrets } from '../screens/outside/Secrets.tsx';
 import { SessionError } from '../screens/outside/SessionError.tsx';
 import { SignIn } from '../screens/outside/SignIn.tsx';
-import { AgentsScreen } from '../screens/agents/AgentsScreen.tsx';
-import { ConnectionsScreen } from '../screens/connections/ConnectionsScreen.tsx';
-import { AppsScreen } from '../screens/apps/AppsScreen.tsx';
-import { FilesScreen } from '../screens/files/FilesScreen.tsx';
-import { HomeScreen } from '../screens/home/HomeScreen.tsx';
-import { ThreadScreen } from '../screens/thread/ThreadScreen.tsx';
-import { ThreadsScreen } from '../screens/threads/ThreadsScreen.tsx';
-import { SettingsScreen } from '../screens/settings/SettingsScreen.tsx';
-import { ScheduleScreen } from '../screens/schedule/ScheduleScreen.tsx';
-import { SystemScreen } from '../screens/system/SystemScreen.tsx';
-import { DevUi } from '../screens/dev-ui/DevUi.tsx';
+import { Stage } from './stage/Stage.tsx';
 import { selectTitle } from './title.ts';
 
 export function App() {
@@ -52,38 +40,5 @@ export function App() {
       break;
   }
 
-  switch (route.key) {
-    case 'home':
-      return <HomeScreen />;
-    case 'threads':
-      return <ThreadsScreen route={route} />;
-    case 'thread':
-      return <ThreadScreen id={route.id} />;
-    case 'projects':
-      return <ProjectsScreen route={route} />;
-    case 'project':
-      return <ProjectScreen route={route} />;
-    case 'files':
-      return <FilesScreen route={route} />;
-    case 'apps':
-      return <AppsScreen route={route} />;
-    case 'schedule':
-      return <ScheduleScreen route={route} />;
-    case 'connections':
-      return <ConnectionsScreen />;
-    case 'secrets':
-      // One instance per id: the values typed and the call in flight belong
-      // to the request they were typed for, never to the next id.
-      return <Secrets key={route.id} id={route.id} />;
-    case 'agents':
-      return <AgentsScreen route={route} />;
-    case 'system':
-      return <SystemScreen />;
-    case 'settings':
-      return <SettingsScreen />;
-    case 'dev_ui':
-      return <DevUi />;
-    case 'login':
-      return <LoginLanding next={route.next} />;
-  }
+  return <Stage />;
 }

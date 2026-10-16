@@ -1,0 +1,32 @@
+@layer patterns {
+  /* ════════════ Stage ════════════
+   .app (container shell) > .stage-layer[data-role=current|top|under][inert] × 1–2 (> .shell + .stage-dim under the top) + the toasts, the viewer
+   The pages of the navigation, each a layer over the whole app; one at rest, two while a page slides over another on the
+   phone (app/stage/stage.logic.ts): the top layer moves by its offset (transform, drawn by stageMotion.ts), the one beneath
+   follows a little under a dim. A layer that is not the current page is inert. */
+  .app {
+    position: relative;
+    container: shell / inline-size;
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+  }
+  .stage-layer {
+    position: absolute;
+    inset: 0;
+    background: var(--bg);
+  }
+  .app[data-motion] .stage-layer {
+    will-change: transform;
+  }
+  .stage-layer[data-role='top'] {
+    box-shadow: -8px 0 24px rgba(0, 0, 0, 0.12);
+  } /* the moving page's left edge over the page beneath */
+  .stage-dim {
+    position: absolute;
+    inset: 0;
+    background: #000;
+    opacity: 0;
+    pointer-events: none;
+  }
+}
