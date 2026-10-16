@@ -22,7 +22,13 @@
 /* narrow thread: same layout, its own sizes. The field is one line and grows to six; buttons below it —
    “attach” aligned with the text, “send” round; the phone’s system bar is accounted for at the bottom */
 @container thread (max-width:480px){
-  .composer{padding:var(--sp-2) var(--gutter) calc(var(--sp-2) + env(safe-area-inset-bottom,0px))}
+  .composer{padding:var(--sp-2) var(--gutter) calc(var(--sp-2) + var(--safe-bottom))}
+  @media (display-mode:browser){
+    .composer{padding-bottom:calc(var(--sp-4) + var(--safe-bottom))}   /* in a browser tab (not the home-screen app) the box keeps 8 px more from the browser's own bar — Vladimir's request, 2026-10-16 */
+  }
+  @media (display-mode:standalone){
+    :root[data-keyboard] .composer{padding-bottom:0}   /* the home-screen app with the on-screen keyboard out (lib/touch/keyboard.ts): the box sits right on it. In a browser tab the keyboard changes nothing — Vladimir's request, 2026-10-16 */
+  }
   .composer-box{--composer-min-h:var(--lh-lg);gap:var(--sp-1);padding:var(--sp-2h) var(--sp-1h) var(--sp-1h) var(--sp-3h)}
   .composer-input{--composer-max-lines:6;padding:var(--sp-0h) var(--sp-2) var(--sp-0h) 0;font-size:var(--fs-input-touch);line-height:var(--lh-lg);max-height:calc(var(--lh-lg) * var(--composer-max-lines) + var(--sp-1))}
   .composer-hint{display:none}
@@ -31,7 +37,7 @@
   .composer-attach .ic{font-size:var(--ico-md)}
   .composer-send .ic{font-size:var(--ico)}
   .composer-lock{padding:var(--sp-2h) var(--sp-3)}
-  .composer:has(> .composer-lock){padding-top:var(--glass-edge-in);padding-bottom:calc(var(--sp-3) + env(safe-area-inset-bottom,0px))}
+  .composer:has(> .composer-lock){padding-top:var(--glass-edge-in);padding-bottom:calc(var(--sp-3) + var(--safe-bottom))}
   .composer-atts{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;margin:0 calc(-1 * var(--sp-1h)) 0 calc(-1 * var(--sp-3h));padding:0 var(--sp-1h) 0 var(--sp-3h)}   /* one row that scrolls sideways, clipped at the box’s inner edge */
   .composer-atts .attd{--attd-w:208px;flex:none}
   .composer-atts[data-more]{-webkit-mask-image:linear-gradient(to right,#000 calc(100% - var(--sp-6)),transparent);mask-image:linear-gradient(to right,#000 calc(100% - var(--sp-6)),transparent)}   /* the row fades at the right edge only while more chips are past it */

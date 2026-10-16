@@ -42,3 +42,23 @@ export function composerKeyAction(event: ComposerKeyEvent, phone: boolean): Comp
 export function outgoingText(value: string): string {
   return value.replace(/^(?:[ \t]*\r?\n)+/, '').trimEnd();
 }
+
+// The box is the field: a tap anywhere on it that is not a control of its
+// own — the padding, the row under the text, the ↵ hint, the gap between
+// the buttons — focuses the textarea (on a phone the text sits at the top
+// of the box and the row of buttons below is a dead strip otherwise —
+// Vladimir, 2026-10-16). The controls keep their taps: the buttons, the
+// attachment chips (their own buttons inside), and the textarea itself
+// (the caret goes where the finger is). `target` is the element under the
+// pointer; the match walks up to the box.
+export const COMPOSER_CONTROLS = 'button, a, input, textarea, [role="button"], .composer-atts';
+
+export type ClickTarget = { closest(selectors: string): unknown };
+
+export function focusesField(target: ClickTarget | null): boolean {
+  return target !== null && target.closest(COMPOSER_CONTROLS) === null;
+}
+
+// The buttons take the focus as any button does — "Attach" included: with
+// the field kept focused through the picker, iOS moves the keyboard and the
+// page unpredictably around the system sheet (tried, 2026-10-16).

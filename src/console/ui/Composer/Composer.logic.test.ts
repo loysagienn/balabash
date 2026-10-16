@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { composerKeyAction, outgoingText } from './Composer.logic.ts';
+import { COMPOSER_CONTROLS, composerKeyAction, focusesField, outgoingText } from './Composer.logic.ts';
 
 const key = (overrides: Partial<Parameters<typeof composerKeyAction>[0]>) => ({
   key: 'Enter',
@@ -48,5 +48,22 @@ describe('outgoingText', () => {
   it('keeps the indentation of the first line', () => {
     assert.equal(outgoingText('    const a = 1;\n    const b = 2;'), '    const a = 1;\n    const b = 2;');
     assert.equal(outgoingText('\n\t- item\n'), '\t- item');
+  });
+});
+
+describe('focusesField', () => {
+  // An element under the pointer, with the ancestors it would match.
+  const at = (matches: string[]) => ({ closest: (selectors: string) => (matches.includes(selectors) ? {} : null) });
+
+  it('the box itself, the row under the text and the hint focus the field', () => {
+    assert.equal(focusesField(at([])), true);
+  });
+
+  it('the controls keep their taps: the buttons, the chips, the textarea', () => {
+    assert.equal(focusesField(at([COMPOSER_CONTROLS])), false);
+  });
+
+  it('no target — nothing to focus', () => {
+    assert.equal(focusesField(null), false);
   });
 });

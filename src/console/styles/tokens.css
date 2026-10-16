@@ -151,11 +151,15 @@
   --content-max:1600px; --feed-max:800px; --rail-w:300px;
   --hit:44px;                                         /* minimum hit area on a touch screen */
   --hit-ext:0px;                                      /* how far to extend the hit area of small controls (< 0 in touch) */
+  /* the phone's system bar at the bottom (the Home indicator's inset in a home-screen web app, 34 px on an iPhone): the one
+     place the inset is read; every bottom bar adds this token. 0 while the on-screen keyboard is out — the indicator sits over
+     the keyboard then, not under the bar, and the platform keeps reporting the inset (lib/touch/keyboard.ts marks the root) */
+  --safe-bottom:env(safe-area-inset-bottom,0px);
   /* phone tabs — islands over the content (Shell.css, ui/Island): the capsule and More, the side inset and gap,
      the More menu's width; their bottom sits 8 px into the system bar's inset (12 px when there is none); --tabs-field — the
      frame's empty field under the content (the nav's height), also --frame-foot of the phone's section screens */
   --tabs-h:62px; --tabs-x:20px; --tabs-gap:10px; --tabs-menu-w:236px;
-  --tabs-bottom:max(calc(env(safe-area-inset-bottom,0px) - 8px),var(--sp-3));
+  --tabs-bottom:max(calc(var(--safe-bottom) - 8px),var(--sp-3));
   --tabs-field:calc(var(--tabs-bottom) + var(--tabs-h) + var(--sp-2));
 
   /* ── Controls ── */
@@ -206,4 +210,7 @@
   --blink:1.4s;   /* dot of a running object */
   --spin:0.9s;    /* loading indicator */
   --flash:2.4s;   /* highlight of a new item */
+}
+@media (display-mode:standalone){
+  html[data-keyboard]{--safe-bottom:0px}   /* the home-screen app with the on-screen keyboard out (lib/touch/keyboard.ts): no system bar under the bottom bars. In a browser tab the keyboard changes nothing — Vladimir, 2026-10-16 */
 }

@@ -15,7 +15,7 @@
 .pv-b{--pv-md-max:720px;flex:1;min-height:0;overflow:auto;padding:var(--sp-4) var(--sp-5) var(--sp-6)}
 .pv-b > .md{max-width:var(--pv-md-max)}
 .pv-b[data-fill]{display:flex;flex-direction:column}
-.pv-actbar{position:sticky;bottom:0;z-index:var(--z-sticky);display:none;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);gap:var(--sp-2);padding:var(--sp-3) var(--gutter) calc(var(--sp-3) + env(safe-area-inset-bottom,0px));flex:none}   /* .glass data-edge="bottom" — the bottom bar of a file preview on the phone */
+.pv-actbar{position:sticky;bottom:0;z-index:var(--z-sticky);display:none;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);gap:var(--sp-2);padding:var(--sp-3) var(--gutter) calc(var(--sp-3) + var(--safe-bottom));flex:none}   /* .glass data-edge="bottom" — the bottom bar of a file preview on the phone */
 @container fa (max-width:720px){
   .pv-acts{display:none}
   .pv-actbar{display:grid}

@@ -19,13 +19,13 @@
 // measured height where the browser lacks it.
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import type { ReactNode } from 'react';
+import type { MouseEvent, PointerEvent, ReactNode } from 'react';
 import type { IconName } from '../Icon/Icon.tsx';
 import { IconBtn } from '../IconBtn/IconBtn.tsx';
 import { Note } from '../Note/Note.tsx';
 import { Kbd } from '../atoms/atoms.tsx';
 import { PHONE_MEDIA } from '../../lib/touch/pinch.ts';
-import { composerKeyAction, outgoingText } from './Composer.logic.ts';
+import { composerKeyAction, focusesField, outgoingText } from './Composer.logic.ts';
 import '../Glass/Glass.css';
 import './Composer.css';
 
@@ -117,6 +117,20 @@ export function Composer({ to, value, onChange, onSend, onFiles, attachments, re
     }
   };
 
+  // The box is the field (focusesField): a press on its own surface keeps
+  // the focus where it is (no blur — on a phone the keyboard would start
+  // sliding away) and the click that follows puts it into the textarea.
+  const onBoxPointerDown = (event: PointerEvent<HTMLDivElement>) => {
+    if (focusesField(event.target as Element)) {
+      event.preventDefault();
+    }
+  };
+  const onBoxClick = (event: MouseEvent<HTMLDivElement>) => {
+    if (focusesField(event.target as Element)) {
+      input.current?.focus();
+    }
+  };
+
   return (
     <div className="composer glass" data-edge="bottom">
       {refusal ? (
@@ -126,7 +140,7 @@ export function Composer({ to, value, onChange, onSend, onFiles, attachments, re
           </Note>
         </div>
       ) : null}
-      <div className="composer-box">
+      <div className="composer-box" onPointerDown={onBoxPointerDown} onClick={onBoxClick}>
         {attachments ? (
           <div ref={atts} className="composer-atts" data-more={more ? '' : undefined}>
             {attachments}

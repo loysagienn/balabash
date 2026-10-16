@@ -27,6 +27,7 @@ import { connectQueryClientToSchedule } from './lib/query/schedule.ts';
 import { connectQueryClientToSystem } from './lib/query/system.ts';
 import { connectQueryClientToUploads } from './lib/query/uploads.ts';
 import { PHONE_MEDIA, installPinchGuard } from './lib/touch/pinch.ts';
+import { installKeyboardWatch } from './lib/touch/keyboard.ts';
 import { createStore } from './store/index.ts';
 import type { AppStore } from './store/index.ts';
 import { sessionCheck, sessionLost } from './store/session/actions.ts';
@@ -79,6 +80,10 @@ connectStoreToFeedEviction(store);
 // The phone's two-finger zoom is off (lib/touch/pinch.ts); desktop zoom — a
 // touch screen beside a mouse included — is not.
 installPinchGuard(document, navigator, window.matchMedia(PHONE_MEDIA));
+// The on-screen keyboard (lib/touch/keyboard.ts): html[data-keyboard] while
+// it is out — the system bar's inset under the bottom bars goes to 0, the
+// composer sits on the keyboard.
+installKeyboardWatch(document, window);
 
 // The second data layer (frontend.md): data of the session, cleared when
 // the session ends (lib/query/session.ts).
