@@ -102,9 +102,19 @@ describe('gesture — the drag', () => {
     assert.equal(drag.claimed, true);
     assert.deepEqual(drag.move(142, 104, 48), { kind: 'move', travel: 30 });
     assert.deepEqual(drag.move(132, 104, 64), { kind: 'move', travel: 20 });
-    // The window of the lift: from the claim (112 at 32) to the last move (132 at 64).
-    assert.equal(drag.up(70), 0.625);
+    // The window of the lift (50 ms before the last move): from 104 at 16 to 132 at 64.
+    assert.equal(drag.up(70), (132 - 104) / (64 - 16));
     assert.equal(drag.active, false);
+  });
+
+  it('reads a flick’s speed from the touch itself: claimed and lifted within two moves', () => {
+    const drag = new Drag('x');
+
+    drag.down(60, 400, 0);
+    assert.deepEqual(drag.move(110, 401, 16), { kind: 'claim', travel: 0 });
+    assert.deepEqual(drag.move(170, 402, 32), { kind: 'move', travel: 60 });
+    // 110 px over 32 ms, read from the touch at 60: a fling, not a slow let-go.
+    assert.equal(drag.up(36), (170 - 60) / 32);
   });
 
   it('lets a drag of the other axis go, and a tap too', () => {

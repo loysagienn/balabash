@@ -1,11 +1,13 @@
 // The speed of a finger at the moment it lifts, in px per ms along one
-// axis: the slope over the last stretch of samples (a window of recent
-// moves, so a long drag's early speed does not count), and zero when the
+// axis: the slope over the last stretch of samples — a short window, the
+// last few frames at 60 Hz, so the speed is the finger's at the lift and
+// not an average over a drag that sped up or slowed down — or over the
+// last two samples when the window holds only one; and zero when the
 // finger had stopped before lifting — a drag that paused and let go has
 // no fling in it, however fast it started.
 
 // Samples older than this before the last one do not count.
-export const VELOCITY_WINDOW_MS = 100;
+export const VELOCITY_WINDOW_MS = 50;
 // A finger still for this long before lifting has stopped.
 export const STILL_MS = 100;
 

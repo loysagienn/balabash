@@ -4,7 +4,8 @@
 // when the axis is its own and lets it go otherwise), the travel from the
 // point of the decision while it is claimed — so the content starts moving
 // from under the finger, not with a jump the size of the slop — and the
-// velocity at the lift. The DOM wiring (pointer events, preventDefault,
+// velocity at the lift, read over the whole touch (a flick is over before
+// the slop is well behind). The DOM wiring (pointer events, preventDefault,
 // capture) is the owner's; this is the arithmetic.
 
 import { lockAxis } from './axis.ts';
@@ -62,6 +63,10 @@ export class Drag {
       return { kind: 'none' };
     }
 
+    // The finger's speed counts from the touch, not from the claim: a
+    // fast flick is claimed and lifted within a few samples.
+    this.tracker.add(t, this.along(x, y));
+
     const axis = lockAxis(x - this.startX, y - this.startY);
 
     if (axis === null) {
@@ -76,8 +81,6 @@ export class Drag {
 
     this.phase = 'claimed';
     this.origin = this.along(x, y);
-    this.tracker.reset();
-    this.tracker.add(t, this.origin);
 
     return { kind: 'claim', travel: 0 };
   }
