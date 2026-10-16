@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { AXIS_RATIO, SLOP_PX, UNDECIDED_MAX_PX, lockAxis } from './axis.ts';
 import { Drag } from './drag.ts';
-import { COMMIT_AT, FLING_PX_MS, SETTLE_MAX_MS, SETTLE_MIN_MS, settle } from './settle.ts';
+import { COMMIT_AT, FLING_PX_MS, SETTLE_MS, SETTLE_SHORT_SHARE, settle } from './settle.ts';
 import { STILL_MS, VelocityTracker } from './velocity.ts';
 
 describe('gesture — the axis', () => {
@@ -65,35 +65,28 @@ describe('gesture — the velocity', () => {
 });
 
 describe('gesture — the settle', () => {
-  it('decides by the fling, else by the half', () => {
+  it('decides by the fling, else by the third', () => {
     assert.equal(settle({ progress: 0.2, velocity: FLING_PX_MS, extent: 390 }).target, 1);
     assert.equal(settle({ progress: 0.9, velocity: -FLING_PX_MS, extent: 390 }).target, 0);
     assert.equal(settle({ progress: COMMIT_AT + 0.01, velocity: 0, extent: 390 }).target, 1);
     assert.equal(settle({ progress: COMMIT_AT, velocity: 0.1, extent: 390 }).target, 0);
   });
 
-  it('runs at the finger’s speed, within the bounds, and takes no time when there is nothing left', () => {
-    // 312 px left at 2 px/ms — 156 ms.
+  it('runs a fling at the finger’s speed with no floor, and a slow let-go at the ordinary time', () => {
+    // 312 px left at 2 px/ms — 156 ms; at 20 px/ms — 16 ms.
     assert.deepEqual(settle({ progress: 0.2, velocity: 2, extent: 390 }), { target: 1, duration: 156 });
-    // A slow let-go: the ordinary pace scaled to the distance left.
-    assert.deepEqual(settle({ progress: 0.75, velocity: 0, extent: 400 }), {
-      target: 1,
-      duration: 80 > SETTLE_MIN_MS ? 80 : SETTLE_MIN_MS,
-    });
+    assert.deepEqual(settle({ progress: 0.2, velocity: 20, extent: 390 }), { target: 1, duration: 16 });
+    // A fling back from far along: at the fling's speed.
+    assert.deepEqual(settle({ progress: 0.9, velocity: -5, extent: 400 }), { target: 0, duration: 72 });
+    // A fling barely over the threshold never takes longer than the full way.
+    assert.deepEqual(settle({ progress: 0.1, velocity: FLING_PX_MS, extent: 400 }), { target: 1, duration: SETTLE_MS });
+    // A slow let-go: the ordinary time scaled to the way left, never under its short share.
+    assert.deepEqual(settle({ progress: 0.75, velocity: 0, extent: 400 }), { target: 1, duration: Math.round(SETTLE_MS * SETTLE_SHORT_SHARE) });
+    assert.deepEqual(settle({ progress: 0.2, velocity: 0.05, extent: 400 }), { target: 0, duration: Math.round(SETTLE_MS * SETTLE_SHORT_SHARE) });
+    assert.deepEqual(settle({ progress: 0.1, velocity: 0, extent: 400 }), { target: 0, duration: Math.round(SETTLE_MS * SETTLE_SHORT_SHARE) });
+    assert.deepEqual(settle({ progress: 0.34, velocity: 0, extent: 400 }), { target: 1, duration: Math.round(SETTLE_MS * 0.66) });
+    // Nothing left: no time.
     assert.deepEqual(settle({ progress: 0, velocity: 0, extent: 400 }), { target: 0, duration: 0 });
-    assert.equal(
-      settle({ progress: 0.1, velocity: 0.1, extent: 400 }).duration,
-      Math.round(Math.max(SETTLE_MIN_MS, 0.1 * SETTLE_MAX_MS)),
-    );
-    // A fling back from far along: at the fling's speed, never under the minimum.
-    assert.deepEqual(settle({ progress: 0.9, velocity: -5, extent: 400 }), { target: 0, duration: SETTLE_MIN_MS });
-    // A slow let-go before the half: back at the ordinary pace.
-    assert.deepEqual(settle({ progress: 0.4, velocity: 0.05, extent: 400 }), {
-      target: 0,
-      duration: Math.round(0.4 * SETTLE_MAX_MS),
-    });
-    // Very fast: never under the minimum.
-    assert.equal(settle({ progress: 0.5, velocity: 50, extent: 400 }).duration, SETTLE_MIN_MS);
     assert.deepEqual(settle({ progress: 0.3, velocity: 1, extent: 400, reduced: true }), { target: 1, duration: 0 });
   });
 });
