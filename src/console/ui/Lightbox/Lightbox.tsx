@@ -1,15 +1,22 @@
 // Image viewer (design: Lightbox): full screen over everything, one for
 // every image of the console. The top bar — the name, the details, Download,
-// Open in a new tab, Close; the image fitted to the stage; ←/→ and the
-// arrows step through the images of one message ("1 of 2"), Escape closes.
-// Rendered through an Overlay (a portal into document.body): the page under
-// it is inert, the focus stays inside and comes back on close. The natural
-// size of the image joins the details once it has loaded (onSize).
+// Open in a new tab, Close — is the header's row, the page color at 70 %
+// with a light blur: the image fits the rectangle below it and, zoomed or
+// dragged, slides under it. The stage pans and zooms like a canvas (useZoom,
+// zoom.logic.ts): the wheel pans, ⌘/Ctrl + wheel zooms about the cursor;
+// one finger or a mouse drag pans, two fingers pinch, a double tap zooms
+// into its point and back, a double tap held moves the zoom with the
+// finger. ←/→ and the arrows step through the images of one message
+// ("1 of 2"), Escape closes, a tap on the background closes. Rendered
+// through an Overlay (a portal into document.body): the page under it is
+// inert, the focus stays inside and comes back on close. The natural size
+// of the image joins the details once it has loaded (onSize).
 
 import { useEffect } from 'react';
 import { IconBtn } from '../IconBtn/IconBtn.tsx';
 import { Overlay } from '../Overlay/Overlay.tsx';
 import './Lightbox.css';
+import { useZoom } from './useZoom.ts';
 
 export type LightboxProps = {
   src: string;
@@ -25,6 +32,8 @@ export type LightboxProps = {
 };
 
 export function Lightbox({ src, name, meta, download, count, onStep, onClose, onSize }: LightboxProps) {
+  const zoom = useZoom(src);
+
   useEffect(() => {
     if (count === null) {
       return undefined;
@@ -57,14 +66,17 @@ export function Lightbox({ src, name, meta, download, count, onStep, onClose, on
           </span>
         </div>
         <div
+          key={src}
+          ref={zoom.stageRef}
           className="lbox-stage"
           onClick={event => {
-            if (event.target === event.currentTarget) {
+            // The click of a clean tap on the background; a drag or a pinch that ended there is not one.
+            if (event.target === event.currentTarget && zoom.consumeClick()) {
               onClose();
             }
           }}
         >
-          <img key={src} src={src} alt={name} onLoad={event => onSize?.({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight })} />
+          <img ref={zoom.imgRef} src={src} alt={name} draggable={false} onLoad={event => onSize?.({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight })} />
           {count !== null ? (
             <>
               <IconBtn icon="chevron-left" label="Previous image" variant="regular" className="lbox-prev" onClick={() => onStep(-1)} />

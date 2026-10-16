@@ -1,10 +1,11 @@
 @layer patterns{
 /* ── Draft attachment ──  .attd[data-state=done|err][data-kind=img] > button.attd-th | .obj.attd-ic, .attd-main (.attd-n, .attd-s), .attd-acts, .prog.attd-prog
    uploading — a 2 px bar along the bottom edge and “×” cancels; done — “×” removes from the draft (the stored file stays);
-   err — tinted, Retry (unless retry can’t help, e.g. over 2 GB) and Remove; the image preview opens the image viewer */
+   err — tinted, Retry (unless retry can’t help, e.g. over 2 GB) and Remove; the image preview opens the image viewer —
+   --attd-th high, as wide as the picture (never cropped) between --attd-th-min and --attd-th-max */
 .attd{--attd-h:44px;--attd-w:248px;--attd-th:32px;position:relative;display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:var(--sp-2);max-width:var(--attd-w);height:var(--attd-h);padding:0 var(--sp-1) 0 var(--sp-1h);border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface-2);overflow:hidden}
-.attd-th{display:block;width:var(--attd-th);height:var(--attd-th);padding:0;border:0;border-radius:var(--r-xs);overflow:hidden;background:none;cursor:pointer}
-.attd-th > img{width:100%;height:100%;object-fit:cover}
+.attd-th{--attd-th-min:24px;--attd-th-max:56px;display:flex;align-items:center;justify-content:center;height:var(--attd-th);min-width:var(--attd-th-min);max-width:var(--attd-th-max);padding:0;border:0;border-radius:var(--r-xs);overflow:hidden;background:none;cursor:pointer}
+.attd-th > img{display:block;height:var(--attd-th);width:auto;max-width:100%;object-fit:contain}
 .attd-main{display:flex;flex-direction:column;min-width:0}
 .attd-n{font-size:var(--fs-meta);line-height:var(--lh-meta);font-weight:var(--fw-medium);color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .attd-s{font-size:var(--fs-micro);line-height:var(--lh-micro);color:var(--st-ink,var(--text-3));font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
