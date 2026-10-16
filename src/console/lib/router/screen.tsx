@@ -5,9 +5,10 @@
 // screen while the next one slides in, and the leaving page must not
 // learn of the route it is leaving for. `nav` is the identity of the last
 // navigation that touched the page (the shell's scroll effect runs on it);
-// `scroll` says what that navigation does to the body's place; `current`
-// — whether the page is the one the store shows (a leaving page and a
-// page previewed under a swipe are not). The shell gives the stage its
+// `scroll` says what that navigation does to the body's place. The value
+// changes only with a navigation that touches the page: a page leaving
+// the screen, or waiting beneath a swipe, is not rendered again for the
+// moves of the others. The shell gives the stage its
 // scroller (frame) and tells it whether the screen is a detail (no tabs
 // on the phone: the toasts sit lower).
 
@@ -24,13 +25,12 @@ export type ScreenNav = {
   move: NavMove;
   nav: number;
   scroll: ScrollIntent;
-  current: boolean;
   frame: (element: HTMLElement | null) => void;
   setDetail: (detail: boolean) => void;
 };
 
 // A screen outside the stage (the showcase, a test) has a navigation of
-// its own: the home route, at the top, current.
+// its own: the home route, at the top.
 export const DETACHED_NAV: ScreenNav = {
   page: 0,
   route: { key: 'home' },
@@ -38,7 +38,6 @@ export const DETACHED_NAV: ScreenNav = {
   move: 'unknown',
   nav: 0,
   scroll: { kind: 'top' },
-  current: true,
   frame: () => {},
   setDetail: () => {},
 };

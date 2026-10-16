@@ -371,6 +371,8 @@ describe('stage — the swipe back', () => {
     const step = onGestureEnd(onGestureMove(stage, 0.6), 2, 390, PHONE);
 
     assert.deepEqual(step.effects, [{ kind: 'back', fallback: THREADS }]);
+    // Past the point of return: the page on its way off cannot be grabbed again.
+    assert.equal(canSwipe(step.state, PHONE), false);
   });
 
   it('refuses a swipe on a top-level page, and on a page sliding out', () => {

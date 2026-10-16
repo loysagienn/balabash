@@ -53,9 +53,20 @@ export function clearMotion({ top, under, dim }: MotionElements): void {
   }
 }
 
+export type MotionRun = {
+  // The animation let go without a word.
+  stop: () => void;
+  // The animation is with the compositor (its first frame no longer waits
+  // on the main thread's work): what the motion asks of the store — the
+  // step back, which renders two pages — goes after this.
+  ready: Promise<void>;
+};
+
+const AT_ONCE: MotionRun = { stop: () => {}, ready: Promise.resolve() };
+
 // Runs the motion on its elements; `onDone` when an animated way reaches
-// the target. Returns the teardown (the animation let go without a word).
-export function runMotion(motion: Motion, elements: MotionElements, onDone: () => void): () => void {
+// the target.
+export function runMotion(motion: Motion, elements: MotionElements, onDone: () => void): MotionRun {
   const { top, under, dim } = elements;
 
   stop(top);
@@ -65,7 +76,7 @@ export function runMotion(motion: Motion, elements: MotionElements, onDone: () =
   if (motion.driver === 'gesture') {
     paintMotion(elements, motion.offset);
 
-    return () => {};
+    return AT_ONCE;
   }
 
   if (motion.driver === 'done' || motion.duration === 0 || motion.offset === motion.target || !top) {
@@ -75,7 +86,7 @@ export function runMotion(motion: Motion, elements: MotionElements, onDone: () =
       onDone();
     }
 
-    return () => {};
+    return AT_ONCE;
   }
 
   const options: KeyframeAnimationOptions = {
@@ -110,11 +121,17 @@ export function runMotion(motion: Motion, elements: MotionElements, onDone: () =
     () => {},
   );
 
-  return () => {
-    live = false;
+  return {
+    stop: () => {
+      live = false;
 
-    for (const animation of animations) {
-      animation.cancel();
-    }
+      for (const animation of animations) {
+        animation.cancel();
+      }
+    },
+    ready: animations[0]!.ready.then(
+      () => {},
+      () => {},
+    ),
   };
 }

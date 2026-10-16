@@ -13,7 +13,7 @@
 // its place. The toasts, the image viewer and the "add workspace" window
 // are here once, over every layer; so is the main thread's shortcut.
 
-import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { flushSync } from 'react-dom';
 import { ScreenNavProvider } from '../../lib/router/screen.tsx';
@@ -36,7 +36,7 @@ import {
   onGestureStart,
   onNav,
 } from './stage.logic.ts';
-import type { StageEnv, StageLayer, StageState } from './stage.logic.ts';
+import type { StageEffect, StageEnv, StageLayer, StageState } from './stage.logic.ts';
 import { clearMotion, paintMotion, runMotion } from './stageMotion.ts';
 import type { MotionElements } from './stageMotion.ts';
 import { installSwipeBack } from './useSwipeBack.ts';
@@ -148,8 +148,11 @@ export function Stage() {
   };
 
   // The motion drawn (stageMotion.ts); the finger's moves are painted by
-  // the gesture itself, between renders.
+  // the gesture itself, between renders. What a gesture asked of the store
+  // (the step back) waits for the animation to be with the compositor: the
+  // step renders two pages, and the page must already be on its way.
   const motion = state.motion;
+  const asked = useRef<StageEffect[]>([]);
 
   useLayoutEffect(() => {
     if (!motion) {
@@ -160,8 +163,21 @@ export function Stage() {
       return undefined;
     }
 
-    return runMotion(motion, elementsOf(), () => commit(onAnimDone(stateRef.current)));
-  }, [motion, commit]);
+    const run = runMotion(motion, elementsOf(), () => commit(onAnimDone(stateRef.current)));
+    const effects = asked.current;
+
+    asked.current = [];
+
+    if (effects.length > 0) {
+      void run.ready.then(() => {
+        for (const effect of effects) {
+          dispatch(goBack(effect.fallback));
+        }
+      });
+    }
+
+    return run.stop;
+  }, [motion, commit, dispatch]);
 
   // The swipe back (useSwipeBack.ts).
   useEffect(() => {
@@ -199,11 +215,8 @@ export function Stage() {
       end: (velocity, width) => {
         const step = onGestureEnd(stateRef.current, velocity, width, envRef.current);
 
+        asked.current = step.effects;
         commit(step.state);
-
-        for (const effect of step.effects) {
-          dispatch(goBack(effect.fallback));
-        }
       },
       cancel: () => commit(onGestureCancel(stateRef.current, envRef.current)),
     });
@@ -268,7 +281,7 @@ export function Stage() {
             data-role={role}
             inert={current ? undefined : true}
           >
-            <Page layer={layer} current={current} registerFrame={registerFrame} reportDetail={reportDetail} />
+            <Page layer={layer} registerFrame={registerFrame} reportDetail={reportDetail} />
             {role === 'under' ? (
               <div
                 className="stage-dim"
@@ -291,30 +304,33 @@ export function Stage() {
 
 type PageProps = {
   layer: StageLayer;
-  current: boolean;
   registerFrame: (page: number, element: HTMLElement | null) => void;
   reportDetail: (page: number, detail: boolean) => void;
 };
 
 // One page: its screen under its own ScreenNav. Memoized on the layer —
-// a finger's moves and the motion's steps do not render the screens.
-const Page = memo(function Page({ layer, current, registerFrame, reportDetail }: PageProps): ReactNode {
+// a finger's moves, the motion's steps and the other layers' navigations
+// do not render the screen: the element and the nav are the layer's.
+const Page = memo(function Page({ layer, registerFrame, reportDetail }: PageProps): ReactNode {
   const frame = useCallback(
     (element: HTMLElement | null) => registerFrame(layer.page, element),
     [registerFrame, layer.page],
   );
   const setDetail = useCallback((detail: boolean) => reportDetail(layer.page, detail), [reportDetail, layer.page]);
-  const nav: ScreenNav = {
-    page: layer.page,
-    route: layer.route,
-    hash: layer.hash,
-    move: layer.move,
-    nav: layer.nav,
-    scroll: layer.scroll,
-    current,
-    frame,
-    setDetail,
-  };
+  const nav = useMemo<ScreenNav>(
+    () => ({
+      page: layer.page,
+      route: layer.route,
+      hash: layer.hash,
+      move: layer.move,
+      nav: layer.nav,
+      scroll: layer.scroll,
+      frame,
+      setDetail,
+    }),
+    [layer, frame, setDetail],
+  );
+  const screen = useMemo(() => screenOf(layer.route), [layer.route]);
 
-  return <ScreenNavProvider value={nav}>{screenOf(layer.route)}</ScreenNavProvider>;
+  return <ScreenNavProvider value={nav}>{screen}</ScreenNavProvider>;
 });

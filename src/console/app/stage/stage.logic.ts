@@ -235,13 +235,17 @@ export function onNav(state: StageState, { router, env, place }: NavInput): Stag
 
 // Whether a finger on the current page may start a swipe back: the phone,
 // a nested page, and no motion the finger cannot take over (a page
-// sliding in is taken over; a page sliding out is a guest — inert).
+// sliding in is taken over; a page sliding out is a guest — inert; a page
+// flung off whose step back is on its way is past the point of return).
 export function canSwipe(state: StageState, env: StageEnv): boolean {
   if (!env.phone || !nested(current(state).route)) {
     return false;
   }
 
-  return state.motion === null || (state.motion.top === state.current && state.motion.driver !== 'gesture');
+  return (
+    state.motion === null ||
+    (state.motion.top === state.current && state.motion.driver !== 'gesture' && state.motion.target === 0)
+  );
 }
 
 export type GestureInput = { router: RouterState; env: StageEnv; place: (entry: number) => number | null };
@@ -261,18 +265,17 @@ export function onGestureStart(state: StageState, { router, env, place }: Gestur
   const parent = parentRoute(top.route)!;
   const behind = pageBehind(router);
   const nav = state.nav + 1;
-  const under: StageLayer =
-    behind
-      ? {
-          page: behind.page,
-          entry: behind.entry,
-          route: behind.route,
-          hash: behind.hash,
-          move: 'back',
-          nav,
-          scroll: scrollIntent('back', top.route, behind.route, place(behind.entry)),
-        }
-      : { page: PREVIEW_PAGE, entry: null, route: parent, hash: '', move: 'back', nav, scroll: { kind: 'top' } };
+  const under: StageLayer = behind
+    ? {
+        page: behind.page,
+        entry: behind.entry,
+        route: behind.route,
+        hash: behind.hash,
+        move: 'back',
+        nav,
+        scroll: scrollIntent('back', top.route, behind.route, place(behind.entry)),
+      }
+    : { page: PREVIEW_PAGE, entry: null, route: parent, hash: '', move: 'back', nav, scroll: { kind: 'top' } };
 
   return {
     ...state,
