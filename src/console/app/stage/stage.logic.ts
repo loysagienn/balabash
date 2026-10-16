@@ -14,8 +14,9 @@
 // the parent beneath — already the current page of the store: the URL has
 // changed, the leaving page is a guest. A swipe back opens the parent
 // beneath the page before the store knows (a preview — the entry behind,
-// when the tab knows it is the parent, or the parent itself, provisional,
-// to be adopted when the navigation lands) and moves the page with the
+// the page this one was opened from, when the tab knows it; else the
+// parent itself, provisional, to be adopted when the navigation lands —
+// the same rule as GO_BACK) and moves the page with the
 // finger; the lift settles it, and a commit asks for the navigation.
 // Every other navigation (a section's tab, a replace, a move inside one
 // page, an unknown entry, a wide screen) is a cut: the new page alone.
@@ -245,8 +246,8 @@ export function canSwipe(state: StageState, env: StageEnv): boolean {
 
 export type GestureInput = { router: RouterState; env: StageEnv; place: (entry: number) => number | null };
 
-// The finger claims the page: the parent opens beneath it (a preview), or
-// the motion in flight becomes the finger's.
+// The finger claims the page: the page behind opens beneath it (a
+// preview), or the motion in flight becomes the finger's.
 export function onGestureStart(state: StageState, { router, env, place }: GestureInput): StageState {
   if (!canSwipe(state, env)) {
     return state;
@@ -261,7 +262,7 @@ export function onGestureStart(state: StageState, { router, env, place }: Gestur
   const behind = pageBehind(router);
   const nav = state.nav + 1;
   const under: StageLayer =
-    behind && sameRoute(behind.route, parent)
+    behind
       ? {
           page: behind.page,
           entry: behind.entry,

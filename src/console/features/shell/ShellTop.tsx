@@ -28,8 +28,9 @@ export type ShellTopProps = {
   sub?: string;
   // The section above the page ("Threads") and where it leads.
   crumb?: { label: string; route: AppRoute };
-  // Where "back" leads (the parent page): the browser goes back when the
-  // entry behind is that page, else the page is opened anew (store/router, GO_BACK).
+  // The parent page — where "back" leads when the tab has no history behind
+  // this page; otherwise the browser goes back to the page this one was
+  // opened from (store/router, GO_BACK).
   back?: AppRoute;
   // "Back" only on the phone: the detail of a split view, whose list stays
   // beside it on a wide shell (Agents, Schedule).

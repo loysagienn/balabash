@@ -10,10 +10,11 @@
 // the thread shown) is not an entry into it ('enter').
 //
 // GO_BACK is the one "back" of the app (the header's arrow, the swipe of a
-// page): when the history entry behind the current one is the page's
-// parent, the browser goes back (its popstate brings the parent as a
-// ROUTE_TO from history, and the stage brings its scroll place back);
-// otherwise the parent is pushed as a new entry, marked as a step back.
+// page): when the tab knows the history entry behind the current one — the
+// page this one was opened from — the browser goes back (its popstate
+// brings that page as a ROUTE_TO from history, and the stage brings its
+// scroll place back); otherwise the parent (`fallback`) is pushed as a new
+// entry, marked as a step back.
 
 import type { AppRoute } from '../../lib/router/routes.ts';
 import type { ActionHandler, Dispatch, State } from '../types.ts';
@@ -21,7 +22,7 @@ import { loadApps } from '../apps/actions.ts';
 import { loadThread, loadThreadEvents, loadThreads } from '../threads/actions.ts';
 import { threadsFiltersOf, sameFilters } from '../threads/filters.ts';
 import { routeTo } from './actions.ts';
-import { pageBehind, sameRoute } from './reducer.ts';
+import { pageBehind } from './reducer.ts';
 import type { RouterState } from './reducer.ts';
 
 export type LoadTrigger = 'enter' | 'within' | 'snapshot' | 'visible';
@@ -95,12 +96,13 @@ export const tabVisibleHandler: ActionHandler<'TAB_VISIBLE'> =
     loadRouteData(getState().router.route, dispatch, getState, 'visible');
   };
 
-// Whether the browser's back lands on the parent: the entry behind the
-// current one is known and says the same URL.
-export function backThroughHistory(router: RouterState, fallback: AppRoute): boolean {
-  const behind = pageBehind(router);
-
-  return behind !== null && sameRoute(behind.route, fallback);
+// Whether the browser's back is the way: the entry behind the current one
+// is known to the tab — the page this one was opened from (a thread opened
+// from another thread goes back to that thread, not to the list). The
+// parent is the way only when the tab knows nothing behind (a deep link,
+// the first page after a reload).
+export function backThroughHistory(router: RouterState): boolean {
+  return pageBehind(router) !== null;
 }
 
 // The browser's history as the handler sees it; the test gives a stand-in.
@@ -114,7 +116,7 @@ export const goBackHandler =
 
     const browser = history();
 
-    if (browser && backThroughHistory(getState().router, action.fallback)) {
+    if (browser && backThroughHistory(getState().router)) {
       browser.back();
     } else {
       dispatch(routeTo(action.fallback, { back: true }));

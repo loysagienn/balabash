@@ -25,9 +25,10 @@ export const routeTo = (
   }) as const;
 
 // "Back" from a nested page (the header's arrow, the swipe): to the history
-// entry behind this one when it is the page's parent — the browser goes
-// back, the place of the parent's scroll comes back with it — and to
-// `fallback` (the parent) as a new entry otherwise (store/router/handlers).
+// entry behind this one when the tab knows it — the page this one was
+// opened from; the browser goes back and the place of its scroll comes
+// back with it — and to `fallback` (the parent) as a new entry otherwise
+// (store/router/handlers).
 export const goBack = (fallback: AppRoute) => ({ type: 'GO_BACK', fallback }) as const;
 
 // The tab is back in view (lib/visibility): the route's data that has no

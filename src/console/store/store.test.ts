@@ -1241,16 +1241,23 @@ describe('route data', () => {
     store.dispatch(routeTo({ key: 'thread', id: 't1' }));
     assert.deepEqual(pages(), ['1/1:projects', '2/2:project', '4/4:thread']);
 
-    // "Back" from the thread to the list: the entry behind is the project, not the list — a push, marked as a step back.
+    // "Back" from the thread: the entry behind is the project it was opened from — the browser goes back there, not to the list.
     store.dispatch(goBack({ key: 'threads' }));
-    assert.deepEqual(back, ['back']);
-    assert.deepEqual(pages(), ['1/1:projects', '2/2:project', '4/4:thread', '5/5:threads']);
-    assert.equal(store.getState().router.move, 'back');
-    assert.deepEqual(store.getState().router.route, { key: 'threads' });
+    assert.deepEqual(back, ['back', 'back']);
+    assert.deepEqual(pages(), ['1/1:projects', '2/2:project', '4/4:thread']);
+
+    // The first page of the tab (a deep link) has nothing behind: the parent is pushed, marked as a step back.
+    const deep = createStore({ api: fakeApi(), initialRoute: { key: 'thread', id: 't1' }, back: () => ({ back: () => back.push('deep') }) });
+
+    deep.dispatch(goBack({ key: 'threads' }));
+    assert.deepEqual(back, ['back', 'back']);
+    assert.deepEqual(deep.getState().router.route, { key: 'threads' });
+    assert.equal(deep.getState().router.move, 'back');
 
     // Without a browser history (a test, a worker) "back" always pushes.
-    const bare = createStore({ api: fakeApi(), initialRoute: { key: 'thread', id: 't1' }, back: () => null });
+    const bare = createStore({ api: fakeApi(), initialRoute: { key: 'projects' }, back: () => null });
 
+    bare.dispatch(routeTo({ key: 'thread', id: 't1' }));
     bare.dispatch(goBack({ key: 'threads' }));
     assert.deepEqual(bare.getState().router.route, { key: 'threads' });
   });

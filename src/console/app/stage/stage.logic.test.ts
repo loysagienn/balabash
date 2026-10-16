@@ -311,12 +311,31 @@ describe('stage — the swipe back', () => {
     assert.deepEqual(pages(onAnimDone(cancelled)), [2]);
   });
 
-  it('previews the parent itself when the entry behind is not it, and adopts the page the step back opens', () => {
-    const nav = router(PROJECTS);
+  it('previews the page behind whatever it is — a thread opened from a thread goes back to that thread', () => {
+    const nav = router(THREADS);
     let stage = initialStage(nav.state);
 
-    // Projects → a thread (from a project's card, say): the entry behind the thread is not the list.
     stage = onAnimDone(onNav(stage, { router: nav.go(THREAD), env: PHONE, place: noPlace }));
+    stage = onAnimDone(onNav(stage, { router: nav.go(OTHER), env: PHONE, place: noPlace }));
+    stage = onGestureStart(stage, { router: nav.state, env: PHONE, place: entry => (entry === 2 ? 4551 : null) });
+    assert.deepEqual(pages(stage), [2, 3]);
+    assert.deepEqual(stage.layers[0]!.route, THREAD);
+    assert.deepEqual(stage.layers[0]!.scroll, { kind: 'restore', place: 4551 });
+
+    const step = onGestureEnd(onGestureMove(stage, 0.9), 0, 390, PHONE);
+
+    assert.deepEqual(step.effects, [{ kind: 'back', fallback: THREAD }]);
+    stage = onNav(step.state, { router: nav.pop(2), env: PHONE, place: noPlace });
+    assert.equal(stage.current, 2);
+    stage = onAnimDone(stage);
+    assert.deepEqual(pages(stage), [2]);
+  });
+
+  it('previews the parent itself when the tab knows nothing behind, and adopts the page the step back opens', () => {
+    // A deep link to a thread: the first page of the tab.
+    const nav = router(THREAD);
+    let stage = initialStage(nav.state);
+
     stage = onGestureStart(stage, { router: nav.state, env: PHONE, place: noPlace });
     assert.equal(stage.layers[0]!.page < 0, true);
     assert.deepEqual(stage.layers[0]!.route, THREADS);
@@ -327,13 +346,13 @@ describe('stage — the swipe back', () => {
     assert.deepEqual(step.effects, [{ kind: 'back', fallback: THREADS }]);
     // The handler pushes the parent, marked as a step back: the preview becomes that page.
     stage = onNav(step.state, { router: nav.go(THREADS, { back: true }), env: PHONE, place: noPlace });
-    assert.deepEqual(pages(stage), [3, 2]);
+    assert.deepEqual(pages(stage), [2, 1]);
     assert.deepEqual(stage.layers[0]!.scroll, { kind: 'keep' });
-    assert.equal(stage.current, 3);
-    assert.equal(stage.motion!.under, 3);
+    assert.equal(stage.current, 2);
+    assert.equal(stage.motion!.under, 2);
     assert.equal(stage.motion!.target, 1);
     stage = onAnimDone(stage);
-    assert.deepEqual(pages(stage), [3]);
+    assert.deepEqual(pages(stage), [2]);
   });
 
   it('takes over a page sliding in, from where it is', () => {
