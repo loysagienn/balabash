@@ -15,6 +15,7 @@
 .composer-hint{margin-left:auto;display:flex;align-items:center;gap:var(--sp-1h);font-size:var(--fs-micro);line-height:var(--lh-micro);color:var(--text-3)}
 .composer-lock{display:flex;align-items:center;gap:var(--sp-2h);max-width:calc(var(--feed-max) - 2 * var(--gutter));margin:0 auto;padding:var(--sp-3) var(--sp-4);border:1px dashed var(--border-strong);border-radius:var(--r-lg);font-size:var(--fs-meta);line-height:var(--lh-meta);color:var(--text-3)}
 .composer-lock strong{color:var(--text-2);font-weight:var(--fw-medium)}
+.composer:has(> .composer-lock){padding-top:var(--glass-edge-in);padding-bottom:var(--sp-5)}   /* the plate's row is a little taller than the box's: the plate starts where the soft edge ends (--glass-edge-in), on the glass proper — Vladimir's request, 2026-10-16 */
 .composer-wait{flex:1;min-width:0;text-align:right;font-size:var(--fs-micro);line-height:var(--lh-micro);color:var(--text-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}   /* “Uploading 1 file…” — takes the free space, so Send stays at the edge */
 .composer-note{max-width:calc(var(--feed-max) - 2 * var(--gutter));margin:0 auto var(--sp-2)}   /* why the send was refused, above the box */
 .composer-atts{display:flex;flex-wrap:wrap;gap:var(--sp-1h)}
@@ -30,6 +31,7 @@
   .composer-attach .ic{font-size:var(--ico-md)}
   .composer-send .ic{font-size:var(--ico)}
   .composer-lock{padding:var(--sp-2h) var(--sp-3)}
+  .composer:has(> .composer-lock){padding-top:var(--glass-edge-in);padding-bottom:calc(var(--sp-3) + env(safe-area-inset-bottom,0px))}
   .composer-atts{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;margin:0 calc(-1 * var(--sp-1h)) 0 calc(-1 * var(--sp-3h));padding:0 var(--sp-1h) 0 var(--sp-3h)}   /* one row that scrolls sideways, clipped at the box’s inner edge */
   .composer-atts .attd{--attd-w:208px;flex:none}
   .composer-atts[data-more]{-webkit-mask-image:linear-gradient(to right,#000 calc(100% - var(--sp-6)),transparent);mask-image:linear-gradient(to right,#000 calc(100% - var(--sp-6)),transparent)}   /* the row fades at the right edge only while more chips are past it */
