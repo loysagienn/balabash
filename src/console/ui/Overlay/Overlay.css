@@ -1,4 +1,9 @@
 @layer components{
-/* ── Overlay ──  the root of a floating dialog in document.body: .overlay > .scrim + the dialog's layer; no box of its own */
-.overlay{display:contents}
+/* ── Overlay ──  the root of a floating dialog in document.body: .overlay > .scrim + the dialog's layer.
+   A fixed layer over the window that clips what it holds: a sheet on its way in sits below the window's edge, and
+   were the document to grow by it, the page would scroll to it (the focus on the dialog pulls it into view on iOS) and
+   snap back once it is in place — so nothing of the window's motion reaches the document. While the dialog is on
+   its way out the layer lets touches through: the page is interactive before the window is gone. */
+.overlay{position:fixed;inset:0;z-index:var(--z-scrim);overflow:hidden}
+.overlay[data-exiting]{pointer-events:none}
 }

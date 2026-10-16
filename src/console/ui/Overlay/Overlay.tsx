@@ -89,9 +89,10 @@ export function Overlay({ onClose, motion = 'none', exitFrom, children }: Overla
       el.inert = true;
     }
 
-    // An autoFocus field inside keeps the focus; otherwise the dialog takes it.
+    // An autoFocus field inside keeps the focus; otherwise the dialog takes
+    // it — without scrolling: the window may be on its way in.
     if (dialog && !dialog.contains(document.activeElement)) {
-      dialog.focus();
+      dialog.focus({ preventScroll: true });
     }
 
     const onKey = (event: KeyboardEvent) => {
@@ -111,13 +112,13 @@ export function Overlay({ onClose, motion = 'none', exitFrom, children }: Overla
 
       if (items.length === 0) {
         event.preventDefault();
-        dialog?.focus();
+        dialog?.focus({ preventScroll: true });
       } else if (event.shiftKey && (index <= 0 || !node.contains(active))) {
         event.preventDefault();
-        items[items.length - 1].focus();
+        items[items.length - 1].focus({ preventScroll: true });
       } else if (!event.shiftKey && (index === items.length - 1 || !node.contains(active))) {
         event.preventDefault();
-        items[0].focus();
+        items[0].focus({ preventScroll: true });
       }
     };
 
