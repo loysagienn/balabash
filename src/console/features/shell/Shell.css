@@ -2,9 +2,9 @@
 /* ════════════ Shell ════════════
    .app (container) > .shell[data-detail][data-own-top] > aside.shell-side + .shell-main > .shell-frame (header.shell-top, main.shell-body, nav.shell-tabs)
    Frame: one scroller per screen (.shell-frame, its scroll timeline --frame drives the glass edges). Its bars are glass
-   (ui/Glass), sticky and in the flow: the header on top, the bottom bar — the tabs on the phone, or the screen’s own (the
-   composer, the file actions). The content scrolls under them, and its empty fields at the top and the bottom are their
-   heights by themselves — the growing composer too. */
+   (ui/Glass), sticky and in the flow: the header on top, the screen’s own bottom bar (the composer, the file actions).
+   On the phone’s section screens the bottom is the tabs — islands (ui/Island) in a sticky field of their own. The content
+   scrolls under them, and its empty fields at the top and the bottom are their heights by themselves — the growing composer too. */
 .app{position:relative;container:shell / inline-size;height:100%;min-height:0}
 .shell{display:grid;grid-template-columns:var(--side-w) minmax(0,1fr);height:100%;min-height:0;background:var(--bg);color:var(--text)}
 
@@ -60,12 +60,36 @@
 /* "back" only on the phone (backNarrow): the detail of a split view, whose list stays beside it when wide */
 .shell-top[data-back="narrow"] .shell-back{display:none}
 
-.shell-tabs{position:sticky;bottom:0;z-index:var(--z-sticky);display:none;grid-template-columns:repeat(5,minmax(0,1fr));min-height:calc(var(--tabs-h) + env(safe-area-inset-bottom,0px));padding:0 0 env(safe-area-inset-bottom,0px);flex:none}   /* .glass data-edge="bottom"; only its row — the soft edge straddles its top */
-.shell-tab{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:var(--sp-0h);font-size:var(--fs-micro);line-height:var(--lh-micro);font-weight:var(--fw-medium);color:var(--text-3);text-decoration:none}
-.shell-tab .ic{font-size:var(--ico-lg)}
-.shell-tab[aria-current="page"]{color:var(--text)}
-.shell-tab[aria-current="page"]::before{content:"";position:absolute;top:-1px;left:30%;right:30%;height:2px;border-radius:var(--r-pill);background:var(--accent)}
-.shell-tab-badge{position:absolute;top:var(--sp-1h);left:calc(50% + var(--sp-1h))}
+/* the phone’s section tabs — islands (ui/Island) floating over the content, not a bar: nav.shell-tabs (sticky, pointer-events
+   only on the islands) > .shell-tabs-cap.island (four a.shell-tab) + button.shell-more.island (More; opens .shell-more-menu).
+   The nav is the frame’s empty field at the bottom (--tabs-field), so at the end of the scroll the content stops above the
+   islands; mid-scroll it runs to the screen edge between and around them, under a faint fade of the page’s glass that goes
+   away over the last --glass-reveal px (the bottom bars’ timeline, ui/Glass: --glass-k). The islands keep their size and
+   place while the content scrolls. */
+.shell-tabs{position:sticky;bottom:0;z-index:var(--z-sticky);display:none;align-items:flex-end;gap:var(--tabs-gap);height:var(--tabs-field);padding:0 var(--tabs-x) var(--tabs-bottom);flex:none;pointer-events:none;isolation:isolate;animation:glass-edge-out linear both;animation-timeline:--frame;animation-range:calc(100% - var(--glass-reveal)) 100%}
+.shell-tabs::before{content:"";position:absolute;inset:calc(-1 * var(--glass-edge-out)) 0 0;z-index:-1;opacity:var(--glass-k);background:linear-gradient(transparent,var(--bg-glass));-webkit-backdrop-filter:var(--glass-blur-soft);backdrop-filter:var(--glass-blur-soft);-webkit-mask-image:linear-gradient(transparent,#000 60%);mask-image:linear-gradient(transparent,#000 60%)}   /* the scroll-edge fade under the islands */
+.shell-tabs > *{pointer-events:auto}
+.shell-tabs-cap{flex:1;min-width:0;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));height:var(--tabs-h);padding:var(--sp-1);border-radius:var(--r-pill)}
+.shell-tab{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:var(--sp-0h);min-width:0;border-radius:var(--r-pill);font-size:var(--fs-micro);line-height:var(--lh-micro);font-weight:var(--fw-medium);color:var(--text);text-decoration:none;transition:background-color var(--dur-1) var(--ease)}
+.shell-tab:active{background-image:var(--layer-press)}
+.shell-tab[aria-current="page"]{background-color:var(--island-lens);color:var(--accent)}
+.shell-tab-ic{position:relative;display:inline-flex}
+.shell-tab-ic .ic,.shell-more .ic{font-size:var(--ico-lg)}
+.shell-tab-badge{position:absolute;top:calc(-1 * var(--sp-1h));left:calc(100% - var(--sp-2));box-shadow:0 0 0 2px var(--bg)}   /* the running count on the icon’s corner, ringed in the page color */
+.shell-tab-l{max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.shell-more{position:relative;display:grid;place-items:center;flex:none;width:var(--tabs-h);height:var(--tabs-h);border-radius:50%;color:var(--text)}
+.shell-more:active{background-image:var(--layer-press)}
+.shell-more[aria-current="page"]{background-image:linear-gradient(var(--island-lens),var(--island-lens));color:var(--accent)}   /* a More section is open */
+.shell-more[aria-expanded="true"]{color:var(--accent)}
+.shell-more-badge{position:absolute;top:calc(var(--tabs-h) / 4);right:calc(var(--tabs-h) / 4)}
+/* the More menu: the hidden sections, a popover over the More island (the same glass, denser), aligned to its right edge */
+.shell-more-menu{position:absolute;right:var(--tabs-x);bottom:calc(var(--tabs-bottom) + var(--tabs-h) + var(--sp-2h));z-index:1;width:var(--tabs-menu-w);padding:var(--sp-1h);border-radius:var(--r-island);background-color:var(--island-menu)}
+.shell-more-i{display:flex;align-items:center;gap:var(--sp-3);width:100%;height:var(--ctl-h-lg-touch);padding:0 var(--sp-3h);border-radius:calc(var(--r-island) - var(--sp-1h));color:var(--text);font-size:var(--fs-body);font-weight:var(--fw-medium);text-decoration:none;text-align:left}
+.shell-more-i .ic{font-size:var(--ico-lg);color:var(--text-2)}
+.shell-more-i:is(:hover,:active){background-color:var(--island-lens)}
+.shell-more-i[aria-current="page"] .ic{color:var(--accent)}
+.shell-more-i .attn{margin-left:auto}
+.shell-more-sep{display:block;height:1px;margin:var(--sp-1h) var(--sp-3h);background:var(--island-hair)}
 
 /* a narrow thread under the shell header (a wide shell): one glass of two rows, set close — the strip (ThreadHead.css) draws it
    from the top of the frame; the header has no glass of its own, and its row ends at its controls (the inset above them,
@@ -92,9 +116,9 @@
   .shell-title-wide{display:none}
   .shell-title-narrow{display:inline}
   .shell-top[data-back="narrow"] .shell-back{display:inline-flex}
-  .shell-tabs{display:grid}
-  .shell-main{--frame-foot:calc(var(--tabs-h) + env(safe-area-inset-bottom,0px))}
-  .shell:not([data-detail]) .screen{padding-bottom:0}   /* the content runs to the tabs’ row */
+  .shell-tabs{display:flex}
+  .shell-main{--frame-foot:var(--tabs-field)}
+  .shell:not([data-detail]) .screen{padding-bottom:0}   /* the content runs to the tabs’ field */
   .shell-mt-btn{display:inline-flex}
   .shell-ws-btn{display:inline-flex}
   .shell[data-detail] .shell-tabs{display:none}

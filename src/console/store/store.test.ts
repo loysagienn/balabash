@@ -1114,13 +1114,13 @@ describe('route data', () => {
     );
   });
 
-  it('closes the More sheet on navigation', () => {
+  it('closes the More menu on navigation', () => {
     const store = createStore({ api: fakeApi(), initialRoute: { key: 'home' } });
 
-    store.dispatch({ type: 'MORE_SHEET_OPEN' });
-    assert.equal(store.getState().ui.moreSheet, true);
+    store.dispatch({ type: 'MORE_MENU_OPEN' });
+    assert.equal(store.getState().ui.moreMenu, true);
     store.dispatch(routeTo({ key: 'apps' }));
-    assert.equal(store.getState().ui.moreSheet, false);
+    assert.equal(store.getState().ui.moreMenu, false);
     assert.deepEqual(store.getState().router, { route: { key: 'apps' }, source: 'app', replace: false, hash: '', scroll: null });
   });
 
@@ -1128,10 +1128,10 @@ describe('route data', () => {
     const store = createStore({ api: fakeApi(), initialRoute: { key: 'thread', id: 'main' } });
     const before = store.getState().router;
 
-    store.dispatch({ type: 'MORE_SHEET_OPEN' });
+    store.dispatch({ type: 'MORE_MENU_OPEN' });
     store.dispatch(routeTo({ key: 'thread', id: 'main' }));
     assert.equal(store.getState().router, before);
-    assert.equal(store.getState().ui.moreSheet, false);
+    assert.equal(store.getState().ui.moreMenu, false);
     store.dispatch(routeTo({ key: 'thread', id: 'main' }, { replace: true }));
     assert.equal(store.getState().router, before);
     store.dispatch(routeTo({ key: 'thread', id: 'other' }));

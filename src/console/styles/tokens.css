@@ -19,6 +19,11 @@
   --overlay:rgba(5,6,8,.72);  /* backdrop of modals and sheets */
   --bg-glass:color-mix(in srgb,var(--bg) 60%,transparent);  /* glass bars the content scrolls under (header, bottom tabs, thread strip, composer, file actions): the page color, see-through, with --glass-blur */
   --surface-glass:color-mix(in srgb,var(--surface) 60%,transparent);  /* see-through controls on the glass: the composer's box, the header's buttons */
+  --island-glass:color-mix(in srgb,var(--surface) 60%,transparent);  /* islands floating over the content (the phone tabs): a thicker glass than the bars — the surface, with --island-blur */
+  --island-menu:color-mix(in srgb,var(--surface) 82%,transparent);   /* an island's popover (the More menu): denser, for reading */
+  --island-lens:color-mix(in srgb,var(--text) 10%,transparent);      /* the current item inside an island; a pressed row of its popover */
+  --island-hair:color-mix(in srgb,var(--text) 10%,transparent);      /* an island's hairline edge */
+  --island-shine:rgba(255,255,255,.07);                               /* an island's top highlight */
   --msg-you:var(--surface-2);   /* your message's bubble in the thread: a step above the page — dark themes --surface-2, light themes --surface (white) */
 
   /* ── State layers: translucent fill over any surface ── */
@@ -140,12 +145,18 @@
   --sp-4:16px; --sp-4h:18px; --sp-5:20px; --sp-6:24px; --sp-7:28px; --sp-8:32px; --sp-10:40px; --sp-12:48px;
 
   /* ── Layout frame ── */
-  --side-w:236px; --top-h:68px; --tabs-h:60px;
+  --side-w:236px; --top-h:68px;
   --gutter:28px;  --gap:16px;  --tile-gap:8px;       /* desktop: gutters, gap, 12 columns */
   --m-gutter:16px; --m-gap:12px; --m-top-h:72px;      /* phone: substituted for --gutter/--gap/--top-h */
   --content-max:1600px; --feed-max:800px; --rail-w:300px;
   --hit:44px;                                         /* minimum hit area on a touch screen */
   --hit-ext:0px;                                      /* how far to extend the hit area of small controls (< 0 in touch) */
+  /* phone tabs — islands over the content (Shell.css, ui/Island): the capsule and More, the side inset and gap,
+     the More menu's width; their bottom sits 8 px into the system bar's inset (12 px when there is none); --tabs-field — the
+     frame's empty field under the content (the nav's height), also --frame-foot of the phone's section screens */
+  --tabs-h:62px; --tabs-x:20px; --tabs-gap:10px; --tabs-menu-w:236px;
+  --tabs-bottom:max(calc(env(safe-area-inset-bottom,0px) - 8px),var(--sp-3));
+  --tabs-field:calc(var(--tabs-bottom) + var(--tabs-h) + var(--sp-2));
 
   /* ── Controls ── */
   --ctl-h-sm:28px; --ctl-h:32px; --ctl-h-lg:40px;              /* desktop */
@@ -166,11 +177,13 @@
   --r-av:11px;    /* avatars, object icons */
   --r-md:12px;    /* tiles, card rows, popovers, feed groups */
   --r-lg:16px;    /* cards, modals, sheets */
-  --r-pill:999px; /* badges, counters */
+  --r-island:24px; /* an island's popover (the More menu) */
+  --r-pill:999px; /* badges, counters, islands */
 
   /* ── Depth: layers differ by background and line; only overlays get a shadow ── */
   --shadow-pop:0 0 0 1px var(--border-strong), 0 12px 32px -8px rgba(0,0,0,.6);
   --shadow-modal:0 0 0 1px var(--border-strong), 0 24px 64px -12px rgba(0,0,0,.7);
+  --shadow-island:0 12px 32px -10px rgba(0,0,0,.55);   /* an island floating over the content */
   --ring-focus:0 0 0 2px var(--bg), 0 0 0 4px var(--focus);   /* buttons and tiles */
   --ring-field:0 0 0 3px var(--accent-bg);                   /* focused field */
   --ring-field-err:0 0 0 3px var(--st-err-bg);               /* field with an error */
@@ -181,6 +194,7 @@
      is opaque at its very top edge and reaches the glass over --glass-solid */
   --glass-blur:saturate(1.2) blur(6px); --glass-blur-soft:blur(1px);
   --glass-edge-in:20px; --glass-edge-out:20px; --glass-reveal:32px; --glass-solid:24px;
+  --island-blur:saturate(1.6) blur(18px);   /* islands (.island): a stronger blur than the bars — a small surface over moving content */
   --z-raised:1; --z-sticky:10; --z-drop:20; --z-pop:40; --z-scrim:50; --z-modal:60; --z-toast:80;
 
   /* ── Motion ── */

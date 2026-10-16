@@ -1,6 +1,6 @@
 // The sections of the shell: navigation items in order, their icons and
-// routes; the phone keeps the first four as tabs and folds the rest into
-// the "More" sheet.
+// routes; the phone keeps the first four in the tabs' capsule and folds the
+// rest into the "More" island's menu.
 
 import type { AppRoute, NavKey } from '../../lib/router/routes.ts';
 import type { IconName } from '../../ui/Icon/Icon.tsx';

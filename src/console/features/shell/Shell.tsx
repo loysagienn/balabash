@@ -1,11 +1,14 @@
 // The app shell (design: Shell): sidebar with the workspace and sections
 // — the main thread first among them, with its shortcut (⌘J / Ctrl+J from
 // any screen) — and the frame: header (ShellTop), the screen's body and the
-// bottom tabs of the phone in one scroller (.shell-frame), the bars glass
-// the content passes under (ui/Glass), sticky and in the flow; the "More"
-// sheet on the phone — one markup, reflowing by the `shell` container
-// width. Counts and attention marks come from the store: running
-// threads on "Threads", a dot on a section that awaits the user. The
+// phone's tabs in one scroller (.shell-frame), the header glass the content
+// passes under (ui/Glass), sticky and in the flow; the tabs are islands
+// (ui/Island) floating over the content in a sticky field of their own —
+// the capsule of the four main sections and the round "More", whose
+// popover menu holds the other sections (MoreIsland) — one markup,
+// reflowing by the `shell` container width. Counts and attention marks
+// come from the store: running threads on "Threads", a dot on a section
+// that awaits the user (on "More" when that section is under it). The
 // toasts of the store stack in the corner of the shell (features/toasts).
 // The sidebar head is the service icon with "Balabash", then the workspace
 // switcher (features/workspaces): the current workspace's mark, name and
@@ -23,12 +26,11 @@ import { selectConnectionsNeedingAction } from '../../store/connections/selector
 import { routeTo } from '../../store/router/actions.ts';
 import { selectMe } from '../../store/session/selectors.ts';
 import { selectRunningCount } from '../../store/threads/selectors.ts';
-import { closeMoreSheet, openMoreSheet } from '../../store/ui/actions.ts';
-import { selectMoreSheet } from '../../store/ui/selectors.ts';
+import { closeMoreMenu, openMoreMenu } from '../../store/ui/actions.ts';
+import { selectMoreMenu } from '../../store/ui/selectors.ts';
 import { Icon } from '../../ui/Icon/Icon.tsx';
 import { Attn, Count, Kbd } from '../../ui/atoms/atoms.tsx';
-import { SectionGrid } from '../../ui/SectionGrid/SectionGrid.tsx';
-import { Sheet } from '../../ui/Sheet/Sheet.tsx';
+import { stepFocus } from '../../ui/atoms/keys.ts';
 import { useSystemFacts } from '../system/queries.ts';
 import { Toasts } from '../toasts/Toasts.tsx';
 import { ImageViewer } from '../viewer/ImageViewer.tsx';
@@ -39,6 +41,7 @@ import { restoreScroll } from './scroll.ts';
 import { ShellTop } from './ShellTop.tsx';
 import type { ShellTopProps } from './ShellTop.tsx';
 import '../../ui/Glass/Glass.css';
+import '../../ui/Island/Island.css';
 import './Shell.css';
 
 export type ShellProps = Omit<ShellTopProps, 'running' | 'main'> & {
@@ -56,7 +59,6 @@ export function Shell({ current, detail, ownTop, children, ...top }: ShellProps)
   const me = useAppSelector(selectMe);
   const running = useAppSelector(selectRunningCount);
   const attention = useAppSelector(selectConnectionsNeedingAction).length > 0 ? new Set<NavKey>(['connections']) : new Set<NavKey>();
-  const moreOpen = useAppSelector(selectMoreSheet);
   // The router state itself, not its fields: a history navigation between
   // two entries can bring the same route, source and place (the reader may
   // have moved the body since), and only the state's identity says it happened.
@@ -123,7 +125,6 @@ export function Shell({ current, detail, ownTop, children, ...top }: ShellProps)
   const now = useNow();
   const foot = footerWords(facts.data?.process, running, now);
   const tabCurrent = section === null ? null : TABS.some(item => item.key === section) ? section : 'more';
-  const moreAttention = MORE.some(item => attention.has(item.key));
 
   return (
     <div className="app">
@@ -177,32 +178,23 @@ export function Shell({ current, detail, ownTop, children, ...top }: ShellProps)
           <div className="shell-frame" ref={frame}>
             <ShellTop {...top} running={running} main={main} />
             <main className="shell-body">{children}</main>
-            <nav className="shell-tabs glass" data-edge="bottom" aria-label="Sections">
-              {TABS.map(item => (
-                <Link key={item.key} className="shell-tab" route={item.route} current={item.key === tabCurrent}>
-                  <Icon name={item.icon} />
-                  {item.name}
-                  {item.key === 'threads' && running > 0 ? (
-                    <Count state="run" size="sm" className="shell-tab-badge">
-                      {running}
-                    </Count>
-                  ) : null}
-                </Link>
-              ))}
-              <a
-                className="shell-tab"
-                href="#more"
-                aria-current={tabCurrent === 'more' ? 'page' : undefined}
-                aria-expanded={moreOpen}
-                onClick={event => {
-                  event.preventDefault();
-                  dispatch(moreOpen ? closeMoreSheet() : openMoreSheet());
-                }}
-              >
-                <Icon name="ellipsis" />
-                More
-                {moreAttention ? <Attn className="shell-tab-badge" /> : null}
-              </a>
+            <nav className="shell-tabs" aria-label="Sections">
+              <div className="shell-tabs-cap island">
+                {TABS.map(item => (
+                  <Link key={item.key} className="shell-tab" route={item.route} current={item.key === tabCurrent}>
+                    <span className="shell-tab-ic">
+                      <Icon name={item.icon} />
+                      {item.key === 'threads' && running > 0 ? (
+                        <Count state="run" size="sm" className="shell-tab-badge">
+                          {running}
+                        </Count>
+                      ) : null}
+                    </span>
+                    <span className="shell-tab-l">{item.name}</span>
+                  </Link>
+                ))}
+              </div>
+              <MoreIsland current={tabCurrent === 'more' ? section : null} attention={attention} />
             </nav>
           </div>
         </div>
@@ -210,20 +202,86 @@ export function Shell({ current, detail, ownTop, children, ...top }: ShellProps)
       <Toasts tabs={!detail} />
       <ImageViewer />
       <AddWorkspaceDialog />
-      {moreOpen ? (
-        <Sheet label="More sections" onClose={() => dispatch(closeMoreSheet())}>
-          <SectionGrid label="More sections">
-            {MORE.map(item => (
-              <Link key={item.key} className="secgrid-i" route={item.route} current={item.key === section}>
-                <Icon name={item.icon} />
-                {item.name}
-                {attention.has(item.key) ? <Attn className="secgrid-badge" /> : null}
-              </Link>
-            ))}
-          </SectionGrid>
-        </Sheet>
-      ) : null}
     </div>
+  );
+}
+
+const MENU_ITEMS = '[role="menuitem"]';
+
+// The round "More" island and its popover menu (design: Shell, moreOpen):
+// the sections outside the capsule, the current one with an accent icon
+// and attention dots at the right. More shows "×" while the menu is open
+// and carries the lens when a section under it is open (current); the
+// yellow dot when one of them awaits the user and the menu is closed. The
+// menu opens above the island, aligned to its right edge, with no scrim:
+// a tap outside, on "×", Escape or a choice (navigation, the store) closes
+// it. The first row takes the focus on open, Up/Down move between the
+// rows, Escape hands the focus back to the island.
+function MoreIsland({ current, attention }: { current: NavKey | null; attention: Set<NavKey> }) {
+  const dispatch = useAppDispatch();
+  const open = useAppSelector(selectMoreMenu);
+  const island = useRef<HTMLButtonElement>(null);
+  const menu = useRef<HTMLDivElement>(null);
+  const attn = MORE.some(item => attention.has(item.key));
+
+  useEffect(() => {
+    if (!open) {
+      return undefined;
+    }
+
+    menu.current?.querySelector<HTMLElement>(MENU_ITEMS)?.focus();
+
+    const onPointer = (event: PointerEvent) => {
+      const target = event.target;
+
+      if (target instanceof Node && !island.current?.contains(target) && !menu.current?.contains(target)) {
+        dispatch(closeMoreMenu());
+      }
+    };
+
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        dispatch(closeMoreMenu());
+        island.current?.focus();
+      }
+    };
+
+    document.addEventListener('pointerdown', onPointer);
+    document.addEventListener('keydown', onKey);
+
+    return () => {
+      document.removeEventListener('pointerdown', onPointer);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open, dispatch]);
+
+  return (
+    <>
+      <button
+        ref={island}
+        type="button"
+        className="shell-more island"
+        aria-label="More sections"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-current={current ? 'page' : undefined}
+        onClick={() => dispatch(open ? closeMoreMenu() : openMoreMenu())}
+      >
+        <Icon name={open ? 'x' : 'ellipsis'} />
+        {attn && !open ? <Attn className="shell-more-badge" /> : null}
+      </button>
+      {open ? (
+        <div ref={menu} className="shell-more-menu island" role="menu" aria-label="More sections" onKeyDown={event => stepFocus(event, MENU_ITEMS, 'y')}>
+          {MORE.map(item => (
+            <Link key={item.key} className="shell-more-i" role="menuitem" route={item.route} current={item.key === current}>
+              <Icon name={item.icon} />
+              {item.name}
+              {attention.has(item.key) ? <Attn /> : null}
+            </Link>
+          ))}
+        </div>
+      ) : null}
+    </>
   );
 }
 

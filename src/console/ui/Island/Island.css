@@ -1,0 +1,8 @@
+/* ── Island ──  a control floating over the content, not a bar: the phone tabs (the capsule and More) and their popover.
+   Mixin on a round block (a pill or a circle):  <div class="shell-tabs-cap island"> · <button class="shell-more island">
+   The content runs under and around it to the screen edge. A thicker glass than the bars (ui/Glass): the surface color
+   (--island-glass), a stronger blur (--island-blur), a hairline and a top highlight, a soft shadow — so a small surface
+   stays readable over moving content in every theme. Its current item is a lens (--island-lens), not a line. */
+@layer patterns{
+.island{background-color:var(--island-glass);-webkit-backdrop-filter:var(--island-blur);backdrop-filter:var(--island-blur);box-shadow:inset 0 0 0 1px var(--island-hair),inset 0 1px 0 var(--island-shine),var(--shadow-island)}
+}

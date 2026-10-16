@@ -2,7 +2,7 @@
 // children — the explanation; action / action2 — what can be done;
 // progress — a bar for a process with an end (then there is no "Close").
 // ToastStack — the host of the screen's toasts: the bottom-right corner
-// of the shell, on the phone the full width above the bottom tabs (tabs)
+// of the shell, on the phone the full width above the tabs' islands (tabs)
 // or at the very bottom of a detail screen.
 
 import type { ReactNode } from 'react';

@@ -1,7 +1,7 @@
-// Interface state that is not data: the "More" sheet on the phone, toasts,
+// Interface state that is not data: the "More" menu on the phone, toasts,
 // composer drafts per thread, whether a thread's message or command is on
 // its way, the image viewer.
-// Navigation closes the sheet.
+// Navigation closes the menu.
 
 import type { Action } from '../types.ts';
 import type { ThreadCommand } from '../threads/actions.ts';
@@ -10,7 +10,7 @@ import type { ToastInput, ViewerImage } from './actions.ts';
 export type Toast = ToastInput & { id: number };
 
 export type UiState = {
-  moreSheet: boolean;
+  moreMenu: boolean;
   // The "Sign in to another workspace" window is open.
   addWorkspace: boolean;
   toasts: Toast[];
@@ -27,7 +27,7 @@ export type UiState = {
   viewer: { images: ViewerImage[]; index: number } | null;
 };
 
-export const initialUi: UiState = { moreSheet: false, addWorkspace: false, toasts: [], nextToastId: 1, composerDrafts: {}, composerSending: {}, threadCommands: {}, viewer: null };
+export const initialUi: UiState = { moreMenu: false, addWorkspace: false, toasts: [], nextToastId: 1, composerDrafts: {}, composerSending: {}, threadCommands: {}, viewer: null };
 
 function withCommand(state: UiState, threadId: string, command: ThreadCommand, pending: boolean): UiState['threadCommands'] {
   const { [command]: current, ...rest } = state.threadCommands[threadId] ?? {};
@@ -53,13 +53,13 @@ function withoutSending(state: UiState, threadId: string): UiState['composerSend
 
 export function uiReducer(state: UiState = initialUi, action: Action): UiState {
   switch (action.type) {
-    case 'MORE_SHEET_OPEN':
-      return { ...state, moreSheet: true };
-    case 'MORE_SHEET_CLOSE':
-      return state.moreSheet ? { ...state, moreSheet: false } : state;
-    // Navigation closes the sheet and the viewer.
+    case 'MORE_MENU_OPEN':
+      return { ...state, moreMenu: true };
+    case 'MORE_MENU_CLOSE':
+      return state.moreMenu ? { ...state, moreMenu: false } : state;
+    // Navigation closes the menu and the viewer.
     case 'ROUTE_TO':
-      return state.moreSheet || state.viewer ? { ...state, moreSheet: false, viewer: null } : state;
+      return state.moreMenu || state.viewer ? { ...state, moreMenu: false, viewer: null } : state;
     case 'VIEWER_OPEN':
       return action.images.length ? { ...state, viewer: { images: action.images, index: Math.max(0, Math.min(action.index, action.images.length - 1)) } } : state;
     case 'VIEWER_STEP': {
