@@ -160,12 +160,13 @@ function ColorField({ name, userId, color }: { name: string; userId: string; col
   );
 }
 
-// The color theme — this browser's choice (lib/theme): four tiles, each a
+// The color theme — this browser's choice (lib/theme): five tiles, each a
 // preview drawn in its own theme (data-bb-theme on the preview, Graphite's
 // included — its block in themes.css repeats :root, so the preview keeps its
 // colors inside a page of another theme), the name and one line under
 // it; picking one repaints the whole console at once, this page included.
-// A choice made in another tab shows here too (subscribeTheme).
+// The tile's data-scheme (dark / light) picks its span on the phone (the
+// CSS). A choice made in another tab shows here too (subscribeTheme).
 function ThemePreview({ theme }: { theme: ThemeId }) {
   return (
     <span className="set-theme-pv" data-bb-theme={theme} aria-hidden="true">
@@ -206,7 +207,7 @@ function AppearanceCard() {
           </span>
           <div className="set-themes" role="radiogroup" aria-labelledby="th-l" onKeyDown={event => pickWithArrows(event, THEME_IDS, current, setTheme)}>
             {THEMES.map(theme => (
-              <button key={theme.id} type="button" className="set-theme" role="radio" aria-checked={theme.id === current} tabIndex={theme.id === current ? 0 : -1} onClick={() => setTheme(theme.id)}>
+              <button key={theme.id} type="button" className="set-theme" role="radio" aria-checked={theme.id === current} tabIndex={theme.id === current ? 0 : -1} data-scheme={theme.scheme} onClick={() => setTheme(theme.id)}>
                 <ThemePreview theme={theme.id} />
                 <span className="set-theme-cap">
                   <span className="set-theme-n">{theme.name}</span>

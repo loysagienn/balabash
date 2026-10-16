@@ -4,8 +4,8 @@
    series, code highlighting) and the shadows that carry color. Type, sizes, spacing, radii, motion and
    layout never change with the theme.
 
-   Graphite is the default: tokens.css :root holds its values. The other three apply by
-   data-bb-theme on <html>: <html data-bb-theme="dusk|light|paper">. The Graphite block below repeats :root,
+   Graphite is the default: tokens.css :root holds its values. The other four apply by
+   data-bb-theme on <html>: <html data-bb-theme="carbon|dusk|light|paper">. The Graphite block below repeats :root,
    and every block repeats the derived tokens (color-mix, var() pairs), so a theme also applies to any
    element inside a page of another theme — the theme previews in Settings rely on that.
    When a Graphite color changes in tokens.css, change it here too.
@@ -54,6 +54,51 @@
   --shadow-pop:0 0 0 1px var(--border-strong), 0 12px 32px -8px rgba(0,0,0,0.6);
   --shadow-modal:0 0 0 1px var(--border-strong), 0 24px 64px -12px rgba(0,0,0,0.7);
   --shadow-island:0 12px 32px -10px rgba(0,0,0,.55);
+  --ring-focus:0 0 0 2px var(--bg), 0 0 0 4px var(--focus); --ring-field:0 0 0 3px var(--accent-bg); --ring-field-err:0 0 0 3px var(--st-err-bg);
+}
+
+/* ── Carbon — dark, true black, neutral, softer contrast: Graphite on a #000000 page ──
+   The neutrals sit on Graphite’s cool hue (oklch h ≈ 272, chroma ≤ 0.015) — no warmth; softer means a lower top of the range
+   (text 13.8:1 instead of 15.6, primary hover not pure white) and a little less chroma in the accent, statuses, identities and
+   code — never a lower floor. The page is black; cards, the sidebar and overlays stay a step above it, edged by a hairline. */
+:root[data-bb-theme="carbon"],[data-bb-theme="carbon"]{
+  color-scheme:dark;
+  --bg:#000000; --surface:#101113; --surface-2:#151619; --surface-3:#1f2126;   /* surface on bg 1.11:1 — the hairline carries the edge */
+  --overlay:rgba(0,0,0,.7);
+  --bg-glass:color-mix(in srgb,var(--bg) 60%,transparent);
+  --surface-glass:color-mix(in srgb,var(--surface) 60%,transparent);
+  --island-glass:color-mix(in srgb,var(--surface) 60%,transparent);
+  --island-menu:color-mix(in srgb,var(--surface) 82%,transparent);
+  --island-lens:color-mix(in srgb,var(--text) 10%,transparent);
+  --island-hair:color-mix(in srgb,var(--text) 12%,transparent);   /* a shadow does not show on black: the hairline is the island’s edge */
+  --island-shine:rgba(255,255,255,.06);
+  --msg-you:var(--surface-2);
+  --hover:rgba(255,255,255,0.045); --selected:rgba(255,255,255,0.07); --press:rgba(255,255,255,0.09);
+  --layer-hover:linear-gradient(var(--hover),var(--hover)); --layer-selected:linear-gradient(var(--selected),var(--selected)); --layer-press:linear-gradient(var(--press),var(--press));
+  --border:#1d1f22; --border-strong:#2c2e33; --border-ctl:#3b3d44; --border-hover:#494b53;   /* --border 1.27:1 to --bg; --border-ctl 1.7:1 to --surface */
+  --border-surface:var(--border);   /* edge of a --surface block on --bg: cards, feed blocks, sidebar and header edges */
+  --focus:#8b95f1;
+  --text:#dbdce0; --text-2:#a7a9b0; --text-3:#858790; --text-4:#60636c;   /* on --surface 13.8 · 8.1 · 5.3 :1 (text-3 on --surface-2 5.1, on --bg 5.9) */
+  --accent:#8b95f1; --link:#aab1f4; --accent-ink:#0d0e18;   /* accent 6.9:1, link 9.3:1 on --surface; dark ink on an accent fill 7.0:1 */
+  --accent-bg:color-mix(in srgb,var(--accent) 12%,transparent); --accent-line:color-mix(in srgb,var(--accent) 35%,transparent);
+  --primary-bg:var(--text); --primary-bg-hover:#eaebee; --primary-bg-press:#bcbdc3; --primary-ink:var(--bg);   /* black ink 15.3 · 17.6 · 11.2 :1 */
+  --st-run:#68ca95; --st-wait:#6fb7e5; --st-act:#e7b45d; --st-done:var(--text-2); --st-err:#eb776c; --st-off:var(--text-3);   /* Graphite’s hues, less chroma; graphics on --surface run 9.4 · wait 8.6 · act 10.0 · err 6.7 */
+  --st-run-ink:var(--st-run); --st-wait-ink:var(--st-wait); --st-act-ink:var(--st-act); --st-err-ink:#ef8277;   /* status text: on --surface run 9.4 · wait 8.6 · act 10.0 · err 7.3 */
+  --st-run-bg:color-mix(in srgb,var(--st-run) 12%,transparent); --st-wait-bg:color-mix(in srgb,var(--st-wait) 12%,transparent);
+  --st-act-bg:color-mix(in srgb,var(--st-act) 13%,transparent); --st-done-bg:color-mix(in srgb,var(--st-done) 12%,transparent);
+  --st-err-bg:color-mix(in srgb,var(--st-err) 11%,transparent); --st-err-bg-strong:color-mix(in srgb,var(--st-err) 18%,transparent); --st-err-bg-press:color-mix(in srgb,var(--st-err) 26%,transparent);
+  --st-act-fill:var(--st-act); --st-err-fill:var(--st-err);   /* solid fills of counters (the bell), under --on-act / --on-err */
+  --st-off-bg:transparent; --on-act:#1a1200; --on-err:#1f0605;   /* on the solid fill: act 9.8, err 6.8 */
+  --lvl-ok:var(--accent); --lvl-warn:var(--st-act); --lvl-over:var(--st-err); --lvl-track:var(--surface-3);
+  --id-1:oklch(0.76 0.105 255); --id-2:oklch(0.76 0.105 75); --id-3:oklch(0.76 0.105 345); --id-4:oklch(0.76 0.105 165);
+  --id-5:oklch(0.76 0.105 295); --id-6:oklch(0.76 0.105 215); --id-7:oklch(0.76 0.105 35); --id-8:oklch(0.76 0.105 125);
+  --id-tint:16%; --id-ink:#000000;   /* letters on their tint ≥ 6.4:1, black on a solid fill ≥ 9.3:1 */
+  --tok-cached:oklch(0.60 0.115 262); --tok-write:oklch(0.66 0.115 65); --tok-fresh:oklch(0.60 0.13 345); --tok-out:oklch(0.63 0.095 170); --tok-reason:oklch(0.58 0.115 300);
+  --code-kw:oklch(0.78 0.105 295); --code-str:oklch(0.80 0.10 165); --code-fn:oklch(0.80 0.09 245); --code-num:oklch(0.80 0.105 75); --code-com:var(--text-3);   /* on the black well ≥ 10:1 */
+  --diff-add:var(--st-run-ink); --diff-del:var(--st-err-ink);
+  --shadow-pop:0 0 0 1px var(--border-strong), 0 12px 32px -8px rgba(0,0,0,0.7);
+  --shadow-modal:0 0 0 1px var(--border-strong), 0 24px 64px -12px rgba(0,0,0,0.8);
+  --shadow-island:0 12px 32px -10px rgba(0,0,0,.6);
   --ring-focus:0 0 0 2px var(--bg), 0 0 0 4px var(--focus); --ring-field:0 0 0 3px var(--accent-bg); --ring-field-err:0 0 0 3px var(--st-err-bg);
 }
 

@@ -1,4 +1,4 @@
-// The color theme of the console (design/themes.md): one of four, kept in
+// The color theme of the console (design/themes.md): one of five, kept in
 // this browser (localStorage, src/utils/console-themes.ts names the key and
 // the ids) and applied as data-bb-theme on <html> — Graphite is the absence
 // of the attribute. The shell's inline boot script applies the choice

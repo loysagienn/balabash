@@ -18,8 +18,8 @@
 .set-sw{display:grid;padding:var(--sp-1);border-radius:var(--r-sm)}
 .set-sw:hover{background-image:var(--layer-hover)}
 .set-sw[aria-checked="true"] .wsm{box-shadow:0 0 0 2px var(--set-sw-gap,var(--surface)),0 0 0 4px var(--id-c)}   /* the chosen color: a ring in its own color, the gap in the color under it */
-/* The theme: one tile per theme (radio buttons), four in a row; the preview is drawn in its own theme — data-bb-theme on it. */
-.set-themes{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:var(--sp-3)}
+/* The theme: one tile per theme (radio buttons), five in a row, dark first; the preview is drawn in its own theme — data-bb-theme on it. */
+.set-themes{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:var(--sp-3)}
 .set-theme{display:flex;flex-direction:column;gap:var(--sp-2);min-width:0;padding:var(--sp-1h) var(--sp-1h) var(--sp-2h);border-radius:var(--r-md);text-align:left;box-shadow:inset 0 0 0 1px var(--border);transition:box-shadow var(--dur-1) var(--ease)}
 .set-theme:hover{background-image:var(--layer-hover);box-shadow:inset 0 0 0 1px var(--border-hover)}
 .set-theme[aria-checked="true"]{background-color:var(--accent-bg);box-shadow:inset 0 0 0 1.5px var(--accent)}   /* the chosen theme: the accent outline over a faint accent fill */
@@ -45,9 +45,11 @@
 /* On the phone the facts of a tile (the group's id and day, the session's browser and source) are the row's whole
    point and are short: they wrap instead of the list's ellipsis. */
 @container shell (max-width:720px){
-  .set-themes{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .set-themes{grid-template-columns:repeat(6,minmax(0,1fr))}   /* phone: the three dark themes in a row, the two light ones under them */
+  .set-theme{grid-column:span 2}
+  .set-theme[data-scheme="light"]{grid-column:span 3}
   .set-sws{--set-sw-gap:var(--bg)}   /* the phone card is bare: the swatches sit on the page */
-  .set-session > .list + .card-b{padding-top:var(--sp-3)}   /* the browser actions start below the rule, not on it */
+  .set-session > .list + .card-b{padding-top:var(--sp-3);border-top:0}   /* the tiles end the list: the browser actions follow after the gap, no rule */
   .set-col .list[data-narrow="tiles"] .row-m{white-space:normal}
 }
 }

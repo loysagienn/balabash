@@ -67,6 +67,7 @@ describe('the theme choice', () => {
 
   it('puts the theme on the page: no attribute for Graphite, the theme’s --bg and scheme in the metas', () => {
     assert.deepEqual(pageTheme('graphite'), { attribute: null, themeColor: '#0c0d0f', colorScheme: 'dark' });
+    assert.deepEqual(pageTheme('carbon'), { attribute: 'carbon', themeColor: '#000000', colorScheme: 'dark' });
     assert.deepEqual(pageTheme('light'), { attribute: 'light', themeColor: '#f3f4f6', colorScheme: 'light' });
 
     const page = fakeDocument();
@@ -122,6 +123,11 @@ describe('the shell’s boot script', () => {
 
     assert.equal(light.attrs.get('data-bb-theme'), 'light');
     assert.deepEqual(light.metas, { 'theme-color': '#f3f4f6', 'color-scheme': 'light' });
+
+    const carbon = run('carbon');
+
+    assert.equal(carbon.attrs.get('data-bb-theme'), 'carbon');
+    assert.deepEqual(carbon.metas, { 'theme-color': '#000000', 'color-scheme': 'dark' });
 
     for (const stored of [null, 'graphite', 'neon']) {
       const page = run(stored);
