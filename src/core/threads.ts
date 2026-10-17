@@ -15,6 +15,8 @@ import { AppendError, TERMINAL_TYPES, THREAD_CANCELLED, THREAD_STARTED, toEvent 
 import { config } from '../config/index.ts';
 import { threadStartFields } from '../projections/thread.ts';
 import { threadsWhere } from './thread-query.ts';
+import { messageFile } from './file-blocks.ts';
+import type { StoredFileFacts } from './file-blocks.ts';
 import type { ThreadFilters } from './thread-query.ts';
 
 export const COORDINATOR_AGENT = 'coordinator';
@@ -299,6 +301,10 @@ type StartThreadInput = {
   remote?: boolean;
   options?: JsonObject;
   adopt?: boolean;
+  // The attachments of the spawn prompt — stored files the spawner already
+  // validated against the workspace; recorded as fileIds + files, the way a
+  // thread.message carries them (src/core/file-blocks.ts).
+  files?: StoredFileFacts[];
   // The project the thread works for (resolved by the spawner): the id is
   // what the projection stores and the console filters on, the slug is the
   // human-readable address at spawn time.
@@ -345,6 +351,11 @@ export async function startThread(options: StartThreadInput): Promise<Thread> {
 
   if (options.adopt !== undefined) {
     payload.adopt = options.adopt;
+  }
+
+  if (options.files?.length) {
+    payload.fileIds = options.files.map(file => file.id);
+    payload.files = options.files.map(messageFile);
   }
 
   if (options.project !== undefined) {

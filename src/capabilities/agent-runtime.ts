@@ -37,7 +37,7 @@ import { createClaudeSession } from '../harness/claude-sdk/sdk-session.ts';
 import { createCodexSession } from '../harness/codex-sdk/sdk-session.ts';
 import type { RoutedRun } from '../runtime/router.ts';
 import { getAgent, isRemoteAgent, mayAgentSpawn } from './agent-catalog.ts';
-import { createSessionRun } from './session-run.ts';
+import { createSessionRun, withSpawnFiles } from './session-run.ts';
 import { callToolJournaled } from './tool-journal.ts';
 import { callServerTool, getServerToolFunctions, type ToolBundle } from './tool-manager.ts';
 import { validateAgentRun } from './validate-agent.ts';
@@ -263,6 +263,14 @@ export async function spawnAgentRun(thread: Thread, startedEvent: Event): Promis
         throw new Error(`Agent "${childAgentName}" is not a remote kind: it takes no options and no adoption`);
       }
 
+      if (options?.adopt && options.fileIds?.length) {
+        throw new Error(`Adopting a session of "${childAgentName}" takes no files: send them to the thread once it is open`);
+      }
+
+      // The attachments of the spawn prompt: validated like a thread.message's
+      // — a dead or foreign fileId rejects the spawn, not the child's reading.
+      const files = await validateMessageFiles(userId, options?.fileIds);
+
       const child = await startThread({
         userId,
         parentThreadId: threadId,
@@ -274,6 +282,7 @@ export async function spawnAgentRun(thread: Thread, startedEvent: Event): Promis
         icon: childDeclaration.icon,
         headless: remote ? true : childDeclaration.headless,
         ...(remote ? { remote: true, options: options?.options ?? {}, adopt: options?.adopt === true } : {}),
+        ...(files.length ? { files } : {}),
         project: await resolveSpawnProject(userId, options?.project),
         actor: 'agent',
         agentName,
@@ -356,7 +365,9 @@ export async function spawnAgentRun(thread: Thread, startedEvent: Event): Promis
   let run;
 
   try {
-    const prompt = validateAgentInput(agentName, startedEvent.payload.input);
+    // The attachments of the spawn prompt are read like a message's: a line
+    // per file and the hint how to reach them — the bytes stay in storage.
+    const prompt = withSpawnFiles(validateAgentInput(agentName, startedEvent.payload.input), startedEvent.payload.files);
 
     // The declarative form is run by the platform's session runner; run() is
     // the imperative escape hatch (validate-agent guarantees exactly one).

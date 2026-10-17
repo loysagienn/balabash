@@ -451,8 +451,9 @@ class Builder {
     if (is(event, 'thread.started')) {
       if (own) {
         const text = event.payload.input ?? '';
+        const atts = Array.isArray(event.payload.files) && event.payload.files.length > 0 ? messageFileAtts(event.payload.files, key) : fileIdAtts(event.payload.fileIds ?? [], key);
 
-        this.push({ kind: 'message', key, at, from: who(event), to: this.ctx.agent, variant: 'task', tag: 'task', text, atts: [], fold: shouldFold(text) });
+        this.push({ kind: 'message', key, at, from: who(event), to: this.ctx.agent, variant: 'task', tag: 'task', text, atts, fold: shouldFold(text) });
       } else if (event.threadId) {
         const child: ChildItem = {
           kind: 'child',

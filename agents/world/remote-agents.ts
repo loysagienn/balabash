@@ -11,4 +11,7 @@ export const REMOTE_AGENTS_NOTE =
   'cancel_thread closes the thread without touching the session. Questions a remote agent raises (an ' +
   'approval of an action, a sign-in) need the user: relay them and never decide for the user — the user ' +
   'decides in the console or by the link. A remote thread you spawn is headless and talks only to you; one ' +
-  'the secretary spawns talks to the user directly.';
+  'the secretary spawns talks to the user directly. A remote agent has no access to Balabash file storage: ' +
+  'a file reaches it only as an attachment (the fileIds of the spawn or of send_to_thread — the files ' +
+  'themselves land in its session), a fileId in the text is useless to it; a file it produced comes back ' +
+  'only by your explicit remote_fetch_file with its path in the session.';

@@ -70,24 +70,17 @@ function readableSize(bytes: number): string {
   return unit === 0 ? `${value} B` : `${value < 10 ? value.toFixed(1) : Math.round(value)} ${units[unit]}`;
 }
 
-// A user message as the session reads it: the text, then a line per
-// attached file (the facts the channel recorded) and one hint how to reach
-// them — the bytes are never in the prompt.
-function describeUserMessage(payload: Record<string, unknown>): string {
-  const speaker = speakerOf(payload);
-  const text = typeof payload.text === 'string' ? payload.text : '';
-  const files = Array.isArray(payload.files) ? payload.files : [];
+// Attached files as the session reads them: a line per file (the facts the
+// sender recorded, `who` names the sender) and one hint how to reach them —
+// the bytes are never in the prompt. Empty when there are no files.
+function describeFiles(files: unknown[], who: string): string[] {
   const parts: string[] = [];
-
-  if (text) {
-    parts.push(speaker ? `${speaker}: ${text}` : text);
-  }
 
   for (const file of files) {
     const meta = isObject(file) ? file : {};
 
     parts.push(
-      `[the user sent a file: fileId=${typeof meta.fileId === 'string' ? meta.fileId : 'unknown'}${
+      `[${who} a file: fileId=${typeof meta.fileId === 'string' ? meta.fileId : 'unknown'}${
         typeof meta.originalFilename === 'string' ? `, name=${meta.originalFilename}` : ''
       }${typeof meta.contentType === 'string' ? `, type=${meta.contentType}` : ''}${
         typeof meta.sizeBytes === 'number' ? `, size=${readableSize(meta.sizeBytes)}` : ''
@@ -103,7 +96,29 @@ function describeUserMessage(payload: Record<string, unknown>): string {
     );
   }
 
-  return parts.join('\n');
+  return parts;
+}
+
+// A user message as the session reads it: the text, then the attached files.
+function describeUserMessage(payload: Record<string, unknown>): string {
+  const speaker = speakerOf(payload);
+  const text = typeof payload.text === 'string' ? payload.text : '';
+  const files = Array.isArray(payload.files) ? payload.files : [];
+  const parts: string[] = [];
+
+  if (text) {
+    parts.push(speaker ? `${speaker}: ${text}` : text);
+  }
+
+  return [...parts, ...describeFiles(files, 'the user sent')].join('\n');
+}
+
+// The spawn prompt with the attachments of thread.started (payload.files)
+// read like a message's: the spawner — the operator of the thread — attached
+// them. One rendering for the session runner and imperative run() agents
+// alike (the runtime applies it before either sees the prompt).
+export function withSpawnFiles(prompt: string, files: unknown): string {
+  return [prompt, ...describeFiles(Array.isArray(files) ? files : [], 'the operator attached')].join('\n');
 }
 
 // An incoming thread.message: text plus attached file references. From the
@@ -331,7 +346,16 @@ function createChildTools(
           type: 'string',
           description:
             'The task for the agent, with everything it should start from: the ask, known context, ' +
-            'constraints, and references (thread ids, event seqs, fileIds) each with a one-line note.',
+            'constraints, and references (thread ids, event seqs) each with a one-line note. Files go in ' +
+            '`fileIds`, not as ids in the text.',
+        },
+        fileIds: {
+          type: ['array', 'null'],
+          items: { type: 'string' },
+          description:
+            'Stored fileIds to attach to the task, or null. The agent gets them as attachments of its first ' +
+            'message (a remote agent receives the files themselves in its session — it has no access to ' +
+            'Balabash storage, so an id in the text is useless to it). Not with adopt.',
         },
         project: {
           type: ['string', 'null'],
@@ -349,7 +373,7 @@ function createChildTools(
           description: 'Remote agents only: true to adopt the existing session named by `prompt`; null or false to start a new one.',
         },
       },
-      required: ['agent', 'title', 'prompt', 'project', 'options', 'adopt'],
+      required: ['agent', 'title', 'prompt', 'fileIds', 'project', 'options', 'adopt'],
       additionalProperties: false,
     },
     handler: async args => {
@@ -359,6 +383,9 @@ function createChildTools(
       const project = typeof args.project === 'string' && args.project.trim() ? args.project.trim() : undefined;
       const options = args.options && typeof args.options === 'object' && !Array.isArray(args.options) ? args.options : undefined;
       const adopt = args.adopt === true;
+      const fileIds = Array.isArray(args.fileIds)
+        ? args.fileIds.filter((id): id is string => typeof id === 'string' && Boolean(id.trim()))
+        : [];
 
       if (!agentName) {
         throw new Error('spawn_agent requires agent');
@@ -370,6 +397,7 @@ function createChildTools(
 
       const child = await ctx.spawn(agentName, prompt, {
         ...(title ? { title } : {}),
+        ...(fileIds.length ? { fileIds } : {}),
         ...(project ? { project } : {}),
         ...(options ? { options } : {}),
         ...(adopt ? { adopt } : {}),

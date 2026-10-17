@@ -431,7 +431,9 @@ async function openUnderLock(thread: Thread, started: Event): Promise<void> {
         [startedEvent],
       );
     } else {
-      const opened = await verb('open', kind.driver.open(kind.context, { prompt: input, options, files: [], messageId: started.id }));
+      // The attachments of the spawn prompt (thread.started files) cross
+      // the boundary like a message's: as stored files for the driver.
+      const opened = await verb('open', kind.driver.open(kind.context, { prompt: input, options, files: await inboundFiles(started, thread.userId), messageId: started.id }));
 
       openedRef = opened.ref;
 
@@ -538,10 +540,10 @@ async function drainInbound(start: RemoteRow): Promise<RemoteRow | null> {
   }
 }
 
-// The attachments of the owner's message — user.message.files, or the
-// fileIds of a thread.message — as stored files of the workspace (a foreign
-// or missing id is dropped with a word in the log, not a crash of the
-// whole message).
+// The attachments of the owner's message — user.message.files, the fileIds
+// of a thread.message, or the files of the spawn's thread.started — as
+// stored files of the workspace (a foreign or missing id is dropped with a
+// word in the log, not a crash of the whole message).
 async function inboundFiles(event: Event, userId: string): Promise<FileRef[]> {
   const payload = event.payload;
   const ids = new Set<string>();

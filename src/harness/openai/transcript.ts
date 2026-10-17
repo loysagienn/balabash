@@ -285,6 +285,7 @@ const renderers: Record<string, Renderer> = {
       agent: payload.agent,
       title: payload.title,
       input: payload.input,
+      files: Array.isArray(payload.files) && payload.files.length ? payload.files : undefined,
     }),
 
   'thread.progress': (payload, event) =>

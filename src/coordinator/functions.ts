@@ -191,8 +191,15 @@ const AGENT_SPAWN_PARAMETERS = {
       type: 'string',
       description:
         'The task for the agent, with everything it should start from: the ask as the user framed it, ' +
-        'known context, constraints and decisions, plus references (thread ids, event seqs, fileIds) ' +
-        'each with a one-line note.',
+        'known context, constraints and decisions, plus references (thread ids, event seqs) each with a ' +
+        'one-line note. Files go in fileIds, not as ids in the text.',
+    },
+    fileIds: {
+      type: ['array', 'null'],
+      items: { type: 'string' },
+      description:
+        'Stored fileIds to attach to the task (e.g. the files the user sent), or null. The agent gets them ' +
+        'as attachments of its first message.',
     },
     thread_title: {
       type: 'string',
@@ -207,7 +214,7 @@ const AGENT_SPAWN_PARAMETERS = {
         'it concerns none. Links the new thread to the project — name it whenever the task is about a project.',
     },
   },
-  required: ['prompt', 'thread_title', 'project'],
+  required: ['prompt', 'fileIds', 'thread_title', 'project'],
   additionalProperties: false,
 } satisfies Record<string, unknown>;
 
@@ -301,6 +308,13 @@ export function remoteSpawnParameters(kind: Pick<RemoteAgentDeclaration, 'option
         type: ['string', 'null'],
         description: 'The id or link of an existing session of this system to adopt as the thread, or null to start a new one. Exactly one of prompt and adopt.',
       },
+      fileIds: {
+        ...AGENT_SPAWN_PARAMETERS.properties.fileIds,
+        description:
+          'Stored fileIds to attach to the task, or null. The remote agent receives the files themselves in ' +
+          'its session — it has no access to Balabash storage, so a fileId in the text is useless to it. ' +
+          'Null when adopting (send files to the thread once it is open).',
+      },
       thread_title: AGENT_SPAWN_PARAMETERS.properties.thread_title,
       project: AGENT_SPAWN_PARAMETERS.properties.project,
       options: {
@@ -309,7 +323,7 @@ export function remoteSpawnParameters(kind: Pick<RemoteAgentDeclaration, 'option
         description: 'The launch parameters of the external system (each null for its default), or null for all defaults.',
       },
     },
-    required: ['prompt', 'adopt', 'thread_title', 'project', 'options'],
+    required: ['prompt', 'adopt', 'fileIds', 'thread_title', 'project', 'options'],
     additionalProperties: false,
   };
 }
@@ -452,6 +466,9 @@ async function executeSpawn(agentName: string, args: JsonObject, ctx: DispatchCo
   const title = typeof threadTitle === 'string' && threadTitle.trim() ? threadTitle.trim() : agentName;
   const declaration = getAgent(agentName);
   const projectSlug = typeof args.project === 'string' && args.project.trim() ? args.project.trim() : undefined;
+  // The attachments of the task: validated up front against the workspace
+  // like send_to_thread's — a dead or foreign fileId rejects the spawn.
+  const files = await Promise.all(uniqueFileIds(args.fileIds).map(fileId => getUserFile(ctx.userId, fileId)));
 
   // A remote kind: a new session from the prompt, or an existing one
   // adopted — exactly one. The secretary's remote thread talks to the user
@@ -461,6 +478,10 @@ async function executeSpawn(agentName: string, args: JsonObject, ctx: DispatchCo
 
     if (Boolean(prompt) === Boolean(adopt)) {
       throw new Error(`Spawning "${agentName}" takes exactly one of prompt (a new session) and adopt (an existing one)`);
+    }
+
+    if (adopt && files.length) {
+      throw new Error(`Adopting a session of "${agentName}" takes no files: send them to the thread once it is open`);
     }
 
     await startThread({
@@ -474,6 +495,7 @@ async function executeSpawn(agentName: string, args: JsonObject, ctx: DispatchCo
       remote: true,
       options: compactOptions(args.options),
       adopt: Boolean(adopt),
+      ...(files.length ? { files } : {}),
       project: await resolveSpawnProject(ctx.userId, projectSlug),
       actor: 'agent',
       agentName: 'coordinator',
@@ -494,18 +516,22 @@ async function executeSpawn(agentName: string, args: JsonObject, ctx: DispatchCo
     input: prompt,
     icon: declaration?.icon,
     headless: declaration?.headless,
+    ...(files.length ? { files } : {}),
     project: await resolveSpawnProject(ctx.userId, projectSlug),
     actor: 'agent',
     agentName: 'coordinator',
   });
 }
 
+// The fileIds of a call: strings, trimmed, deduplicated.
+function uniqueFileIds(value: unknown): string[] {
+  return Array.isArray(value) ? [...new Set(value.filter((id): id is string => typeof id === 'string' && Boolean(id.trim())).map(id => id.trim()))] : [];
+}
+
 async function executeSendToThread(args: JsonObject, ctx: DispatchContext): Promise<void> {
   const threadId = typeof args.threadId === 'string' ? args.threadId.trim() : '';
   const text = typeof args.text === 'string' ? args.text.trim() : '';
-  const fileIds = Array.isArray(args.fileIds)
-    ? [...new Set(args.fileIds.filter((id): id is string => typeof id === 'string' && Boolean(id.trim())).map(id => id.trim()))]
-    : [];
+  const fileIds = uniqueFileIds(args.fileIds);
 
   if (!threadId || !text) {
     throw new Error('send_to_thread requires threadId and non-empty text');

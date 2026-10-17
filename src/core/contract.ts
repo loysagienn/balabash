@@ -382,6 +382,10 @@ export type SpawnOptions = {
   // of an existing session rather than a task.
   options?: JsonObject;
   adopt?: boolean;
+  // Stored files attached to the spawn prompt (validated against the
+  // workspace at spawn; recorded in thread.started as fileIds + files, the
+  // way a thread.message carries them). Not with adopt.
+  fileIds?: string[];
 };
 
 export type RunContext = {

@@ -67,8 +67,9 @@ system.
   failing watch is not a state: backoff, one word to the owner after two
   hours.
 - **Bytes cross only through the driver**: an attachment of the owner's
-  message is streamed into the session; a file of the session is fetched
-  by path on an explicit ask (`remote_fetch_file`) and stored here.
+  message — or of the spawn prompt (`thread.started` files) — is streamed
+  into the session; a file of the session is fetched by path on an explicit
+  ask (`remote_fetch_file`) and stored here.
 
 ## Working here
 

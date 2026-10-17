@@ -41,6 +41,12 @@ export type EventPayloads = {
     remote?: boolean;
     options?: JsonObject;
     adopt?: boolean;
+    // The attachments of the spawn prompt, as thread.message carries them:
+    // fileIds — the references the model reads; files — their facts for
+    // the reader. A local agent fetches them from storage by fileId; a
+    // remote agent's driver streams them into the session at open.
+    fileIds?: string[];
+    files?: InboundFile[];
   };
   'thread.progress': { text: string };
   // fileIds — the references the model reads; files — the same files with

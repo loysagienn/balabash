@@ -71,7 +71,7 @@ const driver: RemoteDriver = {
       await holdOpen;
     }
 
-    session(ref).said.push({ text: input.prompt, messageId: input.messageId });
+    session(ref).said.push({ text: input.prompt, messageId: input.messageId, ...(input.files.length ? { files: input.files.map(file => file.originalFilename ?? file.id) } : {}) });
 
     return { ref, link: `https://ext/${ref}` };
   },
@@ -850,6 +850,13 @@ describe('the remote engine', () => {
     engine.wake(threadId);
     await engine.settled();
     assert.deepEqual(session(ref).said.at(-1), { text: '', messageId: message.event.id, files: ['notes.md'] });
+  });
+
+  test('an attachment of the spawn prompt reaches the driver at open as a stored file; a missing one is skipped', async () => {
+    const stored = await ingestFile({ body: 'brief', originalFilename: 'brief.md', contentType: 'text/markdown', userId: stand.userId, scope: 'web' });
+    const { started, ref } = await openThread({ input: 'read the brief', fileIds: [stored.id, randomUUID()], files: [{ fileId: stored.id, originalFilename: 'brief.md' }, { fileId: randomUUID(), originalFilename: 'gone.md' }] });
+
+    assert.deepEqual(session(ref).said, [{ text: 'read the brief', messageId: started.id, files: ['brief.md'] }]);
   });
 
   test('a file of the session is fetched by path for the owner, stored and shown in the thread; a stranger, a sleeping sandbox and a missing path are refused', async () => {

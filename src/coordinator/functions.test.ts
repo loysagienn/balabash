@@ -35,10 +35,10 @@ describe('the remote spawn function', () => {
     });
   });
 
-  it('takes exactly the five parameters, the options by the kind’s schema', () => {
+  it('takes exactly the six parameters, the options by the kind’s schema', () => {
     const parameters = remoteSpawnParameters({ options: { type: 'object', properties: { effort: { type: 'string' } } } }) as { required: string[]; properties: Record<string, { type: unknown; required?: string[] }> };
 
-    assert.deepEqual(parameters.required, ['prompt', 'adopt', 'thread_title', 'project', 'options']);
+    assert.deepEqual(parameters.required, ['prompt', 'adopt', 'fileIds', 'thread_title', 'project', 'options']);
     assert.deepEqual(parameters.properties.options.type, ['object', 'null']);
     assert.deepEqual(parameters.properties.options.required, ['effort']);
     assert.deepEqual((remoteSpawnParameters({}) as typeof parameters).properties.options.required, []);
