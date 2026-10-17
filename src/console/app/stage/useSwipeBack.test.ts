@@ -1,7 +1,8 @@
 // The swipe back's pointer wiring over stand-ins for the DOM: which drags
 // the page claims (and prevents the browser's pan for) and which it lets
 // go — a drag to the left at the left edge of a wide block is the block's
-// scroll, not a step back.
+// scroll, not a step back; a touch while text is selected is the
+// selection's handle, not a step back either.
 
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, it } from 'node:test';
@@ -146,6 +147,59 @@ describe('stage — the swipe back on the pointers', () => {
 
     const cleanup = installSwipeBack(root as unknown as HTMLElement, page);
     const touchMove = touch(root, block, 230);
+
+    assert.equal(page.started, 0);
+    assert.equal(touchMove.defaultPrevented, false);
+    cleanup();
+  });
+
+  it('never starts over selected text: the finger is on the selection’s handle', () => {
+    const root = new FakeElement();
+    const page = owner();
+
+    (globals.document as { getSelection?: () => unknown }).getSelection = () => ({ isCollapsed: false });
+
+    const cleanup = installSwipeBack(root as unknown as HTMLElement, page);
+    const touchMove = touch(root, root, 230);
+
+    assert.equal(page.started, 0);
+    assert.equal(touchMove.defaultPrevented, false);
+
+    // The selection gone (a tap outside cleared it), the next touch is a swipe again.
+    send(globals.window as EventTarget, 'pointerup', { pointerId: 1, clientX: 230, clientY: 100, timeStamp: 30 });
+    (globals.document as { getSelection?: () => unknown }).getSelection = () => ({ isCollapsed: true });
+    touch(root, root, 230);
+    assert.equal(page.started, 1);
+    cleanup();
+  });
+
+  it('never starts over a stretch selected within the focused field', () => {
+    const root = new FakeElement();
+    const page = owner();
+
+    (globals.document as { activeElement: unknown }).activeElement = { selectionStart: 2, selectionEnd: 7 };
+
+    const cleanup = installSwipeBack(root as unknown as HTMLElement, page);
+    touch(root, root, 230);
+
+    assert.equal(page.started, 0);
+    cleanup();
+  });
+
+  it('lets a drag go when the touch itself selected text before turning horizontal', () => {
+    const root = new FakeElement();
+    const page = owner();
+    const document = globals.document as { getSelection?: () => unknown };
+
+    document.getSelection = () => ({ isCollapsed: true });
+
+    const cleanup = installSwipeBack(root as unknown as HTMLElement, page);
+
+    send(root, 'pointerdown', { target: root, pointerType: 'touch', isPrimary: true, button: 0, pointerId: 1, clientX: 200, clientY: 100, timeStamp: 0 });
+    // A long press: the browser selected the word under the finger.
+    document.getSelection = () => ({ isCollapsed: false });
+    send(globals.window as EventTarget, 'pointermove', { pointerId: 1, clientX: 230, clientY: 100, timeStamp: 600 });
+    const touchMove = send(root, 'touchmove', { touches: [{}] });
 
     assert.equal(page.started, 0);
     assert.equal(touchMove.defaultPrevented, false);

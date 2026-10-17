@@ -14,7 +14,12 @@
 // the page moves, not in the middle of the motion), and the page follows
 // the finger: the travel as a share of the width. The lift settles it
 // (stage.logic: the velocity and the place decide); a second finger or
-// the browser taking the touch sends it back.
+// the browser taking the touch sends it back. Selected text is the
+// browser's: a touch while a selection is out never starts a drag — on
+// the phone the finger on a selection's handle moves the handle, and the
+// browser reports it as an ordinary pointer; a drag that turns horizontal
+// over a selection the touch itself made (a long press) is let go the
+// same way.
 
 import { Drag } from '../../lib/gesture/drag.ts';
 
@@ -31,6 +36,21 @@ export type SwipeOwner = {
 
 // What is never the page's to swipe: a widget that says so, a slider, the image viewer.
 const OWN_HORIZONTAL = '[data-swipe="off"], input[type="range"], .lbox';
+
+// Whether some text is selected: a range on the document, or a stretch
+// within the focused field (a field's selection is its own, not the
+// document's, in every engine).
+export function textSelected(): boolean {
+  const active = document.activeElement as { selectionStart?: number | null; selectionEnd?: number | null } | null;
+
+  if (active && typeof active.selectionStart === 'number' && active.selectionStart !== active.selectionEnd) {
+    return true;
+  }
+
+  const selection = document.getSelection?.();
+
+  return !!selection && !selection.isCollapsed;
+}
 
 // A block between the target and the root that scrolls sideways and has
 // room to scroll back: the drag to the right is its own.
@@ -76,7 +96,7 @@ export function installSwipeBack(root: HTMLElement, owner: SwipeOwner): () => vo
 
     switch (move.kind) {
       case 'claim':
-        if (move.sign < 0 || !owner.start()) {
+        if (move.sign < 0 || textSelected() || !owner.start()) {
           teardown();
           return;
         }
@@ -147,7 +167,7 @@ export function installSwipeBack(root: HTMLElement, owner: SwipeOwner): () => vo
 
     const target = event.target;
 
-    if (!(target instanceof Element) || !owner.canStart(target) || ownsRightwardDrag(target, root)) {
+    if (!(target instanceof Element) || textSelected() || !owner.canStart(target) || ownsRightwardDrag(target, root)) {
       return;
     }
 
