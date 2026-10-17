@@ -222,7 +222,7 @@ describe('the remote engine', () => {
     assert.deepEqual(
       (await eventsOf(threadId, ['session.started', 'session.state'])).map(event => [event.type, event.payload]),
       [
-        ['session.started', { model: 'big', effort: null, tools: [], mcpServers: [] }],
+        ['session.started', { model: 'big', effort: null, tools: [], mcpServers: [], remoteLink: `https://ext/${ref}` }],
         ['session.state', { state: 'run' }],
       ],
     );
@@ -475,6 +475,8 @@ describe('the remote engine', () => {
       const { threadId } = await openThread({ adopt: true, input: 'sess-again' });
 
       assert.deepEqual((await store.getRow(threadId))!.cursor, { rows: 7 });
+      // The adopted session's address reaches the thread like an opened one's.
+      assert.equal((await eventsOf(threadId, ['session.started'])).at(-1)!.payload.remoteLink, 'https://ext/sess-again');
       await pass();
       assert.deepEqual(session('sess-again').readCursors, [{ rows: 7 }]);
 

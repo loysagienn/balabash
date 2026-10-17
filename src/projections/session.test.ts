@@ -51,6 +51,14 @@ describe('foldSession', () => {
     assert.deepEqual(foldSession(running, 'session.started', { model: 'gpt-5.6', effort: null }), { state: 'run', context: { used: 5, max: 50 }, started: { model: 'gpt-5.6', effort: null } });
   });
 
+  it('keeps a remote session’s link (remoteLink of session.started); a local session has none', () => {
+    const remote = foldSession(null, 'session.started', { model: 'ext', effort: null, tools: [], mcpServers: [], remoteLink: 'https://ext/chat/s1' });
+
+    assert.deepEqual(remote, { state: 'wait', context: null, started: { model: 'ext', effort: null, remoteLink: 'https://ext/chat/s1' } });
+    assert.equal(foldSession(remote, 'session.started', { model: 'ext', effort: null, remoteLink: 'https://ext/chat/s1' }), remote);
+    assert.equal(foldSession(null, 'session.started', { model: 'ext', remoteLink: '' })?.started?.remoteLink, undefined);
+  });
+
   it('helpers', () => {
     assert.equal(sessionStateFrom({ state: 'act' }), 'act');
     assert.equal(sessionStateFrom({}), null);

@@ -59,6 +59,10 @@ system.
   comes). A terminal the process never routed (a cancel after a restart, a
   parent's cascade) is found by the thread's status before any read or
   verb.
+- **The session's address is a fact of the thread**: the `link` the driver
+  returns from `open` / `describe` is journaled as `remoteLink` of the
+  thread's `session.started` — the console's rail shows it as the remote
+  session, apart from the thread's own Balabash link.
 - **A question of the agent** (`agent.ask`: an approval, a sign-in) needs
   a human: `thread.decide` carries the decision, no agent of ours decides;
   a sign-in is completed by its link.

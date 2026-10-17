@@ -142,6 +142,10 @@ export type EventPayloads = {
     claudeCodeVersion?: string;
     effort?: string | null;
     cwd?: string;
+    // A remote session (src/remote): where a human looks at it in the
+    // external system — the driver's link. Distinct from a Balabash thread
+    // link: this one leaves the installation.
+    remoteLink?: string;
   };
   'session.state': { state: SessionState };
   // A turn of the inner session (Claude: the result frame; Codex: the

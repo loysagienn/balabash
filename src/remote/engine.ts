@@ -380,6 +380,9 @@ async function openUnderLock(thread: Thread, started: Event): Promise<void> {
   const notificationLevel = (payload.notification as NotificationLevel | undefined) ?? kind.notification ?? 'normal';
   const base = initialWatch({ headless: thread.headless, parentId: thread.parentId ?? '', notification: notificationLevel });
   const now = deps.now();
+  // The session's facts for the thread: the model the options name, and —
+  // once the driver has answered — remoteLink, where a human looks at the
+  // session in the external system (the rail shows it).
   const startedEvent: AppendInput = {
     type: 'session.started',
     actor: 'agent',
@@ -414,6 +417,10 @@ async function openUnderLock(thread: Thread, started: Event): Promise<void> {
         return;
       }
 
+      if (described.link) {
+        startedEvent.payload.remoteLink = described.link;
+      }
+
       await createRow(
         {
           threadId: thread.id,
@@ -436,6 +443,10 @@ async function openUnderLock(thread: Thread, started: Event): Promise<void> {
       const opened = await verb('open', kind.driver.open(kind.context, { prompt: input, options, files: await inboundFiles(started, thread.userId), messageId: started.id }));
 
       openedRef = opened.ref;
+
+      if (opened.link) {
+        startedEvent.payload.remoteLink = opened.link;
+      }
 
       const watch: WatchState = withState(self, rememberOwnMessage(base, started.id), 'working', []);
       const events = [startedEvent, stateEvent(self, 'run')];

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { emptyFeed } from '../../store/feed/reducer.ts';
 import { event, resetSeq, thread } from '../../store/fixtures.ts';
-import { compactionsLabel, railSessionInfo } from './rail.ts';
+import { compactionsLabel, railSessionInfo, remoteLinkLabel } from './rail.ts';
 import {
   anchorIndex,
   cancelWords,
@@ -119,10 +119,16 @@ describe('thread page words', () => {
       event({ type: 'session.context', threadId: 't', payload: { totalTokens: 142_000, maxTokens: 200_000, percentage: 71 } }),
     ];
 
-    assert.deepEqual(railSessionInfo(events, null), { model: 'claude-fable-5-1', effort: 'high', context: { used: 142_000, max: 200_000 }, compactions: 1 });
+    assert.deepEqual(railSessionInfo(events, null), { model: 'claude-fable-5-1', effort: 'high', remoteLink: null, context: { used: 142_000, max: 200_000 }, compactions: 1 });
     assert.deepEqual(railSessionInfo(events, { used: 150_000, max: 200_000 }).context, { used: 150_000, max: 200_000 });
     // An active session names its model itself, whatever the loaded events hold.
-    assert.deepEqual(railSessionInfo([], null, { model: 'claude-opus-5-5', effort: null }), { model: 'claude-opus-5-5', effort: null, context: null, compactions: 0 });
+    assert.deepEqual(railSessionInfo([], null, { model: 'claude-opus-5-5', effort: null }), { model: 'claude-opus-5-5', effort: null, remoteLink: null, context: null, compactions: 0 });
+    // A remote session: its address in the external system, from the events or the live session.
+    const remote = [event({ type: 'session.started', threadId: 'r', payload: { model: 'ext', tools: [], mcpServers: [], remoteLink: 'https://ext/chat/s1' } })];
+
+    assert.equal(railSessionInfo(remote, null).remoteLink, 'https://ext/chat/s1');
+    assert.equal(railSessionInfo([], null, { model: 'ext', effort: null, remoteLink: 'https://ext/chat/s2' }).remoteLink, 'https://ext/chat/s2');
+    assert.equal(remoteLinkLabel('https://ext/chat/s1'), 'ext/chat/s1');
     assert.equal(compactionsLabel(0), 'not compacted');
     assert.equal(compactionsLabel(1), 'compacted once');
     assert.equal(compactionsLabel(2), 'compacted twice');

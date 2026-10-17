@@ -20,8 +20,9 @@ export type SessionView = {
   context: { used: number; max: number } | null;
   // The model and the effort of the session (the newest session.started);
   // absent until one is folded — and in a snapshot of a server older than
-  // the field.
-  started?: { model: string; effort: string | null };
+  // the field. remoteLink — a remote session's address in the external
+  // system (src/remote), present for remote sessions alone.
+  started?: { model: string; effort: string | null; remoteLink?: string };
 };
 
 export const SESSION_EVENT_PREFIX = 'session.';
@@ -42,13 +43,17 @@ export function sessionStateFrom(payload: JsonObject): SessionState | null {
 }
 
 function sessionStartedFrom(payload: JsonObject): NonNullable<SessionView['started']> | null {
-  const { model, effort } = payload;
+  const { model, effort, remoteLink } = payload;
 
   if (typeof model !== 'string' || model === '') {
     return null;
   }
 
-  return { model, effort: typeof effort === 'string' && effort !== '' ? effort : null };
+  return {
+    model,
+    effort: typeof effort === 'string' && effort !== '' ? effort : null,
+    ...(typeof remoteLink === 'string' && remoteLink !== '' ? { remoteLink } : {}),
+  };
 }
 
 function sessionContextFrom(payload: JsonObject): SessionView['context'] {
@@ -91,7 +96,7 @@ export function foldSession(view: SessionView | null, type: string, payload: Jso
     case 'session.started': {
       const started = sessionStartedFrom(payload);
 
-      if (started === null || (view?.started?.model === started.model && view.started.effort === started.effort)) {
+      if (started === null || (view?.started?.model === started.model && view.started.effort === started.effort && view.started.remoteLink === started.remoteLink)) {
         return view;
       }
 

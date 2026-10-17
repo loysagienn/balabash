@@ -8,9 +8,11 @@
 // danger-line: the confirmation's own button is the tinted danger) —
 // regular-size buttons, full width; a control that does not apply stays,
 // disabled, so the rail never reflows;
-// "Copy link"; then the session (model, engine), the context (the gauge of
-// the latest session.context, compactions counted; a remote thread has
-// none), the project and the time — and the same content as the bottom
+// "Copy link" (the thread's own Balabash address); then the session (model,
+// engine; a remote thread: its remote session's address in the external
+// system — a link out, never confused with the thread link), the context
+// (the gauge of the latest session.context, compactions counted; a remote
+// thread has none), the project and the time — and the same content as the bottom
 // sheet "⋯" opens in a narrow thread. Child threads are cards in the feed.
 
 import type { Thread } from '../../../core/contract.ts';
@@ -32,8 +34,8 @@ import { Status } from '../../ui/Status/Status.tsx';
 import { RailGauge, RailSection, ThreadRail as Rail } from '../../ui/Thread/Thread.tsx';
 import { threadStateLabel } from '../../ui/ThreadHead/ThreadHead.logic.ts';
 import { isActiveState } from '../../ui/ThreadRow/ThreadRow.logic.ts';
-import { Code, Tag } from '../../ui/atoms/atoms.tsx';
-import { compactionsLabel } from './rail.ts';
+import { Code, Tag, Url } from '../../ui/atoms/atoms.tsx';
+import { compactionsLabel, remoteLinkLabel } from './rail.ts';
 import type { RailSessionInfo } from './rail.ts';
 import { finishNote, stateNote } from './ThreadScreen.logic.ts';
 
@@ -80,6 +82,13 @@ function useCopyLink(threadId: string): () => void {
 
 function ParentLink({ parent }: { parent: Thread }) {
   return <Link route={{ key: 'thread', id: parent.id }}>{parent.agent}</Link>;
+}
+
+// The remote session's address in the external system (session.started
+// remoteLink): a link out, in a new tab — the "Copy link" next to the
+// title is the thread's own Balabash address, this one is not.
+function remoteSessionItem(remoteLink: string): KeyValueItem {
+  return { key: 'remote session', value: <Url href={remoteLink} title={remoteLink}>{remoteLinkLabel(remoteLink)}</Url> };
 }
 
 function engineWords(engine: string | null, info: RailSessionInfo): string | null {
@@ -133,12 +142,13 @@ export function ThreadRail({ thread, title, state, engine, info, parent, project
           </div>
         </div>
       ) : null}
-      {info.model || engineText ? (
+      {info.model || engineText || info.remoteLink ? (
         <RailSection title="Session">
           <KeyValue
             items={[
               ...(info.model ? [{ key: 'model', value: <Code>{info.model}</Code> }] : []),
               ...(engineText ? [{ key: 'engine', value: engineText }] : []),
+              ...(info.remoteLink ? [remoteSessionItem(info.remoteLink)] : []),
             ]}
           />
         </RailSection>
@@ -200,6 +210,7 @@ export function ThreadDetailsSheet({ thread, title, state, engine, info, parent,
     },
     ...(info.model ? [{ key: 'model', value: <Code>{info.model}</Code> }] : []),
     ...(engineText ? [{ key: 'engine', value: engineText }] : []),
+    ...(info.remoteLink ? [remoteSessionItem(info.remoteLink)] : []),
     ...(info.context && info.context.max > 0 && !thread.remote
       ? [
           {
