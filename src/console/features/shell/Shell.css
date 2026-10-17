@@ -1,11 +1,10 @@
 @layer patterns{
 /* ════════════ Shell ════════════
-   .app (container) > .shell[data-detail][data-own-top] > aside.shell-side + .shell-main > .shell-frame (header.shell-top, main.shell-body, nav.shell-tabs)
+   .shell[data-detail][data-own-top] (a layer of the stage, app/stage/Stage.css — .app is the container) > aside.shell-side + .shell-main > .shell-frame (header.shell-top, main.shell-body, nav.shell-tabs)
    Frame: one scroller per screen (.shell-frame, its scroll timeline --frame drives the glass edges). Its bars are glass
    (ui/Glass), sticky and in the flow: the header on top, the screen’s own bottom bar (the composer, the file actions).
    On the phone’s section screens the bottom is the tabs — islands (ui/Island) in a sticky field of their own. The content
    scrolls under them, and its empty fields at the top and the bottom are their heights by themselves — the growing composer too. */
-.app{position:relative;container:shell / inline-size;height:100%;min-height:0}
 .shell{display:grid;grid-template-columns:var(--side-w) minmax(0,1fr);height:100%;min-height:0;background:var(--bg);color:var(--text)}
 
 .shell-side{display:flex;flex-direction:column;gap:var(--sp-3);min-width:0;padding:var(--sp-3h) var(--sp-2h);border-right:1px solid var(--border-surface);background:var(--surface);overflow-y:auto}

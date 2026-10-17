@@ -16,11 +16,12 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { Thread as ThreadRecord } from '../../../core/contract.ts';
 import { countOf, dateTimeLabel } from '../../lib/format/index.ts';
 import { useNow } from '../../lib/format/useNow.ts';
+import { useScreenNav } from '../../lib/router/screen.tsx';
 import { useAppDispatch, useAppSelector } from '../../store/hooks.ts';
 import { selectAgent } from '../../store/agents/selectors.ts';
 import { engineLabel } from '../../lib/format/engine.ts';
 import { makeSelectThreadEvents, selectThreadFeed } from '../../store/feed/selectors.ts';
-import { routeTo } from '../../store/router/actions.ts';
+import { goBack, routeTo } from '../../store/router/actions.ts';
 import { selectSession, selectThreadState } from '../../store/sessions/selectors.ts';
 import { commandThread, loadThread, loadThreadEvents } from '../../store/threads/actions.ts';
 import { selectThread } from '../../store/threads/selectors.ts';
@@ -31,6 +32,7 @@ import { Attachments, FeedItems, hasRunningAction } from '../../features/thread-
 import { fileIdAtts } from '../../features/thread-feed/project.ts';
 import { makeSelectFeedItems } from '../../features/thread-feed/selectors.ts';
 import { Drop } from '../../ui/Drop/Drop.tsx';
+import { Presence } from '../../ui/Overlay/presence.tsx';
 import type { DropPlace } from '../../ui/Drop/Drop.tsx';
 import { useFileDrop } from '../../lib/upload/useFileDrop.ts';
 import { Confirm } from '../../ui/Confirm/Confirm.tsx';
@@ -351,7 +353,8 @@ function ThreadPage({ thread }: { thread: ThreadRecord }) {
 
   // The place history brought the thread back with (the shell restores it
   // for every screen; the feed opens there instead of at its end).
-  const restore = useAppSelector(s => (s.router.source === 'history' ? s.router.scroll : null));
+  const navScroll = useScreenNav().scroll;
+  const restore = navScroll.kind === 'restore' ? navScroll.place : null;
 
   // The drawn part of the feed (FeedWindow): the end at first, earlier
   // items as the reader nears the top. Settled while rendering, so a chunk
@@ -459,22 +462,26 @@ function ThreadPage({ thread }: { thread: ThreadRecord }) {
           ctx={thread.remote ? undefined : ctx}
           tag={thread.headless ? 'headless' : undefined}
           remote={thread.remote}
-          onBack={() => dispatch(routeTo(BACK))}
+          onBack={() => dispatch(goBack(BACK))}
           controls={headControls}
           onMore={() => setDetailsOpen(open => !open)}
           moreOpen={detailsOpen}
         />
-        {confirmCancel ? (
-          <Confirm title="Cancel thread?" confirm="Cancel thread" confirmIcon="circle-stop" cancel="Keep running" onConfirm={cancel} onClose={() => setConfirmCancel(false)}>
-            {cancelWords(thread)}
-          </Confirm>
-        ) : null}
-        {confirmFinish ? (
-          <Confirm title="Finish thread?" confirm="Finish thread" confirmVariant="primary" confirmIcon="flag" cancel="Keep running" onConfirm={finish} onClose={() => setConfirmFinish(false)}>
-            {finishWords(thread)}
-          </Confirm>
-        ) : null}
-        {detailsOpen ? <ThreadDetailsSheet {...details} onClose={() => setDetailsOpen(false)} /> : null}
+        <Presence>
+          {confirmCancel ? (
+            <Confirm title="Cancel thread?" confirm="Cancel thread" confirmIcon="circle-stop" cancel="Keep running" onConfirm={cancel} onClose={() => setConfirmCancel(false)}>
+              {cancelWords(thread)}
+            </Confirm>
+          ) : null}
+        </Presence>
+        <Presence>
+          {confirmFinish ? (
+            <Confirm title="Finish thread?" confirm="Finish thread" confirmVariant="primary" confirmIcon="flag" cancel="Keep running" onConfirm={finish} onClose={() => setConfirmFinish(false)}>
+              {finishWords(thread)}
+            </Confirm>
+          ) : null}
+        </Presence>
+        <Presence>{detailsOpen ? <ThreadDetailsSheet {...details} onClose={() => setDetailsOpen(false)} /> : null}</Presence>
         <ThreadBody>
           <ThreadMain ref={mainRef} drop={dropHandlers}>
             <div ref={feedRef} style={{ display: 'contents' }}>
@@ -554,7 +561,7 @@ export function ThreadScreen({ id }: { id: string }) {
   return (
     <Shell {...shell} ownTop>
       <Thread className="ths">
-        <ThreadHead title="" state="wait" loading onBack={() => dispatch(routeTo(BACK))} />
+        <ThreadHead title="" state="wait" loading onBack={() => dispatch(goBack(BACK))} />
         <ThreadBody>
           <ThreadMain>
             <Feed>

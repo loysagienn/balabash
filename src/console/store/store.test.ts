@@ -14,7 +14,7 @@ import { createStore } from './index.ts';
 import type { AppRoute } from '../lib/router/routes.ts';
 import type { Action, AppStore } from './index.ts';
 import { eventAction } from './events.ts';
-import { routeTo, tabVisible } from './router/actions.ts';
+import { goBack, routeTo, tabVisible } from './router/actions.ts';
 import { loadApps, publishApp, unpublishApp } from './apps/actions.ts';
 import { createTask, deleteTask, runTask } from './schedule/actions.ts';
 import { selectRunsChanged, selectTaskCall, selectTaskCreate, selectTasks } from './schedule/selectors.ts';
@@ -1121,7 +1121,7 @@ describe('route data', () => {
     assert.equal(store.getState().ui.moreMenu, true);
     store.dispatch(routeTo({ key: 'apps' }));
     assert.equal(store.getState().ui.moreMenu, false);
-    assert.deepEqual(store.getState().router, { route: { key: 'apps' }, source: 'app', replace: false, hash: '', scroll: null });
+    assert.deepEqual(routerWords(store), { route: { key: 'apps' }, source: 'app', replace: false, hash: '', move: 'push' });
   });
 
   it('keeps the router state as is on ROUTE_TO from the app to the current route', () => {
@@ -1143,28 +1143,33 @@ describe('route data', () => {
     const store = createStore({ api: fakeApi(), initialRoute: { key: 'threads', agent: 'engineer' } });
     const before = store.getState().router;
 
-    // Back from a neighbour that a replace gave the same URL: the entry's own place comes with it.
-    store.dispatch(routeTo({ key: 'threads', agent: 'engineer' }, { source: 'history', scroll: 600 }));
+    // Back from a neighbour that a replace gave the same URL: a known entry.
+    store.dispatch(routeTo({ key: 'threads' }));
+    store.dispatch(routeTo({ key: 'threads', agent: 'engineer' }, { replace: true }));
+    store.dispatch(routeTo({ key: 'threads', agent: 'engineer' }, { source: 'history', entry: 1 }));
 
     const back = store.getState().router;
 
     assert.notEqual(back, before);
     assert.equal(back.route, before.route);
-    assert.deepEqual(back, { route: { key: 'threads', agent: 'engineer' }, source: 'history', replace: false, hash: '', scroll: 600 });
+    assert.deepEqual(routerWords(store), { route: { key: 'threads', agent: 'engineer' }, source: 'history', replace: false, hash: '', move: 'back' });
+    assert.equal(back.index, 0);
 
-    // Forward to the neighbour, left at the same place: equal fields, another state.
-    store.dispatch(routeTo({ key: 'threads', agent: 'engineer' }, { source: 'history', scroll: 600 }));
+    // Forward to the neighbour: the same route object, another state.
+    store.dispatch(routeTo({ key: 'threads', agent: 'engineer' }, { source: 'history', entry: 2 }));
 
     const forward = store.getState().router;
 
     assert.notEqual(forward, back);
-    assert.equal(forward.route, before.route);
-    assert.deepEqual(forward, back);
+    assert.deepEqual(forward.route, before.route);
+    assert.equal(forward.move, 'forward');
+    assert.equal(forward.index, 1);
 
-    // An entry without a place is a move too (the screen starts at the top).
-    store.dispatch(routeTo({ key: 'threads', agent: 'engineer' }, { source: 'history' }));
+    // An entry the tab does not know is a move too — to a page of its own.
+    store.dispatch(routeTo({ key: 'threads', agent: 'engineer' }, { source: 'history', entry: null }));
     assert.notEqual(store.getState().router, forward);
-    assert.equal(store.getState().router.scroll, null);
+    assert.equal(store.getState().router.move, 'unknown');
+    assert.equal(store.getState().router.index, 2);
 
     // The app's own link to the current route still changes nothing.
     const kept = store.getState().router;
@@ -1196,17 +1201,74 @@ describe('route data', () => {
 
     // A route without a fragment drops the one before.
     store.dispatch(routeTo({ key: 'files', path: 'b.md' }));
-    assert.deepEqual(store.getState().router, { route: { key: 'files', path: 'b.md' }, source: 'app', replace: false, hash: '', scroll: null });
+    assert.deepEqual(routerWords(store), { route: { key: 'files', path: 'b.md' }, source: 'app', replace: false, hash: '', move: 'push' });
 
-    // history brings the location's fragment back, and the place the entry was left at.
-    store.dispatch(routeTo({ key: 'files', path: 'a.md' }, { source: 'history', hash: '#part', scroll: 120 }));
-    assert.deepEqual(store.getState().router, { route: { key: 'files', path: 'a.md' }, source: 'history', replace: false, hash: '#part', scroll: 120 });
+    // history brings the location's fragment back.
+    store.dispatch(routeTo({ key: 'files', path: 'a.md' }, { source: 'history', hash: '#part', entry: 2 }));
+    assert.deepEqual(routerWords(store), { route: { key: 'files', path: 'a.md' }, source: 'history', replace: false, hash: '#part', move: 'back' });
+  });
 
-    // An app navigation has no place to bring back: its screen starts at the top.
-    store.dispatch(routeTo({ key: 'files', path: 'b.md' }));
-    assert.equal(store.getState().router.scroll, null);
+  it('keeps the pages of the tab: a push opens a page, a replace keeps it, a move inside a project keeps it under a new entry, a step back is the entry behind', () => {
+    const back: string[] = [];
+    const store = createStore({ api: fakeApi(), initialRoute: { key: 'projects' }, back: () => ({ back: () => back.push('back') }) });
+
+    const pages = () => store.getState().router.pages.map(page => `${page.entry}/${page.page}:${page.route.key}`);
+
+    assert.deepEqual(pages(), ['1/1:projects']);
+    store.dispatch(routeTo({ key: 'project', slug: 'p' }));
+    assert.deepEqual(pages(), ['1/1:projects', '2/2:project']);
+    assert.equal(store.getState().router.move, 'push');
+    // Inside the project: a new entry, the same page.
+    store.dispatch(routeTo({ key: 'project', slug: 'p', path: 'docs' }));
+    assert.deepEqual(pages(), ['1/1:projects', '2/2:project', '3/2:project']);
+    assert.equal(store.getState().router.move, 'within');
+    // A replace: the same entry and page, the route changed.
+    store.dispatch(routeTo({ key: 'project', slug: 'p', path: 'docs/a.md' }, { replace: true }));
+    assert.deepEqual(pages(), ['1/1:projects', '2/2:project', '3/2:project']);
+    assert.deepEqual(store.getState().router.pages[2]!.route, { key: 'project', slug: 'p', path: 'docs/a.md' });
+    assert.equal(store.getState().router.move, 'replace');
+
+    // "Back" to the parent (the project page) is the entry behind: the browser goes back.
+    store.dispatch(goBack({ key: 'project', slug: 'p' }));
+    assert.deepEqual(back, ['back']);
+    assert.equal(store.getState().router.index, 2);
+    store.dispatch(routeTo({ key: 'project', slug: 'p' }, { source: 'history', entry: 2 }));
+    assert.equal(store.getState().router.move, 'back');
+    assert.equal(store.getState().router.index, 1);
+
+    // The forward entries stay until a push drops them.
+    assert.equal(store.getState().router.pages.length, 3);
+    store.dispatch(routeTo({ key: 'thread', id: 't1' }));
+    assert.deepEqual(pages(), ['1/1:projects', '2/2:project', '4/4:thread']);
+
+    // "Back" from the thread: the entry behind is the project it was opened from — the browser goes back there, not to the list.
+    store.dispatch(goBack({ key: 'threads' }));
+    assert.deepEqual(back, ['back', 'back']);
+    assert.deepEqual(pages(), ['1/1:projects', '2/2:project', '4/4:thread']);
+
+    // The first page of the tab (a deep link) has nothing behind: the parent is pushed, marked as a step back.
+    const deep = createStore({ api: fakeApi(), initialRoute: { key: 'thread', id: 't1' }, back: () => ({ back: () => back.push('deep') }) });
+
+    deep.dispatch(goBack({ key: 'threads' }));
+    assert.deepEqual(back, ['back', 'back']);
+    assert.deepEqual(deep.getState().router.route, { key: 'threads' });
+    assert.equal(deep.getState().router.move, 'back');
+
+    // Without a browser history (a test, a worker) "back" always pushes.
+    const bare = createStore({ api: fakeApi(), initialRoute: { key: 'projects' }, back: () => null });
+
+    bare.dispatch(routeTo({ key: 'thread', id: 't1' }));
+    bare.dispatch(goBack({ key: 'threads' }));
+    assert.deepEqual(bare.getState().router.route, { key: 'threads' });
   });
 });
+
+// The router's words apart from the pages.
+function routerWords(store: AppStore) {
+  const { route, source, replace, hash, move } = store.getState().router;
+
+  return { route, source, replace, hash, move };
+}
 
 describe('sessions from events', () => {
   it('folds session.state and session.context per thread; a terminal drops the session; the snapshot seeds it', async () => {

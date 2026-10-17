@@ -11,6 +11,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ProjectView } from '../../../api/contract.ts';
 import type { ProjectRoute } from '../../lib/router/routes.ts';
+import { useScreenNav } from '../../lib/router/screen.tsx';
 import { Link, useLinkTargets } from '../../lib/router/Link.tsx';
 import { agoLabel, shortDate } from '../../lib/format/index.ts';
 import { useNow } from '../../lib/format/useNow.ts';
@@ -32,6 +33,7 @@ import { useThreadTotal } from '../../features/thread-list/queries.ts';
 import { TotalFailure } from '../../features/thread-list/TotalFailure.tsx';
 import { knownTotal } from '../../features/thread-list/totals.ts';
 import { Btn } from '../../ui/Btn/Btn.tsx';
+import { Presence } from '../../ui/Overlay/presence.tsx';
 import { Card, CardHead } from '../../ui/Card/Card.tsx';
 import { Empty } from '../../ui/Empty/Empty.tsx';
 import { Note } from '../../ui/Note/Note.tsx';
@@ -110,7 +112,7 @@ function ProjectPage({ project, route }: { project: ProjectView; route: ProjectR
   // history navigation with a place to bring back: the shell restores it,
   // wherever the card was then.
   const firstPath = useRef(true);
-  const fromHistory = useAppSelector(s => s.router.source === 'history' && s.router.scroll !== null);
+  const fromHistory = useScreenNav().scroll.kind === 'restore';
 
   useEffect(() => {
     if (firstPath.current) {
@@ -218,7 +220,7 @@ function ProjectPage({ project, route }: { project: ProjectView; route: ProjectR
           />
         </div>
       </Card>
-      {editing ? <EditProjectDialog project={project} onClose={() => setEditing(false)} /> : null}
+      <Presence>{editing ? <EditProjectDialog project={project} onClose={() => setEditing(false)} /> : null}</Presence>
     </>
   );
 }

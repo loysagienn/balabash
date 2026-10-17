@@ -21,6 +21,7 @@ import { selectSession } from '../../store/session/selectors.ts';
 import { closeAddWorkspace, openAddWorkspace } from '../../store/ui/actions.ts';
 import { selectAddWorkspace } from '../../store/ui/selectors.ts';
 import { Btn } from '../../ui/Btn/Btn.tsx';
+import { Presence } from '../../ui/Overlay/presence.tsx';
 import { Dialog } from '../../ui/Dialog/Dialog.tsx';
 import { Field } from '../../ui/Field/Field.tsx';
 import { Icon } from '../../ui/Icon/Icon.tsx';
@@ -129,27 +130,29 @@ export function WorkspaceSheetButton() {
       <button type="button" className="btn shell-ws-btn" data-variant="ghost" data-icon-only="" aria-label={`Workspace: ${current.name}`} aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(true)}>
         <WsMark name={current.name} color={current.color} />
       </button>
-      {open ? (
-        <Sheet label="Workspaces" title="Workspaces" onClose={() => setOpen(false)}>
-          <div className="wslist" role="menu" aria-label="Workspaces">
-            {items.map(item => (
-              <WsRow key={item.userId} item={item} big />
-            ))}
-          </div>
-          <div className="wssheet-actions">
-            <Btn
-              label="Sign in to another workspace"
-              icon="plus"
-              block
-              onClick={() => {
-                setOpen(false);
-                dispatch(openAddWorkspace());
-              }}
-            />
-            <Btn label={`Sign out of ${current.name}`} icon="log-out" variant="ghost" block busy={logoutPending} onClick={() => dispatch(logout())} />
-          </div>
-        </Sheet>
-      ) : null}
+      <Presence>
+        {open ? (
+          <Sheet label="Workspaces" title="Workspaces" onClose={() => setOpen(false)}>
+            <div className="wslist" role="menu" aria-label="Workspaces">
+              {items.map(item => (
+                <WsRow key={item.userId} item={item} big />
+              ))}
+            </div>
+            <div className="wssheet-actions">
+              <Btn
+                label="Sign in to another workspace"
+                icon="plus"
+                block
+                onClick={() => {
+                  setOpen(false);
+                  dispatch(openAddWorkspace());
+                }}
+              />
+              <Btn label={`Sign out of ${current.name}`} icon="log-out" variant="ghost" block busy={logoutPending} onClick={() => dispatch(logout())} />
+            </div>
+          </Sheet>
+        ) : null}
+      </Presence>
     </>
   );
 }
@@ -161,7 +164,7 @@ export function WorkspaceSheetButton() {
 export function AddWorkspaceDialog() {
   const open = useAppSelector(selectAddWorkspace);
 
-  return open ? <AddWorkspaceWindow /> : null;
+  return <Presence>{open ? <AddWorkspaceWindow /> : null}</Presence>;
 }
 
 function AddWorkspaceWindow() {

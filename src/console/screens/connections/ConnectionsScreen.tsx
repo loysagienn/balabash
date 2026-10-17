@@ -26,6 +26,7 @@ import { selectConnectionCall, selectConnections, selectConnectionsNeedingAction
 import { reconnectConnection } from '../../store/connections/actions.ts';
 import { Shell } from '../../features/shell/Shell.tsx';
 import { Card, CardBody, CardHead } from '../../ui/Card/Card.tsx';
+import { Presence } from '../../ui/Overlay/presence.tsx';
 import { Empty } from '../../ui/Empty/Empty.tsx';
 import { Icon } from '../../ui/Icon/Icon.tsx';
 import { List } from '../../ui/List/List.tsx';
@@ -212,9 +213,9 @@ export function ConnectionsScreen() {
   return (
     <Shell current="connections" title="Connections">
       <Screen>{body}</Screen>
-      {connecting ? <ConnectServiceDialog service={connecting} accounts={accountsOf(connections, connecting.name).length} onClose={() => setConnecting(null)} /> : null}
-      {managing ? <InstallationServiceDialog service={managing} onClose={() => setManaging(null)} /> : null}
-      {inspecting ? <ConnectorServiceDialog service={inspecting} onClose={() => setInspecting(null)} /> : null}
+      <Presence>{connecting ? <ConnectServiceDialog service={connecting} accounts={accountsOf(connections, connecting.name).length} onClose={() => setConnecting(null)} /> : null}</Presence>
+      <Presence>{managing ? <InstallationServiceDialog service={managing} onClose={() => setManaging(null)} /> : null}</Presence>
+      <Presence>{inspecting ? <ConnectorServiceDialog service={inspecting} onClose={() => setInspecting(null)} /> : null}</Presence>
     </Shell>
   );
 }
