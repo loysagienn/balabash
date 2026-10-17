@@ -69,8 +69,7 @@ const devtools = window.__REDUX_DEVTOOLS_EXTENSION__?.({
 
 store = createStore({ api, initialRoute: readRoute(window.location.pathname + window.location.search), initialHash: window.location.hash, enhancer: devtools });
 
-// The frame's scroll place an entry keeps when it is left (lib/router/history.ts).
-connectStoreToHistory(store, { readScroll: () => document.querySelector<HTMLElement>('.shell-frame')?.scrollTop ?? null });
+connectStoreToHistory(store);
 connectStoreToStream(store);
 connectStoreToWorkspace(store);
 connectStoreToVisibility(store);

@@ -10,7 +10,7 @@
 import { Link } from '../../lib/router/Link.tsx';
 import type { AppRoute } from '../../lib/router/routes.ts';
 import { useAppDispatch } from '../../store/hooks.ts';
-import { routeTo } from '../../store/router/actions.ts';
+import { goBack, routeTo } from '../../store/router/actions.ts';
 import { ActivityChip } from '../../ui/ActivityChip/ActivityChip.tsx';
 import { Icon } from '../../ui/Icon/Icon.tsx';
 import { IconBtn } from '../../ui/IconBtn/IconBtn.tsx';
@@ -28,8 +28,9 @@ export type ShellTopProps = {
   sub?: string;
   // The section above the page ("Threads") and where it leads.
   crumb?: { label: string; route: AppRoute };
-  // Where "back" leads; the browser's history when the screen was entered
-  // from inside the app is the screen's own call (it passes a route here).
+  // The parent page — where "back" leads when the tab has no history behind
+  // this page; otherwise the browser goes back to the page this one was
+  // opened from (store/router, GO_BACK).
   back?: AppRoute;
   // "Back" only on the phone: the detail of a split view, whose list stays
   // beside it on a wide shell (Agents, Schedule).
@@ -48,7 +49,7 @@ export function ShellTop({ title, titleNarrow, sub, crumb, back, backNarrow, pag
   return (
     <header className="shell-top glass" data-edge="top" data-title={pageHead ? 'narrow' : undefined} data-back={backNarrow ? 'narrow' : undefined}>
       {back ? null : <WorkspaceSheetButton />}
-      {back ? <IconBtn icon="arrow-left" label="Back" size="sm" className="shell-back" onClick={() => dispatch(routeTo(back))} /> : null}
+      {back ? <IconBtn icon="arrow-left" label="Back" size="sm" className="shell-back" onClick={() => dispatch(goBack(back))} /> : null}
       {crumb ? (
         <>
           <Link className="shell-crumb" route={crumb.route}>

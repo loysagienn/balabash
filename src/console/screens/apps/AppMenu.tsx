@@ -17,6 +17,7 @@ import { UnpublishAppDialog } from '../../features/apps/UnpublishAppDialog.tsx';
 import { publicationDialog } from '../../features/apps/publishApp.logic.ts';
 import type { PublicationDialog } from '../../features/apps/publishApp.logic.ts';
 import { IconBtn } from '../../ui/IconBtn/IconBtn.tsx';
+import { Presence } from '../../ui/Overlay/presence.tsx';
 import { Menu, MenuAnchor, MenuItem, MenuSep } from '../../ui/Menu/Menu.tsx';
 
 const LINK_WORDS = { done: 'Link copied', fail: 'Couldn’t copy the link' };
@@ -105,8 +106,8 @@ export function AppMenu({ app, link }: { app: AppListingView; link: AppLink }) {
       >
         <IconBtn icon="ellipsis" label="App actions" size="sm" expanded={open} onClick={() => setOpen(!open)} />
       </MenuAnchor>
-      {shown === 'publish' ? <PublishAppDialog app={app} onClose={() => setDialog(null)} /> : null}
-      {shown === 'unpublish' && address ? <UnpublishAppDialog app={app} address={address} onClose={() => setDialog(null)} /> : null}
+      <Presence>{shown === 'publish' ? <PublishAppDialog app={app} onClose={() => setDialog(null)} /> : null}</Presence>
+      <Presence>{shown === 'unpublish' && address ? <UnpublishAppDialog app={app} address={address} onClose={() => setDialog(null)} /> : null}</Presence>
     </>
   );
 }

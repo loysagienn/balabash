@@ -2,22 +2,21 @@
 // initial route and fragment are read from location when the store is
 // created (main.tsx); from then on every app-originated ROUTE_TO becomes
 // pushState / replaceState of the route's URL with its fragment, the route
-// in history.state, and popstate dispatches ROUTE_TO back from
-// history.state (or from location when the entry has none) with the
-// fragment the location has. Lives for the tab, only dispatches — a
-// process, not a handler.
-//
-// The scroll place of an entry: every entry the process writes carries an
-// id (`entry` in history.state) and the body's scroll place is kept by that
-// id in the process's memory — taken the moment the entry is left (an app
-// navigation pushing the next one, a popstate going elsewhere) and handed
-// to the ROUTE_TO of the popstate that brings the entry back (`scroll`);
-// the shell restores it once the screen rendered. A replace keeps the id:
-// it is the same page. The browser's own restoration is off
-// (scrollRestoration 'manual'): the document does not scroll, the body
-// does. The memory is the tab's: after a reload every entry starts at the
-// top, as does an entry the process never wrote (the browser's own
-// fragment navigation).
+// and the entry's id (store/router: `pages`) in history.state, and
+// popstate dispatches ROUTE_TO back from history.state (or from location
+// when the entry has none) with the fragment the location has and the id
+// of the entry — the reducer finds the page it belongs to. An entry the
+// process did not write (the browser's own fragment navigation, an entry
+// from before the page was loaded) has no id the tab knows: the reducer
+// gives it a page of its own, and the process stamps the new id into the
+// entry, so the next return to it is a known move. The ids are the
+// store's counters and start over with every load of the page, so every
+// entry is stamped with the id of the load that wrote it: an entry of an
+// earlier load (the pages visited before a reload) is one the tab does
+// not know, whatever number it carries. The browser's own
+// scroll restoration is off (scrollRestoration 'manual'): the document
+// does not scroll, the body does — the stage keeps the places by entry.
+// Lives for the tab, only dispatches — a process, not a handler.
 
 import type { Store } from 'redux';
 import type { Action, State } from '../../store/types.ts';
@@ -25,7 +24,10 @@ import { routeTo } from '../../store/router/actions.ts';
 import { readRoute, writeRoute } from './routes.ts';
 import type { AppRoute } from './routes.ts';
 
-type EntryState = { route: AppRoute; entry: string };
+type EntryState = { route: AppRoute; entry: number; load: string };
+
+// The id of this load of the page.
+const load = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
 function routeFromLocation(): AppRoute {
   return readRoute(window.location.pathname + window.location.search);
@@ -43,11 +45,12 @@ function routeFromState(state: unknown): AppRoute | null {
   return null;
 }
 
-function entryFromState(state: unknown): string | null {
-  if (typeof state === 'object' && state !== null && 'entry' in state) {
-    const entry = (state as { entry: unknown }).entry;
+// The id of the entry when this load wrote it; null for any other entry.
+function entryFromState(state: unknown): number | null {
+  if (typeof state === 'object' && state !== null && 'entry' in state && 'load' in state) {
+    const { entry, load: by } = state as { entry: unknown; load: unknown };
 
-    return typeof entry === 'string' ? entry : null;
+    return typeof entry === 'number' && by === load ? entry : null;
   }
 
   return null;
@@ -58,37 +61,21 @@ export function urlOf(route: AppRoute, hash: string): string {
   return `${writeRoute(route)}${hash}`;
 }
 
-export type HistoryOptions = {
-  // The body's scroll place at this moment — what an entry keeps when it is
-  // left; null when there is no body to read (no shell on the screen).
-  readScroll?: () => number | null;
-};
-
-function newEntry(): string {
-  return crypto.randomUUID();
-}
-
-export function connectStoreToHistory(store: Store<State, Action>, options: HistoryOptions = {}): () => void {
-  const readScroll = options.readScroll ?? (() => null);
-  const places = new Map<string, number>();
+export function connectStoreToHistory(store: Store<State, Action>): () => void {
   let known = store.getState().router;
-  // The entry the tab is on; null for an entry the process did not write.
-  let current: string | null = newEntry();
 
   if ('scrollRestoration' in window.history) {
     window.history.scrollRestoration = 'manual';
   }
 
-  // The first entry gets its route too, so a popstate back to it restores it.
-  window.history.replaceState({ route: known.route, entry: current } satisfies EntryState, '', urlOf(known.route, known.hash));
+  const current = () => known.pages[known.index]!;
 
-  const leave = () => {
-    const place = current === null ? null : readScroll();
-
-    if (current !== null && place !== null) {
-      places.set(current, place);
-    }
-  };
+  // The first entry gets its route and id too, so a popstate back to it is a known move.
+  window.history.replaceState(
+    { route: known.route, entry: current().entry, load } satisfies EntryState,
+    '',
+    urlOf(known.route, known.hash),
+  );
 
   const unsubscribe = store.subscribe(() => {
     const router = store.getState().router;
@@ -99,30 +86,34 @@ export function connectStoreToHistory(store: Store<State, Action>, options: Hist
 
     known = router;
 
+    const { route, hash } = router;
+    const state: EntryState = { route, entry: current().entry, load };
+    const url = urlOf(route, hash);
+
     if (router.source === 'history') {
+      // A known entry needs nothing; one the tab did not know gets its id.
+      if (router.move === 'unknown') {
+        window.history.replaceState(state, '', url);
+      }
+
       return;
     }
 
-    const { route, hash } = router;
-    const url = urlOf(route, hash);
-
     if (router.replace) {
-      current = current ?? newEntry();
-      window.history.replaceState({ route, entry: current } satisfies EntryState, '', url);
+      window.history.replaceState(state, '', url);
     } else {
-      leave();
-      current = newEntry();
-      window.history.pushState({ route, entry: current } satisfies EntryState, '', url);
+      window.history.pushState(state, '', url);
     }
   });
 
   const onPopState = (event: PopStateEvent) => {
-    leave();
-    current = entryFromState(event.state);
-
-    const scroll = current === null ? null : (places.get(current) ?? null);
-
-    store.dispatch(routeTo(routeFromState(event.state) ?? routeFromLocation(), { source: 'history', hash: window.location.hash, scroll }));
+    store.dispatch(
+      routeTo(routeFromState(event.state) ?? routeFromLocation(), {
+        source: 'history',
+        hash: window.location.hash,
+        entry: entryFromState(event.state),
+      }),
+    );
   };
 
   window.addEventListener('popstate', onPopState);

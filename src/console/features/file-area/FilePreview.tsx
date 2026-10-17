@@ -15,6 +15,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import type { WorkspaceFileMeta } from '../../../api/contract.ts';
 import { fileUrl } from '../../lib/api/index.ts';
 import { useLinkTargets } from '../../lib/router/Link.tsx';
+import { useScreenNav } from '../../lib/router/screen.tsx';
 import type { AppRoute } from '../../lib/router/routes.ts';
 import { countOf, fileSize, startedLabel } from '../../lib/format/index.ts';
 import { useAppDispatch, useAppSelector } from '../../store/hooks.ts';
@@ -49,7 +50,7 @@ function readsText(viewer: Viewer): boolean {
 
 function TextBody({ file, viewer, text, routeFor }: { file: WorkspaceFileMeta; viewer: Viewer; text: string; routeFor: (path: string) => AppRoute }) {
   const linkTarget = useLinkTargets();
-  const hash = useAppSelector(state => state.router.hash);
+  const { hash } = useScreenNav();
   const lines = useMemo(
     () => (viewer.kind === 'code' ? codeLines(text, viewer.language, (file.sizeBytes ?? 0) <= HIGHLIGHT_MAX) : null),
     [file.sizeBytes, text, viewer],
