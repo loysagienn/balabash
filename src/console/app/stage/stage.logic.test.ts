@@ -143,13 +143,14 @@ describe('stage — navigations', () => {
     assert.equal(stage.layers.length, 1);
   });
 
-  it('turns the slide around when the user goes back while the page is still sliding in', () => {
+  it('turns the slide around when the user goes back while the page is still sliding in, from where the page is drawn', () => {
     const nav = router(THREADS);
     let stage = initialStage(nav.state);
 
     stage = onNav(stage, { router: nav.go(THREAD), env: PHONE, place: noPlace });
-    stage = { ...stage, motion: { ...stage.motion!, offset: 0.4 } };
-    stage = onNav(stage, { router: nav.pop(1), env: PHONE, place: noPlace });
+    // The animation moves the page; the state still says where it began.
+    assert.equal(stage.motion!.offset, 1);
+    stage = onNav(stage, { router: nav.pop(1), env: PHONE, place: noPlace, at: 0.4 });
     assert.equal(stage.current, 1);
     assert.deepEqual(stage.motion, {
       top: 2,
@@ -215,8 +216,8 @@ describe('stage — the swipe back', () => {
     let stage = initialStage(nav.state);
 
     stage = onAnimDone(onNav(stage, { router: nav.go(THREAD), env: PHONE, place: noPlace }));
-    assert.equal(canSwipe(stage, PHONE), true);
-    assert.equal(canSwipe(stage, WIDE), false);
+    assert.equal(canSwipe(stage, nav.state, PHONE), true);
+    assert.equal(canSwipe(stage, nav.state, WIDE), false);
 
     stage = onGestureStart(stage, { router: nav.state, env: PHONE, place: entry => (entry === 1 ? 480 : null) });
     assert.deepEqual(pages(stage), [1, 2]);
@@ -232,7 +233,7 @@ describe('stage — the swipe back', () => {
     });
     assert.deepEqual(stage.layers[0]!.scroll, { kind: 'restore', place: 480 });
     assert.equal(stage.layers[0]!.move, 'back');
-    assert.equal(canSwipe(stage, PHONE), false);
+    assert.equal(canSwipe(stage, nav.state, PHONE), false);
 
     stage = onGestureMove(stage, 0.6);
     assert.equal(stage.motion!.offset, 0.6);
@@ -360,9 +361,9 @@ describe('stage — the swipe back', () => {
     let stage = initialStage(nav.state);
 
     stage = onNav(stage, { router: nav.go(THREAD), env: PHONE, place: noPlace });
-    stage = { ...stage, motion: { ...stage.motion!, offset: 0.5 } };
-    assert.equal(canSwipe(stage, PHONE), true);
-    stage = onGestureStart(stage, { router: nav.state, env: PHONE, place: noPlace });
+    assert.equal(canSwipe(stage, nav.state, PHONE), true);
+    // The page is drawn half way in when the finger lands on it.
+    stage = onGestureStart(stage, { router: nav.state, env: PHONE, place: noPlace, at: 0.5 });
     assert.deepEqual(pages(stage), [1, 2]);
     assert.equal(stage.motion!.driver, 'gesture');
     assert.equal(stage.motion!.offset, 0.5);
@@ -372,19 +373,77 @@ describe('stage — the swipe back', () => {
 
     assert.deepEqual(step.effects, [{ kind: 'back', fallback: THREADS }]);
     // Past the point of return: the page on its way off cannot be grabbed again.
-    assert.equal(canSwipe(step.state, PHONE), false);
+    assert.equal(canSwipe(step.state, nav.state, PHONE), false);
+  });
+
+  it('keeps the settle of a committed swipe when the popstate it asked for lands: the motion goes on as it is', () => {
+    const nav = router(THREADS);
+    let stage = initialStage(nav.state);
+
+    stage = onAnimDone(onNav(stage, { router: nav.go(THREAD), env: PHONE, place: noPlace }));
+    stage = onGestureStart(stage, { router: nav.state, env: PHONE, place: noPlace });
+
+    // A fling at 4 px/ms from 0.4 on a 390 px page: the rest of the way at the finger's speed.
+    const flung = onGestureEnd(onGestureMove(stage, 0.4), 4, 390, PHONE).state;
+
+    assert.deepEqual(flung.motion, { top: 2, under: 1, offset: 0.4, target: 1, driver: 'anim', duration: 59, ease: 'settle' });
+
+    // The browser answers while the page is still on its way: the same motion, the same pace.
+    stage = onNav(flung, { router: nav.pop(1), env: PHONE, place: noPlace, at: 0.7 });
+    assert.equal(stage.current, 1);
+    assert.equal(stage.motion, flung.motion);
+    stage = onAnimDone(stage);
+    assert.deepEqual(pages(stage), [1]);
+    assert.equal(stage.motion, null);
+  });
+
+  it('refuses a swipe where the step back stays on the page: a folder of a project goes back to the project by a cut', () => {
+    const nav = router(PROJECTS);
+    let stage = initialStage(nav.state);
+    const project: AppRoute = { key: 'project', slug: 'p' };
+    const folder: AppRoute = { key: 'project', slug: 'p', path: 'docs' };
+
+    stage = onAnimDone(onNav(stage, { router: nav.go(project), env: PHONE, place: noPlace }));
+    assert.equal(canSwipe(stage, nav.state, PHONE), true);
+
+    // Inside the project: the entry behind is the same page — no swipe, the layers stay one.
+    stage = onNav(stage, { router: nav.go(folder), env: PHONE, place: noPlace });
+    assert.deepEqual(pages(stage), [2]);
+    assert.equal(canSwipe(stage, nav.state, PHONE), false);
+    assert.equal(onGestureStart(stage, { router: nav.state, env: PHONE, place: noPlace }), stage);
+
+    // The arrow's step back lands on the same page: a cut, told to keep its place.
+    stage = onNav(stage, { router: nav.pop(2), env: PHONE, place: noPlace });
+    assert.deepEqual(pages(stage), [2]);
+    assert.equal(stage.motion, null);
+    assert.deepEqual(stage.layers[0]!.scroll, { kind: 'keep' });
+
+    // A deep link to the folder: nothing behind, and the parent is the same page too.
+    const fresh = router(folder);
+
+    assert.equal(canSwipe(initialStage(fresh.state), fresh.state, PHONE), false);
+
+    // The folder opened from another page goes back to that page: a swipe as usual.
+    const fromThreads = router(THREADS);
+    let other = initialStage(fromThreads.state);
+
+    other = onAnimDone(onNav(other, { router: fromThreads.go(folder), env: PHONE, place: noPlace }));
+    assert.equal(canSwipe(other, fromThreads.state, PHONE), true);
+    other = onGestureStart(other, { router: fromThreads.state, env: PHONE, place: noPlace });
+    assert.deepEqual(pages(other), [1, 2]);
+    assert.deepEqual(other.layers[0]!.route, THREADS);
   });
 
   it('refuses a swipe on a top-level page, and on a page sliding out', () => {
     const nav = router(THREADS);
     let stage = initialStage(nav.state);
 
-    assert.equal(canSwipe(stage, PHONE), false);
+    assert.equal(canSwipe(stage, nav.state, PHONE), false);
     assert.equal(onGestureStart(stage, { router: nav.state, env: PHONE, place: noPlace }), stage);
 
     stage = onAnimDone(onNav(stage, { router: nav.go(THREAD), env: PHONE, place: noPlace }));
     stage = onNav(stage, { router: nav.pop(1), env: PHONE, place: noPlace });
-    assert.equal(canSwipe(stage, PHONE), false);
+    assert.equal(canSwipe(stage, nav.state, PHONE), false);
   });
 
   it('draws the page beneath a little behind, under a dim that lifts', () => {

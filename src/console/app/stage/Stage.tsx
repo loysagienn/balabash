@@ -38,7 +38,7 @@ import {
 } from './stage.logic.ts';
 import type { StageEffect, StageEnv, StageLayer, StageState } from './stage.logic.ts';
 import { clearMotion, paintMotion, runMotion } from './stageMotion.ts';
-import type { MotionElements } from './stageMotion.ts';
+import type { MotionElements, MotionRun } from './stageMotion.ts';
 import { installSwipeBack } from './useSwipeBack.ts';
 import './Stage.css';
 
@@ -119,6 +119,12 @@ export function Stage() {
     }
   };
   const place = (entry: number) => places.current.get(entry) ?? null;
+  // The motion being drawn (stageMotion.ts), while it runs.
+  const run = useRef<MotionRun | null>(null);
+  // Where the animation has the moving layer at this moment — what a
+  // step that interrupts it goes on from. (A finger's motion paints its
+  // offset into the state itself; a settled one is at its target.)
+  const at = () => (stateRef.current.motion?.driver === 'anim' ? run.current?.at() : undefined);
 
   // A navigation: the places of the pages on the screen are kept first,
   // then the stage takes its step. Before paint: the new page never shows
@@ -132,7 +138,7 @@ export function Stage() {
 
     seen.current = router;
     keepPlaces();
-    commit(onNav(stateRef.current, { router, env: envRef.current, place }));
+    commit(onNav(stateRef.current, { router, env: envRef.current, place, at: at() }));
   });
 
   const elementsOf = (): MotionElements => {
@@ -163,23 +169,31 @@ export function Stage() {
       return undefined;
     }
 
-    const run = runMotion(motion, elementsOf(), () => commit(onAnimDone(stateRef.current)));
+    const motionRun = runMotion(motion, elementsOf(), () => commit(onAnimDone(stateRef.current)));
     const effects = asked.current;
 
+    run.current = motionRun;
     asked.current = [];
 
     if (effects.length > 0) {
-      void run.ready.then(() => {
+      void motionRun.ready.then(() => {
         for (const effect of effects) {
           dispatch(goBack(effect.fallback));
         }
       });
     }
 
-    return run.stop;
+    return () => {
+      run.current = null;
+      motionRun.stop();
+    };
   }, [motion, commit, dispatch]);
 
-  // The swipe back (useSwipeBack.ts).
+  // The swipe back (useSwipeBack.ts). The finger's travel counts from
+  // where the page was when the finger claimed it (0 at rest; a page
+  // taken over while sliding in — where it was drawn).
+  const origin = useRef(0);
+
   useEffect(() => {
     const element = root.current;
 
@@ -191,22 +205,23 @@ export function Stage() {
       canStart: target => {
         const current = layers.current.get(stateRef.current.current);
 
-        return !!current && current.contains(target) && canSwipe(stateRef.current, envRef.current);
+        return !!current && current.contains(target) && canSwipe(stateRef.current, seen.current, envRef.current);
       },
       start: () => {
-        const next = onGestureStart(stateRef.current, { router: seen.current, env: envRef.current, place });
+        const next = onGestureStart(stateRef.current, { router: seen.current, env: envRef.current, place, at: at() });
 
         if (next === stateRef.current) {
           return false;
         }
 
+        origin.current = next.motion?.offset ?? 0;
         // The parent mounts under the finger now, not at the next frame.
         flushSync(() => commit(next));
 
         return true;
       },
-      move: offset => {
-        stateRef.current = onGestureMove(stateRef.current, offset);
+      move: travel => {
+        stateRef.current = onGestureMove(stateRef.current, origin.current + travel);
 
         if (stateRef.current.motion) {
           paintMotion(elementsOf(), stateRef.current.motion.offset);

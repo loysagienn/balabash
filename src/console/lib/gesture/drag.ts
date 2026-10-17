@@ -17,8 +17,11 @@ export type DragPhase = 'idle' | 'tracking' | 'claimed' | 'released';
 export type DragMove =
   // Within the slop, or an axis not the owner's: nothing to do.
   | { kind: 'none' }
-  // The drag is the owner's as of this move; the travel begins here.
-  | { kind: 'claim'; travel: number }
+  // The drag is the owner's as of this move; the travel begins here. `sign`
+  // is the way the finger went along the axis when the axis was decided
+  // (+1 — to the right, or down): an owner that moves one way only lets a
+  // drag the other way go.
+  | { kind: 'claim'; travel: number; sign: 1 | -1 }
   // The drag went the other way: the owner lets it go.
   | { kind: 'release' }
   // A claimed drag moved: the travel from the claim, px along the axis.
@@ -82,7 +85,7 @@ export class Drag {
     this.phase = 'claimed';
     this.origin = this.along(x, y);
 
-    return { kind: 'claim', travel: 0 };
+    return { kind: 'claim', travel: 0, sign: this.origin >= this.along(this.startX, this.startY) ? 1 : -1 };
   }
 
   // The lift: the velocity along the axis (px/ms) of a claimed drag, null

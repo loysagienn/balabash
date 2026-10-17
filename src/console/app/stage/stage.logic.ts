@@ -20,14 +20,21 @@
 // finger; the lift settles it, and a commit asks for the navigation.
 // Every other navigation (a section's tab, a replace, a move inside one
 // page, an unknown entry, a wide screen) is a cut: the new page alone.
+// A step back that stays on the page (a folder of a project back to the
+// project) is a cut too, so there is no swipe for it: no page to move.
 //
 // Interruptions: a navigation to the layer beneath while the top moves
 // (the back arrow pressed as the page slides in) turns the motion around
 // from where it is; a navigation to a third page snaps the motion to its
 // end and cuts; a finger on a page that is sliding in takes it over from
-// where it is. A navigation to the page already on the screen (a filter
-// replaced, a move inside a project, a popstate between two entries of
-// the same page) only tells the page what to do with its scroll.
+// where it is. "Where it is" is what the stage reads off the screen (`at`:
+// the animation moves the layer, not this state — the offset here is
+// where the motion began). A navigation to the page already on the screen
+// (a filter replaced, a move inside a project, a popstate between two
+// entries of the same page) only tells the page what to do with its
+// scroll; the navigation a motion already heads for (the popstate a
+// committed swipe asked for) leaves the motion as it is — a fling keeps
+// its pace.
 
 import { settle } from '../../lib/gesture/settle.ts';
 import { nested, parentRoute, samePage } from '../../lib/router/nesting.ts';
@@ -136,9 +143,16 @@ function snapped(state: StageState): StageState {
   return { ...state, layers: state.layers.filter(layer => layer.page !== gone), motion: null };
 }
 
-export type NavInput = { router: RouterState; env: StageEnv; place: (entry: number) => number | null };
+export type NavInput = {
+  router: RouterState;
+  env: StageEnv;
+  // The place a history entry's page was left at, if the stage kept one.
+  place: (entry: number) => number | null;
+  // Where the moving layer is drawn now, when a motion is in flight.
+  at?: number;
+};
 
-export function onNav(state: StageState, { router, env, place }: NavInput): StageState {
+export function onNav(state: StageState, { router, env, place, at }: NavInput): StageState {
   const page = router.pages[router.index]!;
   const nav = state.nav + 1;
   const from = current(state);
@@ -174,23 +188,24 @@ export function onNav(state: StageState, { router, env, place }: NavInput): Stag
       const under = motion.under === known.page ? page.page : motion.under;
       const target: 0 | 1 = top === page.page ? 0 : 1;
 
-      motion = {
-        ...motion,
-        top,
-        under,
-        target,
-        driver:
-          motion.driver === 'gesture'
-            ? 'gesture'
-            : motion.target === target && motion.driver === 'done'
-              ? 'done'
-              : 'anim',
-        duration: motion.driver === 'gesture' ? motion.duration : env.reduced ? 0 : SLIDE_MS,
-        ease: 'slide',
-      };
-
-      if (motion.driver === 'done' && motion.offset === target) {
-        return snapped({ ...state, layers, current: page.page, motion, nav });
+      if (motion.top === top && motion.under === under && motion.target === target) {
+        // The navigation the motion heads for: a motion still on its way
+        // goes on as it is; one that has settled is over.
+        if (motion.driver === 'done') {
+          return snapped({ ...state, layers, current: page.page, nav });
+        }
+      } else {
+        // A turn-around: from where the layer is drawn, at the pace of a slide.
+        motion = {
+          ...motion,
+          top,
+          under,
+          target,
+          offset: at ?? motion.offset,
+          driver: motion.driver === 'gesture' ? 'gesture' : 'anim',
+          duration: motion.driver === 'gesture' ? motion.duration : env.reduced ? 0 : SLIDE_MS,
+          ease: 'slide',
+        };
       }
     }
 
@@ -233,12 +248,23 @@ export function onNav(state: StageState, { router, env, place }: NavInput): Stag
   return { layers: [layer], current: layer.page, motion: null, nav };
 }
 
+// Where a step back from the current page leads: the entry behind when
+// the tab knows it, else the parent (the rule of GO_BACK and of the preview).
+function backDestination(state: StageState, router: RouterState): AppRoute | null {
+  return pageBehind(router)?.route ?? parentRoute(current(state).route);
+}
+
 // Whether a finger on the current page may start a swipe back: the phone,
-// a nested page, and no motion the finger cannot take over (a page
-// sliding in is taken over; a page sliding out is a guest — inert; a page
-// flung off whose step back is on its way is past the point of return).
-export function canSwipe(state: StageState, env: StageEnv): boolean {
-  if (!env.phone || !nested(current(state).route)) {
+// a nested page whose step back leaves the page (a folder of a project
+// goes back to the project — the same page: a cut, nothing to move), and
+// no motion the finger cannot take over (a page sliding in is taken over;
+// a page sliding out is a guest — inert; a page flung off whose step back
+// is on its way is past the point of return).
+export function canSwipe(state: StageState, router: RouterState, env: StageEnv): boolean {
+  const top = current(state);
+  const destination = env.phone && nested(top.route) ? backDestination(state, router) : null;
+
+  if (!destination || samePage(top.route, destination)) {
     return false;
   }
 
@@ -248,17 +274,18 @@ export function canSwipe(state: StageState, env: StageEnv): boolean {
   );
 }
 
-export type GestureInput = { router: RouterState; env: StageEnv; place: (entry: number) => number | null };
+export type GestureInput = NavInput;
 
 // The finger claims the page: the page behind opens beneath it (a
-// preview), or the motion in flight becomes the finger's.
-export function onGestureStart(state: StageState, { router, env, place }: GestureInput): StageState {
-  if (!canSwipe(state, env)) {
+// preview), or the motion in flight becomes the finger's, from where the
+// layer is drawn.
+export function onGestureStart(state: StageState, { router, env, place, at }: GestureInput): StageState {
+  if (!canSwipe(state, router, env)) {
     return state;
   }
 
   if (state.motion) {
-    return { ...state, motion: { ...state.motion, driver: 'gesture' } };
+    return { ...state, motion: { ...state.motion, offset: at ?? state.motion.offset, driver: 'gesture' } };
   }
 
   const top = current(state);

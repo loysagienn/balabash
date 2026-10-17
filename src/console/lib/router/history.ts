@@ -9,7 +9,11 @@
 // process did not write (the browser's own fragment navigation, an entry
 // from before the page was loaded) has no id the tab knows: the reducer
 // gives it a page of its own, and the process stamps the new id into the
-// entry, so the next return to it is a known move. The browser's own
+// entry, so the next return to it is a known move. The ids are the
+// store's counters and start over with every load of the page, so every
+// entry is stamped with the id of the load that wrote it: an entry of an
+// earlier load (the pages visited before a reload) is one the tab does
+// not know, whatever number it carries. The browser's own
 // scroll restoration is off (scrollRestoration 'manual'): the document
 // does not scroll, the body does — the stage keeps the places by entry.
 // Lives for the tab, only dispatches — a process, not a handler.
@@ -20,7 +24,10 @@ import { routeTo } from '../../store/router/actions.ts';
 import { readRoute, writeRoute } from './routes.ts';
 import type { AppRoute } from './routes.ts';
 
-type EntryState = { route: AppRoute; entry: number };
+type EntryState = { route: AppRoute; entry: number; load: string };
+
+// The id of this load of the page.
+const load = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
 function routeFromLocation(): AppRoute {
   return readRoute(window.location.pathname + window.location.search);
@@ -38,11 +45,12 @@ function routeFromState(state: unknown): AppRoute | null {
   return null;
 }
 
+// The id of the entry when this load wrote it; null for any other entry.
 function entryFromState(state: unknown): number | null {
-  if (typeof state === 'object' && state !== null && 'entry' in state) {
-    const entry = (state as { entry: unknown }).entry;
+  if (typeof state === 'object' && state !== null && 'entry' in state && 'load' in state) {
+    const { entry, load: by } = state as { entry: unknown; load: unknown };
 
-    return typeof entry === 'number' ? entry : null;
+    return typeof entry === 'number' && by === load ? entry : null;
   }
 
   return null;
@@ -64,7 +72,7 @@ export function connectStoreToHistory(store: Store<State, Action>): () => void {
 
   // The first entry gets its route and id too, so a popstate back to it is a known move.
   window.history.replaceState(
-    { route: known.route, entry: current().entry } satisfies EntryState,
+    { route: known.route, entry: current().entry, load } satisfies EntryState,
     '',
     urlOf(known.route, known.hash),
   );
@@ -79,7 +87,7 @@ export function connectStoreToHistory(store: Store<State, Action>): () => void {
     known = router;
 
     const { route, hash } = router;
-    const state: EntryState = { route, entry: current().entry };
+    const state: EntryState = { route, entry: current().entry, load };
     const url = urlOf(route, hash);
 
     if (router.source === 'history') {

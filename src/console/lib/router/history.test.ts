@@ -190,6 +190,51 @@ describe('router — the history process', () => {
     disconnect();
   });
 
+  it('knows no entry of an earlier load: a page reloaded on a thread, the browser’s back to the list it came from', () => {
+    // Before the reload the tab had [threads (1), thread (2)]; the reload
+    // makes the thread the first page of a new load — entry 1 again.
+    const { win, entries, pop } = fakeWindow('/threads/t1');
+
+    (globalThis as { window?: unknown }).window = win;
+
+    const store = createStore({ api: {} as Api, initialRoute: readRoute('/threads/t1') });
+    const disconnect = connectStoreToHistory(store);
+    const own = entries[0]!.state as { entry: number; load: string };
+
+    assert.equal(own.entry, 1);
+    assert.equal(typeof own.load, 'string');
+
+    // Back: the list's entry carries the number 1 of the earlier load — not this tab's page 1.
+    pop({ route: { key: 'threads' }, entry: 1, load: `${own.load}-before` });
+
+    const onList = store.getState().router;
+
+    assert.equal(onList.move, 'unknown');
+    assert.equal(onList.pages.length, 2);
+    assert.deepEqual(onList.pages[1]!.route, { key: 'threads' });
+    assert.deepEqual(onList.pages[0]!.route, { key: 'thread', id: 't1' });
+
+    // The entry gets this load's id; the next return to it is a known move.
+    const stamped = entries[1]!.state as { route: unknown; entry: number; load: string };
+
+    assert.equal(entries[1]!.method, 'replace');
+    assert.equal(stamped.entry, 2);
+    assert.equal(stamped.load, own.load);
+
+    pop(own);
+    assert.deepEqual(store.getState().router.route, { key: 'thread', id: 't1' });
+    assert.equal(store.getState().router.pages[store.getState().router.index]!.page, 1);
+    pop(stamped);
+    assert.equal(store.getState().router.move, 'forward');
+    assert.equal(store.getState().router.pages.length, 2);
+
+    // An entry without a load at all (written before loads were stamped) is unknown too.
+    pop({ route: { key: 'threads' }, entry: 1 });
+    assert.equal(store.getState().router.move, 'unknown');
+
+    disconnect();
+  });
+
   it('composes the URL of an entry from the route and the fragment', () => {
     assert.equal(urlOf({ key: 'files', path: 'a b.md' }, '#part'), '/workspace/a%20b.md#part');
     assert.equal(urlOf({ key: 'home' }, ''), '/');

@@ -60,9 +60,37 @@ export type MotionRun = {
   // on the main thread's work): what the motion asks of the store — the
   // step back, which renders two pages — goes after this.
   ready: Promise<void>;
+  // Where the top layer is drawn at this moment — the animation's way
+  // included: an interruption (a step back while the page slides in, a
+  // finger taking the page over) goes on from here, not from where the
+  // animation began.
+  at: () => number;
 };
 
-const AT_ONCE: MotionRun = { stop: () => {}, ready: Promise.resolve() };
+const atOnce = (offset: number): MotionRun => ({ stop: () => {}, ready: Promise.resolve(), at: () => offset });
+
+// The offset the layer is drawn at: its translateX out of the computed
+// transform (what the animation has it at now), as a share of its width;
+// `fallback` when the layer has no width to measure by.
+function drawnOffset(top: HTMLElement, fallback: number): number {
+  const width = top.clientWidth;
+
+  if (width === 0) {
+    return fallback;
+  }
+
+  const transform = getComputedStyle(top).transform;
+
+  if (transform === 'none') {
+    return 0;
+  }
+
+  const matrix = /^matrix(3d)?\((.+)\)$/.exec(transform);
+  const values = matrix ? matrix[2]!.split(',').map(Number) : [];
+  const tx = matrix ? values[matrix[1] ? 12 : 4] : undefined;
+
+  return tx === undefined || Number.isNaN(tx) ? fallback : Math.max(0, Math.min(1, tx / width));
+}
 
 // Runs the motion on its elements; `onDone` when an animated way reaches
 // the target.
@@ -76,7 +104,7 @@ export function runMotion(motion: Motion, elements: MotionElements, onDone: () =
   if (motion.driver === 'gesture') {
     paintMotion(elements, motion.offset);
 
-    return AT_ONCE;
+    return atOnce(motion.offset);
   }
 
   if (motion.driver === 'done' || motion.duration === 0 || motion.offset === motion.target || !top) {
@@ -86,7 +114,7 @@ export function runMotion(motion: Motion, elements: MotionElements, onDone: () =
       onDone();
     }
 
-    return AT_ONCE;
+    return atOnce(motion.target);
   }
 
   const options: KeyframeAnimationOptions = {
@@ -133,5 +161,6 @@ export function runMotion(motion: Motion, elements: MotionElements, onDone: () =
       () => {},
       () => {},
     ),
+    at: () => (live ? drawnOffset(top, motion.offset) : motion.target),
   };
 }

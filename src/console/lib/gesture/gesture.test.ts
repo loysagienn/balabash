@@ -98,7 +98,7 @@ describe('gesture — the drag', () => {
     drag.down(100, 100, 0);
     assert.deepEqual(drag.move(104, 101, 16), { kind: 'none' });
     assert.equal(drag.claimed, false);
-    assert.deepEqual(drag.move(112, 102, 32), { kind: 'claim', travel: 0 });
+    assert.deepEqual(drag.move(112, 102, 32), { kind: 'claim', travel: 0, sign: 1 });
     assert.equal(drag.claimed, true);
     assert.deepEqual(drag.move(142, 104, 48), { kind: 'move', travel: 30 });
     assert.deepEqual(drag.move(132, 104, 64), { kind: 'move', travel: 20 });
@@ -111,10 +111,18 @@ describe('gesture — the drag', () => {
     const drag = new Drag('x');
 
     drag.down(60, 400, 0);
-    assert.deepEqual(drag.move(110, 401, 16), { kind: 'claim', travel: 0 });
+    assert.deepEqual(drag.move(110, 401, 16), { kind: 'claim', travel: 0, sign: 1 });
     assert.deepEqual(drag.move(170, 402, 32), { kind: 'move', travel: 60 });
     // 110 px over 32 ms, read from the touch at 60: a fling, not a slow let-go.
     assert.equal(drag.up(36), (170 - 60) / 32);
+  });
+
+  it('says which way the finger went when the axis was decided', () => {
+    const drag = new Drag('x');
+
+    drag.down(100, 100, 0);
+    assert.deepEqual(drag.move(88, 101, 16), { kind: 'claim', travel: 0, sign: -1 });
+    assert.deepEqual(drag.move(78, 101, 32), { kind: 'move', travel: -10 });
   });
 
   it('lets a drag of the other axis go, and a tap too', () => {
@@ -131,7 +139,7 @@ describe('gesture — the drag', () => {
     const vertical = new Drag('y');
 
     vertical.down(0, 0, 0);
-    assert.deepEqual(vertical.move(2, 20, 10), { kind: 'claim', travel: 0 });
+    assert.deepEqual(vertical.move(2, 20, 10), { kind: 'claim', travel: 0, sign: 1 });
     assert.deepEqual(vertical.move(2, 50, 20), { kind: 'move', travel: 30 });
     vertical.cancel();
     assert.equal(vertical.active, false);

@@ -3,7 +3,10 @@
 // starts a drag; the drag is claimed when it turns out horizontal
 // (lib/gesture/drag — the slop, the axis) and let go when vertical: the
 // page's own scroll, which the browser starts on its own and reports with
-// a pointercancel. From the claim on, the touch's moves are prevented
+// a pointercancel. A step back is a drag to the right: a horizontal drag
+// to the left is let go too — the page would not move, and the browser
+// keeps the drag for what is under the finger (a wide block at its left
+// edge scrolls on). From the claim on, the touch's moves are prevented
 // (a non-passive touchmove listener: the root allows pan-x pan-y to every
 // block, so a horizontal scroller inside keeps its scroll — a drag that
 // starts on one that can still scroll to the left is its own, not the
@@ -73,7 +76,7 @@ export function installSwipeBack(root: HTMLElement, owner: SwipeOwner): () => vo
 
     switch (move.kind) {
       case 'claim':
-        if (!owner.start()) {
+        if (move.sign < 0 || !owner.start()) {
           teardown();
           return;
         }
