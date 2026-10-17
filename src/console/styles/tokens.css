@@ -81,8 +81,10 @@
   --st-err-bg-strong:color-mix(in srgb,var(--st-err) 18%,transparent);
   --st-err-bg-press:color-mix(in srgb,var(--st-err) 26%,transparent);
   --st-off-bg:transparent;
+  --st-run-fill:var(--st-run);  /* solid fill of a “running” counter on an island (the phone’s Threads tab), under --on-run */
   --st-act-fill:var(--st-act);  /* solid fills of counters (the bell), under --on-act / --on-err */
   --st-err-fill:var(--st-err);
+  --on-run:#04140b;        /* text on a solid --st-run fill */
   --on-act:#1a1200;        /* text on a solid --st-act fill */
   --on-err:#1f0605;        /* text on a solid --st-err fill */
 

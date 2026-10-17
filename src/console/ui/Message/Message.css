@@ -13,8 +13,7 @@
 .msg[data-variant="ask"] .msg-b{border-color:color-mix(in srgb,var(--st-act) 30%,var(--border))}
 .msg[data-variant="user"] .msg-b{padding:var(--sp-2h) var(--sp-3h);border-radius:var(--r-md);background:var(--msg-you)}   /* a step above the page: --surface-2 in the dark themes, --surface (white) in the light ones */
 .msg[data-variant="quiet"]{display:block;padding-left:var(--feed-indent,0px)}
-.msg-fold{--fold-h:150px;--fold-fade:56px;position:relative;max-height:var(--fold-h);overflow:hidden}
-.msg-fold::after{content:"";position:absolute;left:0;right:0;bottom:0;height:var(--fold-fade);background:linear-gradient(transparent,var(--surface))}
+.msg-fold{--fold-h:150px;--fold-fade:56px;max-height:var(--fold-h);overflow:hidden;-webkit-mask-image:linear-gradient(#000 calc(100% - var(--fold-fade)),transparent);mask-image:linear-gradient(#000 calc(100% - var(--fold-fade)),transparent)}   /* the folded body fades to transparent, not into a color — right on a card, on your bubble, on the page and under the glass, in every theme */
 .msg-more{display:inline-flex;align-items:center;gap:var(--sp-1);margin-top:var(--sp-2);font-size:var(--fs-meta);line-height:var(--lh-meta);font-weight:var(--fw-medium);color:var(--link)}
 .msg-more:hover{color:var(--text)}
 .msg-quick{display:flex;flex-wrap:wrap;gap:var(--sp-1h);margin-top:var(--sp-3)}

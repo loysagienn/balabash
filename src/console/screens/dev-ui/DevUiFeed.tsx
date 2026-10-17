@@ -76,6 +76,14 @@ A wide table scrolls inside the message instead of widening the feed:
 // sections joined with single newlines by the CLI.
 const SECTIONS = '**Refining review comments**\n**Locating current review thread**';
 
+const REPORT = `Report on slugs. Only published apps need one: a draft is reached by its owner link, which stays private and never changes.
+
+- The slug is unique across the apps domain — a database index, not a check in code, so two parallel publishes cannot take the same one.
+- Unpublishing keeps the slug for 7 days, then frees it; during those days the old address answers with a redirect.
+- Renaming an app does not change its slug; only the owner can change it, in Apps.
+
+Open questions: reserved words (api, admin, static) and the length limit — I suggest 3 to 40 characters.`;
+
 const CODE = `Uniqueness is better enforced by a DB index than by a check in code: otherwise two parallel publishes can take the same slug.
 
 \`\`\`ts
@@ -587,6 +595,10 @@ export function DevUiFeed() {
                 <Label>from a child agent · question</Label>
                 <Message agent="architect" to="engineer" variant="task" time="14:18">
                   <Md source="Do unpublished apps need a slug, or only published ones?" />
+                </Message>
+                <Label>a child agent’s report · folded behind “Show more” — on the page, no card: the body fades to transparent</Label>
+                <Message agent="architect" to="engineer" time="14:31" fold>
+                  <Md source={REPORT} />
                 </Message>
                 <Label>interim text — quieter, no header</Label>
                 <MsgQuiet>

@@ -74,7 +74,7 @@
 .shell-tab[aria-current="page"]{background-color:var(--island-lens);color:var(--accent)}
 .shell-tab-ic{position:relative;display:inline-flex}
 .shell-tab-ic .ic,.shell-more .ic{font-size:var(--ico-lg)}
-.shell-tab-badge{position:absolute;top:calc(-1 * var(--sp-1h));left:calc(100% - var(--sp-2));box-shadow:0 0 0 2px var(--bg)}   /* the running count on the icon’s corner, ringed in the page color */
+.count.shell-tab-badge{position:absolute;top:calc(-1 * var(--sp-1h));left:calc(100% - var(--sp-2));background:var(--st-run-fill);color:var(--on-run)}   /* the running count on the icon’s corner. On an island a counter is solid and has no ring: the glass shows the content moving under it — a tint would let that content through, and a ring of the page color would cut a hole in the glass */
 .shell-tab-l{max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .shell-more{position:relative;display:grid;place-items:center;flex:none;width:var(--tabs-h);height:var(--tabs-h);border-radius:50%;color:var(--text)}
 .shell-more:active{background-image:var(--layer-press)}
