@@ -42,6 +42,12 @@
 .listgrp{display:flex;align-items:center;gap:var(--sp-2);padding:var(--sp-2h) var(--sp-4h) var(--sp-1h);border-top:1px solid var(--border);font-size:var(--fs-micro);line-height:var(--lh-micro);font-weight:var(--fw-medium);color:var(--text-3);font-variant-numeric:tabular-nums}
 .listgrp:first-child{border-top:0}
 .listgrp-end{margin-left:auto;font-weight:var(--fw-regular)}
+/* Loading — the same divider with its text not known yet: <div class="listgrp" aria-hidden="true"><span class="skel" data-shape="line-sm"></span>
+   <span class="skel listgrp-end" data-shape="line-sm"></span></div>. The lines sit in the text's line box, so the divider keeps the loaded height.
+   Their tone is a state layer, not a surface: a divider lies on a card on desktop and right on the page on the phone (the --surface-2 →
+   --surface-3 sheen of .skel vanishes on --bg in the light themes), and a layer reads the same over both. */
+.listgrp > .skel{--listgrp-skel-w:96px;--listgrp-skel-end-w:48px;width:var(--listgrp-skel-w);margin-block:calc((var(--lh-micro) - var(--skel-h)) / 2);background-color:var(--selected);background-image:linear-gradient(90deg,transparent 0,var(--hover) 50%,transparent 100%)}
+.listgrp > .skel.listgrp-end{width:var(--listgrp-skel-end-w)}
 
 /* ── Show more at list end ──  <div class="listmore"><button class="btn" data-variant="ghost" data-size="sm">Show more</button><span class="caption">5 of 248</span></div>
    A long list shows its first items; the button adds the next page in place (then .loadmore while it loads). */
@@ -56,6 +62,9 @@
 @container shell (max-width:720px){
   .list[data-narrow="tiles"]{gap:var(--sp-2)}
   .list[data-narrow="tiles"] .row{border-top:0;border-radius:var(--r-md);background-color:var(--surface);padding:var(--sp-3)}
+  /* A tile lies right on the page: its hover is its edge (--border-strong) under --layer-hover-page, not the row tint —
+     on the light themes a tinted white is the page’s own color, the tile would vanish */
+  .list[data-narrow="tiles"] .row:is(a,button,[tabindex]):hover{background-image:var(--layer-hover-page);box-shadow:inset 0 0 0 1px var(--border-strong)}
   .list[data-narrow="tiles"] .listgrp{padding:var(--sp-2) 0 0;border-top:0}
   .list[data-narrow="tiles"] .row-end:has(> .quiet:only-child){display:none}
 }

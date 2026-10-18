@@ -31,6 +31,8 @@
   --selected:rgba(255,255,255,.07);
   --press:rgba(255,255,255,.09);
   --layer-hover:linear-gradient(var(--hover),var(--hover));
+  --hover-page:rgba(255,255,255,.045);   /* hover of a block lying right on the page: the edge turns --border-strong under this tint (transparent in the light themes) */
+  --layer-hover-page:linear-gradient(var(--hover-page),var(--hover-page));
   --layer-selected:linear-gradient(var(--selected),var(--selected));
   --layer-press:linear-gradient(var(--press),var(--press));
 

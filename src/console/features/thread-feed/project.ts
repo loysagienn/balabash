@@ -83,6 +83,11 @@ export type MessageItem = {
 
 export type QuietItem = { kind: 'quiet'; key: string; at: Date; text: string };
 
+// The agent's thought as text in the feed (design: Thought) — not an
+// action: it ends one action group and starts the next. `at` — when the
+// thinking began; durationMs — how long it took, null when unmeasured.
+export type ThoughtItem = { kind: 'thought'; key: string; at: Date; text: string; durationMs: number | null };
+
 export type ActionItem = {
   kind: 'action';
   key: string;
@@ -140,7 +145,7 @@ export type EvItem = { kind: 'ev'; key: string; at: Date; icon: IconName; state?
 // plain — the text is prose, not an error's output.
 export type ErrorItem = { kind: 'error'; key: string; at: Date; icon: IconName; title: string; text: string; plain?: true };
 
-export type FeedItem = MessageItem | QuietItem | ActionsItem | PlanItem | SubtaskItem | ChildItem | SysItem | EvItem | ErrorItem;
+export type FeedItem = MessageItem | QuietItem | ThoughtItem | ActionsItem | PlanItem | SubtaskItem | ChildItem | SysItem | EvItem | ErrorItem;
 
 const FOLD_CHARS = 800;
 const FOLD_LINES = 12;
@@ -390,7 +395,7 @@ class Builder {
 
   // A block (not a row) where it belongs: under the Agent row of its
   // sub-agent, or at the top level.
-  private place(item: QuietItem | SubtaskItem, parentToolUseId?: string | null): void {
+  private place(item: QuietItem | ThoughtItem | SubtaskItem, parentToolUseId?: string | null): void {
     const nested = this.nestedOf(parentToolUseId);
 
     if (nested) {
@@ -672,13 +677,20 @@ class Builder {
     }
 
     if (is(event, 'session.thinking')) {
-      // The event is written when the thought ends; a measured one began
-      // durationMs earlier — the row's duration, as a tool's. Unmeasured
-      // (older history, nothing to measure from) — no time.
-      const { durationMs } = event.payload;
+      // Text in the feed, not an action (design rule 16): it ends the
+      // action group before it and the next action starts a new one. A
+      // thought without text is not shown — and splits nothing. The event
+      // is written when the thought ends; a measured one began durationMs
+      // earlier. Unmeasured (older history, nothing to measure from) — no time.
+      const { durationMs, text } = event.payload;
+
+      if (typeof text !== 'string' || text.trim() === '') {
+        return;
+      }
+
       const timed = typeof durationMs === 'number' && Number.isFinite(durationMs) && durationMs >= 0;
 
-      this.action({ kind: 'action', key, at: timed ? new Date(at.getTime() - durationMs) : at, state: 'done', label: { icon: 'brain', text: 'Thought' }, endedAt: at, ...(timed ? {} : { untimed: true as const }), endNote: null, detail: { kind: 'md', text: event.payload.text }, nested: [] }, event.payload.parentToolUseId);
+      this.place({ kind: 'thought', key, at: timed ? new Date(at.getTime() - durationMs) : at, text, durationMs: timed ? durationMs : null }, event.payload.parentToolUseId);
 
       return;
     }

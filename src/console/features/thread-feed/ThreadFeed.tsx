@@ -1,5 +1,5 @@
 // The items of a thread's feed drawn with the ui blocks: messages with
-// Markdown and attachments, action groups (FeedAction), the plan, sub-agent
+// Markdown and attachments, thoughts as text, action groups (FeedAction), the plan, sub-agent
 // tasks, child-thread cards with their live state from the store, system
 // lines, event lines and error blocks. `now` is the screen's clock for the
 // time labels and running timers.
@@ -25,6 +25,7 @@ import { MsgQuiet } from '../../ui/Message/MsgQuiet.tsx';
 import { Plan, PlanItem } from '../../ui/Plan/Plan.tsx';
 import { Subtask } from '../../ui/Subtask/Subtask.tsx';
 import { SysLine } from '../../ui/SysLine/SysLine.tsx';
+import { Thought } from '../../ui/Thought/Thought.tsx';
 import { ActGroup, actFold } from '../../ui/Xp/Xp.tsx';
 import { Code } from '../../ui/atoms/atoms.tsx';
 import { fileIcon } from '../../ui/atoms/fileIcon.ts';
@@ -33,7 +34,7 @@ import { attachmentFacts, downloadHref, needsMeta } from './attachments.ts';
 import { askDecidedWords, askKindTag } from './project.ts';
 import type { Attachment, ChildItem, FeedItem, MessageItem } from './project.ts';
 import { useFileMeta } from './queries.ts';
-import { clipLine } from './actions.ts';
+import { actionDuration, clipLine } from './actions.ts';
 import './ThreadFeed.css';
 
 const SUMMARY_MAX = 320;
@@ -180,6 +181,9 @@ export function FeedItemView({ item, now }: { item: FeedItem; now: Date }) {
           <Md quiet source={item.text} />
         </MsgQuiet>
       );
+    case 'thought':
+      // Its time reads as an action's duration ("14s"); an unmeasured one has none.
+      return <Thought time={item.durationMs === null ? undefined : actionDuration(item.durationMs)} source={item.text} />;
     case 'actions':
       return (
         <ActGroup fold={actFold(item.items)}>

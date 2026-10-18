@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { event, resetSeq } from '../../store/fixtures.ts';
 import { askDecidedWords, askKindTag, projectFeed } from './project.ts';
-import type { ActionItem, ActionsItem, ChildItem, FeedContext, FeedItem, MessageItem, PlanItem, SubtaskItem } from './project.ts';
+import type { ActionItem, ActionsItem, ChildItem, FeedContext, FeedItem, MessageItem, PlanItem, SubtaskItem, ThoughtItem } from './project.ts';
 
 const ctx: FeedContext = { threadId: 't1', agent: 'engineer', parentAgent: 'coordinator', agentOf: id => (id === 'c9' ? 'browser' : null), you: null };
 
@@ -186,7 +186,7 @@ describe('projectFeed — messages', () => {
 });
 
 describe('projectFeed — actions', () => {
-  it('a measured thought began durationMs before its event and shows the duration; an unmeasured one shows none', () => {
+  it('a thought is text in the feed: a measured one began durationMs before its event and carries the duration, an unmeasured one none', () => {
     resetSeq(10n);
 
     const t0 = new Date('2026-10-09T10:00:00Z');
@@ -198,21 +198,49 @@ describe('projectFeed — actions', () => {
         own('session.thinking', { text: 'nonsense', durationMs: -5 }, { createdAt: t0 }),
       ],
       ctx,
-    );
-    const [long, instant, old, nonsense] = (items[0] as ActionsItem).items;
+    ) as ThoughtItem[];
 
-    assert.equal(long!.at.getTime(), t0.getTime() - 14_000);
-    assert.equal(long!.endedAt!.getTime(), t0.getTime());
-    assert.equal(long!.untimed, undefined);
-    assert.equal(long!.state, 'done');
-    assert.equal(instant!.at.getTime(), t0.getTime());
-    assert.equal(instant!.untimed, undefined);
-    assert.equal(old!.untimed, true);
-    assert.equal(nonsense!.untimed, true);
-    assert.equal(nonsense!.at.getTime(), t0.getTime());
+    assert.deepEqual(
+      items.map(item => [item.kind, item.text, item.durationMs]),
+      [
+        ['thought', 'long', 14_000],
+        ['thought', 'instant', 0],
+        ['thought', 'old history', null],
+        ['thought', 'nonsense', null],
+      ],
+    );
+    assert.equal(items[0]!.at.getTime(), t0.getTime() - 14_000);
+    assert.equal(items[1]!.at.getTime(), t0.getTime());
+    assert.equal(items[3]!.at.getTime(), t0.getTime());
   });
 
-  it('groups consecutive thinking and tool rows, pairs starts with ends, hides the plan tool', () => {
+  it('a thought ends one action group and starts the next; a thought without text is not shown and splits nothing', () => {
+    resetSeq(10n);
+
+    const tool = (id: string) => [
+      own('session.tool.started', { toolUseId: id, name: 'Bash', input: { command: id } }),
+      own('session.tool.completed', { toolUseId: id, name: 'Bash', result: '', isError: false, exitCode: 0 }),
+    ];
+    const items = projectFeed(
+      [
+        ...tool('a'),
+        own('session.thinking', { text: 'between', durationMs: 2000 }),
+        ...tool('b'),
+        own('session.thinking', { text: '' }),
+        own('session.thinking', { text: '  \n ' }),
+        ...tool('c'),
+        own('session.thinking', { text: 'at the end' }),
+      ],
+      ctx,
+    );
+
+    assert.deepEqual(
+      items.map(item => (item.kind === 'actions' ? item.items.map(row => row.label.arg) : item.kind === 'thought' ? ['thought', item.text] : [item.kind])),
+      [['a'], ['thought', 'between'], ['b', 'c'], ['thought', 'at the end']],
+    );
+  });
+
+  it('groups consecutive tool rows, pairs starts with ends, hides the plan tool', () => {
     resetSeq(10n);
 
     const t0 = new Date('2026-10-09T10:00:00Z');
@@ -234,30 +262,25 @@ describe('projectFeed — actions', () => {
 
     assert.deepEqual(
       items.map(item => item.kind),
-      ['actions', 'plan', 'actions', 'quiet', 'actions'],
+      ['thought', 'actions', 'plan', 'actions', 'quiet', 'actions'],
     );
 
-    const first = items[0] as ActionsItem;
+    const first = items[1] as ActionsItem;
 
     assert.deepEqual(
       first.items.map(action => [action.label.text ?? action.label.tool, action.state, action.endNote]),
-      [
-        ['Thought', 'done', null],
-        ['Bash', 'done', 'exit 0'],
-      ],
+      [['Bash', 'done', 'exit 0']],
     );
-    assert.equal(first.items[0]!.untimed, true);
-    assert.equal(first.items[0]!.at.getTime(), t0.getTime());
-    assert.equal(first.items[1]!.endedAt!.getTime() - first.items[1]!.at.getTime(), 4200);
-    assert.deepEqual(first.items[1]!.detail, { kind: 'terminal', command: 'npm test', output: 'all green' });
+    assert.equal(first.items[0]!.endedAt!.getTime() - first.items[0]!.at.getTime(), 4200);
+    assert.deepEqual(first.items[0]!.detail, { kind: 'terminal', command: 'npm test', output: 'all green' });
 
-    const plan = items[1] as PlanItem;
+    const plan = items[2] as PlanItem;
 
     assert.deepEqual(plan.items, [{ text: 'a', state: 'done' }, { text: 'b', state: 'run' }, { text: 'c' }]);
     assert.equal(plan.done, 1);
     assert.equal(plan.total, 3);
 
-    const edit = (items[2] as ActionsItem).items[0]!;
+    const edit = (items[3] as ActionsItem).items[0]!;
 
     assert.equal(edit.state, 'err');
     assert.equal(edit.endNote, 'error');
@@ -266,7 +289,7 @@ describe('projectFeed — actions', () => {
     assert.equal(edit.label.arg, '…/b/c/d.ts');
     assert.equal(edit.detail?.kind, 'diff');
 
-    const running = (items[4] as ActionsItem).items[0]!;
+    const running = (items[5] as ActionsItem).items[0]!;
 
     assert.equal(running.state, 'run');
     assert.equal(running.endedAt, null);
@@ -303,16 +326,15 @@ describe('projectFeed — actions', () => {
 
     assert.equal(agent.label.tool, 'Agent');
     assert.equal(agent.state, 'done');
+    // The thought is text under the row too, and it splits the frames the same way.
     assert.deepEqual(
       agent.nested.map(item => item.kind),
-      ['actions', 'quiet'],
+      ['thought', 'actions', 'quiet'],
     );
+    assert.equal((agent.nested[0] as ThoughtItem).text, 'sub');
     assert.deepEqual(
-      (agent.nested[0] as ActionsItem).items.map(item => [item.label.text ?? item.label.tool, item.state]),
-      [
-        ['Thought', 'done'],
-        ['Grep', 'done'],
-      ],
+      (agent.nested[1] as ActionsItem).items.map(item => [item.label.text ?? item.label.tool, item.state]),
+      [['Grep', 'done']],
     );
   });
 
@@ -386,14 +408,14 @@ describe('projectFeed — actions', () => {
     assert.equal(agent.label.tool, 'Agent');
     assert.deepEqual(
       agent.nested.map(item => item.kind),
-      ['actions', 'quiet', 'quiet'],
+      ['thought', 'actions', 'quiet', 'quiet'],
     );
     assert.deepEqual(
-      (agent.nested[0] as ActionsItem).items.map(item => item.label.text ?? item.label.tool),
-      ['Thought', 'Grep'],
+      (agent.nested[1] as ActionsItem).items.map(item => item.label.text ?? item.label.tool),
+      ['Grep'],
     );
     // Under the row the report closes the sub-agent's frames, whole.
-    assert.equal((agent.nested[2] as { text: string }).text, report);
+    assert.equal((agent.nested[3] as { text: string }).text, report);
 
     const again = (whole[4] as ActionsItem).items[0]!;
 

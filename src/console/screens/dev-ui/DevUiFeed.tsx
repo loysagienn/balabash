@@ -27,6 +27,7 @@ import { Btn } from '../../ui/Btn/Btn.tsx';
 import { Subtask } from '../../ui/Subtask/Subtask.tsx';
 import { Summary } from '../../ui/Summary/Summary.tsx';
 import { SysLine } from '../../ui/SysLine/SysLine.tsx';
+import { Thought } from '../../ui/Thought/Thought.tsx';
 import { RailGauge, RailSection, Thread, ThreadBody, ThreadMain, ThreadRail } from '../../ui/Thread/Thread.tsx';
 import { ThreadHead } from '../../ui/ThreadHead/ThreadHead.tsx';
 import { ActGroup, Xp, actFold } from '../../ui/Xp/Xp.tsx';
@@ -96,7 +97,7 @@ const n = 42;
 npm run types && npm run build  # both must pass
 \`\`\``;
 
-// Rows of the folded group above, for actFold: four top-level actions.
+// Rows of a folded group, for actFold: four top-level actions.
 const FOLD_ROWS = [{ state: 'done' }, { state: 'done' }, { state: 'done' }, { state: 'done' }] as const;
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
@@ -235,8 +236,8 @@ function RunningThread({ phone }: { phone?: boolean }) {
                 <Message agent="coordinator" to="engineer" variant="task" time="14:02" tag="task" fold>
                   <Md source={TASK} />
                 </Message>
+                <Thought time="14s" source="Publishing by slug: the route and the uniqueness check are the two halves — see what `apps.ts` already does before touching the schema." />
                 <ActGroup>
-                  <Xp state="done" icon="brain" end="14s" text="Thought" />
                   <Xp state="done" icon="files" end="6 calls · 1.2s" text="Read 6 files in" textArg="src/api/apps" />
                 </ActGroup>
                 <MsgQuiet>
@@ -299,7 +300,7 @@ function RunningThread({ phone }: { phone?: boolean }) {
             <MsgQuiet>
               <Md quiet source="Got it. Adding a `released_at` field and a background cleanup." />
             </MsgQuiet>
-            <ActGroup>
+            <ActGroup fold={actFold([{ state: 'done' }, { state: 'done' }, { state: 'run' }])}>
               <Xp
                 state="done"
                 icon="file-pen-line"
@@ -372,9 +373,7 @@ function CompletedThread() {
             <Message agent="coordinator" to="designer" variant="task" time="13:17" tag="task">
               <Md source="Make the home screen in five styles with the same content…" />
             </Message>
-            <ActGroup>
-              <Xp state="done" icon="brain" end="9s" text="Thought" />
-            </ActGroup>
+            <Thought time="9s" source="Same content in five styles — the home screen is the fairest sample: cards, a list, numbers, a chart. Start from the current tokens." />
           </Feed>
           <ComposerLock icon="lock">
             Thread completed. To continue, ask the coordinator to start a new thread.
@@ -488,31 +487,40 @@ export function DevUiFeed() {
         </div>
       </Section>
 
-      <Section title="Action groups fold (design: Thread Feed §02) — a group of two or more actions folds to its last one; the counter shows the earlier ones">
+      <Section title="Action groups fold · thoughts (design: Thread Feed §02) — a group of two or more actions folds to one row, the whole row unfolds it; a thought is text between groups">
         <div className="dev-grid" data-wide="">
           <div className="dev-frame">
             <Thread>
               <Feed>
-                <Label>folded — the default: the last action, the earlier ones in the counter</Label>
+                <Label>a thought — text in the feed, whole: the caption, how long it took, the thought in the quiet tone</Label>
+                <Thought time="6s" source="The release hold lives in `apps.slug_released_at`; a 7-day hold means the unique index has to skip released rows — a partial index, not a plain unique." />
+                <Label>folded — the default: one row, the last action; the whole row unfolds the group, the action itself does not open</Label>
                 <ActGroup fold={actFold(FOLD_ROWS)}>
-                  <Xp state="done" icon="brain" end="9s" text="Thought" />
                   <Xp state="done" icon="files" end="3 calls · 0.4s" text="Read 3 files in" textArg="src/api/apps" />
+                  <Xp state="done" icon="search" end="0.2s" tool="Grep" arg="slug_released_at" />
                   <Xp state="done" icon="file-pen-line" add="+38" del="−6" end="0.1s" tool="Edit" arg="src/api/apps/slug.ts" />
-                  <Xp state="done" icon="square-terminal" end="exit 0 · 4.2s" tool="Bash" arg="npm run build" />
+                  <Xp state="done" icon="square-terminal" end="exit 0 · 4.2s" tool="Bash" arg="npm run build">
+                    <Md quiet source="Build finished: 3 bundles, no warnings." />
+                  </Xp>
                 </ActGroup>
+                <Label>a thought ends one group and starts the next</Label>
+                <Thought time="3s" source="Types first, then the migration — if anything else reads `slug` directly, the build will say so." />
                 <Label>folded, running — the running action is the row; each finished one moves into the counter</Label>
-                <ActGroup fold={{ at: 3, earlier: 3, failed: 0 }}>
-                  <Xp state="done" icon="brain" end="6s" text="Thought" />
+                <ActGroup fold={actFold([{ state: 'done' }, { state: 'done' }, { state: 'run' }])}>
                   <Xp state="done" icon="file-pen-line" add="+12" end="0.1s" tool="Edit" arg="prisma/schema.prisma" />
                   <Xp state="done" icon="file-pen-line" add="+14" end="0.1s" tool="Write" arg="migrations/0042_slug_release.sql" />
                   <Xp state="run" endState="run" end="0:12" tool="Bash" arg="npm run types" />
                 </ActGroup>
                 <Label>folded — a folded action failed: the counter says so</Label>
-                <ActGroup fold={{ at: 2, earlier: 2, failed: 1 }}>
-                  <Xp state="err" icon="square-terminal" endState="err" end="exit 1 · 12.0s" tool="Bash" arg="npm test -- publish" />
+                <ActGroup fold={actFold([{ state: 'err' }, { state: 'done' }, { state: 'done' }])}>
+                  <Xp state="err" icon="square-terminal" endState="err" end="exit 1 · 12.0s" tool="Bash" arg="npm test -- publish">
+                    <Md quiet source={'```\n$ npm test -- publish\n✖ publish › frees the slug after 7 days\n```'} />
+                  </Xp>
                   <Xp state="done" icon="file-pen-line" add="+3" del="−1" end="0.1s" tool="Edit" arg="publish.test.ts" />
                   <Xp state="done" icon="square-terminal" end="exit 0 · 11.4s" tool="Bash" arg="npm test -- publish" />
                 </ActGroup>
+                <Label>a thought without a time — unmeasured, older history</Label>
+                <Thought source="Older history carries no duration; the caption is the word alone." />
               </Feed>
             </Thread>
           </div>
@@ -520,25 +528,32 @@ export function DevUiFeed() {
             <Thread>
               <Feed>
                 <Label>batch summary last — its nested calls stay with it; the counter counts top-level actions</Label>
-                <ActGroup fold={{ at: 2, earlier: 2, failed: 0 }}>
-                  <Xp state="done" icon="brain" end="9s" text="Thought" />
+                <ActGroup fold={actFold([{ state: 'done' }, { state: 'done' }, { state: 'done', depth: 1 }, { state: 'done', depth: 1 }])}>
                   <Xp state="done" icon="square-terminal" end="exit 0 · 4.2s" tool="Bash" arg="npm run build" />
                   <Xp state="done" icon="files" end="3 calls · 0.4s" text="Read 3 files in" textArg="src/api/apps" />
                   <Xp state="done" icon="file-text" end="0.1s" depth={1} tool="Read" arg="index.ts" />
                   <Xp state="done" icon="file-text" end="0.1s" depth={1} tool="Read" arg="publish.ts" />
                 </ActGroup>
-                <Label>folded — the last action’s details open; the counter keeps to its row</Label>
-                <ActGroup fold={{ at: 3, earlier: 3, failed: 0 }}>
-                  <Xp state="done" icon="brain" end="9s" text="Thought" />
+                <Label>press the row to see it open — the counter is a thin row on top, in the same place; every action full width, each opens its details</Label>
+                <ActGroup fold={actFold(FOLD_ROWS)}>
                   <Xp state="done" icon="files" end="3 calls · 0.4s" text="Read 3 files in" textArg="src/api/apps" />
+                  <Xp state="done" icon="search" end="0.2s" tool="Grep" arg="slug_released_at" />
                   <Xp state="done" icon="file-pen-line" add="+38" del="−6" end="0.1s" tool="Edit" arg="src/api/apps/slug.ts" />
-                  <Xp state="done" icon="square-terminal" end="exit 0 · 4.2s" defaultOpen tool="Bash" arg="npm run build">
+                  <Xp state="done" icon="square-terminal" end="exit 0 · 4.2s" tool="Bash" arg="npm run build">
                     <Md quiet source="Build finished: 3 bundles, no warnings." />
                   </Xp>
                 </ActGroup>
-                <Label>one action — no counter</Label>
+                <Label>open with a failure — the counter counts every failed action of the group</Label>
+                <ActGroup fold={actFold([{ state: 'err' }, { state: 'done' }, { state: 'done' }])}>
+                  <Xp state="err" icon="square-terminal" endState="err" end="exit 1 · 12.0s" tool="Bash" arg="npm test -- publish" />
+                  <Xp state="done" icon="file-pen-line" add="+3" del="−1" end="0.1s" tool="Edit" arg="publish.test.ts" />
+                  <Xp state="done" icon="square-terminal" end="exit 0 · 11.4s" tool="Bash" arg="npm test -- publish" />
+                </ActGroup>
+                <Label>a single action — no counter, the row opens its details; its hover is the card’s edge</Label>
                 <ActGroup fold={actFold([{ state: 'done' }])}>
-                  <Xp state="done" icon="brain" end="9s" text="Thought" />
+                  <Xp state="done" icon="globe" end="1.1s" tool="WebFetch" arg="docs.anthropic.com/en/docs/build-with-claude/extended-thinking">
+                    <Md quiet source="Extended thinking: the model’s reasoning arrives as a separate block before the answer." />
+                  </Xp>
                 </ActGroup>
               </Feed>
             </Thread>
@@ -610,18 +625,10 @@ export function DevUiFeed() {
           <div className="dev-frame">
             <Thread>
               <Feed>
-                <Label>thinking — expanded, with highlighted code</Label>
-                <ActGroup>
-                  <Xp state="done" icon="brain" end="14s" defaultOpen text="Thought">
-                    <Md quiet breaks source={CODE} />
-                  </Xp>
-                </ActGroup>
-                <Label>thinking — Codex, two sections on their own lines</Label>
-                <ActGroup>
-                  <Xp state="done" icon="brain" end="6.0s" defaultOpen text="Thought">
-                    <Md quiet breaks source={SECTIONS} />
-                  </Xp>
-                </ActGroup>
+                <Label>a thought with highlighted code</Label>
+                <Thought time="14s" source={CODE} />
+                <Label>a thought — Codex, two sections on their own lines</Label>
+                <Thought time="6.0s" source={SECTIONS} />
                 <Label>batch summary — expanded</Label>
                 <ActGroup>
                   <Xp state="done" icon="files" end="3 calls · 0.4s" text="Read 3 files in" textArg="src/api/apps" />
@@ -629,8 +636,8 @@ export function DevUiFeed() {
                   <Xp state="done" icon="file-text" end="0.1s" depth={1} tool="Read" arg="publish.ts" />
                   <Xp state="done" icon="file-text" end="0.2s" depth={1} tool="Read" arg="manifest.ts" />
                 </ActGroup>
-                <Label>commands and a tool error — open</Label>
-                <ActGroup fold={{ at: 3, earlier: 3, failed: 2 }}>
+                <Label>commands and a tool error — folded: two failed among the folded ones</Label>
+                <ActGroup fold={actFold([{ state: 'done' }, { state: 'err' }, { state: 'err' }, { state: 'off' }])}>
                   <Xp state="done" icon="square-terminal" end="exit 0 · 4.2s" tool="Bash" arg="npm run build" />
                   <Xp
                     state="err"

@@ -1,0 +1,12 @@
+@layer patterns{
+/* ── Thought ──  .thought > .thought-h (.ic, “Thought”, .thought-time) + .md.thought-b (data-variant="quiet")
+   The agent’s thinking as text in the feed, shown whole — thoughts are short; one step quieter than the agent’s intermediate
+   text (MsgQuiet): a caption on top and the text in --text-3. Not an action: it ends an action group and starts the next.
+   A thought without text is not shown (and splits nothing). */
+.thought{margin-left:var(--feed-indent,0px);display:flex;flex-direction:column;gap:var(--sp-1)}
+.thought-h{display:flex;align-items:center;gap:var(--sp-1h);font-size:var(--fs-meta);line-height:var(--lh-meta);font-weight:var(--fw-medium);color:var(--text-3)}
+.thought-h .ic{font-size:var(--ico-xs)}
+.thought-time{font-weight:var(--fw-regular);font-variant-numeric:tabular-nums}
+.thought-time::before{content:"·";margin-right:var(--sp-1h)}
+.thought-b{color:var(--text-3)}
+}

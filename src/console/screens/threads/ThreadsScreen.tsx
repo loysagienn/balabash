@@ -25,14 +25,11 @@ import { ThreadList } from '../../features/thread-list/ThreadList.tsx';
 import { hasFilters } from '../../features/thread-list/filters.ts';
 import { Card } from '../../ui/Card/Card.tsx';
 import { Empty } from '../../ui/Empty/Empty.tsx';
-import { List, LoadMore } from '../../ui/List/List.tsx';
+import { LoadMore } from '../../ui/List/List.tsx';
 import { NewPill } from '../../ui/NewPill/NewPill.tsx';
 import { Note } from '../../ui/Note/Note.tsx';
 import { Screen } from '../../ui/Screen/Screen.tsx';
-import { SkelRow } from '../../ui/Skel/Skel.tsx';
 import './ThreadsScreen.css';
-
-const SKELETON = [55, 35, 80, 60, 45];
 
 // Visibility of an element inside the scrolling shell body. The sentinel
 // mounts and unmounts with the screen's states (skeleton, rows, error), so
@@ -128,7 +125,10 @@ export function ThreadsScreen({ route }: { route: ThreadsRoute }) {
     ) : null;
 
   // The main thread above everything else, whatever the stage of the list,
-  // unless the route narrows the list.
+  // unless the route narrows the list. While the first page loads it is a
+  // row of the same list as the skeleton (design: ThreadsScreen loading) —
+  // the hairline (desktop) and the tile gap (phone) under it are the loaded
+  // list's own, and it does not move when the rows arrive.
   const mainPinned = hasFilters(route) ? null : main;
   const pinned = mainPinned ? <ThreadList threads={[]} pinned={mainPinned} now={now} /> : null;
   let body;
@@ -136,12 +136,7 @@ export function ThreadsScreen({ route }: { route: ThreadsRoute }) {
   if (stage === 'skeleton') {
     body = (
       <Card narrow="bare">
-        {pinned}
-        <List narrow="tiles" busy>
-          {SKELETON.map((w, i) => (
-            <SkelRow key={i} widths={[w, 35]} />
-          ))}
-        </List>
+        <ThreadList threads={[]} pinned={mainPinned} now={now} loading />
       </Card>
     );
   } else if (stage === 'failed') {

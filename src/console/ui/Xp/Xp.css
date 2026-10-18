@@ -1,6 +1,6 @@
 @layer components{
 /* ── Expandable row ──  .xp > button.xp-h[aria-expanded] (.xp-chev .xp-s .xp-t .xp-end) + .xp-b
-   The container sets the padding: --xp-px (sides), --xp-b-indent (details indent). data-depth="1" — nested. */
+   The container sets the padding: --xp-px (sides), --xp-b-indent (details indent). data-depth="1" — nested; data-still — does not open. */
 .xp{border-top:1px solid var(--border)}
 .xp:first-child{border-top:0}
 .xp-h{display:grid;grid-template-columns:var(--ico-sm) var(--ico) minmax(0,1fr) auto;align-items:center;gap:var(--sp-2h);width:100%;min-height:max(var(--xp-h),var(--ctl-h));padding:var(--sp-1h) var(--xp-px,var(--sp-4));font-size:var(--fs-ui);color:var(--text-2);text-align:left}
@@ -22,23 +22,34 @@
 .xp-del{color:var(--diff-del)}
 .xp-b{display:flex;flex-direction:column;gap:var(--sp-2h);padding:var(--sp-0h) var(--xp-px,var(--sp-4)) var(--sp-3h) var(--xp-b-indent,calc(var(--xp-px,var(--sp-4)) + var(--ico-sm) + var(--sp-2h) * 2 + var(--ico)))}
 .xp-h[aria-expanded="false"] + .xp-b{display:none}
+/* Still — the row does not open (the folded row of an action group): no chevron, the head is not a button */
+.xp[data-still] .xp-h{grid-template-columns:var(--ico) minmax(0,1fr) auto}
 }
 @layer patterns{
 /* ── Action group ──  .actgroup — consecutive .xp rows in the feed, indented to the avatar column */
 .actgroup{--xp-px:var(--sp-3);margin-left:var(--feed-indent,0px);border:1px solid var(--border-surface);border-radius:var(--r-md);background:var(--surface);overflow:hidden}
 @container thread (max-width:480px){ .actgroup{--xp-b-indent:var(--sp-3)} }
+/* A group of one action lies on the page as one row: its hover is the card’s — the edge turns --border-strong under
+   --layer-hover-page (the light themes keep the white fill: a tinted white is the page’s color there).
+   The app nests a sub-agent's frames under its Agent row (.xp-b holds whole groups), so the group's own rows are its children. */
+.actgroup:not(:has(> .xp ~ .xp)):has(> .xp > .xp-h:hover){border-color:var(--border-strong)}
+.actgroup:not(:has(> .xp ~ .xp)) > .xp > .xp-h:hover{background-image:var(--layer-hover-page)}
 /* Folding a group of actions — every group of two or more top-level actions folds; folded by default.
-   <div class="actgroup" data-fold="closed|open"> … the earlier actions … <button class="actfold"> + the last action (.xp, with
-   its depth-1 rows after it).
-   closed — only the last action shows; the earlier ones fold into a counter at its left (“+4”; on errors “+4 · 1 failed”,
-   data-state="err" — a folded action failed). The last action is always the latest: while a turn runs it is the running
-   one, and a finished one moves into the counter. open — every action shows (an open group stays open as actions
-   arrive); the counter turns into “fold”. The counter folds and unfolds the group; the row opens its own details. */
-.actgroup[data-fold]{display:grid;grid-template-columns:auto minmax(0,1fr)}
-.actgroup[data-fold] .xp{grid-column:2}
-.actgroup[data-fold="closed"] > :has(~ .actfold){display:none}
-.actgroup[data-fold="closed"] > .actfold + .xp{border-top:0}
-.actfold{grid-column:1;align-self:start;display:flex;align-items:center;min-height:max(var(--xp-h),var(--ctl-h));padding:0 0 0 var(--xp-px,var(--sp-4));border:0;background:none;color:var(--text-2);cursor:pointer}
+   <div class="actgroup" data-fold="closed|open"> <button class="actfold"> + the actions (.xp; depth-1 rows follow their parent).
+   closed — one row: the counter (“+4”; with a failure among the folded ones “+4 · 1 failed”, data-state="err") and the last
+   action, still (Xp still: no chevron, it does not open). The counter’s button stretches over the row: the whole row unfolds the
+   group. The last action is always the latest: while a turn runs, the running one, and a finished one moves into the counter.
+   open — the counter turns into a thin row on top, in the same place (“⌃ 5 actions”, “· 1 failed” in red): pressed where it was,
+   it folds the group back. Every action is full width and opens its own details; no column is kept for the control. An open
+   group stays open as actions arrive. A thought (.thought) is not an action: it ends one group and starts the next. */
+.actgroup[data-fold]{position:relative;display:grid;grid-template-columns:minmax(0,1fr)}
+.actgroup[data-fold="closed"]{grid-template-columns:auto minmax(0,1fr)}
+.actgroup[data-fold="closed"] > .xp:not(:nth-last-child(1 of .xp:not([data-depth]))){display:none}
+.actgroup[data-fold="closed"] .xp{grid-column:2;grid-row:1;border-top:0}
+.actgroup[data-fold="closed"]:has(> .actfold:hover){background-image:var(--layer-hover-page);border-color:var(--border-strong)}
+.actfold{display:flex;align-items:center;min-height:var(--ctl-h);padding:0 var(--xp-px,var(--sp-4));border:0;background:none;color:var(--text-2);text-align:left;cursor:pointer}
+.actgroup[data-fold="closed"] > .actfold{grid-column:1;grid-row:1;padding-right:0}
+.actgroup[data-fold="closed"] > .actfold::after{content:"";position:absolute;inset:0}
 .actfold-n{display:inline-flex;align-items:center;justify-content:center;gap:var(--sp-1);min-width:28px;height:20px;padding:0 var(--sp-1h);border-radius:var(--r-pill);background-color:var(--selected);font-size:var(--fs-meta);line-height:1;font-weight:var(--fw-medium);font-variant-numeric:tabular-nums;white-space:nowrap}
 .actfold-n .ic{font-size:var(--ico-xs)}
 .actfold:hover .actfold-n{background-image:var(--layer-hover);color:var(--text)}
