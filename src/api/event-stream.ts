@@ -6,7 +6,7 @@
 // reconnect never leaves a gap. Events travel whole, through serialize-json,
 // in seq order; a comment heartbeat keeps idle proxies from cutting the
 // connection. Scoped to the session's workspace plus installation-level
-// events (userId null: restarts, exceptions outside a workspace).
+// events (workspaceId null: restarts, exceptions outside a workspace).
 
 import type { Context } from 'koa';
 import type { Event } from '../core/contract.ts';
@@ -31,10 +31,10 @@ export function sseFrame(event: Event): string {
   return `id: ${event.seq}\ndata: ${stringifyJson(event)}\n\n`;
 }
 
-// The handler assumes the session gate already ran (ctx.state.userId).
+// The handler assumes the session gate already ran (ctx.state.workspaceId).
 export function createEventStreamHandler({ hub, readAfter, heartbeatMs = HEARTBEAT_MS, pageSize = 500 }: EventStreamDeps) {
   return async (ctx: Context): Promise<void> => {
-    const userId = ctx.state.userId as string;
+    const workspaceId = ctx.state.workspaceId as string;
     const lastEventId = parseSeq(ctx.get('last-event-id') || undefined);
     const after = parseSeq(typeof ctx.query.after === 'string' ? ctx.query.after : undefined);
     const cursor = lastEventId ?? after;
@@ -46,7 +46,7 @@ export function createEventStreamHandler({ hub, readAfter, heartbeatMs = HEARTBE
       return;
     }
 
-    const visible = (event: Event) => event.userId === userId || event.userId === null;
+    const visible = (event: Event) => event.workspaceId === workspaceId || event.workspaceId === null;
     // Written straight to the response (ctx.respond = false): Koa's stream
     // pipeline would report every client disconnect as a premature close.
     const { res } = ctx;

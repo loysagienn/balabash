@@ -18,7 +18,7 @@ const FOREIGN = 'postgresql://user:secret@db.example.invalid:25060/balabash_v2?s
 
 const program = `
   import { prisma } from ${JSON.stringify(new URL('./client.ts', import.meta.url).href)};
-  prisma.user.count().then(
+  prisma.workspace.count().then(
     () => { console.log(JSON.stringify({ reached: true })); },
     error => { console.log(JSON.stringify({ code: error.code, message: error.message })); },
   );

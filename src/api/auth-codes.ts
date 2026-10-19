@@ -1,5 +1,5 @@
-// In-memory one-time auth codes for linking a web session to a workspace
-// user; any channel (Telegram /auth_code, …) may issue one, and so does the
+// In-memory one-time auth codes for linking a web session to a workspace;
+// any channel (Telegram /auth_code, …) may issue one, and so does the
 // /login page itself for the operator's workspace (the console code,
 // printed to the server log — api.ts). Ported from v1 src/auth-codes as is. Deliberately not persisted: a
 // restart just invalidates pending codes.
@@ -16,12 +16,12 @@ const CODE_LENGTH = 8;
 const ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 
 type PendingCode = {
-  userId: string;
+  workspaceId: string;
   source: LoginSource;
   expiresAt: number;
 };
 
-export type ConsumedCode = { userId: string; source: LoginSource };
+export type ConsumedCode = { workspaceId: string; source: LoginSource };
 
 const codes = new Map<string, PendingCode>();
 
@@ -35,12 +35,12 @@ function sweepExpired(): void {
   }
 }
 
-export function createAuthCode(userId: string, source: LoginSource): string {
+export function createAuthCode(workspaceId: string, source: LoginSource): string {
   sweepExpired();
 
-  // Only one active code per user: a new request invalidates the previous code
+  // Only one active code per workspace: a new request invalidates the previous code
   for (const [code, entry] of codes) {
-    if (entry.userId === userId) {
+    if (entry.workspaceId === workspaceId) {
       codes.delete(code);
     }
   }
@@ -52,13 +52,13 @@ export function createAuthCode(userId: string, source: LoginSource): string {
     code += ALPHABET[byte % ALPHABET.length];
   }
 
-  codes.set(code, { userId, source, expiresAt: Date.now() + CODE_TTL_MS });
+  codes.set(code, { workspaceId, source, expiresAt: Date.now() + CODE_TTL_MS });
 
   return code;
 }
 
 /**
- * Returns the userId and the source for a valid code and invalidates it
+ * Returns the workspaceId and the source for a valid code and invalidates it
  * (one-time use).
  */
 export function consumeAuthCode(input: string): ConsumedCode | null {
@@ -73,5 +73,5 @@ export function consumeAuthCode(input: string): ConsumedCode | null {
 
   codes.delete(code);
 
-  return { userId: entry.userId, source: entry.source };
+  return { workspaceId: entry.workspaceId, source: entry.source };
 }

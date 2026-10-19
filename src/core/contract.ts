@@ -31,7 +31,7 @@ export type Event = {
   type: string;
   actor: EventActor;
   agentName: string | null; // set iff actor === 'agent'
-  userId: string | null; // workspace; null = installation-level
+  workspaceId: string | null; // workspace; null = installation-level
   threadId: string | null; // author's thread; null = outside threads
   targetThreadId: string | null; // addressee; strictly one hop
   payload: JsonObject;
@@ -56,7 +56,7 @@ export type ThreadSummary = {
 
 export type Thread = {
   id: string;
-  userId: string;
+  workspaceId: string;
   parentId: string | null; // null = the workspace's main thread
   agent: string;
   title: string | null;
@@ -166,9 +166,9 @@ export type SessionAgentSpec = {
   nativeServers?: NativeMcpServerName[];
   // Session working directory; default — the run's stateDir. A function form
   // resolves per run from the calling user's id (e.g. a per-user workbench
-  // under data/workspace/<userId>/...); the resolved directory is created
+  // under data/workspace/<workspaceId>/...); the resolved directory is created
   // before the session starts.
-  cwd?: string | ((userId: string) => string);
+  cwd?: string | ((workspaceId: string) => string);
   // Per-run machinery a declaration cannot express statically (a browser next
   // to the session): built once per run after the working directory exists
   // and before the SDK session starts; its bridge tools join the base verbs;
@@ -253,7 +253,7 @@ export type RemoteDriverContext = {
 export type RemoteDriverFilesApi = {
   ingest(input: {
     body: StorageBody;
-    userId?: string | null;
+    workspaceId?: string | null;
     originalFilename?: string | null;
     contentType?: string | null;
     sizeBytes?: number | null;
@@ -390,7 +390,7 @@ export type SpawnOptions = {
 
 export type RunContext = {
   threadId: string;
-  userId: string;
+  workspaceId: string;
   signal: AbortSignal;
 
   // Canonical events on the run's behalf + declared domain events.
@@ -419,7 +419,7 @@ export type RunContext = {
   harness: HarnessApi; // injected core behaviour — instead of base classes
   tools: ToolsApi; // the bundled tool set; calls are journaled as tool.call.*
   files: FilesApi;
-  stateDir: string; // persistent per-agent/per-user directory
+  stateDir: string; // persistent per-agent/per-workspace directory
 };
 
 // ---------------------------------------------------------------------------
@@ -510,7 +510,7 @@ export type ToolsApi = {
 // producer adds deliberately (e.g. storage_get_file); the transcript strips it.
 export type FileRef = {
   id: string;
-  userId: string | null;
+  workspaceId: string | null;
   contentType: string | null;
   sizeBytes: number | null;
   etag: string | null;
@@ -535,7 +535,7 @@ export type FilesApi = {
   // Workspace-scoped: a fileId from outside the user boundary reads as missing.
   getInfo(fileId: string): Promise<FileRef>;
   getDownloadUrl(fileId: string, filename?: string): Promise<string>;
-  // Store new content in the run's workspace (the file's userId is the run's
-  // user). The storage scope is the agent's name.
+  // Store new content in the run's workspace (the file's workspaceId is the run's
+  // workspace). The storage scope is the agent's name.
   ingest(input: IngestFileInput): Promise<FileRef>;
 };

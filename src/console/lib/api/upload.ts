@@ -60,13 +60,13 @@ export function createUpload({ onUnauthorized, workspace }: FetchOptions = {}) {
       }
 
       const xhr = createXhr();
-      const userId = workspace?.() ?? null;
+      const workspaceId = workspace?.() ?? null;
       const onAbort = () => xhr.abort();
 
       xhr.open('POST', url);
       xhr.withCredentials = true;
 
-      for (const [name, value] of Object.entries({ ...headers, ...(userId ? { [WORKSPACE_HEADER]: userId } : {}) })) {
+      for (const [name, value] of Object.entries({ ...headers, ...(workspaceId ? { [WORKSPACE_HEADER]: workspaceId } : {}) })) {
         xhr.setRequestHeader(name, value);
       }
 

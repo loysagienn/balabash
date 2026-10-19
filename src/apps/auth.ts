@@ -4,7 +4,7 @@
 //
 // The token is in-memory on purpose (the pattern of src/api/auth-codes.ts):
 // a restart between mint and exchange only costs one extra round of the
-// self-refresh loop. The cookie is stateless signed state — {userId, exp,
+// self-refresh loop. The cookie is stateless signed state — {workspaceId, exp,
 // kind:'apps'} under an HMAC with its own secret — so it needs no table, no
 // memory, and survives restarts. Revocation is by TTL only (design №7).
 
@@ -21,7 +21,7 @@ export const APPS_COOKIE_MAX_AGE_MS = COOKIE_TTL_MS;
 // One-time handoff tokens.
 
 type PendingToken = {
-  userId: string;
+  workspaceId: string;
   expiresAt: number;
 };
 
@@ -37,19 +37,19 @@ function sweepExpiredTokens(): void {
   }
 }
 
-/** Mints a one-time token bound to the userId; expires in ~60 seconds. */
-export function mintHandoffToken(userId: string): string {
+/** Mints a one-time token bound to the workspaceId; expires in ~60 seconds. */
+export function mintHandoffToken(workspaceId: string): string {
   sweepExpiredTokens();
 
   const token = crypto.randomBytes(32).toString('base64url');
 
-  tokens.set(token, { userId, expiresAt: Date.now() + TOKEN_TTL_MS });
+  tokens.set(token, { workspaceId, expiresAt: Date.now() + TOKEN_TTL_MS });
 
   return token;
 }
 
 /**
- * Exchanges a token for its userId and burns it (one-time use): a second
+ * Exchanges a token for its workspaceId and burns it (one-time use): a second
  * exchange of the same token fails no matter how fresh it is.
  */
 export function consumeHandoffToken(token: string): string | null {
@@ -63,14 +63,14 @@ export function consumeHandoffToken(token: string): string | null {
 
   tokens.delete(token);
 
-  return entry.userId;
+  return entry.workspaceId;
 }
 
 // --------------------------------------------------------------------------
 // The apps cookie: base64url(JSON payload) + '.' + HMAC-SHA256 signature.
 
 type AppsCookiePayload = {
-  userId: string;
+  workspaceId: string;
   exp: number;
   kind: 'apps';
 };
@@ -79,16 +79,16 @@ function signPayload(payload: string): string {
   return crypto.createHmac('sha256', config.appsCookieSecret).update(payload).digest('base64url');
 }
 
-/** Builds a signed cookie value for the userId, expiring in COOKIE_TTL_MS. */
-export function createAppsCookieValue(userId: string): string {
-  const payload: AppsCookiePayload = { userId, exp: Date.now() + COOKIE_TTL_MS, kind: 'apps' };
+/** Builds a signed cookie value for the workspaceId, expiring in COOKIE_TTL_MS. */
+export function createAppsCookieValue(workspaceId: string): string {
+  const payload: AppsCookiePayload = { workspaceId, exp: Date.now() + COOKIE_TTL_MS, kind: 'apps' };
   const encoded = Buffer.from(JSON.stringify(payload)).toString('base64url');
 
   return `${encoded}.${signPayload(encoded)}`;
 }
 
 /**
- * Verifies a cookie value and returns its userId, or null: a missing value,
+ * Verifies a cookie value and returns its workspaceId, or null: a missing value,
  * a broken signature, an expired payload and a foreign kind all look the
  * same to the caller. kind:'apps' keeps the cookie meaningless on the main
  * domain even if the value ever leaks there.
@@ -119,9 +119,9 @@ export function verifyAppsCookieValue(value: string | undefined): string | null 
       return null;
     }
 
-    const { userId, exp, kind } = parsed as Record<string, unknown>;
+    const { workspaceId, exp, kind } = parsed as Record<string, unknown>;
 
-    if (kind !== 'apps' || typeof userId !== 'string' || !userId) {
+    if (kind !== 'apps' || typeof workspaceId !== 'string' || !workspaceId) {
       return null;
     }
 
@@ -129,7 +129,7 @@ export function verifyAppsCookieValue(value: string | undefined): string | null 
       return null;
     }
 
-    return userId;
+    return workspaceId;
   } catch {
     return null;
   }

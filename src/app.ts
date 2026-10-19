@@ -105,7 +105,7 @@ loadAgents(
       await appendEvent({
         type: SYSTEM_EXCEPTION,
         actor: 'system',
-        userId: null,
+        workspaceId: null,
         payload: { scope: 'remote-agents', error: `${file}: ${error}` },
       });
     },
@@ -191,7 +191,7 @@ consumers.push(
         return null;
       }
 
-      const run = createCoordinatorRun({ threadId: thread.id, userId: thread.userId });
+      const run = createCoordinatorRun({ threadId: thread.id, workspaceId: thread.workspaceId });
 
       return {
         accept: run.accept,

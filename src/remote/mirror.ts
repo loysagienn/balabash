@@ -20,7 +20,7 @@ import { OWN_IDS_KEEP } from './store.ts';
 
 export type MirrorContext = {
   threadId: string;
-  userId: string;
+  workspaceId: string;
   kind: string;
   // The watch before the read: the closing summary in flight (watch.finish)
   // keeps the phase at finishing whatever the session says of itself.
@@ -61,13 +61,13 @@ export function stateOfPhase(phase: Exclude<RemotePhase, 'closed' | 'gone'>): Se
 }
 
 // How the agent's text reaches the owner.
-export function agentText(ctx: Pick<MirrorContext, 'threadId' | 'userId' | 'kind' | 'watch'>, text: string): AppendInput {
+export function agentText(ctx: Pick<MirrorContext, 'threadId' | 'workspaceId' | 'kind' | 'watch'>, text: string): AppendInput {
   return ctx.watch.headless
     ? {
         type: THREAD_MESSAGE,
         actor: 'agent',
         agentName: ctx.kind,
-        userId: ctx.userId,
+        workspaceId: ctx.workspaceId,
         threadId: ctx.threadId,
         targetThreadId: ctx.watch.parentId,
         payload: { text },
@@ -76,18 +76,18 @@ export function agentText(ctx: Pick<MirrorContext, 'threadId' | 'userId' | 'kind
         type: 'agent.message',
         actor: 'agent',
         agentName: ctx.kind,
-        userId: ctx.userId,
+        workspaceId: ctx.workspaceId,
         threadId: ctx.threadId,
         payload: { content: [{ type: 'text', text }] as ContentBlock[] as unknown as JsonObject[] },
       };
 }
 
-export function notification(ctx: Pick<MirrorContext, 'threadId' | 'userId' | 'kind' | 'watch'>, level: NotificationLevel, text: string): AppendInput {
+export function notification(ctx: Pick<MirrorContext, 'threadId' | 'workspaceId' | 'kind' | 'watch'>, level: NotificationLevel, text: string): AppendInput {
   return {
     type: THREAD_NOTIFICATION,
     actor: 'agent',
     agentName: ctx.kind,
-    userId: ctx.userId,
+    workspaceId: ctx.workspaceId,
     threadId: ctx.threadId,
     payload: { level: clamp(level, ctx.watch.notification), text },
   };
@@ -98,7 +98,7 @@ function askWords(item: Extract<RemoteItem, { kind: 'ask.opened' }>): string {
 }
 
 export function mirrorRead(read: RemoteRead, ctx: MirrorContext): MirrorResult {
-  const { threadId, userId, kind } = ctx;
+  const { threadId, workspaceId, kind } = ctx;
   const events: AppendInput[] = [];
   let watch: WatchState = { ...ctx.watch, openAsks: [...ctx.watch.openAsks], resolvedAsks: [...ctx.watch.resolvedAsks] };
   let activity = false;
@@ -108,9 +108,9 @@ export function mirrorRead(read: RemoteRead, ctx: MirrorContext): MirrorResult {
   // taken.
   const erroredTurns = new Set<string>();
   let currentTurnId: string | null = null;
-  const author = (): Pick<AppendInput, 'actor' | 'agentName' | 'userId' | 'threadId'> => ({ actor: 'agent', agentName: kind, userId, threadId });
-  const says = (level: NotificationLevel, text: string) => events.push(notification({ threadId, userId, kind, watch }, level, text));
-  const tells = (text: string) => events.push(agentText({ threadId, userId, kind, watch }, text));
+  const author = (): Pick<AppendInput, 'actor' | 'agentName' | 'workspaceId' | 'threadId'> => ({ actor: 'agent', agentName: kind, workspaceId, threadId });
+  const says = (level: NotificationLevel, text: string) => events.push(notification({ threadId, workspaceId, kind, watch }, level, text));
+  const tells = (text: string) => events.push(agentText({ threadId, workspaceId, kind, watch }, text));
   // A turn that failed: the notification says so (the owner of an ordinary
   // thread reads it in the thread and the bell); the parent of a headless
   // thread is told as well — it is waiting for a reply, and none is coming.
@@ -156,7 +156,7 @@ export function mirrorRead(read: RemoteRead, ctx: MirrorContext): MirrorResult {
         events.push({
           type: 'user.message',
           actor: 'user',
-          userId,
+          workspaceId,
           threadId,
           payload: { text: item.text, source: 'remote', identity: { username: item.author ?? 'external' } },
         });

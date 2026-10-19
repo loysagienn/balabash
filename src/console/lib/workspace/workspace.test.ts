@@ -38,16 +38,16 @@ describe('the tab’s workspace', () => {
     const tab = memory({ 'balabash.workspace': 'tab-ws' });
     const browser = memory({ 'balabash.lastWorkspace': 'last-ws' });
 
-    assert.deepEqual(bootWorkspace('https://c.test/secrets/r1?ws=link-ws#f', { tab, browser }), { userId: 'link-ws', cleaned: '/secrets/r1#f' });
+    assert.deepEqual(bootWorkspace('https://c.test/secrets/r1?ws=link-ws#f', { tab, browser }), { workspaceId: 'link-ws', cleaned: '/secrets/r1#f' });
     assert.equal(tab.items.get('balabash.workspace'), 'link-ws');
     assert.equal(currentWorkspace(), 'link-ws');
 
-    assert.deepEqual(bootWorkspace('https://c.test/threads?status=active&ws=x', { tab: memory(), browser }), { userId: 'x', cleaned: '/threads?status=active' });
-    assert.deepEqual(bootWorkspace('https://c.test/threads', { tab: memory({ 'balabash.workspace': 'tab-ws' }), browser }), { userId: 'tab-ws', cleaned: null });
-    assert.deepEqual(bootWorkspace('https://c.test/', { tab: memory(), browser }), { userId: 'last-ws', cleaned: null });
-    assert.deepEqual(bootWorkspace('https://c.test/', { tab: memory(), browser: memory() }), { userId: null, cleaned: null });
+    assert.deepEqual(bootWorkspace('https://c.test/threads?status=active&ws=x', { tab: memory(), browser }), { workspaceId: 'x', cleaned: '/threads?status=active' });
+    assert.deepEqual(bootWorkspace('https://c.test/threads', { tab: memory({ 'balabash.workspace': 'tab-ws' }), browser }), { workspaceId: 'tab-ws', cleaned: null });
+    assert.deepEqual(bootWorkspace('https://c.test/', { tab: memory(), browser }), { workspaceId: 'last-ws', cleaned: null });
+    assert.deepEqual(bootWorkspace('https://c.test/', { tab: memory(), browser: memory() }), { workspaceId: null, cleaned: null });
     // Storage that refuses is storage that remembers nothing.
-    assert.deepEqual(bootWorkspace('https://c.test/', { tab: refusing, browser: refusing }), { userId: null, cleaned: null });
+    assert.deepEqual(bootWorkspace('https://c.test/', { tab: refusing, browser: refusing }), { workspaceId: null, cleaned: null });
   });
 
   it('the confirmed workspace is the tab’s, and the browser’s last only while the tab is in front', () => {
@@ -73,10 +73,10 @@ describe('the tab’s workspace', () => {
     const tab = memory();
     const browser = memory();
 
-    prepareSwitch('w2', { kind: 'signed-in', back: { userId: 'w1', name: 'Personal' } }, { tab, browser });
+    prepareSwitch('w2', { kind: 'signed-in', back: { workspaceId: 'w1', name: 'Personal' } }, { tab, browser });
     assert.equal(tab.items.get('balabash.workspace'), 'w2');
     assert.equal(browser.items.get('balabash.lastWorkspace'), 'w2');
-    assert.deepEqual(takeFlash(tab), { kind: 'signed-in', back: { userId: 'w1', name: 'Personal' } });
+    assert.deepEqual(takeFlash(tab), { kind: 'signed-in', back: { workspaceId: 'w1', name: 'Personal' } });
     assert.equal(takeFlash(tab), null);
 
     tab.items.set('balabash.workspaceFlash', '{broken');
@@ -105,12 +105,12 @@ describe('the tab’s workspace', () => {
 });
 
 describe('the switcher’s list', () => {
-  const me: MeResponse = { userId: 'p', workspaceName: 'Personal (renamed)', operatorName: 'Vladimir', mainThreadId: 't' };
+  const me: MeResponse = { workspaceId: 'p', workspaceName: 'Personal (renamed)', operatorName: 'Vladimir', mainThreadId: 't' };
   const list: WorkspacesResponse = {
     current: 'p',
     workspaces: [
-      { userId: 'p', workspaceName: 'Personal', operatorName: 'Vladimir', signedInAt: new Date(1), loginSource: 'console' },
-      { userId: 'f', workspaceName: null, operatorName: null, signedInAt: new Date(2), loginSource: 'telegram' },
+      { workspaceId: 'p', workspaceName: 'Personal', operatorName: 'Vladimir', signedInAt: new Date(1), loginSource: 'console' },
+      { workspaceId: 'f', workspaceName: null, operatorName: null, signedInAt: new Date(2), loginSource: 'telegram' },
     ],
   };
 
@@ -118,7 +118,7 @@ describe('the switcher’s list', () => {
     const items = workspaceItems(me, list, { p: 6, f: 3 });
 
     assert.deepEqual(
-      items.map(item => [item.userId, item.name, item.operator, item.color, item.current]),
+      items.map(item => [item.workspaceId, item.name, item.operator, item.color, item.current]),
       [
         ['p', 'Personal (renamed)', 'Vladimir', 6, true],
         ['f', 'Workspace', null, 3, false],
@@ -129,14 +129,14 @@ describe('the switcher’s list', () => {
   it('without the list (loading, failed, an older server) — the tab’s own alone', () => {
     assert.deepEqual(workspaceIds(me, undefined), ['p']);
     assert.deepEqual(
-      workspaceItems(me, undefined, { p: 2 }).map(item => [item.userId, item.name, item.current, item.signedInAt]),
+      workspaceItems(me, undefined, { p: 2 }).map(item => [item.workspaceId, item.name, item.current, item.signedInAt]),
       [['p', 'Personal (renamed)', true, null]],
     );
   });
 
   it('a code’s workspace: the tab’s own — nothing; a known one — a switch; a new one — added', () => {
     assert.deepEqual(addOutcome('p', 'p', ['p', 'f']), { kind: 'same' });
-    assert.deepEqual(addOutcome('f', 'p', ['p', 'f']), { kind: 'switch', userId: 'f' });
-    assert.deepEqual(addOutcome('n', 'p', ['p', 'f']), { kind: 'added', userId: 'n' });
+    assert.deepEqual(addOutcome('f', 'p', ['p', 'f']), { kind: 'switch', workspaceId: 'f' });
+    assert.deepEqual(addOutcome('n', 'p', ['p', 'f']), { kind: 'added', workspaceId: 'n' });
   });
 });

@@ -33,20 +33,20 @@ before(async () => {
 after(() => stand.stop());
 
 async function newWorkspace(workspaceName: string): Promise<string> {
-  return (await prisma.user.create({ data: { workspaceName } })).id;
+  return (await prisma.workspace.create({ data: { workspaceName } })).id;
 }
 
-// A browser of its own: a fresh session signed in to `userId`.
-async function newBrowser(userId: string): Promise<string> {
-  const reply = await stand.request('POST', '/api/auth', { body: { code: createAuthCode(userId, 'console') }, cookie: null });
+// A browser of its own: a fresh session signed in to `workspaceId`.
+async function newBrowser(workspaceId: string): Promise<string> {
+  const reply = await stand.request('POST', '/api/auth', { body: { code: createAuthCode(workspaceId, 'console') }, cookie: null });
 
   assert.equal(reply.status, 200, reply.text);
 
   return sessionCookie(reply.headers['set-cookie'] ?? []);
 }
 
-async function signIn(cookie: string, userId: string): Promise<MeResponse> {
-  const reply = await stand.request('POST', '/api/auth', { body: { code: createAuthCode(userId, 'telegram') }, cookie });
+async function signIn(cookie: string, workspaceId: string): Promise<MeResponse> {
+  const reply = await stand.request('POST', '/api/auth', { body: { code: createAuthCode(workspaceId, 'telegram') }, cookie });
 
   assert.equal(reply.status, 200, reply.text);
 
@@ -67,7 +67,7 @@ describe('several workspaces in one browser', () => {
   let stranger: string;
 
   before(async () => {
-    await prisma.user.update({ where: { id: stand.userId }, data: { workspaceName: 'Personal', operatorName: 'Vladimir' } });
+    await prisma.workspace.update({ where: { id: stand.workspaceId }, data: { workspaceName: 'Personal', operatorName: 'Vladimir' } });
     family = await newWorkspace('Family');
     stranger = await newWorkspace('Stranger');
   });
@@ -76,17 +76,17 @@ describe('several workspaces in one browser', () => {
     const before = await prisma.session.count();
     const me = await signIn(stand.cookie, family);
 
-    assert.equal(me.userId, family);
+    assert.equal(me.workspaceId, family);
     assert.equal(me.workspaceName, 'Family');
     assert.equal(await prisma.session.count(), before, 'no second session');
 
     const session = await sessionOf(stand.cookie);
 
-    assert.equal(session.userId, stand.userId, 'the first workspace stays the primary one');
+    assert.equal(session.workspaceId, stand.workspaceId, 'the first workspace stays the primary one');
     assert.deepEqual(
-      (await prisma.sessionWorkspace.findMany({ where: { sessionId: session.id }, orderBy: { createdAt: 'asc' } })).map(row => [row.userId, row.loginSource]),
+      (await prisma.sessionWorkspace.findMany({ where: { sessionId: session.id }, orderBy: { createdAt: 'asc' } })).map(row => [row.workspaceId, row.loginSource]),
       [
-        [stand.userId, 'console'],
+        [stand.workspaceId, 'console'],
         [family, 'telegram'],
       ],
     );
@@ -99,12 +99,12 @@ describe('several workspaces in one browser', () => {
   test('GET /workspaces lists them in order with their names; the request’s workspace is current', async () => {
     const plain = (await stand.request('GET', '/api/workspaces')).json<WorkspacesResponse>();
 
-    assert.equal(plain.current, stand.userId);
+    assert.equal(plain.current, stand.workspaceId);
     assert.deepEqual(
-      plain.workspaces.map(w => ({ userId: w.userId, workspaceName: w.workspaceName, operatorName: w.operatorName, loginSource: w.loginSource, at: w.signedInAt instanceof Date })),
+      plain.workspaces.map(w => ({ workspaceId: w.workspaceId, workspaceName: w.workspaceName, operatorName: w.operatorName, loginSource: w.loginSource, at: w.signedInAt instanceof Date })),
       [
-        { userId: stand.userId, workspaceName: 'Personal', operatorName: 'Vladimir', loginSource: 'console', at: true },
-        { userId: family, workspaceName: 'Family', operatorName: null, loginSource: 'telegram', at: true },
+        { workspaceId: stand.workspaceId, workspaceName: 'Personal', operatorName: 'Vladimir', loginSource: 'console', at: true },
+        { workspaceId: family, workspaceName: 'Family', operatorName: null, loginSource: 'telegram', at: true },
       ],
     );
 
@@ -114,9 +114,9 @@ describe('several workspaces in one browser', () => {
   });
 
   test('a request acts in the workspace it names — by the header or by ?ws=', async () => {
-    assert.equal((await stand.request('GET', '/api/me')).json<MeResponse>().userId, stand.userId);
-    assert.equal((await stand.request('GET', '/api/me', { headers: { [HEADER]: family } })).json<MeResponse>().userId, family);
-    assert.equal((await stand.request('GET', `/api/me?ws=${family}`)).json<MeResponse>().userId, family);
+    assert.equal((await stand.request('GET', '/api/me')).json<MeResponse>().workspaceId, stand.workspaceId);
+    assert.equal((await stand.request('GET', '/api/me', { headers: { [HEADER]: family } })).json<MeResponse>().workspaceId, family);
+    assert.equal((await stand.request('GET', `/api/me?ws=${family}`)).json<MeResponse>().workspaceId, family);
 
     const created = await stand.request('POST', '/api/projects', { body: { title: 'Garden', slug: 'garden', description: 'Family garden.' }, headers: { [HEADER]: family } });
 
@@ -124,7 +124,7 @@ describe('several workspaces in one browser', () => {
 
     const row = await prisma.project.findUniqueOrThrow({ where: { id: created.json<CreateProjectResponse>().project.id } });
 
-    assert.equal(row.userId, family);
+    assert.equal(row.workspaceId, family);
   });
 
   test('a workspace this browser is not signed in to is refused with its own code; /me answers the primary one instead', async () => {
@@ -141,7 +141,7 @@ describe('several workspaces in one browser', () => {
     const me = await stand.request('GET', '/api/me', { headers: { [HEADER]: stranger } });
 
     assert.equal(me.status, 200);
-    assert.equal(me.json<MeResponse>().userId, stand.userId);
+    assert.equal(me.json<MeResponse>().workspaceId, stand.workspaceId);
 
     // No cookie at all is still the plain 401.
     const anonymous = await stand.request('GET', '/api/me', { cookie: null, headers: { [HEADER]: family } });
@@ -151,27 +151,27 @@ describe('several workspaces in one browser', () => {
   });
 
   test('signing out of one workspace leaves the others signed in', async () => {
-    const browser = await newBrowser(stand.userId);
+    const browser = await newBrowser(stand.workspaceId);
 
     await signIn(browser, family);
 
     const out = await stand.request('POST', '/api/logout', { cookie: browser, headers: { [HEADER]: family } });
 
     assert.equal(out.status, 200, out.text);
-    assert.deepEqual(out.json<LogoutResponse>(), { ok: true, signedIn: [stand.userId] });
+    assert.deepEqual(out.json<LogoutResponse>(), { ok: true, signedIn: [stand.workspaceId] });
 
     const gone = await stand.request('GET', '/api/threads', { cookie: browser, headers: { [HEADER]: family } });
 
     assert.equal(gone.status, 401);
     assert.equal(gone.json<ErrorBody>().error.code, 'workspace_signed_out');
-    assert.equal((await stand.request('GET', '/api/me', { cookie: browser })).json<MeResponse>().userId, stand.userId);
+    assert.equal((await stand.request('GET', '/api/me', { cookie: browser })).json<MeResponse>().workspaceId, stand.workspaceId);
 
     // The stand's own browser is another session: Family stays signed in there.
-    assert.equal((await stand.request('GET', '/api/me', { headers: { [HEADER]: family } })).json<MeResponse>().userId, family);
+    assert.equal((await stand.request('GET', '/api/me', { headers: { [HEADER]: family } })).json<MeResponse>().workspaceId, family);
   });
 
   test('signing out of the primary workspace hands the role on; the last one ends the session', async () => {
-    const browser = await newBrowser(stand.userId);
+    const browser = await newBrowser(stand.workspaceId);
 
     await signIn(browser, family);
 
@@ -179,8 +179,8 @@ describe('several workspaces in one browser', () => {
     const first = await stand.request('POST', '/api/logout', { cookie: browser });
 
     assert.deepEqual(first.json<LogoutResponse>(), { ok: true, signedIn: [family] });
-    assert.equal((await prisma.session.findUniqueOrThrow({ where: { id: session.id } })).userId, family);
-    assert.equal((await stand.request('GET', '/api/me', { cookie: browser })).json<MeResponse>().userId, family, 'a request naming nothing acts in the new primary');
+    assert.equal((await prisma.session.findUniqueOrThrow({ where: { id: session.id } })).workspaceId, family);
+    assert.equal((await stand.request('GET', '/api/me', { cookie: browser })).json<MeResponse>().workspaceId, family, 'a request naming nothing acts in the new primary');
 
     const last = await stand.request('POST', '/api/logout', { cookie: browser });
 

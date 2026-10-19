@@ -85,14 +85,14 @@ export type Tx = Prisma.TransactionClient;
 // Row shape used for locking reads; column aliases match the Thread model.
 type ThreadRow = {
   id: string;
-  userId: string;
+  workspaceId: string;
   parentId: string | null;
   status: string;
 };
 
 async function lockThread(tx: Tx, id: string): Promise<ThreadRow | null> {
   const rows = await tx.$queryRaw<ThreadRow[]>`
-    SELECT id, user_id AS "userId", parent_id AS "parentId", status
+    SELECT id, user_id AS "workspaceId", parent_id AS "parentId", status
     FROM threads WHERE id = ${id} FOR UPDATE`;
 
   return rows[0] ?? null;
@@ -105,7 +105,7 @@ async function lockActiveDescendants(tx: Tx, threadId: string): Promise<ThreadRo
       UNION ALL
       SELECT t.id FROM threads t JOIN subtree s ON t.parent_id = s.id
     )
-    SELECT id, user_id AS "userId", parent_id AS "parentId", status
+    SELECT id, user_id AS "workspaceId", parent_id AS "parentId", status
     FROM threads
     WHERE id IN (SELECT id FROM subtree) AND status = 'active'
     ORDER BY created_seq
@@ -118,7 +118,7 @@ async function createEvent(tx: Tx, input: AppendInput): Promise<Event> {
       type: input.type,
       actor: input.actor,
       agentName: input.agentName ?? null,
-      userId: input.userId,
+      workspaceId: input.workspaceId,
       threadId: input.threadId ?? null,
       targetThreadId: input.targetThreadId ?? null,
       payload: input.payload as Prisma.InputJsonValue,
@@ -224,10 +224,10 @@ export async function appendEventIn(tx: Tx, raw: AppendInput): Promise<AppendRes
 
 async function appendThreadStarted(tx: Tx, input: AppendInput): Promise<AppendResult> {
   const threadId = input.threadId!;
-  const { userId, targetThreadId } = input;
+  const { workspaceId, targetThreadId } = input;
 
-  if (!userId) {
-    throw new AppendError('user_required', 'thread.started requires userId');
+  if (!workspaceId) {
+    throw new AppendError('workspace_required', 'thread.started requires workspaceId');
   }
 
   const existing = await tx.thread.findUnique({ where: { id: threadId } });
@@ -246,8 +246,8 @@ async function appendThreadStarted(tx: Tx, input: AppendInput): Promise<AppendRe
       throw new AppendError('target_not_found', `Parent thread ${targetThreadId} does not exist`);
     }
 
-    if (parent.userId !== userId) {
-      throw new AppendError('user_mismatch', `Parent thread belongs to another workspace`);
+    if (parent.workspaceId !== workspaceId) {
+      throw new AppendError('workspace_mismatch', `Parent thread belongs to another workspace`);
     }
 
     if (parent.status !== 'active') {
@@ -256,10 +256,10 @@ async function appendThreadStarted(tx: Tx, input: AppendInput): Promise<AppendRe
   } else {
     // A thread without a parent is the workspace's main thread — eternal and
     // unique (§5.5).
-    const root = await tx.thread.findFirst({ where: { userId, parentId: null } });
+    const root = await tx.thread.findFirst({ where: { workspaceId, parentId: null } });
 
     if (root) {
-      throw new AppendError('root_exists', `Workspace ${userId} already has a main thread (${root.id})`);
+      throw new AppendError('root_exists', `Workspace ${workspaceId} already has a main thread (${root.id})`);
     }
   }
 
@@ -269,7 +269,7 @@ async function appendThreadStarted(tx: Tx, input: AppendInput): Promise<AppendRe
   await tx.thread.create({
     data: {
       id: threadId,
-      userId,
+      workspaceId,
       parentId: targetThreadId ?? null,
       agent,
       title,
@@ -303,8 +303,8 @@ async function appendTerminal(tx: Tx, input: AppendInput): Promise<AppendResult>
     return { written: false, reason: 'already_terminal' };
   }
 
-  if (input.userId !== thread.userId) {
-    throw new AppendError('user_mismatch', `Thread ${threadId} belongs to another workspace`);
+  if (input.workspaceId !== thread.workspaceId) {
+    throw new AppendError('workspace_mismatch', `Thread ${threadId} belongs to another workspace`);
   }
 
   if (input.targetThreadId && input.targetThreadId !== thread.parentId) {
@@ -354,7 +354,7 @@ async function cascadeCancel(tx: Tx, root: ThreadRow, cascadeFromThreadId: strin
     const event = await createEvent(tx, {
       type: THREAD_CANCELLED,
       actor: 'system',
-      userId: root.userId,
+      workspaceId: root.workspaceId,
       threadId: descendant.id,
       targetThreadId: descendant.parentId,
       payload: { reason: 'parent_terminated', cascadeFromThreadId },
@@ -391,8 +391,8 @@ async function appendChildCommand(tx: Tx, input: AppendInput): Promise<AppendRes
     throw new AppendError('one_hop', `${input.type} may only address a direct child`);
   }
 
-  if (target.userId !== input.userId) {
-    throw new AppendError('user_mismatch', `Thread ${targetThreadId} belongs to another workspace`);
+  if (target.workspaceId !== input.workspaceId) {
+    throw new AppendError('workspace_mismatch', `Thread ${targetThreadId} belongs to another workspace`);
   }
 
   if (target.status !== 'active') {
@@ -410,7 +410,7 @@ async function appendChildCommand(tx: Tx, input: AppendInput): Promise<AppendRes
 
 async function appendGeneric(tx: Tx, input: AppendInput): Promise<AppendResult> {
   let resolved: AppendInput = input;
-  const { threadId, userId } = input;
+  const { threadId, workspaceId } = input;
 
   let author: ThreadRow | null = null;
 
@@ -419,15 +419,15 @@ async function appendGeneric(tx: Tx, input: AppendInput): Promise<AppendResult> 
     // soft abort may append its tail), so there is nothing to serialize.
     const thread = await tx.thread.findUnique({
       where: { id: threadId },
-      select: { id: true, userId: true, parentId: true, status: true },
+      select: { id: true, workspaceId: true, parentId: true, status: true },
     });
 
     if (!thread) {
       throw new AppendError('thread_not_found', `Thread ${threadId} does not exist`);
     }
 
-    if (thread.userId !== userId) {
-      throw new AppendError('user_mismatch', `Thread ${threadId} belongs to another workspace`);
+    if (thread.workspaceId !== workspaceId) {
+      throw new AppendError('workspace_mismatch', `Thread ${threadId} belongs to another workspace`);
     }
 
     author = thread;
@@ -461,8 +461,8 @@ async function resolveTarget(tx: Tx, input: AppendInput, author: ThreadRow | nul
     throw new AppendError('target_not_found', `Thread ${targetThreadId} does not exist`);
   }
 
-  if (input.userId !== target.userId) {
-    throw new AppendError('user_mismatch', `Thread ${targetThreadId} belongs to another workspace`);
+  if (input.workspaceId !== target.workspaceId) {
+    throw new AppendError('workspace_mismatch', `Thread ${targetThreadId} belongs to another workspace`);
   }
 
   if (target.status !== 'active') {
@@ -470,10 +470,10 @@ async function resolveTarget(tx: Tx, input: AppendInput, author: ThreadRow | nul
     // user's system journal — so the fact is not lost (e.g. an OAuth callback
     // arriving after the auth thread was cascade-cancelled). The single
     // exception to the one-hop rule.
-    const main = await tx.thread.findFirst({ where: { userId: target.userId, parentId: null } });
+    const main = await tx.thread.findFirst({ where: { workspaceId: target.workspaceId, parentId: null } });
 
     if (!main) {
-      throw new AppendError('no_main_thread', `Workspace ${target.userId} has no main thread to redirect to`);
+      throw new AppendError('no_main_thread', `Workspace ${target.workspaceId} has no main thread to redirect to`);
     }
 
     return {

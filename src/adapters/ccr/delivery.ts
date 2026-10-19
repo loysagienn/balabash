@@ -122,7 +122,7 @@ export function startCcrDelivery({ mux, isThreadBusy, bindThread, releaseThread 
   // consumer machinery: without the binding the whole child conversation
   // has nowhere to go.
   const handleThreadStarted = async (event: Event): Promise<void> => {
-    if (!event.targetThreadId || !event.threadId || !event.userId) {
+    if (!event.targetThreadId || !event.threadId || !event.workspaceId) {
       // A main thread: the coordinator is not a Claude Code session — it
       // lives in the web chat, not in CCR.
       return;

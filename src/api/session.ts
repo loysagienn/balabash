@@ -192,21 +192,21 @@ export async function getSession(ctx: Context): Promise<SessionModel | null> {
  * sets the cookie. This is the ONLY place a session row is born; the
  * workspace the code was for is its first (and primary) workspace.
  */
-export async function createUserSession(ctx: Context, userId: string, loginSource: LoginSource): Promise<SessionModel> {
+export async function createUserSession(ctx: Context, workspaceId: string, loginSource: LoginSource): Promise<SessionModel> {
   const token = generateSessionToken();
 
   const session = await prisma.$transaction(async tx => {
     const row = await tx.session.create({
       data: {
         userAgent: ctx.headers['user-agent'] || '',
-        userId,
+        workspaceId,
         tokenHash: hashSessionToken(token),
         lastUsed: new Date(),
         loginSource,
       },
     });
 
-    await tx.sessionWorkspace.create({ data: { sessionId: row.id, userId, createdAt: row.createdAt, loginSource } });
+    await tx.sessionWorkspace.create({ data: { sessionId: row.id, workspaceId, createdAt: row.createdAt, loginSource } });
 
     return row;
   });
@@ -250,22 +250,22 @@ export function requestedWorkspace(ctx: Context): string | null {
 // null — it names a workspace this session is not signed in to (signed out
 // of it elsewhere, or never signed in here).
 export async function resolveWorkspace(session: SessionModel, requested: string | null): Promise<string | null> {
-  if (!session.userId) {
+  if (!session.workspaceId) {
     return null;
   }
 
-  if (requested === null || requested === session.userId) {
-    return session.userId;
+  if (requested === null || requested === session.workspaceId) {
+    return session.workspaceId;
   }
 
-  const binding = await prisma.sessionWorkspace.findUnique({ where: { sessionId_userId: { sessionId: session.id, userId: requested } } });
+  const binding = await prisma.sessionWorkspace.findUnique({ where: { sessionId_workspaceId: { sessionId: session.id, workspaceId: requested } } });
 
   return binding ? requested : null;
 }
 
 // The workspaces of a session in the order they were signed in to.
 export function listSessionWorkspaces(sessionId: string): Promise<SessionWorkspaceModel[]> {
-  return prisma.sessionWorkspace.findMany({ where: { sessionId }, orderBy: [{ createdAt: 'asc' }, { userId: 'asc' }] });
+  return prisma.sessionWorkspace.findMany({ where: { sessionId }, orderBy: [{ createdAt: 'asc' }, { workspaceId: 'asc' }] });
 }
 
 /**
@@ -273,16 +273,16 @@ export function listSessionWorkspaces(sessionId: string): Promise<SessionWorkspa
  * with a live session adds the workspace to it (signing in to a workspace
  * it already has changes nothing), any other gets a new session.
  */
-export async function signInWorkspace(ctx: Context, userId: string, loginSource: LoginSource): Promise<SessionModel> {
+export async function signInWorkspace(ctx: Context, workspaceId: string, loginSource: LoginSource): Promise<SessionModel> {
   const session = await getSession(ctx);
 
-  if (!session || !session.userId) {
-    return createUserSession(ctx, userId, loginSource);
+  if (!session || !session.workspaceId) {
+    return createUserSession(ctx, workspaceId, loginSource);
   }
 
   await prisma.sessionWorkspace.upsert({
-    where: { sessionId_userId: { sessionId: session.id, userId } },
-    create: { sessionId: session.id, userId, loginSource },
+    where: { sessionId_workspaceId: { sessionId: session.id, workspaceId } },
+    create: { sessionId: session.id, workspaceId, loginSource },
     update: {},
   });
 
@@ -294,19 +294,19 @@ export async function signInWorkspace(ctx: Context, userId: string, loginSource:
  * signed in, in order; the last one gone ends the session itself (the row
  * and the cookie).
  */
-export async function signOutWorkspace(ctx: Context, session: SessionModel, userId: string): Promise<string[]> {
+export async function signOutWorkspace(ctx: Context, session: SessionModel, workspaceId: string): Promise<string[]> {
   const remaining = await prisma.$transaction(async tx => {
-    await tx.sessionWorkspace.deleteMany({ where: { sessionId: session.id, userId } });
+    await tx.sessionWorkspace.deleteMany({ where: { sessionId: session.id, workspaceId } });
 
-    const rows = await tx.sessionWorkspace.findMany({ where: { sessionId: session.id }, orderBy: [{ createdAt: 'asc' }, { userId: 'asc' }] });
+    const rows = await tx.sessionWorkspace.findMany({ where: { sessionId: session.id }, orderBy: [{ createdAt: 'asc' }, { workspaceId: 'asc' }] });
 
     if (rows.length === 0) {
       await tx.session.deleteMany({ where: { id: session.id } });
-    } else if (!rows.some(row => row.userId === session.userId)) {
-      await tx.session.update({ where: { id: session.id }, data: { userId: rows[0]!.userId } });
+    } else if (!rows.some(row => row.workspaceId === session.workspaceId)) {
+      await tx.session.update({ where: { id: session.id }, data: { workspaceId: rows[0]!.workspaceId } });
     }
 
-    return rows.map(row => row.userId);
+    return rows.map(row => row.workspaceId);
   });
 
   if (remaining.length === 0) {

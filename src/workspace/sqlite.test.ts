@@ -163,46 +163,46 @@ describe('_files metadata under a foreign lock', () => {
   test('listDir prunes orphans in one transaction while a writer is busy', async () => {
     // layout.ts resolves from cwd — point it at the scratch root.
     const previousCwd = process.cwd();
-    const userId = 'u1';
+    const workspaceId = 'u1';
     await fs.mkdir(path.join(root, 'data', 'workspace'), { recursive: true });
     process.chdir(root);
 
     try {
-      const userDb = workspaceDbPath(userId);
-      await fs.mkdir(workspaceFilesDir(userId), { recursive: true });
-      await fs.writeFile(path.join(workspaceFilesDir(userId), 'keep.txt'), 'k');
-      await ensureFilesDb(userDb);
-      await upsertMeta(userDb, 'keep.txt', 'Keep', null);
-      await upsertMeta(userDb, 'gone1.txt', 'Gone', null);
-      await upsertMeta(userDb, 'gone2.txt', 'Gone', null);
+      const workspaceDb = workspaceDbPath(workspaceId);
+      await fs.mkdir(workspaceFilesDir(workspaceId), { recursive: true });
+      await fs.writeFile(path.join(workspaceFilesDir(workspaceId), 'keep.txt'), 'k');
+      await ensureFilesDb(workspaceDb);
+      await upsertMeta(workspaceDb, 'keep.txt', 'Keep', null);
+      await upsertMeta(workspaceDb, 'gone1.txt', 'Gone', null);
+      await upsertMeta(workspaceDb, 'gone2.txt', 'Gone', null);
 
-      const userHolder = await holdWriteLock(1_200, userDb);
+      const workspaceHolder = await holdWriteLock(1_200, workspaceDb);
 
-      const listing = await listDir(userId, '');
-      await waitExit(userHolder);
+      const listing = await listDir(workspaceId, '');
+      await waitExit(workspaceHolder);
 
       assert.deepEqual(listing?.files.map(f => f.path), ['keep.txt']);
-      const left = await withWorkspaceDb(userDb, db =>
+      const left = await withWorkspaceDb(workspaceDb, db =>
         (db.prepare('SELECT path FROM _files ORDER BY path').all() as Array<{ path: string }>).map(r => r.path),
       );
       assert.deepEqual(left, ['keep.txt']);
 
-      await deleteMeta(userId, ['keep.txt']);
-      const meta = await withWorkspaceDb(userDb, db => readMeta(db, 'keep.txt'));
+      await deleteMeta(workspaceId, ['keep.txt']);
+      const meta = await withWorkspaceDb(workspaceDb, db => readMeta(db, 'keep.txt'));
       assert.deepEqual(meta, { title: null, description: null });
 
       // Pruning is best-effort: a lock outlasting its short window leaves the
       // orphan rows to the indexer, and the listing still answers promptly.
-      await upsertMeta(userDb, 'gone3.txt', 'Gone', null);
-      const longHolder = await holdWriteLock(3_500, userDb);
+      await upsertMeta(workspaceDb, 'gone3.txt', 'Gone', null);
+      const longHolder = await holdWriteLock(3_500, workspaceDb);
       const startedAt = Date.now();
-      const listingUnderLock = await listDir(userId, '');
+      const listingUnderLock = await listDir(workspaceId, '');
       const elapsed = Date.now() - startedAt;
       await waitExit(longHolder);
 
       assert.deepEqual(listingUnderLock?.files.map(f => f.path), ['keep.txt']);
       assert.ok(elapsed >= 2_000 && elapsed < 3_400, `gave up pruning after its window (${elapsed} ms)`);
-      const leftover = await withWorkspaceDb(userDb, db =>
+      const leftover = await withWorkspaceDb(workspaceDb, db =>
         (db.prepare('SELECT path FROM _files ORDER BY path').all() as Array<{ path: string }>).map(r => r.path),
       );
       assert.deepEqual(leftover, ['gone3.txt']);

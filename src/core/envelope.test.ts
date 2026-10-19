@@ -18,14 +18,14 @@ describe('registry events in the envelope', () => {
   test('the names of Settings changing is canonical, written by the operator', () => {
     assert.equal(isCanonicalType('settings.updated'), true);
     assert.equal(isCanonicalType('settings.cleared'), false);
-    validateEnvelope({ type: 'settings.updated', actor: 'user', userId: 'u', payload: { workspaceName: 'Home', operatorName: null } });
+    validateEnvelope({ type: 'settings.updated', actor: 'user', workspaceId: 'u', payload: { workspaceName: 'Home', operatorName: null } });
   });
 
   test('any actor may write them; a thread needs its user', () => {
-    validateEnvelope({ type: 'project.created', actor: 'agent', agentName: 'coordinator', userId: 'u', threadId: 'main', payload: {} });
-    validateEnvelope({ type: 'app.published', actor: 'user', userId: 'u', payload: {} });
-    validateEnvelope({ type: 'schedule.task.cancelled', actor: 'system', userId: 'u', payload: {} });
-    assert.throws(() => validateEnvelope({ type: 'project.created', actor: 'agent', userId: 'u', threadId: 'main', payload: {} }), AppendError);
+    validateEnvelope({ type: 'project.created', actor: 'agent', agentName: 'coordinator', workspaceId: 'u', threadId: 'main', payload: {} });
+    validateEnvelope({ type: 'app.published', actor: 'user', workspaceId: 'u', payload: {} });
+    validateEnvelope({ type: 'schedule.task.cancelled', actor: 'system', workspaceId: 'u', payload: {} });
+    assert.throws(() => validateEnvelope({ type: 'project.created', actor: 'agent', workspaceId: 'u', threadId: 'main', payload: {} }), AppendError);
   });
 
   test('project and app are reserved first segments (no agent may be named so)', () => {

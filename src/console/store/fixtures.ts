@@ -18,7 +18,7 @@ export function event(partial: Partial<Event> & { type: string }): Event {
     id: partial.id ?? `ev-${seq}`,
     actor: partial.actor ?? 'agent',
     agentName: partial.agentName ?? (partial.actor === 'user' || partial.actor === 'system' ? null : 'engineer'),
-    userId: partial.userId ?? 'u1',
+    workspaceId: partial.workspaceId ?? 'u1',
     threadId: partial.threadId ?? null,
     targetThreadId: partial.targetThreadId ?? null,
     payload: partial.payload ?? {},
@@ -32,7 +32,7 @@ export function thread(partial: Partial<Thread> & { id: string }): Thread {
   const createdAt = partial.createdAt ?? new Date(1_700_000_000_000);
 
   return {
-    userId: 'u1',
+    workspaceId: 'u1',
     parentId: 'main',
     agent: 'engineer',
     title: null,
@@ -50,7 +50,7 @@ export function thread(partial: Partial<Thread> & { id: string }): Thread {
   };
 }
 
-export const ME = { userId: 'u1', workspaceName: 'Workspace', operatorName: null, mainThreadId: 'main' };
+export const ME = { workspaceId: 'u1', workspaceName: 'Workspace', operatorName: null, mainThreadId: 'main' };
 
 export function snapshot(partial: Partial<SnapshotResponse> = {}): SnapshotResponse {
   return {

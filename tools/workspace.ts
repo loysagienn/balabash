@@ -1,13 +1,13 @@
-// Workspace data workbench, the part every agent gets: the per-user SQLite
+// Workspace data workbench, the part every agent gets: the per-workspace SQLite
 // database (tables = datasets) and the bridge between the workspace file area
 // and Balabash file storage. The file-area hands (read/write/list/delete,
 // run_script) live in the separate workspace_files server — granted only to
 // agents without native file tools.
 //
-// Layout on disk (per userId, taken from MCP request _meta, never from args):
-//   data/workspace/<userId>/workspace.sqlite  — the database (+ _files metadata table)
-//   data/workspace/<userId>/files/            — file area
-//   data/workspace/<userId>/tmp/              — transient inline-script files
+// Layout on disk (per workspaceId, taken from MCP request _meta, never from args):
+//   data/workspace/<workspaceId>/workspace.sqlite  — the database (+ _files metadata table)
+//   data/workspace/<workspaceId>/files/            — file area
+//   data/workspace/<workspaceId>/tmp/              — transient inline-script files
 //
 // Tools: data_query (any SQL, capped results), workspace_export_file (file
 // area -> storage, returns a fileId) and workspace_import_file (storage ->
@@ -25,7 +25,7 @@ import { ToolError, toErrorResult, toStructuredResult } from '../src/capabilitie
 import type { LocalToolFilesApi } from '../src/capabilities/local-tool-source.ts';
 import { guessContentType, placeImport, sanitizeRelPath } from '../src/workspace/files.ts';
 import { queryInChild } from '../src/workspace/child.ts';
-import { callerUserId, ensureWorkspace, serveMcp, type Workspace } from './workspace_shared.ts';
+import { callerWorkspaceId, ensureWorkspace, serveMcp, type Workspace } from './workspace_shared.ts';
 
 // data_query result caps: the query result is the model's window into the
 // data — it must stay a window, not a firehose.
@@ -86,7 +86,7 @@ function createMcpServer(filesApi: LocalToolFilesApi) {
     },
     async ({ sql }, extra) => {
       try {
-        const workspace = await ensureWorkspace(callerUserId(extra));
+        const workspace = await ensureWorkspace(callerWorkspaceId(extra));
         return toStructuredResult(await runQuery(workspace, sql));
       } catch (error) {
         return toErrorResult(error);
@@ -116,8 +116,8 @@ function createMcpServer(filesApi: LocalToolFilesApi) {
     },
     async ({ path: rawPath, filename, content_type }, extra) => {
       try {
-        const userId = callerUserId(extra);
-        const workspace = await ensureWorkspace(userId);
+        const workspaceId = callerWorkspaceId(extra);
+        const workspace = await ensureWorkspace(workspaceId);
         const relPath = sanitizeRelPath(rawPath);
         const absPath = path.join(workspace.filesDir, relPath);
 
@@ -131,7 +131,7 @@ function createMcpServer(filesApi: LocalToolFilesApi) {
 
         const stored = await filesApi.ingest({
           body: createReadStream(absPath),
-          userId,
+          workspaceId,
           originalFilename,
           contentType,
           sizeBytes: stats.size,
@@ -168,8 +168,8 @@ function createMcpServer(filesApi: LocalToolFilesApi) {
     },
     async ({ fileId: rawFileId, path: rawPath }, extra) => {
       try {
-        const userId = callerUserId(extra);
-        const workspace = await ensureWorkspace(userId);
+        const workspaceId = callerWorkspaceId(extra);
+        const workspace = await ensureWorkspace(workspaceId);
         const fileId = rawFileId.trim();
 
         if (!fileId) {
@@ -179,7 +179,7 @@ function createMcpServer(filesApi: LocalToolFilesApi) {
         // Workspace boundary: a foreign file reads as missing, same as an
         // unknown id — existence outside the workspace is not leaked.
         const file = await filesApi.get(fileId).catch(() => null);
-        if (!file || file.userId !== userId) {
+        if (!file || file.workspaceId !== workspaceId) {
           throw new ToolError(`File "${fileId}" not found.`);
         }
 
@@ -220,7 +220,7 @@ function createMcpServer(filesApi: LocalToolFilesApi) {
           throw error;
         }
 
-        const placed = await placeImport(userId, wanted, temp, hash.digest('hex'));
+        const placed = await placeImport(workspaceId, wanted, temp, hash.digest('hex'));
 
         return toStructuredResult({
           path: placed.path,

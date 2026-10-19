@@ -11,7 +11,7 @@ import { appendEvent } from '../core/append.ts';
 import type { ServerToolOutcome } from './tool-manager.ts';
 
 export type ToolCallJournalContext = {
-  userId: string;
+  workspaceId: string;
   threadId: string;
   agentName: string;
 };
@@ -28,7 +28,7 @@ export async function callToolJournaled(
       type,
       actor: 'agent',
       agentName: ctx.agentName,
-      userId: ctx.userId,
+      workspaceId: ctx.workspaceId,
       threadId: ctx.threadId,
       payload,
     });

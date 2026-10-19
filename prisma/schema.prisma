@@ -25,22 +25,22 @@ model EventConsumer {
 // thread, targetThreadId the addressee (strictly one hop up or down the
 // thread tree, validated on append).
 model Event {
-  seq           BigInt @id @default(autoincrement()) // global order + consumer cursor
-  id            String @unique @default(uuid()) // stable reference (refs, delivery idempotency)
-  type          String // canonical type (§4.2) or agent domain type '<agent>.*'
-  actor         String // 'user' | 'system' | 'agent'
-  agentName     String? @map("agent_name") // agent name when actor='agent' (runId is a payload detail)
-  userId        String? @map("user_id") // workspace; null = installation-level event
-  threadId      String? @map("thread_id") // author's thread; null = event outside threads
+  seq            BigInt  @id @default(autoincrement()) // global order + consumer cursor
+  id             String  @unique @default(uuid()) // stable reference (refs, delivery idempotency)
+  type           String // canonical type (§4.2) or agent domain type '<agent>.*'
+  actor          String // 'user' | 'system' | 'agent'
+  agentName      String? @map("agent_name") // agent name when actor='agent' (runId is a payload detail)
+  workspaceId    String? @map("user_id") // workspace; null = installation-level event
+  threadId       String? @map("thread_id") // author's thread; null = event outside threads
   targetThreadId String? @map("target_thread_id") // addressee thread, one hop (§4.3)
-  payload       Json
-  schemaVersion Int    @default(1) @map("schema_version")
+  payload        Json
+  schemaVersion  Int     @default(1) @map("schema_version")
 
   createdAt DateTime @default(now()) @map("created_at")
 
   @@index([threadId, seq])
   @@index([targetThreadId, seq])
-  @@index([userId, seq])
+  @@index([workspaceId, seq])
   @@index([type, seq])
   @@map("events")
 }
@@ -50,19 +50,19 @@ model Event {
 // lifecycle event; rebuildable from the log (scripts/rebuild-threads).
 // Never import this model outside src/core.
 model Thread {
-  id       String  @id
-  userId   String  @map("user_id")
-  parentId String? @map("parent_id") // null = the workspace's main thread
-  agent    String
-  title    String?
+  id          String  @id
+  workspaceId String  @map("user_id")
+  parentId    String? @map("parent_id") // null = the workspace's main thread
+  agent       String
+  title       String?
   // Retrospective self-description (~300 chars) written by the thread's own
   // thread.completed; stays null for threads terminated from outside.
   description String?
-  status   String // 'active' | 'completed' | 'failed' | 'cancelled'
-  summary  Json? // terminal summary {text, fileIds?, refs?} for completed threads
+  status      String // 'active' | 'completed' | 'failed' | 'cancelled'
+  summary     Json? // terminal summary {text, fileIds?, refs?} for completed threads
   // The project the thread works for — named at spawn (thread.started
   // payload projectId); null for threads outside any project.
-  projectId String? @map("project_id")
+  projectId   String? @map("project_id")
 
   createdSeq  BigInt  @map("created_seq") // seq of thread.started
   terminalSeq BigInt? @map("terminal_seq") // seq of the terminal event
@@ -70,25 +70,25 @@ model Thread {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  @@index([userId, status])
+  @@index([workspaceId, status])
   @@index([parentId, status])
-  @@index([userId, parentId])
-  @@index([userId, projectId])
+  @@index([workspaceId, parentId])
+  @@index([workspaceId, projectId])
   @@map("threads")
 }
 
-// A user is a workspace: the isolation and trust boundary, owner of threads,
+// A workspace: the isolation and trust boundary, owner of threads,
 // files and connections (§6). The human behind it is not modeled;
 // TELEGRAM_ALLOWED_LOGINS is an activator, not a table.
-model User {
-  id        String   @id @default(uuid())
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+model Workspace {
+  id            String   @id @default(uuid())
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
   // The workspace's own name and the operator's name, set in the console's
   // Settings (PATCH /api/settings). Null until set: the workspace then goes
   // by the bound Telegram group's title, the operator has no name.
-  workspaceName String? @map("workspace_name")
-  operatorName  String? @map("operator_name")
+  workspaceName String?  @map("workspace_name")
+  operatorName  String?  @map("operator_name")
 
   @@map("users")
 }
@@ -97,11 +97,11 @@ model User {
 // A group the bot was added to but nobody activated stays unbound and fully
 // ignored — there is no one to attribute events to.
 model TelegramGroup {
-  chatId    BigInt   @id @map("chat_id")
-  userId    String?  @unique @map("user_id")
-  status    String // 'unbound' | 'active'
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  chatId      BigInt   @id @map("chat_id")
+  workspaceId String?  @unique @map("user_id")
+  status      String // 'unbound' | 'active'
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
 
   @@map("telegram_groups")
 }
@@ -133,20 +133,20 @@ model TelegramDelivery {
 }
 
 model Session {
-  id        String    @id @default(uuid())
-  createdAt DateTime  @default(now()) @map("created_at")
-  lastUsed  DateTime? @map("last_used")
-  userAgent String?   @map("user_agent")
-  userId    String?   @map("user_id")
-  language  String?   @map("language")
-  tokenHash String?   @unique @map("token_hash")
-  rotatedAt DateTime? @map("rotated_at")
+  id          String    @id @default(uuid())
+  createdAt   DateTime  @default(now()) @map("created_at")
+  lastUsed    DateTime? @map("last_used")
+  userAgent   String?   @map("user_agent")
+  workspaceId String?   @map("user_id")
+  language    String?   @map("language")
+  tokenHash   String?   @unique @map("token_hash")
+  rotatedAt   DateTime? @map("rotated_at")
   // Where the one-time code this session was born from came from:
   // 'telegram' (the /auth_code command in the bound group) or 'console'
   // (printed into the server log); null for sessions born before the column.
-  loginSource String? @map("login_source")
+  loginSource String?   @map("login_source")
 
-  @@index([userId])
+  @@index([workspaceId])
   @@index([lastUsed])
   @@index([createdAt])
   @@index([rotatedAt])
@@ -162,14 +162,14 @@ model Session {
 // workspace act in it.
 model SessionWorkspace {
   sessionId   String   @map("session_id")
-  userId      String   @map("user_id")
+  workspaceId String   @map("user_id")
   createdAt   DateTime @default(now()) @map("created_at")
   // Where the code that signed this workspace in came from: 'telegram' or
   // 'console' (as web_sessions.login_source).
   loginSource String?  @map("login_source")
 
-  @@id([sessionId, userId])
-  @@index([userId])
+  @@id([sessionId, workspaceId])
+  @@index([workspaceId])
   @@map("web_session_workspaces")
 }
 
@@ -201,16 +201,16 @@ model CcrDelivery {
   @@map("ccr_deliveries")
 }
 
-// Per-user authorization state for an external MCP server with auth: "user".
+// Per-workspace authorization state for an external MCP server with auth: "user".
 // Secret material (tokens, PKCE verifier) lives only here and never enters the
 // event log — the connection lifecycle is mirrored there as sanitized
 // connection.* events living in the auth thread.
 model Connection {
   id           String   @id @default(uuid())
-  userId       String   @map("user_id")
+  workspaceId  String   @map("user_id")
   threadId     String?  @map("thread_id") // thread that initiated the flow; connection.* events are addressed to it
   server       String // mcp-servers config name
-  accountKey   String   @map("account_key") // immutable mnemonic slug — the account's address within (user, server)
+  accountKey   String   @map("account_key") // immutable mnemonic slug — the account's address within (workspace, server)
   displayName  String   @map("display_name") // renameable human-readable label
   status       String // 'pending' | 'connected' | 'reauthorization_required'
   identityId   String?  @map("identity_id") // machine part of the provider identity (identity probe result)
@@ -223,15 +223,15 @@ model Connection {
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
 
-  @@unique([userId, server, accountKey])
-  // Twin guard: one row per provider identity within (user, server). Postgres
+  @@unique([workspaceId, server, accountKey])
+  // Twin guard: one row per provider identity within (workspace, server). Postgres
   // treats NULLs as distinct — identity-less rows never conflict.
-  @@unique([userId, server, identityId])
+  @@unique([workspaceId, server, identityId])
   @@map("connections")
 }
 
 // Installation-level OAuth client registrations obtained via Dynamic Client
-// Registration, one per external server. Shared by every user: users differ in
+// Registration, one per external server. Shared by every workspace: workspaces differ in
 // their Connection rows, not in the client the installation acts as.
 model OauthClient {
   server            String   @id
@@ -247,15 +247,15 @@ model OauthClient {
 // credentials go directly to OauthClient; only this opaque nonce is exposed
 // in the link handed to the operator.
 model OauthClientRequest {
-  id        String   @id @default(uuid())
-  userId    String   @map("user_id")
-  threadId  String?  @map("thread_id") // thread that issued the link; oauth_client.provisioned is addressed to it
-  server    String
-  nonce     String   @unique
-  expiresAt DateTime @map("expires_at")
-  createdAt DateTime @default(now()) @map("created_at")
+  id          String   @id @default(uuid())
+  workspaceId String   @map("user_id")
+  threadId    String?  @map("thread_id") // thread that issued the link; oauth_client.provisioned is addressed to it
+  server      String
+  nonce       String   @unique
+  expiresAt   DateTime @map("expires_at")
+  createdAt   DateTime @default(now()) @map("created_at")
 
-  @@unique([userId, server])
+  @@unique([workspaceId, server])
   @@map("oauth_client_requests")
 }
 
@@ -276,16 +276,16 @@ model ExternalServerSecret {
 // used by one external MCP server. Field metadata is non-secret; submitted
 // values go directly to ExternalServerSecret.
 model ExternalServerSecretRequest {
-  id        String   @id @default(uuid())
-  userId    String   @map("user_id")
-  threadId  String?  @map("thread_id") // thread that issued the link; secrets.provisioned is addressed to it
-  server    String
-  nonce     String   @unique
-  fields    Json
-  expiresAt DateTime @map("expires_at")
-  createdAt DateTime @default(now()) @map("created_at")
+  id          String   @id @default(uuid())
+  workspaceId String   @map("user_id")
+  threadId    String?  @map("thread_id") // thread that issued the link; secrets.provisioned is addressed to it
+  server      String
+  nonce       String   @unique
+  fields      Json
+  expiresAt   DateTime @map("expires_at")
+  createdAt   DateTime @default(now()) @map("created_at")
 
-  @@unique([userId, server])
+  @@unique([workspaceId, server])
   @@map("external_server_secret_requests")
 }
 
@@ -297,10 +297,10 @@ model LlmRequest {
   id        String   @id @default(uuid())
   createdAt DateTime @default(now()) @map("created_at")
 
-  userId   String  @map("user_id")
-  threadId String? @map("thread_id") // the run's thread this request served
-  provider String // 'openai' | 'anthropic'
-  model    String // model as reported by the response, not the requested alias
+  workspaceId String  @map("user_id")
+  threadId    String? @map("thread_id") // the run's thread this request served
+  provider    String // 'openai' | 'anthropic'
+  model       String // model as reported by the response, not the requested alias
 
   responseId         String? @map("response_id")
   previousResponseId String? @map("previous_response_id")
@@ -331,7 +331,7 @@ model LlmRequest {
 
   rawUsage Json? @map("raw_usage") // usage + tool_usage exactly as returned by the API
 
-  @@index([userId, createdAt])
+  @@index([workspaceId, createdAt])
   @@index([threadId, createdAt])
   @@map("llm_requests")
 }
@@ -349,27 +349,27 @@ model LlmRequest {
 // sleeping). note/code runs leave no rows behind — a task's only memory is
 // the events it pushes; command runs are journaled in JobRun.
 model ScheduledTask {
-  id          String    @id @default(uuid())
-  slug        String    @unique
-  userId      String    @map("user_id")
-  name        String
-  description String?
-  kind        String // 'note' | 'code' | 'command'
-  cron        String? // cron expression, evaluated in config.scheduleTimezone
-  at          DateTime? // one-shot "not before T"; consumed on fire
-  note        String? // the payload of a 'note' task; ignored for 'code'/'command'
+  id              String    @id @default(uuid())
+  slug            String    @unique
+  workspaceId     String    @map("user_id")
+  name            String
+  description     String?
+  kind            String // 'note' | 'code' | 'command'
+  cron            String? // cron expression, evaluated in config.scheduleTimezone
+  at              DateTime? // one-shot "not before T"; consumed on fire
+  note            String? // the payload of a 'note' task; ignored for 'code'/'command'
   // kind 'command' only: the shell command (`bash -c`), its working
   // directory (relative to the workspace file area; null = the root), the
   // kill timeout and whether a successful run pushes a schedule.fired event
   // (failures always surface as system.exception).
   command         String?
   cwd             String?
-  timeoutMs       Int?     @map("timeout_ms")
-  reportOnSuccess Boolean  @default(false) @map("report_on_success")
-  createdBy   String?   @map("created_by") // who registered the task: the agent, or "operator" from the console
-  createdAt   DateTime  @default(now()) @map("created_at")
+  timeoutMs       Int?      @map("timeout_ms")
+  reportOnSuccess Boolean   @default(false) @map("report_on_success")
+  createdBy       String?   @map("created_by") // who registered the task: the agent, or "operator" from the console
+  createdAt       DateTime  @default(now()) @map("created_at")
 
-  @@index([userId])
+  @@index([workspaceId])
   @@map("scheduled_tasks")
 }
 
@@ -384,9 +384,9 @@ model ScheduledTask {
 // time: a one-shot task's row is deleted before the run, and a recreated slug
 // may carry a different command — the journal keeps what actually executed.
 model JobRun {
-  id     String @id
-  userId String @map("user_id")
-  slug   String
+  id          String @id
+  workspaceId String @map("user_id")
+  slug        String
 
   command String
   cwd     String? // workspace-relative working directory; null = the file-area root
@@ -406,7 +406,7 @@ model JobRun {
   stdoutTruncated Boolean @default(false) @map("stdout_truncated")
   stderrTruncated Boolean @default(false) @map("stderr_truncated")
 
-  @@index([userId, startedAt])
+  @@index([workspaceId, startedAt])
   @@index([slug, startedAt])
   @@map("job_runs")
 }
@@ -423,20 +423,20 @@ model JobRun {
 // the project" and drives sorting (the @updatedAt bump on rename/archive is
 // an accepted blur).
 model Project {
-  id          String   @id @default(uuid())
-  userId      String   @map("user_id")
+  id          String    @id @default(uuid())
+  workspaceId String    @map("user_id")
   title       String
   slug        String
   description String
-  archived    Boolean  @default(false)
+  archived    Boolean   @default(false)
   // When the project was archived: set by archive, cleared by unarchive.
   // Null on a live project — and on one archived before the date was kept.
   archivedAt  DateTime? @map("archived_at")
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
 
-  @@unique([userId, title])
-  @@unique([userId, slug])
+  @@unique([workspaceId, title])
+  @@unique([workspaceId, slug])
   @@map("projects")
 }
 
@@ -447,13 +447,13 @@ model Project {
 // unpublish deletes the row. One publication per app folder: changing the
 // slug is unpublish + publish.
 model AppPublication {
-  id        String   @id @default(uuid())
-  slug      String   @unique // [a-z0-9-], reserved names rejected at publish
-  userId    String   @map("user_id")
-  path      String // workspace-relative path of the app folder
-  createdAt DateTime @default(now()) @map("created_at")
+  id          String   @id @default(uuid())
+  slug        String   @unique // [a-z0-9-], reserved names rejected at publish
+  workspaceId String   @map("user_id")
+  path        String // workspace-relative path of the app folder
+  createdAt   DateTime @default(now()) @map("created_at")
 
-  @@unique([userId, path])
+  @@unique([workspaceId, path])
   @@map("app_publications")
 }
 
@@ -461,7 +461,7 @@ model File {
   id               String    @id @default(uuid())
   bucket           String
   objectKey        String    @map("object_key")
-  userId           String?   @map("user_id")
+  workspaceId      String?   @map("user_id")
   contentType      String?   @map("content_type")
   sizeBytes        Int?      @map("size_bytes")
   etag             String?
@@ -490,24 +490,24 @@ model File {
 // atomically with each verb's effect, so a restart replays what was never
 // delivered to the session.
 model RemoteThread {
-  threadId        String    @id @map("thread_id")
-  userId          String    @map("user_id")
-  kind            String // catalog name of the remote agent
-  ref             String // the session in the external system (opaque to the core)
-  link            String? // where a human looks at it in the external UI
-  cursor          Json? // the driver's opaque position, advanced atomically with the mirror events
-  watch           Json? // the engine's watch state (src/remote/store.ts)
-  phase           String    @default("idle") // working | idle | asking | paused | finishing | closed | gone
-  inboundSeq      BigInt    @default(0) @map("inbound_seq") // the last inbound event (seq) applied to the session
-  nextPollAt      DateTime  @default(now()) @map("next_poll_at")
-  pollFailures    Int       @default(0) @map("poll_failures")
-  lastActivityAt  DateTime  @default(now()) @map("last_activity_at") // last turn boundary / inbound — the pause clock
-  createdAt       DateTime  @default(now()) @map("created_at")
-  updatedAt       DateTime  @updatedAt @map("updated_at")
+  threadId       String   @id @map("thread_id")
+  workspaceId    String   @map("user_id")
+  kind           String // catalog name of the remote agent
+  ref            String // the session in the external system (opaque to the core)
+  link           String? // where a human looks at it in the external UI
+  cursor         Json? // the driver's opaque position, advanced atomically with the mirror events
+  watch          Json? // the engine's watch state (src/remote/store.ts)
+  phase          String   @default("idle") // working | idle | asking | paused | finishing | closed | gone
+  inboundSeq     BigInt   @default(0) @map("inbound_seq") // the last inbound event (seq) applied to the session
+  nextPollAt     DateTime @default(now()) @map("next_poll_at")
+  pollFailures   Int      @default(0) @map("poll_failures")
+  lastActivityAt DateTime @default(now()) @map("last_activity_at") // last turn boundary / inbound — the pause clock
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
 
   // remote_threads_kind_ref_live_key: UNIQUE (kind, ref) WHERE phase NOT IN ('closed', 'gone') — in the migration.
   @@index([kind, ref])
   @@index([phase, nextPollAt])
-  @@index([userId, phase])
+  @@index([workspaceId, phase])
   @@map("remote_threads")
 }

@@ -13,7 +13,7 @@ import { getLlmBackend } from './backend.ts';
 const PROVIDER = getLlmBackend().kind;
 
 type LlmMetricsContext = {
-  userId: string;
+  workspaceId: string;
   threadId: string;
   lastSeq: bigint;
   requestedModel: string;
@@ -55,7 +55,7 @@ function asInt(value: unknown): number | null {
  * Per-turn measurement scope: counts inner-loop iterations and records one
  * llm_requests row per API call, including calls that threw.
  */
-export function startLlmRequestMetrics({ userId, threadId, lastSeq, requestedModel, purpose }: LlmMetricsContext) {
+export function startLlmRequestMetrics({ workspaceId, threadId, lastSeq, requestedModel, purpose }: LlmMetricsContext) {
   let iteration = 0;
 
   const record = (data: Prisma.LlmRequestCreateInput) => {
@@ -76,7 +76,7 @@ export function startLlmRequestMetrics({ userId, threadId, lastSeq, requestedMod
       response = await call();
     } catch (error) {
       record({
-        userId,
+        workspaceId,
         threadId,
         provider: PROVIDER,
         model: requestedModel,
@@ -99,7 +99,7 @@ export function startLlmRequestMetrics({ userId, threadId, lastSeq, requestedMod
     const extra = response as unknown as { service_tier?: unknown; tool_usage?: unknown; prompt_cache_diagnostics?: unknown };
 
     record({
-      userId,
+      workspaceId,
       threadId,
       provider: PROVIDER,
       model: response.model || requestedModel,

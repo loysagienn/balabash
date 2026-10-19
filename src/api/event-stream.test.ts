@@ -16,15 +16,15 @@ const log: Event[] = [];
 let server: ReturnType<Koa['listen']>;
 let port: number;
 
-function push(seq: number, userId: string | null, type = 'thread.progress'): Event {
+function push(seq: number, workspaceId: string | null, type = 'thread.progress'): Event {
   const event: Event = {
     seq: BigInt(seq),
     id: `e${seq}`,
     type,
     actor: 'agent',
     agentName: 'engineer',
-    userId,
-    threadId: userId ? 't' : null,
+    workspaceId,
+    threadId: workspaceId ? 't' : null,
     targetThreadId: null,
     payload: { text: `event ${seq}` },
     schemaVersion: 1,
@@ -102,7 +102,7 @@ describe('GET /api/events/stream', () => {
     const handler = createEventStreamHandler({ hub, readAfter: async (seq, limit) => log.filter(event => event.seq > seq).slice(0, limit), heartbeatMs: 60_000, pageSize: 2 });
 
     app.use(async (ctx, next) => {
-      ctx.state.userId = 'u1';
+      ctx.state.workspaceId = 'u1';
       await next();
     });
     app.use(async ctx => {
@@ -141,7 +141,7 @@ describe('GET /api/events/stream', () => {
     const data = frames.filter(frame => frame.data);
 
     assert.deepEqual(
-      data.map(frame => [frame.id, frame.data!.seq, frame.data!.userId]),
+      data.map(frame => [frame.id, frame.data!.seq, frame.data!.workspaceId]),
       [
         ['2', 2n, 'u1'],
         ['4', 4n, null],

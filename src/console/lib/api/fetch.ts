@@ -103,10 +103,10 @@ export function createFetch({ onUnauthorized, workspace }: FetchOptions = {}) {
   return async function apiFetch<T>(path: string, init?: FetchInit): Promise<T> {
     const hasBody = init?.body !== undefined;
     const hasText = init?.text !== undefined;
-    const userId = workspace?.() ?? null;
+    const workspaceId = workspace?.() ?? null;
     const headers: Record<string, string> = {
       ...(hasBody ? { 'content-type': 'application/json' } : hasText ? { 'content-type': 'text/plain; charset=utf-8' } : {}),
-      ...(userId ? { [WORKSPACE_HEADER]: userId } : {}),
+      ...(workspaceId ? { [WORKSPACE_HEADER]: workspaceId } : {}),
       ...init?.headers,
     };
 

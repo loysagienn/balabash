@@ -41,7 +41,7 @@ after(() => stand.stop());
 async function startChild(agent: string, title: string, policy: JsonObject = {}): Promise<string> {
   const id = randomUUID();
 
-  await appendEvent({ type: 'thread.started', actor: 'system', userId: stand.userId, threadId: id, targetThreadId: stand.mainThreadId, payload: { agent, title, ...policy } });
+  await appendEvent({ type: 'thread.started', actor: 'system', workspaceId: stand.workspaceId, threadId: id, targetThreadId: stand.mainThreadId, payload: { agent, title, ...policy } });
 
   return id;
 }
@@ -49,7 +49,7 @@ async function startChild(agent: string, title: string, policy: JsonObject = {})
 function close(threadId: string, status: Exclude<ThreadStatus, 'active'>) {
   const payload: JsonObject = status === 'completed' ? { summary: { text: 'done' } } : status === 'failed' ? { error: 'boom' } : { reason: 'stop' };
 
-  return appendEvent({ type: `thread.${status}`, actor: 'system', userId: stand.userId, threadId, payload });
+  return appendEvent({ type: `thread.${status}`, actor: 'system', workspaceId: stand.workspaceId, threadId, payload });
 }
 
 async function headOfLog(): Promise<bigint> {
@@ -71,24 +71,24 @@ describe('countThreadsAt', () => {
     await close(browserCancelled, 'cancelled');
 
     const head = await headOfLog();
-    const all = await countThreadsAt(stand.userId, {});
+    const all = await countThreadsAt(stand.workspaceId, {});
 
     // The main thread is the third active one.
     assert.deepEqual(all, { counts: { active: 3, completed: 1, failed: 1, cancelled: 1 }, asOfSeq: head });
 
-    const engineer = await countThreadsAt(stand.userId, { agent: 'engineer' });
+    const engineer = await countThreadsAt(stand.workspaceId, { agent: 'engineer' });
 
     assert.deepEqual(engineer.counts, { active: 1, completed: 1, failed: 1, cancelled: 0 });
 
-    const roots = await countThreadsAt(stand.userId, { parentId: null });
+    const roots = await countThreadsAt(stand.workspaceId, { parentId: null });
 
     assert.deepEqual(roots.counts, { active: 1, completed: 0, failed: 0, cancelled: 0 });
 
-    const search = await countThreadsAt(stand.userId, { q: 'browser' });
+    const search = await countThreadsAt(stand.workspaceId, { q: 'browser' });
 
     assert.deepEqual(search.counts, { active: 1, completed: 0, failed: 0, cancelled: 1 });
 
-    const future = await countThreadsAt(stand.userId, { createdAtGte: new Date(Date.now() + 60 * 60 * 1000) });
+    const future = await countThreadsAt(stand.workspaceId, { createdAtGte: new Date(Date.now() + 60 * 60 * 1000) });
 
     assert.deepEqual(future, { counts: { active: 0, completed: 0, failed: 0, cancelled: 0 }, asOfSeq: head });
 
@@ -98,7 +98,7 @@ describe('countThreadsAt', () => {
   });
 
   test('a terminal committed between the two reads is out of the counts as it is out of the stamp — the snapshot', async () => {
-    const sample = await countBetweenReads(() => countThreadsAt(stand.userId, { agent: 'wedge-rr' }), 'wedge-rr');
+    const sample = await countBetweenReads(() => countThreadsAt(stand.workspaceId, { agent: 'wedge-rr' }), 'wedge-rr');
 
     assert.deepEqual(sample.counts, { active: 1, completed: 0, failed: 0, cancelled: 0 }, `at seq ${sample.asOfSeq}`);
   });
@@ -108,7 +108,7 @@ describe('countThreadsAt', () => {
       prisma.$transaction(
         async tx => {
           const { _max } = await tx.event.aggregate({ _max: { seq: true } });
-          const counts = await countThreads(stand.userId, { agent: 'wedge-rc' }, tx);
+          const counts = await countThreads(stand.workspaceId, { agent: 'wedge-rc' }, tx);
 
           return { counts, asOfSeq: _max.seq ?? 0n };
         },
@@ -131,7 +131,7 @@ describe('countThreadsAt', () => {
     let closing = true;
     const counting = (async () => {
       while (closing) {
-        samples.push(await countThreadsAt(stand.userId, { agent: 'burst' }));
+        samples.push(await countThreadsAt(stand.workspaceId, { agent: 'burst' }));
       }
     })();
 
@@ -152,7 +152,7 @@ describe('countThreadsAt', () => {
       await counting;
     }
 
-    samples.push(await countThreadsAt(stand.userId, { agent: 'burst' }));
+    samples.push(await countThreadsAt(stand.workspaceId, { agent: 'burst' }));
 
     const terminals = await prisma.event.findMany({
       where: { threadId: { in: burst }, type: { in: ['thread.completed', 'thread.failed', 'thread.cancelled'] } },
@@ -207,7 +207,7 @@ async function countBetweenReads<T extends { counts: ThreadCounts; asOfSeq: bigi
   });
   const held = logTransaction(
     async tx => {
-      const result = await appendEventIn(tx, { type: 'thread.completed', actor: 'system', userId: stand.userId, threadId, payload: { summary: { text: 'between' } } });
+      const result = await appendEventIn(tx, { type: 'thread.completed', actor: 'system', workspaceId: stand.workspaceId, threadId, payload: { summary: { text: 'between' } } });
 
       assert.equal(result.written, true);
       prepared();
@@ -280,14 +280,14 @@ describe('the rows of threads', () => {
     const policy = (list: { id: string; headless: boolean }[]) => Object.fromEntries(list.filter(t => [headless, surfaced, silent, odd].includes(t.id)).map(t => [t.id, t.headless]));
     const expected = { [headless]: true, [surfaced]: false, [silent]: false, [odd]: false };
 
-    assert.deepEqual(policy(await threads.listThreads(stand.userId, { agent: 'gardener' })), { [headless]: true });
-    assert.deepEqual(policy(await threads.listThreads(stand.userId, { q: 'by its start' })), { [headless]: true, [surfaced]: false });
-    assert.deepEqual(policy(await threads.listThreads(stand.userId)), expected);
+    assert.deepEqual(policy(await threads.listThreads(stand.workspaceId, { agent: 'gardener' })), { [headless]: true });
+    assert.deepEqual(policy(await threads.listThreads(stand.workspaceId, { q: 'by its start' })), { [headless]: true, [surfaced]: false });
+    assert.deepEqual(policy(await threads.listThreads(stand.workspaceId)), expected);
     assert.deepEqual(policy(await threads.listActiveChildThreads()), expected);
     assert.deepEqual(policy(await threads.activeSubtree(stand.mainThreadId)), expected);
     assert.equal((await threads.getThread(headless))?.headless, true);
     assert.equal((await threads.getThread(silent))?.headless, false);
-    assert.equal((await threads.getMainThread(stand.userId))?.headless, false);
+    assert.equal((await threads.getMainThread(stand.workspaceId))?.headless, false);
     assert.equal((await threads.getThread(randomUUID())), null);
     // The projection's row does not store it: the join is the only source.
     assert.equal('headless' in (await prisma.thread.findUniqueOrThrow({ where: { id: headless } })), false);
@@ -301,9 +301,9 @@ describe('the rows of threads', () => {
     assert.equal((await threads.getThread(remote))?.remote, true);
     assert.equal((await threads.getThread(local))?.remote, false);
     assert.equal((await threads.getThread(odd))?.remote, false);
-    assert.equal((await threads.getMainThread(stand.userId))?.remote, false);
+    assert.equal((await threads.getMainThread(stand.workspaceId))?.remote, false);
     assert.deepEqual(
-      Object.fromEntries((await threads.listThreads(stand.userId, { q: 'session' })).map(t => [t.id, t.remote])),
+      Object.fromEntries((await threads.listThreads(stand.workspaceId, { q: 'session' })).map(t => [t.id, t.remote])),
       { [remote]: true, [local]: false },
     );
     assert.equal('remote' in (await prisma.thread.findUniqueOrThrow({ where: { id: remote } })), false);
@@ -315,7 +315,7 @@ describe('the rows of threads', () => {
     const parent = await startChild('manager', 'A parent');
     const remoteChild = randomUUID();
 
-    await appendEvent({ type: 'thread.started', actor: 'system', userId: stand.userId, threadId: remoteChild, targetThreadId: parent, payload: { agent: 'fake_agent', remote: true } });
+    await appendEvent({ type: 'thread.started', actor: 'system', workspaceId: stand.workspaceId, threadId: remoteChild, targetThreadId: parent, payload: { agent: 'fake_agent', remote: true } });
 
     const activeIds = (await threads.listActiveChildThreads()).map(t => t.id);
 
@@ -343,12 +343,12 @@ describe('the rows of threads', () => {
 
     await close(newer, 'completed');
 
-    const first = await threads.getLatestTerminalThread(stand.userId);
+    const first = await threads.getLatestTerminalThread(stand.workspaceId);
 
     assert.equal(first?.id, newer);
 
     const ended = await close(older, 'failed');
-    const last = await threads.getLatestTerminalThread(stand.userId);
+    const last = await threads.getLatestTerminalThread(stand.workspaceId);
 
     assert.equal(last?.id, older);
     assert.equal(last?.status, 'failed');

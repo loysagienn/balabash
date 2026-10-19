@@ -150,14 +150,14 @@ function checkParams(endpoint: AppEndpoint, supplied: Record<string, unknown>): 
 // ---------------------------------------------------------------------------
 
 /**
- * Runs one declared endpoint of userId's app. The result shape follows the
+ * Runs one declared endpoint of workspaceId's app. The result shape follows the
  * SDK contract (sdk/data.ts): rows for 'all', one row or null for 'get',
  * {changes, lastInsertRowid} for 'run'. 'bad_params' is the caller's 400;
  * 'busy' is the bulk fence (503, retry later); 'error' is an execution
  * failure (the owner edge may show the message, the public edge must not).
  */
 export async function callAppEndpoint(
-  userId: string,
+  workspaceId: string,
   endpoint: AppEndpoint,
   suppliedParams: Record<string, unknown>,
 ): Promise<EndpointCallOutcome> {
@@ -169,8 +169,8 @@ export async function callAppEndpoint(
 
   const execute = () =>
     statementInChild(
-      workspaceDbPath(userId),
-      workspaceFilesDir(userId),
+      workspaceDbPath(workspaceId),
+      workspaceFilesDir(workspaceId),
       { statement: endpoint.statement, kind: endpoint.kind, params: checked.binds, readOnly: endpoint.bulk },
       endpointCaps(endpoint),
     );

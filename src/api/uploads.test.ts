@@ -34,8 +34,8 @@ before(async () => {
 
   const layout = await import('../workspace/layout.ts');
 
-  filesDir = layout.workspaceFilesDir(stand.userId);
-  tmpDir = layout.workspaceTmpDir(stand.userId);
+  filesDir = layout.workspaceFilesDir(stand.workspaceId);
+  tmpDir = layout.workspaceTmpDir(stand.workspaceId);
 });
 
 after(() => stand.stop());
@@ -243,7 +243,7 @@ describe('uploading an attachment to storage', () => {
 
     const row = await prisma.file.findUnique({ where: { id: file.fileId } });
 
-    assert.equal(row?.userId, stand.userId);
+    assert.equal(row?.workspaceId, stand.workspaceId);
     assert.equal(row?.scope, 'web');
     assert.ok(row?.uploadedAt);
 
@@ -275,7 +275,7 @@ describe('uploading an attachment to storage', () => {
 
     assert.equal(huge.status, 413, huge.body);
 
-    const other = await prisma.user.create({ data: {} });
+    const other = await prisma.workspace.create({ data: {} });
     const foreign = await store('bytes', { 'x-balabash-filename': 'a.txt', 'x-balabash-workspace': other.id });
 
     assert.equal(foreign.status, 401);
@@ -343,9 +343,9 @@ describe('a message with files', () => {
   });
 
   test('a foreign or a missing file refuses the whole message by name, and nothing is written', async () => {
-    const other = await prisma.user.create({ data: {} });
+    const other = await prisma.workspace.create({ data: {} });
     const { ingestFile } = await import('../files/index.ts');
-    const foreign = await ingestFile({ body: 'theirs', userId: other.id, originalFilename: 'theirs.txt', contentType: 'text/plain', scope: 'web' });
+    const foreign = await ingestFile({ body: 'theirs', workspaceId: other.id, originalFilename: 'theirs.txt', contentType: 'text/plain', scope: 'web' });
     const missing = '00000000-0000-4000-8000-000000000000';
     const events = await eventCount();
     const reply = await send({ text: 'with a stranger', fileIds: [pdf, foreign.id, missing] });
@@ -369,9 +369,9 @@ describe('the coordinator hands files to a child', () => {
     const { startThread } = await import('../core/threads.ts');
     const { dispatchCoordinatorFunction } = await import('../coordinator/functions.ts');
     const { ingestFile } = await import('../files/index.ts');
-    const child = await startThread({ userId: stand.userId, parentThreadId: stand.mainThreadId, agent: 'engineer', title: 'with files', actor: 'system' });
-    const own = await ingestFile({ body: 'spec', userId: stand.userId, originalFilename: 'spec.md', contentType: 'text/markdown', scope: 'web' });
-    const ctx = { userId: stand.userId, threadId: stand.mainThreadId };
+    const child = await startThread({ workspaceId: stand.workspaceId, parentThreadId: stand.mainThreadId, agent: 'engineer', title: 'with files', actor: 'system' });
+    const own = await ingestFile({ body: 'spec', workspaceId: stand.workspaceId, originalFilename: 'spec.md', contentType: 'text/markdown', scope: 'web' });
+    const ctx = { workspaceId: stand.workspaceId, threadId: stand.mainThreadId };
     const sent = await dispatchCoordinatorFunction(
       { name: 'send_to_thread', callId: 'c1', arguments: JSON.stringify({ threadId: child.id, text: 'Here is the spec', fileIds: [own.id] }) } as never,
       ctx,
@@ -387,8 +387,8 @@ describe('the coordinator hands files to a child', () => {
       files: [{ fileId: own.id, contentType: 'text/markdown', originalFilename: 'spec.md', sizeBytes: 4 }],
     });
 
-    const other = await prisma.user.create({ data: {} });
-    const foreign = await ingestFile({ body: 'theirs', userId: other.id, originalFilename: 'theirs.md', contentType: 'text/markdown', scope: 'web' });
+    const other = await prisma.workspace.create({ data: {} });
+    const foreign = await ingestFile({ body: 'theirs', workspaceId: other.id, originalFilename: 'theirs.md', contentType: 'text/markdown', scope: 'web' });
     const events = await eventCount();
     const refused = await dispatchCoordinatorFunction(
       { name: 'send_to_thread', callId: 'c2', arguments: JSON.stringify({ threadId: child.id, text: 'And this', fileIds: [foreign.id] }) } as never,
@@ -420,17 +420,17 @@ describe('an import that never overwrites', () => {
     };
 
     const first = await received('version one');
-    const placed = await placeImport(stand.userId, 'imports/plan.pdf', first.temp, first.digest);
+    const placed = await placeImport(stand.workspaceId, 'imports/plan.pdf', first.temp, first.digest);
 
     assert.deepEqual({ path: placed.path, reused: placed.reused }, { path: 'imports/plan.pdf', reused: false });
 
     const again = await received('version one');
-    const same = await placeImport(stand.userId, 'imports/plan.pdf', again.temp, again.digest);
+    const same = await placeImport(stand.workspaceId, 'imports/plan.pdf', again.temp, again.digest);
 
     assert.deepEqual({ path: same.path, reused: same.reused }, { path: 'imports/plan.pdf', reused: true });
 
     const changed = await received('version two');
-    const beside = await placeImport(stand.userId, 'imports/plan.pdf', changed.temp, changed.digest);
+    const beside = await placeImport(stand.workspaceId, 'imports/plan.pdf', changed.temp, changed.digest);
 
     assert.deepEqual({ path: beside.path, reused: beside.reused }, { path: 'imports/plan (2).pdf', reused: false });
     assert.equal(await fs.readFile(path.join(filesDir, 'imports/plan.pdf'), 'utf8'), 'version one');

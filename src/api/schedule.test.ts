@@ -45,26 +45,26 @@ before(async () => {
 
   const { workspaceFilesDir } = await import('../workspace/layout.ts');
 
-  await fs.mkdir(workspaceFilesDir(stand.userId), { recursive: true });
+  await fs.mkdir(workspaceFilesDir(stand.workspaceId), { recursive: true });
 
-  const task = (slug: string, data: Record<string, unknown>) => prisma.scheduledTask.create({ data: { slug, userId: stand.userId, name: slug, kind: 'command', ...data } });
+  const task = (slug: string, data: Record<string, unknown>) => prisma.scheduledTask.create({ data: { slug, workspaceId: stand.workspaceId, name: slug, kind: 'command', ...data } });
 
   await task('remind', { kind: 'note', note: 'Call the electrician', at: at(60), createdBy: 'coordinator' });
   await task('echo-job', { command: "printf 'hello\\n'; printf 'warn\\n' >&2", timeoutMs: 5_000, createdBy: 'engineer' });
   await task('disk-check', { command: 'df -h', cron: '0 */6 * * *' });
   await task('sleeper', { kind: 'code', cron: '0 9 * * *' });
   await task('rotate', { command: 'true', timeoutMs: 5_000 });
-  await prisma.scheduledTask.create({ data: { slug: 'foreign-job', userId: FOREIGN_USER, name: 'Foreign', kind: 'command', command: 'true' } });
+  await prisma.scheduledTask.create({ data: { slug: 'foreign-job', workspaceId: FOREIGN_USER, name: 'Foreign', kind: 'command', command: 'true' } });
 
   const run = (id: string, slug: string, startedAt: Date, data: Record<string, unknown> = {}) =>
-    prisma.jobRun.create({ data: { id, userId: stand.userId, slug, command: 'df -h', trigger: 'cron', status: 'ok', exitCode: 0, startedAt, finishedAt: new Date(startedAt.getTime() + 1_500), durationMs: 1_500, ...data } });
+    prisma.jobRun.create({ data: { id, workspaceId: stand.workspaceId, slug, command: 'df -h', trigger: 'cron', status: 'ok', exitCode: 0, startedAt, finishedAt: new Date(startedAt.getTime() + 1_500), durationMs: 1_500, ...data } });
 
   await run(RUNS.oldest, 'disk-check', at(0), { status: 'failed', exitCode: 1, stderrTail: 'df: /mnt: No such file or directory\n', stdoutTail: 'Filesystem Size Used\n' });
   await run(RUNS.twinA, 'disk-check', at(10));
   await run(RUNS.twinB, 'disk-check', at(10), { trigger: 'manual' });
   await run(RUNS.newest, 'disk-check', at(20), { status: 'timeout', exitCode: null, durationMs: 5_000, stdoutTail: 'x'.repeat(40), stdoutTruncated: true });
   await run(RUNS.other, 'echo-job', at(15), { command: 'echo', durationMs: 20 });
-  await prisma.jobRun.create({ data: { id: RUNS.foreign, userId: FOREIGN_USER, slug: 'foreign-job', command: 'true', trigger: 'cron', status: 'ok', exitCode: 0, startedAt: at(30) } });
+  await prisma.jobRun.create({ data: { id: RUNS.foreign, workspaceId: FOREIGN_USER, slug: 'foreign-job', command: 'true', trigger: 'cron', status: 'ok', exitCode: 0, startedAt: at(30) } });
 });
 
 after(() => stand.stop());
@@ -316,7 +316,7 @@ describe('running and deleting a task over the api', () => {
     // Another hand edits the task the way the tools do: cancel and create again under the same slug.
     await prisma.scheduledTask.delete({ where: { id: before.id } });
 
-    const after = await prisma.scheduledTask.create({ data: { slug: 'rotate', userId: stand.userId, name: 'rotate (edited)', kind: 'command', command: 'exit 3', timeoutMs: 5_000 } });
+    const after = await prisma.scheduledTask.create({ data: { slug: 'rotate', workspaceId: stand.workspaceId, name: 'rotate (edited)', kind: 'command', command: 'exit 3', timeoutMs: 5_000 } });
 
     assert.notEqual(after.id, before.id);
 
@@ -386,7 +386,7 @@ describe('creating a task over the api', () => {
 
     const row = await prisma.scheduledTask.findUniqueOrThrow({ where: { slug: 'console-job' } });
 
-    assert.equal(row.userId, stand.userId);
+    assert.equal(row.workspaceId, stand.workspaceId);
     assert.equal(row.id, task.id);
     assert.equal(row.cwd, null);
 

@@ -141,25 +141,25 @@ export async function listThreadEvents(
 
 // Recall for the pull tools (§5.2): one event by global seq, visible only
 // inside its own workspace.
-export async function getUserEvent(userId: string, seq: bigint): Promise<Event | null> {
-  const row = await prisma.event.findFirst({ where: { userId, seq } });
+export async function getWorkspaceEvent(workspaceId: string, seq: bigint): Promise<Event | null> {
+  const row = await prisma.event.findFirst({ where: { workspaceId, seq } });
 
   return row ? toEvent(row) : null;
 }
 
-type GetUserEventsOptions = {
+type GetWorkspaceEventsOptions = {
   beforeSeq?: bigint;
   limit?: number;
 };
 
 // Paginated feed for the web UI: the workspace's events, newest first.
-export async function getUserEvents(
-  userId: string,
-  { beforeSeq, limit = 50 }: GetUserEventsOptions = {},
+export async function getWorkspaceEvents(
+  workspaceId: string,
+  { beforeSeq, limit = 50 }: GetWorkspaceEventsOptions = {},
 ): Promise<Event[]> {
   const rows = await prisma.event.findMany({
     where: {
-      userId,
+      workspaceId,
       ...(beforeSeq !== undefined ? { seq: { lt: beforeSeq } } : {}),
     },
     orderBy: { seq: 'desc' },

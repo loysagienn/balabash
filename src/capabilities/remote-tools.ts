@@ -56,7 +56,7 @@ export function createRemoteToolServer(): BuiltinToolServer {
         throw new Error('remote_fetch_file requires threadId and path');
       }
 
-      const file = await fetchRemoteFile(threadId, path, { userId: ctx.userId, threadId: ctx.threadId });
+      const file = await fetchRemoteFile(threadId, path, { workspaceId: ctx.workspaceId, threadId: ctx.threadId });
 
       return { fileId: file.id, name: file.originalFilename, contentType: file.contentType, sizeBytes: file.sizeBytes };
     },

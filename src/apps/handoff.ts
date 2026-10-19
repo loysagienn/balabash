@@ -46,13 +46,13 @@ export function createAppsHandoffMiddleware(): (ctx: Context, next: Next) => Pro
 
     const session = await getSession(ctx);
 
-    if (!session || !session.userId) {
+    if (!session || !session.workspaceId) {
       ctx.redirect(`/login?next=${encodeURIComponent(target)}`);
 
       return;
     }
 
-    const token = mintHandoffToken(session.userId);
+    const token = mintHandoffToken(session.workspaceId);
 
     ctx.status = 302;
     ctx.redirect(`https://${appsDomain}/auth?token=${encodeURIComponent(token)}&redirect=${encodeURIComponent(target)}`);

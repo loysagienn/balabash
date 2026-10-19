@@ -147,7 +147,7 @@ async function openThread(payload: JsonObject, parentThreadId = stand.mainThread
   const result = await appendEvent({
     type: 'thread.started',
     actor: 'system',
-    userId: stand.userId,
+    workspaceId: stand.workspaceId,
     threadId,
     targetThreadId: parentThreadId,
     payload: { agent: 'fake_agent', title: 'Remote', remote: true, ...payload },
@@ -172,7 +172,7 @@ async function openThread(payload: JsonObject, parentThreadId = stand.mainThread
 // is handed over, the failure is the thread's terminal.
 async function openFailing(payload: JsonObject): Promise<string> {
   const threadId = randomUUID();
-  const result = await appendEvent({ type: 'thread.started', actor: 'system', userId: stand.userId, threadId, targetThreadId: stand.mainThreadId, payload: { agent: 'fake_agent', title: 'Remote', remote: true, ...payload } });
+  const result = await appendEvent({ type: 'thread.started', actor: 'system', workspaceId: stand.workspaceId, threadId, targetThreadId: stand.mainThreadId, payload: { agent: 'fake_agent', title: 'Remote', remote: true, ...payload } });
 
   assert.ok(result.written);
   assert.ok(await engine.openRemoteThread((await getThread(threadId))!, result.event));
@@ -273,9 +273,9 @@ describe('the remote engine', () => {
 
     await assert.rejects(
       store.advanceRow(threadId, { cursor: 'c-lost' }, [
-        { type: 'agent.message', actor: 'agent', agentName: 'fake_agent', userId: stand.userId, threadId, payload: { content: [{ type: 'text', text: 'first' }] } },
+        { type: 'agent.message', actor: 'agent', agentName: 'fake_agent', workspaceId: stand.workspaceId, threadId, payload: { content: [{ type: 'text', text: 'first' }] } },
         // Invalid: thread.message needs a non-empty text.
-        { type: 'thread.message', actor: 'agent', agentName: 'fake_agent', userId: stand.userId, threadId, targetThreadId: stand.mainThreadId, payload: { text: '' } },
+        { type: 'thread.message', actor: 'agent', agentName: 'fake_agent', workspaceId: stand.workspaceId, threadId, targetThreadId: stand.mainThreadId, payload: { text: '' } },
       ]),
     );
     assert.equal((await store.getRow(threadId))!.cursor, row.cursor);
@@ -289,7 +289,7 @@ describe('the remote engine', () => {
     await pass();
     assert.equal((await store.getRow(threadId))!.phase, 'idle');
 
-    const message = await appendEvent({ type: 'user.message', actor: 'user', userId: stand.userId, threadId, payload: { text: 'and z', source: 'web', files: [{ fileId: 'f1', originalFilename: 'notes.md' }] } });
+    const message = await appendEvent({ type: 'user.message', actor: 'user', workspaceId: stand.workspaceId, threadId, payload: { text: 'and z', source: 'web', files: [{ fileId: 'f1', originalFilename: 'notes.md' }] } });
 
     assert.ok(message.written);
     engine.wake(threadId);
@@ -303,7 +303,7 @@ describe('the remote engine', () => {
     assert.ok(row.watch.ownMessageIds.includes(message.event.id));
     assert.deepEqual((await eventsOf(threadId, ['session.state'])).map(event => event.payload.state), ['run', 'wait', 'run']);
 
-    const foreign = await appendEvent({ type: 'user.message', actor: 'user', userId: stand.userId, threadId, payload: { text: 'from context', source: 'remote', identity: { username: 'alice' } } });
+    const foreign = await appendEvent({ type: 'user.message', actor: 'user', workspaceId: stand.workspaceId, threadId, payload: { text: 'from context', source: 'remote', identity: { username: 'alice' } } });
 
     assert.ok(foreign.written);
     engine.wake(threadId);
@@ -311,7 +311,7 @@ describe('the remote engine', () => {
     assert.equal(session(ref).said.length, 2);
 
     // The parent's thread.message is the owner's voice too.
-    const fromParent = await appendEvent({ type: 'thread.message', actor: 'agent', agentName: 'coordinator', userId: stand.userId, threadId: stand.mainThreadId, targetThreadId: threadId, payload: { text: 'parent says' } });
+    const fromParent = await appendEvent({ type: 'thread.message', actor: 'agent', agentName: 'coordinator', workspaceId: stand.workspaceId, threadId: stand.mainThreadId, targetThreadId: threadId, payload: { text: 'parent says' } });
 
     assert.ok(fromParent.written);
     engine.wake(threadId);
@@ -340,7 +340,7 @@ describe('the remote engine', () => {
       ],
     );
 
-    const decide = await appendEvent({ type: 'thread.decide', actor: 'user', userId: stand.userId, threadId: stand.mainThreadId, targetThreadId: threadId, payload: { askId: 'ask-1', decision: 'allow', identity: { username: 'operator' }, source: 'web' } });
+    const decide = await appendEvent({ type: 'thread.decide', actor: 'user', workspaceId: stand.workspaceId, threadId: stand.mainThreadId, targetThreadId: threadId, payload: { askId: 'ask-1', decision: 'allow', identity: { username: 'operator' }, source: 'web' } });
 
     assert.ok(decide.written);
     engine.wake(threadId);
@@ -372,7 +372,7 @@ describe('the remote engine', () => {
     assert.equal(paused.nextPollAt.getTime() - clock.getTime(), engine.READ_EVERY_MS.paused);
     assert.deepEqual((await eventsOf(threadId, ['session.state'])).map(event => event.payload.state), ['run', 'wait', 'paused']);
 
-    const message = await appendEvent({ type: 'user.message', actor: 'user', userId: stand.userId, threadId, payload: { text: 'wake up' } });
+    const message = await appendEvent({ type: 'user.message', actor: 'user', workspaceId: stand.workspaceId, threadId, payload: { text: 'wake up' } });
 
     assert.ok(message.written);
     engine.wake(threadId);
@@ -480,7 +480,7 @@ describe('the remote engine', () => {
       await pass();
       assert.deepEqual(session('sess-again').readCursors, [{ rows: 7 }]);
 
-      await appendEvent({ type: 'thread.cancelled', actor: 'system', userId: stand.userId, threadId, payload: { reason: 'by mistake' } });
+      await appendEvent({ type: 'thread.cancelled', actor: 'system', workspaceId: stand.workspaceId, threadId, payload: { reason: 'by mistake' } });
       engine.forget(threadId, 'thread.cancelled');
       await engine.settled();
       assert.equal((await store.getRow(threadId))!.phase, 'closed');
@@ -513,7 +513,7 @@ describe('the remote engine', () => {
     });
 
     const threadId = randomUUID();
-    const started = await appendEvent({ type: 'thread.started', actor: 'system', userId: stand.userId, threadId, targetThreadId: stand.mainThreadId, payload: { agent: 'fake_agent', remote: true, input: 'slow open' } });
+    const started = await appendEvent({ type: 'thread.started', actor: 'system', workspaceId: stand.workspaceId, threadId, targetThreadId: stand.mainThreadId, payload: { agent: 'fake_agent', remote: true, input: 'slow open' } });
 
     assert.ok(started.written);
     assert.ok(await engine.openRemoteThread((await getThread(threadId))!, started.event), 'the facade is handed over while the open is in flight');
@@ -540,7 +540,7 @@ describe('the remote engine', () => {
     session(ref).reads.push({ cursor: 'c1', phase: 'working', items: [{ kind: 'text', turnId: 't', text: 'still going' }] });
 
     // The terminal is in the log; no facade in memory saw it (a restart).
-    await appendEvent({ type: 'thread.cancelled', actor: 'system', userId: stand.userId, threadId, payload: { reason: 'cancelled after a restart' } });
+    await appendEvent({ type: 'thread.cancelled', actor: 'system', workspaceId: stand.workspaceId, threadId, payload: { reason: 'cancelled after a restart' } });
     tick(engine.READ_EVERY_MS.working);
     await pass();
 
@@ -551,7 +551,7 @@ describe('the remote engine', () => {
     // The inbound side finds it too.
     const other = await openThread({ input: 'orphaned too' });
 
-    await appendEvent({ type: 'thread.cancelled', actor: 'system', userId: stand.userId, threadId: other.threadId, payload: { reason: 'cancelled' } });
+    await appendEvent({ type: 'thread.cancelled', actor: 'system', workspaceId: stand.workspaceId, threadId: other.threadId, payload: { reason: 'cancelled' } });
     engine.wake(other.threadId);
     await engine.settled();
     assert.equal((await store.getRow(other.threadId))!.phase, 'closed');
@@ -560,11 +560,11 @@ describe('the remote engine', () => {
   test('a parent’s cascade takes the remote child along, row included', async () => {
     const parentId = randomUUID();
 
-    await appendEvent({ type: 'thread.started', actor: 'system', userId: stand.userId, threadId: parentId, targetThreadId: stand.mainThreadId, payload: { agent: 'engineer', title: 'Parent' } });
+    await appendEvent({ type: 'thread.started', actor: 'system', workspaceId: stand.workspaceId, threadId: parentId, targetThreadId: stand.mainThreadId, payload: { agent: 'engineer', title: 'Parent' } });
 
     const { threadId } = await openThread({ input: 'child', headless: true }, parentId);
 
-    await appendEvent({ type: 'thread.cancelled', actor: 'system', userId: stand.userId, threadId: parentId, payload: { reason: 'parent over' } });
+    await appendEvent({ type: 'thread.cancelled', actor: 'system', workspaceId: stand.workspaceId, threadId: parentId, payload: { reason: 'parent over' } });
     assert.equal((await getThread(threadId))!.status, 'cancelled');
     tick(engine.READ_EVERY_MS.working);
     await pass();
@@ -573,7 +573,7 @@ describe('the remote engine', () => {
 
   test('the owner’s message is applied from the log by the row’s position, not from memory: the heart and the boot sweep serve what a dead process left', async () => {
     const { threadId, ref } = await openThread({ input: 'durable' });
-    const first = await appendEvent({ type: 'user.message', actor: 'user', userId: stand.userId, threadId, payload: { text: 'first' } });
+    const first = await appendEvent({ type: 'user.message', actor: 'user', workspaceId: stand.workspaceId, threadId, payload: { text: 'first' } });
 
     assert.ok(first.written);
     // No wake: the process that acknowledged the event in the router died.
@@ -582,7 +582,7 @@ describe('the remote engine', () => {
     assert.deepEqual(session(ref).said.at(-1), { text: 'first', messageId: first.event.id });
     assert.equal((await store.getRow(threadId))!.inboundSeq, first.event.seq);
 
-    const second = await appendEvent({ type: 'user.message', actor: 'user', userId: stand.userId, threadId, payload: { text: 'second' } });
+    const second = await appendEvent({ type: 'user.message', actor: 'user', workspaceId: stand.workspaceId, threadId, payload: { text: 'second' } });
 
     assert.ok(second.written);
     await engine.sweepRemoteThreads();
@@ -616,7 +616,7 @@ describe('the remote engine', () => {
     await until(() => threads.filter(thread => session(thread.ref).readCursors.length === 1).length === engine.READS_IN_FLIGHT, 'the reads in flight');
 
     const fifth = threads.find(thread => session(thread.ref).readCursors.length === 0)!;
-    const message = await appendEvent({ type: 'user.message', actor: 'user', userId: stand.userId, threadId: fifth.threadId, payload: { text: 'while the read waits' } });
+    const message = await appendEvent({ type: 'user.message', actor: 'user', workspaceId: stand.workspaceId, threadId: fifth.threadId, payload: { text: 'while the read waits' } });
 
     assert.ok(message.written);
     engine.wake(fifth.threadId);
@@ -635,7 +635,7 @@ describe('the remote engine', () => {
 
   test('finish: an idle read before the summary’s turn keeps the thread finishing; the deadline completes it', async () => {
     const { threadId, ref } = await openThread({ input: 'patient' });
-    const command = await appendEvent({ type: 'thread.finish', actor: 'user', userId: stand.userId, threadId: stand.mainThreadId, targetThreadId: threadId, payload: {} });
+    const command = await appendEvent({ type: 'thread.finish', actor: 'user', workspaceId: stand.workspaceId, threadId: stand.mainThreadId, targetThreadId: threadId, payload: {} });
 
     assert.ok(command.written);
     engine.wake(threadId);
@@ -651,7 +651,7 @@ describe('the remote engine', () => {
     assert.equal(row.phase, 'finishing');
     assert.ok(row.watch.finish);
 
-    const late = await appendEvent({ type: 'user.message', actor: 'user', userId: stand.userId, threadId, payload: { text: 'too late' } });
+    const late = await appendEvent({ type: 'user.message', actor: 'user', workspaceId: stand.workspaceId, threadId, payload: { text: 'too late' } });
 
     assert.ok(late.written);
     engine.wake(threadId);
@@ -666,7 +666,7 @@ describe('the remote engine', () => {
 
   test('finish: a driver naming no prompt — the first turn after the ask is the summary’s', async () => {
     const { threadId, ref } = await openThread({ input: 'nameless' });
-    const command = await appendEvent({ type: 'thread.finish', actor: 'user', userId: stand.userId, threadId: stand.mainThreadId, targetThreadId: threadId, payload: {} });
+    const command = await appendEvent({ type: 'thread.finish', actor: 'user', workspaceId: stand.workspaceId, threadId: stand.mainThreadId, targetThreadId: threadId, payload: {} });
 
     assert.ok(command.written);
     engine.wake(threadId);
@@ -693,7 +693,7 @@ describe('the remote engine', () => {
   test('pause: only a waiting thread sleeps; a working one is told why', async () => {
     const { threadId, ref } = await openThread({ input: 'busy' });
     const pauseNow = async () => {
-      const command = await appendEvent({ type: 'thread.pause', actor: 'user', userId: stand.userId, threadId: stand.mainThreadId, targetThreadId: threadId, payload: {} });
+      const command = await appendEvent({ type: 'thread.pause', actor: 'user', workspaceId: stand.workspaceId, threadId: stand.mainThreadId, targetThreadId: threadId, payload: {} });
 
       assert.ok(command.written);
       engine.wake(threadId);
@@ -716,11 +716,11 @@ describe('the remote engine', () => {
 
     for (let i = 0; i < engine.ROWS_PER_PASS; i += 1) {
       const threadId = randomUUID();
-      const started = await appendEvent({ type: 'thread.started', actor: 'system', userId: stand.userId, threadId, targetThreadId: stand.mainThreadId, payload: { agent: 'dead_agent', title: 'Dead', remote: true, input: 'x' } });
+      const started = await appendEvent({ type: 'thread.started', actor: 'system', workspaceId: stand.workspaceId, threadId, targetThreadId: stand.mainThreadId, payload: { agent: 'dead_agent', title: 'Dead', remote: true, input: 'x' } });
 
       assert.ok(started.written);
       await store.createRow(
-        { threadId, userId: stand.userId, kind: 'dead_agent', ref: `dead-${i}`, link: null, watch: store.initialWatch({ headless: false, parentId: stand.mainThreadId, notification: 'normal' }), phase: 'working', inboundSeq: started.event.seq, nextPollAt: new Date(clock.getTime() - 60_000) },
+        { threadId, workspaceId: stand.workspaceId, kind: 'dead_agent', ref: `dead-${i}`, link: null, watch: store.initialWatch({ headless: false, parentId: stand.mainThreadId, notification: 'normal' }), phase: 'working', inboundSeq: started.event.seq, nextPollAt: new Date(clock.getTime() - 60_000) },
         [],
       );
     }
@@ -761,7 +761,7 @@ describe('the remote engine', () => {
     await engine.settled();
     assert.equal(session(ref).stopped, 1);
 
-    const cancelled = await appendEvent({ type: 'thread.cancelled', actor: 'system', userId: stand.userId, threadId, payload: { reason: 'cancelled by the operator' } });
+    const cancelled = await appendEvent({ type: 'thread.cancelled', actor: 'system', workspaceId: stand.workspaceId, threadId, payload: { reason: 'cancelled by the operator' } });
 
     assert.ok(cancelled.written);
     engine.forget(threadId, 'thread.cancelled');
@@ -777,7 +777,7 @@ describe('the remote engine', () => {
 
   test('finish: the session is asked for a closing summary in a turn of its own, whose text completes the thread', async () => {
     const { threadId, ref } = await openThread({ input: 'wrap up' });
-    const command = await appendEvent({ type: 'thread.finish', actor: 'user', userId: stand.userId, threadId: stand.mainThreadId, targetThreadId: threadId, payload: { reason: 'finished_by_user' } });
+    const command = await appendEvent({ type: 'thread.finish', actor: 'user', workspaceId: stand.workspaceId, threadId: stand.mainThreadId, targetThreadId: threadId, payload: { reason: 'finished_by_user' } });
 
     assert.ok(command.written);
     engine.wake(threadId);
@@ -789,7 +789,7 @@ describe('the remote engine', () => {
     assert.equal((await store.getRow(threadId))!.phase, 'finishing');
 
     // A message meanwhile is not passed on.
-    const late = await appendEvent({ type: 'user.message', actor: 'user', userId: stand.userId, threadId, payload: { text: 'one more thing' } });
+    const late = await appendEvent({ type: 'user.message', actor: 'user', workspaceId: stand.workspaceId, threadId, payload: { text: 'one more thing' } });
 
     assert.ok(late.written);
     engine.wake(threadId);
@@ -823,7 +823,7 @@ describe('the remote engine', () => {
     session(ref).reads.push({ cursor: 'c1', phase: 'idle', items: [{ kind: 'text', turnId: 't', text: 'last words' }, { kind: 'turn.finished', turnId: 't', outcome: 'completed', text: 'last words' }] });
     await pass();
 
-    const command = await appendEvent({ type: 'thread.finish', actor: 'user', userId: stand.userId, threadId: stand.mainThreadId, targetThreadId: threadId, payload: {} });
+    const command = await appendEvent({ type: 'thread.finish', actor: 'user', workspaceId: stand.workspaceId, threadId: stand.mainThreadId, targetThreadId: threadId, payload: {} });
 
     assert.ok(command.written);
     engine.wake(threadId);
@@ -839,11 +839,11 @@ describe('the remote engine', () => {
 
   test('an attachment of the owner’s message reaches the driver as a stored file; a message of files alone is said too', async () => {
     const { threadId, ref } = await openThread({ input: 'take this' });
-    const stored = await ingestFile({ body: 'hello', originalFilename: 'notes.md', contentType: 'text/markdown', userId: stand.userId, scope: 'web' });
+    const stored = await ingestFile({ body: 'hello', originalFilename: 'notes.md', contentType: 'text/markdown', workspaceId: stand.workspaceId, scope: 'web' });
     const message = await appendEvent({
       type: 'user.message',
       actor: 'user',
-      userId: stand.userId,
+      workspaceId: stand.workspaceId,
       threadId,
       payload: { text: null, files: [{ fileId: stored.id, originalFilename: 'notes.md' }, { fileId: randomUUID(), originalFilename: 'gone.md' }] },
     });
@@ -855,7 +855,7 @@ describe('the remote engine', () => {
   });
 
   test('an attachment of the spawn prompt reaches the driver at open as a stored file; a missing one is skipped', async () => {
-    const stored = await ingestFile({ body: 'brief', originalFilename: 'brief.md', contentType: 'text/markdown', userId: stand.userId, scope: 'web' });
+    const stored = await ingestFile({ body: 'brief', originalFilename: 'brief.md', contentType: 'text/markdown', workspaceId: stand.workspaceId, scope: 'web' });
     const { started, ref } = await openThread({ input: 'read the brief', fileIds: [stored.id, randomUUID()], files: [{ fileId: stored.id, originalFilename: 'brief.md' }, { fileId: randomUUID(), originalFilename: 'gone.md' }] });
 
     assert.deepEqual(session(ref).said, [{ text: 'read the brief', messageId: started.id, files: ['brief.md'] }]);
@@ -866,25 +866,25 @@ describe('the remote engine', () => {
 
     session(ref).files['/workspace/out/report.txt'] = 'the report';
 
-    const file = await engine.fetchRemoteFile(threadId, '/workspace/out/report.txt', { userId: stand.userId, threadId: stand.mainThreadId });
+    const file = await engine.fetchRemoteFile(threadId, '/workspace/out/report.txt', { workspaceId: stand.workspaceId, threadId: stand.mainThreadId });
 
     assert.equal(file.originalFilename, 'report.txt');
-    assert.equal(file.userId, stand.userId);
+    assert.equal(file.workspaceId, stand.workspaceId);
     assert.equal(file.scope, 'fake_agent');
 
     const shown = (await eventsOf(threadId, ['agent.message'])).at(-1)!.payload as { content: Array<{ type: string; fileId?: string; text?: string }> };
 
     assert.deepEqual(shown.content.map(block => [block.type, block.fileId ?? block.text]), [['text', '/workspace/out/report.txt'], ['file', file.id]]);
 
-    await assert.rejects(engine.fetchRemoteFile(threadId, '/workspace/out/report.txt', { userId: stand.userId, threadId: randomUUID() }), /not a child of the calling thread/);
-    await assert.rejects(engine.fetchRemoteFile(threadId, '/workspace/none', { userId: stand.userId, threadId: stand.mainThreadId }), /not available/);
-    await assert.rejects(engine.fetchRemoteFile(randomUUID(), '/x', { userId: stand.userId, threadId: stand.mainThreadId }), /not a remote thread/);
+    await assert.rejects(engine.fetchRemoteFile(threadId, '/workspace/out/report.txt', { workspaceId: stand.workspaceId, threadId: randomUUID() }), /not a child of the calling thread/);
+    await assert.rejects(engine.fetchRemoteFile(threadId, '/workspace/none', { workspaceId: stand.workspaceId, threadId: stand.mainThreadId }), /not available/);
+    await assert.rejects(engine.fetchRemoteFile(randomUUID(), '/x', { workspaceId: stand.workspaceId, threadId: stand.mainThreadId }), /not a remote thread/);
   });
 
   test('a headless thread tells its parent and relays an ask to it', async () => {
     const parentId = randomUUID();
 
-    await appendEvent({ type: 'thread.started', actor: 'system', userId: stand.userId, threadId: parentId, targetThreadId: stand.mainThreadId, payload: { agent: 'engineer', title: 'Parent' } });
+    await appendEvent({ type: 'thread.started', actor: 'system', workspaceId: stand.workspaceId, threadId: parentId, targetThreadId: stand.mainThreadId, payload: { agent: 'engineer', title: 'Parent' } });
 
     const { threadId, ref } = await openThread({ input: 'for the parent', headless: true }, parentId);
 
@@ -907,7 +907,7 @@ describe('the remote engine', () => {
     assert.deepEqual(await eventsOf(threadId, ['agent.message', 'thread.notification']), []);
 
     // A sign-in is not decided by a word.
-    const decide = await appendEvent({ type: 'thread.decide', actor: 'agent', agentName: 'engineer', userId: stand.userId, threadId: parentId, targetThreadId: threadId, payload: { askId: 'ask-h', decision: 'allow' } });
+    const decide = await appendEvent({ type: 'thread.decide', actor: 'agent', agentName: 'engineer', workspaceId: stand.workspaceId, threadId: parentId, targetThreadId: threadId, payload: { askId: 'ask-h', decision: 'allow' } });
 
     assert.ok(decide.written);
     engine.wake(threadId);

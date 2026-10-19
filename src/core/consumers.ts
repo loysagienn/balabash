@@ -53,12 +53,12 @@ async function setConsumerCursor(name: string, lastSeq: bigint): Promise<void> {
 // A crash after handling but before advancing the cursor can redeliver, so
 // handlers must remain idempotent.
 async function reportHandlerError(consumerName: string, event: Event, error: unknown): Promise<void> {
-  const mainThread = event.userId ? await getMainThread(event.userId) : null;
+  const mainThread = event.workspaceId ? await getMainThread(event.workspaceId) : null;
 
   await appendEvent({
     type: SYSTEM_EXCEPTION,
     actor: 'system',
-    userId: event.userId,
+    workspaceId: event.workspaceId,
     threadId: mainThread?.id ?? null,
     payload: {
       consumerName,
@@ -77,7 +77,7 @@ async function reportOutage(consumerName: string, outage: ConsumerOutage): Promi
   await appendEvent({
     type: SYSTEM_EXCEPTION,
     actor: 'system',
-    userId: null,
+    workspaceId: null,
     payload: {
       scope: 'consumer-outage',
       consumerName,

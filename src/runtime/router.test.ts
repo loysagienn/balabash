@@ -80,7 +80,7 @@ async function until(condition: () => boolean, what: string, timeoutMs = 5000): 
 async function startChild(policy: Record<string, unknown>): Promise<string> {
   const id = randomUUID();
 
-  await appendEvent({ type: 'thread.started', actor: 'system', userId: stand.userId, threadId: id, targetThreadId: stand.mainThreadId, payload: { agent: 'fake_agent', title: 'x', ...policy } });
+  await appendEvent({ type: 'thread.started', actor: 'system', workspaceId: stand.workspaceId, threadId: id, targetThreadId: stand.mainThreadId, payload: { agent: 'fake_agent', title: 'x', ...policy } });
 
   return id;
 }
@@ -102,13 +102,13 @@ describe('the thread router', () => {
     // The process restarted: no run in memory.
     runs.dropRun(remote);
 
-    await appendEvent({ type: 'thread.interrupt', actor: 'user', userId: stand.userId, threadId: stand.mainThreadId, targetThreadId: remote, payload: { reason: 'stop' } });
+    await appendEvent({ type: 'thread.interrupt', actor: 'user', workspaceId: stand.workspaceId, threadId: stand.mainThreadId, targetThreadId: remote, payload: { reason: 'stop' } });
     await until(() => log.includes(`interrupt ${remote}`), 'the interrupt');
     assert.ok(log.includes(`rise ${remote}`));
     assert.ok(runs.getRun(remote));
 
     runs.dropRun(remote);
-    await appendEvent({ type: 'user.message', actor: 'user', userId: stand.userId, threadId: remote, payload: { text: 'hello' } });
+    await appendEvent({ type: 'user.message', actor: 'user', workspaceId: stand.workspaceId, threadId: remote, payload: { text: 'hello' } });
     await until(() => (accepted.get(remote) ?? []).some(event => event.type === 'user.message'), 'the message');
     assert.ok(runs.getRun(remote));
   });
@@ -120,7 +120,7 @@ describe('the thread router', () => {
     runs.dropRun(local);
     log.length = 0;
 
-    await appendEvent({ type: 'thread.interrupt', actor: 'user', userId: stand.userId, threadId: stand.mainThreadId, targetThreadId: local, payload: { reason: 'stop' } });
+    await appendEvent({ type: 'thread.interrupt', actor: 'user', workspaceId: stand.workspaceId, threadId: stand.mainThreadId, targetThreadId: local, payload: { reason: 'stop' } });
     const marker = await startChild({ remote: true });
 
     await until(() => log.includes(`spawn ${marker} remote=true`), 'the marker spawn after the stop');
@@ -133,7 +133,7 @@ describe('the thread router', () => {
     const remote = await startChild({ remote: true });
 
     await until(() => Boolean(runs.getRun(remote)), 'the spawn');
-    await appendEvent({ type: 'thread.cancelled', actor: 'system', userId: stand.userId, threadId: remote, payload: { reason: 'done' } });
+    await appendEvent({ type: 'thread.cancelled', actor: 'system', workspaceId: stand.workspaceId, threadId: remote, payload: { reason: 'done' } });
     await until(() => log.includes(`abort ${remote} thread.cancelled`), 'the abort');
     assert.equal(runs.getRun(remote), null);
   });

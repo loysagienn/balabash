@@ -37,7 +37,7 @@ import './Workspaces.css';
 
 function choose(item: WorkspaceItem): void {
   if (!item.current) {
-    switchWorkspace(item.userId);
+    switchWorkspace(item.workspaceId);
   }
 }
 
@@ -75,7 +75,7 @@ export function WorkspaceSwitcher() {
     <Menu label="Workspaces" className="wsmenu">
       <MenuLabel>Workspaces</MenuLabel>
       {items.map(item => (
-        <WsRow key={item.userId} item={item} />
+        <WsRow key={item.workspaceId} item={item} />
       ))}
       <MenuSep />
       <MenuItem
@@ -135,7 +135,7 @@ export function WorkspaceSheetButton() {
           <Sheet label="Workspaces" title="Workspaces" onClose={() => setOpen(false)}>
             <div className="wslist" role="menu" aria-label="Workspaces">
               {items.map(item => (
-                <WsRow key={item.userId} item={item} big />
+                <WsRow key={item.workspaceId} item={item} big />
               ))}
             </div>
             <div className="wssheet-actions">
@@ -191,18 +191,18 @@ function AddWorkspaceWindow() {
     try {
       const me = await api.auth(trimmed);
       const outcome = addOutcome(
-        me.userId,
-        current?.userId ?? null,
-        items.map(item => item.userId),
+        me.workspaceId,
+        current?.workspaceId ?? null,
+        items.map(item => item.workspaceId),
       );
 
       if (outcome.kind === 'same') {
         setBusy(false);
         close();
       } else if (outcome.kind === 'switch') {
-        switchWorkspace(outcome.userId);
+        switchWorkspace(outcome.workspaceId);
       } else {
-        switchWorkspace(outcome.userId, { kind: 'signed-in', back: current ? { userId: current.userId, name: current.name } : null });
+        switchWorkspace(outcome.workspaceId, { kind: 'signed-in', back: current ? { workspaceId: current.workspaceId, name: current.name } : null });
       }
     } catch (failure) {
       setBusy(false);

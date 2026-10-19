@@ -189,7 +189,7 @@ function fakeApi(overrides: ApiOverrides = {}, calls: Calls = []): Api {
       pause: wrap('threads.pause', threads.pause),
       decide: wrap('threads.decide', threads.decide),
     },
-    workspaces: { list: async () => ({ current: ME.userId, workspaces: [] }) },
+    workspaces: { list: async () => ({ current: ME.workspaceId, workspaces: [] }) },
     workspace: WORKSPACE,
     files: FILES,
     llmRequests: LLM_REQUESTS,
@@ -485,7 +485,7 @@ describe('session start-up', () => {
     assert.deepEqual([store.getState().session.me?.workspaceName, selectOperatorName(store.getState())], [ME.workspaceName, null]);
     store.dispatch(eventAction(event({ seq: 101n, type: 'settings.updated', actor: 'user', payload: { workspaceName: 'Home', operatorName: 'Vladimir' } })));
     assert.deepEqual([store.getState().session.me?.workspaceName, selectOperatorName(store.getState())], ['Home', 'Vladimir']);
-    assert.equal(store.getState().session.me?.userId, ME.userId, 'the rest of me is kept');
+    assert.equal(store.getState().session.me?.workspaceId, ME.workspaceId, 'the rest of me is kept');
 
     // Cleared on another device: the event carries the group's title and no operator.
     store.dispatch(eventAction(event({ seq: 102n, type: 'settings.updated', actor: 'user', payload: { workspaceName: 'Group', operatorName: null } })));
@@ -569,7 +569,7 @@ describe('session start-up', () => {
     await dispatched(store, sessionCheck());
     await settle();
     assert.deepEqual([store.getState().session.me?.workspaceName, selectOperatorName(store.getState())], ['New', 'Vladimir']);
-    assert.equal(store.getState().session.me?.userId, ME.userId);
+    assert.equal(store.getState().session.me?.workspaceId, ME.workspaceId);
     assert.deepEqual(store.getState().session.settingsSaved, { workspaceName: 0, operatorName: 0 });
 
     // A snapshot stamped before names the tab already holds (a Retry

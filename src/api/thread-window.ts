@@ -18,26 +18,26 @@ export const SNAPSHOT_THREAD_WINDOW = 200;
 export const ACTIVE_PAGE = 500;
 
 export type ThreadWindowReads = {
-  list(userId: string, options: { status?: ThreadStatus; beforeCreatedSeq?: bigint; limit: number; order: 'desc' }): Promise<Thread[]>;
+  list(workspaceId: string, options: { status?: ThreadStatus; beforeCreatedSeq?: bigint; limit: number; order: 'desc' }): Promise<Thread[]>;
   get(id: string): Promise<Thread | null>;
   // The workspace's thread with the greatest terminal seq; null while none has ended.
-  latestTerminal(userId: string): Promise<Thread | null>;
+  latestTerminal(workspaceId: string): Promise<Thread | null>;
 };
 
 const newestFirst = (a: Thread, b: Thread) => (a.createdSeq > b.createdSeq ? -1 : a.createdSeq < b.createdSeq ? 1 : 0);
 
-export async function readThreadWindow(userId: string, mainThreadId: string | null, reads: ThreadWindowReads): Promise<Thread[]> {
+export async function readThreadWindow(workspaceId: string, mainThreadId: string | null, reads: ThreadWindowReads): Promise<Thread[]> {
   const byId = new Map<string, Thread>();
   const take = (threads: Thread[]) => {
     for (const thread of threads) {
       byId.set(thread.id, thread);
     }
   };
-  const newest = reads.list(userId, { limit: SNAPSHOT_THREAD_WINDOW, order: 'desc' });
-  const latestTerminal = reads.latestTerminal(userId);
+  const newest = reads.list(workspaceId, { limit: SNAPSHOT_THREAD_WINDOW, order: 'desc' });
+  const latestTerminal = reads.latestTerminal(workspaceId);
 
   for (let before: bigint | undefined; ; ) {
-    const page = await reads.list(userId, { status: 'active', ...(before !== undefined ? { beforeCreatedSeq: before } : {}), limit: ACTIVE_PAGE, order: 'desc' });
+    const page = await reads.list(workspaceId, { status: 'active', ...(before !== undefined ? { beforeCreatedSeq: before } : {}), limit: ACTIVE_PAGE, order: 'desc' });
 
     take(page);
 

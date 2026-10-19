@@ -17,7 +17,7 @@ import type { Consumer } from '../../core/consumers.ts';
 import type { ContentBlock, Event, ThreadSummary } from '../../core/contract.ts';
 import { TERMINAL_TYPES, THREAD_NOTIFICATION, THREAD_STARTED } from '../../core/envelope.ts';
 import { getThread } from '../../core/threads.ts';
-import { getFile, getFileDownloadUrl, getFileSizeBytes, getUserFile, openFileContent } from '../../files/index.ts';
+import { getFile, getFileDownloadUrl, getFileSizeBytes, getWorkspaceFile, openFileContent } from '../../files/index.ts';
 import { MAX_PRESIGN_TTL_SECONDS } from '../../files/storage.ts';
 import { formatTelegramMarkdown, TELEGRAM_MESSAGE_LIMIT } from './format.ts';
 
@@ -28,7 +28,7 @@ type DeliveryTarget = {
 
 // Thread → forum topic; the main thread lives in General (no topic id).
 async function resolveTarget(event: Event): Promise<DeliveryTarget | null> {
-  if (!event.threadId || !event.userId) {
+  if (!event.threadId || !event.workspaceId) {
     return null;
   }
 
@@ -46,7 +46,7 @@ async function resolveTarget(event: Event): Promise<DeliveryTarget | null> {
     return null;
   }
 
-  const group = await prisma.telegramGroup.findFirst({ where: { userId: event.userId } });
+  const group = await prisma.telegramGroup.findFirst({ where: { workspaceId: event.workspaceId } });
 
   return group ? { chatId: group.chatId, messageThreadId: null } : null;
 }
@@ -258,7 +258,7 @@ export function startTelegramDelivery({ bot }: { bot: Bot }): Consumer {
   // mode, missing Manage topics right, network down for good) is journaled
   // loudly: without the mapping the whole child conversation has nowhere to go.
   const handleThreadStarted = async (event: Event): Promise<void> => {
-    if (!event.targetThreadId || !event.threadId || !event.userId) {
+    if (!event.targetThreadId || !event.threadId || !event.workspaceId) {
       // A main thread lives in General; no topic to create.
       return;
     }
@@ -274,7 +274,7 @@ export function startTelegramDelivery({ bot }: { bot: Bot }): Consumer {
       return;
     }
 
-    const group = await prisma.telegramGroup.findFirst({ where: { userId: event.userId } });
+    const group = await prisma.telegramGroup.findFirst({ where: { workspaceId: event.workspaceId } });
 
     if (!group) {
       return;
@@ -376,12 +376,12 @@ export function startTelegramDelivery({ bot }: { bot: Bot }): Consumer {
       try {
         // Only the thread's workspace's own files leave for its chat: a
         // summary recorded before end_thread checked its fileIds may name
-        // another's (getUserFile refuses it like a missing one).
-        if (!event.userId) {
+        // another's (getWorkspaceFile refuses it like a missing one).
+        if (!event.workspaceId) {
           throw new Error('the summary names no workspace');
         }
 
-        await getUserFile(event.userId, fileId);
+        await getWorkspaceFile(event.workspaceId, fileId);
         await sendFile(target, fileId);
       } catch (error) {
         console.error(`[telegram-delivery] failed to send summary file ${fileId}:`, error);

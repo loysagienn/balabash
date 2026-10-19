@@ -41,7 +41,7 @@ async function startChild(title: string, policy: Record<string, unknown> = {}): 
   await appendEvent({
     type: 'thread.started',
     actor: 'system',
-    userId: stand.userId,
+    workspaceId: stand.workspaceId,
     threadId: id,
     targetThreadId: stand.mainThreadId,
     payload: { agent: 'engineer', title, ...policy },
@@ -51,7 +51,7 @@ async function startChild(title: string, policy: Record<string, unknown> = {}): 
 }
 
 async function closeThread(id: string): Promise<void> {
-  const result = await appendEvent({ type: 'thread.completed', actor: 'system', userId: stand.userId, threadId: id, payload: { summary: { text: 'done' } } });
+  const result = await appendEvent({ type: 'thread.completed', actor: 'system', workspaceId: stand.workspaceId, threadId: id, payload: { summary: { text: 'done' } } });
 
   assert.equal(result.written, true);
 }
@@ -77,12 +77,12 @@ describe('thread commands over the api', () => {
     const { event } = reply.json<ThreadCommandResponse>();
 
     assert.deepEqual(
-      { type: event.type, actor: event.actor, agentName: event.agentName, userId: event.userId, threadId: event.threadId, targetThreadId: event.targetThreadId, payload: event.payload },
+      { type: event.type, actor: event.actor, agentName: event.agentName, workspaceId: event.workspaceId, threadId: event.threadId, targetThreadId: event.targetThreadId, payload: event.payload },
       {
         type: 'thread.interrupt',
         actor: 'user',
         agentName: null,
-        userId: stand.userId,
+        workspaceId: stand.workspaceId,
         threadId: stand.mainThreadId,
         targetThreadId: child,
         payload: { reason: 'interrupted_by_user', identity: { username: 'operator' }, source: 'web' },
@@ -220,7 +220,7 @@ describe('thread commands over the api', () => {
           locked();
           await terminal;
 
-          const result = await appendEventIn(tx, { type: 'thread.completed', actor: 'system', userId: stand.userId, threadId: child, payload: { summary: { text: 'done first' } } });
+          const result = await appendEventIn(tx, { type: 'thread.completed', actor: 'system', workspaceId: stand.workspaceId, threadId: child, payload: { summary: { text: 'done first' } } });
 
           assert.equal(result.written, true);
         },
@@ -334,7 +334,7 @@ describe('the finish, pause and decide commands over the api', () => {
   test('decide: one of the open question’s options, never a sign-in, never a question not open', async () => {
     const remote = await startChild('Asking', { agent: 'fake_agent', remote: true });
     const ask = (askId: string, kind: string, options: string[]) =>
-      appendEvent({ type: 'agent.ask', actor: 'agent', agentName: 'fake_agent', userId: stand.userId, threadId: remote, payload: { askId, kind, text: 'q', options } });
+      appendEvent({ type: 'agent.ask', actor: 'agent', agentName: 'fake_agent', workspaceId: stand.workspaceId, threadId: remote, payload: { askId, kind, text: 'q', options } });
 
     await ask('a1', 'approval', ['allow', 'deny']);
     await ask('c1', 'credential', []);
@@ -364,7 +364,7 @@ describe('the finish, pause and decide commands over the api', () => {
     assert.deepEqual(decided.json<ThreadCommandResponse>().event.payload, { askId: 'a1', decision: 'deny', identity: { username: 'operator' }, source: 'web' });
 
     // Resolved: no longer open.
-    await appendEvent({ type: 'agent.ask.resolved', actor: 'agent', agentName: 'fake_agent', userId: stand.userId, threadId: remote, payload: { askId: 'a1', outcome: 'deny' } });
+    await appendEvent({ type: 'agent.ask.resolved', actor: 'agent', agentName: 'fake_agent', workspaceId: stand.workspaceId, threadId: remote, payload: { askId: 'a1', outcome: 'deny' } });
 
     const again = await stand.request('POST', `/api/threads/${remote}/decide`, { body: { askId: 'a1', decision: 'deny' } });
 

@@ -100,7 +100,7 @@ export async function backfillConnectionIdentity(
   }
 
   const twin = await prisma.connection.findFirst({
-    where: { userId: row.userId, server: row.server, identityId: identity.id, NOT: { id: row.id } },
+    where: { workspaceId: row.workspaceId, server: row.server, identityId: identity.id, NOT: { id: row.id } },
   });
 
   if (twin) {

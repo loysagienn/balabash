@@ -140,8 +140,8 @@ function pickWithArrows<T>(event: KeyboardEvent<HTMLElement>, options: readonly 
 
 // The workspace's mark color — this browser's choice (lib/workspace): the
 // mark in each of the eight identity colors, saved on choice.
-function ColorField({ name, userId, color }: { name: string; userId: string; color: number }) {
-  const pick = (option: number) => setWorkspaceColor(userId, option);
+function ColorField({ name, workspaceId, color }: { name: string; workspaceId: string; color: number }) {
+  const pick = (option: number) => setWorkspaceColor(workspaceId, option);
 
   return (
     <div className="fld set-color">
@@ -375,7 +375,7 @@ function BrowserCard({ facts, stage, now, logoutPending, onLogout, onAdd }: { fa
 
           return (
             <Row
-              key={item.userId}
+              key={item.workspaceId}
               lead={<WsMark name={item.name} color={item.color} />}
               title={item.name}
               tag={item.current ? <Tag>this workspace</Tag> : null}
@@ -430,7 +430,7 @@ export function SettingsScreen() {
             saved={saved.workspaceName}
             onSave={value => dispatch(saveSettings({ workspaceName: value }))}
           >
-            {workspace.current ? <ColorField name={workspace.current.name} userId={workspace.current.userId} color={workspace.current.color} /> : null}
+            {workspace.current ? <ColorField name={workspace.current.name} workspaceId={workspace.current.workspaceId} color={workspace.current.color} /> : null}
           </NameCard>
           <NameCard
             title="You"

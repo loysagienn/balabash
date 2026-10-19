@@ -50,7 +50,7 @@ function isUniqueViolation(error: unknown): boolean {
 // row, the other is the same refusal (P2002), not a crash. The author
 // column: the agent of the asking thread, "operator" for the console, null
 // for the system.
-export async function createTask(userId: string, input: TaskInput, by: RegistryAuthor): Promise<CreateOutcome> {
+export async function createTask(workspaceId: string, input: TaskInput, by: RegistryAuthor): Promise<CreateOutcome> {
   const taken = () => new ScheduleError('conflict', `slug "${input.slug}" is already taken — cancel_task it first to recreate`);
   const existing = await prisma.scheduledTask.findUnique({ where: { slug: input.slug } });
 
@@ -63,7 +63,7 @@ export async function createTask(userId: string, input: TaskInput, by: RegistryA
 
   try {
     task = await registryMutation(async (tx, journal) => {
-      const created = await tx.scheduledTask.create({ data: { ...input, userId, createdBy } });
+      const created = await tx.scheduledTask.create({ data: { ...input, workspaceId, createdBy } });
 
       await journal('schedule.task.created', taskRecord(created, new Date()), by);
 
@@ -80,18 +80,18 @@ export async function createTask(userId: string, input: TaskInput, by: RegistryA
   return { task, sleeping: await isSleeping(task) };
 }
 
-export async function findTask(userId: string, slug: string): Promise<ScheduledTaskModel | null> {
-  return prisma.scheduledTask.findFirst({ where: { slug, userId } });
+export async function findTask(workspaceId: string, slug: string): Promise<ScheduledTaskModel | null> {
+  return prisma.scheduledTask.findFirst({ where: { slug, workspaceId } });
 }
 
 // A code task without its run(ctx) body file in the workspace sleeps: the
 // heart never arms it and a manual run is refused.
 export async function isSleeping(task: ScheduledTaskModel): Promise<boolean> {
-  return task.kind === 'code' && !(await hasTaskBody(task.userId, task.slug));
+  return task.kind === 'code' && !(await hasTaskBody(task.workspaceId, task.slug));
 }
 
 export function sleepingText(task: ScheduledTaskModel): string {
-  return `task "${task.slug}" is sleeping — no run(ctx) body: ${workspaceTaskFile(task.userId, task.slug)} does not exist.`;
+  return `task "${task.slug}" is sleeping — no run(ctx) body: ${workspaceTaskFile(task.workspaceId, task.slug)} does not exist.`;
 }
 
 // The row the command means, when it named one: another row under the
@@ -109,8 +109,8 @@ function assertExpected(task: ScheduledTaskModel, expectId: string | undefined):
 // the one-shot journals that end itself; deleteMany keeps the two
 // idempotent against each other). With expectId, a slug held by another
 // row is refused ('replaced') and that row stays.
-export async function deleteTask(userId: string, slug: string, by: RegistryAuthor, expectId?: string): Promise<ScheduledTaskModel | null> {
-  const task = await findTask(userId, slug);
+export async function deleteTask(workspaceId: string, slug: string, by: RegistryAuthor, expectId?: string): Promise<ScheduledTaskModel | null> {
+  const task = await findTask(workspaceId, slug);
 
   if (!task) {
     return null;
@@ -138,8 +138,8 @@ export type RunOutcome = { kind: 'fired'; task: ScheduledTaskModel; runId: strin
 // cron task keeps its moment). Refusals: no such task, a sleeping code
 // task, a workspace without a main thread to fire into, a slug held by
 // another row than expectId names.
-export async function runTask(userId: string, slug: string, expectId?: string): Promise<RunOutcome> {
-  const task = await findTask(userId, slug);
+export async function runTask(workspaceId: string, slug: string, expectId?: string): Promise<RunOutcome> {
+  const task = await findTask(workspaceId, slug);
 
   if (!task) {
     throw new ScheduleError('not_found', `no task with slug "${slug}" in this workspace`);

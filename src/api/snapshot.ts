@@ -22,7 +22,7 @@ import { listProjects, projectView } from '../projects/store.ts';
 import { listApps } from '../apps/management.ts';
 import { publicAppsBase } from '../apps/urls.ts';
 import { taskView } from '../schedule/view.ts';
-import { connectionView, listUserConnections } from '../capabilities/connections/index.ts';
+import { connectionView, listWorkspaceConnections } from '../capabilities/connections/index.ts';
 import { effectiveBundleServers, listUserAuthServers } from '../capabilities/tool-manager.ts';
 import { readOpenSecretRequests } from '../capabilities/secret-requests.ts';
 import { getAgents, isRemoteAgent, type CatalogAgent } from '../capabilities/agent-catalog.ts';
@@ -94,7 +94,7 @@ export async function readMainLastMessage(mainThreadId: string | null): Promise<
 }
 
 // The system's own events as the stream shows them to this workspace —
-// its own and the installation-level ones (userId null: a restart
+// its own and the installation-level ones (workspaceId null: a restart
 // completed for no thread, an exception outside a workspace) — the newest
 // SYSTEM_LOG_KEEP in seq order. The console's system domain folds the
 // tail by the same rule (store/system/reducer.ts).
@@ -106,8 +106,8 @@ export function systemLogTypes(kind: SystemLogKind | undefined): string[] {
 // A page of the same log for "Show more": the newest `limit` events of the
 // kind before `before` (every one when null), in seq order, with the count
 // of every event of the kind the workspace may see.
-export async function readSystemLogPage(userId: string, kind: SystemLogKind | undefined, before: bigint | null, limit: number): Promise<SystemLogResponse> {
-  const where = { type: { in: systemLogTypes(kind) }, OR: [{ userId }, { userId: null }] };
+export async function readSystemLogPage(workspaceId: string, kind: SystemLogKind | undefined, before: bigint | null, limit: number): Promise<SystemLogResponse> {
+  const where = { type: { in: systemLogTypes(kind) }, OR: [{ workspaceId }, { workspaceId: null }] };
   const [rows, total] = await Promise.all([
     prisma.event.findMany({ where: { ...where, ...(before === null ? {} : { seq: { lt: before } }) }, orderBy: { seq: 'desc' }, take: limit }),
     prisma.event.count({ where }),
@@ -116,9 +116,9 @@ export async function readSystemLogPage(userId: string, kind: SystemLogKind | un
   return { events: rows.reverse().map(toEvent), total };
 }
 
-export async function readSystemLog(userId: string): Promise<Event[]> {
+export async function readSystemLog(workspaceId: string): Promise<Event[]> {
   const rows = await prisma.event.findMany({
-    where: { type: { in: [...SYSTEM_LOG_TYPES] }, OR: [{ userId }, { userId: null }] },
+    where: { type: { in: [...SYSTEM_LOG_TYPES] }, OR: [{ workspaceId }, { workspaceId: null }] },
     orderBy: { seq: 'desc' },
     take: SYSTEM_LOG_KEEP,
   });
@@ -126,14 +126,14 @@ export async function readSystemLog(userId: string): Promise<Event[]> {
   return rows.reverse().map(toEvent);
 }
 
-async function readTasks(userId: string, now: Date): Promise<TaskView[]> {
-  const rows = await prisma.scheduledTask.findMany({ where: { userId }, orderBy: { createdAt: 'asc' } });
+async function readTasks(workspaceId: string, now: Date): Promise<TaskView[]> {
+  const rows = await prisma.scheduledTask.findMany({ where: { workspaceId }, orderBy: { createdAt: 'asc' } });
 
   return rows.map(row => taskView(row, now));
 }
 
-async function readConnections(userId: string): Promise<ConnectionView[]> {
-  return (await listUserConnections(userId)).map(connectionView);
+async function readConnections(workspaceId: string): Promise<ConnectionView[]> {
+  return (await listWorkspaceConnections(workspaceId)).map(connectionView);
 }
 
 function readServices(): ServiceView[] {
@@ -153,11 +153,11 @@ function readServices(): ServiceView[] {
 // whose newest start names no model is left without one. The tail keeps it
 // fresh: the console's agents reducer folds session.started by the same
 // rule (the stand test replays the tail over the snapshot and compares).
-async function readLastModels(userId: string): Promise<Map<string, string | null>> {
+async function readLastModels(workspaceId: string): Promise<Map<string, string | null>> {
   const rows = await prisma.$queryRaw<Array<{ agentName: string | null; payload: JsonObject }>>`
     SELECT DISTINCT ON (agent_name) agent_name AS "agentName", payload
     FROM events
-    WHERE user_id = ${userId} AND type = 'session.started' AND agent_name IS NOT NULL
+    WHERE user_id = ${workspaceId} AND type = 'session.started' AND agent_name IS NOT NULL
     ORDER BY agent_name, seq DESC`;
   const models = new Map<string, string | null>();
 
@@ -236,9 +236,9 @@ function coordinatorView(catalog: CatalogAgent[]): AgentView {
 // The agents as the console's catalog shows them: the coordinator first,
 // then the catalog by name (getAgents sorts), each with the model its
 // newest session ran on.
-export async function readAgents(userId: string): Promise<AgentView[]> {
+export async function readAgents(workspaceId: string): Promise<AgentView[]> {
   const catalog = getAgents();
-  const lastModels = await readLastModels(userId);
+  const lastModels = await readLastModels(workspaceId);
 
   return [
     coordinatorView(catalog),
@@ -246,7 +246,7 @@ export async function readAgents(userId: string): Promise<AgentView[]> {
   ];
 }
 
-export async function buildSnapshot(userId: string, readMe: () => Promise<MeResponse>): Promise<SnapshotResponse> {
+export async function buildSnapshot(workspaceId: string, readMe: () => Promise<MeResponse>): Promise<SnapshotResponse> {
   // The stamp first, the projections after: the tail from asOfSeq may
   // overlap with what the projections already reflect, never miss anything.
   // `me` is a projection too (settings.updated changes its names), so it is
@@ -256,15 +256,15 @@ export async function buildSnapshot(userId: string, readMe: () => Promise<MeResp
   const me = await readMe();
 
   const [threads, mainLastMessage, projects, apps, tasks, connections, secretRequests, agents, systemLog] = await Promise.all([
-    readThreadWindow(userId, me.mainThreadId, { list: listThreads, get: getThread, latestTerminal: getLatestTerminalThread }),
+    readThreadWindow(workspaceId, me.mainThreadId, { list: listThreads, get: getThread, latestTerminal: getLatestTerminalThread }),
     readMainLastMessage(me.mainThreadId),
-    listProjects(userId),
-    listApps(userId),
-    readTasks(userId, now),
-    readConnections(userId),
-    readOpenSecretRequests(userId),
-    readAgents(userId),
-    readSystemLog(userId),
+    listProjects(workspaceId),
+    listApps(workspaceId),
+    readTasks(workspaceId, now),
+    readConnections(workspaceId),
+    readOpenSecretRequests(workspaceId),
+    readAgents(workspaceId),
+    readSystemLog(workspaceId),
   ]);
   const sessions = await readSessions(threads);
 

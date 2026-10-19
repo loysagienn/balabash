@@ -247,7 +247,7 @@ async function createTask(args: JsonObject, ctx: BuiltinServerCallContext): Prom
       reportOnSuccess: args.report_on_success,
     });
 
-    outcome = await createTaskCommand(ctx.userId, input, { kind: 'thread', userId: ctx.userId, threadId: ctx.threadId });
+    outcome = await createTaskCommand(ctx.workspaceId, input, { kind: 'thread', workspaceId: ctx.workspaceId, threadId: ctx.threadId });
   } catch (error) {
     throw error instanceof ScheduleError ? new Error(toolWords(error.message)) : error;
   }
@@ -266,7 +266,7 @@ async function createTask(args: JsonObject, ctx: BuiltinServerCallContext): Prom
     if (outcome.sleeping) {
       lines.push(
         `The task SLEEPS: no run(ctx) body under slug "${slug}". It comes alive the moment ` +
-          `${workspaceTaskFile(task.userId, slug)} exists (no build or restart).`,
+          `${workspaceTaskFile(task.workspaceId, slug)} exists (no build or restart).`,
       );
     }
 
@@ -292,7 +292,7 @@ async function createTask(args: JsonObject, ctx: BuiltinServerCallContext): Prom
 
 async function listTasks(ctx: BuiltinServerCallContext): Promise<string> {
   const tasks = await prisma.scheduledTask.findMany({
-    where: { userId: ctx.userId },
+    where: { workspaceId: ctx.workspaceId },
     orderBy: { createdAt: 'asc' },
   });
 
@@ -337,7 +337,7 @@ async function listTasks(ctx: BuiltinServerCallContext): Promise<string> {
 // only the model's reply is worded.
 async function cancelTask(args: JsonObject, ctx: BuiltinServerCallContext): Promise<string> {
   const slug = requireSlug(args);
-  const task = await deleteTask(ctx.userId, slug, { kind: 'thread', userId: ctx.userId, threadId: ctx.threadId });
+  const task = await deleteTask(ctx.workspaceId, slug, { kind: 'thread', workspaceId: ctx.workspaceId, threadId: ctx.threadId });
 
   if (!task) {
     throw new Error(`no task with slug "${slug}" in this workspace`);
@@ -351,7 +351,7 @@ async function runTask(args: JsonObject, ctx: BuiltinServerCallContext): Promise
   let outcome;
 
   try {
-    outcome = await runTaskCommand(ctx.userId, slug);
+    outcome = await runTaskCommand(ctx.workspaceId, slug);
   } catch (error) {
     // A refusal of the command reads as the tool's error, in its words.
     throw error instanceof ScheduleError ? new Error(error.message) : error;
@@ -412,7 +412,7 @@ async function listJobRuns(args: JsonObject, ctx: BuiltinServerCallContext): Pro
 
   const runs = await prisma.jobRun.findMany({
     where: {
-      userId: ctx.userId,
+      workspaceId: ctx.workspaceId,
       ...(slug ? { slug } : {}),
       ...(status ? { status } : {}),
     },
@@ -434,7 +434,7 @@ async function getJobRun(args: JsonObject, ctx: BuiltinServerCallContext): Promi
     throw new Error('a non-empty runId is required');
   }
 
-  const run = await prisma.jobRun.findFirst({ where: { id: runId, userId: ctx.userId } });
+  const run = await prisma.jobRun.findFirst({ where: { id: runId, workspaceId: ctx.workspaceId } });
 
   if (!run) {
     throw new Error(`no job run "${runId}" in this workspace`);

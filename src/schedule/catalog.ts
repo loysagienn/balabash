@@ -1,6 +1,6 @@
 // The task bodies: a registry row of kind 'code' joins its run(ctx) body by
 // slug, and the body is a file of the task's workspace —
-// data/workspace/<userId>/tasks/<slug>.ts, imported fresh at every fire
+// data/workspace/<workspaceId>/tasks/<slug>.ts, imported fresh at every fire
 // (src/capabilities/extensions.ts): no build, no restart, an edit is live at
 // the next moment. A broken file fails that run loudly (system.exception),
 // never the boot. A task is a workspace notion, so its body lives with the
@@ -39,26 +39,26 @@ function validateTaskModule(label: string, module: Record<string, unknown>): Tas
 }
 
 /** The workspace task file of a slug, by convention — whether it exists or not. */
-export function workspaceTaskFile(userId: string, slug: string): string {
-  return path.join(workspaceTasksDir(userId), `${slug}.ts`);
+export function workspaceTaskFile(workspaceId: string, slug: string): string {
+  return path.join(workspaceTasksDir(workspaceId), `${slug}.ts`);
 }
 
 // The body file of a registry row, without loading it, or null (sleeping).
 // The slug pattern is what keeps the path honest — a registry slug never
 // carries separators.
-export async function locateTaskBody(userId: string, slug: string): Promise<string | null> {
+export async function locateTaskBody(workspaceId: string, slug: string): Promise<string | null> {
   if (!SLUG_PATTERN.test(slug)) {
     return null;
   }
 
-  const file = workspaceTaskFile(userId, slug);
+  const file = workspaceTaskFile(workspaceId, slug);
   const stats = await stat(file).catch(() => null);
 
   return stats?.isFile() ? file : null;
 }
 
-export async function hasTaskBody(userId: string, slug: string): Promise<boolean> {
-  return (await locateTaskBody(userId, slug)) !== null;
+export async function hasTaskBody(workspaceId: string, slug: string): Promise<boolean> {
+  return (await locateTaskBody(workspaceId, slug)) !== null;
 }
 
 // Makes the body's directory an ES module scope: its package.json gets

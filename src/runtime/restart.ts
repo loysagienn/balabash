@@ -45,7 +45,7 @@ const PENDING_NOTIFY_AFTER_MS = 5 * 60_000;
 
 type PendingRestart = {
   seq: bigint;
-  userId: string | null;
+  workspaceId: string | null;
   threadId: string | null;
   reason: string;
   // The agent of the requesting thread, as the request names it.
@@ -57,7 +57,7 @@ type PendingRestart = {
   // What the newest poll found in the way, every workspace's threads with
   // their owner; null before the first poll.
   waiting: {
-    threads: { id: string; title: string | null; agent: string; userId: string }[];
+    threads: { id: string; title: string | null; agent: string; workspaceId: string }[];
     secretaryTurn: boolean;
     workspaceJob: boolean;
     logQuiet: boolean;
@@ -71,13 +71,13 @@ let pending: PendingRestart | null = null;
 // view is the workspace's: the request's words and thread only when the
 // request is its own, the threads in the way only its own — another
 // workspace's are a count (src/api/contract.ts PendingRestartView).
-export function getPendingRestart(userId: string): PendingRestartView | null {
+export function getPendingRestart(workspaceId: string): PendingRestartView | null {
   if (!pending) {
     return null;
   }
 
   const { seq, reason, requestedAt, requestedBy, threadId, force, waiting } = pending;
-  const own = pending.userId === userId;
+  const own = pending.workspaceId === workspaceId;
 
   return {
     seq: Number(seq),
@@ -89,8 +89,8 @@ export function getPendingRestart(userId: string): PendingRestartView | null {
     force,
     waiting: waiting
       ? {
-          threads: waiting.threads.filter(thread => thread.userId === userId).map(({ id, title, agent }) => ({ id, title, agent })),
-          otherThreads: waiting.threads.filter(thread => thread.userId !== userId).length,
+          threads: waiting.threads.filter(thread => thread.workspaceId === workspaceId).map(({ id, title, agent }) => ({ id, title, agent })),
+          otherThreads: waiting.threads.filter(thread => thread.workspaceId !== workspaceId).length,
           secretaryTurn: waiting.secretaryTurn,
           workspaceJob: waiting.workspaceJob,
           logQuiet: waiting.logQuiet,
@@ -130,11 +130,11 @@ export async function completePendingRestarts({
   const requests = await getEventsAfter(lastCompletedSeq, { types: [SYSTEM_RESTART_REQUESTED], limit: 50 });
 
   for (const request of requests) {
-    if (!request.userId) {
+    if (!request.workspaceId) {
       continue;
     }
 
-    const target = request.threadId ?? (await getMainThread(request.userId))?.id ?? null;
+    const target = request.threadId ?? (await getMainThread(request.workspaceId))?.id ?? null;
 
     if (!target) {
       continue;
@@ -143,7 +143,7 @@ export async function completePendingRestarts({
     await appendEvent({
       type: SYSTEM_RESTART_COMPLETED,
       actor: 'system',
-      userId: request.userId,
+      workspaceId: request.workspaceId,
       threadId: null,
       targetThreadId: target,
       payload: {
@@ -165,7 +165,7 @@ export async function completePendingRestarts({
     await appendEvent({
       type: SYSTEM_EXCEPTION,
       actor: 'system',
-      userId: null,
+      workspaceId: null,
       payload: {
         scope: 'supervisor-rollback',
         error: `Supervisor rolled back to the last good bundle (${rollback.reason ?? 'crash-loop'} at ${rollback.at ?? 'unknown time'})`,
@@ -179,7 +179,7 @@ export async function completePendingRestarts({
     await appendEvent({
       type: SYSTEM_EXCEPTION,
       actor: 'system',
-      userId: null,
+      workspaceId: null,
       payload: { scope: 'migrate-deploy', error: migrationsError },
     });
   }
@@ -210,13 +210,13 @@ export function startRestartModule({ isBusy, hasActiveJobs, hasRemoteWork, onRes
   let exiting = false;
 
   const notifyLongPending = async (current: PendingRestart, blockedBy: string[]): Promise<void> => {
-    if (current.notified || !current.userId || Date.now() - current.requestedAt.getTime() < PENDING_NOTIFY_AFTER_MS) {
+    if (current.notified || !current.workspaceId || Date.now() - current.requestedAt.getTime() < PENDING_NOTIFY_AFTER_MS) {
       return;
     }
 
     current.notified = true;
 
-    const main = await getMainThread(current.userId);
+    const main = await getMainThread(current.workspaceId);
 
     if (!main) {
       return;
@@ -225,7 +225,7 @@ export function startRestartModule({ isBusy, hasActiveJobs, hasRemoteWork, onRes
     await appendEvent({
       type: THREAD_NOTIFICATION,
       actor: 'system',
-      userId: current.userId,
+      workspaceId: current.workspaceId,
       threadId: main.id,
       payload: {
         level: 'normal',
@@ -289,7 +289,7 @@ export function startRestartModule({ isBusy, hasActiveJobs, hasRemoteWork, onRes
     }
 
     current.waiting = {
-      threads: activeChildren.map(thread => ({ id: thread.id, title: thread.title, agent: thread.agent, userId: thread.userId })),
+      threads: activeChildren.map(thread => ({ id: thread.id, title: thread.title, agent: thread.agent, workspaceId: thread.workspaceId })),
       secretaryTurn,
       workspaceJob,
       logQuiet,
@@ -328,7 +328,7 @@ export function startRestartModule({ isBusy, hasActiveJobs, hasRemoteWork, onRes
 
       pending = {
         seq: event.seq,
-        userId: event.userId,
+        workspaceId: event.workspaceId,
         threadId: event.threadId,
         reason: typeof event.payload.reason === 'string' ? event.payload.reason : 'restart',
         requestedBy: typeof event.payload.requestedBy === 'string' ? event.payload.requestedBy : null,

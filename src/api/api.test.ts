@@ -28,7 +28,7 @@ let filesDir: string;
 before(async () => {
   stand = await startStand();
   ({ prisma } = await import('../db/client.ts'));
-  filesDir = (await import('../workspace/layout.ts')).workspaceFilesDir(stand.userId);
+  filesDir = (await import('../workspace/layout.ts')).workspaceFilesDir(stand.workspaceId);
 });
 
 after(() => stand.stop());
@@ -58,7 +58,7 @@ describe('projects over the api', () => {
 
     const row = await prisma.project.findUnique({ where: { id } });
 
-    assert.equal(row?.userId, stand.userId);
+    assert.equal(row?.workspaceId, stand.workspaceId);
     assert.equal(row?.slug, 'renovation');
 
     const dir = path.join(filesDir, 'renovation');
@@ -196,7 +196,7 @@ describe('projects over the api', () => {
         async tx => {
           const row = await tx.project.update({ where: { id }, data: { archived, archivedAt: firstAt } });
 
-          await appendEventIn(tx, { type: archived ? 'project.archived' : 'project.unarchived', actor: 'user', threadId: null, userId: stand.userId, payload: projectRecord(row) });
+          await appendEventIn(tx, { type: archived ? 'project.archived' : 'project.unarchived', actor: 'user', threadId: null, workspaceId: stand.workspaceId, payload: projectRecord(row) });
           locked();
           await released;
         },
@@ -291,7 +291,7 @@ describe('projects over the api', () => {
     released.catch(() => {});
     const held = prisma.$transaction(
       async tx => {
-        await tx.project.create({ data: { userId: stand.userId, title: 'Held', slug: 'held', description: 'The row that wins.' } });
+        await tx.project.create({ data: { workspaceId: stand.workspaceId, title: 'Held', slug: 'held', description: 'The row that wins.' } });
         locked();
         await released;
       },
@@ -324,7 +324,7 @@ describe('projects over the api', () => {
       assert.equal(refused.status, 409, refused.text);
       assert.equal(refused.json<ErrorBody>().error.code, 'conflict');
       assert.equal(await fs.stat(path.join(filesDir, 'held')).catch(() => null), null);
-      assert.equal((await prisma.project.findUniqueOrThrow({ where: { userId_slug: { userId: stand.userId, slug: 'held' } } })).title, 'Held');
+      assert.equal((await prisma.project.findUniqueOrThrow({ where: { workspaceId_slug: { workspaceId: stand.workspaceId, slug: 'held' } } })).title, 'Held');
       // The held row wrote no event of its own; the loser added none.
       assert.equal((await projectEvents()).filter(event => event.type === 'project.created').length, 2);
     } finally {
@@ -448,7 +448,7 @@ describe('the cache policy of the private surfaces', () => {
 
   test('a stored file by id may be kept privately for an hour', async () => {
     const { ingestFile } = await import('../files/index.ts');
-    const file = await ingestFile({ body: Buffer.from('stored'), contentType: 'text/plain', sizeBytes: 6, originalFilename: 'note.txt', userId: stand.userId });
+    const file = await ingestFile({ body: Buffer.from('stored'), contentType: 'text/plain', sizeBytes: 6, originalFilename: 'note.txt', workspaceId: stand.workspaceId });
     const reply = await stand.request('GET', `/api/files/${file.id}`);
 
     assert.equal(reply.status, 200, reply.text);
@@ -458,8 +458,8 @@ describe('the cache policy of the private surfaces', () => {
 
   test('the facts of a stored file by id: own — kept for an hour; foreign and missing — the same 404', async () => {
     const { ingestFile } = await import('../files/index.ts');
-    const own = await ingestFile({ body: Buffer.from('<png>'), contentType: 'image/png', sizeBytes: 5, originalFilename: 'shot.png', width: 32, height: 16, userId: stand.userId });
-    const foreign = await ingestFile({ body: Buffer.from('theirs'), contentType: 'text/plain', sizeBytes: 6, originalFilename: 'theirs.txt', userId: 'someone-else' });
+    const own = await ingestFile({ body: Buffer.from('<png>'), contentType: 'image/png', sizeBytes: 5, originalFilename: 'shot.png', width: 32, height: 16, workspaceId: stand.workspaceId });
+    const foreign = await ingestFile({ body: Buffer.from('theirs'), contentType: 'text/plain', sizeBytes: 6, originalFilename: 'theirs.txt', workspaceId: 'someone-else' });
 
     const reply = await stand.request('GET', `/api/files/${own.id}/meta`);
 
@@ -467,7 +467,7 @@ describe('the cache policy of the private surfaces', () => {
     assert.deepEqual(reply.json<FileMetaResponse>(), { file: { fileId: own.id, name: 'shot.png', contentType: 'image/png', sizeBytes: 5, width: 32, height: 16 } });
     assert.equal(reply.headers['cache-control'], 'private, max-age=3600');
 
-    const nameless = await ingestFile({ body: Buffer.from('?'), userId: stand.userId });
+    const nameless = await ingestFile({ body: Buffer.from('?'), workspaceId: stand.workspaceId });
     const bare = await stand.request('GET', `/api/files/${nameless.id}/meta`);
 
     assert.equal(bare.status, 200, bare.text);
@@ -493,7 +493,7 @@ describe('the cache policy of the private surfaces', () => {
   // and for the bytes alike, and never stored.
   test('a stored file whose row cannot be read is a 500, not a 404', async () => {
     const { ingestFile } = await import('../files/index.ts');
-    const file = await ingestFile({ body: Buffer.from('held'), contentType: 'text/plain', sizeBytes: 4, originalFilename: 'held.txt', userId: stand.userId });
+    const file = await ingestFile({ body: Buffer.from('held'), contentType: 'text/plain', sizeBytes: 4, originalFilename: 'held.txt', workspaceId: stand.workspaceId });
 
     await withFileLookupFailure(async () => {
       for (const url of [`/api/files/${file.id}/meta`, `/api/files/${file.id}`]) {
@@ -586,7 +586,7 @@ describe('the cache policy of the private surfaces', () => {
   // the error must not inherit the hour of the bytes nor their disposition.
   test('a stored file that cannot be opened is a 500 that is never stored', async () => {
     const { ingestFile } = await import('../files/index.ts');
-    const file = await ingestFile({ body: Buffer.from('gone'), contentType: 'text/plain', sizeBytes: 4, originalFilename: 'gone.txt', userId: stand.userId });
+    const file = await ingestFile({ body: Buffer.from('gone'), contentType: 'text/plain', sizeBytes: 4, originalFilename: 'gone.txt', workspaceId: stand.workspaceId });
 
     await prisma.file.update({ where: { id: file.id }, data: { objectKey: '../outside-the-root' } });
 
@@ -1018,15 +1018,15 @@ describe('settings over the api', () => {
 
     const me = await stand.request('GET', '/api/me');
 
-    assert.deepEqual(me.json<MeResponse>(), { userId: stand.userId, workspaceName: 'Home', operatorName: 'Vladimir', mainThreadId: stand.mainThreadId });
+    assert.deepEqual(me.json<MeResponse>(), { workspaceId: stand.workspaceId, workspaceName: 'Home', operatorName: 'Vladimir', mainThreadId: stand.mainThreadId });
 
     const cleared = await stand.request('PATCH', '/api/settings', { body: { operatorName: '   ' } });
 
     assert.deepEqual(cleared.json<SettingsResponse>().settings, { workspaceName: 'Home', operatorName: null });
 
-    const user = await prisma.user.findUniqueOrThrow({ where: { id: stand.userId } });
+    const workspace = await prisma.workspace.findUniqueOrThrow({ where: { id: stand.workspaceId } });
 
-    assert.deepEqual({ workspaceName: user.workspaceName, operatorName: user.operatorName }, { workspaceName: 'Home', operatorName: null });
+    assert.deepEqual({ workspaceName: workspace.workspaceName, operatorName: workspace.operatorName }, { workspaceName: 'Home', operatorName: null });
 
     // Each change journals settings.updated by the operator with the names
     // the call answered — what every other tab folds into its `me` — and
@@ -1037,8 +1037,8 @@ describe('settings over the api', () => {
     assert.deepEqual(
       events.map(({ seq: _seq, ...rest }) => rest),
       [
-        { actor: 'user', threadId: null, userId: stand.userId, payload: { workspaceName: 'Home', operatorName: 'Vladimir' } },
-        { actor: 'user', threadId: null, userId: stand.userId, payload: { workspaceName: 'Home', operatorName: null } },
+        { actor: 'user', threadId: null, workspaceId: stand.workspaceId, payload: { workspaceName: 'Home', operatorName: 'Vladimir' } },
+        { actor: 'user', threadId: null, workspaceId: stand.workspaceId, payload: { workspaceName: 'Home', operatorName: null } },
       ],
     );
     assert.deepEqual([reply.json<SettingsResponse>().seq, cleared.json<SettingsResponse>().seq], [events[0]!.seq, events[1]!.seq]);
@@ -1068,7 +1068,7 @@ describe('settings over the api', () => {
     assert.ok(facts.session.createdAt instanceof Date);
     assert.deepEqual({ userAgent: facts.session.userAgent, loginSource: facts.session.loginSource }, { userAgent: '', loginSource: 'console' });
 
-    const row = await prisma.session.findFirstOrThrow({ where: { userId: stand.userId } });
+    const row = await prisma.session.findFirstOrThrow({ where: { workspaceId: stand.workspaceId } });
 
     assert.deepEqual({ createdAt: row.createdAt, loginSource: row.loginSource }, { createdAt: facts.session.createdAt, loginSource: 'console' });
 
@@ -1076,7 +1076,7 @@ describe('settings over the api', () => {
     // title needs the Bot API, which the stand has no token for.
     const linkedAt = new Date('2026-08-06T22:44:25.685Z');
 
-    await prisma.telegramGroup.create({ data: { chatId: -1003986621992n, userId: stand.userId, status: 'active', updatedAt: linkedAt } });
+    await prisma.telegramGroup.create({ data: { chatId: -1003986621992n, workspaceId: stand.workspaceId, status: 'active', updatedAt: linkedAt } });
 
     try {
       const bound = await stand.request('GET', '/api/settings');
@@ -1084,7 +1084,7 @@ describe('settings over the api', () => {
       assert.equal(bound.status, 200, bound.text);
       assert.deepEqual(bound.json<SettingsFactsResponse>().telegram, { enabled: false, botUsername: null, group: { chatId: -1003986621992n, title: null, linkedAt } });
     } finally {
-      await prisma.telegramGroup.deleteMany({ where: { userId: stand.userId } });
+      await prisma.telegramGroup.deleteMany({ where: { workspaceId: stand.workspaceId } });
     }
   });
 
@@ -1100,12 +1100,12 @@ describe('settings over the api', () => {
     // Telegram command with its own User-Agent: each cookie reads its own
     // row — the phone's facts are the phone's, the stand's stay the stand's.
     const ua = 'Mozilla/5.0 (iPhone; CPU iPhone OS 26_7_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/154.0.8037.55 Mobile/15E148 Safari/604.1';
-    const signedIn = await stand.request('POST', '/api/auth', { body: { code: createAuthCode(stand.userId, 'telegram') }, cookie: null, headers: { 'user-agent': ua } });
+    const signedIn = await stand.request('POST', '/api/auth', { body: { code: createAuthCode(stand.workspaceId, 'telegram') }, cookie: null, headers: { 'user-agent': ua } });
 
     assert.equal(signedIn.status, 200, signedIn.text);
 
     const phone = sessionCookie(signedIn.headers['set-cookie'] ?? []);
-    const phoneRow = await prisma.session.findFirstOrThrow({ where: { userId: stand.userId, userAgent: ua } });
+    const phoneRow = await prisma.session.findFirstOrThrow({ where: { workspaceId: stand.workspaceId, userAgent: ua } });
 
     try {
       const phoneFacts = (await stand.request('GET', '/api/settings', { cookie: phone })).json<SettingsFactsResponse>();
@@ -1132,15 +1132,15 @@ describe('settings over the api', () => {
     }
 
     // Another workspace's bound group is not this one's.
-    const other = await prisma.user.create({ data: {} });
+    const other = await prisma.workspace.create({ data: {} });
 
-    await prisma.telegramGroup.create({ data: { chatId: -1001234567890n, userId: other.id, status: 'active' } });
+    await prisma.telegramGroup.create({ data: { chatId: -1001234567890n, workspaceId: other.id, status: 'active' } });
 
     try {
       assert.equal((await stand.request('GET', '/api/settings')).json<SettingsFactsResponse>().telegram.group, null);
     } finally {
-      await prisma.telegramGroup.deleteMany({ where: { userId: other.id } });
-      await prisma.user.delete({ where: { id: other.id } });
+      await prisma.telegramGroup.deleteMany({ where: { workspaceId: other.id } });
+      await prisma.workspace.delete({ where: { id: other.id } });
     }
   });
 
@@ -1149,15 +1149,15 @@ describe('settings over the api', () => {
 
     assert.equal(reply.status, 400);
     assert.match(reply.json<ErrorBody>().error.message, /workspaceName must be a string/);
-    assert.equal((await prisma.user.findUniqueOrThrow({ where: { id: stand.userId } })).workspaceName, 'Home');
+    assert.equal((await prisma.workspace.findUniqueOrThrow({ where: { id: stand.workspaceId } })).workspaceName, 'Home');
     assert.equal((await settingsEvents()).length, 2);
   });
 });
 
-async function settingsEvents(): Promise<{ seq: bigint; actor: string; threadId: string | null; userId: string | null; payload: unknown }[]> {
+async function settingsEvents(): Promise<{ seq: bigint; actor: string; threadId: string | null; workspaceId: string | null; payload: unknown }[]> {
   const rows = await prisma.event.findMany({ where: { type: 'settings.updated' }, orderBy: { seq: 'asc' } });
 
-  return rows.map(row => ({ seq: row.seq, actor: row.actor, threadId: row.threadId, userId: row.userId, payload: row.payload }));
+  return rows.map(row => ({ seq: row.seq, actor: row.actor, threadId: row.threadId, workspaceId: row.workspaceId, payload: row.payload }));
 }
 
 describe('the plan limits over the api', () => {

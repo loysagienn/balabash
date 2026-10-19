@@ -8,8 +8,8 @@ export const WORKSPACE_QUERY = 'ws';
 let current: string | null = null;
 
 // Set by lib/workspace (boot, confirmation, forgetting).
-export function setCurrentWorkspace(userId: string | null): void {
-  current = userId;
+export function setCurrentWorkspace(workspaceId: string | null): void {
+  current = workspaceId;
 }
 
 // The workspace this page acts in (null until known — the requests then
@@ -20,8 +20,8 @@ export function currentWorkspace(): string | null {
 
 // A URL the browser loads by itself (the stream, file bytes), naming the
 // page's workspace.
-export function withWorkspace(url: string, userId: string | null = current): string {
-  if (!userId) {
+export function withWorkspace(url: string, workspaceId: string | null = current): string {
+  if (!workspaceId) {
     return url;
   }
 
@@ -29,5 +29,5 @@ export function withWorkspace(url: string, userId: string | null = current): str
   const base = hash === -1 ? url : url.slice(0, hash);
   const tail = hash === -1 ? '' : url.slice(hash);
 
-  return `${base}${base.includes('?') ? '&' : '?'}${WORKSPACE_QUERY}=${encodeURIComponent(userId)}${tail}`;
+  return `${base}${base.includes('?') ? '&' : '?'}${WORKSPACE_QUERY}=${encodeURIComponent(workspaceId)}${tail}`;
 }

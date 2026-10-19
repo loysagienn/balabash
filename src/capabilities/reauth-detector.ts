@@ -20,9 +20,9 @@ export function startReauthDetector(): Consumer {
     name: 'reauth-detector',
     types: [CONNECTION_REAUTHORIZATION_REQUIRED],
     handler: async event => {
-      const { userId } = event;
+      const { workspaceId } = event;
 
-      if (!userId) {
+      if (!workspaceId) {
         return;
       }
 
@@ -35,13 +35,13 @@ export function startReauthDetector(): Consumer {
 
       // At-least-once tolerance and no thread storms: one active auth thread
       // serves every pending reauthorization of the workspace.
-      const activeThreads = await listThreads(userId, { status: 'active' });
+      const activeThreads = await listThreads(workspaceId, { status: 'active' });
 
       if (activeThreads.some(thread => thread.agent === AUTH_AGENT)) {
         return;
       }
 
-      const main = await getMainThread(userId);
+      const main = await getMainThread(workspaceId);
 
       if (!main) {
         return;
@@ -58,7 +58,7 @@ export function startReauthDetector(): Consumer {
       const accountHint = account ? ` Pass account: "${account}" when issuing the link.` : '';
 
       const thread = await startThread({
-        userId,
+        workspaceId,
         parentThreadId: main.id,
         agent: AUTH_AGENT,
         title: `Re-authorize ${who}`,
@@ -70,7 +70,7 @@ export function startReauthDetector(): Consumer {
       await appendEvent({
         type: THREAD_NOTIFICATION,
         actor: 'system',
-        userId,
+        workspaceId,
         threadId: thread.id,
         payload: {
           level: 'normal',

@@ -34,6 +34,6 @@ export const agent = {
     instructions: `${MANAGER_INSTRUCTIONS}\n\n${IMAGE_GENERATOR_SUBAGENT_NOTE}`,
     model: 'claude-opus-5-5',
     preset: 'full',
-    cwd: (userId: string) => workspaceFilesDir(userId),
+    cwd: (workspaceId: string) => workspaceFilesDir(workspaceId),
   },
 } satisfies AgentDeclaration;

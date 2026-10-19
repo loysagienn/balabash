@@ -11,9 +11,9 @@ import type { PrismaClient } from '../../prisma-generated/client.ts';
 // no thread, no dialogue and no trace of its own — the only memory it leaves
 // is the events it pushes.
 export type TaskContext = {
-  // The workspace the task belongs to (its user id): what a body filters its
+  // The workspace the task belongs to (its workspace id): what a body filters its
   // own past events by — the event log is shared by every workspace.
-  userId: string;
+  workspaceId: string;
   // Journal a fact for the coordinator: always appended as a schedule.fired
   // event addressed to the workspace's main thread, with the task's slug and
   // name mixed into the payload — the task code does not choose the event
@@ -23,7 +23,7 @@ export type TaskContext = {
   // trusted code of the installation.
   prisma: PrismaClient;
   // The workspace's tool surface: the task bundle's tool servers (see
-  // taskBundle in engine.ts), resolved for the task's user. Calls are NOT
+  // taskBundle in engine.ts), resolved for the task's workspace. Calls are NOT
   // journaled as tool.call.* — a task has no thread to journal into.
   tools: ToolsApi;
 };

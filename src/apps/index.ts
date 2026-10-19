@@ -236,7 +236,7 @@ async function renderOwnerShell(ctx: Context, appPath: string, result: Exclude<M
 // a file inside an app folder answers the file; any other path inside an app
 // folder answers the shell too when the browser is navigating (the SPA
 // fallback) and 404 otherwise.
-async function serveOwnerPath(ctx: Context, userId: string, rawRest: string): Promise<void> {
+async function serveOwnerPath(ctx: Context, workspaceId: string, rawRest: string): Promise<void> {
   const decoded = decodePath(rawRest);
 
   if (decoded === null) {
@@ -253,7 +253,7 @@ async function serveOwnerPath(ctx: Context, userId: string, rawRest: string): Pr
     // registry of existence.
     ctx.type = 'text/html; charset=utf-8';
     ctx.set('cache-control', 'no-store');
-    ctx.body = renderCatalogPage(await listApps(userId), publicAppUrl);
+    ctx.body = renderCatalogPage(await listApps(workspaceId), publicAppUrl);
 
     return;
   }
@@ -268,11 +268,11 @@ async function serveOwnerPath(ctx: Context, userId: string, rawRest: string): Pr
     return;
   }
 
-  const filesDir = workspaceFilesDir(userId);
+  const filesDir = workspaceFilesDir(workspaceId);
   const stats = await fs.stat(path.join(filesDir, relPath)).catch(() => null);
 
   if (stats?.isDirectory()) {
-    const result = await readAppManifest(userId, relPath);
+    const result = await readAppManifest(workspaceId, relPath);
 
     if (result.status !== 'absent') {
       await renderOwnerShell(ctx, relPath, result);
@@ -305,7 +305,7 @@ async function serveOwnerPath(ctx: Context, userId: string, rawRest: string): Pr
   // in-page router reads the rest of the path. Resource fetches keep the
   // honest 404.
   const appRoot = wantsHtml(ctx) ? await findAppRoot(filesDir, relPath) : null;
-  const result = appRoot ? await readAppManifest(userId, appRoot) : null;
+  const result = appRoot ? await readAppManifest(workspaceId, appRoot) : null;
 
   if (!appRoot || !result || result.status === 'absent') {
     sendText(ctx, 404, stats?.isDirectory() ? 'This folder is not an app (no balabash-app.json)' : 'Not found');
@@ -320,7 +320,7 @@ async function serveOwnerPath(ctx: Context, userId: string, rawRest: string): Pr
 // Endpoint calls answer JSON on every path — the SDK's error handling reads
 // {error:{code,message}}, never an HTML page. This is the owner edge, so
 // execution errors keep their messages; the public edge of step 4 must not.
-async function serveOwnerEndpoint(ctx: Context, userId: string, rawRest: string): Promise<void> {
+async function serveOwnerEndpoint(ctx: Context, workspaceId: string, rawRest: string): Promise<void> {
   const decoded = decodePath(rawRest);
 
   if (decoded === null) {
@@ -349,7 +349,7 @@ async function serveOwnerEndpoint(ctx: Context, userId: string, rawRest: string)
     return;
   }
 
-  const manifest = await readAppManifest(userId, appPath);
+  const manifest = await readAppManifest(workspaceId, appPath);
 
   if (manifest.status === 'absent') {
     sendJsonError(ctx, 404, 'not_found', 'This folder is not an app (no balabash-app.json)');
@@ -382,7 +382,7 @@ async function serveOwnerEndpoint(ctx: Context, userId: string, rawRest: string)
     return;
   }
 
-  const outcome = await callAppEndpoint(userId, endpoint, (params as Record<string, unknown> | undefined) ?? {});
+  const outcome = await callAppEndpoint(workspaceId, endpoint, (params as Record<string, unknown> | undefined) ?? {});
 
   switch (outcome.status) {
     case 'ok':
@@ -412,14 +412,14 @@ const SLUG_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/;
 // A publication row is only half the truth — the folder is existence
 // itself: row without folder (or with a broken manifest) answers as absent
 // or unavailable, never with details.
-async function findPublication(slug: string): Promise<{ userId: string; path: string } | null> {
+async function findPublication(slug: string): Promise<{ workspaceId: string; path: string } | null> {
   if (!SLUG_PATTERN.test(slug)) {
     return null;
   }
 
   const row = await prisma.appPublication.findUnique({ where: { slug } });
 
-  return row ? { userId: row.userId, path: row.path } : null;
+  return row ? { workspaceId: row.workspaceId, path: row.path } : null;
 }
 
 // The public page/asset surface: /:slug is the shell, /:slug/<file> an asset
@@ -454,7 +454,7 @@ async function servePublicPath(ctx: Context, rawPath: string, appBasePrefix = ''
     return;
   }
 
-  const manifest = await readAppManifest(publication.userId, publication.path);
+  const manifest = await readAppManifest(publication.workspaceId, publication.path);
 
   if (manifest.status === 'absent') {
     // The folder is gone (or is no longer an app): the filesystem is the
@@ -510,7 +510,7 @@ async function servePublicPath(ctx: Context, rawPath: string, appBasePrefix = ''
     return;
   }
 
-  const filesDir = workspaceFilesDir(publication.userId);
+  const filesDir = workspaceFilesDir(publication.workspaceId);
   const stats = await fs.stat(path.join(filesDir, relFilePath)).catch(() => null);
 
   if (stats?.isFile()) {
@@ -567,7 +567,7 @@ async function servePublicEndpoint(ctx: Context, rawRest: string): Promise<void>
     return;
   }
 
-  const manifest = await readAppManifest(publication.userId, publication.path);
+  const manifest = await readAppManifest(publication.workspaceId, publication.path);
 
   if (manifest.status === 'absent') {
     sendJsonError(ctx, 404, 'not_found', 'Not found');
@@ -598,7 +598,7 @@ async function servePublicEndpoint(ctx: Context, rawRest: string): Promise<void>
     return;
   }
 
-  const outcome = await callAppEndpoint(publication.userId, endpoint, (params as Record<string, unknown> | undefined) ?? {});
+  const outcome = await callAppEndpoint(publication.workspaceId, endpoint, (params as Record<string, unknown> | undefined) ?? {});
 
   switch (outcome.status) {
     case 'ok':
@@ -640,9 +640,9 @@ function handleAuthExchange(ctx: Context): void {
   ctx.set('cache-control', 'no-store');
   ctx.set('x-robots-tag', 'noindex');
 
-  const userId = token ? consumeHandoffToken(token) : null;
+  const workspaceId = token ? consumeHandoffToken(token) : null;
 
-  if (!userId) {
+  if (!workspaceId) {
     ctx.status = 401;
     ctx.type = 'html';
     ctx.body = [
@@ -654,7 +654,7 @@ function handleAuthExchange(ctx: Context): void {
     return;
   }
 
-  ctx.cookies.set(APPS_COOKIE_NAME, createAppsCookieValue(userId), {
+  ctx.cookies.set(APPS_COOKIE_NAME, createAppsCookieValue(workspaceId), {
     maxAge: APPS_COOKIE_MAX_AGE_MS,
     sameSite: 'lax',
     httpOnly: true,
@@ -678,15 +678,15 @@ async function handleApiRequest(ctx: Context): Promise<void> {
     // The owner gateway answers 401 on a missing/expired cookie — the exact
     // signal the SDK's refresh loop listens for (sdk/data.ts): it sends the
     // browser to refreshUrl, the main domain re-mints, the app reloads.
-    const userId = resolveOwner(ctx);
+    const workspaceId = resolveOwner(ctx);
 
-    if (!userId) {
+    if (!workspaceId) {
       sendJsonError(ctx, 401, 'unauthorized', 'The apps cookie is missing or expired');
 
       return;
     }
 
-    await serveOwnerEndpoint(ctx, userId, urlPath.slice('/platform/api/apps/'.length));
+    await serveOwnerEndpoint(ctx, workspaceId, urlPath.slice('/platform/api/apps/'.length));
 
     return;
   }
@@ -731,16 +731,16 @@ async function handleAppsRequest(ctx: Context): Promise<void> {
     // Owner surface behind the apps cookie. An invalid cookie on a page
     // navigation bounces the SAME path to the main domain — the self-refresh
     // loop: the main domain re-mints a token and sends the browser back.
-    const userId = resolveOwner(ctx);
+    const workspaceId = resolveOwner(ctx);
 
-    if (!userId) {
+    if (!workspaceId) {
       ctx.status = 302;
       ctx.redirect(`https://${config.consoleDomain}${urlPath}${ctx.search}`);
 
       return;
     }
 
-    await serveOwnerPath(ctx, userId, urlPath === '/apps' ? '' : urlPath.slice('/apps/'.length));
+    await serveOwnerPath(ctx, workspaceId, urlPath === '/apps' ? '' : urlPath.slice('/apps/'.length));
 
     return;
   }
@@ -801,13 +801,13 @@ async function handleMainDomainRequest(ctx: Context): Promise<void> {
       // browser to refreshUrl (the owner page), which asks for a login.
       const session = await getSession(ctx);
 
-      if (!session || !session.userId) {
+      if (!session || !session.workspaceId) {
         sendJsonError(ctx, 401, 'unauthorized', 'The web session is missing or expired');
 
         return;
       }
 
-      await serveOwnerEndpoint(ctx, session.userId, urlPath.slice('/platform/api/apps/'.length));
+      await serveOwnerEndpoint(ctx, session.workspaceId, urlPath.slice('/platform/api/apps/'.length));
 
       return;
     }
@@ -844,13 +844,13 @@ async function handleMainDomainRequest(ctx: Context): Promise<void> {
   if (urlPath === '/apps' || urlPath.startsWith('/apps/')) {
     const session = await getSession(ctx);
 
-    if (!session || !session.userId) {
+    if (!session || !session.workspaceId) {
       ctx.redirect(`/login?next=${encodeURIComponent(sanitizeAppsRedirect(urlPath + ctx.search))}`);
 
       return;
     }
 
-    await serveOwnerPath(ctx, session.userId, urlPath === '/apps' ? '' : urlPath.slice('/apps/'.length));
+    await serveOwnerPath(ctx, session.workspaceId, urlPath === '/apps' ? '' : urlPath.slice('/apps/'.length));
 
     return;
   }

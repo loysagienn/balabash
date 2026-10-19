@@ -61,7 +61,7 @@ after(() => stand.stop());
 async function startChild(agent: string, policy: JsonObject = {}): Promise<string> {
   const id = randomUUID();
 
-  await appendEvent({ type: 'thread.started', actor: 'system', userId: stand.userId, threadId: id, targetThreadId: stand.mainThreadId, payload: { agent, title: `${agent} at work`, ...policy } });
+  await appendEvent({ type: 'thread.started', actor: 'system', workspaceId: stand.workspaceId, threadId: id, targetThreadId: stand.mainThreadId, payload: { agent, title: `${agent} at work`, ...policy } });
 
   return id;
 }
@@ -81,15 +81,15 @@ describe('the last message of the main thread', () => {
     assert.equal(await readMainLastMessage(null), null);
     assert.equal(await readMainLastMessage(main), null);
 
-    const asked = await written({ type: 'user.message', actor: 'user', userId: stand.userId, threadId: main, payload: { text: 'Start the designer', source: 'web' } });
+    const asked = await written({ type: 'user.message', actor: 'user', workspaceId: stand.workspaceId, threadId: main, payload: { text: 'Start the designer', source: 'web' } });
 
     assert.equal((await readMainLastMessage(main))?.seq, asked);
 
     // A tool call after the message is not a message.
-    await written({ type: 'tool.call.started', actor: 'agent', agentName: 'coordinator', userId: stand.userId, threadId: main, payload: { callId: 'c1', functionName: 'spawn_agent', input: {} } });
+    await written({ type: 'tool.call.started', actor: 'agent', agentName: 'coordinator', workspaceId: stand.workspaceId, threadId: main, payload: { callId: 'c1', functionName: 'spawn_agent', input: {} } });
     assert.equal((await readMainLastMessage(main))?.seq, asked);
 
-    const answered = await written({ type: 'agent.message', actor: 'agent', agentName: 'coordinator', userId: stand.userId, threadId: main, payload: { content: [{ type: 'text', text: 'Started.' }] } });
+    const answered = await written({ type: 'agent.message', actor: 'agent', agentName: 'coordinator', workspaceId: stand.workspaceId, threadId: main, payload: { content: [{ type: 'text', text: 'Started.' }] } });
     const message = await readMainLastMessage(main);
 
     assert.equal(message?.seq, answered);
@@ -99,12 +99,12 @@ describe('the last message of the main thread', () => {
     // A child's report addressed to the main thread is in its feed too —
     // the same selection as GET /threads/:id/events.
     const child = await startChild('engineer');
-    const reported = await written({ type: 'agent.message', actor: 'agent', agentName: 'engineer', userId: stand.userId, threadId: child, targetThreadId: main, payload: { content: [{ type: 'text', text: 'Done.' }] } });
+    const reported = await written({ type: 'agent.message', actor: 'agent', agentName: 'engineer', workspaceId: stand.workspaceId, threadId: child, targetThreadId: main, payload: { content: [{ type: 'text', text: 'Done.' }] } });
 
     assert.equal((await readMainLastMessage(main))?.seq, reported);
 
     // A message inside the child alone is not the main thread's.
-    await written({ type: 'agent.message', actor: 'agent', agentName: 'engineer', userId: stand.userId, threadId: child, payload: { content: [{ type: 'text', text: 'To myself.' }] } });
+    await written({ type: 'agent.message', actor: 'agent', agentName: 'engineer', workspaceId: stand.workspaceId, threadId: child, payload: { content: [{ type: 'text', text: 'To myself.' }] } });
     assert.equal((await readMainLastMessage(main))?.seq, reported);
   });
 });
@@ -165,12 +165,12 @@ describe('the agent catalog of the snapshot', () => {
     delete process.env.MAIN_OPENAI_MODEL;
   });
 
-  async function startedOn(threadId: string, agentName: string, model: string | null, userId: string = stand.userId): Promise<void> {
-    await written({ type: 'session.started', actor: 'agent', agentName, userId, threadId, payload: { ...(model === null ? {} : { model }), tools: [], mcpServers: [] } });
+  async function startedOn(threadId: string, agentName: string, model: string | null, workspaceId: string = stand.workspaceId): Promise<void> {
+    await written({ type: 'session.started', actor: 'agent', agentName, workspaceId, threadId, payload: { ...(model === null ? {} : { model }), tools: [], mcpServers: [] } });
   }
 
   test('heads the catalog with the coordinator: the OpenAI engine, the model of the config, its passport and every catalog agent', async () => {
-    const [coordinator, ...catalog] = await readAgents(stand.userId);
+    const [coordinator, ...catalog] = await readAgents(stand.workspaceId);
     const names = getAgents().map(agent => agent.name);
 
     assert.ok(names.length > 0);
@@ -188,7 +188,7 @@ describe('the agent catalog of the snapshot', () => {
   });
 
   test('gives every catalog agent the platform default effort beside the declared one, and the sdk of its declaration', async () => {
-    const [, ...catalog] = await readAgents(stand.userId);
+    const [, ...catalog] = await readAgents(stand.workspaceId);
     const declared = new Map(getAgents().map(agent => [agent.name, agent]));
 
     for (const agent of catalog) {
@@ -208,7 +208,7 @@ describe('the agent catalog of the snapshot', () => {
   test('reads the model of each agent’s newest session.started in this workspace', async () => {
     const engineer = await startChild('engineer');
     const browser = await startChild('browser');
-    const byName = async () => new Map((await readAgents(stand.userId)).map(agent => [agent.name, agent.lastModel]));
+    const byName = async () => new Map((await readAgents(stand.workspaceId)).map(agent => [agent.name, agent.lastModel]));
 
     assert.equal((await byName()).get('engineer'), null);
 
@@ -232,7 +232,7 @@ describe('the agent catalog of the snapshot', () => {
     // Another workspace's session is not this one's.
     const foreign = randomUUID();
 
-    await appendEvent({ type: 'thread.started', actor: 'system', userId: foreign, threadId: foreign, payload: { agent: 'gardener', title: 'elsewhere' } });
+    await appendEvent({ type: 'thread.started', actor: 'system', workspaceId: foreign, threadId: foreign, payload: { agent: 'gardener', title: 'elsewhere' } });
     await startedOn(foreign, 'gardener', 'claude-opus-5-5', foreign);
     assert.equal((await byName()).get('gardener'), null);
   });
@@ -242,10 +242,10 @@ describe('the agent catalog of the snapshot', () => {
 
     assert.equal(response.status, 200, response.text);
 
-    const body = response.json<{ apps: { publicAppsBase: string }; me: { userId: string } }>();
+    const body = response.json<{ apps: { publicAppsBase: string }; me: { workspaceId: string } }>();
 
     assert.equal(body.apps.publicAppsBase, `https://${STAND_HOST}/a`);
-    assert.equal(body.me.userId, stand.userId);
+    assert.equal(body.me.workspaceId, stand.workspaceId);
   });
 
   // The console's agents reducer folds the tail by the same rule
@@ -253,7 +253,7 @@ describe('the agent catalog of the snapshot', () => {
   // reducer itself is the console's (store.test.ts), the rule and the
   // tail are replayed here over the server's own reading.
   test('the replay of the tail over the snapshot equals the next snapshot', async () => {
-    const lastModels = async () => Object.fromEntries((await readAgents(stand.userId)).map(agent => [agent.name, agent.lastModel]));
+    const lastModels = async () => Object.fromEntries((await readAgents(stand.workspaceId)).map(agent => [agent.name, agent.lastModel]));
     // The stamp as buildSnapshot takes it (readHeadSeq): the head of the log before the projections.
     const asOfSeq = (await prisma.event.aggregate({ _max: { seq: true } }))._max.seq ?? 0n;
     const snapshot = await lastModels();
@@ -268,14 +268,14 @@ describe('the agent catalog of the snapshot', () => {
     await startedOn(browser, 'browser', 'claude-sonnet-5');
     await startedOn(engineer, 'engineer', null);
     await startedOn(browser, 'browser', '');
-    await written({ type: 'session.started', actor: 'agent', agentName: 'nobody', userId: stand.userId, threadId: engineer, payload: { model: 'claude-opus-5-5', tools: [], mcpServers: [] } });
-    await appendEvent({ type: 'thread.started', actor: 'system', userId: foreign, threadId: foreign, payload: { agent: 'gardener', title: 'elsewhere' } });
+    await written({ type: 'session.started', actor: 'agent', agentName: 'nobody', workspaceId: stand.workspaceId, threadId: engineer, payload: { model: 'claude-opus-5-5', tools: [], mcpServers: [] } });
+    await appendEvent({ type: 'thread.started', actor: 'system', workspaceId: foreign, threadId: foreign, payload: { agent: 'gardener', title: 'elsewhere' } });
     await startedOn(foreign, 'gardener', 'claude-opus-5-5', foreign);
     await startedOn(engineer, 'engineer', 'claude-fable-5-1');
 
     // The tail as the stream serves it: after the snapshot's stamp, this
     // workspace's events (src/api/event-stream.ts visible).
-    const tail = (await getEventsAfter(asOfSeq, { limit: 1000 })).filter(event => event.userId === stand.userId || event.userId === null);
+    const tail = (await getEventsAfter(asOfSeq, { limit: 1000 })).filter(event => event.workspaceId === stand.workspaceId || event.workspaceId === null);
     const replay = { ...snapshot };
 
     for (const event of tail) {
@@ -308,11 +308,11 @@ describe('the sessions of the snapshot', () => {
     const engineer = await startChild('engineer');
     const asOfSeq = (await prisma.event.aggregate({ _max: { seq: true } }))._max.seq ?? 0n;
 
-    await written({ type: 'session.started', actor: 'agent', agentName: 'engineer', userId: stand.userId, threadId: engineer, payload: { model: 'claude-fable-5-1', effort: 'low', tools: [], mcpServers: [] } });
-    await written({ type: 'session.state', actor: 'agent', agentName: 'engineer', userId: stand.userId, threadId: engineer, payload: { state: 'run' } });
-    await written({ type: 'session.context', actor: 'agent', agentName: 'engineer', userId: stand.userId, threadId: engineer, payload: { totalTokens: 10, maxTokens: 100, percentage: 10 } });
-    await written({ type: 'session.started', actor: 'agent', agentName: 'engineer', userId: stand.userId, threadId: engineer, payload: { model: 'claude-opus-5-5', effort: 'high', tools: [], mcpServers: [] } });
-    await written({ type: 'session.state', actor: 'agent', agentName: 'engineer', userId: stand.userId, threadId: engineer, payload: { state: 'wait' } });
+    await written({ type: 'session.started', actor: 'agent', agentName: 'engineer', workspaceId: stand.workspaceId, threadId: engineer, payload: { model: 'claude-fable-5-1', effort: 'low', tools: [], mcpServers: [] } });
+    await written({ type: 'session.state', actor: 'agent', agentName: 'engineer', workspaceId: stand.workspaceId, threadId: engineer, payload: { state: 'run' } });
+    await written({ type: 'session.context', actor: 'agent', agentName: 'engineer', workspaceId: stand.workspaceId, threadId: engineer, payload: { totalTokens: 10, maxTokens: 100, percentage: 10 } });
+    await written({ type: 'session.started', actor: 'agent', agentName: 'engineer', workspaceId: stand.workspaceId, threadId: engineer, payload: { model: 'claude-opus-5-5', effort: 'high', tools: [], mcpServers: [] } });
+    await written({ type: 'session.state', actor: 'agent', agentName: 'engineer', workspaceId: stand.workspaceId, threadId: engineer, payload: { state: 'wait' } });
 
     const response = await stand.request('GET', '/api/snapshot');
 
@@ -344,7 +344,7 @@ describe('the open requests for credentials of the snapshot', () => {
   // hold the rows the tables hold now. Compared by id: the order of the
   // store is the snapshot's then the tail's, the bell sorts by moment.
   async function replayed(asOfSeq: bigint, hydrated: OpenSecretRequestView[]): Promise<Record<string, OpenSecretRequestView>> {
-    const tail = (await getEventsAfter(asOfSeq, { limit: 1000 })).filter(event => event.userId === stand.userId || event.userId === null);
+    const tail = (await getEventsAfter(asOfSeq, { limit: 1000 })).filter(event => event.workspaceId === stand.workspaceId || event.workspaceId === null);
     let state = secretRequestsReducer(initialSecretRequests, snapshotLoadDone(snapshotFixture({ asOfSeq, secretRequests: hydrated })));
 
     for (const event of tail) {
@@ -380,11 +380,11 @@ describe('the open requests for credentials of the snapshot', () => {
     const asOfSeq = await headSeq();
     const auth = await startChild('auth');
 
-    assert.deepEqual(await readOpenSecretRequests(stand.userId), []);
+    assert.deepEqual(await readOpenSecretRequests(stand.workspaceId), []);
 
-    const keys = await openSecretRequest('external-secrets', { userId: stand.userId, threadId: auth, server: 'yandex-direct', fields: [{ key: 'API_KEY', description: 'd1' }, { key: 'LOGIN', description: 'd2' }] });
-    const client = await openSecretRequest('oauth-client', { userId: stand.userId, threadId: auth, server: 'google' });
-    const rows = await readOpenSecretRequests(stand.userId);
+    const keys = await openSecretRequest('external-secrets', { workspaceId: stand.workspaceId, threadId: auth, server: 'yandex-direct', fields: [{ key: 'API_KEY', description: 'd1' }, { key: 'LOGIN', description: 'd2' }] });
+    const client = await openSecretRequest('oauth-client', { workspaceId: stand.workspaceId, threadId: auth, server: 'google' });
+    const rows = await readOpenSecretRequests(stand.workspaceId);
 
     assert.deepEqual(
       rows.map(row => [row.id, row.kind, row.server, row.fields, row.threadId, row.agent]),
@@ -411,8 +411,8 @@ describe('the open requests for credentials of the snapshot', () => {
     // new fields, the new thread and moment; the form still answers by the id.
     const stamped = await headSeq();
     const other = await startChild('auth');
-    const again = await openSecretRequest('external-secrets', { userId: stand.userId, threadId: other, server: 'yandex-direct', fields: [{ key: 'API_KEY', description: 'd1' }] });
-    const after = await readOpenSecretRequests(stand.userId);
+    const again = await openSecretRequest('external-secrets', { workspaceId: stand.workspaceId, threadId: other, server: 'yandex-direct', fields: [{ key: 'API_KEY', description: 'd1' }] });
+    const after = await readOpenSecretRequests(stand.workspaceId);
     const replaced = after.find(row => row.id === keys.id);
 
     assert.equal(again.id, keys.id);
@@ -433,15 +433,15 @@ describe('the open requests for credentials of the snapshot', () => {
 
   test('a refused journal refuses the opening: no row without its event', async () => {
     const auth = await startChild('auth');
-    const before = await readOpenSecretRequests(stand.userId);
+    const before = await readOpenSecretRequests(stand.workspaceId);
     const asOfSeq = await headSeq();
 
     await withJournalRefusing('requested', async () => {
-      await assert.rejects(openSecretRequest('external-secrets', { userId: stand.userId, threadId: auth, server: 'notion-mcp', fields: [{ key: 'TOKEN', description: 'd' }] }), /journal refused/);
-      await assert.rejects(openSecretRequest('oauth-client', { userId: stand.userId, threadId: auth, server: 'yandex' }), /journal refused/);
+      await assert.rejects(openSecretRequest('external-secrets', { workspaceId: stand.workspaceId, threadId: auth, server: 'notion-mcp', fields: [{ key: 'TOKEN', description: 'd' }] }), /journal refused/);
+      await assert.rejects(openSecretRequest('oauth-client', { workspaceId: stand.workspaceId, threadId: auth, server: 'yandex' }), /journal refused/);
     });
 
-    assert.deepEqual(await readOpenSecretRequests(stand.userId), before);
+    assert.deepEqual(await readOpenSecretRequests(stand.workspaceId), before);
     assert.deepEqual(await getEventsAfter(asOfSeq, { limit: 100 }), []);
   });
 
@@ -449,14 +449,14 @@ describe('the open requests for credentials of the snapshot', () => {
     const foreign = randomUUID();
     const foreignAuth = randomUUID();
 
-    await appendEvent({ type: 'thread.started', actor: 'system', userId: foreign, threadId: foreignAuth, payload: { agent: 'auth', title: 'elsewhere' } });
+    await appendEvent({ type: 'thread.started', actor: 'system', workspaceId: foreign, threadId: foreignAuth, payload: { agent: 'auth', title: 'elsewhere' } });
 
     const asOfSeq = await headSeq();
-    const mine = await readOpenSecretRequests(stand.userId);
-    const theirs = await openSecretRequest('external-secrets', { userId: foreign, threadId: foreignAuth, server: 'yandex-direct', fields: [{ key: 'API_KEY', description: 'd1' }] });
+    const mine = await readOpenSecretRequests(stand.workspaceId);
+    const theirs = await openSecretRequest('external-secrets', { workspaceId: foreign, threadId: foreignAuth, server: 'yandex-direct', fields: [{ key: 'API_KEY', description: 'd1' }] });
 
     assert.notEqual(theirs.id, mine.find(row => row.server === 'yandex-direct')?.id);
-    assert.deepEqual(await readOpenSecretRequests(stand.userId), mine);
+    assert.deepEqual(await readOpenSecretRequests(stand.workspaceId), mine);
     assert.deepEqual(await replayed(asOfSeq, mine), byId(mine), 'the tail of this workspace does not carry the other request');
     assert.deepEqual((await readOpenSecretRequests(foreign)).map(row => [row.id, row.agent]), [[theirs.id, 'auth']]);
 
@@ -472,7 +472,7 @@ describe('the open requests for credentials of the snapshot', () => {
   });
 
   test('closes the request when the values land, in one transaction with its event: a refused journal keeps the row and the values out; then the row is gone and the event names it', async () => {
-    const before = await readOpenSecretRequests(stand.userId);
+    const before = await readOpenSecretRequests(stand.workspaceId);
     const keys = before.find(row => row.kind === 'external-secrets');
     const client = before.find(row => row.kind === 'oauth-client');
 
@@ -495,7 +495,7 @@ describe('the open requests for credentials of the snapshot', () => {
       assert.equal(refusedClient.status, 400, refusedClient.text);
     });
 
-    assert.deepEqual(await readOpenSecretRequests(stand.userId), before);
+    assert.deepEqual(await readOpenSecretRequests(stand.workspaceId), before);
     assert.equal(await prisma.externalServerSecret.count({ where: { server: 'yandex-direct' } }), 0);
     assert.equal(await prisma.oauthClient.count({ where: { server: 'google' } }), 0);
     assert.deepEqual(await getEventsAfter(asOfSeq, { limit: 100 }), []);
@@ -504,12 +504,12 @@ describe('the open requests for credentials of the snapshot', () => {
     const saved = await stand.request('POST', `/api/secret-requests/${keys.id}`, { body: { values } });
 
     assert.equal(saved.status, 200, saved.text);
-    assert.deepEqual((await readOpenSecretRequests(stand.userId)).map(row => row.id), [client.id]);
+    assert.deepEqual((await readOpenSecretRequests(stand.workspaceId)).map(row => row.id), [client.id]);
 
     const savedClient = await stand.request('POST', `/api/secret-requests/${client.id}`, { body: { values: clientValues } });
 
     assert.equal(savedClient.status, 200, savedClient.text);
-    assert.deepEqual(await readOpenSecretRequests(stand.userId), []);
+    assert.deepEqual(await readOpenSecretRequests(stand.workspaceId), []);
     assert.deepEqual((await prisma.externalServerSecret.findMany({ where: { server: 'yandex-direct' } })).map(row => [row.key, row.value]), [['API_KEY', values.API_KEY]]);
     assert.deepEqual((await prisma.oauthClient.findUnique({ where: { server: 'google' } }))?.clientInformation, clientValues);
 

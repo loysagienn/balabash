@@ -57,10 +57,10 @@ This is the verification instrument for any work on prompts and tool
 descriptions: run it before and after a change and diff the output.
 
 ```
-npm run build && npm run render-context [-- <userId>]
+npm run build && npm run render-context [-- <workspaceId>]
 ```
 
-With one user in the database the userId is inferred; with several the
+With one user in the database the workspaceId is inferred; with several the
 script lists them and exits. Connecting per-user servers (gmail, notion) may
 hit the network; a server that fails to connect is reported inside the
 output instead of failing the run. Safe to run next to the live app: it

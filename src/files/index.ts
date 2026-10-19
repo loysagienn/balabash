@@ -19,7 +19,7 @@ import {
 } from './storage.ts';
 
 type FileMetadata = {
-  userId?: string | null;
+  workspaceId?: string | null;
   contentType?: string | null;
   sizeBytes?: number | null;
   originalFilename?: string | null;
@@ -92,7 +92,7 @@ const buildObjectKey = (scope?: string | null, originalFilename?: string | null)
 function toFileRef(file: FileModel): FileRef {
   return {
     id: file.id,
-    userId: file.userId,
+    workspaceId: file.workspaceId,
     contentType: file.contentType,
     sizeBytes: file.sizeBytes,
     etag: file.etag,
@@ -107,7 +107,7 @@ function toFileRef(file: FileModel): FileRef {
 }
 
 // The expected refusal of a lookup — no such row, a row not yet uploaded, a
-// row of another user — as opposed to the store failing to answer at all:
+// row of another workspace — as opposed to the store failing to answer at all:
 // a caller translating refusals (the API's 404) must let a failure through.
 export class FileNotFoundError extends Error {
   constructor(fileId: string, reason = 'not found') {
@@ -136,7 +136,7 @@ export async function ingestFile({
   sizeBytes,
   originalFilename,
   scope,
-  userId,
+  workspaceId,
   width,
   height,
   cacheControl,
@@ -157,7 +157,7 @@ export async function ingestFile({
     data: {
       bucket,
       objectKey,
-      userId: userId ?? undefined,
+      workspaceId: workspaceId ?? undefined,
       contentType: contentType ?? undefined,
       sizeBytes: uploadResult.sizeBytes ?? sizeBytes ?? undefined,
       etag: uploadResult.ETag ?? undefined,
@@ -198,10 +198,10 @@ export async function getFileSizeBytes(fileId: string): Promise<number | null> {
 // Workspace-scoped lookup for model-supplied file ids (§6): a fileId coming
 // from an LLM call must not cross the user boundary, and the existence of a
 // foreign file is not leaked — same error as a missing one.
-export async function getUserFile(userId: string, fileId: string): Promise<FileRef> {
+export async function getWorkspaceFile(workspaceId: string, fileId: string): Promise<FileRef> {
   const file = await requireFile(fileId);
 
-  if (file.userId !== userId) {
+  if (file.workspaceId !== workspaceId) {
     throw new FileNotFoundError(fileId);
   }
 

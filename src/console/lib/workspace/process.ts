@@ -21,7 +21,7 @@ export function flashToast(flash: WorkspaceFlash, workspaceName: string | null):
     return {
       title: `Signed in to ${here}`,
       state: 'done',
-      ...(flash.back ? { action: { label: `Back to ${flash.back.name}`, workspace: flash.back.userId } } : {}),
+      ...(flash.back ? { action: { label: `Back to ${flash.back.name}`, workspace: flash.back.workspaceId } } : {}),
     };
   }
 
@@ -35,11 +35,11 @@ export function connectStoreToWorkspace(store: Store<State, Action>): () => void
 
   const unsubscribe = store.subscribe(() => {
     const { session } = store.getState();
-    const userId = session.me?.userId ?? null;
+    const workspaceId = session.me?.workspaceId ?? null;
 
-    if (userId && userId !== confirmed) {
-      confirmed = userId;
-      confirmWorkspace(userId);
+    if (workspaceId && workspaceId !== confirmed) {
+      confirmed = workspaceId;
+      confirmWorkspace(workspaceId);
 
       if (flash) {
         const toast = flashToast(flash, session.me?.workspaceName ?? null);
@@ -47,7 +47,7 @@ export function connectStoreToWorkspace(store: Store<State, Action>): () => void
         flash = null;
         store.dispatch(pushToast(toast));
       }
-    } else if (!userId && confirmed && session.status === 'anonymous') {
+    } else if (!workspaceId && confirmed && session.status === 'anonymous') {
       // Signed out of the last workspace (or the whole session is gone).
       confirmed = null;
       forgetWorkspace();

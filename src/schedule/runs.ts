@@ -65,11 +65,11 @@ export type JobRunsPage = { runs: JobRunView[]; nextCursor: string | null };
 // and id, so two runs started in the same millisecond never lose one
 // between pages). A cursor naming no run of the user reads as the end: an
 // empty page — the journal does not keep what it never had.
-export async function listJobRuns(userId: string, options: { slug?: string; before?: string; limit: number }): Promise<JobRunsPage> {
+export async function listJobRuns(workspaceId: string, options: { slug?: string; before?: string; limit: number }): Promise<JobRunsPage> {
   let cursor: { startedAt: Date; id: string } | null = null;
 
   if (options.before !== undefined) {
-    cursor = await prisma.jobRun.findFirst({ where: { id: options.before, userId }, select: { startedAt: true, id: true } });
+    cursor = await prisma.jobRun.findFirst({ where: { id: options.before, workspaceId }, select: { startedAt: true, id: true } });
 
     if (!cursor) {
       return { runs: [], nextCursor: null };
@@ -78,7 +78,7 @@ export async function listJobRuns(userId: string, options: { slug?: string; befo
 
   const rows = await prisma.jobRun.findMany({
     where: {
-      userId,
+      workspaceId,
       ...(options.slug !== undefined ? { slug: options.slug } : {}),
       ...(cursor
         ? {
@@ -96,8 +96,8 @@ export async function listJobRuns(userId: string, options: { slug?: string; befo
   return { runs: page.map(jobRunView), nextCursor: rows.length > options.limit ? page[page.length - 1]!.id : null };
 }
 
-export async function getJobRun(userId: string, id: string): Promise<JobRunDetailView | null> {
-  const row = await prisma.jobRun.findFirst({ where: { id, userId } });
+export async function getJobRun(workspaceId: string, id: string): Promise<JobRunDetailView | null> {
+  const row = await prisma.jobRun.findFirst({ where: { id, workspaceId } });
 
   return row ? jobRunDetailView(row) : null;
 }
@@ -105,13 +105,13 @@ export async function getJobRun(userId: string, id: string): Promise<JobRunDetai
 // The newest run of every task that has one, newest first across tasks.
 // One query: DISTINCT ON (slug) over the (slug, started_at) index — the
 // journal of a workspace holds thousands of rows, the answer a dozen.
-export async function latestJobRuns(userId: string): Promise<JobRunView[]> {
+export async function latestJobRuns(workspaceId: string): Promise<JobRunView[]> {
   const rows = await prisma.$queryRaw<ViewRow[]>`
     SELECT DISTINCT ON (slug)
       id, slug, trigger, status, exit_code AS "exitCode", started_at AS "startedAt", finished_at AS "finishedAt",
       duration_ms AS "durationMs", stdout_truncated AS "stdoutTruncated", stderr_truncated AS "stderrTruncated"
     FROM job_runs
-    WHERE user_id = ${userId}
+    WHERE user_id = ${workspaceId}
     ORDER BY slug, started_at DESC, id DESC
   `;
 

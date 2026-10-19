@@ -102,7 +102,7 @@ async function requestRestart(args: JsonObject, ctx: BuiltinServerCallContext): 
   await appendEvent({
     type: SYSTEM_RESTART_REQUESTED,
     actor: 'system',
-    userId: ctx.userId,
+    workspaceId: ctx.workspaceId,
     threadId: ctx.threadId,
     payload: {
       reason,

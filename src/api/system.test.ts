@@ -86,12 +86,12 @@ describe('GET /api/system', () => {
   });
 
   test('answers the file area of the session’s workspace once walked, per top-level folder too', async () => {
-    const filesDir = (await import('../workspace/layout.ts')).workspaceFilesDir(stand.userId);
+    const filesDir = (await import('../workspace/layout.ts')).workspaceFilesDir(stand.workspaceId);
 
     await fs.mkdir(path.join(filesDir, 'renovation'), { recursive: true });
     await fs.writeFile(path.join(filesDir, 'notes.md'), 'abc');
     await fs.writeFile(path.join(filesDir, 'renovation', 'AGENTS.md'), '1234');
-    await measureFileAreaTotals(stand.userId);
+    await measureFileAreaTotals(stand.workspaceId);
 
     const body = (await stand.request('GET', '/api/system')).json<SystemResponse>();
 
@@ -107,20 +107,20 @@ describe('the system log of the snapshot', () => {
   test('carries this workspace’s and the installation’s system events in seq order, never another workspace’s', async () => {
     const foreign = randomUUID();
 
-    await appendEvent({ type: 'system.restart.requested', actor: 'system', userId: stand.userId, threadId: stand.mainThreadId, payload: { reason: 'a new build', requestedBy: 'engineer' } });
-    await appendEvent({ type: 'system.exception', actor: 'system', userId: null, payload: { scope: 'migrate-deploy', error: 'migration 0041 failed' } });
-    await appendEvent({ type: 'system.exception', actor: 'system', userId: foreign, payload: { scope: 'workspace-job', slug: 'elsewhere', error: 'not ours' } });
-    await appendEvent({ type: 'system.restart.completed', actor: 'system', userId: stand.userId, threadId: null, targetThreadId: stand.mainThreadId, payload: { reason: 'a new build', requestSeq: 1 } });
+    await appendEvent({ type: 'system.restart.requested', actor: 'system', workspaceId: stand.workspaceId, threadId: stand.mainThreadId, payload: { reason: 'a new build', requestedBy: 'engineer' } });
+    await appendEvent({ type: 'system.exception', actor: 'system', workspaceId: null, payload: { scope: 'migrate-deploy', error: 'migration 0041 failed' } });
+    await appendEvent({ type: 'system.exception', actor: 'system', workspaceId: foreign, payload: { scope: 'workspace-job', slug: 'elsewhere', error: 'not ours' } });
+    await appendEvent({ type: 'system.restart.completed', actor: 'system', workspaceId: stand.workspaceId, threadId: null, targetThreadId: stand.mainThreadId, payload: { reason: 'a new build', requestSeq: 1 } });
 
     const snapshot = (await stand.request('GET', '/api/snapshot')).json<SnapshotResponse>();
     const log = snapshot.systemLog;
 
     assert.deepEqual(
-      log.map(event => [event.type, event.userId]),
+      log.map(event => [event.type, event.workspaceId]),
       [
-        ['system.restart.requested', stand.userId],
+        ['system.restart.requested', stand.workspaceId],
         ['system.exception', null],
-        ['system.restart.completed', stand.userId],
+        ['system.restart.completed', stand.workspaceId],
       ],
     );
     assert.ok(log.every((event, i) => i === 0 || event.seq > log[i - 1].seq));
@@ -129,22 +129,22 @@ describe('the system log of the snapshot', () => {
 
   test('the replay of the tail over the snapshot equals the next snapshot', async () => {
     const asOfSeq = await headSeq();
-    const hydrated = await readSystemLog(stand.userId);
+    const hydrated = await readSystemLog(stand.workspaceId);
 
-    await appendEvent({ type: 'system.restart.requested', actor: 'system', userId: stand.userId, threadId: stand.mainThreadId, payload: { reason: 'another build' } });
-    await appendEvent({ type: 'user.message', actor: 'user', userId: stand.userId, threadId: stand.mainThreadId, payload: { text: 'not a system event', source: 'web' } });
-    await appendEvent({ type: 'system.exception', actor: 'system', userId: randomUUID(), payload: { error: 'another workspace' } });
-    await appendEvent({ type: 'system.exception', actor: 'system', userId: null, payload: { scope: 'supervisor-rollback', error: 'rolled back' } });
+    await appendEvent({ type: 'system.restart.requested', actor: 'system', workspaceId: stand.workspaceId, threadId: stand.mainThreadId, payload: { reason: 'another build' } });
+    await appendEvent({ type: 'user.message', actor: 'user', workspaceId: stand.workspaceId, threadId: stand.mainThreadId, payload: { text: 'not a system event', source: 'web' } });
+    await appendEvent({ type: 'system.exception', actor: 'system', workspaceId: randomUUID(), payload: { error: 'another workspace' } });
+    await appendEvent({ type: 'system.exception', actor: 'system', workspaceId: null, payload: { scope: 'supervisor-rollback', error: 'rolled back' } });
 
     // The tail as the stream serves it: this workspace's events after the stamp.
-    const tail = (await getEventsAfter(asOfSeq, { limit: 1000 })).filter(event => event.userId === stand.userId || event.userId === null);
+    const tail = (await getEventsAfter(asOfSeq, { limit: 1000 })).filter(event => event.workspaceId === stand.workspaceId || event.workspaceId === null);
     let state = systemReducer(initialSystem, snapshotLoadDone(snapshotFixture({ asOfSeq, systemLog: hydrated })));
 
     for (const event of tail) {
       state = systemReducer(state, eventAction(event));
     }
 
-    const next = await readSystemLog(stand.userId);
+    const next = await readSystemLog(stand.workspaceId);
 
     assert.equal(next.length, hydrated.length + 2);
     assert.deepEqual(
@@ -160,16 +160,16 @@ describe('GET /api/system/log', () => {
     // The tests before this one left events of their own: the counts are deltas.
     const were = { all: await total(''), restart: await total('&kind=restart'), exception: await total('&kind=exception') };
     const foreign = randomUUID();
-    const r1 = await appendEvent({ type: 'system.restart.requested', actor: 'system', userId: stand.userId, threadId: stand.mainThreadId, payload: { reason: 'a build', requestedBy: 'engineer' } });
+    const r1 = await appendEvent({ type: 'system.restart.requested', actor: 'system', workspaceId: stand.workspaceId, threadId: stand.mainThreadId, payload: { reason: 'a build', requestedBy: 'engineer' } });
 
     assert.ok(r1.written);
 
-    const x1 = await appendEvent({ type: 'system.exception', actor: 'system', userId: null, payload: { scope: 'migrate-deploy', error: 'one' } });
+    const x1 = await appendEvent({ type: 'system.exception', actor: 'system', workspaceId: null, payload: { scope: 'migrate-deploy', error: 'one' } });
 
-    await appendEvent({ type: 'system.exception', actor: 'system', userId: foreign, payload: { scope: 'workspace-job', error: 'not ours' } });
+    await appendEvent({ type: 'system.exception', actor: 'system', workspaceId: foreign, payload: { scope: 'workspace-job', error: 'not ours' } });
 
-    const c1 = await appendEvent({ type: 'system.restart.completed', actor: 'system', userId: stand.userId, threadId: null, targetThreadId: stand.mainThreadId, payload: { reason: 'a build', requestSeq: Number(r1.event.seq) } });
-    const x2 = await appendEvent({ type: 'system.exception', actor: 'system', userId: stand.userId, payload: { scope: 'workspace-job', error: 'two' } });
+    const c1 = await appendEvent({ type: 'system.restart.completed', actor: 'system', workspaceId: stand.workspaceId, threadId: null, targetThreadId: stand.mainThreadId, payload: { reason: 'a build', requestSeq: Number(r1.event.seq) } });
+    const x2 = await appendEvent({ type: 'system.exception', actor: 'system', workspaceId: stand.workspaceId, payload: { scope: 'workspace-job', error: 'two' } });
 
     assert.ok(x1.written);
     assert.ok(c1.written);
@@ -226,9 +226,9 @@ describe('the restart in the way, as this workspace may see it', () => {
   };
 
   test('another workspace’s request is a bare fact — no reason, no requester, no thread — and its threads in the way a count; an own request names its own', async () => {
-    const other = await prisma.user.create({ data: {} });
+    const other = await prisma.workspace.create({ data: {} });
     const otherMain = await ensureMainThread(other.id);
-    const foreignChild = await startThread({ userId: other.id, parentThreadId: otherMain.id, agent: 'engineer', title: 'foreign confidential title', actor: 'system' });
+    const foreignChild = await startThread({ workspaceId: other.id, parentThreadId: otherMain.id, agent: 'engineer', title: 'foreign confidential title', actor: 'system' });
     // The safe window never opens: a secretary turn is always in flight.
     const restarts = startRestartModule({
       isBusy: () => true,
@@ -238,7 +238,7 @@ describe('the restart in the way, as this workspace may see it', () => {
     });
 
     try {
-      const foreign = await appendEvent({ type: 'system.restart.requested', actor: 'system', userId: other.id, threadId: foreignChild.id, payload: { reason: 'foreign confidential reason', requestedBy: 'engineer' } });
+      const foreign = await appendEvent({ type: 'system.restart.requested', actor: 'system', workspaceId: other.id, threadId: foreignChild.id, payload: { reason: 'foreign confidential reason', requestedBy: 'engineer' } });
 
       assert.ok(foreign.written);
       const seen = await until(async () => {
@@ -257,8 +257,8 @@ describe('the restart in the way, as this workspace may see it', () => {
 
       // The workspace's own request, blocked by the other workspace's thread
       // and by a child of its own: its words, its thread named, the other's counted.
-      const ownChild = await startThread({ userId: stand.userId, parentThreadId: stand.mainThreadId, agent: 'engineer', title: 'own thread', actor: 'system' });
-      const own = await appendEvent({ type: 'system.restart.requested', actor: 'system', userId: stand.userId, threadId: stand.mainThreadId, payload: { reason: 'my build', requestedBy: 'engineer' } });
+      const ownChild = await startThread({ workspaceId: stand.workspaceId, parentThreadId: stand.mainThreadId, agent: 'engineer', title: 'own thread', actor: 'system' });
+      const own = await appendEvent({ type: 'system.restart.requested', actor: 'system', workspaceId: stand.workspaceId, threadId: stand.mainThreadId, payload: { reason: 'my build', requestedBy: 'engineer' } });
 
       assert.ok(own.written);
       const mine = await until(async () => {

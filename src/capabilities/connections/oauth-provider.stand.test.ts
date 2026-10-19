@@ -36,7 +36,7 @@ before(async () => {
   provider = await import('./oauth-provider.ts');
   connection = await prisma.connection.create({
     data: {
-      userId: stand.userId,
+      workspaceId: stand.workspaceId,
       threadId: stand.mainThreadId,
       server: SERVER,
       accountKey: 'main',

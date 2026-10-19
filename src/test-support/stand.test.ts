@@ -42,7 +42,7 @@ describe('stand', () => {
     const { config } = await import('../config/index.ts');
 
     assert.equal(await fs.realpath(process.cwd()), await fs.realpath(stand.dir));
-    assert.equal(workspaceFilesDir(stand.userId), path.join(process.cwd(), 'data', 'workspace', stand.userId, 'files'));
+    assert.equal(workspaceFilesDir(stand.workspaceId), path.join(process.cwd(), 'data', 'workspace', stand.workspaceId, 'files'));
     assert.equal(config.fileStorage, 'local');
     assert.equal(config.filesRoot, path.join(process.cwd(), 'files'));
     assert.equal(config.telegramEnabled, false);
@@ -55,12 +55,12 @@ describe('stand', () => {
   test('the workspace is seeded: one user, its main thread, a web session', async () => {
     const { prisma } = await import('../db/client.ts');
 
-    assert.deepEqual(await prisma.user.findMany({ select: { id: true } }), [{ id: stand.userId }]);
+    assert.deepEqual(await prisma.workspace.findMany({ select: { id: true } }), [{ id: stand.workspaceId }]);
     assert.deepEqual(
       await prisma.thread.findMany({ select: { id: true, parentId: true, agent: true, status: true } }),
       [{ id: stand.mainThreadId, parentId: null, agent: 'coordinator', status: 'active' }],
     );
-    assert.equal(await prisma.session.count({ where: { userId: stand.userId } }), 1);
+    assert.equal(await prisma.session.count({ where: { workspaceId: stand.workspaceId } }), 1);
     assert.match(stand.cookie, /^session_id=[A-Za-z0-9_-]+$/);
   });
 
@@ -68,7 +68,7 @@ describe('stand', () => {
     const me = await stand.request('GET', '/api/me');
 
     assert.equal(me.status, 200);
-    assert.deepEqual(me.json<MeResponse>(), { userId: stand.userId, workspaceName: null, operatorName: null, mainThreadId: stand.mainThreadId });
+    assert.deepEqual(me.json<MeResponse>(), { workspaceId: stand.workspaceId, workspaceName: null, operatorName: null, mainThreadId: stand.mainThreadId });
 
     const anonymous = await stand.request('GET', '/api/me', { cookie: null });
 

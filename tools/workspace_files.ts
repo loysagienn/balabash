@@ -1,5 +1,5 @@
 // Workspace file-area hands: read/write/list/delete over
-// data/workspace/<userId>/files plus run_script. These tools duplicate what a
+// data/workspace/<workspaceId>/files plus run_script. These tools duplicate what a
 // native tool preset (shell, file edits) already gives, so the server is
 // granted only to agents without native hands (browser, the coordinator,
 // scheduled tasks) — full-preset agents get the workspace server (data_query
@@ -15,7 +15,7 @@ import { z } from 'zod';
 import { ToolError, toErrorResult, toStructuredResult } from '../src/capabilities/tool-result.ts';
 import { listDir, sanitizeRelPath, statFile, upsertMeta } from '../src/workspace/files.ts';
 import { withWorkspaceDb } from '../src/workspace/sqlite.ts';
-import { callerUserId, childEnv, ensureWorkspace, runChild, serveMcp } from './workspace_shared.ts';
+import { callerWorkspaceId, childEnv, ensureWorkspace, runChild, serveMcp } from './workspace_shared.ts';
 
 // run_script: the MCP call timeout is 10 minutes — the script cap stays under it.
 const SCRIPT_DEFAULT_TIMEOUT_SECONDS = 60;
@@ -72,7 +72,7 @@ function createMcpServer() {
     },
     async ({ runtime, code, file, args, timeout_seconds }, extra) => {
       try {
-        const workspace = await ensureWorkspace(callerUserId(extra));
+        const workspace = await ensureWorkspace(callerWorkspaceId(extra));
 
         if ((code === null) === (file === null)) {
           throw new ToolError('Pass exactly one of "code" (inline source) or "file" (saved script path).');
@@ -157,7 +157,7 @@ function createMcpServer() {
     },
     async ({ path: rawPath, content, title, description }, extra) => {
       try {
-        const workspace = await ensureWorkspace(callerUserId(extra));
+        const workspace = await ensureWorkspace(callerWorkspaceId(extra));
         const relPath = sanitizeRelPath(rawPath);
         const absPath = path.join(workspace.filesDir, relPath);
 
@@ -203,7 +203,7 @@ function createMcpServer() {
     },
     async ({ path: rawPath }, extra) => {
       try {
-        const workspace = await ensureWorkspace(callerUserId(extra));
+        const workspace = await ensureWorkspace(callerWorkspaceId(extra));
         const relPath = sanitizeRelPath(rawPath);
         const absPath = path.join(workspace.filesDir, relPath);
 
@@ -246,11 +246,11 @@ function createMcpServer() {
     },
     async ({ path: rawPath }, extra) => {
       try {
-        const userId = callerUserId(extra);
-        await ensureWorkspace(userId);
+        const workspaceId = callerWorkspaceId(extra);
+        await ensureWorkspace(workspaceId);
         const relPath = sanitizeRelPath(rawPath);
 
-        const node = await statFile(userId, relPath);
+        const node = await statFile(workspaceId, relPath);
         if (!node) {
           throw new ToolError(`No file at "${relPath}" in the workspace file area. Check workspace_list_files.`);
         }
@@ -281,13 +281,13 @@ function createMcpServer() {
     },
     async ({ path: rawPath }, extra) => {
       try {
-        const userId = callerUserId(extra);
-        await ensureWorkspace(userId);
+        const workspaceId = callerWorkspaceId(extra);
+        await ensureWorkspace(workspaceId);
         const relDir = rawPath === null ? '' : sanitizeRelPath(rawPath, 'directory path');
 
         // The core's listing (shared with the web API) also prunes orphaned
         // _files rows of this directory — the filesystem is the source of truth.
-        const listing = await listDir(userId, relDir);
+        const listing = await listDir(workspaceId, relDir);
         if (!listing) {
           throw new ToolError(`No directory "${relDir || '.'}" in the workspace file area.`);
         }
@@ -320,7 +320,7 @@ function createMcpServer() {
     },
     async ({ path: rawPath }, extra) => {
       try {
-        const workspace = await ensureWorkspace(callerUserId(extra));
+        const workspace = await ensureWorkspace(callerWorkspaceId(extra));
         const relPath = sanitizeRelPath(rawPath);
         const absPath = path.join(workspace.filesDir, relPath);
 

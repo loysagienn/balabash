@@ -17,7 +17,7 @@ import { initialWatch } from './store.ts';
 function ctx(partial: Partial<MirrorContext> = {}, watch: Partial<ReturnType<typeof initialWatch>> = {}): MirrorContext {
   return {
     threadId: 't1',
-    userId: 'u1',
+    workspaceId: 'u1',
     kind: 'fake_agent',
     watch: initialWatch({ headless: false, parentId: 'main', notification: 'urgent', ownMessageIds: ['m-own'], ...watch }),
     ...partial,

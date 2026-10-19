@@ -167,7 +167,7 @@ export const agent = {
     instructions: SYSTEM_PROMPT,
     model: DESIGNER_MODEL,
     preset: 'full',
-    cwd: (userId: string) => workspaceFilesDir(userId),
+    cwd: (workspaceId: string) => workspaceFilesDir(workspaceId),
     nativeServers: ['claude_design'],
     environment: (ctx: RunContext) => createEnvironment(ctx),
   },

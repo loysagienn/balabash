@@ -31,6 +31,6 @@ export const agent = {
     model: 'gpt-6-astra',
     effort: 'high',
     preset: 'full',
-    cwd: (userId: string) => workspaceFilesDir(userId),
+    cwd: (workspaceId: string) => workspaceFilesDir(workspaceId),
   },
 } satisfies AgentDeclaration;

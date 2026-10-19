@@ -128,8 +128,8 @@ function isUniqueViolation(error: unknown): boolean {
 
 // Same error for a foreign and a missing id: existence outside the
 // workspace is not leaked.
-export async function requireProject(userId: string, id: string): Promise<ProjectModel> {
-  const project = await getProject(userId, id.trim());
+export async function requireProject(workspaceId: string, id: string): Promise<ProjectModel> {
+  const project = await getProject(workspaceId, id.trim());
 
   if (!project) {
     throw new ProjectError('not_found', `Project "${id}" not found in this workspace`);
@@ -144,12 +144,12 @@ function takenBy(field: 'title' | 'slug', value: string, clash: ProjectModel): P
 
 export type CreatedProject = { project: ProjectModel; adopted: boolean };
 
-export async function createProject(userId: string, input: ProjectInput, by: RegistryAuthor): Promise<CreatedProject> {
+export async function createProject(workspaceId: string, input: ProjectInput, by: RegistryAuthor): Promise<CreatedProject> {
   const { title, slug, description } = input;
 
   // Friendly uniqueness errors ahead of the write; the db constraints stay
   // the last word (the race window is covered by the P2002 catch below).
-  const clash = await prisma.project.findFirst({ where: { userId, OR: [{ title }, { slug }] } });
+  const clash = await prisma.project.findFirst({ where: { workspaceId, OR: [{ title }, { slug }] } });
 
   if (clash) {
     throw clash.title === title ? takenBy('title', title, clash) : takenBy('slug', slug, clash);
@@ -159,7 +159,7 @@ export async function createProject(userId: string, input: ProjectInput, by: Reg
   // workbench agents create per-task directories at the same root, and
   // turning such a directory into a project is a feature. A file in the way
   // is an error: nothing is ever deleted or moved.
-  const dir = path.join(workspaceFilesDir(userId), slug);
+  const dir = path.join(workspaceFilesDir(workspaceId), slug);
   const existing = await fs.stat(dir).catch(() => null);
 
   if (existing && !existing.isDirectory()) {
@@ -176,7 +176,7 @@ export async function createProject(userId: string, input: ProjectInput, by: Reg
       // and the seed carries its title and description, never the loser's.
       // A failure on the disk rolls the row back; what the loser leaves
       // behind is nothing.
-      const created = await tx.project.create({ data: { userId, title, slug, description } });
+      const created = await tx.project.create({ data: { workspaceId, title, slug, description } });
 
       // What this creation puts on the disk, to take back if its
       // transaction fails: the folder when mkdir made it, and the files its
@@ -247,8 +247,8 @@ export async function createProject(userId: string, input: ProjectInput, by: Reg
 // otherwise; touched — nothing differed from the row, only updatedAt moved.
 export type UpdatedProject = { project: ProjectModel; renamedFrom: string | null; touched: boolean };
 
-export async function updateProject(userId: string, id: string, patch: ProjectPatch, by: RegistryAuthor): Promise<UpdatedProject> {
-  const project = await requireProject(userId, id);
+export async function updateProject(workspaceId: string, id: string, patch: ProjectPatch, by: RegistryAuthor): Promise<UpdatedProject> {
+  const project = await requireProject(workspaceId, id);
   // A field equal to the row's value is "keep", like an absent one — so a
   // repeated call is idempotent and the answer says what really changed.
   const title = patch.title !== project.title ? patch.title : null;
@@ -256,7 +256,7 @@ export async function updateProject(userId: string, id: string, patch: ProjectPa
   const slug = patch.slug !== project.slug ? patch.slug : null;
 
   if (title) {
-    const clash = await prisma.project.findFirst({ where: { userId, title, id: { not: project.id } } });
+    const clash = await prisma.project.findFirst({ where: { workspaceId, title, id: { not: project.id } } });
 
     if (clash) {
       throw takenBy('title', title, clash);
@@ -264,7 +264,7 @@ export async function updateProject(userId: string, id: string, patch: ProjectPa
   }
 
   if (slug) {
-    const clash = await prisma.project.findFirst({ where: { userId, slug, id: { not: project.id } } });
+    const clash = await prisma.project.findFirst({ where: { workspaceId, slug, id: { not: project.id } } });
 
     if (clash) {
       throw takenBy('slug', slug, clash);
@@ -276,7 +276,7 @@ export async function updateProject(userId: string, id: string, patch: ProjectPa
   let movedFromDir: string | null = null;
 
   if (slug) {
-    const filesDir = workspaceFilesDir(userId);
+    const filesDir = workspaceFilesDir(workspaceId);
     const oldDir = path.join(filesDir, project.slug);
     const newDir = path.join(filesDir, slug);
 
@@ -317,7 +317,7 @@ export async function updateProject(userId: string, id: string, patch: ProjectPa
   } catch (error) {
     if (movedFromDir && slug) {
       // Roll the folder back so disk keeps matching the (unchanged) row.
-      await fs.rename(path.join(workspaceFilesDir(userId), slug), movedFromDir).catch(() => {});
+      await fs.rename(path.join(workspaceFilesDir(workspaceId), slug), movedFromDir).catch(() => {});
     }
 
     if (isUniqueViolation(error)) {
@@ -334,8 +334,8 @@ export async function updateProject(userId: string, id: string, patch: ProjectPa
 // when a project is in the archive, not only that it is.
 export type FlaggedProject = { project: ProjectModel; changed: boolean };
 
-async function setArchived(userId: string, id: string, archived: boolean, by: RegistryAuthor): Promise<FlaggedProject> {
-  const project = await requireProject(userId, id);
+async function setArchived(workspaceId: string, id: string, archived: boolean, by: RegistryAuthor): Promise<FlaggedProject> {
+  const project = await requireProject(workspaceId, id);
 
   if (project.archived === archived) {
     return { project, changed: false };
@@ -361,10 +361,10 @@ async function setArchived(userId: string, id: string, archived: boolean, by: Re
   });
 }
 
-export function archiveProject(userId: string, id: string, by: RegistryAuthor): Promise<FlaggedProject> {
-  return setArchived(userId, id, true, by);
+export function archiveProject(workspaceId: string, id: string, by: RegistryAuthor): Promise<FlaggedProject> {
+  return setArchived(workspaceId, id, true, by);
 }
 
-export function unarchiveProject(userId: string, id: string, by: RegistryAuthor): Promise<FlaggedProject> {
-  return setArchived(userId, id, false, by);
+export function unarchiveProject(workspaceId: string, id: string, by: RegistryAuthor): Promise<FlaggedProject> {
+  return setArchived(workspaceId, id, false, by);
 }

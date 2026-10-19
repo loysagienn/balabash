@@ -71,8 +71,8 @@ export type ManifestResult =
  * the folder is not an app at all; 'invalid' is an app with a broken
  * passport — the edge renders it as a readable error page, never a 500.
  */
-export async function readAppManifest(userId: string, appRelPath2: string): Promise<ManifestResult> {
-  const absPath = path.join(workspaceFilesDir(userId), appRelPath2, APP_MANIFEST_FILENAME);
+export async function readAppManifest(workspaceId: string, appRelPath2: string): Promise<ManifestResult> {
+  const absPath = path.join(workspaceFilesDir(workspaceId), appRelPath2, APP_MANIFEST_FILENAME);
 
   let raw: string;
 

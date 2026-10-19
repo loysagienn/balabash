@@ -58,7 +58,7 @@ export type CoordinatorRun = {
 // writer and the first retry delay of a lost state write — the real ones by
 // default.
 export type CoordinatorRunDeps = {
-  functionDefinitions?: (userId: string) => Promise<FunctionDefinition[]>;
+  functionDefinitions?: (workspaceId: string) => Promise<FunctionDefinition[]>;
   client?: TurnClient;
   journal?: JournalWriter;
   stateRetryMs?: number;
@@ -101,11 +101,11 @@ export async function readRemoteChildStates(children: Thread[]): Promise<Record<
 
 const REMOTE_STATE_WORDS: Record<string, string> = { run: 'working', wait: 'idle', act: 'needs a decision', paused: 'paused (asleep; a message wakes it)' };
 
-export function buildStatusText(children: Thread[], projects: ProjectModel[], userId: string, remoteStates: Record<string, string> = {}): string {
+export function buildStatusText(children: Thread[], projects: ProjectModel[], workspaceId: string, remoteStates: Record<string, string> = {}): string {
   const lines = [`[status — authoritative, overrides the transcript]`, `time: ${new Date().toISOString()}`];
   // The restart in the way as this workspace may see it: the reason only
   // when the request is its own (src/runtime/restart.ts).
-  const pendingRestart = getPendingRestart(userId);
+  const pendingRestart = getPendingRestart(workspaceId);
 
   if (pendingRestart) {
     const origin = pendingRestart.own ? `(${pendingRestart.reason})` : '(requested from another workspace)';
@@ -160,7 +160,7 @@ export function buildStatusText(children: Thread[], projects: ProjectModel[], us
   return lines.join('\n');
 }
 
-export function createCoordinatorRun({ threadId, userId }: { threadId: string; userId: string }, deps: CoordinatorRunDeps = {}): CoordinatorRun {
+export function createCoordinatorRun({ threadId, workspaceId }: { threadId: string; workspaceId: string }, deps: CoordinatorRunDeps = {}): CoordinatorRun {
   const functionDefinitions = deps.functionDefinitions ?? getCoordinatorFunctionDefinitions;
   const journal = deps.journal ?? createJournalWriter();
   let wakePending = false;
@@ -260,16 +260,16 @@ export function createCoordinatorRun({ threadId, userId }: { threadId: string; u
     }
 
     try {
-      const tools = await functionDefinitions(userId);
-      const children = await listThreads(userId, { status: 'active', parentId: threadId });
-      const projects = await listProjects(userId, { archived: false });
+      const tools = await functionDefinitions(workspaceId);
+      const children = await listThreads(workspaceId, { status: 'active', parentId: threadId });
+      const projects = await listProjects(workspaceId, { archived: false });
 
       const prompt = buildKeepalivePrompt({
         threadId,
         model: config.mainOpenaiModel,
         instructions: COORDINATOR_INSTRUCTIONS,
         tools,
-        statusText: buildStatusText(children, projects, userId, await readRemoteChildStates(children)),
+        statusText: buildStatusText(children, projects, workspaceId, await readRemoteChildStates(children)),
       });
 
       // Nothing to keep warm: the state was reset, the head changed or the
@@ -284,7 +284,7 @@ export function createCoordinatorRun({ threadId, userId }: { threadId: string; u
         tools,
         prompt,
         metrics: startLlmRequestMetrics({
-          userId,
+          workspaceId,
           threadId,
           lastSeq: prompt.lastSeq,
           requestedModel: config.mainOpenaiModel,
@@ -310,9 +310,9 @@ export function createCoordinatorRun({ threadId, userId }: { threadId: string; u
     }
 
     const lastSeq = events.at(-1)!.seq;
-    const tools = await functionDefinitions(userId);
-    const children = await listThreads(userId, { status: 'active', parentId: threadId });
-    const projects = await listProjects(userId, { archived: false });
+    const tools = await functionDefinitions(workspaceId);
+    const children = await listThreads(workspaceId, { status: 'active', parentId: threadId });
+    const projects = await listProjects(workspaceId, { archived: false });
 
     const prompt = buildTurnPrompt({
       threadId,
@@ -322,7 +322,7 @@ export function createCoordinatorRun({ threadId, userId }: { threadId: string; u
       model: config.mainOpenaiModel,
       instructions: COORDINATOR_INSTRUCTIONS,
       tools,
-      statusText: buildStatusText(children, projects, userId, await readRemoteChildStates(children)),
+      statusText: buildStatusText(children, projects, workspaceId, await readRemoteChildStates(children)),
     });
 
     // The new events rendered to nothing — the model has nothing to react
@@ -332,7 +332,7 @@ export function createCoordinatorRun({ threadId, userId }: { threadId: string; u
     }
 
     const metrics = startLlmRequestMetrics({
-      userId,
+      workspaceId,
       threadId,
       lastSeq,
       requestedModel: config.mainOpenaiModel,
@@ -349,7 +349,7 @@ export function createCoordinatorRun({ threadId, userId }: { threadId: string; u
       tools,
       prompt,
       metrics,
-      dispatch: call => dispatchCoordinatorFunction(call, { userId, threadId }),
+      dispatch: call => dispatchCoordinatorFunction(call, { workspaceId, threadId }),
       cacheComparisonResponseId: lastResponseId,
       ...(deps.client ? { deps: { client: deps.client } } : {}),
     });
@@ -376,7 +376,7 @@ export function createCoordinatorRun({ threadId, userId }: { threadId: string; u
           await appendEvent({
             type: SYSTEM_EXCEPTION,
             actor: 'system',
-            userId,
+            workspaceId,
             threadId,
             payload: {
               scope: 'coordinator-turn',

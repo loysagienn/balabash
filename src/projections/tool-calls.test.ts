@@ -10,7 +10,7 @@ function event(seq: number, type: string, payload: Event['payload'], at: string)
     type,
     actor: 'agent',
     agentName: 'engineer',
-    userId: 'u',
+    workspaceId: 'u',
     threadId: 't',
     targetThreadId: null,
     payload,

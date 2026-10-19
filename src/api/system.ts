@@ -79,7 +79,7 @@ function readProcess(): ProcessView {
   };
 }
 
-export async function buildSystem(userId: string): Promise<SystemResponse> {
+export async function buildSystem(workspaceId: string): Promise<SystemResponse> {
   const [machine, database, fileStorage] = await Promise.all([readMachine(), readDatabase(), readFileStorage()]);
 
   return {
@@ -88,7 +88,7 @@ export async function buildSystem(userId: string): Promise<SystemResponse> {
     process: readProcess(),
     database,
     fileStorage,
-    fileArea: getFileAreaTotals(userId),
-    restart: { pending: getPendingRestart(userId) },
+    fileArea: getFileAreaTotals(workspaceId),
+    restart: { pending: getPendingRestart(workspaceId) },
   };
 }

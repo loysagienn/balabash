@@ -71,13 +71,13 @@ function identityOf(from: NonNullable<Context['from']>): JsonObject {
 async function getBoundGroup(chatId: number) {
   const group = await prisma.telegramGroup.findUnique({ where: { chatId: BigInt(chatId) } });
 
-  return group?.userId ? { ...group, userId: group.userId } : null;
+  return group?.workspaceId ? { ...group, workspaceId: group.workspaceId } : null;
 }
 
 // Resolves the thread a topic message belongs to: General → the main thread,
 // a known forum topic → its thread (stage 3), an unknown topic → null (not
 // ours; a topic created by hand is outside the surface).
-async function resolveThreadId(userId: string, chatId: number, messageThreadId: number | undefined) {
+async function resolveThreadId(workspaceId: string, chatId: number, messageThreadId: number | undefined) {
   if (messageThreadId !== undefined) {
     const topic = await prisma.telegramTopic.findUnique({
       where: { chatId_messageThreadId: { chatId: BigInt(chatId), messageThreadId } },
@@ -86,7 +86,7 @@ async function resolveThreadId(userId: string, chatId: number, messageThreadId: 
     return topic?.threadId ?? null;
   }
 
-  const mainThread = await getMainThread(userId);
+  const mainThread = await getMainThread(workspaceId);
 
   return mainThread?.id ?? null;
 }
@@ -144,21 +144,21 @@ export async function initTelegramBot() {
     const chatId = BigInt(chat.id);
     const existing = await prisma.telegramGroup.findUnique({ where: { chatId } });
 
-    if (existing?.userId) {
+    if (existing?.workspaceId) {
       await ctx.reply('Уже активировано: эта группа привязана к воркспейсу.');
 
       return;
     }
 
-    const user = await prisma.user.create({ data: {} });
+    const workspace = await prisma.workspace.create({ data: {} });
 
     await prisma.telegramGroup.upsert({
       where: { chatId },
-      create: { chatId, userId: user.id, status: 'active' },
-      update: { userId: user.id, status: 'active' },
+      create: { chatId, workspaceId: workspace.id, status: 'active' },
+      update: { workspaceId: workspace.id, status: 'active' },
     });
 
-    await ensureMainThread(user.id);
+    await ensureMainThread(workspace.id);
 
     const forumHint =
       'is_forum' in chat && chat.is_forum
@@ -218,7 +218,7 @@ export async function initTelegramBot() {
     await appendEvent({
       type: THREAD_CANCEL,
       actor: 'user',
-      userId: group.userId,
+      workspaceId: group.workspaceId,
       threadId: thread.parentId,
       targetThreadId: thread.id,
       payload: { reason: 'cancelled_by_user', identity: identityOf(ctx.from) },
@@ -243,7 +243,7 @@ export async function initTelegramBot() {
       return;
     }
 
-    const code = createAuthCode(group.userId, 'telegram');
+    const code = createAuthCode(group.workspaceId, 'telegram');
     const messageThreadId = ctx.message?.is_topic_message ? ctx.message.message_thread_id : undefined;
 
     await ctx.reply(
@@ -283,7 +283,7 @@ export async function initTelegramBot() {
 
     const message = ctx.message;
     const messageThreadId = message.is_topic_message ? message.message_thread_id : undefined;
-    const threadId = await resolveThreadId(group.userId, chat.id, messageThreadId);
+    const threadId = await resolveThreadId(group.workspaceId, chat.id, messageThreadId);
 
     if (!threadId) {
       return;
@@ -329,7 +329,7 @@ export async function initTelegramBot() {
 
         file = await ingestFile({
           body: Readable.fromWeb(response.body as never),
-          userId: group.userId,
+          workspaceId: group.workspaceId,
           originalFilename,
           contentType,
           sizeBytes: telegramFile.file_size ?? null,
@@ -344,7 +344,7 @@ export async function initTelegramBot() {
         await appendEvent({
           type: SYSTEM_EXCEPTION,
           actor: 'system',
-          userId: group.userId,
+          workspaceId: group.workspaceId,
           threadId,
           payload: { scope: 'telegram-file-ingest', error: errorMessage },
         }).catch(appendError => {
@@ -379,7 +379,7 @@ export async function initTelegramBot() {
     await appendEvent({
       type: 'user.message',
       actor: 'user',
-      userId: group.userId,
+      workspaceId: group.workspaceId,
       threadId,
       payload: {
         text,

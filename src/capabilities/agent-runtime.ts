@@ -31,7 +31,7 @@ import {
 } from '../core/envelope.ts';
 import { startThread } from '../core/threads.ts';
 import { resolveSpawnProject } from '../projects/store.ts';
-import { getUserFile, getFileDownloadUrl, ingestFile } from '../files/index.ts';
+import { getWorkspaceFile, getFileDownloadUrl, ingestFile } from '../files/index.ts';
 import type { StorageBody } from '../files/storage.ts';
 import { createClaudeSession } from '../harness/claude-sdk/sdk-session.ts';
 import { createCodexSession } from '../harness/codex-sdk/sdk-session.ts';
@@ -64,10 +64,10 @@ function getErrorMessage(error: unknown): string {
 // File references in an outgoing thread.message: deduplicated and checked
 // against the workspace (a foreign or unknown fileId throws); the rows come
 // back for the payload's facts.
-async function validateMessageFiles(userId: string, fileIds: string[] | undefined): Promise<FileRef[]> {
+async function validateMessageFiles(workspaceId: string, fileIds: string[] | undefined): Promise<FileRef[]> {
   const unique = [...new Set((fileIds ?? []).map(id => id.trim()).filter(Boolean))];
 
-  return Promise.all(unique.map(fileId => getUserFile(userId, fileId)));
+  return Promise.all(unique.map(fileId => getWorkspaceFile(workspaceId, fileId)));
 }
 
 // The payload of a thread.message: the text, and for the files it carries
@@ -87,27 +87,27 @@ function clampNotificationLevel(requested: NotificationLevel, threadLevel: Notif
 // Every call goes through the one tool.call.* journaling point; the
 // completed payload is the verbatim result.
 function createToolsApi({
-  userId,
+  workspaceId,
   threadId,
   agentName,
   bundle,
 }: {
-  userId: string;
+  workspaceId: string;
   threadId: string;
   agentName: string;
   bundle: ToolBundle;
 }): ToolsApi {
   return {
     list: async () =>
-      (await getServerToolFunctions(userId, bundle)).map(fn => ({
+      (await getServerToolFunctions(workspaceId, bundle)).map(fn => ({
         name: fn.functionName,
         description: fn.description,
         inputSchema: fn.inputSchema,
       })),
 
     call: async (name, args): Promise<ToolResult> => {
-      const outcome = await callToolJournaled({ userId, threadId, agentName }, randomUUID(), name, args, () =>
-        callServerTool({ userId, threadId }, bundle, name, args),
+      const outcome = await callToolJournaled({ workspaceId, threadId, agentName }, randomUUID(), name, args, () =>
+        callServerTool({ workspaceId, threadId }, bundle, name, args),
       );
 
       return outcome.result;
@@ -115,14 +115,14 @@ function createToolsApi({
   };
 }
 
-function createFilesApi(userId: string, agentName: string): FilesApi {
+function createFilesApi(workspaceId: string, agentName: string): FilesApi {
   return {
     // The one FileRef: the files layer already returns it verbatim.
-    getInfo: async fileId => getUserFile(userId, fileId),
+    getInfo: async fileId => getWorkspaceFile(workspaceId, fileId),
 
     getDownloadUrl: async fileId => {
       // Scope check first: the presigned URL layer itself is workspace-blind.
-      await getUserFile(userId, fileId);
+      await getWorkspaceFile(workspaceId, fileId);
 
       const { url } = await getFileDownloadUrl(fileId);
 
@@ -130,7 +130,7 @@ function createFilesApi(userId: string, agentName: string): FilesApi {
     },
 
     // Workspace-scoped by construction: the stored file belongs to the run's
-    // user, so it is deliverable through every user-scoped path (ctx.files,
+    // workspace, so it is deliverable through every workspace-scoped path (ctx.files,
     // storage_get_file, send_message fileIds).
     ingest: async input =>
       ingestFile({
@@ -141,7 +141,7 @@ function createFilesApi(userId: string, agentName: string): FilesApi {
         contentType: input.contentType ?? null,
         sizeBytes: input.sizeBytes ?? null,
         scope: agentName,
-        userId,
+        workspaceId,
       }),
   };
 }
@@ -154,7 +154,7 @@ export async function spawnAgentRun(thread: Thread, startedEvent: Event): Promis
     await appendEvent({
       type: THREAD_FAILED,
       actor: 'system',
-      userId: thread.userId,
+      workspaceId: thread.workspaceId,
       threadId: thread.id,
       payload: { error },
     }).catch(appendError => {
@@ -179,7 +179,7 @@ export async function spawnAgentRun(thread: Thread, startedEvent: Event): Promis
     return null;
   }
 
-  const { userId } = thread;
+  const { workspaceId } = thread;
   const threadId = thread.id;
   const agentName = declaration.name;
   const threadNotificationLevel =
@@ -197,10 +197,10 @@ export async function spawnAgentRun(thread: Thread, startedEvent: Event): Promis
   };
 
   const abortController = new AbortController();
-  const tools = createToolsApi({ userId, threadId, agentName, bundle });
-  const files = createFilesApi(userId, agentName);
+  const tools = createToolsApi({ workspaceId, threadId, agentName, bundle });
+  const files = createFilesApi(workspaceId, agentName);
 
-  const stateDir = path.join(AGENT_STATE_ROOT, agentName, userId);
+  const stateDir = path.join(AGENT_STATE_ROOT, agentName, workspaceId);
 
   await mkdir(stateDir, { recursive: true });
 
@@ -209,7 +209,7 @@ export async function spawnAgentRun(thread: Thread, startedEvent: Event): Promis
       type,
       actor: 'agent',
       agentName,
-      userId,
+      workspaceId,
       threadId,
       payload,
     });
@@ -217,7 +217,7 @@ export async function spawnAgentRun(thread: Thread, startedEvent: Event): Promis
 
   const ctx: RunContext = {
     threadId,
-    userId,
+    workspaceId,
     signal: abortController.signal,
 
     pushEvent,
@@ -269,10 +269,10 @@ export async function spawnAgentRun(thread: Thread, startedEvent: Event): Promis
 
       // The attachments of the spawn prompt: validated like a thread.message's
       // — a dead or foreign fileId rejects the spawn, not the child's reading.
-      const files = await validateMessageFiles(userId, options?.fileIds);
+      const files = await validateMessageFiles(workspaceId, options?.fileIds);
 
       const child = await startThread({
-        userId,
+        workspaceId,
         parentThreadId: threadId,
         agent: childAgentName,
         title: options?.title,
@@ -283,7 +283,7 @@ export async function spawnAgentRun(thread: Thread, startedEvent: Event): Promis
         headless: remote ? true : childDeclaration.headless,
         ...(remote ? { remote: true, options: options?.options ?? {}, adopt: options?.adopt === true } : {}),
         ...(files.length ? { files } : {}),
-        project: await resolveSpawnProject(userId, options?.project),
+        project: await resolveSpawnProject(workspaceId, options?.project),
         actor: 'agent',
         agentName,
       });
@@ -296,7 +296,7 @@ export async function spawnAgentRun(thread: Thread, startedEvent: Event): Promis
         type: THREAD_FINISH,
         actor: 'agent',
         agentName,
-        userId,
+        workspaceId,
         threadId,
         targetThreadId: childThreadId,
         payload: { reason: 'finished_by_parent' },
@@ -308,7 +308,7 @@ export async function spawnAgentRun(thread: Thread, startedEvent: Event): Promis
         type: THREAD_CANCEL,
         actor: 'agent',
         agentName,
-        userId,
+        workspaceId,
         threadId,
         targetThreadId: childThreadId,
         payload: { reason },
@@ -320,13 +320,13 @@ export async function spawnAgentRun(thread: Thread, startedEvent: Event): Promis
     // are validated against the workspace up front: a dead or foreign fileId
     // must reject the call, not surface later at the recipient.
     sendToChild: async (childThreadId: string, text: string, fileIds?: string[]) => {
-      const files = await validateMessageFiles(userId, fileIds);
+      const files = await validateMessageFiles(workspaceId, fileIds);
 
       await appendEvent({
         type: THREAD_MESSAGE,
         actor: 'agent',
         agentName,
-        userId,
+        workspaceId,
         threadId,
         targetThreadId: childThreadId,
         payload: threadMessagePayload(text, files),
@@ -334,13 +334,13 @@ export async function spawnAgentRun(thread: Thread, startedEvent: Event): Promis
     },
 
     sendToParent: async (text: string, fileIds?: string[]) => {
-      const files = await validateMessageFiles(userId, fileIds);
+      const files = await validateMessageFiles(workspaceId, fileIds);
 
       await appendEvent({
         type: THREAD_MESSAGE,
         actor: 'agent',
         agentName,
-        userId,
+        workspaceId,
         threadId,
         targetThreadId: thread.parentId,
         payload: threadMessagePayload(text, files),

@@ -10,7 +10,7 @@ function makeEvent(seq: number): Event {
     type: 'thread.progress',
     actor: 'agent',
     agentName: 'engineer',
-    userId: 'u',
+    workspaceId: 'u',
     threadId: 't',
     targetThreadId: null,
     payload: { text: String(seq) },

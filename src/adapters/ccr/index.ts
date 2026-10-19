@@ -79,7 +79,7 @@ function waitingMetadata(lastLine: string | null): Record<string, unknown> {
 
 export async function startCcrAdapter(): Promise<CcrAdapter> {
   // The singleton channel serves the operator's workspace and nothing else.
-  const { userId } = await ensureOperatorWorkspace();
+  const { workspaceId } = await ensureOperatorWorkspace();
 
   // The app's working indicator per thread: report transitions only.
   const runningStates = new Map<string, 'running' | 'idle'>();
@@ -93,7 +93,7 @@ export async function startCcrAdapter(): Promise<CcrAdapter> {
     await appendEvent({
       type: SYSTEM_EXCEPTION,
       actor: 'system',
-      userId,
+      workspaceId,
       threadId,
       payload: { scope, error: error instanceof Error ? error.message : String(error) },
     }).catch(appendError => {
@@ -116,7 +116,7 @@ export async function startCcrAdapter(): Promise<CcrAdapter> {
 
       for (const attachment of inbound.attachments) {
         try {
-          const file = await downloadAttachment(attachment, creds.accessToken, userId);
+          const file = await downloadAttachment(attachment, creds.accessToken, workspaceId);
 
           blocks.push(attachment.isImage ? { type: 'image', fileId: file.id } : { type: 'file', fileId: file.id });
           fileMetas.push({
@@ -149,7 +149,7 @@ export async function startCcrAdapter(): Promise<CcrAdapter> {
     await appendEvent({
       type: 'user.message',
       actor: 'user',
-      userId,
+      workspaceId,
       threadId,
       payload: {
         text: inbound.text,
@@ -176,7 +176,7 @@ export async function startCcrAdapter(): Promise<CcrAdapter> {
       await appendEvent({
         type: THREAD_INTERRUPT,
         actor: 'user',
-        userId,
+        workspaceId,
         threadId: thread.parentId,
         targetThreadId: thread.id,
         payload: { reason: 'interrupted_by_user', identity: OPERATOR_IDENTITY },
@@ -267,7 +267,7 @@ export async function startCcrAdapter(): Promise<CcrAdapter> {
     },
   });
 
-  console.log(`[ccr] adapter is running (operator workspace ${userId})`);
+  console.log(`[ccr] adapter is running (operator workspace ${workspaceId})`);
 
   return {
     consumer,

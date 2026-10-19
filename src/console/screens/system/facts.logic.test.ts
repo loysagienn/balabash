@@ -191,8 +191,8 @@ describe('the rows of the log', () => {
     const log = [
       completed(5n, at(2026, 10, 11, 16, 5, 38), 3),
       requested(7n, at(2026, 10, 11, 17, 0), null),
-      event({ seq: 8n, type: 'system.exception', actor: 'system', userId: null, payload: { scope: 'migrate-deploy', error: 'migration 0041_app_slug failed\nstack' } }),
-      event({ seq: 9n, type: 'system.exception', actor: 'system', userId: null, payload: { scope: 'supervisor-rollback', error: 'Supervisor rolled back' } }),
+      event({ seq: 8n, type: 'system.exception', actor: 'system', workspaceId: null, payload: { scope: 'migrate-deploy', error: 'migration 0041_app_slug failed\nstack' } }),
+      event({ seq: 9n, type: 'system.exception', actor: 'system', workspaceId: null, payload: { scope: 'supervisor-rollback', error: 'Supervisor rolled back' } }),
       event({ seq: 10n, type: 'system.exception', actor: 'system', threadId: 'main', payload: { scope: 'workspace-job', slug: 'db-backup', runId: 'r', status: 'failed', exitCode: 127, error: 'pg_dump: not found' } }),
       event({ seq: 11n, type: 'system.exception', actor: 'system', targetThreadId: 'main', payload: { consumerName: 'router', eventType: 'user.message', error: "Cannot read properties of undefined (reading 'slug')" } }),
       event({ seq: 12n, type: 'system.exception', actor: 'system', payload: { scope: 'telegram-file-ingest', error: 'too big' } }),

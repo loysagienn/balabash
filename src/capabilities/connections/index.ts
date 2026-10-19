@@ -1,6 +1,6 @@
-// Per-user authorization for external MCP servers with auth: "user".
+// Per-workspace authorization for external MCP servers with auth: "user".
 //
-// A capability config registers the server once for everyone; each user then
+// A capability config registers the server once for everyone; each workspace then
 // connects their own account through a one-time link issued by the auth
 // agent. The pieces:
 // - requestAuthorization issues the link (auth-agent tool);
@@ -32,7 +32,7 @@ import {
   OAUTH_CLIENT_PROVISIONED,
 } from '../../core/envelope.ts';
 import { config } from '../../config/index.ts';
-import { dropUserClient, getUserAuthServer, type UserAuthServer } from '../tool-manager.ts';
+import { dropWorkspaceClient, getUserAuthServer, type UserAuthServer } from '../tool-manager.ts';
 import { createInteractiveAuthProvider } from './oauth-provider.ts';
 import { backfillConnectionIdentity, getAccessToken, identityData, identityLabel, probeIdentity } from './identity.ts';
 import type { ProbedIdentity } from './identity.ts';
@@ -88,18 +88,18 @@ function getServer(serverName: string): UserAuthServer {
   return server;
 }
 
-// The registry of one (user, server) changes one command at a time: a
+// The registry of one (workspace, server) changes one command at a time: a
 // command runs its checks and its write in one transaction under an
 // advisory lock keyed by the pair, so what it checked (the row it means, a
 // name in use, how many accounts the service holds, whether an account at
 // this address exists) still holds when it writes. The lock is the pair's,
 // not the log's: the lifecycle event is journaled after the commit, as
 // before. A refusal thrown inside rolls the transaction back.
-async function underServerLock<T>(userId: string, serverName: string, work: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
+async function underServerLock<T>(workspaceId: string, serverName: string, work: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
   return prisma.$transaction(async tx => {
     // Executed, not queried: the function returns void, which the client
     // cannot read as a column.
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${userId}), hashtext(${serverName}))`;
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${workspaceId}), hashtext(${serverName}))`;
 
     return work(tx);
   });
@@ -126,17 +126,17 @@ async function requireManualOauthClient(server: UserAuthServer): Promise<void> {
 
 // Ordered by birth: the oldest account of a server is deterministically its
 // canonical one in the client registry — never Postgres plan roulette.
-export async function listUserConnections(userId: string) {
-  return prisma.connection.findMany({ where: { userId }, orderBy: { createdAt: 'asc' } });
+export async function listWorkspaceConnections(workspaceId: string) {
+  return prisma.connection.findMany({ where: { workspaceId }, orderBy: { createdAt: 'asc' } });
 }
 
 // One row of the user by its id — the address the console's endpoints
-// use; a row of another user and a missing one are the same null (the
+// use; a row of another workspace and a missing one are the same null (the
 // api's 404, no existence oracle).
-export async function getUserConnection(userId: string, id: string): Promise<ConnectionModel | null> {
+export async function getWorkspaceConnection(workspaceId: string, id: string): Promise<ConnectionModel | null> {
   const row = await prisma.connection.findUnique({ where: { id } });
 
-  return row && row.userId === userId ? row : null;
+  return row && row.workspaceId === workspaceId ? row : null;
 }
 
 // The row as the console sees it — in the snapshot (ConnectionView) and in
@@ -178,11 +178,11 @@ function connectionRecord(row: ConnectionModel): ConnectionRecord {
 // thread that drives the account (the auth agent's; append redirects to
 // the main thread when it is gone). A failure to journal is logged — the
 // row has already changed.
-async function journalConnectionEvent(type: string, row: { userId: string; threadId: string | null; server: string }, payload: JsonObject): Promise<void> {
+async function journalConnectionEvent(type: string, row: { workspaceId: string; threadId: string | null; server: string }, payload: JsonObject): Promise<void> {
   await appendEvent({
     type,
     actor: 'system',
-    userId: row.userId,
+    workspaceId: row.workspaceId,
     threadId: null,
     targetThreadId: row.threadId,
     payload,
@@ -196,13 +196,13 @@ async function journalConnectionEvent(type: string, row: { userId: string; threa
 // screen showed: expectId), that very row. An address that meanwhile
 // belongs to another row (the account was disconnected and connected
 // again under the same address) is refused; the newcomer is not touched.
-async function requireConnection(db: Prisma.TransactionClient, userId: string, serverName: string, accountKey: string, expectId?: string): Promise<ConnectionModel> {
+async function requireConnection(db: Prisma.TransactionClient, workspaceId: string, serverName: string, accountKey: string, expectId?: string): Promise<ConnectionModel> {
   const row = await db.connection.findUnique({
-    where: { userId_server_accountKey: { userId, server: serverName, accountKey } },
+    where: { workspaceId_server_accountKey: { workspaceId, server: serverName, accountKey } },
   });
 
   if (!row) {
-    const rows = await db.connection.findMany({ where: { userId, server: serverName } });
+    const rows = await db.connection.findMany({ where: { workspaceId, server: serverName } });
     const known = rows.map(candidate => `${candidate.accountKey} — "${candidate.displayName}"`).join('; ') || '(none)';
 
     throw new ConnectionError('not_found', `No account "${accountKey}" of "${serverName}". Accounts: ${known}`);
@@ -218,7 +218,7 @@ async function requireConnection(db: Prisma.TransactionClient, userId: string, s
 // Renames the display name of one account. The slug (the address) and the
 // provider identity never change.
 export async function renameConnection(
-  userId: string,
+  workspaceId: string,
   serverName: string,
   accountKey: string,
   name: string,
@@ -228,8 +228,8 @@ export async function renameConnection(
   expectId?: string,
 ): Promise<{ accountKey: string; previousName: string; name: string; connection: ConnectionModel }> {
   const trimmed = name.trim();
-  const { row, renamed } = await underServerLock(userId, serverName, async tx => {
-    const row = await requireConnection(tx, userId, serverName, accountKey, expectId);
+  const { row, renamed } = await underServerLock(workspaceId, serverName, async tx => {
+    const row = await requireConnection(tx, workspaceId, serverName, accountKey, expectId);
 
     if (!trimmed) {
       throw new ConnectionError('bad_request', 'The new name must not be empty');
@@ -237,7 +237,7 @@ export async function renameConnection(
 
     // Case-insensitive, matching the name check at connect time.
     const clash = await tx.connection.findFirst({
-      where: { userId, server: serverName, displayName: { equals: trimmed, mode: 'insensitive' }, NOT: { id: row.id } },
+      where: { workspaceId, server: serverName, displayName: { equals: trimmed, mode: 'insensitive' }, NOT: { id: row.id } },
     });
 
     if (clash) {
@@ -262,22 +262,22 @@ export async function renameConnection(
 // slug becomes free. Tokens go with the row; access at the provider side is
 // revoked by the user in the provider's own UI.
 export async function disconnectConnection(
-  userId: string,
+  workspaceId: string,
   serverName: string,
   accountKey: string,
   threadId?: string,
   // The row the caller means (the console's endpoint): see requireConnection.
   expectId?: string,
 ): Promise<{ accountKey: string; name: string }> {
-  const row = await underServerLock(userId, serverName, async tx => {
-    const row = await requireConnection(tx, userId, serverName, accountKey, expectId);
+  const row = await underServerLock(workspaceId, serverName, async tx => {
+    const row = await requireConnection(tx, workspaceId, serverName, accountKey, expectId);
 
     await tx.connection.delete({ where: { id: row.id } });
 
     return row;
   });
 
-  dropUserClient(row.server, userId, row.accountKey);
+  dropWorkspaceClient(row.server, workspaceId, row.accountKey);
   await journalConnectionEvent(CONNECTION_DISCONNECTED, { ...row, threadId: threadId ?? row.threadId }, {
     connectionId: row.id,
     server: row.server,
@@ -298,13 +298,13 @@ export type ConnectLink = { url: string; connection: ConnectionView; expiresAt: 
 // Issues a one-time authorization link for one account of the service and
 // answers only its address — the auth agent's request_authorization.
 export async function requestAuthorization(
-  userId: string,
+  workspaceId: string,
   threadId: string,
   serverName: string,
   requestedAccountKey?: string,
   displayName?: string,
 ): Promise<string> {
-  return (await issueConnectLink(userId, threadId, serverName, requestedAccountKey, displayName)).url;
+  return (await issueConnectLink(workspaceId, threadId, serverName, requestedAccountKey, displayName)).url;
 }
 
 // What a link is asked for — the three callers of the one issue.
@@ -323,7 +323,7 @@ type LinkTarget =
 
 type LinkResolution = { existing: ConnectionModel } | { create: { accountKey: string; displayName: string } };
 
-// The row the target names among the rows of (user, server) as they are
+// The row the target names among the rows of (workspace, server) as they are
 // under the lock, or the row to create.
 function resolveLinkTarget(server: UserAuthServer, target: LinkTarget, rows: ConnectionModel[]): LinkResolution {
   switch (target.kind) {
@@ -424,17 +424,17 @@ function assertCanCreate(server: UserAuthServer, rows: ConnectionModel[], backfi
 // Issues a one-time authorization link for the target: the row is updated
 // (re-authorization: a fresh nonce, the issuing thread, the status pending
 // unless the account is connected — then its status only changes when the
-// new flow completes) or created pending, under the (user, server) lock,
+// new flow completes) or created pending, under the (workspace, server) lock,
 // so the rules hold at the write. threadId is the issuing thread — the auth
 // agent's, or the main thread when the operator asks from the console: the
 // flow's connection.* events are addressed to it.
-async function issueLink(userId: string, threadId: string, server: UserAuthServer, target: LinkTarget): Promise<ConnectLink> {
+async function issueLink(workspaceId: string, threadId: string, server: UserAuthServer, target: LinkTarget): Promise<ConnectLink> {
   await requireManualOauthClient(server);
 
   // The backfill asks the provider — outside the lock and the transaction;
   // the gate is judged again inside, on the rows as they are then.
   const backfillRefusals = new Map<string, string>();
-  const seen = await prisma.connection.findMany({ where: { userId, server: server.name } });
+  const seen = await prisma.connection.findMany({ where: { workspaceId, server: server.name } });
 
   if (wouldCreate(target, seen) && server.identityProbe) {
     for (const row of identityUnknown(seen)) {
@@ -449,8 +449,8 @@ async function issueLink(userId: string, threadId: string, server: UserAuthServe
   const connectNonce = randomToken();
   const expiresAt = new Date(Date.now() + CONNECT_LINK_TTL_MS);
   const pending = { expiresAt: expiresAt.toISOString() };
-  const row = await underServerLock(userId, server.name, async tx => {
-    const rows = await tx.connection.findMany({ where: { userId, server: server.name } });
+  const row = await underServerLock(workspaceId, server.name, async tx => {
+    const rows = await tx.connection.findMany({ where: { workspaceId, server: server.name } });
     const resolved = resolveLinkTarget(server, target, rows);
 
     if ('existing' in resolved) {
@@ -472,7 +472,7 @@ async function issueLink(userId: string, threadId: string, server: UserAuthServe
 
     return tx.connection.create({
       data: {
-        userId,
+        workspaceId,
         threadId,
         server: server.name,
         accountKey: resolved.create.accountKey,
@@ -497,7 +497,7 @@ async function issueLink(userId: string, threadId: string, server: UserAuthServe
 // identity probe and on every existing account's identity being known
 // (else the twin guard is blind).
 export async function issueConnectLink(
-  userId: string,
+  workspaceId: string,
   threadId: string,
   serverName: string,
   requestedAccountKey?: string,
@@ -510,20 +510,20 @@ export async function issueConnectLink(
     throw new ConnectionError('bad_request', `Account key "${accountKey}" must match ${ACCOUNT_KEY_PATTERN}`);
   }
 
-  return issueLink(userId, threadId, server, { kind: 'account', accountKey, displayName });
+  return issueLink(workspaceId, threadId, server, { kind: 'account', accountKey, displayName });
 }
 
 // The console's "Reconnect" of one row: a link for that very row (its
-// re-authorization); a row of another user and a missing one are one
+// re-authorization); a row of another workspace and a missing one are one
 // not-found — a row gone by the write is not born again.
-export async function reconnectConnection(userId: string, threadId: string, id: string): Promise<ConnectLink> {
-  const row = await getUserConnection(userId, id);
+export async function reconnectConnection(workspaceId: string, threadId: string, id: string): Promise<ConnectLink> {
+  const row = await getWorkspaceConnection(workspaceId, id);
 
   if (!row) {
     throw new ConnectionError('not_found', 'No such connection');
   }
 
-  return issueLink(userId, threadId, getServer(row.server), { kind: 'row', id: row.id });
+  return issueLink(workspaceId, threadId, getServer(row.server), { kind: 'row', id: row.id });
 }
 
 // The console's "Connect" on a service of the catalog: a link for a new
@@ -534,8 +534,8 @@ export async function reconnectConnection(userId: string, threadId: string, id: 
 // has one (another account needs a name, an existing one its own
 // "Reconnect"). The link-issuing rules (one account without an identity
 // probe, a manual OAuth client not provisioned) are issueLink's.
-export async function startConnection(userId: string, threadId: string, serverName: string, name: string | null): Promise<ConnectLink> {
-  return issueLink(userId, threadId, getServer(serverName), { kind: 'new', name });
+export async function startConnection(workspaceId: string, threadId: string, serverName: string, name: string | null): Promise<ConnectLink> {
+  return issueLink(workspaceId, threadId, getServer(serverName), { kind: 'new', name });
 }
 
 // Records a pending request for a manual installation OAuth client
@@ -545,7 +545,7 @@ export async function startConnection(userId: string, threadId: string, serverNa
 // is checked at the API edge). No TTL: the request lives until fulfilled or
 // replaced. Submitted values never enter the event log.
 export async function requestOauthClientCredentials(
-  userId: string,
+  workspaceId: string,
   threadId: string,
   serverName: string,
 ): Promise<string> {
@@ -555,9 +555,9 @@ export async function requestOauthClientCredentials(
     throw new Error(`Integration "${server.name}" uses Dynamic Client Registration`);
   }
 
-  const row = await openSecretRequest('oauth-client', { userId, threadId, server: server.name });
+  const row = await openSecretRequest('oauth-client', { workspaceId, threadId, server: server.name });
 
-  return secretRequestUrl(row.id, userId);
+  return secretRequestUrl(row.id, workspaceId);
 }
 
 export type OauthClientRequestView = {
@@ -565,12 +565,12 @@ export type OauthClientRequestView = {
   server: string;
 };
 
-// Metadata only, session-derived userId; foreign or missing → null (the
+// Metadata only, session-derived workspaceId; foreign or missing → null (the
 // caller's 404). The server config is deliberately not consulted here.
-export async function getOauthClientRequest(userId: string, requestId: string): Promise<OauthClientRequestView | null> {
+export async function getOauthClientRequest(workspaceId: string, requestId: string): Promise<OauthClientRequestView | null> {
   const row = await prisma.oauthClientRequest.findUnique({ where: { id: requestId } });
 
-  if (!row || row.userId !== userId) {
+  if (!row || row.workspaceId !== workspaceId) {
     return null;
   }
 
@@ -578,12 +578,12 @@ export async function getOauthClientRequest(userId: string, requestId: string): 
 }
 
 export async function provisionOauthClient(
-  userId: string,
+  workspaceId: string,
   requestId: string,
   clientId: string,
   clientSecret: string,
 ): Promise<void> {
-  const request = await getOauthClientRequest(userId, requestId);
+  const request = await getOauthClientRequest(workspaceId, requestId);
 
   if (!request) {
     throw new Error('The OAuth client request does not exist or is already fulfilled');
@@ -606,7 +606,7 @@ export async function provisionOauthClient(
   const seq = await logTransaction(async tx => {
     const row = await tx.oauthClientRequest.findUnique({ where: { id: request.id } });
 
-    if (!row || row.userId !== userId) {
+    if (!row || row.workspaceId !== workspaceId) {
       throw new Error('The OAuth client request does not exist or is already fulfilled');
     }
 
@@ -626,7 +626,7 @@ export async function provisionOauthClient(
     const appended = await appendEventIn(tx, {
       type: OAUTH_CLIENT_PROVISIONED,
       actor: 'system',
-      userId: row.userId,
+      workspaceId: row.workspaceId,
       threadId: null,
       targetThreadId: row.threadId,
       payload: {
@@ -708,7 +708,7 @@ export async function handleOauthCallback(query: Record<string, unknown>): Promi
     await appendEvent({
       type,
       actor: 'system',
-      userId: row.userId,
+      workspaceId: row.workspaceId,
       threadId: null,
       targetThreadId: row.threadId,
       payload,
@@ -769,7 +769,7 @@ export async function handleOauthCallback(query: Record<string, unknown>): Promi
 
   // A stale client may exist after re-authorization; the next turn reconnects
   // with the fresh tokens.
-  dropUserClient(row.server, row.userId, row.accountKey);
+  dropWorkspaceClient(row.server, row.workspaceId, row.accountKey);
 
   if (server.identityProbe) {
     // The pre-flow snapshot (`row` was read before the token exchange) tells
@@ -804,7 +804,7 @@ export async function handleOauthCallback(query: Record<string, unknown>): Promi
     if (outcome.kind === 'twin') {
       // The consent landed on an already-connected provider account; its row
       // took the fresh tokens, so its live client is stale too.
-      dropUserClient(row.server, row.userId, outcome.twinAccountKey);
+      dropWorkspaceClient(row.server, row.workspaceId, outcome.twinAccountKey);
 
       if (bornHere) {
         // The newborn row died in establishIdentity: the registry lost it.
@@ -873,7 +873,7 @@ async function restorePreFlowState(preFlow: ConnectionModel): Promise<void> {
 }
 
 // Establishes the provider identity of a just-authorized connection and
-// resolves it against the sibling rows of (user, server). preFlow is the row
+// resolves it against the sibling rows of (workspace, server). preFlow is the row
 // as it was when the callback started — before the token exchange — kept for
 // restoring the row when the consent targeted a different provider account.
 async function establishIdentity(
@@ -897,7 +897,7 @@ async function establishIdentity(
   }
 
   const twin = await prisma.connection.findFirst({
-    where: { userId: fresh.userId, server: fresh.server, identityId: identity.id, NOT: { id: fresh.id } },
+    where: { workspaceId: fresh.workspaceId, server: fresh.server, identityId: identity.id, NOT: { id: fresh.id } },
   });
 
   if (!twin) {
@@ -961,7 +961,7 @@ export async function markReauthorizationRequired(connectionId: string, error: s
   await appendEvent({
     type: CONNECTION_REAUTHORIZATION_REQUIRED,
     actor: 'system',
-    userId: row.userId,
+    workspaceId: row.workspaceId,
     threadId: null,
     targetThreadId: row.threadId,
     payload: {

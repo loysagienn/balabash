@@ -70,7 +70,7 @@ import type { AppendInput } from '../core/envelope.ts';
 import { AGENT_ASK_RESOLVED, SYSTEM_EXCEPTION, THREAD_COMPLETED, THREAD_DECIDE, THREAD_FAILED, THREAD_FINISH, THREAD_MESSAGE, THREAD_PAUSE } from '../core/envelope.ts';
 import { fileContentBlock, messageFile } from '../core/file-blocks.ts';
 import { getThread } from '../core/threads.ts';
-import { getUserFile } from '../files/index.ts';
+import { getWorkspaceFile } from '../files/index.ts';
 import type { RoutedRun } from '../runtime/router.ts';
 import { getLoadedRemoteKind } from '../capabilities/remote-agent-source.ts';
 import { createRemoteFacade } from './facade.ts';
@@ -277,12 +277,12 @@ function readEvery(phase: Exclude<RemotePhase, 'closed' | 'gone'>, hintSec: numb
   return READ_EVERY_MS[phase];
 }
 
-function stateEvent(row: Pick<RemoteRow, 'threadId' | 'userId' | 'kind'>, state: WatchState['state']): AppendInput {
-  return { type: 'session.state', actor: 'agent', agentName: row.kind, userId: row.userId, threadId: row.threadId, payload: { state } };
+function stateEvent(row: Pick<RemoteRow, 'threadId' | 'workspaceId' | 'kind'>, state: WatchState['state']): AppendInput {
+  return { type: 'session.state', actor: 'agent', agentName: row.kind, workspaceId: row.workspaceId, threadId: row.threadId, payload: { state } };
 }
 
 // The state after a phase, written only when it changes.
-function withState(row: Pick<RemoteRow, 'threadId' | 'userId' | 'kind'>, watch: WatchState, phase: Exclude<RemotePhase, 'closed' | 'gone'>, events: AppendInput[]): WatchState {
+function withState(row: Pick<RemoteRow, 'threadId' | 'workspaceId' | 'kind'>, watch: WatchState, phase: Exclude<RemotePhase, 'closed' | 'gone'>, events: AppendInput[]): WatchState {
   const state = stateOfPhase(phase);
 
   if (watch.state === state) {
@@ -294,8 +294,8 @@ function withState(row: Pick<RemoteRow, 'threadId' | 'userId' | 'kind'>, watch: 
   return { ...watch, state };
 }
 
-async function failThread(row: Pick<RemoteRow, 'threadId' | 'userId'>, error: string): Promise<void> {
-  await appendEvent({ type: THREAD_FAILED, actor: 'system', userId: row.userId, threadId: row.threadId, payload: { error } }).catch(appendError => {
+async function failThread(row: Pick<RemoteRow, 'threadId' | 'workspaceId'>, error: string): Promise<void> {
+  await appendEvent({ type: THREAD_FAILED, actor: 'system', workspaceId: row.workspaceId, threadId: row.threadId, payload: { error } }).catch(appendError => {
     console.error(`[remote:${row.threadId}] failed to journal the failure:`, appendError);
   });
 }
@@ -328,7 +328,7 @@ const nothing: Commit = { patch: {}, events: [] };
 function completion(row: RemoteRow, text: string): Commit {
   return {
     patch: { phase: 'closed', watch: { ...row.watch, finish: null } },
-    events: [{ type: THREAD_COMPLETED, actor: 'agent', agentName: row.kind, userId: row.userId, threadId: row.threadId, payload: { summary: { text } } }],
+    events: [{ type: THREAD_COMPLETED, actor: 'agent', agentName: row.kind, workspaceId: row.workspaceId, threadId: row.threadId, payload: { summary: { text } } }],
   };
 }
 
@@ -365,7 +365,7 @@ async function openUnderLock(thread: Thread, started: Event): Promise<void> {
 
   const kind = deps.resolveKind(thread.agent);
   // The row-shaped view of the thread for the helpers below.
-  const self = { threadId: thread.id, userId: thread.userId, kind: thread.agent };
+  const self = { threadId: thread.id, workspaceId: thread.workspaceId, kind: thread.agent };
 
   if (!kind) {
     await failThread(self, `remote agent kind "${thread.agent}" is not loaded`);
@@ -387,7 +387,7 @@ async function openUnderLock(thread: Thread, started: Event): Promise<void> {
     type: 'session.started',
     actor: 'agent',
     agentName: thread.agent,
-    userId: thread.userId,
+    workspaceId: thread.workspaceId,
     threadId: thread.id,
     payload: {
       model: typeof options.model === 'string' && options.model ? options.model : typeof options.harness === 'string' && options.harness ? options.harness : thread.agent,
@@ -424,7 +424,7 @@ async function openUnderLock(thread: Thread, started: Event): Promise<void> {
       await createRow(
         {
           threadId: thread.id,
-          userId: thread.userId,
+          workspaceId: thread.workspaceId,
           kind: thread.agent,
           ref: input,
           link: described.link ?? null,
@@ -440,7 +440,7 @@ async function openUnderLock(thread: Thread, started: Event): Promise<void> {
     } else {
       // The attachments of the spawn prompt (thread.started files) cross
       // the boundary like a message's: as stored files for the driver.
-      const opened = await verb('open', kind.driver.open(kind.context, { prompt: input, options, files: await inboundFiles(started, thread.userId), messageId: started.id }));
+      const opened = await verb('open', kind.driver.open(kind.context, { prompt: input, options, files: await inboundFiles(started, thread.workspaceId), messageId: started.id }));
 
       openedRef = opened.ref;
 
@@ -454,7 +454,7 @@ async function openUnderLock(thread: Thread, started: Event): Promise<void> {
       await createRow(
         {
           threadId: thread.id,
-          userId: thread.userId,
+          workspaceId: thread.workspaceId,
           kind: thread.agent,
           ref: opened.ref,
           link: opened.link ?? null,
@@ -555,7 +555,7 @@ async function drainInbound(start: RemoteRow): Promise<RemoteRow | null> {
 // of a thread.message, or the files of the spawn's thread.started — as
 // stored files of the workspace (a foreign or missing id is dropped with a
 // word in the log, not a crash of the whole message).
-async function inboundFiles(event: Event, userId: string): Promise<FileRef[]> {
+async function inboundFiles(event: Event, workspaceId: string): Promise<FileRef[]> {
   const payload = event.payload;
   const ids = new Set<string>();
 
@@ -575,7 +575,7 @@ async function inboundFiles(event: Event, userId: string): Promise<FileRef[]> {
 
   for (const fileId of ids) {
     try {
-      files.push(await getUserFile(userId, fileId));
+      files.push(await getWorkspaceFile(workspaceId, fileId));
     } catch (error) {
       console.error(`[remote:${event.threadId ?? event.targetThreadId}] attachment ${fileId} skipped:`, error);
     }
@@ -591,7 +591,7 @@ async function applyInbound(row: RemoteRow, kind: Kind, event: Event): Promise<C
     (event.type === 'user.message' && event.payload.source !== 'remote') || (event.type === THREAD_MESSAGE && event.targetThreadId === row.threadId);
 
   if (isOwnerText) {
-    return say(row, kind, typeof event.payload.text === 'string' ? event.payload.text : '', await inboundFiles(event, row.userId), event.id);
+    return say(row, kind, typeof event.payload.text === 'string' ? event.payload.text : '', await inboundFiles(event, row.workspaceId), event.id);
   }
 
   switch (event.type) {
@@ -656,7 +656,7 @@ async function decide(row: RemoteRow, kind: Kind, event: Event): Promise<Commit>
       type: AGENT_ASK_RESOLVED,
       actor: 'agent',
       agentName: row.kind,
-      userId: row.userId,
+      workspaceId: row.workspaceId,
       threadId: row.threadId,
       payload: {
         askId,
@@ -732,11 +732,11 @@ async function pause(row: RemoteRow): Promise<Commit> {
 // in the workspace and shown in the thread — to the user as an attachment,
 // to the parent as a thread.message with it. The caller must be the
 // thread's owner: its parent, or the thread itself.
-export async function fetchRemoteFile(threadId: string, path: string, caller: { userId: string; threadId: string }): Promise<FileRef> {
+export async function fetchRemoteFile(threadId: string, path: string, caller: { workspaceId: string; threadId: string }): Promise<FileRef> {
   return withLock(threadId, async () => {
     const row = await getRow(threadId);
 
-    if (!row || row.userId !== caller.userId) {
+    if (!row || row.workspaceId !== caller.workspaceId) {
       throw new Error(`Thread ${threadId} is not a remote thread of this workspace`);
     }
 
@@ -769,14 +769,14 @@ export async function fetchRemoteFile(threadId: string, path: string, caller: { 
       originalFilename: fetched.filename,
       contentType: fetched.contentType ?? null,
       scope: row.kind,
-      userId: row.userId,
+      workspaceId: row.workspaceId,
     });
     const shown: AppendInput = row.watch.headless
       ? {
           type: THREAD_MESSAGE,
           actor: 'agent',
           agentName: row.kind,
-          userId: row.userId,
+          workspaceId: row.workspaceId,
           threadId: row.threadId,
           targetThreadId: row.watch.parentId,
           payload: { text: `[file] ${file.originalFilename ?? file.id} — ${path}`, fileIds: [file.id], files: [messageFile(file)] },
@@ -785,7 +785,7 @@ export async function fetchRemoteFile(threadId: string, path: string, caller: { 
           type: 'agent.message',
           actor: 'agent',
           agentName: row.kind,
-          userId: row.userId,
+          workspaceId: row.workspaceId,
           threadId: row.threadId,
           payload: { content: [{ type: 'text', text: path }, fileContentBlock(file)] as unknown as JsonObject[] },
         };
@@ -852,7 +852,7 @@ async function pollRow(row: RemoteRow): Promise<void> {
       await appendEvent({
         type: SYSTEM_EXCEPTION,
         actor: 'system',
-        userId: null,
+        workspaceId: null,
         payload: { scope: 'remote-agents', error: `no driver for kind "${row.kind}" — its threads are not watched until the extension loads` },
       }).catch(() => {});
     }
@@ -874,7 +874,7 @@ async function pollRow(row: RemoteRow): Promise<void> {
   }
 
   const now = deps.now();
-  const mirrored = mirrorRead(read, { threadId: row.threadId, userId: row.userId, kind: row.kind, watch: row.watch });
+  const mirrored = mirrorRead(read, { threadId: row.threadId, workspaceId: row.workspaceId, kind: row.kind, watch: row.watch });
   const events = [...mirrored.events];
   let watch: WatchState = { ...mirrored.watch, failingSince: null, warnedAt: null };
 
@@ -883,7 +883,7 @@ async function pollRow(row: RemoteRow): Promise<void> {
   }
 
   if (mirrored.phase === 'gone') {
-    events.push({ type: THREAD_FAILED, actor: 'system', userId: row.userId, threadId: row.threadId, payload: { error: 'the remote session is gone' } });
+    events.push({ type: THREAD_FAILED, actor: 'system', workspaceId: row.workspaceId, threadId: row.threadId, payload: { error: 'the remote session is gone' } });
     await advanceRow(row.threadId, { cursor: read.cursor, watch, phase: 'gone', pollFailures: 0 }, events);
 
     return;

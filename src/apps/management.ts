@@ -103,20 +103,20 @@ async function collectAppDirs(rootDir: string): Promise<{ appDirs: string[]; com
 }
 
 /** Every app folder of the user's file area, joined with publication facts. */
-export async function listApps(userId: string): Promise<AppListing[]> {
-  const { appDirs, complete } = await collectAppDirs(workspaceFilesDir(userId));
+export async function listApps(workspaceId: string): Promise<AppListing[]> {
+  const { appDirs, complete } = await collectAppDirs(workspaceFilesDir(workspaceId));
 
   if (!complete) {
-    console.warn(`[apps] user ${userId}: app scan hit the ${MAX_SCANNED_DIRS}-directory cap; apps in deep folders may be missing from the list`);
+    console.warn(`[apps] workspace ${workspaceId}: app scan hit the ${MAX_SCANNED_DIRS}-directory cap; apps in deep folders may be missing from the list`);
   }
 
-  const publications = await prisma.appPublication.findMany({ where: { userId } });
+  const publications = await prisma.appPublication.findMany({ where: { workspaceId } });
   const slugByPath = new Map(publications.map(row => [row.path, row.slug]));
 
   const listings: AppListing[] = [];
 
   for (const appPath of appDirs.sort()) {
-    const manifest = await readAppManifest(userId, appPath);
+    const manifest = await readAppManifest(workspaceId, appPath);
 
     if (manifest.status === 'absent') {
       continue; // vanished between the walk and the read
@@ -152,7 +152,7 @@ function sanitizeAppPath(rawPath: unknown): string {
  * right now — publishing a broken manifest is refused with the reason (this
  * is the owner edge; the public edge never shows it).
  */
-export async function publishApp(userId: string, rawPath: unknown, rawSlug: unknown): Promise<{ slug: string; path: string }> {
+export async function publishApp(workspaceId: string, rawPath: unknown, rawSlug: unknown): Promise<{ slug: string; path: string }> {
   const appPath = sanitizeAppPath(rawPath);
 
   const slug = typeof rawSlug === 'string' ? rawSlug.trim().toLowerCase() : '';
@@ -165,7 +165,7 @@ export async function publishApp(userId: string, rawPath: unknown, rawSlug: unkn
     throw new AppManagementError(`"${slug}" is a reserved name — pick another slug`);
   }
 
-  const manifest = await readAppManifest(userId, appPath);
+  const manifest = await readAppManifest(workspaceId, appPath);
 
   if (manifest.status === 'absent') {
     throw new AppManagementError(`${appPath} is not an app: no ${APP_MANIFEST_FILENAME} there`);
@@ -175,7 +175,7 @@ export async function publishApp(userId: string, rawPath: unknown, rawSlug: unkn
     throw new AppManagementError(`The app's manifest is broken — fix it before publishing: ${manifest.error}`);
   }
 
-  const existingByPath = await prisma.appPublication.findUnique({ where: { userId_path: { userId, path: appPath } } });
+  const existingByPath = await prisma.appPublication.findUnique({ where: { workspaceId_path: { workspaceId, path: appPath } } });
 
   if (existingByPath) {
     throw new AppManagementError(
@@ -189,20 +189,20 @@ export async function publishApp(userId: string, rawPath: unknown, rawSlug: unkn
 
   try {
     row = await registryMutation(async (tx, journal) => {
-      const created = await tx.appPublication.create({ data: { userId, path: appPath, slug } });
+      const created = await tx.appPublication.create({ data: { workspaceId, path: appPath, slug } });
 
       // Publication is the operator's act from the owner edge (the session API
       // is the only caller): the event is authored by the user.
       await journal(
         'app.published',
         { path: created.path, slug: created.slug, name: manifest.manifest.name, description: manifest.manifest.description },
-        { kind: 'user', userId },
+        { kind: 'user', workspaceId },
       );
 
       return created;
     });
   } catch (error) {
-    // The slug unique constraint: taken by any user (including a racing
+    // The slug unique constraint: taken by any workspace (including a racing
     // publish). The message deliberately does not say by whom.
     if (typeof error === 'object' && error !== null && (error as { code?: string }).code === 'P2002') {
       throw new AppManagementError(`The slug "${slug}" is taken — pick another one`);
@@ -215,32 +215,32 @@ export async function publishApp(userId: string, rawPath: unknown, rawSlug: unkn
 }
 
 /** Unpublishes by path or by slug (whichever is given); ownership-scoped. */
-export async function unpublishApp(userId: string, rawPath: unknown, rawSlug: unknown): Promise<{ slug: string; path: string }> {
+export async function unpublishApp(workspaceId: string, rawPath: unknown, rawSlug: unknown): Promise<{ slug: string; path: string }> {
   if (typeof rawSlug === 'string' && rawSlug.trim()) {
     const slug = rawSlug.trim().toLowerCase();
     const row = await prisma.appPublication.findUnique({ where: { slug } });
 
-    if (!row || row.userId !== userId) {
+    if (!row || row.workspaceId !== workspaceId) {
       throw new AppManagementError(`Nothing is published as "${slug}"`);
     }
 
-    return unpublishRow(userId, row);
+    return unpublishRow(workspaceId, row);
   }
 
   const appPath = sanitizeAppPath(rawPath);
-  const row = await prisma.appPublication.findUnique({ where: { userId_path: { userId, path: appPath } } });
+  const row = await prisma.appPublication.findUnique({ where: { workspaceId_path: { workspaceId, path: appPath } } });
 
   if (!row) {
     throw new AppManagementError(`${appPath} is not published`);
   }
 
-  return unpublishRow(userId, row);
+  return unpublishRow(workspaceId, row);
 }
 
-async function unpublishRow(userId: string, row: { id: string; slug: string; path: string }): Promise<{ slug: string; path: string }> {
+async function unpublishRow(workspaceId: string, row: { id: string; slug: string; path: string }): Promise<{ slug: string; path: string }> {
   await registryMutation(async (tx, journal) => {
     await tx.appPublication.delete({ where: { id: row.id } });
-    await journal('app.unpublished', { path: row.path, slug: row.slug }, { kind: 'user', userId });
+    await journal('app.unpublished', { path: row.path, slug: row.slug }, { kind: 'user', workspaceId });
   });
 
   return { slug: row.slug, path: row.path };

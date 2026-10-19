@@ -34,7 +34,7 @@ export type NamesView = {
 };
 
 export type MeResponse = NamesView & {
-  userId: string;
+  workspaceId: string;
   // The workspace's main thread (the coordinator's root thread) — the
   // header's «to the coordinator» link target. Null only before activation.
   mainThreadId: string | null;
@@ -115,7 +115,7 @@ export type WebSessionView = {
 // one). Read by place: names of the other workspaces are not in the log of
 // the one a tab shows.
 export type SignedInWorkspaceView = NamesView & {
-  userId: string;
+  workspaceId: string;
   // When this browser signed in to the workspace, and how the code came.
   signedInAt: Date;
   loginSource: LoginSource | null;
@@ -155,7 +155,7 @@ export type {
 import type { Event, Thread, ThreadCounts, ThreadStatus } from '../core/contract.ts';
 
 // GET /api/threads query: everything optional, everything scoped to the
-// session's userId on the server. Newest first; `before` is the cursor —
+// session's workspaceId on the server. Newest first; `before` is the cursor —
 // the nextCursor of the previous page (a thread's createdSeq, decimal).
 export type ThreadsQuery = {
   status?: ThreadStatus;
@@ -272,7 +272,7 @@ export type DecideThreadRequest = {
 
 // ---------------------------------------------------------------------------
 // The workspace file area: the user's window into
-// data/workspace/<userId>/files. GET /api/workspace/node?path=<rel> answers
+// data/workspace/<workspaceId>/files. GET /api/workspace/node?path=<rel> answers
 // with a polymorphic node — a directory listing or one file's metadata — so
 // a deep link learns what it points at in one request. Raw content streams
 // from the root namespace instead: GET /files/<rel> (bytes + honest
@@ -382,7 +382,7 @@ export type UploadFileResponse = { file: StoredFileMeta };
 
 // ---------------------------------------------------------------------------
 // LLM request telemetry (read-only): the llm_requests table minus rawUsage,
-// scoped to the session's userId. Serves the /llm-usage chart — the raw
+// scoped to the session's workspaceId. Serves the /llm-usage chart — the raw
 // last-N series, no server-side aggregation. Token counts are null (not 0)
 // when a request failed before returning usage.
 
@@ -938,7 +938,7 @@ export type OpenSecretRequestView = {
 export type ServiceView = {
   name: string;
   description: string | null;
-  // Whether the service can hold several accounts per user (identity probe).
+  // Whether the service can hold several accounts per workspace (identity probe).
   multiAccount: boolean;
   // Whether an installation-level OAuth client must be provisioned by hand.
   manualClient: boolean;

@@ -21,7 +21,7 @@ import { appendEvent } from '../core/append.ts';
 import { THREAD_CANCEL, THREAD_FINISH, THREAD_MESSAGE } from '../core/envelope.ts';
 import { startThread } from '../core/threads.ts';
 import { resolveSpawnProject } from '../projects/store.ts';
-import { getUserFile } from '../files/index.ts';
+import { getWorkspaceFile } from '../files/index.ts';
 import { messageFile } from '../core/file-blocks.ts';
 import { getAgent, getAgents, isRemoteAgent } from '../capabilities/agent-catalog.ts';
 import { RESTART_SERVER_NAME } from '../capabilities/restart-tools.ts';
@@ -367,16 +367,16 @@ function getAgentFunctionDefinitions(): FunctionDefinition[] {
   return definitions;
 }
 
-// The tool servers' functions for this user, connecting pending servers
+// The tool servers' functions for this workspace, connecting pending servers
 // first. Non-strict: external MCP schemas are not guaranteed to satisfy the
 // strict subset — the server validates input, errors feed back into the
 // inner loop. A name taken by a static/builtin function or a catalog agent
 // wins over a server tool (dispatch checks in that order).
-async function getServerFunctionDefinitions(userId: string): Promise<FunctionDefinition[]> {
+async function getServerFunctionDefinitions(workspaceId: string): Promise<FunctionDefinition[]> {
   const agentNames = new Set(getAgents().map(agent => agent.name));
   const definitions: FunctionDefinition[] = [];
 
-  for (const fn of await getServerToolFunctions(userId, COORDINATOR_BUNDLE)) {
+  for (const fn of await getServerToolFunctions(workspaceId, COORDINATOR_BUNDLE)) {
     if (RESERVED_FUNCTION_NAMES.has(fn.functionName) || agentNames.has(fn.functionName)) {
       console.warn(`[coordinator] server tool "${fn.functionName}" is shadowed and not exposed`);
       continue;
@@ -394,16 +394,16 @@ async function getServerFunctionDefinitions(userId: string): Promise<FunctionDef
   return definitions;
 }
 
-export async function getCoordinatorFunctionDefinitions(userId: string): Promise<FunctionDefinition[]> {
+export async function getCoordinatorFunctionDefinitions(workspaceId: string): Promise<FunctionDefinition[]> {
   return [
     ...STATIC_FUNCTION_DEFINITIONS,
     ...getAgentFunctionDefinitions(),
-    ...(await getServerFunctionDefinitions(userId)),
+    ...(await getServerFunctionDefinitions(workspaceId)),
   ];
 }
 
 type DispatchContext = {
-  userId: string;
+  workspaceId: string;
   threadId: string;
 };
 
@@ -440,7 +440,7 @@ async function executeSendMessage(args: JsonObject, ctx: DispatchContext): Promi
   for (const fileId of fileIds) {
     // Validation up front — scoped to the workspace: a dead or foreign
     // fileId must reject the call, not surface later as a failed delivery.
-    const file = await getUserFile(ctx.userId, fileId);
+    const file = await getWorkspaceFile(ctx.workspaceId, fileId);
 
     content.push(
       file.contentType?.toLowerCase().startsWith('image/') ? { type: 'image', fileId } : { type: 'file', fileId },
@@ -451,7 +451,7 @@ async function executeSendMessage(args: JsonObject, ctx: DispatchContext): Promi
     type: 'agent.message',
     actor: 'agent',
     agentName: 'coordinator',
-    userId: ctx.userId,
+    workspaceId: ctx.workspaceId,
     threadId: ctx.threadId,
     payload: { content },
   });
@@ -468,7 +468,7 @@ async function executeSpawn(agentName: string, args: JsonObject, ctx: DispatchCo
   const projectSlug = typeof args.project === 'string' && args.project.trim() ? args.project.trim() : undefined;
   // The attachments of the task: validated up front against the workspace
   // like send_to_thread's — a dead or foreign fileId rejects the spawn.
-  const files = await Promise.all(uniqueFileIds(args.fileIds).map(fileId => getUserFile(ctx.userId, fileId)));
+  const files = await Promise.all(uniqueFileIds(args.fileIds).map(fileId => getWorkspaceFile(ctx.workspaceId, fileId)));
 
   // A remote kind: a new session from the prompt, or an existing one
   // adopted — exactly one. The secretary's remote thread talks to the user
@@ -485,7 +485,7 @@ async function executeSpawn(agentName: string, args: JsonObject, ctx: DispatchCo
     }
 
     await startThread({
-      userId: ctx.userId,
+      workspaceId: ctx.workspaceId,
       parentThreadId: ctx.threadId,
       agent: agentName,
       title,
@@ -496,7 +496,7 @@ async function executeSpawn(agentName: string, args: JsonObject, ctx: DispatchCo
       options: compactOptions(args.options),
       adopt: Boolean(adopt),
       ...(files.length ? { files } : {}),
-      project: await resolveSpawnProject(ctx.userId, projectSlug),
+      project: await resolveSpawnProject(ctx.workspaceId, projectSlug),
       actor: 'agent',
       agentName: 'coordinator',
     });
@@ -509,7 +509,7 @@ async function executeSpawn(agentName: string, args: JsonObject, ctx: DispatchCo
   }
 
   await startThread({
-    userId: ctx.userId,
+    workspaceId: ctx.workspaceId,
     parentThreadId: ctx.threadId,
     agent: agentName,
     title,
@@ -517,7 +517,7 @@ async function executeSpawn(agentName: string, args: JsonObject, ctx: DispatchCo
     icon: declaration?.icon,
     headless: declaration?.headless,
     ...(files.length ? { files } : {}),
-    project: await resolveSpawnProject(ctx.userId, projectSlug),
+    project: await resolveSpawnProject(ctx.workspaceId, projectSlug),
     actor: 'agent',
     agentName: 'coordinator',
   });
@@ -541,7 +541,7 @@ async function executeSendToThread(args: JsonObject, ctx: DispatchContext): Prom
   // sendToChild): validated up front against the workspace — a dead or
   // foreign fileId rejects the call — the references for the model, the
   // facts for the reader.
-  const files = await Promise.all(fileIds.map(fileId => getUserFile(ctx.userId, fileId)));
+  const files = await Promise.all(fileIds.map(fileId => getWorkspaceFile(ctx.workspaceId, fileId)));
 
   // One-hop is validated by append: only a direct child can be addressed. A
   // child that terminated in between redirects back to the main thread, so
@@ -550,7 +550,7 @@ async function executeSendToThread(args: JsonObject, ctx: DispatchContext): Prom
     type: THREAD_MESSAGE,
     actor: 'agent',
     agentName: 'coordinator',
-    userId: ctx.userId,
+    workspaceId: ctx.workspaceId,
     threadId: ctx.threadId,
     targetThreadId: threadId,
     payload: { text, ...(files.length ? { fileIds: files.map(file => file.id), files: files.map(messageFile) } : {}) },
@@ -571,7 +571,7 @@ async function executeFinishThread(args: JsonObject, ctx: DispatchContext): Prom
     type: THREAD_FINISH,
     actor: 'agent',
     agentName: 'coordinator',
-    userId: ctx.userId,
+    workspaceId: ctx.workspaceId,
     threadId: ctx.threadId,
     targetThreadId: threadId,
     payload: { reason: 'finished_by_coordinator' },
@@ -593,7 +593,7 @@ async function executeCancelThread(args: JsonObject, ctx: DispatchContext): Prom
     type: THREAD_CANCEL,
     actor: 'agent',
     agentName: 'coordinator',
-    userId: ctx.userId,
+    workspaceId: ctx.workspaceId,
     threadId: ctx.threadId,
     targetThreadId: threadId,
     payload: { reason },
@@ -657,14 +657,14 @@ export async function dispatchCoordinatorFunction(call: FunctionCall, ctx: Dispa
 
   // An agent name wins over a same-named server tool — mirroring the
   // definitions, where the shadowed server tool is not exposed.
-  if (!getAgent(call.name) && isServerToolFunction(ctx.userId, COORDINATOR_BUNDLE, call.name)) {
+  if (!getAgent(call.name) && isServerToolFunction(ctx.workspaceId, COORDINATOR_BUNDLE, call.name)) {
     try {
       const outcome = await callToolJournaled(
-        { userId: ctx.userId, threadId: ctx.threadId, agentName: 'coordinator' },
+        { workspaceId: ctx.workspaceId, threadId: ctx.threadId, agentName: 'coordinator' },
         call.callId,
         call.name,
         args,
-        () => callServerTool({ userId: ctx.userId, threadId: ctx.threadId }, COORDINATOR_BUNDLE, call.name, args),
+        () => callServerTool({ workspaceId: ctx.workspaceId, threadId: ctx.threadId }, COORDINATOR_BUNDLE, call.name, args),
       );
 
       return { kind: 'sync', result: outcome.result };

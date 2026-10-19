@@ -12,7 +12,7 @@ import { describeExternalServerStatuses, listExternalSecretTargets, listUserAuth
 import {
   disconnectConnection,
   getOauthClient,
-  listUserConnections,
+  listWorkspaceConnections,
   renameConnection,
   requestAuthorization,
   requestOauthClientCredentials,
@@ -69,7 +69,7 @@ function describeAccountStatus(status: string): string {
   }
 }
 
-type ConnectionRow = Awaited<ReturnType<typeof listUserConnections>>[number];
+type ConnectionRow = Awaited<ReturnType<typeof listWorkspaceConnections>>[number];
 
 function describeAccountRow(row: ConnectionRow): string {
   const label = identityLabel(row.identity);
@@ -285,7 +285,7 @@ function optionalStringArg(args: JsonObject, key: string): string | null {
 // Resolves the target account of an authorization link: an existing slug, a
 // new named account, or — with neither given — the only existing account.
 async function resolveAuthorizationTarget(
-  userId: string,
+  workspaceId: string,
   serverName: string,
   args: JsonObject,
 ): Promise<{ accountKey?: string; displayName?: string }> {
@@ -296,7 +296,7 @@ async function resolveAuthorizationTarget(
     throw new Error('Pass either "account" (re-authorize an existing one) or "name" (connect a new one), not both');
   }
 
-  const rows = (await listUserConnections(userId)).filter(row => row.server === serverName);
+  const rows = (await listWorkspaceConnections(workspaceId)).filter(row => row.server === serverName);
 
   if (account) {
     const row = rows.find(candidate => candidate.accountKey === account);
@@ -342,9 +342,9 @@ export function createAuthToolServer(): BuiltinToolServer {
       DISCONNECT_CONNECTION_FUNCTION_NAME,
     ],
 
-    getFunctions: async userId => {
+    getFunctions: async workspaceId => {
       // One connections fetch feeds every account-aware surface of this turn.
-      const connections = await listUserConnections(userId);
+      const connections = await listWorkspaceConnections(workspaceId);
       const functions = await Promise.all([
         requestAuthorizationFunction(connections),
         requestOauthClientFunction(),
@@ -359,8 +359,8 @@ export function createAuthToolServer(): BuiltinToolServer {
       const server = requireStringArg(args, 'server');
 
       if (toolName === REQUEST_AUTHORIZATION_FUNCTION_NAME) {
-        const target = await resolveAuthorizationTarget(ctx.userId, server, args);
-        const url = await requestAuthorization(ctx.userId, ctx.threadId, server, target.accountKey, target.displayName);
+        const target = await resolveAuthorizationTarget(ctx.workspaceId, server, args);
+        const url = await requestAuthorization(ctx.workspaceId, ctx.threadId, server, target.accountKey, target.displayName);
         const accountNote = target.displayName
           ? ` (new account "${target.accountKey}" — "${target.displayName}")`
           : target.accountKey
@@ -373,26 +373,26 @@ export function createAuthToolServer(): BuiltinToolServer {
       if (toolName === RENAME_CONNECTION_FUNCTION_NAME) {
         const account = requireStringArg(args, 'account');
         const name = requireStringArg(args, 'name');
-        const result = await renameConnection(ctx.userId, server, account, name, ctx.threadId);
+        const result = await renameConnection(ctx.workspaceId, server, account, name, ctx.threadId);
 
         return `Account "${result.accountKey}" of "${server}" renamed: "${result.previousName}" → "${result.name}". The slug stays "${result.accountKey}".`;
       }
 
       if (toolName === DISCONNECT_CONNECTION_FUNCTION_NAME) {
         const account = requireStringArg(args, 'account');
-        const result = await disconnectConnection(ctx.userId, server, account, ctx.threadId);
+        const result = await disconnectConnection(ctx.workspaceId, server, account, ctx.threadId);
 
         return `Account "${result.accountKey}" ("${result.name}") of "${server}" is disconnected and its stored tokens are deleted. If the user wants a full revocation, remind them to also revoke Balabash's access in the provider's security settings.`;
       }
 
       if (toolName === REQUEST_OAUTH_CLIENT_FUNCTION_NAME) {
-        const url = await requestOauthClientCredentials(ctx.userId, ctx.threadId, server);
+        const url = await requestOauthClientCredentials(ctx.workspaceId, ctx.threadId, server);
 
         return `One-time operator link for the installation OAuth client of "${server}" (valid 15 minutes): ${url}\nSend it to the user and wait — an oauth_client.provisioned event arrives in this thread when the client is saved.`;
       }
 
       if (toolName === REQUEST_EXTERNAL_SERVER_CREDENTIALS_FUNCTION_NAME) {
-        const url = await requestExternalServerCredentials(ctx.userId, ctx.threadId, server);
+        const url = await requestExternalServerCredentials(ctx.workspaceId, ctx.threadId, server);
 
         return `One-time operator link for the installation credentials of "${server}" (valid 15 minutes): ${url}\nSend it to the user and wait — a secrets.provisioned event arrives in this thread when the values are saved.`;
       }

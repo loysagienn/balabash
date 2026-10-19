@@ -58,7 +58,7 @@ describe('test PostgreSQL', () => {
     const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: db.url }) });
 
     try {
-      assert.equal(await prisma.user.count(), 0);
+      assert.equal(await prisma.workspace.count(), 0);
       assert.equal(await prisma.event.count(), 0);
     } finally {
       await prisma.$disconnect();

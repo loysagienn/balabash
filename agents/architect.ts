@@ -89,7 +89,7 @@ export const agent = {
     // The architect's whole value is depth of reasoning — the only agent on max.
     effort: 'max',
     preset: 'full',
-    cwd: (userId: string) => workspaceFilesDir(userId),
+    cwd: (workspaceId: string) => workspaceFilesDir(workspaceId),
     initialMessage: (prompt: string) => `Subject of the architectural work:
 ${prompt}
 

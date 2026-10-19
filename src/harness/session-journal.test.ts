@@ -19,7 +19,7 @@ describe('createJournalWriter', () => {
       identityOf: async threadId => {
         lookups.push(threadId);
 
-        return threadId === 'gone' ? null : { userId: 'u1', agentName: 'engineer' };
+        return threadId === 'gone' ? null : { workspaceId: 'u1', agentName: 'engineer' };
       },
     });
 
@@ -42,7 +42,7 @@ describe('createJournalWriter', () => {
       type: 'session.state',
       actor: 'agent',
       agentName: 'engineer',
-      userId: 'u1',
+      workspaceId: 'u1',
       threadId: 't1',
       payload: { state: 'run' },
     });
@@ -64,7 +64,7 @@ describe('createJournalWriter', () => {
 
         appended.push(input.type);
       },
-      identityOf: async () => ({ userId: 'u1', agentName: 'engineer' }),
+      identityOf: async () => ({ workspaceId: 'u1', agentName: 'engineer' }),
     });
 
     // The value tells whether everything landed: a dropped entry, a failed
@@ -96,7 +96,7 @@ describe('createJournalWriter', () => {
       identityOf: async threadId => {
         lookups.push(threadId);
 
-        return known || threadId !== 'late' ? { userId: 'u1', agentName: 'a' } : null;
+        return known || threadId !== 'late' ? { workspaceId: 'u1', agentName: 'a' } : null;
       },
       identityCacheSize: 2,
     });

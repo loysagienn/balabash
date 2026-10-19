@@ -8,9 +8,9 @@
 // on demand. Agents name them per server in their tool lists.
 
 import type { Event, JsonObject, JsonValue, Thread, ToolDefinition } from '../core/contract.ts';
-import { getTranscript, getUserEvent } from '../core/events.ts';
+import { getTranscript, getWorkspaceEvent } from '../core/events.ts';
 import { getThread, listThreads } from '../core/threads.ts';
-import { getFileDownloadUrl, getUserFile } from '../files/index.ts';
+import { getFileDownloadUrl, getWorkspaceFile } from '../files/index.ts';
 import { buildTranscript } from '../harness/openai/transcript.ts';
 import type { ToolFunction } from './mcp-client.ts';
 import type { BuiltinToolServer } from './tool-manager.ts';
@@ -129,7 +129,7 @@ const EVENTS_TOOL_DEFINITIONS: ToolDefinition[] = [
 const GET_THREAD_HISTORY_LIMIT = 400;
 
 type BuiltinToolContext = {
-  userId: string;
+  workspaceId: string;
 };
 
 // The full event for the model: the envelope with seq as a number and dates
@@ -171,7 +171,7 @@ async function executeGetEvent(args: JsonObject, ctx: BuiltinToolContext): Promi
     throw new Error('get_event requires an integer seq');
   }
 
-  const event = await getUserEvent(ctx.userId, seq);
+  const event = await getWorkspaceEvent(ctx.workspaceId, seq);
 
   if (!event) {
     throw new Error(`Event seq=${args.seq} not found in this workspace`);
@@ -189,7 +189,7 @@ async function executeGetFile(args: JsonObject, ctx: BuiltinToolContext): Promis
 
   // Scoped to the workspace: a model-supplied fileId must not reach across
   // the user boundary.
-  const file = await getUserFile(ctx.userId, fileId);
+  const file = await getWorkspaceFile(ctx.workspaceId, fileId);
   const { url } = await getFileDownloadUrl(fileId);
 
   // The one FileRef plus its ephemeral url. The OpenAI harness
@@ -236,7 +236,7 @@ async function executeListThreads(args: JsonObject, ctx: BuiltinToolContext): Pr
     limit = Math.min(args.limit, LIST_THREADS_LIMIT_MAX);
   }
 
-  const threads = await listThreads(ctx.userId, {
+  const threads = await listThreads(ctx.workspaceId, {
     ...(status !== undefined ? { status: status as Thread['status'] } : {}),
     ...(createdAtGte !== undefined ? { createdAtGte } : {}),
     ...(createdAtLte !== undefined ? { createdAtLte } : {}),
@@ -251,7 +251,7 @@ async function executeListThreads(args: JsonObject, ctx: BuiltinToolContext): Pr
 async function getWorkspaceThread(threadId: string, ctx: BuiltinToolContext): Promise<Thread> {
   const thread = threadId ? await getThread(threadId) : null;
 
-  if (!thread || thread.userId !== ctx.userId) {
+  if (!thread || thread.workspaceId !== ctx.workspaceId) {
     throw new Error(`Thread "${threadId}" not found in this workspace`);
   }
 
@@ -321,7 +321,7 @@ function createPullToolServer(
         throw new Error(`Unknown ${serverName} tool "${toolName}"`);
       }
 
-      return executor(args, { userId: ctx.userId });
+      return executor(args, { workspaceId: ctx.workspaceId });
     },
   };
 }

@@ -5,7 +5,7 @@
 // pending too and is retried before the next catalog is handed out — an
 // unreachable or unauthorized server never fails the boot, it simply has no
 // functions until it connects; servers with
-// auth: "user" are registered without a global connection — per-user clients
+// auth: "user" are registered without a global connection — per-workspace clients
 // are created lazily once the user's connection row says "connected".
 // Module-level state is deliberate: the whole system is one process, the
 // runs consume this registry through their bundled ToolsApi.
@@ -24,7 +24,7 @@ import {
 import { startLocalToolSource, type LocalToolContext, type LocalToolHelpers, type LocalToolSource } from './local-tool-source.ts';
 import { INSTALLATION_SERVERS_DIR, INSTALLATION_TOOLS_DIR, importExtensionModule, listExtensionFiles } from './extensions.ts';
 import { ToolError, toErrorResult, toStructuredResult } from './tool-result.ts';
-import { callerUserId, serveMcp } from '../../tools/workspace_shared.ts';
+import { callerWorkspaceId, serveMcp } from '../../tools/workspace_shared.ts';
 import {
   readExternalServerConfigs,
   type ExternalServerConfig,
@@ -34,7 +34,7 @@ import {
 } from './server-config.ts';
 import { resolveExternalServerSecrets } from './server-secrets.ts';
 import { runToolHandler } from './tool-result.ts';
-import { listUserConnections, markReauthorizationRequired } from './connections/index.ts';
+import { listWorkspaceConnections, markReauthorizationRequired } from './connections/index.ts';
 import { backfillConnectionIdentity, identityLabel } from './connections/identity.ts';
 
 // MCP SDK defaults to 60s per request; deep-research-style tools legitimately
@@ -85,7 +85,7 @@ export function isReservedFunctionName(functionName: string): boolean {
 // issued links and events are thread-addressed.
 
 export type BuiltinServerCallContext = {
-  userId: string;
+  workspaceId: string;
   threadId: string;
 };
 
@@ -94,7 +94,7 @@ export type BuiltinToolServer = {
   // Static function namespace: lookup and collision checks stay synchronous;
   // getFunctions may expose a state-dependent subset with live descriptions.
   functionNames: string[];
-  getFunctions(userId: string): Promise<ToolFunction[]>;
+  getFunctions(workspaceId: string): Promise<ToolFunction[]>;
   // Birth contract: the tool returns data or throws; the platform
   // wrapper (runToolHandler) shapes the structured result at the call site.
   call(toolName: string, args: JsonObject, ctx: BuiltinServerCallContext): Promise<JsonValue>;
@@ -185,8 +185,8 @@ let pendingExternalServers = new Map<string, PendingExternalServer>();
 let claudeConnectors = new Map<string, string | null>();
 
 // Servers with auth: "user" have no global connection: every user authorizes
-// their own account. The registry feeds the connections layer; per-user
-// clients are created lazily once a user's connection row says "connected".
+// their own account. The registry feeds the connections layer; per-workspace
+// clients are created lazily once a workspace's connection row says "connected".
 export type UserAuthServer = {
   name: string;
   // 'file' = an in-process tool server (tools/*.ts) with per-user auth: its
@@ -206,17 +206,17 @@ export type UserAuthServer = {
 
 const userAuthServers = new Map<string, UserAuthServer>();
 
-// Per-user clients: userId → server name → accountKey → client. Accounts of
+// Per-workspace clients: workspaceId → server name → accountKey → client. Accounts of
 // one server share a single function set — the canonical list lives on the
-// first live client of the group (see ensureUserServers).
-type UserServerAccounts = Map<string, ConnectedServer>;
+// first live client of the group (see ensureWorkspaceServers).
+type WorkspaceServerAccounts = Map<string, ConnectedServer>;
 
-const userServers = new Map<string, Map<string, UserServerAccounts>>();
+const workspaceServers = new Map<string, Map<string, WorkspaceServerAccounts>>();
 
 // The canonical client of a server group: the one whose function list is the
 // group's exposed set. Map iteration order is insertion order, so this is the
 // first live account.
-function canonicalClient(accounts: UserServerAccounts): ConnectedServer | null {
+function canonicalClient(accounts: WorkspaceServerAccounts): ConnectedServer | null {
   return accounts.values().next().value ?? null;
 }
 
@@ -236,8 +236,8 @@ export function registerUserAuthServer(server: UserAuthServer): void {
   userAuthServers.set(server.name, server);
 }
 
-export function dropUserClient(serverName: string, userId: string, accountKey: string): void {
-  const groups = userServers.get(userId);
+export function dropWorkspaceClient(serverName: string, workspaceId: string, accountKey: string): void {
+  const groups = workspaceServers.get(workspaceId);
   const accounts = groups?.get(serverName);
   const client = accounts?.get(accountKey);
 
@@ -254,24 +254,24 @@ export function dropUserClient(serverName: string, userId: string, accountKey: s
   void client.close().catch(() => {});
 }
 
-type ConnectionRow = Awaited<ReturnType<typeof listUserConnections>>[number];
+type ConnectionRow = Awaited<ReturnType<typeof listWorkspaceConnections>>[number];
 
 // Lazily connects the user's authorized servers before tool definitions are
 // handed out, and returns the user's connection rows for the account surface.
 // A failed refresh downgrades the connection to reauthorization_required;
 // transient errors are logged and retried on the next turn.
-async function ensureUserServers(userId: string): Promise<ConnectionRow[]> {
+async function ensureWorkspaceServers(workspaceId: string): Promise<ConnectionRow[]> {
   if (!userAuthServers.size) {
     return [];
   }
 
-  const rows = await listUserConnections(userId);
+  const rows = await listWorkspaceConnections(workspaceId);
 
   for (const server of userAuthServers.values()) {
     const connectedRows = rows.filter(row => row.server === server.name && row.status === 'connected');
 
     for (const row of connectedRows) {
-      if (userServers.get(userId)?.get(server.name)?.has(row.accountKey)) {
+      if (workspaceServers.get(workspaceId)?.get(server.name)?.has(row.accountKey)) {
         continue;
       }
 
@@ -291,7 +291,7 @@ async function ensureUserServers(userId: string): Promise<ConnectionRow[]> {
           );
         }
 
-        const groups = userServers.get(userId) ?? new Map<string, UserServerAccounts>();
+        const groups = workspaceServers.get(workspaceId) ?? new Map<string, WorkspaceServerAccounts>();
         const accounts = groups.get(server.name) ?? new Map<string, ConnectedServer>();
 
         // Concurrent turns can race to connect the same account across the
@@ -320,17 +320,17 @@ async function ensureUserServers(userId: string): Promise<ConnectionRow[]> {
 
         if (collisions.length) {
           console.warn(
-            `[tools] "${server.name}" (${row.accountKey}) for user ${userId}: dropped colliding tools ${collisions.map(fn => fn.functionName).join(', ')}`,
+            `[tools] "${server.name}" (${row.accountKey}) for workspace ${workspaceId}: dropped colliding tools ${collisions.map(fn => fn.functionName).join(', ')}`,
           );
           connected.functions = connected.functions.filter(fn => !collisions.includes(fn));
         }
 
         accounts.set(row.accountKey, connected);
         groups.set(server.name, accounts);
-        userServers.set(userId, groups);
+        workspaceServers.set(workspaceId, groups);
 
         console.log(
-          `[tools] connected "${server.name}" (${row.accountKey}) for user ${userId}; tools: ${connected.functions.map(fn => fn.functionName).join(', ') || '(none)'}`,
+          `[tools] connected "${server.name}" (${row.accountKey}) for workspace ${workspaceId}; tools: ${connected.functions.map(fn => fn.functionName).join(', ') || '(none)'}`,
         );
 
         // Lazy identity backfill: a pre-multi-account row just proved its
@@ -342,7 +342,7 @@ async function ensureUserServers(userId: string): Promise<ConnectionRow[]> {
             .then(backfill => {
               if (!backfill.ok) {
                 console.warn(
-                  `[tools] identity backfill for "${server.name}" (${row.accountKey}) of user ${userId} failed: ${backfill.reason}`,
+                  `[tools] identity backfill for "${server.name}" (${row.accountKey}) of workspace ${workspaceId} failed: ${backfill.reason}`,
                 );
               }
             })
@@ -351,11 +351,11 @@ async function ensureUserServers(userId: string): Promise<ConnectionRow[]> {
       } catch (error) {
         if (error instanceof UnauthorizedError) {
           console.warn(
-            `[tools] "${server.name}" (${row.accountKey}) for user ${userId} is unauthorized — marked for re-authorization`,
+            `[tools] "${server.name}" (${row.accountKey}) for workspace ${workspaceId} is unauthorized — marked for re-authorization`,
           );
           await markReauthorizationRequired(row.id, getErrorMessage(error));
         } else {
-          console.error(`[tools] failed to connect "${server.name}" (${row.accountKey}) for user ${userId}:`, error);
+          console.error(`[tools] failed to connect "${server.name}" (${row.accountKey}) for workspace ${workspaceId}:`, error);
         }
       }
     }
@@ -379,11 +379,11 @@ function describeAccount(row: ConnectionRow): string {
 // contradiction ("unknown" yet listed as connected).
 async function accountSelectionError(
   serverName: string,
-  userId: string,
+  workspaceId: string,
   passed: unknown,
   liveSlugs: ReadonlySet<string>,
 ): Promise<string> {
-  const rows = (await listUserConnections(userId)).filter(row => row.server === serverName);
+  const rows = (await listWorkspaceConnections(workspaceId)).filter(row => row.server === serverName);
   const described =
     rows
       .map(row => {
@@ -674,7 +674,7 @@ async function ensurePendingExternalServers(): Promise<void> {
 }
 
 export async function loadToolServers(input: Omit<LocalToolContext, keyof LocalToolHelpers>): Promise<void> {
-  const ctx: LocalToolContext = { ...input, serveMcp, callerUserId, toStructuredResult, toErrorResult, ToolError };
+  const ctx: LocalToolContext = { ...input, serveMcp, callerWorkspaceId, toStructuredResult, toErrorResult, ToolError };
   const connected = new Map<string, ConnectedServer>();
   const nextUserAuth = new Map<string, UserAuthServer>();
   const nextPending = new Map<string, PendingExternalServer>();
@@ -834,15 +834,15 @@ export async function loadToolServers(input: Omit<LocalToolContext, keyof LocalT
     void source.close().catch(() => {});
   }
 
-  // Configs changed wholesale — per-user clients reconnect lazily.
-  for (const groups of userServers.values()) {
+  // Configs changed wholesale — per-workspace clients reconnect lazily.
+  for (const groups of workspaceServers.values()) {
     for (const accounts of groups.values()) {
       for (const client of accounts.values()) {
         void client.close().catch(() => {});
       }
     }
   }
-  userServers.clear();
+  workspaceServers.clear();
 
   const functionNames = [...connected.values()].flatMap(server => server.functions.map(fn => fn.functionName));
 
@@ -880,11 +880,11 @@ type ToolFunctionEntry = {
   // Global: the server itself. User: the group's canonical client — the call
   // site picks the actual account client from `accounts`.
   server: ConnectedServer;
-  accounts?: UserServerAccounts;
+  accounts?: WorkspaceServerAccounts;
   scope: 'global' | 'user';
 };
 
-function getToolFunctionEntry(userId: string, bundle: ToolBundle, functionName: string): ToolFunctionEntry | null {
+function getToolFunctionEntry(workspaceId: string, bundle: ToolBundle, functionName: string): ToolFunctionEntry | null {
   for (const server of servers.values()) {
     if (!isServerInBundle(bundle, server.name)) {
       continue;
@@ -897,7 +897,7 @@ function getToolFunctionEntry(userId: string, bundle: ToolBundle, functionName: 
     }
   }
 
-  for (const [serverName, accounts] of userServers.get(userId)?.entries() ?? []) {
+  for (const [serverName, accounts] of workspaceServers.get(workspaceId)?.entries() ?? []) {
     if (!isServerInBundle(bundle, serverName)) {
       continue;
     }
@@ -923,16 +923,16 @@ function getBuiltinServerForFunction(bundle: ToolBundle, functionName: string): 
   return null;
 }
 
-export function isServerToolFunction(userId: string, bundle: ToolBundle, functionName: string): boolean {
-  return Boolean(getBuiltinServerForFunction(bundle, functionName) || getToolFunctionEntry(userId, bundle, functionName));
+export function isServerToolFunction(workspaceId: string, bundle: ToolBundle, functionName: string): boolean {
+  return Boolean(getBuiltinServerForFunction(bundle, functionName) || getToolFunctionEntry(workspaceId, bundle, functionName));
 }
 
 // The functions of the bundle's servers — global, this user's authorized
 // ones, and builtin servers — connecting pending and per-user servers first.
-export async function getServerToolFunctions(userId: string, bundle: ToolBundle): Promise<ToolFunction[]> {
+export async function getServerToolFunctions(workspaceId: string, bundle: ToolBundle): Promise<ToolFunction[]> {
   await ensurePendingExternalServers();
 
-  const connectionRows = await ensureUserServers(userId);
+  const connectionRows = await ensureWorkspaceServers(workspaceId);
 
   const functions = [...servers.values()]
     .filter(server => isServerInBundle(bundle, server.name))
@@ -941,7 +941,7 @@ export async function getServerToolFunctions(userId: string, bundle: ToolBundle)
   // User-auth servers expose one function set per server — the canonical
   // client's — regardless of how many accounts are connected; every tool
   // schema gets the platform account parameter.
-  for (const [serverName, accounts] of userServers.get(userId)?.entries() ?? []) {
+  for (const [serverName, accounts] of workspaceServers.get(workspaceId)?.entries() ?? []) {
     if (!isServerInBundle(bundle, serverName)) {
       continue;
     }
@@ -960,7 +960,7 @@ export async function getServerToolFunctions(userId: string, bundle: ToolBundle)
 
   for (const server of builtinToolServers.values()) {
     if (isServerInBundle(bundle, server.name)) {
-      functions.push(...(await server.getFunctions(userId)));
+      functions.push(...(await server.getFunctions(workspaceId)));
     }
   }
 
@@ -971,13 +971,13 @@ export async function getServerToolFunctions(userId: string, bundle: ToolBundle)
 // Compare-and-set on the map slot: a concurrent reconnect of the same server
 // that already won keeps its client, the loser's connection is closed.
 function replaceServer(
-  userId: string,
+  workspaceId: string,
   scope: ToolFunctionEntry['scope'],
   stale: ConnectedServer,
   fresh: ConnectedServer,
 ): void {
   if (scope === 'user') {
-    const accounts = userServers.get(userId)?.get(stale.name);
+    const accounts = workspaceServers.get(workspaceId)?.get(stale.name);
 
     if (!accounts || !stale.accountKey || accounts.get(stale.accountKey) !== stale) {
       void fresh.close().catch(() => {});
@@ -1014,7 +1014,7 @@ export async function callServerTool(
   functionName: string,
   args: JsonObject,
 ): Promise<ServerToolOutcome> {
-  const { userId } = ctx;
+  const { workspaceId } = ctx;
 
   const builtinServer = getBuiltinServerForFunction(bundle, functionName);
 
@@ -1026,7 +1026,7 @@ export async function callServerTool(
     };
   }
 
-  const entry = getToolFunctionEntry(userId, bundle, functionName);
+  const entry = getToolFunctionEntry(workspaceId, bundle, functionName);
 
   if (!entry) {
     throw new Error(`Unknown tool "${functionName}"`);
@@ -1045,7 +1045,7 @@ export async function callServerTool(
     const target = typeof accountArg === 'string' ? accounts?.get(accountArg) : undefined;
 
     if (!target) {
-      throw new Error(await accountSelectionError(fn.serverName, userId, accountArg, new Set(accounts?.keys() ?? [])));
+      throw new Error(await accountSelectionError(fn.serverName, workspaceId, accountArg, new Set(accounts?.keys() ?? [])));
     }
 
     server = target;
@@ -1055,7 +1055,7 @@ export async function callServerTool(
   // Local (in-process) servers receive the calling run's identity in _meta:
   // a file ingested by a local tool must land in the caller's workspace, not
   // as an ownerless row. External servers never see workspace internals.
-  const meta = server.origin === 'file' ? { _meta: { balabash: { userId, threadId: ctx.threadId } } } : {};
+  const meta = server.origin === 'file' ? { _meta: { balabash: { workspaceId, threadId: ctx.threadId } } } : {};
   const invoke = (target: ConnectedServer) =>
     target.client.callTool({ name: fn.toolName, arguments: callArgs, ...meta }, undefined, {
       timeout: TOOL_CALL_TIMEOUT_MS,
@@ -1066,7 +1066,7 @@ export async function callServerTool(
   const rejectUnauthorized = async (error: unknown): Promise<never> => {
     if (scope === 'user' && error instanceof UnauthorizedError) {
       if (server.accountKey) {
-        dropUserClient(fn.serverName, userId, server.accountKey);
+        dropWorkspaceClient(fn.serverName, workspaceId, server.accountKey);
       }
 
       if (server.connectionId) {
@@ -1107,7 +1107,7 @@ export async function callServerTool(
     // the fresh connection serves the same tools.
     fresh.functions = server.functions;
     fresh.origin = server.origin;
-    replaceServer(userId, scope, server, fresh);
+    replaceServer(workspaceId, scope, server, fresh);
 
     try {
       raw = await invoke(fresh);

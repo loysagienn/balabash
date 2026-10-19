@@ -27,7 +27,7 @@ export const WORKSPACE_COLORS = [1, 2, 3, 4, 5, 6, 7, 8] as const;
 
 // What the next page says once it is up: signed in to one more workspace
 // (with the way back), or signed out of the one the tab was showing.
-export type WorkspaceFlash = { kind: 'signed-in'; back: { userId: string; name: string } | null } | { kind: 'signed-out'; name: string };
+export type WorkspaceFlash = { kind: 'signed-in'; back: { workspaceId: string; name: string } | null } | { kind: 'signed-out'; name: string };
 
 // Storage that may refuse (a private window, a full quota, a disabled one):
 // every read and write is best effort.
@@ -63,21 +63,21 @@ function storage(kind: 'sessionStorage' | 'localStorage'): Store | null {
 
 // The page's workspace, as /api/me (or a sign-in) confirmed it: kept for
 // this tab, and — while the tab is in front — as the browser's last one.
-export function confirmWorkspace(userId: string, { tab = storage('sessionStorage'), browser = storage('localStorage'), visible = isVisible() }: { tab?: Store | null; browser?: Store | null; visible?: boolean } = {}): void {
-  setCurrentWorkspace(userId);
-  write(tab, TAB_KEY, userId);
+export function confirmWorkspace(workspaceId: string, { tab = storage('sessionStorage'), browser = storage('localStorage'), visible = isVisible() }: { tab?: Store | null; browser?: Store | null; visible?: boolean } = {}): void {
+  setCurrentWorkspace(workspaceId);
+  write(tab, TAB_KEY, workspaceId);
 
   if (visible) {
-    write(browser, LAST_KEY, userId);
+    write(browser, LAST_KEY, workspaceId);
   }
 }
 
 // The user came back to this tab: its workspace is the last one again.
 export function rememberLastWorkspace(browser: Store | null = storage('localStorage')): void {
-  const userId = currentWorkspace();
+  const workspaceId = currentWorkspace();
 
-  if (userId) {
-    write(browser, LAST_KEY, userId);
+  if (workspaceId) {
+    write(browser, LAST_KEY, workspaceId);
   }
 }
 
@@ -92,7 +92,7 @@ function isVisible(): boolean {
 // Boot: the workspace a page starts in — the link's (?ws=, taken out of the
 // address), the tab's, or the browser's last one; null — none known yet.
 // Answers the address without ?ws= when the link carried one.
-export function bootWorkspace(href: string, { tab = storage('sessionStorage'), browser = storage('localStorage') }: { tab?: Store | null; browser?: Store | null } = {}): { userId: string | null; cleaned: string | null } {
+export function bootWorkspace(href: string, { tab = storage('sessionStorage'), browser = storage('localStorage') }: { tab?: Store | null; browser?: Store | null } = {}): { workspaceId: string | null; cleaned: string | null } {
   const url = new URL(href);
   const linked = url.searchParams.get(WORKSPACE_QUERY)?.trim() || null;
   let cleaned: string | null = null;
@@ -102,21 +102,21 @@ export function bootWorkspace(href: string, { tab = storage('sessionStorage'), b
     cleaned = url.pathname + url.search + url.hash;
   }
 
-  const userId = linked ?? read(tab, TAB_KEY) ?? read(browser, LAST_KEY);
+  const workspaceId = linked ?? read(tab, TAB_KEY) ?? read(browser, LAST_KEY);
 
-  setCurrentWorkspace(userId);
+  setCurrentWorkspace(workspaceId);
 
   if (linked) {
     write(tab, TAB_KEY, linked);
   }
 
-  return { userId, cleaned };
+  return { workspaceId, cleaned };
 }
 
 // The page that follows a switch: what to remember before leaving.
-export function prepareSwitch(userId: string, flash: WorkspaceFlash | null, { tab = storage('sessionStorage'), browser = storage('localStorage') }: { tab?: Store | null; browser?: Store | null } = {}): void {
-  write(tab, TAB_KEY, userId);
-  write(browser, LAST_KEY, userId);
+export function prepareSwitch(workspaceId: string, flash: WorkspaceFlash | null, { tab = storage('sessionStorage'), browser = storage('localStorage') }: { tab?: Store | null; browser?: Store | null } = {}): void {
+  write(tab, TAB_KEY, workspaceId);
+  write(browser, LAST_KEY, workspaceId);
   write(tab, FLASH_KEY, flash ? JSON.stringify(flash) : null);
 }
 
@@ -127,8 +127,8 @@ export function forgetWorkspace({ tab = storage('sessionStorage') }: { tab?: Sto
 }
 
 // Switching: Home of the chosen workspace, loaded anew.
-export function switchWorkspace(userId: string, flash: WorkspaceFlash | null = null): void {
-  prepareSwitch(userId, flash);
+export function switchWorkspace(workspaceId: string, flash: WorkspaceFlash | null = null): void {
+  prepareSwitch(workspaceId, flash);
   window.location.assign('/');
 }
 
@@ -232,9 +232,9 @@ export function workspaceColors(ids: string[], browser: Store | null = storage('
   return colors;
 }
 
-export function setWorkspaceColor(userId: string, color: number, browser: Store | null = storage('localStorage')): void {
+export function setWorkspaceColor(workspaceId: string, color: number, browser: Store | null = storage('localStorage')): void {
   if (isColor(color)) {
-    write(browser, COLORS_KEY, JSON.stringify({ ...readColors(browser), [userId]: color }));
+    write(browser, COLORS_KEY, JSON.stringify({ ...readColors(browser), [workspaceId]: color }));
     announceColors();
   }
 }

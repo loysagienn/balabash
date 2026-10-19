@@ -32,22 +32,22 @@ async function sweepSleepingTasks(): Promise<void> {
   const rows = await prisma.scheduledTask.findMany({ where: { kind: 'code' }, orderBy: { createdAt: 'asc' } });
 
   for (const row of rows) {
-    if (await hasTaskBody(row.userId, row.slug)) {
+    if (await hasTaskBody(row.workspaceId, row.slug)) {
       continue;
     }
 
-    const main = await getMainThread(row.userId);
+    const main = await getMainThread(row.workspaceId);
 
     await appendEvent({
       type: SYSTEM_EXCEPTION,
       actor: 'system',
-      userId: row.userId,
+      workspaceId: row.workspaceId,
       threadId: main?.id ?? null,
       payload: {
         scope: 'schedule-boot',
         slug: row.slug,
         error:
-          `Scheduled task "${row.slug}" (kind code) has no body — it sleeps until ${workspaceTaskFile(row.userId, row.slug)} ` +
+          `Scheduled task "${row.slug}" (kind code) has no body — it sleeps until ${workspaceTaskFile(row.workspaceId, row.slug)} ` +
           `exists (live at the next fire).`,
       },
     }).catch(error => {
@@ -76,7 +76,7 @@ export function startScheduleHeart(): { name: string; stop: () => void } {
     for (const row of rows) {
       // The sleeping-task rule: no body — the heart does not arm and does not
       // complain; the boot sweep already did, once and loudly.
-      if (row.kind === 'code' && !(await hasTaskBody(row.userId, row.slug))) {
+      if (row.kind === 'code' && !(await hasTaskBody(row.workspaceId, row.slug))) {
         continue;
       }
 
@@ -136,7 +136,7 @@ export function startScheduleHeart(): { name: string; stop: () => void } {
       const deleted = await tx.scheduledTask.deleteMany({ where: { id: row.id } });
 
       if (deleted.count > 0) {
-        await journal('schedule.task.cancelled', { ...taskRecord(row, now), reason: 'consumed' }, { kind: 'system', userId: row.userId });
+        await journal('schedule.task.cancelled', { ...taskRecord(row, now), reason: 'consumed' }, { kind: 'system', workspaceId: row.workspaceId });
       }
 
       return deleted.count;

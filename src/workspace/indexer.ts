@@ -34,8 +34,8 @@ const MAX_MODEL_CALLS_PER_PASS = 20;
 const HEAD_BYTES = 6_000;
 const MODEL_TIMEOUT_MS = 60_000;
 
-// Walk safety cap per user — a runaway file area must not own the pass.
-const MAX_FILES_PER_USER = 5_000;
+// Walk safety cap per workspace — a runaway file area must not own the pass.
+const MAX_FILES_PER_WORKSPACE = 5_000;
 
 const SKIPPED_DIR_NAMES = new Set(['node_modules', '__pycache__']);
 
@@ -99,7 +99,7 @@ function isSkippedName(name: string): boolean {
 }
 
 async function walkFiles(absDir: string, relPrefix: string, out: CandidateFile[]): Promise<void> {
-  if (out.length >= MAX_FILES_PER_USER) {
+  if (out.length >= MAX_FILES_PER_WORKSPACE) {
     return;
   }
 
@@ -112,7 +112,7 @@ async function walkFiles(absDir: string, relPrefix: string, out: CandidateFile[]
   }
 
   for (const entry of entries) {
-    if (out.length >= MAX_FILES_PER_USER) {
+    if (out.length >= MAX_FILES_PER_WORKSPACE) {
       return;
     }
 
@@ -212,7 +212,7 @@ function looksBinary(head: Buffer): boolean {
 // yet: a stat confirms the file is gone before the row goes. Unmatched rows
 // are few (the skipped kinds plus the real orphans), so the stats are cheap.
 async function pruneOrphans(
-  userId: string,
+  workspaceId: string,
   filesDir: string,
   walked: CandidateFile[],
   annotationTimes: Map<string, Date>,
@@ -232,7 +232,7 @@ async function pruneOrphans(
     }
   }
 
-  await deleteMeta(userId, orphans);
+  await deleteMeta(workspaceId, orphans);
 
   return orphans.length;
 }
@@ -301,7 +301,7 @@ async function annotate(candidate: CandidateFile, head: string, truncated: boole
 }
 
 // ---------------------------------------------------------------------------
-// The pass: all users, freshness-filtered, capped model calls.
+// The pass: all workspaces, freshness-filtered, capped model calls.
 // ---------------------------------------------------------------------------
 
 async function runPass(isStopped: () => boolean): Promise<void> {
@@ -310,22 +310,22 @@ async function runPass(isStopped: () => boolean): Promise<void> {
   let pruned = 0;
   let capped = false;
 
-  let userIds: string[];
+  let workspaceIds: string[];
 
   try {
     const entries = await fs.readdir(workspaceRoot(), { withFileTypes: true });
 
-    userIds = entries.filter(entry => entry.isDirectory() && !entry.name.startsWith('.')).map(entry => entry.name);
+    workspaceIds = entries.filter(entry => entry.isDirectory() && !entry.name.startsWith('.')).map(entry => entry.name);
   } catch {
     return; // no workspace root yet — nothing to index
   }
 
-  for (const userId of userIds) {
+  for (const workspaceId of workspaceIds) {
     if (isStopped() || capped) {
       break;
     }
 
-    const filesDir = workspaceFilesDir(userId);
+    const filesDir = workspaceFilesDir(workspaceId);
     const filesDirStats = await fs.stat(filesDir).catch(() => null);
 
     if (!filesDirStats?.isDirectory()) {
@@ -336,21 +336,21 @@ async function runPass(isStopped: () => boolean): Promise<void> {
 
     await walkFiles(filesDir, '', files);
 
-    const walkComplete = files.length < MAX_FILES_PER_USER;
+    const walkComplete = files.length < MAX_FILES_PER_WORKSPACE;
 
     if (!walkComplete) {
-      console.warn(`[indexer] user ${userId}: file walk hit the ${MAX_FILES_PER_USER}-file cap; the rest waits`);
+      console.warn(`[indexer] workspace ${workspaceId}: file walk hit the ${MAX_FILES_PER_WORKSPACE}-file cap; the rest waits`);
     }
 
-    const annotationTimes = await readAnnotationTimes(userId);
+    const annotationTimes = await readAnnotationTimes(workspaceId);
 
     // A capped walk leaves most rows unmatched; the confirming stats would
     // cost a stat per row of the table — the sweep waits for a full walk.
     if (walkComplete) {
       try {
-        pruned += await pruneOrphans(userId, filesDir, files, annotationTimes);
+        pruned += await pruneOrphans(workspaceId, filesDir, files, annotationTimes);
       } catch (error) {
-        console.error(`[indexer] failed to prune orphaned annotations of user ${userId}:`, error);
+        console.error(`[indexer] failed to prune orphaned annotations of workspace ${workspaceId}:`, error);
       }
     }
 
@@ -364,7 +364,7 @@ async function runPass(isStopped: () => boolean): Promise<void> {
       continue;
     }
 
-    const dbPath = workspaceDbPath(userId);
+    const dbPath = workspaceDbPath(workspaceId);
     let dbReady = false;
 
     for (const candidate of candidates) {
@@ -400,7 +400,7 @@ async function runPass(isStopped: () => boolean): Promise<void> {
         annotated += 1;
       } catch (error) {
         failed += 1;
-        console.error(`[indexer] failed to annotate ${userId}/${candidate.relPath}:`, error);
+        console.error(`[indexer] failed to annotate ${workspaceId}/${candidate.relPath}:`, error);
       }
     }
   }

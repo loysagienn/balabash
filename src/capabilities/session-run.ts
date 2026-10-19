@@ -554,11 +554,11 @@ export function createSessionRun(
     rejectFinished = reject;
   });
 
-  // Resolve the session working directory: a function form is per-user (e.g.
-  // a workbench under data/workspace/<userId>/...) and is resolved here, at
+  // Resolve the session working directory: a function form is per-workspace (e.g.
+  // a workbench under data/workspace/<workspaceId>/...) and is resolved here, at
   // run start. The resolved directory must exist before the SDK session
   // starts in it.
-  const cwd = typeof spec.cwd === 'function' ? spec.cwd(ctx.userId) : spec.cwd;
+  const cwd = typeof spec.cwd === 'function' ? spec.cwd(ctx.workspaceId) : spec.cwd;
 
   if (cwd) {
     mkdirSync(cwd, { recursive: true });
@@ -598,7 +598,7 @@ export function createSessionRun(
       // Scripts run from the session reach the workspace database the same way
       // run_script children do: via the WORKSPACE_DB env variable; the
       // workspace's task-body directory rides along for the scheduler.
-      env: { WORKSPACE_DB: workspaceDbPath(ctx.userId), WORKSPACE_TASKS_DIR: workspaceTasksDir(ctx.userId) },
+      env: { WORKSPACE_DB: workspaceDbPath(ctx.workspaceId), WORKSPACE_TASKS_DIR: workspaceTasksDir(ctx.workspaceId) },
       extraTools: [
         createEndThreadTool(ctx, end),
         createSendFileTool(ctx, headless),

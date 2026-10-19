@@ -28,9 +28,9 @@ export type RegistryEventType = Extract<EventType, `project.${string}` | `schedu
 // authored by its thread), the operator from the console (actor user, no
 // thread), or the core itself (the schedule heart consuming a one-shot).
 export type RegistryAuthor =
-  | { kind: 'thread'; userId: string; threadId: string }
-  | { kind: 'user'; userId: string }
-  | { kind: 'system'; userId: string };
+  | { kind: 'thread'; workspaceId: string; threadId: string }
+  | { kind: 'user'; workspaceId: string }
+  | { kind: 'system'; workspaceId: string };
 
 // Answers the seq of the event written — a change that answers a client
 // can tell it where in the log its change stands (PATCH /settings does, so
@@ -53,7 +53,7 @@ export async function registryMutation<T>(change: (tx: Tx, journal: RegistryJour
       const appendResult = await appendEventIn(tx, {
         type,
         ...(thread ? { actor: 'agent', agentName: thread.agent, threadId: thread.id } : { actor: by.kind === 'user' ? 'user' : 'system', threadId: null }),
-        userId: by.userId,
+        workspaceId: by.workspaceId,
         payload: payload as JsonObject,
       });
 

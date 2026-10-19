@@ -11,7 +11,7 @@
 //   data/remote-agents/<name>.ts              remote agent kind: export start(ctx) →
 //                                             RemoteAgentDeclaration (remote-agent-source.ts,
 //                                             the driver contract in src/core/contract.ts)
-//   data/workspace/<userId>/tasks/<slug>.ts   scheduled task body, export run(ctx)
+//   data/workspace/<workspaceId>/tasks/<slug>.ts   scheduled task body, export run(ctx)
 //
 // Tools, server configs and remote agent kinds are installation-wide (shared
 // by every workspace, like the repository's tools/ and mcp-servers/); a task

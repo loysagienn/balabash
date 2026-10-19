@@ -9,7 +9,7 @@ import type { LoginSource, MeResponse, WorkspacesResponse } from '../../../api/c
 import type { WorkspaceColors } from '../../lib/workspace/index.ts';
 
 export type WorkspaceItem = {
-  userId: string;
+  workspaceId: string;
   name: string;
   operator: string | null;
   color: number;
@@ -25,26 +25,26 @@ export function workspaceName(name: string | null | undefined): string {
 }
 
 export function workspaceIds(me: MeResponse | null, list: WorkspacesResponse | undefined): string[] {
-  const ids = list ? list.workspaces.map(w => w.userId) : [];
+  const ids = list ? list.workspaces.map(w => w.workspaceId) : [];
 
-  return me && !ids.includes(me.userId) ? [me.userId, ...ids] : ids;
+  return me && !ids.includes(me.workspaceId) ? [me.workspaceId, ...ids] : ids;
 }
 
 export function workspaceItems(me: MeResponse | null, list: WorkspacesResponse | undefined, colors: WorkspaceColors): WorkspaceItem[] {
-  const current = me?.userId ?? list?.current ?? null;
+  const current = me?.workspaceId ?? list?.current ?? null;
   const items: WorkspaceItem[] = (list?.workspaces ?? []).map(w => ({
-    userId: w.userId,
+    workspaceId: w.workspaceId,
     // The tab's own workspace speaks with `me`, which the tail keeps fresh.
-    name: workspaceName(w.userId === me?.userId ? me.workspaceName : w.workspaceName),
-    operator: w.userId === me?.userId ? me.operatorName : w.operatorName,
-    color: colors[w.userId] ?? 1,
-    current: w.userId === current,
+    name: workspaceName(w.workspaceId === me?.workspaceId ? me.workspaceName : w.workspaceName),
+    operator: w.workspaceId === me?.workspaceId ? me.operatorName : w.operatorName,
+    color: colors[w.workspaceId] ?? 1,
+    current: w.workspaceId === current,
     signedInAt: w.signedInAt,
     loginSource: w.loginSource,
   }));
 
-  if (me && !items.some(item => item.userId === me.userId)) {
-    items.unshift({ userId: me.userId, name: workspaceName(me.workspaceName), operator: me.operatorName, color: colors[me.userId] ?? 1, current: true, signedInAt: null, loginSource: null });
+  if (me && !items.some(item => item.workspaceId === me.workspaceId)) {
+    items.unshift({ workspaceId: me.workspaceId, name: workspaceName(me.workspaceName), operator: me.operatorName, color: colors[me.workspaceId] ?? 1, current: true, signedInAt: null, loginSource: null });
   }
 
   return items;
@@ -54,12 +54,12 @@ export function workspaceItems(me: MeResponse | null, list: WorkspacesResponse |
 // code signed in to: the tab's own — nothing to switch to; one already in
 // the list — a plain switch; a new one — a switch that says so, with the
 // way back.
-export type AddOutcome = { kind: 'same' } | { kind: 'switch'; userId: string } | { kind: 'added'; userId: string };
+export type AddOutcome = { kind: 'same' } | { kind: 'switch'; workspaceId: string } | { kind: 'added'; workspaceId: string };
 
 export function addOutcome(signedInTo: string, current: string | null, known: string[]): AddOutcome {
   if (signedInTo === current) {
     return { kind: 'same' };
   }
 
-  return known.includes(signedInTo) ? { kind: 'switch', userId: signedInTo } : { kind: 'added', userId: signedInTo };
+  return known.includes(signedInTo) ? { kind: 'switch', workspaceId: signedInTo } : { kind: 'added', workspaceId: signedInTo };
 }

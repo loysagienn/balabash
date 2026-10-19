@@ -6,7 +6,7 @@ cancel_task / run_task) that says WHEN it fires, plus a run(ctx) body that
 says WHAT it does. The slug joins the two.
 
 A task is a workspace notion: its body is a file of the workspace,
-`data/workspace/<userId>/tasks/<slug>.ts` (the directory is
+`data/workspace/<workspaceId>/tasks/<slug>.ts` (the directory is
 `$WORKSPACE_TASKS_DIR` in an agent session), outside git, travelling with the
 workspace's data. The file is imported fresh at every fire — NO build, NO
 restart, an edit is live at the next moment; a broken file fails that run
@@ -46,9 +46,9 @@ Three kinds share the registry; only 'code' has a body here:
 
 ## ctx
 
-- `ctx.userId` — the task's workspace. The event log is shared by every
+- `ctx.workspaceId` — the task's workspace. The event log is shared by every
   workspace: a body that reads its own past events (a watermark, dedup)
-  filters them by `userId: ctx.userId`.
+  filters them by `workspaceId: ctx.workspaceId`.
 - `ctx.pushEvent(payload)` — journals a `schedule.fired` event addressed to
   the workspace's main thread, with the task's slug and name mixed into the
   payload. The task code does not choose the event type or the addressee.
@@ -56,7 +56,7 @@ Three kinds share the registry; only 'code' has a body here:
   coordinator. Keep payloads compact; push nothing when there is nothing to
   say.
 - `ctx.prisma` — the app's database client (src/db/client.ts).
-- `ctx.tools` — the workspace tool surface for the task's user: the
+- `ctx.tools` — the workspace tool surface for the task's workspace: the
   repository servers of the task bundle (TASK_REPOSITORY_SERVERS in
   src/schedule/engine.ts) plus, since the bundle names `projects`, every
   extension server of the installation (data/tools, data/mcp-servers — see

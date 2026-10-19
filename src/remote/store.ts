@@ -54,7 +54,7 @@ export const OWN_IDS_KEEP = 200;
 
 export type RemoteRow = {
   threadId: string;
-  userId: string;
+  workspaceId: string;
   kind: string;
   ref: string;
   link: string | null;
@@ -101,7 +101,7 @@ export function initialWatch(input: Pick<WatchState, 'headless' | 'parentId' | '
 function toRow(row: RemoteThreadModel): RemoteRow {
   return {
     threadId: row.threadId,
-    userId: row.userId,
+    workspaceId: row.workspaceId,
     kind: row.kind,
     ref: row.ref,
     link: row.link,
@@ -133,7 +133,7 @@ async function appendAll(tx: Prisma.TransactionClient, events: AppendInput[]): P
   return seqs;
 }
 
-export type CreateRowInput = Pick<RemoteRow, 'threadId' | 'userId' | 'kind' | 'ref' | 'link' | 'watch' | 'phase' | 'inboundSeq'> & { cursor?: JsonValue | null; lastActivityAt?: Date; nextPollAt?: Date };
+export type CreateRowInput = Pick<RemoteRow, 'threadId' | 'workspaceId' | 'kind' | 'ref' | 'link' | 'watch' | 'phase' | 'inboundSeq'> & { cursor?: JsonValue | null; lastActivityAt?: Date; nextPollAt?: Date };
 
 // The row of a freshly opened or adopted thread with the events of its
 // opening (session.started, session.state) — one transaction. A second
@@ -146,7 +146,7 @@ export async function createRow(input: CreateRowInput, events: AppendInput[]): P
       const created = await tx.remoteThread.create({
         data: {
           threadId: input.threadId,
-          userId: input.userId,
+          workspaceId: input.workspaceId,
           kind: input.kind,
           ref: input.ref,
           link: input.link,

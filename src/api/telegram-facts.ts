@@ -28,7 +28,7 @@ export type TelegramFactsOptions = {
   // nothing is asked and every enrichment is null.
   client: () => BotApiClient | null;
   // The group bound to the workspace — the telegram_groups row of the user.
-  readGroup: (userId: string) => Promise<BoundGroup | null>;
+  readGroup: (workspaceId: string) => Promise<BoundGroup | null>;
   now?: () => number;
   // How long one Bot API call may take before it is abandoned (and aborted).
   timeoutMs?: number;
@@ -38,12 +38,12 @@ export type TelegramFactsOptions = {
 
 export type TelegramFacts = {
   // The bound group's title, null without a group, a channel or an answer.
-  groupTitle(userId: string): Promise<string | null>;
+  groupTitle(workspaceId: string): Promise<string | null>;
   // The bot's @username (without the @), null while the channel is off or
   // the call failed.
   botUsername(): Promise<string | null>;
   // The Telegram card's facts: the binding with its title, the bot's name.
-  view(userId: string): Promise<{ enabled: boolean; botUsername: string | null; group: { chatId: bigint; title: string | null; linkedAt: Date } | null }>;
+  view(workspaceId: string): Promise<{ enabled: boolean; botUsername: string | null; group: { chatId: bigint; title: string | null; linkedAt: Date } | null }>;
 };
 
 export const BOT_API_TIMEOUT_MS = 5_000;
@@ -89,26 +89,26 @@ export function createTelegramFacts(options: TelegramFactsOptions): TelegramFact
     }
   }
 
-  function titleOf(userId: string, chatId: bigint): Promise<string | null> {
-    const cached = titles.get(userId);
+  function titleOf(workspaceId: string, chatId: bigint): Promise<string | null> {
+    const cached = titles.get(workspaceId);
 
     if (cached && now() - cached.at < titleTtlMs) {
       return Promise.resolve(cached.value);
     }
 
-    let pending = titlesInFlight.get(userId);
+    let pending = titlesInFlight.get(workspaceId);
 
     if (!pending) {
       pending = ask((client, signal) => client.getChat(Number(chatId), signal))
         .then(chat => {
           const title = chat?.title ?? null;
 
-          titles.set(userId, { value: title, at: now() });
+          titles.set(workspaceId, { value: title, at: now() });
 
           return title;
         })
-        .finally(() => titlesInFlight.delete(userId));
-      titlesInFlight.set(userId, pending);
+        .finally(() => titlesInFlight.delete(workspaceId));
+      titlesInFlight.set(workspaceId, pending);
     }
 
     return pending;
@@ -138,22 +138,22 @@ export function createTelegramFacts(options: TelegramFactsOptions): TelegramFact
     return usernameInFlight;
   }
 
-  async function groupTitle(userId: string): Promise<string | null> {
+  async function groupTitle(workspaceId: string): Promise<string | null> {
     if (!options.client()) {
       return null;
     }
 
-    const group = await options.readGroup(userId);
+    const group = await options.readGroup(workspaceId);
 
-    return group ? titleOf(userId, group.chatId) : null;
+    return group ? titleOf(workspaceId, group.chatId) : null;
   }
 
   return {
     groupTitle,
     botUsername,
-    async view(userId) {
-      const group = await options.readGroup(userId);
-      const [title, name] = await Promise.all([group ? titleOf(userId, group.chatId) : null, botUsername()]);
+    async view(workspaceId) {
+      const group = await options.readGroup(workspaceId);
+      const [title, name] = await Promise.all([group ? titleOf(workspaceId, group.chatId) : null, botUsername()]);
 
       return {
         enabled: options.client() !== null,

@@ -159,7 +159,7 @@ export function startThreadRouter({ createRun, spawnRun }: RouterHooks): Consume
       // the terminal event is routed. A target that terminated in between is
       // a no-op (§4.3).
       if (event.type === THREAD_CANCEL) {
-        if (!event.targetThreadId || !event.userId) {
+        if (!event.targetThreadId || !event.workspaceId) {
           return;
         }
 
@@ -168,7 +168,7 @@ export function startThreadRouter({ createRun, spawnRun }: RouterHooks): Consume
         await appendEvent({
           type: THREAD_CANCELLED,
           actor: 'system',
-          userId: event.userId,
+          workspaceId: event.workspaceId,
           threadId: event.targetThreadId,
           payload: { reason, requestedBy: event.actor === 'agent' ? (event.agentName ?? 'agent') : event.actor },
         });

@@ -11,7 +11,7 @@
 //
 // What goes where (the table in the document is the spec; the code is the
 // truth):
-//   users                  as is, same ids — data/workspace/<userId> and
+//   users                  as is, same ids — data/workspace/<workspaceId> and
 //                          data/agent-state move without renames
 //   events                 row by row, seq preserved, payload text → jsonb;
 //                          the seq sequence is bumped past max(seq)
@@ -187,7 +187,7 @@ function sqliteCount(db: DatabaseSync, table: string): number {
 
 async function assertTargetEmpty(): Promise<void> {
   const counts = {
-    users: await prisma.user.count(),
+    users: await prisma.workspace.count(),
     events: await prisma.event.count(),
     threads: await prisma.thread.count(),
     ccr_sessions: await prisma.ccrSession.count(),
@@ -270,7 +270,7 @@ try {
     async tx => {
       // users
       for (const row of sqliteRows(db, 'SELECT * FROM users')) {
-        await tx.user.create({
+        await tx.workspace.create({
           data: { id: str(row, 'id'), createdAt: date(row, 'created_at'), updatedAt: date(row, 'updated_at') },
         });
         stats.users += 1;
@@ -294,7 +294,7 @@ try {
             type: str(row, 'type'),
             actor: str(row, 'actor'),
             agentName: optStr(row, 'agent_name'),
-            userId: optStr(row, 'user_id'),
+            workspaceId: optStr(row, 'user_id'),
             threadId: optStr(row, 'thread_id'),
             targetThreadId: optStr(row, 'target_thread_id'),
             payload: json(row, 'payload'),
@@ -354,7 +354,7 @@ try {
         await tx.project.create({
           data: {
             id: str(row, 'id'),
-            userId: str(row, 'user_id'),
+            workspaceId: str(row, 'user_id'),
             title: str(row, 'title'),
             slug: str(row, 'slug'),
             description: str(row, 'description'),
@@ -372,7 +372,7 @@ try {
           data: {
             id: str(row, 'id'),
             slug: str(row, 'slug'),
-            userId: str(row, 'user_id'),
+            workspaceId: str(row, 'user_id'),
             name: str(row, 'name'),
             description: optStr(row, 'description'),
             kind: str(row, 'kind'),
@@ -401,7 +401,7 @@ try {
             id: str(row, 'id'),
             bucket: 'local',
             objectKey: filePath.slice(rootPrefix.length),
-            userId: optStr(row, 'user_id'),
+            workspaceId: optStr(row, 'user_id'),
             contentType: optStr(row, 'content_type'),
             sizeBytes: optInt(row, 'size_bytes'),
             etag: optStr(row, 'etag'),
@@ -425,7 +425,7 @@ try {
           await tx.connection.create({
             data: {
               id: str(row, 'id'),
-              userId: str(row, 'user_id'),
+              workspaceId: str(row, 'user_id'),
               threadId: optStr(row, 'thread_id'),
               server,
               accountKey: 'default',
@@ -490,7 +490,7 @@ try {
     }
   };
 
-  expect('users', await prisma.user.count(), source.users);
+  expect('users', await prisma.workspace.count(), source.users);
   expect('events', await prisma.event.count(), source.events);
   expect('threads', await prisma.thread.count(), source.threads);
   expect('ccr_sessions', await prisma.ccrSession.count(), source.ccr_sessions - skippedCcr.length);

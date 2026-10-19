@@ -29,7 +29,7 @@ function guessContentType(fileName: string, isImage: boolean): string | null {
 export async function downloadAttachment(
   attachment: InboundAttachment,
   accessToken: string,
-  userId: string,
+  workspaceId: string,
 ): Promise<FileRef> {
   const response = await fetch(`${FILES_BASE}/${encodeURIComponent(attachment.fileUuid)}/raw`, {
     headers: {
@@ -47,7 +47,7 @@ export async function downloadAttachment(
 
   return ingestFile({
     body: Readable.fromWeb(response.body as never),
-    userId,
+    workspaceId,
     originalFilename: attachment.fileName,
     contentType: response.headers.get('content-type') ?? guessContentType(attachment.fileName, attachment.isImage),
     sizeBytes: sizeHeader ? Number(sizeHeader) : null,

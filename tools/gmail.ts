@@ -22,7 +22,7 @@ import type { FileRef } from '../src/core/contract.ts';
 type ToolFilesApi = {
   ingest: (input: {
     body: NodeJS.ReadableStream | Buffer | Uint8Array | string;
-    userId?: string | null;
+    workspaceId?: string | null;
     originalFilename?: string | null;
     contentType?: string | null;
     sizeBytes?: number | null;
@@ -32,14 +32,14 @@ type ToolFilesApi = {
 // The calling run's identity rides in the MCP request _meta (set by the tool
 // manager for local servers). A stored file must belong to that workspace —
 // an ownerless file cannot be delivered back to the user.
-function callerUserId(extra: { _meta?: Record<string, unknown> }): string | null {
+function callerWorkspaceId(extra: { _meta?: Record<string, unknown> }): string | null {
   const balabash = extra._meta?.balabash;
-  const userId =
+  const workspaceId =
     balabash && typeof balabash === 'object' && !Array.isArray(balabash)
-      ? (balabash as Record<string, unknown>).userId
+      ? (balabash as Record<string, unknown>).workspaceId
       : undefined;
 
-  return typeof userId === 'string' && userId ? userId : null;
+  return typeof workspaceId === 'string' && workspaceId ? workspaceId : null;
 }
 
 const GMAIL_API_BASE = 'https://gmail.googleapis.com/gmail/v1/users/me';
@@ -586,7 +586,7 @@ function createMcpServer(accessToken: string, filesApi: ToolFilesApi): McpServer
         const body = Buffer.from(data, 'base64url');
         const file = await filesApi.ingest({
           body,
-          userId: callerUserId(extra),
+          workspaceId: callerWorkspaceId(extra),
           originalFilename: part.filename ?? filename,
           contentType: part.mimeType ?? null,
           sizeBytes: body.length,

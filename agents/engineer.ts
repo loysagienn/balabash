@@ -74,6 +74,6 @@ export const agent = {
     instructions: SYSTEM_PROMPT,
     model: CLAUDE_MODEL,
     preset: 'full',
-    cwd: (userId: string) => workspaceFilesDir(userId),
+    cwd: (workspaceId: string) => workspaceFilesDir(workspaceId),
   },
 } satisfies AgentDeclaration;

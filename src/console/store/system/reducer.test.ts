@@ -13,7 +13,7 @@ import { pendingRestartOf } from './selectors.ts';
 
 const requested = (seq: bigint, requestedBy = 'engineer') => event({ seq, type: 'system.restart.requested', actor: 'system', threadId: 't1', payload: { reason: 'a build', requestedBy } });
 const completed = (seq: bigint, requestSeq: number) => event({ seq, type: 'system.restart.completed', actor: 'system', targetThreadId: 'main', payload: { reason: 'a build', requestSeq } });
-const exception = (seq: bigint) => event({ seq, type: 'system.exception', actor: 'system', userId: null, payload: { scope: 'migrate-deploy', error: 'failed' } });
+const exception = (seq: bigint) => event({ seq, type: 'system.exception', actor: 'system', workspaceId: null, payload: { scope: 'migrate-deploy', error: 'failed' } });
 
 describe('the system log of the store', () => {
   it('starts from the snapshot in seq order and takes the tail by seq, a held seq once', () => {

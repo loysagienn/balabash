@@ -28,7 +28,7 @@ type ThreadReadRow = ThreadRow & { headless: boolean; remote: boolean };
 function toThread(row: ThreadReadRow): Thread {
   return {
     id: row.id,
-    userId: row.userId,
+    workspaceId: row.workspaceId,
     parentId: row.parentId,
     agent: row.agent,
     title: row.title,
@@ -53,7 +53,7 @@ function toThread(row: ThreadReadRow): Thread {
 // source; `= 'true'::jsonb` reads a boolean and nothing else as true (a
 // missing or odd value is not), with no cast that could fail on an odd
 // payload.
-const THREAD_COLUMNS = Prisma.sql`threads.id, threads.user_id AS "userId", threads.parent_id AS "parentId", threads.agent, threads.title,
+const THREAD_COLUMNS = Prisma.sql`threads.id, threads.user_id AS "workspaceId", threads.parent_id AS "parentId", threads.agent, threads.title,
        threads.description, threads.status, threads.summary, threads.project_id AS "projectId",
        COALESCE(started.payload -> 'headless' = 'true'::jsonb, false) AS headless,
        COALESCE(started.payload -> 'remote' = 'true'::jsonb, false) AS remote,
@@ -85,11 +85,11 @@ type ListThreadsOptions = ThreadFilters & {
   order?: 'asc' | 'desc';
 };
 
-export async function listThreads(userId: string, { limit = 100, order = 'asc', ...filters }: ListThreadsOptions = {}): Promise<Thread[]> {
+export async function listThreads(workspaceId: string, { limit = 100, order = 'asc', ...filters }: ListThreadsOptions = {}): Promise<Thread[]> {
   // The limit keeps the newest matching threads (the useful end of a growing
   // workspace) regardless of the output order. Raw SQL: the filters are the
   // fragments of thread-query.ts (the search reaches into the summary).
-  const threads = await readThreads(prisma, threadsWhere(userId, filters), Prisma.sql`ORDER BY threads.created_seq DESC LIMIT ${limit}`);
+  const threads = await readThreads(prisma, threadsWhere(workspaceId, filters), Prisma.sql`ORDER BY threads.created_seq DESC LIMIT ${limit}`);
 
   if (order === 'asc') {
     threads.reverse();
@@ -102,10 +102,10 @@ export async function listThreads(userId: string, { limit = 100, order = 'asc', 
 // terminal seq; null while none has. The snapshot carries it so the
 // console's "the last thread finished …" is the log's answer, not the
 // window's.
-export async function getLatestTerminalThread(userId: string): Promise<Thread | null> {
+export async function getLatestTerminalThread(workspaceId: string): Promise<Thread | null> {
   const [thread] = await readThreads(
     prisma,
-    Prisma.sql`threads.user_id = ${userId} AND threads.terminal_seq IS NOT NULL`,
+    Prisma.sql`threads.user_id = ${workspaceId} AND threads.terminal_seq IS NOT NULL`,
     Prisma.sql`ORDER BY threads.terminal_seq DESC LIMIT 1`,
   );
 
@@ -116,11 +116,11 @@ export type ThreadCountFilters = Omit<ThreadFilters, 'status' | 'beforeCreatedSe
 
 // How many threads of the workspace fall under each status with the same
 // filters (status and cursor aside) — the segments of the threads list.
-export async function countThreads(userId: string, filters: ThreadCountFilters, db: DbClient = prisma): Promise<ThreadCounts> {
+export async function countThreads(workspaceId: string, filters: ThreadCountFilters, db: DbClient = prisma): Promise<ThreadCounts> {
   const rows = await db.$queryRaw<{ status: string; n: number }[]>`
     SELECT status, COUNT(*)::int AS n
     FROM threads
-    WHERE ${threadsWhere(userId, filters)}
+    WHERE ${threadsWhere(workspaceId, filters)}
     GROUP BY status`;
   const counts: ThreadCounts = { active: 0, completed: 0, failed: 0, cancelled: 0 };
 
@@ -144,11 +144,11 @@ export async function countThreads(userId: string, filters: ThreadCountFilters, 
 // (logTransaction, src/core/append.ts), so every terminal with a seq at or
 // below the stamp is in the counts, and every one above it reaches a read
 // strictly after the stamp.
-export async function countThreadsAt(userId: string, filters: ThreadCountFilters): Promise<{ counts: ThreadCounts; asOfSeq: bigint }> {
+export async function countThreadsAt(workspaceId: string, filters: ThreadCountFilters): Promise<{ counts: ThreadCounts; asOfSeq: bigint }> {
   return prisma.$transaction(
     async tx => {
       const { _max } = await tx.event.aggregate({ _max: { seq: true } });
-      const counts = await countThreads(userId, filters, tx);
+      const counts = await countThreads(workspaceId, filters, tx);
 
       return { counts, asOfSeq: _max.seq ?? 0n };
     },
@@ -178,8 +178,8 @@ export async function listMainThreads(): Promise<Thread[]> {
 }
 
 // The workspace's main thread: the only thread without a parent (§5.5).
-export async function getMainThread(userId: string, db: DbClient = prisma): Promise<Thread | null> {
-  const [thread] = await readThreads(db, Prisma.sql`threads.user_id = ${userId} AND threads.parent_id IS NULL`, Prisma.sql`LIMIT 1`);
+export async function getMainThread(workspaceId: string, db: DbClient = prisma): Promise<Thread | null> {
+  const [thread] = await readThreads(db, Prisma.sql`threads.user_id = ${workspaceId} AND threads.parent_id IS NULL`, Prisma.sql`LIMIT 1`);
 
   return thread ?? null;
 }
@@ -202,8 +202,8 @@ export async function activeSubtree(threadId: string): Promise<Thread[]> {
 // Workspace activation (§5.5): the main thread is created once, eternally
 // active, coordinator-owned. Idempotent.
 
-export async function ensureMainThread(userId: string): Promise<Thread> {
-  const existing = await getMainThread(userId);
+export async function ensureMainThread(workspaceId: string): Promise<Thread> {
+  const existing = await getMainThread(workspaceId);
 
   if (existing) {
     return existing;
@@ -215,14 +215,14 @@ export async function ensureMainThread(userId: string): Promise<Thread> {
     await appendEvent({
       type: THREAD_STARTED,
       actor: 'system',
-      userId,
+      workspaceId,
       threadId,
       payload: { agent: COORDINATOR_AGENT },
     });
   } catch (error) {
     // Lost a concurrent activation race — the winner's thread is ours too.
     if (error instanceof AppendError && error.code === 'root_exists') {
-      const winner = await getMainThread(userId);
+      const winner = await getMainThread(workspaceId);
 
       if (winner) {
         return winner;
@@ -238,43 +238,43 @@ export async function ensureMainThread(userId: string): Promise<Thread> {
 // The operator's workspace, channel-neutrally: the one workspace of this
 // installation that a singleton channel (CCR, whose credentials are one
 // account) or the channel-less web login (the console code of /login) serves.
-// Telegram keeps its own binding — group ↔ user in telegram_groups, created
+// Telegram keeps its own binding — group ↔ workspace in telegram_groups, created
 // by /start — and may hold several workspaces; this resolves exactly one:
-// a single user is it, no user at all (a fresh install without Telegram) is
+// a single workspace is it, no workspace at all (a fresh install without Telegram) is
 // created here together with its main thread — the channel-neutral analogue
-// of /start — and several users need OPERATOR_USER_ID to disambiguate (a
+// of /start — and several workspaces need OPERATOR_USER_ID to disambiguate (a
 // loud error instead of a silent "oldest wins").
 export async function ensureOperatorWorkspace(): Promise<Thread> {
-  const users = await prisma.user.findMany({ select: { id: true }, orderBy: { createdAt: 'asc' } });
-  const configured = config.operatorUserId;
+  const workspaces = await prisma.workspace.findMany({ select: { id: true }, orderBy: { createdAt: 'asc' } });
+  const configured = config.operatorWorkspaceId;
 
-  let userId: string;
+  let workspaceId: string;
 
   if (configured) {
-    if (!users.some(user => user.id === configured)) {
+    if (!workspaces.some(workspace => workspace.id === configured)) {
       throw new Error(`OPERATOR_USER_ID ${configured} does not exist in the users table`);
     }
 
-    userId = configured;
-  } else if (users.length === 1) {
-    userId = users[0].id;
-  } else if (users.length === 0) {
-    userId = (await prisma.user.create({ data: {} })).id;
-    console.log(`[threads] operator workspace created: user ${userId}`);
+    workspaceId = configured;
+  } else if (workspaces.length === 1) {
+    workspaceId = workspaces[0].id;
+  } else if (workspaces.length === 0) {
+    workspaceId = (await prisma.workspace.create({ data: {} })).id;
+    console.log(`[threads] operator workspace created: workspace ${workspaceId}`);
   } else {
     throw new Error(
-      `several users in the database — set OPERATOR_USER_ID to the operator's workspace: ${users.map(user => user.id).join(', ')}`,
+      `several workspaces in the database — set OPERATOR_USER_ID to the operator's workspace: ${workspaces.map(workspace => workspace.id).join(', ')}`,
     );
   }
 
-  return ensureMainThread(userId);
+  return ensureMainThread(workspaceId);
 }
 
 // Spawn helper: generates the thread id and writes thread.started addressed
 // to the parent. The runtime builds on this; input/title come from the
 // spawner.
 type StartThreadInput = {
-  userId: string;
+  workspaceId: string;
   parentThreadId: string;
   agent: string;
   title?: string;
@@ -367,7 +367,7 @@ export async function startThread(options: StartThreadInput): Promise<Thread> {
     type: THREAD_STARTED,
     actor: options.actor,
     agentName: options.agentName ?? null,
-    userId: options.userId,
+    workspaceId: options.workspaceId,
     threadId,
     targetThreadId: options.parentThreadId,
     payload,
@@ -395,7 +395,7 @@ export async function tombstoneActiveThreads(reason: string): Promise<number> {
     const result: AppendResult = await appendEvent({
       type: THREAD_CANCELLED,
       actor: 'system',
-      userId: row.userId,
+      workspaceId: row.workspaceId,
       threadId: row.id,
       payload: { reason },
     });
@@ -448,7 +448,7 @@ export async function rebuildThreadsProjection(db: DbClient = prisma): Promise<{
         await db.thread.create({
           data: {
             id: event.threadId!,
-            userId: event.userId!,
+            workspaceId: event.workspaceId!,
             parentId: event.targetThreadId,
             agent,
             title,

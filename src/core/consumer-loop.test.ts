@@ -11,7 +11,7 @@ function makeEvent(seq: number): Event {
     type: 'user.message',
     actor: 'user',
     agentName: null,
-    userId: 'u',
+    workspaceId: 'u',
     threadId: 't',
     targetThreadId: null,
     payload: { text: String(seq) },

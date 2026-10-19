@@ -24,7 +24,7 @@ export {
 } from './envelope.ts';
 export type { AppendInput } from './envelope.ts';
 
-export { getEventsAfter, getTranscript, getUserEvent, getUserEvents, listThreadEvents } from './events.ts';
+export { getEventsAfter, getTranscript, getWorkspaceEvent, getWorkspaceEvents, listThreadEvents } from './events.ts';
 
 export { getLiveHub, notifyAppended } from './live.ts';
 export type { LiveHub, LiveListener } from './live.ts';

@@ -60,19 +60,19 @@ function parseFields(value: unknown): ExternalServerSecretField[] {
 // — no TTL. threadId is the issuing thread (the auth agent's): the
 // provisioning event is addressed to it.
 export async function requestExternalServerCredentials(
-  userId: string,
+  workspaceId: string,
   threadId: string,
   serverName: string,
 ): Promise<string> {
-  const { id } = await openExternalServerCredentialsRequest(userId, threadId, serverName);
+  const { id } = await openExternalServerCredentialsRequest(workspaceId, threadId, serverName);
 
-  return secretRequestUrl(id, userId);
+  return secretRequestUrl(id, workspaceId);
 }
 
 // The request itself, by id — the console opens it from the Connections
 // screen (addressed to the workspace's main thread) and goes to its form.
 export async function openExternalServerCredentialsRequest(
-  userId: string,
+  workspaceId: string,
   threadId: string,
   serverName: string,
 ): Promise<{ id: string }> {
@@ -82,7 +82,7 @@ export async function openExternalServerCredentialsRequest(
     throw new Error(`External server "${serverName}" is not awaiting installation credentials`);
   }
 
-  return openSecretRequest('external-secrets', { userId, threadId, server: target.name, fields: toFields(target) });
+  return openSecretRequest('external-secrets', { workspaceId, threadId, server: target.name, fields: toFields(target) });
 }
 
 // Whether the installation has a server with installation credentials
@@ -119,16 +119,16 @@ export type ExternalServerSecretRequestView = {
 };
 
 // The request as the web window may see it: field METADATA only, never
-// values. userId comes from the session; a foreign or missing request is the
+// values. workspaceId comes from the session; a foreign or missing request is the
 // caller's 404. The live tool-manager is deliberately not consulted here —
 // the row itself is the source of truth until fulfilled.
 export async function getExternalServerSecretRequest(
-  userId: string,
+  workspaceId: string,
   requestId: string,
 ): Promise<ExternalServerSecretRequestView | null> {
   const row = await prisma.externalServerSecretRequest.findUnique({ where: { id: requestId } });
 
-  if (!row || row.userId !== userId) {
+  if (!row || row.workspaceId !== workspaceId) {
     return null;
   }
 
@@ -136,11 +136,11 @@ export async function getExternalServerSecretRequest(
 }
 
 export async function provisionExternalServerSecrets(
-  userId: string,
+  workspaceId: string,
   requestId: string,
   values: Record<string, string>,
 ): Promise<void> {
-  const request = await getExternalServerSecretRequest(userId, requestId);
+  const request = await getExternalServerSecretRequest(workspaceId, requestId);
 
   if (!request) {
     throw new Error('The credential request does not exist or is already fulfilled');
@@ -176,7 +176,7 @@ export async function provisionExternalServerSecrets(
   const seq = await logTransaction(async tx => {
     const row = await tx.externalServerSecretRequest.findUnique({ where: { id: request.id } });
 
-    if (!row || row.userId !== userId) {
+    if (!row || row.workspaceId !== workspaceId) {
       throw new Error('The credential request does not exist or is already fulfilled');
     }
 
@@ -193,7 +193,7 @@ export async function provisionExternalServerSecrets(
     const appended = await appendEventIn(tx, {
       type: SECRETS_PROVISIONED,
       actor: 'system',
-      userId: row.userId,
+      workspaceId: row.workspaceId,
       threadId: null,
       targetThreadId: row.threadId,
       payload: { requestId: row.id, server: row.server, fields: Object.keys(normalized) },

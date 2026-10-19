@@ -11,7 +11,7 @@
 // are not found. A command names the row the screen showed: an address
 // that belongs to another row by the command (the account disconnected
 // and connected again under it while the request was on its way — the
-// test holds the module's (user, server) lock and swaps the row under it)
+// test holds the module's (workspace, server) lock and swaps the row under it)
 // is refused and the newcomer stays untouched; a row gone by then is not
 // found and not born again. The rules of "Connect" hold at the write: a
 // first account that another writer adds meanwhile makes a nameless
@@ -84,12 +84,12 @@ before(async () => {
   service('race2', false);
 
   const row = (id: string, server: string, accountKey: string, displayName: string, data: Record<string, unknown> = {}) =>
-    prisma.connection.create({ data: { id, userId: stand.userId, server, accountKey, displayName, status: 'connected', ...data } });
+    prisma.connection.create({ data: { id, workspaceId: stand.workspaceId, server, accountKey, displayName, status: 'connected', ...data } });
 
   await row(ROWS.solo, 'solo', 'default', 'solo', { threadId: stand.mainThreadId, metadata: { scope: 'read write' }, identity: { id: 'u-1', label: 'me@solo.example' }, identityId: 'u-1' });
   await row(ROWS.work, 'multi', 'work', 'Work', { identityId: 'm-1', identity: { id: 'm-1', label: 'work@multi.example' } });
   await row(ROWS.home, 'multi', 'home', 'Home', { status: 'reauthorization_required', identityId: 'm-2' });
-  await prisma.connection.create({ data: { id: ROWS.foreign, userId: FOREIGN_USER, server: 'solo', accountKey: 'default', displayName: 'Foreign', status: 'connected' } });
+  await prisma.connection.create({ data: { id: ROWS.foreign, workspaceId: FOREIGN_USER, server: 'solo', accountKey: 'default', displayName: 'Foreign', status: 'connected' } });
 });
 
 after(() => stand.stop());
@@ -260,7 +260,7 @@ describe('connecting a new account from the catalog', () => {
 
     assert.equal(nameless.status, 409, nameless.text);
     assert.match(nameless.json<ErrorBody>().error.message, /already has an account/);
-    assert.equal(await prisma.connection.count({ where: { userId: stand.userId, server: 'multi' } }), 3);
+    assert.equal(await prisma.connection.count({ where: { workspaceId: stand.workspaceId, server: 'multi' } }), 3);
   });
 
   test('a service of one account refuses a second one; an unknown service and a malformed body are refused', async () => {
@@ -280,7 +280,7 @@ describe('connecting a new account from the catalog', () => {
     const badName = await stand.request('POST', '/api/connections', { body: { server: 'fresh', name: 7 } });
 
     assert.equal(badName.status, 400, badName.text);
-    assert.equal(await prisma.connection.count({ where: { userId: stand.userId, server: 'solo' } }), 1);
+    assert.equal(await prisma.connection.count({ where: { workspaceId: stand.workspaceId, server: 'solo' } }), 1);
   });
 });
 
@@ -328,7 +328,7 @@ describe('disconnecting an account', () => {
   });
 });
 
-// Holds the module's (user, server) lock in a transaction of its own; once
+// Holds the module's (workspace, server) lock in a transaction of its own; once
 // a request of the test waits on it (the request read its row ahead of the
 // lock), changes the registry under the lock and commits — so the command
 // runs over a registry that is not the one the request read. Every wait is
@@ -352,7 +352,7 @@ async function underHeldLock(server: string, change: (tx: Prisma.TransactionClie
 
   const held = prisma.$transaction(
     async tx => {
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${stand.userId}), hashtext(${server}))`;
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${stand.workspaceId}), hashtext(${server}))`;
       locked();
       await waiterSeen;
       await change(tx);
@@ -429,13 +429,13 @@ describe('a command over the row the screen showed', () => {
       const shown = randomUUID();
       const newcomer = randomUUID();
 
-      await prisma.connection.create({ data: { id: shown, userId: stand.userId, server: 'multi', accountKey, displayName: `Shown ${label}`, status: 'connected', identityId: `swap-${label}-1` } });
+      await prisma.connection.create({ data: { id: shown, workspaceId: stand.workspaceId, server: 'multi', accountKey, displayName: `Shown ${label}`, status: 'connected', identityId: `swap-${label}-1` } });
 
       const reply = await underHeldLock(
         'multi',
         async tx => {
           await tx.connection.delete({ where: { id: shown } });
-          await tx.connection.create({ data: { id: newcomer, userId: stand.userId, server: 'multi', accountKey, displayName: 'Newcomer', status: 'connected', identityId: `swap-${label}-2` } });
+          await tx.connection.create({ data: { id: newcomer, workspaceId: stand.workspaceId, server: 'multi', accountKey, displayName: 'Newcomer', status: 'connected', identityId: `swap-${label}-2` } });
         },
         signal => send(shown, signal),
       );
@@ -462,7 +462,7 @@ describe('a command over the row the screen showed', () => {
       const accountKey = `gone-${label.toLowerCase()}`;
       const shown = randomUUID();
 
-      await prisma.connection.create({ data: { id: shown, userId: stand.userId, server: 'multi', accountKey, displayName: `Gone ${label}`, status: 'connected', identityId: `gone-${label}` } });
+      await prisma.connection.create({ data: { id: shown, workspaceId: stand.workspaceId, server: 'multi', accountKey, displayName: `Gone ${label}`, status: 'connected', identityId: `gone-${label}` } });
 
       const reply = await underHeldLock(
         'multi',
@@ -473,7 +473,7 @@ describe('a command over the row the screen showed', () => {
       );
 
       assert.equal(reply.status, 404, `${label}: ${reply.text}`);
-      assert.equal(await prisma.connection.count({ where: { userId: stand.userId, server: 'multi', accountKey } }), 0, `${label}: the address stays free`);
+      assert.equal(await prisma.connection.count({ where: { workspaceId: stand.workspaceId, server: 'multi', accountKey } }), 0, `${label}: the address stays free`);
     }
   });
 });
@@ -483,7 +483,7 @@ describe('the rules of "Connect" hold at the write', () => {
     const reply = await underHeldLock(
       'race',
       async tx => {
-        await tx.connection.create({ data: { userId: stand.userId, server: 'race', accountKey: 'default', displayName: 'race', status: 'connected' } });
+        await tx.connection.create({ data: { workspaceId: stand.workspaceId, server: 'race', accountKey: 'default', displayName: 'race', status: 'connected' } });
       },
       signal => stand.request('POST', '/api/connections', { body: { server: 'race' }, signal }),
     );
@@ -491,7 +491,7 @@ describe('the rules of "Connect" hold at the write', () => {
     assert.equal(reply.status, 409, reply.text);
     assert.match(reply.json<ErrorBody>().error.message, /already has an account/);
 
-    const rows = await prisma.connection.findMany({ where: { userId: stand.userId, server: 'race' } });
+    const rows = await prisma.connection.findMany({ where: { workspaceId: stand.workspaceId, server: 'race' } });
 
     assert.equal(rows.length, 1);
     assert.equal(rows[0]!.connectNonce, null, 'no link was issued for the newcomer');
@@ -508,7 +508,7 @@ describe('the rules of "Connect" hold at the write', () => {
 
     assert.deepEqual(replies.map(reply => reply.status).sort(), [200, 409], replies.map(reply => reply.text).join('\n'));
     assert.match(replies.find(reply => reply.status === 409)!.json<ErrorBody>().error.message, /at most one connected account/);
-    assert.equal(await prisma.connection.count({ where: { userId: stand.userId, server: 'race2' } }), 1);
+    assert.equal(await prisma.connection.count({ where: { workspaceId: stand.workspaceId, server: 'race2' } }), 1);
     assert.equal((await connectionEvents()).filter(event => event.type === 'connection.pending' && event.payload.server === 'race2').length, 1);
   });
 });
@@ -527,7 +527,7 @@ describe('the callback’s identity refusal', () => {
     await prisma.connection.create({
       data: {
         id,
-        userId: stand.userId,
+        workspaceId: stand.workspaceId,
         threadId: stand.mainThreadId,
         server: 'multi',
         accountKey: 'bound',

@@ -12,7 +12,7 @@ import type { ThreadWindowReads } from './thread-window.ts';
 function thread(id: string, createdSeq: bigint, status: ThreadStatus, parentId: string | null = 'main'): Thread {
   const createdAt = new Date(1_700_000_000_000 + Number(createdSeq) * 1000);
 
-  return { id, userId: 'u1', parentId, agent: 'engineer', title: null, description: null, status, summary: null, projectId: null, headless: false, remote: false, createdSeq, terminalSeq: null, createdAt, updatedAt: createdAt };
+  return { id, workspaceId: 'u1', parentId, agent: 'engineer', title: null, description: null, status, summary: null, projectId: null, headless: false, remote: false, createdSeq, terminalSeq: null, createdAt, updatedAt: createdAt };
 }
 
 // A log of `active` active children above the root (createdSeq 1) and
@@ -23,7 +23,7 @@ function fakeReads(threads: Thread[]): ThreadWindowReads & { calls: { list: numb
 
   return {
     calls,
-    list: async (_userId, { status, beforeCreatedSeq, limit }) => {
+    list: async (_workspaceId, { status, beforeCreatedSeq, limit }) => {
       calls.list += 1;
 
       return newestFirst.filter(t => (status === undefined || t.status === status) && (beforeCreatedSeq === undefined || t.createdSeq < beforeCreatedSeq)).slice(0, limit);

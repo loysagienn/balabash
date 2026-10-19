@@ -2,7 +2,7 @@
 // bytes, per top-level folder too — for the console's summaries: the Files
 // section on Home, the "file area" line of the disk on System, "Project
 // files" of a project (its folder is a top-level one). A measurement, not
-// a fact of the log: a walk over data/workspace/<userId>/files, repeated on
+// a fact of the log: a walk over data/workspace/<workspaceId>/files, repeated on
 // a timer by the service below and kept in the process's memory; a reader
 // gets the newest one or null before the first walk (the console says
 // "measuring"). The walk counts what is on disk — every regular file, the
@@ -28,8 +28,8 @@ export const MAX_ENTRIES = 1_000_000;
 
 const totals = new Map<string, FileAreaTotalsView>();
 
-export function getFileAreaTotals(userId: string): FileAreaTotalsView | null {
-  return totals.get(userId) ?? null;
+export function getFileAreaTotals(workspaceId: string): FileAreaTotalsView | null {
+  return totals.get(workspaceId) ?? null;
 }
 
 type Counter = { files: number; bytes: number };
@@ -157,19 +157,19 @@ export async function measureDirectory(root: string, now = new Date()): Promise<
   return { measuredAt: now, files: total.files, bytes: total.bytes, folders: Object.fromEntries(folders), complete: complete && unreadable === 0, unreadable };
 }
 
-export async function measureFileAreaTotals(userId: string): Promise<FileAreaTotalsView | null> {
-  const measured = await measureDirectory(workspaceFilesDir(userId));
+export async function measureFileAreaTotals(workspaceId: string): Promise<FileAreaTotalsView | null> {
+  const measured = await measureDirectory(workspaceFilesDir(workspaceId));
 
   if (measured) {
-    totals.set(userId, measured);
+    totals.set(workspaceId, measured);
   } else {
-    totals.delete(userId);
+    totals.delete(workspaceId);
   }
 
   return measured;
 }
 
-async function listWorkspaceUserIds(): Promise<string[]> {
+async function listWorkspaceIds(): Promise<string[]> {
   try {
     const entries = await fs.readdir(workspaceRoot(), { withFileTypes: true });
 
@@ -180,11 +180,11 @@ async function listWorkspaceUserIds(): Promise<string[]> {
 }
 
 async function measureAll(): Promise<void> {
-  for (const userId of await listWorkspaceUserIds()) {
+  for (const workspaceId of await listWorkspaceIds()) {
     try {
-      await measureFileAreaTotals(userId);
+      await measureFileAreaTotals(workspaceId);
     } catch (error) {
-      console.error(`[file-area-totals] failed to measure the file area of user ${userId}:`, error);
+      console.error(`[file-area-totals] failed to measure the file area of workspace ${workspaceId}:`, error);
     }
   }
 }

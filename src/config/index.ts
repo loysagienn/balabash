@@ -49,9 +49,9 @@ export const config = {
 
   // The operator's workspace: the one
   // workspace a singleton channel (CCR) or an offline script serves. Needed
-  // only when the users table holds several rows — with zero or one user
+  // only when the users table holds several rows — with zero or one workspace
   // ensureOperatorWorkspace() resolves it without configuration.
-  get operatorUserId(): string | null {
+  get operatorWorkspaceId(): string | null {
     return process.env.OPERATOR_USER_ID?.trim() || null;
   },
 
@@ -151,7 +151,7 @@ export const config = {
     return requireEnv('CONSOLE_DOMAIN').trim().toLowerCase();
   },
 
-  // Secret of the stateless apps cookie (HMAC over {userId, exp, kind});
+  // Secret of the stateless apps cookie (HMAC over {workspaceId, exp, kind});
   // deliberately its OWN secret — the cookie is never interchangeable with
   // session machinery even if one of the secrets leaks. Read lazily: only
   // the apps surfaces touch it, a boot without APPS_DOMAIN never needs it.

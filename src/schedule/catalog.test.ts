@@ -28,7 +28,7 @@ describe('loadTaskBody', () => {
     const tasks = await area();
     const file = path.join(tasks, 'probe.ts');
 
-    await writeFile(file, 'export async function run(ctx: { userId: string }): Promise<void> {\n  void ctx;\n}\n');
+    await writeFile(file, 'export async function run(ctx: { workspaceId: string }): Promise<void> {\n  void ctx;\n}\n');
 
     const run = await loadTaskBody(file);
 

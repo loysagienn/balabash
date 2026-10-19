@@ -81,7 +81,7 @@ async function said(text: string) {
   const result = await appendEvent({
     type: 'user.message',
     actor: 'user',
-    userId: stand.userId,
+    workspaceId: stand.workspaceId,
     threadId: stand.mainThreadId,
     payload: { text, source: 'web', identity: { username: 'operator' } },
   });
@@ -98,7 +98,7 @@ async function leftInRun() {
     type: 'session.state',
     actor: 'agent',
     agentName: 'coordinator',
-    userId: stand.userId,
+    workspaceId: stand.workspaceId,
     threadId: stand.mainThreadId,
     payload: { state: 'run' },
   });
@@ -225,7 +225,7 @@ describe('the course of the main thread', () => {
   let run: CoordinatorRun;
 
   before(() => {
-    run = createCoordinatorRun({ threadId: stand.mainThreadId, userId: stand.userId }, { client: model.client, functionDefinitions: async () => [] });
+    run = createCoordinatorRun({ threadId: stand.mainThreadId, workspaceId: stand.workspaceId }, { client: model.client, functionDefinitions: async () => [] });
   });
 
   test('a turn is `run` in the log before the model is asked and `wait` once the loop is done, by the coordinator', async () => {
@@ -269,7 +269,7 @@ describe('the course of the main thread', () => {
 describe('a fresh run on warm memory', () => {
   test('knows no state: its first loop writes `wait` even without a turn', async () => {
     const model = scriptedClient();
-    const fresh = createCoordinatorRun({ threadId: stand.mainThreadId, userId: stand.userId }, { client: model.client, functionDefinitions: async () => [] });
+    const fresh = createCoordinatorRun({ threadId: stand.mainThreadId, workspaceId: stand.workspaceId }, { client: model.client, functionDefinitions: async () => [] });
     const from = await headSeq();
 
     // The prompt builder's memory is the process's, warm from the turns
@@ -287,7 +287,7 @@ describe('a fresh run on warm memory', () => {
 describe('a fresh run on cold memory — a new process', () => {
   test('re-renders the transcript: the first wake is a turn, `run` then `wait`', async () => {
     const model = scriptedClient();
-    const fresh = createCoordinatorRun({ threadId: stand.mainThreadId, userId: stand.userId }, { client: model.client, functionDefinitions: async () => [] });
+    const fresh = createCoordinatorRun({ threadId: stand.mainThreadId, workspaceId: stand.workspaceId }, { client: model.client, functionDefinitions: async () => [] });
     const from = await headSeq();
 
     // A restart drops the builder's memory of the thread — the same wake
@@ -308,7 +308,7 @@ describe('a lost state write', () => {
     const flaky = flakyJournal();
     // The retry is far away: the wake is what recovers here.
     const run = createCoordinatorRun(
-      { threadId: stand.mainThreadId, userId: stand.userId },
+      { threadId: stand.mainThreadId, workspaceId: stand.workspaceId },
       { client: model.client, functionDefinitions: async () => [], journal: flaky.journal, stateRetryMs: 60_000 },
     );
     const from = await headSeq();
@@ -334,7 +334,7 @@ describe('a lost state write', () => {
     const model = scriptedClient();
     const flaky = flakyJournal();
     const run = createCoordinatorRun(
-      { threadId: stand.mainThreadId, userId: stand.userId },
+      { threadId: stand.mainThreadId, workspaceId: stand.workspaceId },
       { client: model.client, functionDefinitions: async () => [], journal: flaky.journal, stateRetryMs: 50 },
     );
     const from = await headSeq();
@@ -351,7 +351,7 @@ describe('a lost state write', () => {
     const model = scriptedClient();
     const flaky = flakyJournal();
     const run = createCoordinatorRun(
-      { threadId: stand.mainThreadId, userId: stand.userId },
+      { threadId: stand.mainThreadId, workspaceId: stand.workspaceId },
       { client: model.client, functionDefinitions: async () => [], journal: flaky.journal, stateRetryMs: 60_000 },
     );
     const from = await headSeq();
@@ -369,7 +369,7 @@ describe('a lost state write', () => {
 describe('a failed turn', () => {
   test('ends in `wait` after its system.exception', async () => {
     const model = scriptedClient();
-    const run = createCoordinatorRun({ threadId: stand.mainThreadId, userId: stand.userId }, { client: model.client, functionDefinitions: async () => [] });
+    const run = createCoordinatorRun({ threadId: stand.mainThreadId, workspaceId: stand.workspaceId }, { client: model.client, functionDefinitions: async () => [] });
     const from = await headSeq();
 
     model.fail(true);

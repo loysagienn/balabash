@@ -130,21 +130,21 @@ export async function sweepAbortedJobRuns(): Promise<void> {
   }
 }
 
-// ToolsApi resolved for the task's user. threadId in the call context is the
+// ToolsApi resolved for the task's workspace. threadId in the call context is the
 // workspace's main thread: builtin servers and local tools use it only as the
 // caller's attribution (e.g. file ingest), and the main thread is the one
 // place a thread-less actor can honestly point at.
-function createTaskToolsApi(userId: string, mainThreadId: string): ToolsApi {
+function createTaskToolsApi(workspaceId: string, mainThreadId: string): ToolsApi {
   return {
     list: async () =>
-      (await getServerToolFunctions(userId, taskBundle())).map(fn => ({
+      (await getServerToolFunctions(workspaceId, taskBundle())).map(fn => ({
         name: fn.functionName,
         description: fn.description,
         inputSchema: fn.inputSchema,
       })),
 
     call: async (name, args) => {
-      const outcome = await callServerTool({ userId, threadId: mainThreadId }, taskBundle(), name, args);
+      const outcome = await callServerTool({ workspaceId, threadId: mainThreadId }, taskBundle(), name, args);
 
       return outcome.result;
     },
@@ -168,10 +168,10 @@ export type FireOutcome =
 // schedule itself is untouched here: consuming a one-shot row is the heart's
 // business, not the action's.
 export async function fireTask(task: ScheduledTaskModel, trigger: JobTrigger): Promise<FireOutcome> {
-  const main = await getMainThread(task.userId);
+  const main = await getMainThread(task.workspaceId);
 
   if (!main) {
-    console.warn(`[schedule] task "${task.slug}": workspace ${task.userId} has no main thread; skipping`);
+    console.warn(`[schedule] task "${task.slug}": workspace ${task.workspaceId} has no main thread; skipping`);
 
     return { kind: 'no_main_thread' };
   }
@@ -180,7 +180,7 @@ export async function fireTask(task: ScheduledTaskModel, trigger: JobTrigger): P
     await appendEvent({
       type: SCHEDULE_FIRED,
       actor: 'system',
-      userId: task.userId,
+      workspaceId: task.workspaceId,
       threadId: null,
       targetThreadId: main.id,
       payload: { ...payload, slug: task.slug, name: task.name },
@@ -200,7 +200,7 @@ export async function fireTask(task: ScheduledTaskModel, trigger: JobTrigger): P
     return fireCommandTask(task, trigger, main.id, pushFired);
   }
 
-  const file = await locateTaskBody(task.userId, task.slug);
+  const file = await locateTaskBody(task.workspaceId, task.slug);
 
   if (!file) {
     return { kind: 'sleeping' };
@@ -213,10 +213,10 @@ export async function fireTask(task: ScheduledTaskModel, trigger: JobTrigger): P
   running.add(task.slug);
 
   const ctx: TaskContext = {
-    userId: task.userId,
+    workspaceId: task.workspaceId,
     pushEvent: pushFired,
     prisma,
-    tools: createTaskToolsApi(task.userId, main.id),
+    tools: createTaskToolsApi(task.workspaceId, main.id),
   };
 
   // Detached: the body must not block the heart's pass. An exception is the
@@ -235,7 +235,7 @@ export async function fireTask(task: ScheduledTaskModel, trigger: JobTrigger): P
       await appendEvent({
         type: SYSTEM_EXCEPTION,
         actor: 'system',
-        userId: task.userId,
+        workspaceId: task.workspaceId,
         threadId: main.id,
         payload: { scope: 'scheduled-task', slug: task.slug, error: `Scheduled task "${task.slug}" failed: ${message}` },
       }).catch(appendError => {
@@ -304,7 +304,7 @@ function fireCommandTask(
   const command = task.command ?? '';
   const cwd = task.cwd;
   const timeoutMs = clampJobTimeout(task.timeoutMs);
-  const journalBase = { id: runId, userId: task.userId, slug: task.slug, command, cwd, trigger };
+  const journalBase = { id: runId, workspaceId: task.workspaceId, slug: task.slug, command, cwd, trigger };
 
   // Fire-and-forget for the caller, but kept as a settled promise so the
   // completion write never races the start insert (an instant spawn error
@@ -325,7 +325,7 @@ function fireCommandTask(
     let stderrTruncated = false;
 
     try {
-      const filesDir = workspaceFilesDir(task.userId);
+      const filesDir = workspaceFilesDir(task.workspaceId);
       const absCwd = cwd ? path.join(filesDir, sanitizeRelPath(cwd, 'job cwd')) : filesDir;
 
       if (!command.trim()) {
@@ -334,7 +334,7 @@ function fireCommandTask(
 
       const outcome = await runChild('bash', ['-c', command], {
         cwd: absCwd,
-        env: childEnv(workspaceDbPath(task.userId)),
+        env: childEnv(workspaceDbPath(task.workspaceId)),
         timeoutMs,
         maxOutputChars: JOB_TAIL_MAX_CHARS,
         capMode: 'tail',
@@ -401,7 +401,7 @@ function fireCommandTask(
       await appendEvent({
         type: SYSTEM_EXCEPTION,
         actor: 'system',
-        userId: task.userId,
+        workspaceId: task.workspaceId,
         threadId: mainThreadId,
         payload: {
           scope: 'workspace-job',

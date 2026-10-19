@@ -42,7 +42,7 @@ after(() => stand.stop());
 // thread.started the way a spawn writes it: authored by the new thread,
 // addressed to the parent.
 function start(id: string, parentId: string, agent = 'engineer') {
-  return appendEvent({ type: 'thread.started', actor: 'system', userId: stand.userId, threadId: id, targetThreadId: parentId, payload: { agent, title: id } });
+  return appendEvent({ type: 'thread.started', actor: 'system', workspaceId: stand.workspaceId, threadId: id, targetThreadId: parentId, payload: { agent, title: id } });
 }
 
 async function startChild(parentId = stand.mainThreadId, agent = 'engineer'): Promise<string> {
@@ -54,15 +54,15 @@ async function startChild(parentId = stand.mainThreadId, agent = 'engineer'): Pr
 }
 
 function complete(threadId: string, text = 'done') {
-  return appendEvent({ type: 'thread.completed', actor: 'system', userId: stand.userId, threadId, payload: { summary: { text } } });
+  return appendEvent({ type: 'thread.completed', actor: 'system', workspaceId: stand.workspaceId, threadId, payload: { summary: { text } } });
 }
 
 function fail(threadId: string) {
-  return appendEvent({ type: 'thread.failed', actor: 'system', userId: stand.userId, threadId, payload: { error: 'boom' } });
+  return appendEvent({ type: 'thread.failed', actor: 'system', workspaceId: stand.workspaceId, threadId, payload: { error: 'boom' } });
 }
 
 function command(type: 'thread.cancel' | 'thread.interrupt', threadId: string, targetThreadId: string) {
-  return appendEvent({ type, actor: 'system', userId: stand.userId, threadId, targetThreadId, payload: { reason: 'test' } });
+  return appendEvent({ type, actor: 'system', workspaceId: stand.workspaceId, threadId, targetThreadId, payload: { reason: 'test' } });
 }
 
 async function threadRow(id: string): Promise<{ status: string; terminalSeq: bigint | null } | null> {
@@ -109,7 +109,7 @@ describe('terminals', () => {
     assert.deepEqual(row, { status: terminal.event.type.slice('thread.'.length), terminalSeq: terminal.event.seq });
     assert.equal((await lifecycleOf([child])).filter(event => TERMINALS.includes(event.type)).length, 1);
 
-    const later = await appendEvent({ type: 'thread.cancelled', actor: 'system', userId: stand.userId, threadId: child, payload: { reason: 'late' } });
+    const later = await appendEvent({ type: 'thread.cancelled', actor: 'system', workspaceId: stand.workspaceId, threadId: child, payload: { reason: 'late' } });
 
     assert.deepEqual(later, { written: false, reason: 'already_terminal' });
     assert.deepEqual(await threadRow(child), row);
@@ -221,7 +221,7 @@ describe('registryMutation', () => {
   let projectId: string;
 
   before(async () => {
-    projectId = (await prisma.project.create({ data: { userId: stand.userId, title: 'Registry', slug: 'registry', description: 'd' } })).id;
+    projectId = (await prisma.project.create({ data: { workspaceId: stand.workspaceId, title: 'Registry', slug: 'registry', description: 'd' } })).id;
   });
 
   async function updates(): Promise<{ actor: string; agentName: string | null; threadId: string | null; title: string }[]> {
@@ -236,9 +236,9 @@ describe('registryMutation', () => {
     const thread = await startChild(stand.mainThreadId, 'gardener');
 
     for (const [title, by] of [
-      ['By thread', { kind: 'thread', userId: stand.userId, threadId: thread }],
-      ['By user', { kind: 'user', userId: stand.userId }],
-      ['By system', { kind: 'system', userId: stand.userId }],
+      ['By thread', { kind: 'thread', workspaceId: stand.workspaceId, threadId: thread }],
+      ['By user', { kind: 'user', workspaceId: stand.workspaceId }],
+      ['By system', { kind: 'system', workspaceId: stand.workspaceId }],
     ] as const) {
       await registryMutation(async (tx, journal) => {
         const row = await tx.project.update({ where: { id: projectId }, data: { title } });
@@ -259,7 +259,7 @@ describe('registryMutation', () => {
       registryMutation(async (tx, journal) => {
         const row = await tx.project.update({ where: { id: projectId }, data: { title: 'Lost' } });
 
-        await journal('project.updated', projectRecord(row), { kind: 'user', userId: stand.userId });
+        await journal('project.updated', projectRecord(row), { kind: 'user', workspaceId: stand.workspaceId });
         throw new Error('the change failed after the journal');
       }),
       /failed after the journal/,
@@ -278,7 +278,7 @@ describe('registryMutation', () => {
           registryMutation(async (tx, journal) => {
             const row = await tx.project.update({ where: { id: projectId }, data: { title } });
 
-            await journal('project.updated', projectRecord(row), { kind: 'user', userId: stand.userId });
+            await journal('project.updated', projectRecord(row), { kind: 'user', workspaceId: stand.workspaceId });
           }),
         ),
       );
@@ -308,7 +308,7 @@ describe('the log lock', () => {
     const childId = await startChild();
 
     assert.equal(
-      await refusal(prisma.$transaction(tx => appendEventIn(tx, { type: 'thread.progress', actor: 'system', userId: stand.userId, threadId: childId, payload: { text: 'unlocked' } }))),
+      await refusal(prisma.$transaction(tx => appendEventIn(tx, { type: 'thread.progress', actor: 'system', workspaceId: stand.workspaceId, threadId: childId, payload: { text: 'unlocked' } }))),
       'log_lock_required',
     );
     assert.deepEqual((await lifecycleOf([childId])).map(event => event.type), ['thread.started']);
@@ -333,7 +333,7 @@ describe('the log lock', () => {
 
     const held = logTransaction(
       async tx => {
-        const result = await appendEventIn(tx, { type: 'thread.completed', actor: 'system', userId: stand.userId, threadId: childId, payload: { summary: { text: 'held' } } });
+        const result = await appendEventIn(tx, { type: 'thread.completed', actor: 'system', workspaceId: stand.workspaceId, threadId: childId, payload: { summary: { text: 'held' } } });
 
         assert.equal(result.written, true);
         prepared(result.written ? result.event.seq : -1n);
@@ -351,7 +351,7 @@ describe('the log lock', () => {
       const head = async () => (await prisma.event.aggregate({ _max: { seq: true } }))._max.seq ?? 0n;
       const headBefore = await head();
 
-      next = appendEvent({ type: 'session.state', actor: 'agent', agentName: 'engineer', userId: stand.userId, threadId: childId, payload: { state: 'idle' } });
+      next = appendEvent({ type: 'session.state', actor: 'agent', agentName: 'engineer', workspaceId: stand.workspaceId, threadId: childId, payload: { state: 'idle' } });
       await Promise.race([waitForLockWaiters(1), failureOf(held), failureOf(next)]);
 
       // The next event waits behind the uncommitted terminal: nothing above
@@ -408,7 +408,7 @@ describe('the payload', () => {
       result: 'detailed \u0000\u0000\u0004 auto',
       nested: { 'k\u0000ey': ['\u0000', 1, null, true, { deep: 'ok' }] },
     };
-    const result = await appendEvent({ type: 'session.tool.completed', actor: 'agent', agentName: 'engineer', userId: stand.userId, threadId: childId, payload });
+    const result = await appendEvent({ type: 'session.tool.completed', actor: 'agent', agentName: 'engineer', workspaceId: stand.workspaceId, threadId: childId, payload });
 
     assert.ok(result.written);
 
@@ -434,7 +434,7 @@ describe('the payload', () => {
       type: 'thread.completed',
       actor: 'agent',
       agentName: 'engineer',
-      userId: stand.userId,
+      workspaceId: stand.workspaceId,
       threadId: childId,
       targetThreadId: stand.mainThreadId,
       payload: { title: 'Done\u0000', description: 'd', summary: { text: 'sum\u0000mary' } },

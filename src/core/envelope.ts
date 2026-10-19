@@ -133,7 +133,7 @@ export type AppendInput = {
   type: string;
   actor: EventActor;
   agentName?: string | null;
-  userId: string | null;
+  workspaceId: string | null;
   threadId?: string | null;
   // For thread lifecycle events the target is derived from the projection
   // (parent); passing it explicitly is allowed but must match.
@@ -233,7 +233,7 @@ const LIFECYCLE_PAYLOAD_SCHEMAS: Record<string, z.ZodType> = {
 // the projection and live in append.ts.
 
 export function validateEnvelope(input: AppendInput): void {
-  const { type, actor, agentName, userId, threadId } = input;
+  const { type, actor, agentName, workspaceId, threadId } = input;
 
   if (isCanonicalType(type)) {
     validateCanonicalActor(input);
@@ -267,8 +267,8 @@ export function validateEnvelope(input: AppendInput): void {
 
   // Installation-level events live outside workspaces and therefore outside
   // threads: threads always belong to a user.
-  if (threadId && !userId) {
-    throw new AppendError('user_required', `Event with threadId requires userId (type "${type}")`);
+  if (threadId && !workspaceId) {
+    throw new AppendError('workspace_required', `Event with threadId requires workspaceId (type "${type}")`);
   }
 
   const payloadSchema = LIFECYCLE_PAYLOAD_SCHEMAS[type];
@@ -330,7 +330,7 @@ export function toEvent(row: EventRow): Event {
     type: row.type,
     actor: row.actor as EventActor,
     agentName: row.agentName,
-    userId: row.userId,
+    workspaceId: row.workspaceId,
     threadId: row.threadId,
     targetThreadId: row.targetThreadId,
     payload: row.payload as JsonObject,

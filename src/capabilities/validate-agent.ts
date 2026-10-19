@@ -239,7 +239,7 @@ export function validateAgent(module: Record<string, unknown>, filename: string)
       (typeof session.cwd === 'string' && Boolean(session.cwd.trim()));
 
     if (!validCwd) {
-      throw new Error(`${filename} agent.session.cwd must be a non-empty string or a (userId) => string function`);
+      throw new Error(`${filename} agent.session.cwd must be a non-empty string or a (workspaceId) => string function`);
     }
 
     if (session.environment !== undefined && typeof session.environment !== 'function') {

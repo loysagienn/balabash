@@ -269,7 +269,7 @@ export const agent = {
 
         const profileDir = path.join(ctx.stateDir, 'profile');
         const outputDir = path.join(ctx.stateDir, 'runs', ctx.threadId);
-        const cwd = workspaceFilesDir(ctx.userId);
+        const cwd = workspaceFilesDir(ctx.workspaceId);
 
         cleanup.outputDir = outputDir;
         await mkdir(profileDir, { recursive: true });
@@ -316,7 +316,7 @@ export const agent = {
           cwd,
           // Same as the platform session runner: the workspace database path
           // for anything the session runs from its working directory.
-          env: { WORKSPACE_DB: workspaceDbPath(ctx.userId) },
+          env: { WORKSPACE_DB: workspaceDbPath(ctx.workspaceId) },
           extraTools: [...playwrightTools, finishTool],
         });
 

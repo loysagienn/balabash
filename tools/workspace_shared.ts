@@ -20,29 +20,29 @@ export { childEnv, runChild, type ChildOutcome } from '../src/workspace/child.ts
 
 const WORKSPACE_ROOT = workspaceRoot();
 
-const USER_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+const WORKSPACE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 
 // ---------------------------------------------------------------------------
-// Identity: the calling run's userId rides in the MCP request _meta (set by
+// Identity: the calling run's workspaceId rides in the MCP request _meta (set by
 // the tool manager for local servers) — never in model-visible arguments.
 // ---------------------------------------------------------------------------
 
-export function callerUserId(extra: { _meta?: Record<string, unknown> }): string {
+export function callerWorkspaceId(extra: { _meta?: Record<string, unknown> }): string {
   const balabash = extra._meta?.balabash;
-  const userId =
+  const workspaceId =
     balabash && typeof balabash === 'object' && !Array.isArray(balabash)
-      ? (balabash as Record<string, unknown>).userId
+      ? (balabash as Record<string, unknown>).workspaceId
       : undefined;
 
-  if (typeof userId !== 'string' || !userId) {
+  if (typeof workspaceId !== 'string' || !workspaceId) {
     throw new ToolError('Workspace tools need the calling run identity, but none arrived.');
   }
 
-  if (!USER_ID_PATTERN.test(userId)) {
-    throw new ToolError(`Workspace identity "${userId}" is not usable as a directory name.`);
+  if (!WORKSPACE_ID_PATTERN.test(workspaceId)) {
+    throw new ToolError(`Workspace identity "${workspaceId}" is not usable as a directory name.`);
   }
 
-  return userId;
+  return workspaceId;
 }
 
 // ---------------------------------------------------------------------------
@@ -55,8 +55,8 @@ export type Workspace = {
   dbPath: string;
 };
 
-export async function ensureWorkspace(userId: string): Promise<Workspace> {
-  const root = path.join(WORKSPACE_ROOT, userId);
+export async function ensureWorkspace(workspaceId: string): Promise<Workspace> {
+  const root = path.join(WORKSPACE_ROOT, workspaceId);
   const workspace: Workspace = {
     filesDir: path.join(root, 'files'),
     tmpDir: path.join(root, 'tmp'),

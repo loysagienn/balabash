@@ -53,7 +53,7 @@ class DownloadError extends Error {
 type ToolFilesApi = {
   ingest: (input: {
     body: NodeJS.ReadableStream | Buffer | Uint8Array | string;
-    userId?: string | null;
+    workspaceId?: string | null;
     originalFilename?: string | null;
     contentType?: string | null;
     sizeBytes?: number | null;
@@ -66,14 +66,14 @@ type ToolFilesApi = {
 // The calling run's identity rides in the MCP request _meta (set by the tool
 // manager for local servers). A stored file must belong to that workspace —
 // an ownerless file cannot be delivered back to the user.
-function callerUserId(extra: { _meta?: Record<string, unknown> }): string | null {
+function callerWorkspaceId(extra: { _meta?: Record<string, unknown> }): string | null {
   const balabash = extra._meta?.balabash;
-  const userId =
+  const workspaceId =
     balabash && typeof balabash === 'object' && !Array.isArray(balabash)
-      ? (balabash as Record<string, unknown>).userId
+      ? (balabash as Record<string, unknown>).workspaceId
       : undefined;
 
-  return typeof userId === 'string' && userId ? userId : null;
+  return typeof workspaceId === 'string' && workspaceId ? workspaceId : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -600,7 +600,7 @@ function createMcpServer(filesApi: ToolFilesApi) {
         try {
           stored = await filesApi.ingest({
             body: outcome.body,
-            userId: callerUserId(extra),
+            workspaceId: callerWorkspaceId(extra),
             originalFilename: filename,
             contentType,
             sizeBytes: outcome.sizeBytes,

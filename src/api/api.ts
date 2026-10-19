@@ -1,5 +1,5 @@
 // The /api namespace: JSON over the session, the second interface's server
-// side. The userId comes ONLY from the session — no endpoint accepts it from
+// side. The workspaceId comes ONLY from the session — no endpoint accepts it from
 // the request. Bodies cross the wire through serialize-json in both
 // directions (bigint/Date survive), errors share one shape
 // ({error: {code, message}}), and an unmatched /api path answers JSON 404
@@ -30,13 +30,13 @@ import { WorkspacePathError, fileNodeOf, guessContentType, listDir, placeUpload,
 import type { UploadMode } from '../workspace/files.ts';
 import { BodyTooLargeError, clientLeft, declaredLength, isNoSpace, limitedBody } from './upload-body.ts';
 import { UPLOAD_MAX_BYTES } from '../utils/file-names.ts';
-import { FileNotFoundError, getFile, getUserFile, ingestFile, openFileContent } from '../files/index.ts';
+import { FileNotFoundError, getFile, getWorkspaceFile, ingestFile, openFileContent } from '../files/index.ts';
 import type { StorageBody } from '../files/storage.ts';
 import { verifyDownloadLink } from '../files/storage/local.ts';
 import { forgetExternalServerSecrets, getExternalServerSecretRequest, isExternalSecretServer, openExternalServerCredentialsRequest, provisionExternalServerSecrets } from '../capabilities/external-secrets.ts';
 import { listClaudeConnectorTargets, listExternalSecretTargets, refreshExternalServers } from '../capabilities/tool-manager.ts';
 import { resolveOperatorCredentials, tokenTtlMs } from '../adapters/ccr/token.ts';
-import { ConnectionError, disconnectConnection, getOauthClientRequest, getUserConnection, provisionOauthClient, reconnectConnection, renameConnection, startConnection, connectionView } from '../capabilities/connections/index.ts';
+import { ConnectionError, disconnectConnection, getOauthClientRequest, getWorkspaceConnection, provisionOauthClient, reconnectConnection, renameConnection, startConnection, connectionView } from '../capabilities/connections/index.ts';
 import { AppManagementError, listApps, publishApp, unpublishApp } from '../apps/management.ts';
 import { ProjectError, archiveProject, createProject, parseProjectInput, parseProjectPatch, unarchiveProject, updateProject } from '../projects/mutations.ts';
 import { projectView } from '../projects/store.ts';
@@ -130,7 +130,7 @@ async function readJsonBody(ctx: Context): Promise<Record<string, unknown> | nul
 }
 
 // Session gate for every endpoint except the code exchange itself. The
-// session row always carries a userId (anonymous sessions are never
+// session row always carries a workspaceId (anonymous sessions are never
 // created), but the column is nullable — the guard re-checks. The request
 // acts in one workspace of the session (session.ts, "Several workspaces"):
 // the one it names, or the primary one; naming a workspace this browser is
@@ -139,23 +139,23 @@ async function readJsonBody(ctx: Context): Promise<Record<string, unknown> | nul
 async function gate(ctx: Context, next: Next, { fallbackToPrimary }: { fallbackToPrimary: boolean }): Promise<void> {
   const session = await getSession(ctx);
 
-  if (!session || !session.userId) {
+  if (!session || !session.workspaceId) {
     sendError(ctx, 401, 'unauthorized', 'No valid session');
 
     return;
   }
 
   const requested = requestedWorkspace(ctx);
-  const userId = (await resolveWorkspace(session, requested)) ?? (fallbackToPrimary ? session.userId : null);
+  const workspaceId = (await resolveWorkspace(session, requested)) ?? (fallbackToPrimary ? session.workspaceId : null);
 
-  if (!userId) {
+  if (!workspaceId) {
     sendError(ctx, 401, 'workspace_signed_out', 'This browser is not signed in to that workspace');
 
     return;
   }
 
   ctx.state.session = session;
-  ctx.state.userId = userId;
+  ctx.state.workspaceId = workspaceId;
   await next();
 }
 
@@ -170,7 +170,7 @@ function requireSessionOrPrimary(ctx: Context, next: Next): Promise<void> {
 }
 
 // The bound telegram group's title — the workspace name of /api/me while
-// none is stored (the User row itself is empty by design) — and the facts
+// none is stored (the Workspace row itself is empty by design) — and the facts
 // of the Telegram card of Settings come from the Bot API through
 // telegram-facts.ts: cached, under a short deadline, a failure degrades to
 // null, never to an error or a long wait. Telegram is an optional channel:
@@ -192,15 +192,15 @@ const telegramFacts = createTelegramFacts({
     // time it listens to the native AbortSignal the facts hand it.
     return { getChat: (chatId, signal) => api.getChat(chatId, signal as GrammySignal), getMe: signal => api.getMe(signal as GrammySignal) };
   },
-  readGroup: userId => prisma.telegramGroup.findUnique({ where: { userId }, select: { chatId: true, updatedAt: true } }),
+  readGroup: workspaceId => prisma.telegramGroup.findUnique({ where: { workspaceId }, select: { chatId: true, updatedAt: true } }),
 });
 
-function getGroupTitle(userId: string): Promise<string | null> {
-  return telegramFacts.groupTitle(userId);
+function getGroupTitle(workspaceId: string): Promise<string | null> {
+  return telegramFacts.groupTitle(workspaceId);
 }
 
-function readTelegramView(userId: string): Promise<TelegramView> {
-  return telegramFacts.view(userId);
+function readTelegramView(workspaceId: string): Promise<TelegramView> {
+  return telegramFacts.view(workspaceId);
 }
 
 // --------------------------------------------------------------------------
@@ -250,7 +250,7 @@ function parseLimitParam(value: string | undefined): number | null {
 async function requireOwnThread(ctx: Context, id: string): Promise<Thread | null> {
   const thread = await getThread(id);
 
-  if (!thread || thread.userId !== ctx.state.userId) {
+  if (!thread || thread.workspaceId !== ctx.state.workspaceId) {
     sendError(ctx, 404, 'not_found', 'No such thread');
 
     return null;
@@ -267,7 +267,7 @@ const router = new Router({ prefix: '/api' });
 // operator reads it from the process log (ssh, the supervisor's terminal).
 // The response carries nothing: anyone who can reach the page may press the
 // button, only whoever can read the log learns the code, and an extra
-// request merely rotates it (one active code per user). The throttle keeps
+// request merely rotates it (one active code per workspace). The throttle keeps
 // a stranger from flooding the log.
 const CONSOLE_CODE_MIN_INTERVAL_MS = 10 * 1000;
 let lastConsoleCodeAt = 0;
@@ -285,7 +285,7 @@ router.post('/auth/console-code', async ctx => {
   lastConsoleCodeAt = now;
 
   const mainThread = await ensureOperatorWorkspace();
-  const code = createAuthCode(mainThread.userId, 'console');
+  const code = createAuthCode(mainThread.workspaceId, 'console');
 
   console.log(`[web] login code for the operator workspace (one-time, valid 10 minutes): ${code}`);
 
@@ -308,9 +308,9 @@ router.post('/auth', async ctx => {
   }
 
   // A browser already signed in adds this workspace to its session.
-  await signInWorkspace(ctx, consumed.userId, consumed.source);
+  await signInWorkspace(ctx, consumed.workspaceId, consumed.source);
 
-  ctx.body = prepareObject(await buildMeResponse(consumed.userId));
+  ctx.body = prepareObject(await buildMeResponse(consumed.workspaceId));
 });
 
 // The names as the console shows them: the stored workspace name wins over
@@ -318,24 +318,24 @@ router.post('/auth', async ctx => {
 // the stored one or nothing.
 type StoredNames = { workspaceName: string | null; operatorName: string | null };
 
-function namesOf(user: StoredNames | null, groupTitle: string | null): NamesView {
-  return { workspaceName: user?.workspaceName ?? groupTitle, operatorName: user?.operatorName ?? null };
+function namesOf(workspace: StoredNames | null, groupTitle: string | null): NamesView {
+  return { workspaceName: workspace?.workspaceName ?? groupTitle, operatorName: workspace?.operatorName ?? null };
 }
 
-async function readNames(userId: string): Promise<NamesView> {
-  const user = await prisma.user.findUnique({ where: { id: userId }, select: { workspaceName: true, operatorName: true } });
+async function readNames(workspaceId: string): Promise<NamesView> {
+  const workspace = await prisma.workspace.findUnique({ where: { id: workspaceId }, select: { workspaceName: true, operatorName: true } });
 
-  return namesOf(user, user?.workspaceName ? null : await getGroupTitle(userId));
+  return namesOf(workspace, workspace?.workspaceName ? null : await getGroupTitle(workspaceId));
 }
 
-async function buildMeResponse(userId: string): Promise<MeResponse> {
-  const [names, mainThread] = await Promise.all([readNames(userId), getMainThread(userId)]);
+async function buildMeResponse(workspaceId: string): Promise<MeResponse> {
+  const [names, mainThread] = await Promise.all([readNames(workspaceId), getMainThread(workspaceId)]);
 
-  return { userId, ...names, mainThreadId: mainThread?.id ?? null };
+  return { workspaceId, ...names, mainThreadId: mainThread?.id ?? null };
 }
 
 router.get('/me', requireSessionOrPrimary, async ctx => {
-  ctx.body = prepareObject(await buildMeResponse(ctx.state.userId as string));
+  ctx.body = prepareObject(await buildMeResponse(ctx.state.workspaceId as string));
 });
 
 // The workspaces of this browser (the switcher, Settings): names as /me
@@ -346,14 +346,14 @@ router.get('/workspaces', requireSession, async ctx => {
   const workspaces = await Promise.all(
     rows.map(
       async (row): Promise<SignedInWorkspaceView> => ({
-        userId: row.userId,
-        ...(await readNames(row.userId)),
+        workspaceId: row.workspaceId,
+        ...(await readNames(row.workspaceId)),
         signedInAt: row.createdAt,
         loginSource: loginSourceOf(row.loginSource),
       }),
     ),
   );
-  const response: WorkspacesResponse = { current: ctx.state.userId as string, workspaces };
+  const response: WorkspacesResponse = { current: ctx.state.workspaceId as string, workspaces };
 
   ctx.body = prepareObject(response);
 });
@@ -367,7 +367,7 @@ router.get('/workspaces', requireSession, async ctx => {
 router.get('/settings', requireSession, async ctx => {
   const session = ctx.state.session as SessionModel;
   const facts: SettingsFactsResponse = {
-    telegram: await readTelegramView(ctx.state.userId as string),
+    telegram: await readTelegramView(ctx.state.workspaceId as string),
     scheduleTimezone: config.scheduleTimezone,
     session: { createdAt: session.createdAt, userAgent: session.userAgent ?? '', loginSource: loginSourceOf(session.loginSource) },
   };
@@ -393,7 +393,7 @@ function loginSourceOf(value: string | null): LoginSource | null {
 // to is fetched before the transaction (a Bot API call does not belong
 // inside one). An empty patch changes nothing and journals nothing.
 router.patch('/settings', requireSession, async ctx => {
-  const userId = ctx.state.userId as string;
+  const workspaceId = ctx.state.workspaceId as string;
   const body = await readJsonBody(ctx);
 
   if (!body) {
@@ -418,17 +418,17 @@ router.patch('/settings', requireSession, async ctx => {
 
   if (Object.keys(patch).length > 0) {
     // Needed unless the patch itself names the workspace.
-    const groupTitle = patch.workspaceName ? null : await getGroupTitle(userId);
+    const groupTitle = patch.workspaceName ? null : await getGroupTitle(workspaceId);
 
     response = await registryMutation(async (tx, journal) => {
-      const user = await tx.user.update({ where: { id: userId }, data: patch, select: { workspaceName: true, operatorName: true } });
-      const settings = namesOf(user, groupTitle);
-      const seq = await journal('settings.updated', settings, { kind: 'user', userId });
+      const workspace = await tx.workspace.update({ where: { id: workspaceId }, data: patch, select: { workspaceName: true, operatorName: true } });
+      const settings = namesOf(workspace, groupTitle);
+      const seq = await journal('settings.updated', settings, { kind: 'user', workspaceId });
 
       return { settings, seq };
     });
   } else {
-    response = { settings: await readNames(userId), seq: null };
+    response = { settings: await readNames(workspaceId), seq: null };
   }
 
   ctx.body = prepareObject(response);
@@ -436,7 +436,7 @@ router.patch('/settings', requireSession, async ctx => {
 
 // Signs this browser out of the request's workspace only; the others stay.
 router.post('/logout', requireSession, async ctx => {
-  const signedIn = await signOutWorkspace(ctx, ctx.state.session as SessionModel, ctx.state.userId as string);
+  const signedIn = await signOutWorkspace(ctx, ctx.state.session as SessionModel, ctx.state.workspaceId as string);
   const response: LogoutResponse = { ok: true, signedIn };
 
   ctx.body = prepareObject(response);
@@ -448,9 +448,9 @@ router.post('/logout', requireSession, async ctx => {
 // the log from asOfSeq through the stream.
 
 router.get('/snapshot', requireSession, async ctx => {
-  const userId = ctx.state.userId as string;
+  const workspaceId = ctx.state.workspaceId as string;
 
-  ctx.body = prepareObject(await buildSnapshot(userId, () => buildMeResponse(userId)));
+  ctx.body = prepareObject(await buildSnapshot(workspaceId, () => buildMeResponse(workspaceId)));
 });
 
 const eventStream = createEventStreamHandler({
@@ -464,7 +464,7 @@ router.get('/events/stream', requireSession, ctx => eventStream(ctx));
 // The workspace window (read-only): threads and their event feeds.
 
 router.get('/threads', requireSession, async ctx => {
-  const userId = ctx.state.userId as string;
+  const workspaceId = ctx.state.workspaceId as string;
 
   const status = queryValue(ctx.query.status);
 
@@ -524,14 +524,14 @@ router.get('/threads', requireSession, async ctx => {
   // The counts ride with the first page only: the set does not change
   // between pages, and later pages are the scroll of the same list.
   const [threads, counted] = await Promise.all([
-    listThreads(userId, {
+    listThreads(workspaceId, {
       ...filters,
       ...(status !== undefined ? { status: status as ThreadStatus } : {}),
       ...(before !== undefined ? { beforeCreatedSeq: BigInt(before) } : {}),
       limit,
       order: 'desc',
     }),
-    before === undefined ? countThreadsAt(userId, filters) : undefined,
+    before === undefined ? countThreadsAt(workspaceId, filters) : undefined,
   ]);
 
   const response: ThreadsResponse = {
@@ -614,16 +614,16 @@ const MESSAGE_FILES_MAX = 20;
 const WEB_IDENTITY = { username: 'operator' };
 
 // The files of a message: the stored files of the session's workspace,
-// each by the rule of every model- and user-facing lookup (getUserFile — a
+// each by the rule of every model- and user-facing lookup (getWorkspaceFile — a
 // foreign file and a missing one are the same refusal). The refused ids
 // come back to name the chips that were not accepted.
-async function messageFiles(userId: string, fileIds: string[]): Promise<{ files: FileRef[]; refused: string[] }> {
+async function messageFiles(workspaceId: string, fileIds: string[]): Promise<{ files: FileRef[]; refused: string[] }> {
   const files: FileRef[] = [];
   const refused: string[] = [];
 
   for (const fileId of fileIds) {
     try {
-      files.push(await getUserFile(userId, fileId));
+      files.push(await getWorkspaceFile(workspaceId, fileId));
     } catch (error) {
       if (!(error instanceof FileNotFoundError)) {
         throw error;
@@ -697,7 +697,7 @@ router.post('/threads/:id/messages', requireSession, async ctx => {
     return;
   }
 
-  const { files, refused } = await messageFiles(thread.userId, fileIds);
+  const { files, refused } = await messageFiles(thread.workspaceId, fileIds);
 
   if (refused.length > 0) {
     ctx.status = 400;
@@ -713,7 +713,7 @@ router.post('/threads/:id/messages', requireSession, async ctx => {
   const result = await appendEvent({
     type: 'user.message',
     actor: 'user',
-    userId: thread.userId,
+    workspaceId: thread.workspaceId,
     threadId: thread.id,
     payload: {
       text: text || null,
@@ -778,7 +778,7 @@ router.post('/threads/:id/interrupt', requireSession, async ctx => {
   const result = await appendEvent({
     type: THREAD_INTERRUPT,
     actor: 'user',
-    userId: thread.userId,
+    workspaceId: thread.workspaceId,
     threadId: thread.parentId,
     targetThreadId: thread.id,
     payload: { reason: 'interrupted_by_user', identity: WEB_IDENTITY, source: 'web' },
@@ -818,7 +818,7 @@ router.post('/threads/:id/cancel', requireSession, async ctx => {
   const result = await appendEvent({
     type: THREAD_CANCEL,
     actor: 'user',
-    userId: thread.userId,
+    workspaceId: thread.workspaceId,
     threadId: thread.parentId,
     targetThreadId: thread.id,
     payload: { reason, identity: WEB_IDENTITY, source: 'web' },
@@ -866,7 +866,7 @@ async function writeRemoteCommand(ctx: Context, thread: Thread & { parentId: str
   const result = await appendEvent({
     type,
     actor: 'user',
-    userId: thread.userId,
+    workspaceId: thread.workspaceId,
     threadId: thread.parentId,
     targetThreadId: thread.id,
     payload: { ...payload, identity: WEB_IDENTITY, source: 'web' },
@@ -982,7 +982,7 @@ router.get('/files/:fileId', requireSession, async ctx => {
   let file: FileRef;
 
   try {
-    file = await getUserFile(ctx.state.userId as string, fileId);
+    file = await getWorkspaceFile(ctx.state.workspaceId as string, fileId);
   } catch (error) {
     // Only the lookup's own refusal is a 404; a store that failed to answer
     // (the connection lost, the pool's timeout) is the middleware's 500,
@@ -1031,7 +1031,7 @@ router.get('/files/:fileId/meta', requireSession, async ctx => {
   let file: FileRef;
 
   try {
-    file = await getUserFile(ctx.state.userId as string, fileId);
+    file = await getWorkspaceFile(ctx.state.workspaceId as string, fileId);
   } catch (error) {
     // Only the lookup's own refusal is a 404; a store that failed to answer
     // (the connection lost, the pool's timeout) is the middleware's 500,
@@ -1104,7 +1104,7 @@ router.post('/files', requireSession, async ctx => {
   try {
     file = await ingestFile({
       body: limitedBody(ctx.req, declared) as StorageBody,
-      userId: ctx.state.userId as string,
+      workspaceId: ctx.state.workspaceId as string,
       originalFilename: name,
       contentType,
       sizeBytes: declared,
@@ -1133,7 +1133,7 @@ router.post('/files', requireSession, async ctx => {
 // edge — the public edge on the apps domain never shows these details.
 
 router.get('/apps', requireSession, async ctx => {
-  const response: AppsResponse = { apps: await listApps(ctx.state.userId as string), publicAppsBase: publicAppsBase() };
+  const response: AppsResponse = { apps: await listApps(ctx.state.workspaceId as string), publicAppsBase: publicAppsBase() };
 
   ctx.body = prepareObject(response);
 });
@@ -1161,7 +1161,7 @@ router.post('/apps/publish', requireSession, async ctx => {
     return;
   }
 
-  await handleManagementCall(ctx, () => publishApp(ctx.state.userId as string, body.path, body.slug));
+  await handleManagementCall(ctx, () => publishApp(ctx.state.workspaceId as string, body.path, body.slug));
 });
 
 router.post('/apps/unpublish', requireSession, async ctx => {
@@ -1171,7 +1171,7 @@ router.post('/apps/unpublish', requireSession, async ctx => {
     return;
   }
 
-  await handleManagementCall(ctx, () => unpublishApp(ctx.state.userId as string, body.path, body.slug));
+  await handleManagementCall(ctx, () => unpublishApp(ctx.state.workspaceId as string, body.path, body.slug));
 });
 
 // --------------------------------------------------------------------------
@@ -1199,7 +1199,7 @@ async function handleProjectCall(ctx: Context, call: () => Promise<ProjectRespon
 }
 
 router.post('/projects', requireSession, async ctx => {
-  const userId = ctx.state.userId as string;
+  const workspaceId = ctx.state.workspaceId as string;
   const body = await readJsonBody(ctx);
 
   if (!body) {
@@ -1207,7 +1207,7 @@ router.post('/projects', requireSession, async ctx => {
   }
 
   await handleProjectCall(ctx, async () => {
-    const { project, adopted } = await createProject(userId, parseProjectInput(body), { kind: 'user', userId });
+    const { project, adopted } = await createProject(workspaceId, parseProjectInput(body), { kind: 'user', workspaceId });
     const response: CreateProjectResponse = { project: projectView(project), adopted };
 
     return response;
@@ -1215,7 +1215,7 @@ router.post('/projects', requireSession, async ctx => {
 });
 
 router.patch('/projects/:id', requireSession, async ctx => {
-  const userId = ctx.state.userId as string;
+  const workspaceId = ctx.state.workspaceId as string;
   const body = await readJsonBody(ctx);
 
   if (!body) {
@@ -1223,27 +1223,27 @@ router.patch('/projects/:id', requireSession, async ctx => {
   }
 
   await handleProjectCall(ctx, async () => {
-    const { project } = await updateProject(userId, ctx.params.id as string, parseProjectPatch(body), { kind: 'user', userId });
+    const { project } = await updateProject(workspaceId, ctx.params.id as string, parseProjectPatch(body), { kind: 'user', workspaceId });
 
     return { project: projectView(project) };
   });
 });
 
 router.post('/projects/:id/archive', requireSession, async ctx => {
-  const userId = ctx.state.userId as string;
+  const workspaceId = ctx.state.workspaceId as string;
 
   await handleProjectCall(ctx, async () => {
-    const { project } = await archiveProject(userId, ctx.params.id as string, { kind: 'user', userId });
+    const { project } = await archiveProject(workspaceId, ctx.params.id as string, { kind: 'user', workspaceId });
 
     return { project: projectView(project) };
   });
 });
 
 router.post('/projects/:id/unarchive', requireSession, async ctx => {
-  const userId = ctx.state.userId as string;
+  const workspaceId = ctx.state.workspaceId as string;
 
   await handleProjectCall(ctx, async () => {
-    const { project } = await unarchiveProject(userId, ctx.params.id as string, { kind: 'user', userId });
+    const { project } = await unarchiveProject(workspaceId, ctx.params.id as string, { kind: 'user', workspaceId });
 
     return { project: projectView(project) };
   });
@@ -1277,7 +1277,7 @@ function parseRunsLimit(value: string | undefined): number | null {
 }
 
 router.get('/schedule/runs', requireSession, async ctx => {
-  const userId = ctx.state.userId as string;
+  const workspaceId = ctx.state.workspaceId as string;
   const slug = queryValue(ctx.query.slug);
   const before = queryValue(ctx.query.before);
   const limit = parseRunsLimit(queryValue(ctx.query.limit));
@@ -1294,19 +1294,19 @@ router.get('/schedule/runs', requireSession, async ctx => {
     return;
   }
 
-  const response: JobRunsResponse = await listJobRuns(userId, { slug, before, limit });
+  const response: JobRunsResponse = await listJobRuns(workspaceId, { slug, before, limit });
 
   ctx.body = prepareObject(response);
 });
 
 router.get('/schedule/runs/latest', requireSession, async ctx => {
-  const response: LatestJobRunsResponse = { runs: await latestJobRuns(ctx.state.userId as string) };
+  const response: LatestJobRunsResponse = { runs: await latestJobRuns(ctx.state.workspaceId as string) };
 
   ctx.body = prepareObject(response);
 });
 
 router.get('/schedule/runs/:id', requireSession, async ctx => {
-  const run = await getJobRun(ctx.state.userId as string, ctx.params.id as string);
+  const run = await getJobRun(ctx.state.workspaceId as string, ctx.params.id as string);
 
   if (!run) {
     sendError(ctx, 404, 'not_found', 'No such run');
@@ -1335,7 +1335,7 @@ function sendScheduleError(ctx: Context, error: ScheduleError): void {
 // (createdBy "operator"). The answer carries the row and whether a code
 // task sleeps.
 router.post('/schedule/tasks', requireSession, async ctx => {
-  const userId = ctx.state.userId as string;
+  const workspaceId = ctx.state.workspaceId as string;
   const body = await readJsonBody(ctx);
 
   if (!body) {
@@ -1343,7 +1343,7 @@ router.post('/schedule/tasks', requireSession, async ctx => {
   }
 
   try {
-    const { task, sleeping } = await createTask(userId, parseTaskInput(body), { kind: 'user', userId });
+    const { task, sleeping } = await createTask(workspaceId, parseTaskInput(body), { kind: 'user', workspaceId });
     const response: CreateTaskResponse = { task: taskView(task, new Date()), sleeping };
 
     ctx.body = prepareObject(response);
@@ -1376,7 +1376,7 @@ function parseTaskId(ctx: Context, raw: unknown): string | undefined | null {
 }
 
 router.post('/schedule/tasks/:slug/run', requireSession, async ctx => {
-  const userId = ctx.state.userId as string;
+  const workspaceId = ctx.state.workspaceId as string;
   const body = await readJsonBody(ctx);
 
   if (!body) {
@@ -1390,7 +1390,7 @@ router.post('/schedule/tasks/:slug/run', requireSession, async ctx => {
   }
 
   try {
-    const outcome = await runTask(userId, ctx.params.slug as string, taskId);
+    const outcome = await runTask(workspaceId, ctx.params.slug as string, taskId);
     const response: RunTaskResponse = outcome.kind === 'fired' ? { outcome: 'fired', runId: outcome.runId } : { outcome: 'already_running', runId: null };
 
     ctx.body = prepareObject(response);
@@ -1406,7 +1406,7 @@ router.post('/schedule/tasks/:slug/run', requireSession, async ctx => {
 });
 
 router.delete('/schedule/tasks/:slug', requireSession, async ctx => {
-  const userId = ctx.state.userId as string;
+  const workspaceId = ctx.state.workspaceId as string;
   const taskId = parseTaskId(ctx, queryValue(ctx.query.taskId));
 
   if (taskId === null) {
@@ -1414,7 +1414,7 @@ router.delete('/schedule/tasks/:slug', requireSession, async ctx => {
   }
 
   try {
-    const task = await deleteTask(userId, ctx.params.slug as string, { kind: 'user', userId }, taskId);
+    const task = await deleteTask(workspaceId, ctx.params.slug as string, { kind: 'user', workspaceId }, taskId);
 
     if (!task) {
       sendError(ctx, 404, 'not_found', 'No such task');
@@ -1448,7 +1448,7 @@ router.delete('/schedule/tasks/:slug', requireSession, async ctx => {
 // address that belongs to another row by then — the account disconnected
 // and connected again under the same address between the screen and the
 // command — is a 409 and the newcomer is not touched (the module's lock
-// per (user, server) holds the checks at the write). The lifecycle events keep their
+// per (workspace, server) holds the checks at the write). The lifecycle events keep their
 // addressee — the thread that drives the account (the auth agent's; the
 // main thread when the console issued the link): a rename and a
 // disconnect journal to the row's thread, a link from the console binds
@@ -1464,7 +1464,7 @@ function sendConnectionError(ctx: Context, error: ConnectionError): void {
 }
 
 async function requireOwnConnection(ctx: Context, id: string) {
-  const row = await getUserConnection(ctx.state.userId as string, id);
+  const row = await getWorkspaceConnection(ctx.state.workspaceId as string, id);
 
   if (!row) {
     sendError(ctx, 404, 'not_found', 'No such connection');
@@ -1476,7 +1476,7 @@ async function requireOwnConnection(ctx: Context, id: string) {
 // A link from the console is addressed to the main thread; a workspace
 // without one cannot be told the outcome — the link is not issued.
 async function requireMainThreadId(ctx: Context): Promise<string | null> {
-  const main = await getMainThread(ctx.state.userId as string);
+  const main = await getMainThread(ctx.state.workspaceId as string);
 
   if (!main) {
     sendError(ctx, 409, 'no_main_thread', 'workspace has no main thread to address the sign-in to');
@@ -1504,7 +1504,7 @@ function parseName(ctx: Context, raw: unknown, required: boolean): string | null
 }
 
 router.patch('/connections/:id', requireSession, async ctx => {
-  const userId = ctx.state.userId as string;
+  const workspaceId = ctx.state.workspaceId as string;
   const body = await readJsonBody(ctx);
 
   if (!body) {
@@ -1524,7 +1524,7 @@ router.patch('/connections/:id', requireSession, async ctx => {
   }
 
   try {
-    const { connection } = await renameConnection(userId, row.server, row.accountKey, name, undefined, row.id);
+    const { connection } = await renameConnection(workspaceId, row.server, row.accountKey, name, undefined, row.id);
     const response: ConnectionResponse = { connection: connectionView(connection) };
 
     ctx.body = prepareObject(response);
@@ -1540,7 +1540,7 @@ router.patch('/connections/:id', requireSession, async ctx => {
 });
 
 router.delete('/connections/:id', requireSession, async ctx => {
-  const userId = ctx.state.userId as string;
+  const workspaceId = ctx.state.workspaceId as string;
   const row = await requireOwnConnection(ctx, ctx.params.id as string);
 
   if (!row) {
@@ -1548,7 +1548,7 @@ router.delete('/connections/:id', requireSession, async ctx => {
   }
 
   try {
-    await disconnectConnection(userId, row.server, row.accountKey, undefined, row.id);
+    await disconnectConnection(workspaceId, row.server, row.accountKey, undefined, row.id);
 
     const response: ConnectionResponse = { connection: connectionView(row) };
 
@@ -1565,7 +1565,7 @@ router.delete('/connections/:id', requireSession, async ctx => {
 });
 
 router.post('/connections/:id/reconnect', requireSession, async ctx => {
-  const userId = ctx.state.userId as string;
+  const workspaceId = ctx.state.workspaceId as string;
   const row = await requireOwnConnection(ctx, ctx.params.id as string);
 
   if (!row) {
@@ -1579,7 +1579,7 @@ router.post('/connections/:id/reconnect', requireSession, async ctx => {
   }
 
   try {
-    const response: ConnectLinkResponse = await reconnectConnection(userId, mainThreadId, row.id);
+    const response: ConnectLinkResponse = await reconnectConnection(workspaceId, mainThreadId, row.id);
 
     ctx.body = prepareObject(response);
   } catch (error) {
@@ -1594,7 +1594,7 @@ router.post('/connections/:id/reconnect', requireSession, async ctx => {
 });
 
 router.post('/connections', requireSession, async ctx => {
-  const userId = ctx.state.userId as string;
+  const workspaceId = ctx.state.workspaceId as string;
   const body = await readJsonBody(ctx);
 
   if (!body) {
@@ -1620,7 +1620,7 @@ router.post('/connections', requireSession, async ctx => {
   }
 
   try {
-    const response: ConnectLinkResponse = await startConnection(userId, mainThreadId, body.server, name ?? null);
+    const response: ConnectLinkResponse = await startConnection(workspaceId, mainThreadId, body.server, name ?? null);
 
     ctx.body = prepareObject(response);
   } catch (error) {
@@ -1698,7 +1698,7 @@ router.get('/installation-services', requireSession, async ctx => {
 });
 
 router.post('/installation-services/:name/secret-request', requireSession, async ctx => {
-  const userId = ctx.state.userId as string;
+  const workspaceId = ctx.state.workspaceId as string;
   const { name } = ctx.params;
 
   if (!isExternalSecretServer(name)) {
@@ -1713,7 +1713,7 @@ router.post('/installation-services/:name/secret-request', requireSession, async
     return;
   }
 
-  const { id } = await openExternalServerCredentialsRequest(userId, mainThreadId, name);
+  const { id } = await openExternalServerCredentialsRequest(workspaceId, mainThreadId, name);
   const response: InstallationSecretRequestResponse = { requestId: id };
 
   ctx.body = prepareObject(response);
@@ -1737,7 +1737,7 @@ router.delete('/installation-services/:name/secrets', requireSession, async ctx 
 // --------------------------------------------------------------------------
 // LLM request telemetry (read-only): raw rows for the console's "Main
 // thread · tokens per request" (threadId — one thread's window; the rows are
-// scoped by the session's user, so a thread of another workspace simply has
+// scoped by the session's workspace, so a thread of another workspace simply has
 // none). The api layer
 // reads the table directly — llm_requests is deliberately outside the event
 // log and has no core facade; this endpoint is its only reader. rawUsage
@@ -1766,8 +1766,8 @@ router.get('/limits', requireSession, async ctx => {
 // shell's footer and the summaries of Home and Project read it on mount
 // and focus, keeping an answer for a minute.
 router.get('/system', requireSession, async ctx => {
-  const userId = ctx.state.userId as string;
-  const response: SystemResponse = await buildSystem(userId);
+  const workspaceId = ctx.state.workspaceId as string;
+  const response: SystemResponse = await buildSystem(workspaceId);
 
   ctx.body = prepareObject(response);
 });
@@ -1777,7 +1777,7 @@ router.get('/system', requireSession, async ctx => {
 // `before`, and the count of every one the workspace may see — the same
 // ownership rule as the snapshot's systemLog (readSystemLogPage).
 router.get('/system/log', requireSession, async ctx => {
-  const userId = ctx.state.userId as string;
+  const workspaceId = ctx.state.workspaceId as string;
   const kind = queryValue(ctx.query.kind);
 
   if (kind !== undefined && kind !== 'restart' && kind !== 'exception') {
@@ -1802,13 +1802,13 @@ router.get('/system/log', requireSession, async ctx => {
     return;
   }
 
-  const response: SystemLogResponse = await readSystemLogPage(userId, kind, before === undefined ? null : BigInt(before), limit);
+  const response: SystemLogResponse = await readSystemLogPage(workspaceId, kind, before === undefined ? null : BigInt(before), limit);
 
   ctx.body = prepareObject(response);
 });
 
 router.get('/llm-requests', requireSession, async ctx => {
-  const userId = ctx.state.userId as string;
+  const workspaceId = ctx.state.workspaceId as string;
 
   const limit = parseLimitParam(queryValue(ctx.query.limit));
 
@@ -1828,10 +1828,10 @@ router.get('/llm-requests', requireSession, async ctx => {
 
   // Newest N, then reversed: the client draws oldest-first, left to right.
   const rows = await prisma.llmRequest.findMany({
-    where: { userId, ...(threadId !== undefined ? { threadId } : {}) },
+    where: { workspaceId, ...(threadId !== undefined ? { threadId } : {}) },
     orderBy: { createdAt: 'desc' },
     take: limit,
-    omit: { userId: true, rawUsage: true },
+    omit: { workspaceId: true, rawUsage: true },
   });
 
   const response: LlmRequestsResponse = { requests: rows.reverse() };
@@ -1841,7 +1841,7 @@ router.get('/llm-requests', requireSession, async ctx => {
 
 // --------------------------------------------------------------------------
 // The workspace file area (read-only): the user's window into
-// data/workspace/<userId>/files, scoped by the session's userId. The path
+// data/workspace/<workspaceId>/files, scoped by the session's workspaceId. The path
 // boundary is the file-area core's sanitizeRelPath — a rejected path is a
 // 400, a missing one a 404. Metadata travels as JSON; raw bytes stream
 // separately with an honest content-type.
@@ -1865,7 +1865,7 @@ function parseWorkspacePath(ctx: Context): string | null {
 }
 
 router.get('/workspace/node', requireSession, async ctx => {
-  const userId = ctx.state.userId as string;
+  const workspaceId = ctx.state.workspaceId as string;
   const relPath = parseWorkspacePath(ctx);
 
   if (relPath === null) {
@@ -1874,7 +1874,7 @@ router.get('/workspace/node', requireSession, async ctx => {
 
   // A directory answers first (the root always does, even unprovisioned —
   // an empty area, not an error); otherwise the path may name a file.
-  const listing = await listDir(userId, relPath);
+  const listing = await listDir(workspaceId, relPath);
 
   if (listing) {
     const response: WorkspaceNodeResponse = {
@@ -1890,7 +1890,7 @@ router.get('/workspace/node', requireSession, async ctx => {
     return;
   }
 
-  const file = await statFile(userId, relPath);
+  const file = await statFile(workspaceId, relPath);
 
   if (!file) {
     sendError(ctx, 404, 'not_found', 'No such path in the workspace file area');
@@ -1999,7 +1999,7 @@ function parseFilesPath(ctx: Context): string | null {
 }
 
 filesRouter.get('/files/*path', requireSession, async ctx => {
-  const userId = ctx.state.userId as string;
+  const workspaceId = ctx.state.workspaceId as string;
   const relPath = parseFilesPath(ctx);
 
   if (relPath === null) {
@@ -2007,7 +2007,7 @@ filesRouter.get('/files/*path', requireSession, async ctx => {
   }
 
   // statFile answers null for missing paths AND directories — both are 404.
-  const file = await statFile(userId, relPath);
+  const file = await statFile(workspaceId, relPath);
 
   if (!file) {
     sendError(ctx, 404, 'not_found', 'No such file in the workspace file area');
@@ -2018,7 +2018,7 @@ filesRouter.get('/files/*path', requireSession, async ctx => {
   // The validator's own stat (bigint — the full precision of the inode's
   // times; the node above carries the listing's milliseconds); a file gone
   // between the two is the same 404.
-  const absPath = resolveFilePath(userId, relPath);
+  const absPath = resolveFilePath(workspaceId, relPath);
   const stats = await stat(absPath, { bigint: true }).catch(() => null);
 
   if (!stats?.isFile()) {
@@ -2090,7 +2090,7 @@ async function readBodyUpTo(ctx: Context, limit: number): Promise<Buffer | null>
 }
 
 filesRouter.put('/files/*path', requireSession, async ctx => {
-  const userId = ctx.state.userId as string;
+  const workspaceId = ctx.state.workspaceId as string;
   const relPath = parseFilesPath(ctx);
 
   if (relPath === null) {
@@ -2112,10 +2112,10 @@ filesRouter.put('/files/*path', requireSession, async ctx => {
     return;
   }
 
-  await withFileWriteLock(userId, relPath, async () => {
+  await withFileWriteLock(workspaceId, relPath, async () => {
     // A symbolic link or a folder outside the area is not a file of the
     // area: the same 404 as a missing path.
-    const before = await statWritable(userId, relPath);
+    const before = await statWritable(workspaceId, relPath);
 
     if (!before) {
       sendError(ctx, 404, 'not_found', 'No such file in the workspace file area');
@@ -2131,8 +2131,8 @@ filesRouter.put('/files/*path', requireSession, async ctx => {
       return;
     }
 
-    const written = await replaceFileContent(userId, relPath, content);
-    const response: WorkspaceWriteResponse = { file: await fileNodeOf(userId, relPath, written.stats), etag: workspaceFileEtag(written.validator) };
+    const written = await replaceFileContent(workspaceId, relPath, content);
+    const response: WorkspaceWriteResponse = { file: await fileNodeOf(workspaceId, relPath, written.stats), etag: workspaceFileEtag(written.validator) };
 
     ctx.set('etag', response.etag);
     ctx.body = prepareObject(response);
@@ -2158,7 +2158,7 @@ filesRouter.put('/files/*path', requireSession, async ctx => {
 const UPLOAD_CONFLICT_MODES: Record<string, UploadMode> = { replace: 'replace', keep: 'keep' };
 
 filesRouter.post('/files/*path', requireSession, async ctx => {
-  const userId = ctx.state.userId as string;
+  const workspaceId = ctx.state.workspaceId as string;
   const relPath = parseFilesPath(ctx);
 
   if (relPath === null) {
@@ -2188,7 +2188,7 @@ filesRouter.post('/files/*path', requireSession, async ctx => {
     return;
   }
 
-  if (!(await uploadFolder(userId, relPath))) {
+  if (!(await uploadFolder(workspaceId, relPath))) {
     sendError(ctx, 404, 'not_found', 'No such folder in the workspace file area');
 
     return;
@@ -2196,7 +2196,7 @@ filesRouter.post('/files/*path', requireSession, async ctx => {
 
   // The listing the client checked may be out of date: a taken name is
   // refused before the bytes travel (and again at the placement).
-  if (mode === 'create' && (await fs.lstat(resolveFilePath(userId, relPath)).catch(() => null))) {
+  if (mode === 'create' && (await fs.lstat(resolveFilePath(workspaceId, relPath)).catch(() => null))) {
     sendError(ctx, 409, 'exists', 'A file with this name already exists');
 
     return;
@@ -2205,7 +2205,7 @@ filesRouter.post('/files/*path', requireSession, async ctx => {
   let temp: string;
 
   try {
-    temp = await receiveUpload(userId, limitedBody(ctx.req, declared ?? UPLOAD_MAX_BYTES));
+    temp = await receiveUpload(workspaceId, limitedBody(ctx.req, declared ?? UPLOAD_MAX_BYTES));
   } catch (error) {
     if (!sendUploadRefusal(ctx, error)) {
       throw error;
@@ -2215,8 +2215,8 @@ filesRouter.post('/files/*path', requireSession, async ctx => {
   }
 
   try {
-    await withFileWriteLock(userId, relPath, async () => {
-      const placed = await placeUpload(userId, relPath, temp, mode);
+    await withFileWriteLock(workspaceId, relPath, async () => {
+      const placed = await placeUpload(workspaceId, relPath, temp, mode);
 
       if (placed.kind === 'exists') {
         sendError(ctx, 409, 'exists', 'A file with this name already exists');
@@ -2230,7 +2230,7 @@ filesRouter.post('/files/*path', requireSession, async ctx => {
         return;
       }
 
-      const response: WorkspaceUploadResponse = { file: await fileNodeOf(userId, placed.path, placed.stats) };
+      const response: WorkspaceUploadResponse = { file: await fileNodeOf(workspaceId, placed.path, placed.stats) };
 
       ctx.status = 201;
       ctx.body = prepareObject(response);
@@ -2357,8 +2357,8 @@ export function createFilesMiddleware(): (ctx: Context, next: Next) => Promise<v
 // event, the response carries nothing back. One id namespace over both
 // request kinds; a foreign or missing id is the same 404.
 
-async function resolveSecretRequest(userId: string, requestId: string): Promise<SecretRequestView | null> {
-  const external = await getExternalServerSecretRequest(userId, requestId);
+async function resolveSecretRequest(workspaceId: string, requestId: string): Promise<SecretRequestView | null> {
+  const external = await getExternalServerSecretRequest(workspaceId, requestId);
 
   if (external) {
     return {
@@ -2375,7 +2375,7 @@ async function resolveSecretRequest(userId: string, requestId: string): Promise<
     };
   }
 
-  const oauthClient = await getOauthClientRequest(userId, requestId);
+  const oauthClient = await getOauthClientRequest(workspaceId, requestId);
 
   if (oauthClient) {
     return {
@@ -2405,7 +2405,7 @@ async function resolveSecretRequest(userId: string, requestId: string): Promise<
 }
 
 router.get('/secret-requests/:id', requireSession, async ctx => {
-  const request = await resolveSecretRequest(ctx.state.userId as string, ctx.params.id);
+  const request = await resolveSecretRequest(ctx.state.workspaceId as string, ctx.params.id);
 
   if (!request) {
     sendError(ctx, 404, 'not_found', 'No such secret request — it may already be fulfilled');
@@ -2419,8 +2419,8 @@ router.get('/secret-requests/:id', requireSession, async ctx => {
 });
 
 router.post('/secret-requests/:id', requireSession, async ctx => {
-  const userId = ctx.state.userId as string;
-  const request = await resolveSecretRequest(userId, ctx.params.id);
+  const workspaceId = ctx.state.workspaceId as string;
+  const request = await resolveSecretRequest(workspaceId, ctx.params.id);
 
   if (!request) {
     sendError(ctx, 404, 'not_found', 'No such secret request — it may already be fulfilled');
@@ -2446,9 +2446,9 @@ router.post('/secret-requests/:id', requireSession, async ctx => {
 
   try {
     if (request.kind === 'external-secrets') {
-      await provisionExternalServerSecrets(userId, request.id, values);
+      await provisionExternalServerSecrets(workspaceId, request.id, values);
     } else {
-      await provisionOauthClient(userId, request.id, values.client_id ?? '', values.client_secret ?? '');
+      await provisionOauthClient(workspaceId, request.id, values.client_id ?? '', values.client_secret ?? '');
     }
   } catch (error) {
     sendError(ctx, 400, 'provisioning_failed', error instanceof Error ? error.message : String(error));

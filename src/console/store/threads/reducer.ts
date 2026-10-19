@@ -88,7 +88,7 @@ function threadFromStarted(event: EventOf<'thread.started'>): Thread | null {
 
   return {
     id: event.threadId,
-    userId: event.userId ?? '',
+    workspaceId: event.workspaceId ?? '',
     parentId: event.targetThreadId,
     agent,
     title,

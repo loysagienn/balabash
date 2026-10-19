@@ -29,7 +29,7 @@ export type SecretRequestKind = OpenSecretRequestView['kind'];
 export const OAUTH_CLIENT_FIELDS: readonly string[] = ['client_id', 'client_secret'];
 
 export type OpenSecretRequestInput = {
-  userId: string;
+  workspaceId: string;
   threadId: string;
   server: string;
   // The fields of an external-secrets request (stored in the row for the
@@ -37,7 +37,7 @@ export type OpenSecretRequestInput = {
   fields?: ExternalServerSecretField[];
 };
 
-type RequestRow = { id: string; userId: string; threadId: string | null; server: string; createdAt: Date };
+type RequestRow = { id: string; workspaceId: string; threadId: string | null; server: string; createdAt: Date };
 
 export function secretRequestRecord(row: RequestRow, fields: readonly string[]): SecretRequestRecord {
   return { requestId: row.id, server: row.server, fields: [...fields], requestedAt: row.createdAt.toISOString() };
@@ -46,14 +46,14 @@ export function secretRequestRecord(row: RequestRow, fields: readonly string[]):
 // The one-time link of a request: the console's form at /secrets/<id>,
 // naming the workspace it belongs to (?ws=) — a browser signed in to
 // several workspaces opens it in that one, whichever the tab was showing.
-export function secretRequestUrl(id: string, userId: string): string {
-  return `https://${config.consoleDomain}/secrets/${encodeURIComponent(id)}?ws=${encodeURIComponent(userId)}`;
+export function secretRequestUrl(id: string, workspaceId: string): string {
+  return `https://${config.consoleDomain}/secrets/${encodeURIComponent(id)}?ws=${encodeURIComponent(workspaceId)}`;
 }
 
-// Opens (or replaces) the request of one server for one user and journals
+// Opens (or replaces) the request of one server for one workspace and journals
 // it; answers the row's id — the address of the one-time link.
 export async function openSecretRequest(kind: SecretRequestKind, input: OpenSecretRequestInput): Promise<{ id: string }> {
-  const { userId, threadId, server } = input;
+  const { workspaceId, threadId, server } = input;
   // nonce/expiresAt are vestigial: the session flow never reads them. They
   // stay written (columns are required) until a later cleanup migration
   // drops them once no running code references them. createdAt is the
@@ -64,23 +64,23 @@ export async function openSecretRequest(kind: SecretRequestKind, input: OpenSecr
     if (kind === 'external-secrets') {
       const fields = (input.fields ?? []) as unknown as Prisma.InputJsonValue;
       const row = await tx.externalServerSecretRequest.upsert({
-        where: { userId_server: { userId, server } },
-        create: { userId, threadId, server, fields, ...stamp() },
+        where: { workspaceId_server: { workspaceId, server } },
+        create: { workspaceId, threadId, server, fields, ...stamp() },
         update: { threadId, fields, ...stamp() },
       });
 
-      await journal(SECRETS_REQUESTED, secretRequestRecord(row, (input.fields ?? []).map(field => field.key)), { kind: 'thread', userId, threadId });
+      await journal(SECRETS_REQUESTED, secretRequestRecord(row, (input.fields ?? []).map(field => field.key)), { kind: 'thread', workspaceId, threadId });
 
       return { id: row.id };
     }
 
     const row = await tx.oauthClientRequest.upsert({
-      where: { userId_server: { userId, server } },
-      create: { userId, threadId, server, ...stamp() },
+      where: { workspaceId_server: { workspaceId, server } },
+      create: { workspaceId, threadId, server, ...stamp() },
       update: { threadId, ...stamp() },
     });
 
-    await journal(OAUTH_CLIENT_REQUESTED, secretRequestRecord(row, OAUTH_CLIENT_FIELDS), { kind: 'thread', userId, threadId });
+    await journal(OAUTH_CLIENT_REQUESTED, secretRequestRecord(row, OAUTH_CLIENT_FIELDS), { kind: 'thread', workspaceId, threadId });
 
     return { id: row.id };
   });
@@ -96,10 +96,10 @@ function fieldNames(value: unknown): string[] {
 
 // The open requests of a user as the snapshot shows them, oldest first
 // (ties by id): both tables, with the agent of the issuing thread.
-export async function readOpenSecretRequests(userId: string, client: Tx | typeof prisma = prisma): Promise<OpenSecretRequestView[]> {
+export async function readOpenSecretRequests(workspaceId: string, client: Tx | typeof prisma = prisma): Promise<OpenSecretRequestView[]> {
   const [secrets, clients] = await Promise.all([
-    client.externalServerSecretRequest.findMany({ where: { userId } }),
-    client.oauthClientRequest.findMany({ where: { userId } }),
+    client.externalServerSecretRequest.findMany({ where: { workspaceId } }),
+    client.oauthClientRequest.findMany({ where: { workspaceId } }),
   ]);
   const rows: Array<Omit<OpenSecretRequestView, 'agent'>> = [
     ...secrets.map(row => ({ id: row.id, kind: 'external-secrets' as const, server: row.server, fields: fieldNames(row.fields), threadId: row.threadId, requestedAt: row.createdAt })),

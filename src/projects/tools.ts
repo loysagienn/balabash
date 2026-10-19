@@ -188,17 +188,17 @@ function requireId(args: JsonObject): string {
 // The change is authored by the calling thread: the project.* event names
 // the agent and the thread that asked for it.
 function author(ctx: BuiltinServerCallContext): RegistryAuthor {
-  return { kind: 'thread', userId: ctx.userId, threadId: ctx.threadId };
+  return { kind: 'thread', workspaceId: ctx.workspaceId, threadId: ctx.threadId };
 }
 
 async function executeList(ctx: BuiltinServerCallContext): Promise<JsonValue> {
-  const projects = await listProjects(ctx.userId);
+  const projects = await listProjects(ctx.workspaceId);
 
   return { projects: projects.map(projectToJson) };
 }
 
 async function executeGet(args: JsonObject, ctx: BuiltinServerCallContext): Promise<JsonValue> {
-  const project = await requireProject(ctx.userId, requireId(args));
+  const project = await requireProject(ctx.workspaceId, requireId(args));
 
   return {
     project: {
@@ -213,7 +213,7 @@ async function executeGet(args: JsonObject, ctx: BuiltinServerCallContext): Prom
 }
 
 async function executeCreate(args: JsonObject, ctx: BuiltinServerCallContext): Promise<JsonValue> {
-  const { project, adopted } = await createProject(ctx.userId, parseProjectInput(args), author(ctx));
+  const { project, adopted } = await createProject(ctx.workspaceId, parseProjectInput(args), author(ctx));
 
   return {
     project: projectToJson(project),
@@ -226,7 +226,7 @@ async function executeCreate(args: JsonObject, ctx: BuiltinServerCallContext): P
 }
 
 async function executeUpdate(args: JsonObject, ctx: BuiltinServerCallContext): Promise<JsonValue> {
-  const { project, renamedFrom, touched } = await updateProject(ctx.userId, requireId(args), parseProjectPatch(args), author(ctx));
+  const { project, renamedFrom, touched } = await updateProject(ctx.workspaceId, requireId(args), parseProjectPatch(args), author(ctx));
 
   return {
     project: projectToJson(project),
@@ -236,7 +236,7 @@ async function executeUpdate(args: JsonObject, ctx: BuiltinServerCallContext): P
 }
 
 async function executeArchive(args: JsonObject, ctx: BuiltinServerCallContext): Promise<JsonValue> {
-  const { project, changed } = await archiveProject(ctx.userId, requireId(args), author(ctx));
+  const { project, changed } = await archiveProject(ctx.workspaceId, requireId(args), author(ctx));
 
   if (!changed) {
     return `Project "${project.title}" is already archived.`;
@@ -246,7 +246,7 @@ async function executeArchive(args: JsonObject, ctx: BuiltinServerCallContext): 
 }
 
 async function executeUnarchive(args: JsonObject, ctx: BuiltinServerCallContext): Promise<JsonValue> {
-  const { project, changed } = await unarchiveProject(ctx.userId, requireId(args), author(ctx));
+  const { project, changed } = await unarchiveProject(ctx.workspaceId, requireId(args), author(ctx));
 
   if (!changed) {
     return `Project "${project.title}" is not archived.`;

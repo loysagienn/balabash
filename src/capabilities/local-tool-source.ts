@@ -18,13 +18,13 @@ export type LocalToolSource = {
 
 // The files surface handed to a local tool (tools/AGENTS.md): stored files by
 // opaque fileId plus ingest for new ones. The API itself is global — a local
-// tool serves every workspace — so ingest takes the calling run's userId,
+// tool serves every workspace — so ingest takes the calling run's workspaceId,
 // which every call receives in the MCP request _meta (extra._meta.balabash):
 // a file stored without it is ownerless and undeliverable to the user.
 export type LocalToolFilesApi = {
   ingest: (input: {
     body: StorageBody;
-    userId?: string | null;
+    workspaceId?: string | null;
     originalFilename?: string | null;
     contentType?: string | null;
     sizeBytes?: number | null;
@@ -49,8 +49,8 @@ export type LocalToolHelpers = {
   // Serves a streamable HTTP MCP endpoint on loopback; one server instance
   // per request. Returns what start() must return.
   serveMcp: (createMcpServer: () => McpServer) => Promise<{ config: ExternalServerConfig; close: () => Promise<void> }>;
-  // The calling run's userId from the request _meta (per-user scoping).
-  callerUserId: (extra: { _meta?: Record<string, unknown> }) => string;
+  // The calling run's workspaceId from the request _meta (per-workspace scoping).
+  callerWorkspaceId: (extra: { _meta?: Record<string, unknown> }) => string;
   toStructuredResult: (data: unknown) => StructuredToolResult;
   toErrorResult: (error: unknown) => StructuredToolResult;
   ToolError: typeof ToolError;

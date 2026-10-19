@@ -11,7 +11,7 @@ import { z } from 'zod';
 import { ToolError, toErrorResult, toStructuredResult } from '../src/capabilities/tool-result.ts';
 import { AppManagementError, listApps, publishApp, unpublishApp } from '../src/apps/management.ts';
 import { ownerAppUrl as ownerUrl, publicAppUrl as publicUrl } from '../src/apps/urls.ts';
-import { callerUserId, serveMcp } from './workspace_shared.ts';
+import { callerWorkspaceId, serveMcp } from './workspace_shared.ts';
 
 async function guarded<T>(call: () => Promise<T>): Promise<T> {
   try {
@@ -40,8 +40,8 @@ function createMcpServer() {
     },
     async (_args, extra) => {
       try {
-        const userId = callerUserId(extra);
-        const apps = await listApps(userId);
+        const workspaceId = callerWorkspaceId(extra);
+        const apps = await listApps(workspaceId);
 
         return toStructuredResult({
           apps: apps.map(app => ({
@@ -72,8 +72,8 @@ function createMcpServer() {
     },
     async ({ path, slug }, extra) => {
       try {
-        const userId = callerUserId(extra);
-        const result = await guarded(() => publishApp(userId, path, slug));
+        const workspaceId = callerWorkspaceId(extra);
+        const result = await guarded(() => publishApp(workspaceId, path, slug));
 
         return toStructuredResult({ ...result, publicUrl: publicUrl(result.slug) });
       } catch (error) {
@@ -96,8 +96,8 @@ function createMcpServer() {
     },
     async ({ path, slug }, extra) => {
       try {
-        const userId = callerUserId(extra);
-        const result = await guarded(() => unpublishApp(userId, path ?? undefined, slug ?? undefined));
+        const workspaceId = callerWorkspaceId(extra);
+        const result = await guarded(() => unpublishApp(workspaceId, path ?? undefined, slug ?? undefined));
 
         return toStructuredResult(result);
       } catch (error) {

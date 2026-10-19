@@ -1,9 +1,9 @@
 // The core of the workspace FILE AREA: the one place that owns the path
 // boundary, the content-type table and the primitives over
-// data/workspace/<userId>/files. All consumers go through here — the
+// data/workspace/<workspaceId>/files. All consumers go through here — the
 // workbench tool servers (tools/workspace.ts, tools/workspace_files.ts) and
 // the web API (/api/workspace/*) — so the boundary check exists exactly once.
-// The currency is a relative path inside the file area; the userId comes from
+// The currency is a relative path inside the file area; the workspaceId comes from
 // the caller's identity (MCP _meta / web session), never from model- or
 // user-supplied parameters.
 //
@@ -61,8 +61,8 @@ export function sanitizeRelPath(raw: string, label = 'path'): string {
 }
 
 /** Absolute path of a file-area entry after sanitization. No mkdir. */
-export function resolveFilePath(userId: string, relPath: string): string {
-  return path.join(workspaceFilesDir(userId), sanitizeRelPath(relPath));
+export function resolveFilePath(workspaceId: string, relPath: string): string {
+  return path.join(workspaceFilesDir(workspaceId), sanitizeRelPath(relPath));
 }
 
 // ---------------------------------------------------------------------------
@@ -200,12 +200,12 @@ export function upsertMeta(
 // The read-side door to the metadata: opens the database only when the file
 // already exists (opening would create it), degrades to empty metadata.
 async function withExistingDb<T>(
-  userId: string,
+  workspaceId: string,
   fallback: T,
   fn: (db: DatabaseSync) => T,
   options?: WithDbOptions,
 ): Promise<T> {
-  const dbPath = workspaceDbPath(userId);
+  const dbPath = workspaceDbPath(workspaceId);
   const stats = await fs.stat(dbPath).catch(() => null);
 
   if (!stats?.isFile()) {
@@ -234,7 +234,7 @@ function readMetaMap(db: DatabaseSync): Map<string, FileMeta> {
 // by the listing (orphans of one directory, on sight) and the indexer
 // (orphans of the whole area, once a pass). A missing database has nothing
 // to prune — a read-side door, never provisions.
-export async function deleteMeta(userId: string, relPaths: string[], options?: WithDbOptions): Promise<void> {
+export async function deleteMeta(workspaceId: string, relPaths: string[], options?: WithDbOptions): Promise<void> {
   if (!relPaths.length) {
     return;
   }
@@ -242,7 +242,7 @@ export async function deleteMeta(userId: string, relPaths: string[], options?: W
   // One short IMMEDIATE transaction: the write lock is taken up front and
   // the rows go in a single step instead of one autocommit per path.
   await withExistingDb(
-    userId,
+    workspaceId,
     undefined,
     db =>
       inWriteTransaction(db, () => {
@@ -264,8 +264,8 @@ const PRUNE_ON_SIGHT_LOCK_WAIT_MS = 2_000;
 // Annotation freshness index for the background indexer: every _files row's
 // updated_at as a UTC Date, keyed by path. Empty when the database does not
 // exist yet (a read never provisions).
-export async function readAnnotationTimes(userId: string): Promise<Map<string, Date>> {
-  return withExistingDb(userId, new Map<string, Date>(), db => {
+export async function readAnnotationTimes(workspaceId: string): Promise<Map<string, Date>> {
+  return withExistingDb(workspaceId, new Map<string, Date>(), db => {
     const map = new Map<string, Date>();
     const rows = db.prepare('SELECT path, updated_at FROM _files').all() as Array<{
       path: string;
@@ -343,9 +343,9 @@ async function folderNode(absDir: string, relPath: string): Promise<WorkspaceFol
  * root reads as an empty area (nothing was provisioned yet); a missing (or
  * non-directory) subpath returns null — the edge decides the answer shape.
  */
-export async function listDir(userId: string, relDir: string): Promise<WorkspaceDirListing | null> {
+export async function listDir(workspaceId: string, relDir: string): Promise<WorkspaceDirListing | null> {
   const rel = relDir ? sanitizeRelPath(relDir, 'directory path') : '';
-  const filesDir = workspaceFilesDir(userId);
+  const filesDir = workspaceFilesDir(workspaceId);
   const absDir = rel ? path.join(filesDir, rel) : filesDir;
 
   let entries;
@@ -361,7 +361,7 @@ export async function listDir(userId: string, relDir: string): Promise<Workspace
   const files: WorkspaceFileNode[] = [];
   const presentNames = new Set<string>();
 
-  const metaByPath = await withExistingDb(userId, new Map<string, FileMeta>(), readMetaMap);
+  const metaByPath = await withExistingDb(workspaceId, new Map<string, FileMeta>(), readMetaMap);
 
   for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
     if (entry.isDirectory()) {
@@ -399,7 +399,7 @@ export async function listDir(userId: string, relDir: string): Promise<Workspace
   });
 
   try {
-    await deleteMeta(userId, stale, { lockWaitMs: PRUNE_ON_SIGHT_LOCK_WAIT_MS });
+    await deleteMeta(workspaceId, stale, { lockWaitMs: PRUNE_ON_SIGHT_LOCK_WAIT_MS });
   } catch (error) {
     if (!(error instanceof WorkspaceDbBusyError)) {
       throw error;
@@ -422,11 +422,11 @@ export async function listDir(userId: string, relDir: string): Promise<Workspace
 // ones a precondition compares against. What is not covered: a parent
 // swapped for a link between this look and the rename — the other writers
 // here are the operator's own agents, not an adversary.
-export async function statWritable(userId: string, relPath: string): Promise<BigIntStats | null> {
-  const absPath = resolveFilePath(userId, relPath);
+export async function statWritable(workspaceId: string, relPath: string): Promise<BigIntStats | null> {
+  const absPath = resolveFilePath(workspaceId, relPath);
   const [stats, areaReal, parentReal] = await Promise.all([
     fs.lstat(absPath, { bigint: true }).catch(() => null),
-    fs.realpath(workspaceFilesDir(userId)).catch(() => null),
+    fs.realpath(workspaceFilesDir(workspaceId)).catch(() => null),
     fs.realpath(path.dirname(absPath)).catch(() => null),
   ]);
 
@@ -440,13 +440,13 @@ export async function statWritable(userId: string, relPath: string): Promise<Big
 // One write of a file at a time within this process: a conditional write
 // (look, compare, replace, answer) runs whole before the next one looks, so
 // two writes under one validator end as one success and one refusal, not
-// two successes. Keyed by user and path; the chain is dropped once nobody
+// two successes. Keyed by workspace and path; the chain is dropped once nobody
 // is in it. Writers outside the process (agents on the host) are not held
 // by this — their window is the one described at replaceFileContent.
 const writeChains = new Map<string, Promise<unknown>>();
 
-export async function withFileWriteLock<T>(userId: string, relPath: string, work: () => Promise<T>): Promise<T> {
-  const key = `${userId}/${sanitizeRelPath(relPath)}`;
+export async function withFileWriteLock<T>(workspaceId: string, relPath: string, work: () => Promise<T>): Promise<T> {
+  const key = `${workspaceId}/${sanitizeRelPath(relPath)}`;
   const previous = writeChains.get(key) ?? Promise.resolve();
   const run = previous.then(work, work);
   const settled = run.then(
@@ -484,8 +484,8 @@ export async function withFileWriteLock<T>(userId: string, relPath: string, work
 // differ from the listing's by one at the edge of a millisecond.
 export type WrittenFile = { stats: Stats; validator: BigIntStats };
 
-export async function replaceFileContent(userId: string, relPath: string, content: Buffer): Promise<WrittenFile> {
-  const absPath = resolveFilePath(userId, relPath);
+export async function replaceFileContent(workspaceId: string, relPath: string, content: Buffer): Promise<WrittenFile> {
+  const absPath = resolveFilePath(workspaceId, relPath);
   const temp = path.join(path.dirname(absPath), `.write-${randomBytes(6).toString('hex')}.tmp`);
   const handle = await fs.open(temp, 'wx');
 
@@ -506,8 +506,8 @@ export async function replaceFileContent(userId: string, relPath: string, conten
 
 // The node of a file from its stats (the listing's shape) and its
 // annotation.
-async function fileNode(userId: string, rel: string, stats: Pick<Stats, 'size' | 'mtime'>): Promise<WorkspaceFileNode> {
-  const meta = await withExistingDb(userId, { title: null, description: null } as FileMeta, db => readMeta(db, rel));
+async function fileNode(workspaceId: string, rel: string, stats: Pick<Stats, 'size' | 'mtime'>): Promise<WorkspaceFileNode> {
+  const meta = await withExistingDb(workspaceId, { title: null, description: null } as FileMeta, db => readMeta(db, rel));
 
   return {
     path: rel,
@@ -520,16 +520,16 @@ async function fileNode(userId: string, rel: string, stats: Pick<Stats, 'size' |
 }
 
 /** The node of a file the caller has the stats of (a write's answer). */
-export function fileNodeOf(userId: string, relPath: string, stats: Pick<Stats, 'size' | 'mtime'>): Promise<WorkspaceFileNode> {
-  return fileNode(userId, sanitizeRelPath(relPath), stats);
+export function fileNodeOf(workspaceId: string, relPath: string, stats: Pick<Stats, 'size' | 'mtime'>): Promise<WorkspaceFileNode> {
+  return fileNode(workspaceId, sanitizeRelPath(relPath), stats);
 }
 
 /** The node of one file; null when the path is missing or not a file. */
-export async function statFile(userId: string, relPath: string): Promise<WorkspaceFileNode | null> {
+export async function statFile(workspaceId: string, relPath: string): Promise<WorkspaceFileNode | null> {
   const rel = sanitizeRelPath(relPath);
-  const stats = await fs.stat(path.join(workspaceFilesDir(userId), rel)).catch(() => null);
+  const stats = await fs.stat(path.join(workspaceFilesDir(workspaceId), rel)).catch(() => null);
 
-  return stats?.isFile() ? fileNode(userId, rel, stats) : null;
+  return stats?.isFile() ? fileNode(workspaceId, rel, stats) : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -541,10 +541,10 @@ export async function statFile(userId: string, relPath: string): Promise<Workspa
 // link to a folder outside does not carry the upload there). Null — no such
 // folder (the edge answers 404). Nothing is created: an upload goes into a
 // folder that is there.
-export async function uploadFolder(userId: string, relPath: string): Promise<string | null> {
-  const absPath = resolveFilePath(userId, relPath);
+export async function uploadFolder(workspaceId: string, relPath: string): Promise<string | null> {
+  const absPath = resolveFilePath(workspaceId, relPath);
   const [areaReal, parentReal] = await Promise.all([
-    fs.realpath(workspaceFilesDir(userId)).catch(() => null),
+    fs.realpath(workspaceFilesDir(workspaceId)).catch(() => null),
     fs.realpath(path.dirname(absPath)).catch(() => null),
   ]);
 
@@ -563,8 +563,8 @@ export async function uploadFolder(userId: string, relPath: string): Promise<str
 // volume, so placeUpload links it into place). The source is the caller's
 // stream, already limited; a source that fails (the client gone, the limit
 // passed) removes the temp file and rethrows.
-export async function receiveUpload(userId: string, source: NodeJS.ReadableStream): Promise<string> {
-  const dir = workspaceTmpDir(userId);
+export async function receiveUpload(workspaceId: string, source: NodeJS.ReadableStream): Promise<string> {
+  const dir = workspaceTmpDir(workspaceId);
 
   await fs.mkdir(dir, { recursive: true });
 
@@ -619,12 +619,12 @@ function isExists(error: unknown): boolean {
 // whatever the outcome. The caller holds the write lock of the path
 // (withFileWriteLock): two uploads of one name end as one file and one
 // "exists", or two numbered files.
-export async function placeUpload(userId: string, relPath: string, temp: string, mode: UploadMode): Promise<PlacedUpload> {
+export async function placeUpload(workspaceId: string, relPath: string, temp: string, mode: UploadMode): Promise<PlacedUpload> {
   const rel = sanitizeRelPath(relPath);
 
   try {
     if (mode === 'replace') {
-      const absPath = resolveFilePath(userId, rel);
+      const absPath = resolveFilePath(workspaceId, rel);
       const existing = await fs.lstat(absPath).catch(() => null);
 
       if (existing && !existing.isFile()) {
@@ -647,7 +647,7 @@ export async function placeUpload(userId: string, relPath: string, temp: string,
 
     for (let n = 1; n <= (mode === 'keep' ? KEEP_MAX : 1); n += 1) {
       const candidate = numberedName(rel, n);
-      const absPath = resolveFilePath(userId, candidate);
+      const absPath = resolveFilePath(workspaceId, candidate);
 
       try {
         await linkNew(temp, absPath);
@@ -684,7 +684,7 @@ export async function fileDigest(absPath: string): Promise<string> {
 // the same import done before and its path is the answer (reused); anything
 // else under the name is passed by. The folder must exist; the temp file
 // is gone afterwards.
-export async function placeImport(userId: string, relPath: string, temp: string, digest: string): Promise<{ path: string; stats: Stats; reused: boolean }> {
+export async function placeImport(workspaceId: string, relPath: string, temp: string, digest: string): Promise<{ path: string; stats: Stats; reused: boolean }> {
   const rel = sanitizeRelPath(relPath);
 
   try {
@@ -692,7 +692,7 @@ export async function placeImport(userId: string, relPath: string, temp: string,
 
     for (let n = 1; n <= KEEP_MAX; n += 1) {
       const candidate = numberedName(rel, n);
-      const absPath = resolveFilePath(userId, candidate);
+      const absPath = resolveFilePath(workspaceId, candidate);
       const existing = await fs.lstat(absPath).catch(() => null);
 
       if (existing) {

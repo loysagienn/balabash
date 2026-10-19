@@ -11,9 +11,9 @@
 // notion) may hit the network; a server that fails to connect is reported in
 // the output instead of failing the run.
 //
-// Usage: npm run build && npm run render-context [-- <userId>]
+// Usage: npm run build && npm run render-context [-- <workspaceId>]
 //   Output: data/showcase/<name>.md (overwritten on every run).
-//   With no userId the single workspace user is used; with several users the
+//   With no workspaceId the single workspace is used; with several workspaces the
 //   script lists them and exits.
 //
 // Read-only by intent: it renders texts and never journals events, spawns
@@ -72,8 +72,8 @@ function renderSection(title: string, body: string): string {
   return `## ${title}\n\n${body}`;
 }
 
-async function renderBundleTools(userId: string, bundle: ToolBundle): Promise<string> {
-  const functions = await getServerToolFunctions(userId, bundle);
+async function renderBundleTools(workspaceId: string, bundle: ToolBundle): Promise<string> {
+  const functions = await getServerToolFunctions(workspaceId, bundle);
 
   if (!functions.length) {
     return '(no server tools in this bundle)';
@@ -91,7 +91,7 @@ async function renderBundleTools(userId: string, bundle: ToolBundle): Promise<st
     .join('\n\n');
 }
 
-async function renderAgent(declaration: AgentDeclaration, userId: string): Promise<string> {
+async function renderAgent(declaration: AgentDeclaration, workspaceId: string): Promise<string> {
   const bundle: ToolBundle = {
     declared: declaration.tools,
   };
@@ -143,7 +143,7 @@ async function renderAgent(declaration: AgentDeclaration, userId: string): Promi
   let bundleTools: string;
 
   try {
-    bundleTools = await renderBundleTools(userId, bundle);
+    bundleTools = await renderBundleTools(workspaceId, bundle);
   } catch (error) {
     bundleTools = `(failed to assemble the bundle: ${error instanceof Error ? error.message : String(error)})`;
   }
@@ -176,20 +176,20 @@ function renderRemoteAgent(declaration: RemoteAgentDeclaration): string {
   return `${sections.join('\n\n')}\n`;
 }
 
-async function renderCoordinator(userId: string): Promise<string> {
+async function renderCoordinator(workspaceId: string): Promise<string> {
   const sections = [
     '# Coordinator (the secretary)',
     renderSection('Instructions (prompt-cache head)', COORDINATOR_INSTRUCTIONS),
     renderSection(
       'Status tail (format sample, rendered fresh every turn)',
-      `\`\`\`\n${buildStatusText([], [], userId)}\n\`\`\``,
+      `\`\`\`\n${buildStatusText([], [], workspaceId)}\n\`\`\``,
     ),
   ];
 
   let functionsSection: string;
 
   try {
-    const definitions = await getCoordinatorFunctionDefinitions(userId);
+    const definitions = await getCoordinatorFunctionDefinitions(workspaceId);
 
     functionsSection = definitions
       .map(definition =>
@@ -211,27 +211,27 @@ async function renderCoordinator(userId: string): Promise<string> {
 
 // ---------------------------------------------------------------------------
 
-async function resolveUserId(): Promise<string> {
+async function resolveWorkspaceId(): Promise<string> {
   const fromArgv = process.argv[2]?.trim();
 
   if (fromArgv) {
     return fromArgv;
   }
 
-  const users = await prisma.user.findMany({ select: { id: true } });
+  const workspaces = await prisma.workspace.findMany({ select: { id: true } });
 
-  if (users.length === 1) {
-    return users[0].id;
+  if (workspaces.length === 1) {
+    return workspaces[0].id;
   }
 
-  if (!users.length) {
-    throw new Error('no users in the database — pass a userId explicitly');
+  if (!workspaces.length) {
+    throw new Error('no workspaces in the database — pass a workspaceId explicitly');
   }
 
-  throw new Error(`several users in the database — pass one explicitly: ${users.map(user => user.id).join(', ')}`);
+  throw new Error(`several workspaces in the database — pass one explicitly: ${workspaces.map(workspace => workspace.id).join(', ')}`);
 }
 
-const userId = await resolveUserId();
+const workspaceId = await resolveWorkspaceId();
 
 const filesApi = {
   ingest: (input: Parameters<typeof ingestFile>[0]) => ingestFile(input),
@@ -265,17 +265,17 @@ const written: string[] = [];
 
 const coordinatorPath = path.join(OUT_DIR, 'coordinator.md');
 
-await writeFile(coordinatorPath, await renderCoordinator(userId), 'utf8');
+await writeFile(coordinatorPath, await renderCoordinator(workspaceId), 'utf8');
 written.push(coordinatorPath);
 
 for (const declaration of getAgents()) {
   const filePath = path.join(OUT_DIR, `${declaration.name}.md`);
 
-  await writeFile(filePath, isRemoteAgent(declaration) ? renderRemoteAgent(declaration) : await renderAgent(declaration, userId), 'utf8');
+  await writeFile(filePath, isRemoteAgent(declaration) ? renderRemoteAgent(declaration) : await renderAgent(declaration, workspaceId), 'utf8');
   written.push(filePath);
 }
 
-console.log(`[render-context] user ${userId}; written:\n${written.map(file => `  ${file}`).join('\n')}`);
+console.log(`[render-context] workspace ${workspaceId}; written:\n${written.map(file => `  ${file}`).join('\n')}`);
 
 await prisma.$disconnect();
 

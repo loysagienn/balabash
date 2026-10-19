@@ -26,7 +26,7 @@ export type JournalEntry = { [T in SessionEventType]: { type: T; payload: EventP
 // (a measurement taken only after the frames before it are written).
 export type JournalInput = JournalEntry[] | (() => Promise<JournalEntry[]>);
 
-export type JournalIdentity = { userId: string; agentName: string };
+export type JournalIdentity = { workspaceId: string; agentName: string };
 
 export type JournalWriterDeps = {
   append?: (input: AppendInput) => Promise<unknown>;
@@ -98,7 +98,7 @@ export function sanitizeToolResult(content: unknown): JsonValue {
 async function readIdentity(threadId: string): Promise<JournalIdentity | null> {
   const thread = await getThread(threadId);
 
-  return thread ? { userId: thread.userId, agentName: thread.agent } : null;
+  return thread ? { workspaceId: thread.workspaceId, agentName: thread.agent } : null;
 }
 
 export function createJournalWriter(deps: JournalWriterDeps = {}): JournalWriter {
@@ -168,7 +168,7 @@ export function createJournalWriter(deps: JournalWriterDeps = {}): JournalWriter
           type: entry.type,
           actor: 'agent',
           agentName: who.agentName,
-          userId: who.userId,
+          workspaceId: who.workspaceId,
           threadId,
           payload: entry.payload as JsonObject,
         });
