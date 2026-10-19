@@ -4,23 +4,13 @@
 // ever affect the turn — errors go to stderr and nowhere else.
 
 import type { Response } from 'openai/resources/responses/responses';
-import type { Prisma } from '../../../prisma-generated/client.ts';
-import { prisma } from '../../db/client.ts';
+import { asInt, recordLlmRequest } from '../llm-request-log.ts';
+import type { LlmRequestContext } from '../turn-contract.ts';
 import { getLlmBackend } from './backend.ts';
 
 // The provider column: which backend answered — 'openai' or
 // 'openai-compatible' (the model column names the model itself).
 const PROVIDER = getLlmBackend().kind;
-
-type LlmMetricsContext = {
-  workspaceId: string;
-  threadId: string;
-  lastSeq: bigint;
-  requestedModel: string;
-  // 'turn' — a model turn (1..N requests); 'keepalive' — a prompt-cache
-  // prewarm ping (one request, no output).
-  purpose: 'turn' | 'keepalive';
-};
 
 // The server's prompt-cache verdict against comparison_response_id, when the
 // request asked for one. Typed by the SDK, but read defensively like the
@@ -47,22 +37,13 @@ function readCacheDiagnostics(response: Response): CacheDiagnostics {
   };
 }
 
-function asInt(value: unknown): number | null {
-  return typeof value === 'number' && Number.isFinite(value) ? value : null;
-}
-
 /**
  * Per-turn measurement scope: counts inner-loop iterations and records one
  * llm_requests row per API call, including calls that threw.
  */
-export function startLlmRequestMetrics({ workspaceId, threadId, lastSeq, requestedModel, purpose }: LlmMetricsContext) {
+export function startLlmRequestMetrics({ workspaceId, threadId, lastSeq, requestedModel, purpose }: LlmRequestContext) {
   let iteration = 0;
-
-  const record = (data: Prisma.LlmRequestCreateInput) => {
-    void prisma.llmRequest.create({ data }).catch(error => {
-      console.error('llm-metrics: failed to record request', error);
-    });
-  };
+  const record = recordLlmRequest;
 
   const measure = async (call: () => Promise<Response>): Promise<Response> => {
     iteration += 1;
@@ -123,7 +104,7 @@ export function startLlmRequestMetrics({ workspaceId, threadId, lastSeq, request
         usage: usage ?? null,
         tool_usage: extra.tool_usage ?? null,
         prompt_cache_diagnostics: extra.prompt_cache_diagnostics ?? null,
-      } as unknown as Prisma.InputJsonValue,
+      } as unknown as Parameters<typeof recordLlmRequest>[0]['rawUsage'],
     });
 
     return response;

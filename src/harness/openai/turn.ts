@@ -29,46 +29,18 @@ import type {
   ResponseInput,
   ResponseInputItem,
 } from 'openai/resources/responses/responses';
-import type { ToolResult } from '../../core/contract.ts';
+import { MAX_TURN_ITERATIONS } from '../turn-contract.ts';
+import type { DispatchResult, FunctionCall, RequestHead, TurnOutcome, TurnPrompt } from '../turn-contract.ts';
 import { getLlmBackend } from './backend.ts';
 import type { LlmBackend } from './backend.ts';
 import { getOpenaiClient } from './client.ts';
 import { toolResultToModelOutput } from './content.ts';
 import type { ModelOutput } from './content.ts';
-import type { TurnPrompt } from './prompt-builder.ts';
 import type { startLlmRequestMetrics } from './llm-metrics.ts';
 
-export type FunctionDefinition = {
-  type: 'function';
-  name: string;
-  description: string;
-  strict: boolean;
-  parameters: Record<string, unknown>;
-};
-
-export type FunctionCall = {
-  callId: string;
-  name: string;
-  arguments: string;
-};
-
-export type DispatchResult =
-  // The result goes back to the model and the loop continues.
-  | { kind: 'sync'; result: ToolResult }
-  // Accepted for asynchronous execution; consequences arrive as events.
-  // Acknowledged to the model as 'accepted' and the loop continues.
-  | { kind: 'async' }
-  // Rejected at dispatch; the error goes back so the model can recover
-  // in the same turn.
-  | { kind: 'rejected'; error: string }
-  // The model declares the turn over: nothing more to do for the newest
-  // events. The other calls of the same response are still dispatched.
-  | { kind: 'end' };
-
-// A turn that never ends is a model looping on itself (sending message
-// after message, re-spawning); the cap turns it into a journaled failure
-// (the coordinator journals a thrown turn as system.exception).
-export const MAX_TURN_ITERATIONS = 16;
+// The contract types, re-exported for the readers that knew them here.
+export { MAX_TURN_ITERATIONS } from '../turn-contract.ts';
+export type { DispatchResult, FunctionCall, FunctionDefinition, TurnOutcome } from '../turn-contract.ts';
 
 type FunctionCallOutputItem = {
   type: 'function_call_output';
@@ -76,11 +48,20 @@ type FunctionCallOutputItem = {
   output: ModelOutput;
 };
 
-type RequestHead = {
-  model: string;
-  instructions: string;
-  tools: FunctionDefinition[];
-};
+// The prompt in Responses API shape: each frozen chunk a user message, the
+// volatile status a developer message after them.
+function toInput({ chunks, statusText }: TurnPrompt): ResponseInput {
+  return [
+    ...chunks.map(text => ({
+      role: 'user' as const,
+      content: [{ type: 'input_text' as const, text }],
+    })),
+    {
+      role: 'developer' as const,
+      content: [{ type: 'input_text' as const, text: statusText }],
+    },
+  ];
+}
 
 // The request parameters shared by every call of a thread: the prompt-cache
 // prefix depends on them (model, instructions, tools, reasoning), so turns
@@ -118,12 +99,6 @@ export type TurnClient = {
   responses: { create(params: ResponseCreateParamsNonStreaming): Promise<Response> };
 };
 
-export type TurnOutcome = {
-  // Id of the turn's first response — the next baseline for cache
-  // diagnostics.
-  firstResponseId: string;
-};
-
 // The next iteration's request continuation: the two ways a turn carries its
 // own history, see the header.
 type Continuation = { input: ResponseInput; previousResponseId?: string };
@@ -152,7 +127,7 @@ export async function runTurn({
   const backend = deps?.backend ?? getLlmBackend();
   const explicitCache = backend.promptCache === 'explicit';
 
-  let input: ResponseInput = prompt.input;
+  let input: ResponseInput = toInput(prompt);
   let previousResponseId: string | undefined;
   let firstResponseId: string | undefined;
 
@@ -265,7 +240,7 @@ export async function prewarmPrompt({
 
   const response = await metrics.measure(() =>
     client.responses.create({
-      ...baseRequest({ model, instructions, tools }, prompt.input),
+      ...baseRequest({ model, instructions, tools }, toInput(prompt)),
       prompt_cache_key: prompt.cacheKey,
       prompt_cache_options: {
         prewarm: true,

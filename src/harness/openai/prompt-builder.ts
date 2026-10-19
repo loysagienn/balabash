@@ -1,11 +1,13 @@
-// Assembles the first request of a model turn so that consecutive turns
-// extend each other byte-for-byte and hit the OpenAI prompt cache. Port of v1
+// Assembles the prompt of a model turn's first request so that consecutive
+// turns extend each other byte-for-byte and hit the backend's prompt cache
+// (OpenAI's explicit cache, Anthropic's cache_control breakpoints — the
+// turn drivers render the chunks into their wire shapes). Port of v1
 // runner/prompt-builder generalized per THREAD (§8.1): state and cache key
 // are keyed by threadId, which makes the builder reusable by any future
 // non-SDK agent, not only the coordinator.
 //
-// The cache works at breakpoints: the implicit one sits at the latest user
-// message, and tools+instructions form an atomic head — any byte change there
+// The cache works at breakpoints: the one at the latest transcript chunk,
+// and tools+instructions form an atomic head — any byte change there
 // resets everything. Hence the scheme: while the head hash is unchanged, each
 // turn appends one new input_text chunk rendered from the events that arrived
 // since the previous turn, and the previously sent chunks are resent
@@ -20,8 +22,8 @@
 // turn. State lives in process memory only; a restart is just a reset.
 
 import crypto from 'node:crypto';
-import type { ResponseInput } from 'openai/resources/responses/responses';
 import { config } from '../../config/index.ts';
+import type { TurnPrompt } from '../turn-contract.ts';
 import { getLlmBackend } from './backend.ts';
 import { buildTranscript } from './transcript.ts';
 
@@ -36,17 +38,14 @@ const MAX_TOTAL_CHARS = 200_000;
 // automatic prompt cache, see buildTurnPrompt).
 const transcriptOptions = () => ({ charLimit: config.coordinatorTranscriptChars });
 
-// Lifetime of a cached prefix on GPT-5.6+ models: 30 minutes after its last
-// write or reuse, the only supported prompt_cache_options.ttl. Measured on
-// the live log, the cliff is sharp — ~95% reuse at 26–30 minutes, ~10% at
-// 30–34, none afterwards — so "may retain longer" is not to be counted on.
-// Once the prefix is cold, appending is strictly worse than resetting: the
-// accumulated fat chunks would be resent at the full write rate, while a
-// rebuild sends the compact fresh transcript for the same price. The
-// coordinator keeps the prefix warm across pauses with prewarm pings
-// (markPromptStateWarm), which is what makes appending after a long pause
-// legitimate.
-export const PROMPT_CACHE_TTL_MS = 30 * 60 * 1000;
+// Lifetime of a cached prefix: the backend's (backend.ts — 30 minutes on
+// OpenAI, 1 hour on Anthropic). Once the prefix is cold, appending is
+// strictly worse than resetting: the accumulated fat chunks would be resent
+// at the full write rate, while a rebuild sends the compact fresh transcript
+// for the same price. The coordinator keeps the prefix warm across pauses
+// with prewarm pings (markPromptStateWarm), which is what makes appending
+// after a long pause legitimate.
+const promptCacheTtlMs = () => getLlmBackend().promptCacheTtlMs;
 
 type PromptState = {
   headHash: string;
@@ -73,42 +72,28 @@ type BuildTurnPromptOptions = {
   // depends on the exact serialization, not on logical equality.
   tools: readonly unknown[];
   // Volatile status rendered fresh every turn (current time; active children
-  // from stage 3). Appended after the chunks as a developer message and
-  // deliberately kept out of the state and the head hash: it changes every
-  // turn, and the cache prefix must not depend on it. Next turn's chunk
-  // replaces it in the same position, so the frozen prefix stays
-  // byte-identical.
+  // from stage 3). Rendered after the chunks (a developer message on
+  // OpenAI, a system message on Anthropic) and deliberately kept out of the
+  // state and the head hash: it changes every turn, and the cache prefix
+  // must not depend on it. Next turn's chunk replaces it in the same
+  // position, so the frozen prefix stays byte-identical.
   statusText: string;
 };
 
-export type TurnPrompt = {
-  input: ResponseInput;
-  cacheKey: string;
-};
-
 function isWarm(state: PromptState): boolean {
-  return Date.now() - state.lastWarmAt <= PROMPT_CACHE_TTL_MS;
+  return Date.now() - state.lastWarmAt <= promptCacheTtlMs();
 }
 
 function headHashOf(model: string, instructions: string, tools: readonly unknown[]): string {
   return crypto.createHash('sha256').update(JSON.stringify({ model, instructions, tools })).digest('hex');
 }
 
-function toInput(chunks: string[], statusText: string): ResponseInput {
-  return [
-    ...chunks.map(text => ({
-      role: 'user' as const,
-      content: [{ type: 'input_text' as const, text }],
-    })),
-    {
-      role: 'developer' as const,
-      content: [{ type: 'input_text' as const, text: statusText }],
-    },
-  ];
+function toPrompt(chunks: string[], statusText: string, cacheKey: string): TurnPrompt {
+  return { chunks, statusText, cacheKey };
 }
 
 /**
- * Builds the input of the turn's first request. Returns null when the new
+ * Builds the prompt of the turn's first request. Returns null when the new
  * events render to nothing — the model has nothing to react to and the turn
  * should be skipped entirely; the events stay uncovered and ride along with
  * the next chunk.
@@ -130,7 +115,7 @@ export function buildTurnPrompt({
   if (getLlmBackend().promptCache !== 'explicit') {
     const { text } = buildTranscript(events, transcriptOptions());
 
-    return text ? { input: toInput([text], statusText), cacheKey: threadId } : null;
+    return text ? toPrompt([text], statusText, threadId) : null;
   }
 
   const headHash = headHashOf(model, instructions, tools);
@@ -163,7 +148,7 @@ export function buildTurnPrompt({
       state.lastSeq = lastSeq;
       state.lastWarmAt = Date.now();
 
-      return { input: toInput(state.chunks, statusText), cacheKey: threadId };
+      return toPrompt([...state.chunks], statusText, threadId);
     }
   }
 
@@ -186,7 +171,7 @@ export function buildTurnPrompt({
   // Stable per thread and never rotated: the key routes requests to the
   // machine that holds the cache, so after a transcript reset the unchanged
   // head can still be served warm.
-  return { input: toInput([text], statusText), cacheKey: threadId };
+  return toPrompt([text], statusText, threadId);
 }
 
 // A restart of the owning run drops its builder state explicitly (the next
@@ -219,7 +204,7 @@ export function buildKeepalivePrompt({
     return null;
   }
 
-  return { input: toInput(state.chunks, statusText), cacheKey: threadId, lastSeq: state.lastSeq };
+  return { ...toPrompt([...state.chunks], statusText, threadId), lastSeq: state.lastSeq };
 }
 
 // A successful prewarm ping extends the prefix lifetime by another TTL.

@@ -1,4 +1,7 @@
 import path from 'node:path';
+import type { EffortLevel } from '../core/contract.ts';
+
+const EFFORT_LEVELS: readonly EffortLevel[] = ['low', 'medium', 'high', 'xhigh', 'max'];
 
 function requireEnv(name: string): string {
   const value = process.env[name];
@@ -61,20 +64,30 @@ export const config = {
     return requireEnv('OPENAI_API_KEY');
   },
 
-  // Which OpenAI-shaped backend the Responses API calls go to:
-  // 'openai' — api.openai.com with its
-  // stateful turns and explicit prompt cache; 'openai-compatible' — any
-  // server speaking the Responses API statelessly (LiteLLM/vLLM): the full
-  // input every iteration, no cache options, no prewarm pings. The one
-  // place reading this is harness/openai/backend.ts.
-  get llmBackend(): 'openai' | 'openai-compatible' {
+  // Which LLM backend the coordinator's model calls go to: 'openai' —
+  // api.openai.com over the Responses API with its stateful turns and
+  // explicit prompt cache; 'openai-compatible' — any server speaking the
+  // Responses API statelessly (LiteLLM/vLLM): the full input every
+  // iteration, no cache options, no prewarm pings; 'anthropic' —
+  // api.anthropic.com over the Messages API (MAIN_ANTHROPIC_API_KEY). The
+  // one place reading this is harness/openai/backend.ts.
+  get llmBackend(): 'openai' | 'openai-compatible' | 'anthropic' {
     const raw = process.env.LLM_BACKEND?.trim().toLowerCase() || 'openai';
 
-    if (raw !== 'openai' && raw !== 'openai-compatible') {
-      throw new Error('LLM_BACKEND must be "openai" or "openai-compatible"');
+    if (raw !== 'openai' && raw !== 'openai-compatible' && raw !== 'anthropic') {
+      throw new Error('LLM_BACKEND must be "openai", "openai-compatible" or "anthropic"');
     }
 
     return raw;
+  },
+
+  // Read only by the Anthropic driver (LLM_BACKEND=anthropic). Deliberately
+  // not the SDK's own ANTHROPIC_API_KEY: the app's environment is inherited
+  // by every Claude Agent SDK session it starts (harness/claude-sdk), and
+  // the SDK would take that variable over the host's plan login — the
+  // coordinator's key would then pay for all the agents.
+  get anthropicApiKey(): string {
+    return requireEnv('MAIN_ANTHROPIC_API_KEY');
   },
 
   // Base URL of the OpenAI-shaped API; unset = the SDK default (api.openai.com).
@@ -96,9 +109,26 @@ export const config = {
     return chars;
   },
 
-  // The coordinator model — always from config, never hardcoded.
-  get mainOpenaiModel(): string {
-    return requireEnv('MAIN_OPENAI_MODEL');
+  // The coordinator model — always from config, never hardcoded: the
+  // variable of the configured backend (MAIN_ANTHROPIC_MODEL under
+  // LLM_BACKEND=anthropic, MAIN_OPENAI_MODEL for the Responses API
+  // backends).
+  get mainModel(): string {
+    return requireEnv(this.llmBackend === 'anthropic' ? 'MAIN_ANTHROPIC_MODEL' : 'MAIN_OPENAI_MODEL');
+  },
+
+  // Reasoning effort of the coordinator model where the backend takes one
+  // (the Anthropic driver's output_config.effort). Default 'medium': the
+  // secretary routes and relays; Opus 5.5 defaults to medium itself, set
+  // explicitly so a model default drifting does not move the cache prefix.
+  get coordinatorEffort(): EffortLevel {
+    const raw = process.env.COORDINATOR_EFFORT?.trim().toLowerCase() || 'medium';
+
+    if (!EFFORT_LEVELS.includes(raw as EffortLevel)) {
+      throw new Error(`COORDINATOR_EFFORT must be one of ${EFFORT_LEVELS.join(', ')}`);
+    }
+
+    return raw as EffortLevel;
   },
 
   // Prompt-cache keep-alive window of the coordinator, minutes after the last

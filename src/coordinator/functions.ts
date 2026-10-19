@@ -7,7 +7,9 @@
 // Synchronous calls are journaled as tool.call.* events in the coordinator's
 // thread; spawns and cancels are async dispatches acknowledged with
 // 'accepted' — their consequences arrive as events. do_nothing ends the
-// turn (the only way it ends).
+// turn on the backends whose turn contract has no other end (the Responses
+// API drivers run with forced tool calls); the Anthropic driver's turn ends
+// when the model stops calling tools, and the function is not offered there.
 
 import type { ContentBlock, JsonObject, JsonSchema, RemoteAgentDeclaration } from '../core/contract.ts';
 import { THREAD_NAMING_NOTE } from '../../agents/world/index.ts';
@@ -32,7 +34,8 @@ import {
   isServerToolFunction,
   type ToolBundle,
 } from '../capabilities/tool-manager.ts';
-import type { DispatchResult, FunctionCall, FunctionDefinition } from '../harness/openai/turn.ts';
+import type { DispatchResult, FunctionCall, FunctionDefinition } from '../harness/turn-contract.ts';
+import { getLlmBackend } from '../harness/openai/backend.ts';
 
 // The coordinator's tool passport, listed explicitly like every agent's: the
 // coordinator has no native file tools, so the workspace_files hands ride
@@ -395,8 +398,10 @@ async function getServerFunctionDefinitions(workspaceId: string): Promise<Functi
 }
 
 export async function getCoordinatorFunctionDefinitions(workspaceId: string): Promise<FunctionDefinition[]> {
+  const endsByCall = getLlmBackend().kind !== 'anthropic';
+
   return [
-    ...STATIC_FUNCTION_DEFINITIONS,
+    ...STATIC_FUNCTION_DEFINITIONS.filter(definition => endsByCall || definition.name !== 'do_nothing'),
     ...getAgentFunctionDefinitions(),
     ...(await getServerFunctionDefinitions(workspaceId)),
   ];
@@ -455,6 +460,13 @@ async function executeSendMessage(args: JsonObject, ctx: DispatchContext): Promi
     threadId: ctx.threadId,
     payload: { content },
   });
+}
+
+// A text answer of the model (the Anthropic driver: a text block is the
+// model's message to the user) delivered the way send_message delivers —
+// the same agent.message event, text only.
+export async function deliverCoordinatorText(text: string, ctx: DispatchContext): Promise<void> {
+  await executeSendMessage({ text, fileIds: null }, ctx);
 }
 
 // Spawn a child thread for a catalog agent: thread.started addressed to the

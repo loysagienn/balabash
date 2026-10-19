@@ -16,31 +16,33 @@ import { listProjects } from '../projects/store.ts';
 import type { ProjectModel } from '../projects/store.ts';
 import { getFailingConsumers } from '../core/consumers.ts';
 import { getPendingRestart } from '../runtime/restart.ts';
-import { buildTurnPrompt, buildKeepalivePrompt, markPromptStateWarm, PROMPT_CACHE_TTL_MS } from '../harness/openai/prompt-builder.ts';
-import { startLlmRequestMetrics } from '../harness/openai/llm-metrics.ts';
-import { runTurn, prewarmPrompt } from '../harness/openai/turn.ts';
-import type { FunctionDefinition, TurnClient } from '../harness/openai/turn.ts';
+import { buildTurnPrompt, buildKeepalivePrompt, markPromptStateWarm } from '../harness/openai/prompt-builder.ts';
+import type { FunctionDefinition } from '../harness/turn-contract.ts';
+import type { TurnClient } from '../harness/openai/turn.ts';
 import { getLlmBackend } from '../harness/openai/backend.ts';
+import { getTurnDriver } from '../harness/turn-driver.ts';
 import { createJournalWriter } from '../harness/session-journal.ts';
 import type { JournalWriter } from '../harness/session-journal.ts';
 import { sessionStateFrom } from '../projections/session.ts';
 import type { SessionState } from '../projections/session.ts';
 import { COORDINATOR_INSTRUCTIONS } from './instructions.ts';
-import { getCoordinatorFunctionDefinitions, dispatchCoordinatorFunction } from './functions.ts';
+import { getCoordinatorFunctionDefinitions, dispatchCoordinatorFunction, deliverCoordinatorText } from './functions.ts';
 
 // Raw snapshot window, taken with a margin: the transcript builder selects
 // from it by char budget, so the effective depth per event class differs.
 const HISTORY_LIMIT = 400;
 
 // Prompt-cache keep-alive: after a turn, the thread's cached prefix is
-// refreshed with a prewarm ping every KEEPALIVE_INTERVAL_MS (the 30-minute
-// TTL minus a margin for scheduling jitter and the request itself) for as
-// long as config.coordinatorCacheKeepaliveWindowMs since the last turn. A
-// ping on a warm prefix is a pure cached read (~1/12 of the cold write the
-// next turn would otherwise pay); the window bounds the speculation on
-// threads that went quiet for good. Live-log economics behind the default
-// window are in the config comment.
-const KEEPALIVE_INTERVAL_MS = PROMPT_CACHE_TTL_MS - 5 * 60 * 1000;
+// refreshed with a prewarm ping every keepaliveIntervalMs() (the backend's
+// cache TTL — 30 minutes on OpenAI, 1 hour on Anthropic — minus a margin
+// for scheduling jitter and the request itself) for as long as
+// config.coordinatorCacheKeepaliveWindowMs since the last turn. A ping on a
+// warm prefix is a pure cached read (~1/12 of the cold write the next turn
+// would otherwise pay); the window bounds the speculation on threads that
+// went quiet for good. Live-log economics behind the default window are in
+// the config comment.
+const KEEPALIVE_MARGIN_MS = 5 * 60 * 1000;
+const keepaliveIntervalMs = () => getLlmBackend().promptCacheTtlMs - KEEPALIVE_MARGIN_MS;
 
 // A session.state write the log did not take (the database was away) is
 // retried on its own until it lands: the main thread is eternal and has no
@@ -54,9 +56,9 @@ export type CoordinatorRun = {
   accept: (event: Event) => void;
 };
 
-// Test seams: the function definitions, the OpenAI client, the journal
-// writer and the first retry delay of a lost state write — the real ones by
-// default.
+// Test seams: the function definitions, the OpenAI driver's client, the
+// journal writer and the first retry delay of a lost state write — the real
+// ones by default.
 export type CoordinatorRunDeps = {
   functionDefinitions?: (workspaceId: string) => Promise<FunctionDefinition[]>;
   client?: TurnClient;
@@ -163,6 +165,7 @@ export function buildStatusText(children: Thread[], projects: ProjectModel[], wo
 export function createCoordinatorRun({ threadId, workspaceId }: { threadId: string; workspaceId: string }, deps: CoordinatorRunDeps = {}): CoordinatorRun {
   const functionDefinitions = deps.functionDefinitions ?? getCoordinatorFunctionDefinitions;
   const journal = deps.journal ?? createJournalWriter();
+  const driver = getTurnDriver();
   let wakePending = false;
   let running = false;
 
@@ -236,8 +239,9 @@ export function createCoordinatorRun({ threadId, workspaceId }: { threadId: stri
       keepaliveTimer = null;
     }
 
-    // Pings refresh OpenAI's explicit prompt cache; a backend with an
-    // automatic prefix cache has nothing to keep warm.
+    // Pings refresh an explicit prompt cache (OpenAI's, Anthropic's
+    // breakpoints); a backend with an automatic prefix cache has nothing to
+    // keep warm.
     if (config.coordinatorCacheKeepaliveWindowMs <= 0 || getLlmBackend().promptCache !== 'explicit') {
       return;
     }
@@ -245,7 +249,7 @@ export function createCoordinatorRun({ threadId, workspaceId }: { threadId: stri
     keepaliveTimer = setTimeout(() => {
       keepaliveTimer = null;
       void keepalive();
-    }, KEEPALIVE_INTERVAL_MS);
+    }, keepaliveIntervalMs());
     keepaliveTimer.unref();
   };
 
@@ -266,7 +270,7 @@ export function createCoordinatorRun({ threadId, workspaceId }: { threadId: stri
 
       const prompt = buildKeepalivePrompt({
         threadId,
-        model: config.mainOpenaiModel,
+        model: config.mainModel,
         instructions: COORDINATOR_INSTRUCTIONS,
         tools,
         statusText: buildStatusText(children, projects, workspaceId, await readRemoteChildStates(children)),
@@ -278,18 +282,18 @@ export function createCoordinatorRun({ threadId, workspaceId }: { threadId: stri
         return;
       }
 
-      lastResponseId = await prewarmPrompt({
-        model: config.mainOpenaiModel,
+      lastResponseId = await driver.prewarmPrompt({
+        model: config.mainModel,
         instructions: COORDINATOR_INSTRUCTIONS,
         tools,
         prompt,
-        metrics: startLlmRequestMetrics({
+        metrics: {
           workspaceId,
           threadId,
           lastSeq: prompt.lastSeq,
-          requestedModel: config.mainOpenaiModel,
+          requestedModel: config.mainModel,
           purpose: 'keepalive',
-        }),
+        },
         cacheComparisonResponseId: lastResponseId,
       });
       markPromptStateWarm(threadId);
@@ -319,7 +323,7 @@ export function createCoordinatorRun({ threadId, workspaceId }: { threadId: stri
       events,
       lastSeq,
       snapshotFull: events.length >= HISTORY_LIMIT,
-      model: config.mainOpenaiModel,
+      model: config.mainModel,
       instructions: COORDINATOR_INSTRUCTIONS,
       tools,
       statusText: buildStatusText(children, projects, workspaceId, await readRemoteChildStates(children)),
@@ -331,25 +335,24 @@ export function createCoordinatorRun({ threadId, workspaceId }: { threadId: stri
       return;
     }
 
-    const metrics = startLlmRequestMetrics({
-      workspaceId,
-      threadId,
-      lastSeq,
-      requestedModel: config.mainOpenaiModel,
-      purpose: 'turn',
-    });
-
     // In the log before the request goes out: the write resolves once
     // written or given up on (the writer never throws into the turn).
     await setState('run');
 
-    const outcome = await runTurn({
-      model: config.mainOpenaiModel,
+    const outcome = await driver.runTurn({
+      model: config.mainModel,
       instructions: COORDINATOR_INSTRUCTIONS,
       tools,
       prompt,
-      metrics,
+      metrics: {
+        workspaceId,
+        threadId,
+        lastSeq,
+        requestedModel: config.mainModel,
+        purpose: 'turn',
+      },
       dispatch: call => dispatchCoordinatorFunction(call, { workspaceId, threadId }),
+      deliverText: text => deliverCoordinatorText(text, { workspaceId, threadId }),
       cacheComparisonResponseId: lastResponseId,
       ...(deps.client ? { deps: { client: deps.client } } : {}),
     });

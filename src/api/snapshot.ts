@@ -226,7 +226,7 @@ function coordinatorView(catalog: CatalogAgent[]): AgentView {
     agents: catalog.map(agent => agent.name),
     headless: false,
     notification: null,
-    model: config.mainOpenaiModel,
+    model: config.mainModel,
     effort: null,
     defaultEffort: null,
     lastModel: null,

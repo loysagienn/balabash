@@ -42,10 +42,10 @@ const head: Pick<Parameters<typeof runTurn>[0], 'model' | 'instructions' | 'tool
   model: 'm',
   instructions: 'i',
   tools: [],
-  prompt: { input: [{ role: 'user', content: 'hello' }], cacheKey: 'k' },
+  prompt: { chunks: ['hello'], statusText: 'status', cacheKey: 'k' },
 };
-const stateful = { kind: 'openai' as const, baseUrl: null, statefulTurns: true, promptCache: 'explicit' as const };
-const stateless = { kind: 'openai-compatible' as const, baseUrl: null, statefulTurns: false, promptCache: 'automatic' as const };
+const stateful = { kind: 'openai' as const, baseUrl: null, statefulTurns: true, promptCache: 'explicit' as const, promptCacheTtlMs: 30 * 60 * 1000 };
+const stateless = { kind: 'openai-compatible' as const, baseUrl: null, statefulTurns: false, promptCache: 'automatic' as const, promptCacheTtlMs: 0 };
 
 function dispatcher(kinds: Record<string, DispatchResult>) {
   const dispatched: string[] = [];
@@ -125,9 +125,10 @@ describe('runTurn', () => {
 
     const input = requests[1]!.input as Array<Record<string, unknown>>;
 
-    assert.deepEqual(input[0], { role: 'user', content: 'hello' });
-    assert.equal(input[1]!.type, 'function_call');
-    assert.deepEqual(input[2], { type: 'function_call_output', call_id: 'c1', output: 'accepted' });
+    assert.deepEqual(input[0], { role: 'user', content: [{ type: 'input_text', text: 'hello' }] });
+    assert.deepEqual(input[1], { role: 'developer', content: [{ type: 'input_text', text: 'status' }] });
+    assert.equal(input[2]!.type, 'function_call');
+    assert.deepEqual(input[3], { type: 'function_call_output', call_id: 'c1', output: 'accepted' });
   });
 
   it('fails loudly when the model never ends the turn', async () => {
