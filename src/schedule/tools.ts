@@ -31,7 +31,7 @@ const FUNCTIONS: ToolFunction[] = [
       'Register a named scheduled task. kind "note": at the trigger moment the note falls into the main ' +
       'thread as a schedule.fired event and the secretary interprets it — use this for reminders and ' +
       'recurring instructions. kind "code": the trigger runs the run(ctx) body under the same slug — the ' +
-      'workspace task file data/workspace/<userId>/tasks/<slug>.ts (live at the next fire, no build); the ' +
+      'workspace task file data/workspace/<workspaceId>/tasks/<slug>.ts (live at the next fire, no build); the ' +
       'scheduler agent writes bodies; until the file exists the task SLEEPS — no errors, no runs. kind ' +
       '"command": a workspace job — the ' +
       'trigger runs the given shell command (bash -c) inside the workspace file area, with WORKSPACE_DB in ' +
