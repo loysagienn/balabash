@@ -321,7 +321,7 @@ describe('a message with files', () => {
         { fileId: pdf, contentType: 'application/pdf', originalFilename: 'invoice.pdf', sizeBytes: 3 },
         { fileId: image, contentType: 'image/png', originalFilename: 'wall.png', sizeBytes: 3 },
       ],
-      identity: { username: 'operator' },
+      identity: { userId: stand.userId, displayName: 'Operator' },
       source: 'web',
     });
   });
@@ -339,7 +339,7 @@ describe('a message with files', () => {
     const plain = await send({ text: 'Just text' });
 
     assert.equal(plain.status, 200);
-    assert.deepEqual(plain.json<PostThreadMessageResponse>().event.payload, { text: 'Just text', identity: { username: 'operator' }, source: 'web' });
+    assert.deepEqual(plain.json<PostThreadMessageResponse>().event.payload, { text: 'Just text', identity: { userId: stand.userId, displayName: 'Operator' }, source: 'web' });
   });
 
   test('a foreign or a missing file refuses the whole message by name, and nothing is written', async () => {

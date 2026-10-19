@@ -16,7 +16,7 @@ import http from 'node:http';
 import path from 'node:path';
 import { STAND_HOST, sessionCookie, startStand } from '../test-support/stand.ts';
 import type { Reply, Stand } from '../test-support/stand.ts';
-import type { CreateProjectResponse, FileMetaResponse, InstallationServicesResponse, LimitsResponse, ProjectResponse, SettingsFactsResponse, SettingsResponse, MeResponse, WorkspaceNodeResponse, WorkspaceWriteResponse } from './contract.ts';
+import type { CreateProjectResponse, FileMetaResponse, InstallationServicesResponse, LimitsResponse, ProjectResponse, SettingsFactsResponse, SettingsResponse, MeResponse, UserResponse, WorkspaceNodeResponse, WorkspaceWriteResponse } from './contract.ts';
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 
 type ErrorBody = { error: { code: string; message: string } };
@@ -1010,46 +1010,75 @@ describe('editing a Markdown file over the api', () => {
 });
 
 describe('settings over the api', () => {
-  test('PATCH /settings stores the names and /me reads them back', async () => {
+  test('PATCH /settings stores the workspace’s name and /me reads it back beside the user', async () => {
     const reply = await stand.request('PATCH', '/api/settings', { body: { workspaceName: '  Home  ', operatorName: 'Vladimir' } });
 
     assert.equal(reply.status, 200, reply.text);
-    assert.deepEqual(reply.json<SettingsResponse>().settings, { workspaceName: 'Home', operatorName: 'Vladimir' });
+    assert.deepEqual(reply.json<SettingsResponse>().settings, { workspaceName: 'Home' });
 
     const me = await stand.request('GET', '/api/me');
 
-    assert.deepEqual(me.json<MeResponse>(), { workspaceId: stand.workspaceId, workspaceName: 'Home', operatorName: 'Vladimir', mainThreadId: stand.mainThreadId });
+    assert.deepEqual(me.json<MeResponse>(), { workspaceId: stand.workspaceId, workspaceName: 'Home', mainThreadId: stand.mainThreadId, user: { userId: stand.userId, displayName: 'Operator' } });
 
-    const cleared = await stand.request('PATCH', '/api/settings', { body: { operatorName: '   ' } });
+    const cleared = await stand.request('PATCH', '/api/settings', { body: { workspaceName: '   ' } });
 
-    assert.deepEqual(cleared.json<SettingsResponse>().settings, { workspaceName: 'Home', operatorName: null });
+    assert.deepEqual(cleared.json<SettingsResponse>().settings, { workspaceName: null });
 
     const workspace = await prisma.workspace.findUniqueOrThrow({ where: { id: stand.workspaceId } });
 
-    assert.deepEqual({ workspaceName: workspace.workspaceName, operatorName: workspace.operatorName }, { workspaceName: 'Home', operatorName: null });
+    // The operator's name of the time before users is nobody's to write.
+    assert.deepEqual({ workspaceName: workspace.workspaceName, operatorName: workspace.operatorName }, { workspaceName: null, operatorName: null });
 
-    // Each change journals settings.updated by the operator with the names
+    // Each change journals settings.updated by the operator with the name
     // the call answered — what every other tab folds into its `me` — and
     // the answer names its event's seq, the position the saving tab holds
-    // the names at.
+    // the name at.
     const events = await settingsEvents();
 
     assert.deepEqual(
       events.map(({ seq: _seq, ...rest }) => rest),
       [
-        { actor: 'user', threadId: null, workspaceId: stand.workspaceId, payload: { workspaceName: 'Home', operatorName: 'Vladimir' } },
-        { actor: 'user', threadId: null, workspaceId: stand.workspaceId, payload: { workspaceName: 'Home', operatorName: null } },
+        { actor: 'user', threadId: null, workspaceId: stand.workspaceId, payload: { workspaceName: 'Home' } },
+        { actor: 'user', threadId: null, workspaceId: stand.workspaceId, payload: { workspaceName: null } },
       ],
     );
     assert.deepEqual([reply.json<SettingsResponse>().seq, cleared.json<SettingsResponse>().seq], [events[0]!.seq, events[1]!.seq]);
+
+    await stand.request('PATCH', '/api/settings', { body: { workspaceName: 'Home' } });
   });
 
-  test('an empty patch answers the names and journals nothing', async () => {
+  test('an empty patch answers the name and journals nothing', async () => {
     const reply = await stand.request('PATCH', '/api/settings', { body: {} });
 
     assert.equal(reply.status, 200, reply.text);
-    assert.deepEqual(reply.json<SettingsResponse>(), { settings: { workspaceName: 'Home', operatorName: null }, seq: null });
-    assert.equal((await settingsEvents()).length, 2);
+    assert.deepEqual(reply.json<SettingsResponse>(), { settings: { workspaceName: 'Home' }, seq: null });
+    assert.equal((await settingsEvents()).length, 3);
+  });
+
+  test('PATCH /user sets the user’s own name, clears it, and journals nothing; /me follows', async () => {
+    const named = await stand.request('PATCH', '/api/user', { body: { displayName: '  Vladimir  ' } });
+
+    assert.equal(named.status, 200, named.text);
+    assert.deepEqual(named.json<UserResponse>(), { user: { userId: stand.userId, displayName: 'Vladimir' } });
+    assert.deepEqual((await stand.request('GET', '/api/me')).json<MeResponse>().user, { userId: stand.userId, displayName: 'Vladimir' });
+    assert.deepEqual(await prisma.user.findUniqueOrThrow({ where: { id: stand.userId }, select: { displayName: true, nameSetByUser: true } }), { displayName: 'Vladimir', nameSetByUser: true });
+
+    const empty = await stand.request('PATCH', '/api/user', { body: {} });
+
+    assert.deepEqual(empty.json<UserResponse>(), { user: { userId: stand.userId, displayName: 'Vladimir' } });
+
+    const cleared = await stand.request('PATCH', '/api/user', { body: { displayName: ' ' } });
+
+    assert.deepEqual(cleared.json<UserResponse>(), { user: { userId: stand.userId, displayName: null } });
+    assert.deepEqual(await prisma.user.findUniqueOrThrow({ where: { id: stand.userId }, select: { displayName: true, nameSetByUser: true } }), { displayName: null, nameSetByUser: false });
+
+    const refused = await stand.request('PATCH', '/api/user', { body: { displayName: 42 } });
+
+    assert.equal(refused.status, 400);
+    assert.equal(refused.json<ErrorBody>().error.code, 'bad_request');
+    assert.equal((await settingsEvents()).length, 3);
+
+    await stand.request('PATCH', '/api/user', { body: { displayName: 'Operator' } });
   });
 
   test('GET /settings answers the facts of this browser, the schedule’s time zone and the Telegram binding', async () => {
@@ -1100,7 +1129,7 @@ describe('settings over the api', () => {
     // Telegram command with its own User-Agent: each cookie reads its own
     // row — the phone's facts are the phone's, the stand's stay the stand's.
     const ua = 'Mozilla/5.0 (iPhone; CPU iPhone OS 26_7_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/154.0.8037.55 Mobile/15E148 Safari/604.1';
-    const signedIn = await stand.request('POST', '/api/auth', { body: { code: createAuthCode(stand.workspaceId, 'telegram') }, cookie: null, headers: { 'user-agent': ua } });
+    const signedIn = await stand.request('POST', '/api/auth', { body: { code: createAuthCode({ workspaceId: stand.workspaceId, userId: stand.userId }, 'telegram') }, cookie: null, headers: { 'user-agent': ua } });
 
     assert.equal(signedIn.status, 200, signedIn.text);
 
@@ -1150,7 +1179,7 @@ describe('settings over the api', () => {
     assert.equal(reply.status, 400);
     assert.match(reply.json<ErrorBody>().error.message, /workspaceName must be a string/);
     assert.equal((await prisma.workspace.findUniqueOrThrow({ where: { id: stand.workspaceId } })).workspaceName, 'Home');
-    assert.equal((await settingsEvents()).length, 2);
+    assert.equal((await settingsEvents()).length, 3);
   });
 });
 

@@ -11,6 +11,8 @@ import type { WorkspaceColors } from '../../lib/workspace/index.ts';
 export type WorkspaceItem = {
   workspaceId: string;
   name: string;
+  // Your name under the workspace's: the user of this browser's session is
+  // the same in every workspace of it.
   operator: string | null;
   color: number;
   current: boolean;
@@ -36,7 +38,7 @@ export function workspaceItems(me: MeResponse | null, list: WorkspacesResponse |
     workspaceId: w.workspaceId,
     // The tab's own workspace speaks with `me`, which the tail keeps fresh.
     name: workspaceName(w.workspaceId === me?.workspaceId ? me.workspaceName : w.workspaceName),
-    operator: w.workspaceId === me?.workspaceId ? me.operatorName : w.operatorName,
+    operator: me?.user.displayName ?? null,
     color: colors[w.workspaceId] ?? 1,
     current: w.workspaceId === current,
     signedInAt: w.signedInAt,
@@ -44,7 +46,7 @@ export function workspaceItems(me: MeResponse | null, list: WorkspacesResponse |
   }));
 
   if (me && !items.some(item => item.workspaceId === me.workspaceId)) {
-    items.unshift({ workspaceId: me.workspaceId, name: workspaceName(me.workspaceName), operator: me.operatorName, color: colors[me.workspaceId] ?? 1, current: true, signedInAt: null, loginSource: null });
+    items.unshift({ workspaceId: me.workspaceId, name: workspaceName(me.workspaceName), operator: me.user.displayName, color: colors[me.workspaceId] ?? 1, current: true, signedInAt: null, loginSource: null });
   }
 
   return items;

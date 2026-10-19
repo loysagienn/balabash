@@ -8,8 +8,9 @@
 // local file storage) and strips the channels and services inherited from
 // the shell (Telegram, OpenAI, Spaces, the domains), then seeds the
 // workspace the way a fresh install does — ensureOperatorWorkspace(): one
-// workspace and its main thread — and signs in through the real code exchange
-// (POST /api/auth), so the stand's cookie is a web session like any other.
+// workspace and its main thread, the operator its owner (joinConsoleUser) —
+// and signs in through the real code exchange (POST /api/auth), so the
+// stand's cookie is a web session like any other: of the operator user.
 // Requests go to a Koa listener on an ephemeral port carrying the /files
 // and /api middleware exactly as src/api/index.ts mounts them (app.proxy,
 // and the stand sends X-Forwarded-Proto: https — the session cookie is
@@ -107,6 +108,9 @@ export type Stand = {
   // request() does not fit (a stream read as it flows).
   port: number;
   workspaceId: string;
+  // The operator user (src/users): the owner of the workspace, the user of
+  // the stand's session.
+  userId: string;
   mainThreadId: string;
   // The web session of the operator: `session_id=<token>`.
   cookie: string;
@@ -165,6 +169,7 @@ export async function startStand(): Promise<Stand> {
     const { ensureOperatorWorkspace } = await import('../core/threads.ts');
     const { createApiMiddleware, createFilesMiddleware } = await import('../api/api.ts');
     const { createAuthCode } = await import('../api/auth-codes.ts');
+    const { joinConsoleUser } = await import('../users/index.ts');
 
     cleanup.add('disconnect', async () => {
       getLiveHub().close();
@@ -191,12 +196,13 @@ export async function startStand(): Promise<Stand> {
 
     const mainThread = await ensureOperatorWorkspace();
     const workspaceId = mainThread.workspaceId;
+    const { userId } = await joinConsoleUser(workspaceId);
 
     let cookie = '';
     const request = (method: string, urlPath: string, options: RequestOptions = {}) =>
       send(port, method, urlPath, { ...options, cookie: options.cookie === undefined ? cookie : options.cookie });
 
-    const signedIn = await request('POST', '/api/auth', { body: { code: createAuthCode(workspaceId, 'console') } });
+    const signedIn = await request('POST', '/api/auth', { body: { code: createAuthCode({ workspaceId, userId }, 'console') } });
 
     if (signedIn.status !== 200) {
       throw new Error(`the stand could not sign in: ${signedIn.status} ${signedIn.text}`);
@@ -204,7 +210,7 @@ export async function startStand(): Promise<Stand> {
 
     cookie = sessionCookie(signedIn.headers['set-cookie'] ?? []);
 
-    return { db, dir, port, workspaceId, mainThreadId: mainThread.id, cookie, request, stop: () => cleanup.run() };
+    return { db, dir, port, workspaceId, userId, mainThreadId: mainThread.id, cookie, request, stop: () => cleanup.run() };
   } catch (error) {
     // The failure of the start is the error; a failure of the cleanup
     // rides along with it rather than replacing it.

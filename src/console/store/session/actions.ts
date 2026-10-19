@@ -1,4 +1,4 @@
-import type { MeResponse, NamesView, SettingsPatchRequest } from '../../../api/contract.ts';
+import type { MeResponse, NamesView, UserView } from '../../../api/contract.ts';
 import type { ApiFailure } from '../../lib/api/index.ts';
 import type { LoginRequest } from './reducer.ts';
 
@@ -29,14 +29,20 @@ export const logoutDone = () => ({ type: 'LOGOUT_DONE' }) as const;
 export const leaveWorkspace = (signedIn: string[] | null) => ({ type: 'WORKSPACE_LEAVE', signedIn }) as const;
 export const logoutFail = (error: ApiFailure) => ({ type: 'LOGOUT_FAIL', error }) as const;
 
-// The names of Settings (workspace, operator): each card saves on its own,
-// the answer updates `me` — the sidebar, the feed and the cards follow.
-// DONE carries where the answer stands in the log (the seq of the
+// The names of Settings (the workspace's, yours): each card saves on its
+// own, the answer updates `me` — the sidebar, the feed and the cards
+// follow. The workspace's name goes to PATCH /api/settings and DONE
+// carries where the answer stands in the log (the seq of the
 // settings.updated it journaled; null when the server changed nothing):
-// the reducer takes its names only ahead of the names it already holds.
-export const saveSettings = (patch: SettingsPatchRequest) => ({ type: 'SAVE_SETTINGS', patch }) as const;
-export const saveSettingsDone = (patch: SettingsPatchRequest, settings: NamesView, seq: bigint | null) => ({ type: 'SAVE_SETTINGS_DONE', patch, settings, seq }) as const;
-export const saveSettingsFail = (patch: SettingsPatchRequest, error: ApiFailure) => ({ type: 'SAVE_SETTINGS_FAIL', patch, error }) as const;
+// the reducer takes it only ahead of the names it already holds. Your
+// name goes to PATCH /api/user — a fact of the user, not of the workspace's
+// log: DONE carries the user as the server now words them.
+export type NamesPatch = { workspaceName?: string | null; displayName?: string | null };
+export type NamesSaved = { kind: 'settings'; settings: NamesView; seq: bigint | null } | { kind: 'user'; user: UserView };
+
+export const saveSettings = (patch: NamesPatch) => ({ type: 'SAVE_SETTINGS', patch }) as const;
+export const saveSettingsDone = (patch: NamesPatch, saved: NamesSaved) => ({ type: 'SAVE_SETTINGS_DONE', patch, saved }) as const;
+export const saveSettingsFail = (patch: NamesPatch, error: ApiFailure) => ({ type: 'SAVE_SETTINGS_FAIL', patch, error }) as const;
 
 // A session-gated call answered 401: the session is gone.
 export const sessionLost = () => ({ type: 'SESSION_LOST' }) as const;

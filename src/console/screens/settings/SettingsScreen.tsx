@@ -1,8 +1,9 @@
 // Settings (design: SettingsScreen): the cards "Workspace" (its name, and
 // the color of its mark — this browser's choice, lib/workspace) and "You"
-// (the operator's name), each name saving on its own through
-// PATCH /api/settings — the answer updates `me`, so the sidebar and the
-// feed follow, and a toast confirms; "Appearance" — the color theme, this
+// (your name — the user's, one in every workspace), each name saving on
+// its own — the workspace's through PATCH /api/settings, yours through
+// PATCH /api/user — the answer updates `me`, so the sidebar and the feed
+// follow, and a toast confirms; "Appearance" — the color theme, this
 // browser's choice (lib/theme), applied on choice; the cards of facts read
 // by place from GET /api/settings (queries.ts; the words — SettingsScreen.logic.ts):
 // "Telegram" — the group bound to the workspace, or that none is;
@@ -436,12 +437,12 @@ export function SettingsScreen() {
             title="You"
             label="Your name"
             fid="op-n"
-            hint="Shown under the workspace name and as the author of your messages in threads."
-            field="operatorName"
-            current={me?.operatorName ?? null}
-            saving={saving.operatorName}
-            saved={saved.operatorName}
-            onSave={value => dispatch(saveSettings({ operatorName: value }))}
+            hint="Shown under the workspace name and as the author of your messages — in threads and to the agents, in every workspace you are in. Until you set one, your Telegram name is used."
+            field="displayName"
+            current={me?.user.displayName ?? null}
+            saving={saving.displayName}
+            saved={saved.displayName}
+            onSave={value => dispatch(saveSettings({ displayName: value }))}
           />
           <AppearanceCard />
           {stage.kind === 'facts' && stage.stale ? <FactsStale facts={facts} error={stage.stale} /> : null}

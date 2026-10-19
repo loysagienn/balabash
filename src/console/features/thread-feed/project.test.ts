@@ -4,7 +4,7 @@ import { event, resetSeq } from '../../store/fixtures.ts';
 import { askDecidedWords, askKindTag, projectFeed } from './project.ts';
 import type { ActionItem, ActionsItem, ChildItem, FeedContext, FeedItem, MessageItem, PlanItem, SubtaskItem, ThoughtItem } from './project.ts';
 
-const ctx: FeedContext = { threadId: 't1', agent: 'engineer', parentAgent: 'coordinator', agentOf: id => (id === 'c9' ? 'browser' : null), you: null };
+const ctx: FeedContext = { threadId: 't1', agent: 'engineer', parentAgent: 'coordinator', agentOf: id => (id === 'c9' ? 'browser' : null), userId: 'me', you: null };
 
 const own = (type: string, payload: object, extra: object = {}) => event({ type, threadId: 't1', payload: payload as never, ...extra });
 
@@ -66,6 +66,34 @@ describe('projectFeed — a question for the user (agent.ask)', () => {
 });
 
 describe('projectFeed — messages', () => {
+  it('shows another user’s message under their name as a person’s block; yours and the ones from before users are "you"', () => {
+    resetSeq(1n);
+
+    const items = projectFeed(
+      [
+        event({ type: 'user.message', threadId: 't1', actor: 'user', payload: { text: 'hers', source: 'web', identity: { userId: 'u2', displayName: 'Ksenia' } } }),
+        event({ type: 'user.message', threadId: 't1', actor: 'user', payload: { text: 'nameless', identity: { userId: 'u3', displayName: null, username: 'kate' } } }),
+        event({ type: 'user.message', threadId: 't1', actor: 'user', payload: { text: 'mine', source: 'web', identity: { userId: 'me', displayName: 'Vladimir' } } }),
+        event({ type: 'user.message', threadId: 't1', actor: 'user', payload: { text: 'legacy', identity: { username: 'loysagienn', firstName: 'Vladimir' } } }),
+        event({ type: 'thread.cancel', threadId: 'main', targetThreadId: 't1', actor: 'user', payload: { reason: 'enough', identity: { userId: 'u2', displayName: 'Ksenia' } } }),
+        event({ type: 'thread.interrupt', threadId: 'main', targetThreadId: 't1', actor: 'user', payload: { identity: { userId: 'me', displayName: 'Vladimir' } } }),
+      ],
+      { ...ctx, you: 'Vladimir' },
+    );
+
+    assert.deepEqual(
+      items.map(item => (item.kind === 'message' ? [item.from, item.variant ?? null, item.text] : item.kind === 'sys' ? item.text : item.kind)),
+      [
+        ['Ksenia', 'user', 'hers'],
+        ['kate', 'user', 'nameless'],
+        ['you', 'user', 'mine'],
+        ['you', 'user', 'legacy'],
+        'Ksenia asked to cancel the thread — enough',
+        'Vladimir stopped the turn — the agent halted and is awaiting a message',
+      ],
+    );
+  });
+
   it('shows a reply somebody else wrote into a remote session under their name, not as yours', () => {
     resetSeq(1n);
 

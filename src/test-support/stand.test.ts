@@ -68,7 +68,7 @@ describe('stand', () => {
     const me = await stand.request('GET', '/api/me');
 
     assert.equal(me.status, 200);
-    assert.deepEqual(me.json<MeResponse>(), { workspaceId: stand.workspaceId, workspaceName: null, operatorName: null, mainThreadId: stand.mainThreadId });
+    assert.deepEqual(me.json<MeResponse>(), { workspaceId: stand.workspaceId, workspaceName: null, mainThreadId: stand.mainThreadId, user: { userId: stand.userId, displayName: 'Operator' } });
 
     const anonymous = await stand.request('GET', '/api/me', { cookie: null });
 

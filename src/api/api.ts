@@ -16,7 +16,9 @@ import { prisma } from '../db/client.ts';
 import { config } from '../config/index.ts';
 import { prepareObject } from '../utils/serialize-json.ts';
 import { parseJsonBody } from './json-body.ts';
-import { SettingsError, parseSettingsPatch } from './settings.ts';
+import { SettingsError, parseSettingsPatch, parseUserPatch } from './settings.ts';
+import { joinConsoleUser, readUser, setUserName, webIdentity } from '../users/index.ts';
+import type { UserIdentity } from '../core/event-types.ts';
 import { BOT_API_TIMEOUT_MS, createTelegramFacts } from './telegram-facts.ts';
 import { countThreadsAt, ensureOperatorWorkspace, getMainThread, getThread, listThreads } from '../core/threads.ts';
 import { getEventsAfter, listThreadEvents } from '../core/events.ts';
@@ -78,6 +80,8 @@ import type {
   LlmRequestsResponse,
   LogoutResponse,
   MeResponse,
+  UserResponse,
+  UserView,
   NamesView,
   PostThreadMessageResponse,
   ThreadCommandResponse,
@@ -130,16 +134,18 @@ async function readJsonBody(ctx: Context): Promise<Record<string, unknown> | nul
 }
 
 // Session gate for every endpoint except the code exchange itself. The
-// session row always carries a workspaceId (anonymous sessions are never
-// created), but the column is nullable — the guard re-checks. The request
-// acts in one workspace of the session (session.ts, "Several workspaces"):
-// the one it names, or the primary one; naming a workspace this browser is
-// not signed in to is a 401 of its own code — the tab's workspace is gone,
-// the browser's session is not.
+// session row always carries a workspaceId and a userId (anonymous
+// sessions are never created, a row without a user is no session —
+// session.ts), but the columns are nullable — the guard re-checks. The
+// request acts in one workspace of the session (session.ts, "Several
+// workspaces"): the one it names, or the primary one; naming a workspace
+// this browser is not signed in to is a 401 of its own code — the tab's
+// workspace is gone, the browser's session is not. The user of the session
+// is the author of what the request writes (ctx.state.userId).
 async function gate(ctx: Context, next: Next, { fallbackToPrimary }: { fallbackToPrimary: boolean }): Promise<void> {
   const session = await getSession(ctx);
 
-  if (!session || !session.workspaceId) {
+  if (!session || !session.workspaceId || !session.userId) {
     sendError(ctx, 401, 'unauthorized', 'No valid session');
 
     return;
@@ -156,7 +162,16 @@ async function gate(ctx: Context, next: Next, { fallbackToPrimary }: { fallbackT
 
   ctx.state.session = session;
   ctx.state.workspaceId = workspaceId;
+  ctx.state.userId = session.userId;
   await next();
+}
+
+// The identity the request's writes carry: the user of the session and
+// their name as of now (src/users).
+async function requestIdentity(ctx: Context): Promise<UserIdentity> {
+  const userId = ctx.state.userId as string;
+
+  return webIdentity((await readUser(userId)) ?? { userId, displayName: null });
 }
 
 function requireSession(ctx: Context, next: Next): Promise<void> {
@@ -285,7 +300,8 @@ router.post('/auth/console-code', async ctx => {
   lastConsoleCodeAt = now;
 
   const mainThread = await ensureOperatorWorkspace();
-  const code = createAuthCode(mainThread.workspaceId, 'console');
+  const operator = await joinConsoleUser(mainThread.workspaceId);
+  const code = createAuthCode({ workspaceId: mainThread.workspaceId, userId: operator.userId }, 'console');
 
   console.log(`[web] login code for the operator workspace (one-time, valid 10 minutes): ${code}`);
 
@@ -307,35 +323,73 @@ router.post('/auth', async ctx => {
     return;
   }
 
-  // A browser already signed in adds this workspace to its session.
-  await signInWorkspace(ctx, consumed.workspaceId, consumed.source);
+  // A browser already signed in as this user adds the workspace to its
+  // session.
+  await signInWorkspace(ctx, { workspaceId: consumed.workspaceId, userId: consumed.userId }, consumed.source);
 
-  ctx.body = prepareObject(await buildMeResponse(consumed.workspaceId));
+  ctx.body = prepareObject(await buildMeResponse(consumed.workspaceId, consumed.userId));
 });
 
-// The names as the console shows them: the stored workspace name wins over
-// the group's title (and spares the Bot API call); the operator's name is
-// the stored one or nothing.
-type StoredNames = { workspaceName: string | null; operatorName: string | null };
+// The name as the console shows it: the stored workspace name wins over
+// the group's title (and spares the Bot API call).
+type StoredNames = { workspaceName: string | null };
 
 function namesOf(workspace: StoredNames | null, groupTitle: string | null): NamesView {
-  return { workspaceName: workspace?.workspaceName ?? groupTitle, operatorName: workspace?.operatorName ?? null };
+  return { workspaceName: workspace?.workspaceName ?? groupTitle };
 }
 
 async function readNames(workspaceId: string): Promise<NamesView> {
-  const workspace = await prisma.workspace.findUnique({ where: { id: workspaceId }, select: { workspaceName: true, operatorName: true } });
+  const workspace = await prisma.workspace.findUnique({ where: { id: workspaceId }, select: { workspaceName: true } });
 
   return namesOf(workspace, workspace?.workspaceName ? null : await getGroupTitle(workspaceId));
 }
 
-async function buildMeResponse(workspaceId: string): Promise<MeResponse> {
-  const [names, mainThread] = await Promise.all([readNames(workspaceId), getMainThread(workspaceId)]);
+// The user of the session as `me` words them; a row gone from under a
+// live session reads as a nameless user rather than a refusal.
+async function readUserView(userId: string): Promise<UserView> {
+  const user = await readUser(userId);
 
-  return { workspaceId, ...names, mainThreadId: mainThread?.id ?? null };
+  return { userId, displayName: user?.displayName ?? null };
+}
+
+async function buildMeResponse(workspaceId: string, userId: string): Promise<MeResponse> {
+  const [names, mainThread, user] = await Promise.all([readNames(workspaceId), getMainThread(workspaceId), readUserView(userId)]);
+
+  return { workspaceId, ...names, mainThreadId: mainThread?.id ?? null, user };
 }
 
 router.get('/me', requireSessionOrPrimary, async ctx => {
-  ctx.body = prepareObject(await buildMeResponse(ctx.state.workspaceId as string));
+  ctx.body = prepareObject(await buildMeResponse(ctx.state.workspaceId as string, ctx.state.userId as string));
+});
+
+// The user's own name (src/users): a row of the user, not of the workspace
+// — no event, the answer is the user as `me` words them.
+router.patch('/user', requireSession, async ctx => {
+  const body = await readJsonBody(ctx);
+
+  if (!body) {
+    return;
+  }
+
+  let patch;
+
+  try {
+    patch = parseUserPatch(body);
+  } catch (error) {
+    if (error instanceof SettingsError) {
+      sendError(ctx, 400, 'bad_request', error.message);
+
+      return;
+    }
+
+    throw error;
+  }
+
+  const userId = ctx.state.userId as string;
+  const user = patch.displayName === undefined ? await readUserView(userId) : await setUserName(userId, patch.displayName);
+  const response: UserResponse = { user: { userId: user.userId, displayName: user.displayName } };
+
+  ctx.body = prepareObject(response);
 });
 
 // The workspaces of this browser (the switcher, Settings): names as /me
@@ -421,7 +475,7 @@ router.patch('/settings', requireSession, async ctx => {
     const groupTitle = patch.workspaceName ? null : await getGroupTitle(workspaceId);
 
     response = await registryMutation(async (tx, journal) => {
-      const workspace = await tx.workspace.update({ where: { id: workspaceId }, data: patch, select: { workspaceName: true, operatorName: true } });
+      const workspace = await tx.workspace.update({ where: { id: workspaceId }, data: patch, select: { workspaceName: true } });
       const settings = namesOf(workspace, groupTitle);
       const seq = await journal('settings.updated', settings, { kind: 'user', workspaceId });
 
@@ -450,7 +504,7 @@ router.post('/logout', requireSession, async ctx => {
 router.get('/snapshot', requireSession, async ctx => {
   const workspaceId = ctx.state.workspaceId as string;
 
-  ctx.body = prepareObject(await buildSnapshot(workspaceId, () => buildMeResponse(workspaceId)));
+  ctx.body = prepareObject(await buildSnapshot(workspaceId, () => buildMeResponse(workspaceId, ctx.state.userId as string)));
 });
 
 const eventStream = createEventStreamHandler({
@@ -606,12 +660,11 @@ router.get('/threads/:id/events', requireSession, async ctx => {
 // The web chat's inbound: a user.message into one of the session's threads.
 // The same canonical event every channel writes (Telegram, CCR) — the
 // router wakes the thread's run; the coordinator rises lazily for the main
-// thread. The identity is the workspace's one human (the session IS the
-// operator's), the source marks the channel for adapters and renderers.
+// thread. The identity is the user of the session (requestIdentity), the
+// source marks the channel for adapters and renderers.
 
 const MESSAGE_TEXT_MAX_CHARS = 20_000;
 const MESSAGE_FILES_MAX = 20;
-const WEB_IDENTITY = { username: 'operator' };
 
 // The files of a message: the stored files of the session's workspace,
 // each by the rule of every model- and user-facing lookup (getWorkspaceFile — a
@@ -718,7 +771,7 @@ router.post('/threads/:id/messages', requireSession, async ctx => {
     payload: {
       text: text || null,
       ...(files.length ? { blocks: files.map(fileContentBlock), files: files.map(messageFile) } : {}),
-      identity: WEB_IDENTITY,
+      identity: await requestIdentity(ctx),
       source: 'web',
     },
   });
@@ -781,7 +834,7 @@ router.post('/threads/:id/interrupt', requireSession, async ctx => {
     workspaceId: thread.workspaceId,
     threadId: thread.parentId,
     targetThreadId: thread.id,
-    payload: { reason: 'interrupted_by_user', identity: WEB_IDENTITY, source: 'web' },
+    payload: { reason: 'interrupted_by_user', identity: await requestIdentity(ctx), source: 'web' },
   });
 
   if (!result.written) {
@@ -821,7 +874,7 @@ router.post('/threads/:id/cancel', requireSession, async ctx => {
     workspaceId: thread.workspaceId,
     threadId: thread.parentId,
     targetThreadId: thread.id,
-    payload: { reason, identity: WEB_IDENTITY, source: 'web' },
+    payload: { reason, identity: await requestIdentity(ctx), source: 'web' },
   });
 
   if (!result.written) {
@@ -869,7 +922,7 @@ async function writeRemoteCommand(ctx: Context, thread: Thread & { parentId: str
     workspaceId: thread.workspaceId,
     threadId: thread.parentId,
     targetThreadId: thread.id,
-    payload: { ...payload, identity: WEB_IDENTITY, source: 'web' },
+    payload: { ...payload, identity: await requestIdentity(ctx), source: 'web' },
   });
 
   if (!result.written) {

@@ -23,14 +23,21 @@ export type AuthRequest = {
 // the code goes to the server's stdout, never over the wire. 429 when one
 // was printed moments ago.
 
-// The two names of Settings: the workspace's own and the operator's.
+// The workspace's name of Settings.
 export type NamesView = {
   // The workspace's name: the stored one (Settings), else the bound Telegram
   // group's title when that channel is on; null otherwise.
   workspaceName: string | null;
-  // The operator's name, null until set in Settings: the sidebar line under
-  // the workspace and "you" in the feed (never the agents' prompts).
-  operatorName: string | null;
+};
+
+// The user behind this browser's session (src/users): the one the code was
+// issued to. The name is theirs across every workspace — the sidebar line
+// under the workspace, "you" in the feed, the author of their messages in
+// the agents' prompts; null while they have none (the Telegram profile
+// fills it in, Settings sets it).
+export type UserView = {
+  userId: string;
+  displayName: string | null;
 };
 
 export type MeResponse = NamesView & {
@@ -38,6 +45,21 @@ export type MeResponse = NamesView & {
   // The workspace's main thread (the coordinator's root thread) — the
   // header's «to the coordinator» link target. Null only before activation.
   mainThreadId: string | null;
+  user: UserView;
+};
+
+// PATCH /api/user: the user's own name. null, empty or blank — cleared
+// (the channel's profile names them again, once it sees them); a string —
+// trimmed, at most 100 chars, theirs from now on. 400 for another type or
+// a longer name. Not an event of the log (the user spans workspaces): the
+// answer updates `me` of the saving tab, another tab learns it with its
+// next /api/me.
+export type UserPatchRequest = {
+  displayName?: string | null;
+};
+
+export type UserResponse = {
+  user: UserView;
 };
 
 // POST /api/logout signs this browser out of the workspace the request acts
@@ -50,13 +72,12 @@ export type LogoutResponse = {
 };
 
 // PATCH /api/settings: a field absent — left alone; null, empty or blank —
-// cleared (the workspace goes by the group's title again, the operator has
-// no name); a string — trimmed, at most 100 chars. 400 for another type or
-// a longer name. The answer is the effective names, as /api/me reports them,
-// and where the change stands in the log.
+// cleared (the workspace goes by the group's title again); a string —
+// trimmed, at most 100 chars. 400 for another type or a longer name. The
+// answer is the effective names, as /api/me reports them, and where the
+// change stands in the log.
 export type SettingsPatchRequest = {
   workspaceName?: string | null;
-  operatorName?: string | null;
 };
 
 export type SettingsResponse = {

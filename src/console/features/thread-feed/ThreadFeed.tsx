@@ -13,7 +13,7 @@ import { useAppDispatch, useAppSelector } from '../../store/hooks.ts';
 import { openViewer } from '../../store/ui/actions.ts';
 import { commandThread } from '../../store/threads/actions.ts';
 import { selectThreadCommandPending } from '../../store/ui/selectors.ts';
-import { selectOperatorName } from '../../store/session/selectors.ts';
+import { selectUserName } from '../../store/session/selectors.ts';
 import { selectThreadState } from '../../store/sessions/selectors.ts';
 import { Att, AttThumb, Atts } from '../../ui/Att/Att.tsx';
 import { ChildThread } from '../../ui/ChildThread/ChildThread.tsx';
@@ -106,7 +106,7 @@ export function Attachments({ atts, context }: { atts: Attachment[]; context?: s
 }
 
 function FeedMessage({ item, now }: { item: MessageItem; now: Date }) {
-  const you = useAppSelector(selectOperatorName) ?? undefined;
+  const you = useAppSelector(selectUserName) ?? undefined;
   const dispatch = useAppDispatch();
   const ask = item.ask;
   const deciding = useAppSelector(s => (ask ? selectThreadCommandPending(s, ask.threadId, 'decide') : false));
@@ -136,7 +136,7 @@ function FeedMessage({ item, now }: { item: MessageItem; now: Date }) {
       {/* The user's own text keeps its single line breaks (typed, not
           Markdown-wrapped); an agent's Markdown reads by the usual rules. */}
       {item.text ? <Md source={item.text} breaks={item.variant === 'user'} /> : null}
-      <Attachments atts={item.atts} context={`${item.from === 'you' ? (you ?? 'you') : item.from}${showsRecipient(item.from, item.to, item.tag) ? ` → ${item.to}` : ''}, ${dateTimeLabel(item.at, now)}`} />
+      <Attachments atts={item.atts} context={`${item.from === 'you' ? (you ?? 'you') : item.from}${showsRecipient(item.from, item.to, item.tag, item.variant) ? ` → ${item.to}` : ''}, ${dateTimeLabel(item.at, now)}`} />
     </Message>
   );
 }

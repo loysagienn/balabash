@@ -14,7 +14,7 @@
 // sub-agent brought back shows where it finished, as its report row.
 
 import type { Event, JsonObject } from '../../../core/contract.ts';
-import type { EventOf, EventPayloads, EventType, InboundFile, SessionPlanItem } from '../../../core/event-types.ts';
+import type { EventOf, EventPayloads, EventType, InboundFile, SessionPlanItem, UserIdentity } from '../../../core/event-types.ts';
 import { dateTimeLabel } from '../../lib/format/index.ts';
 import { formatTokensK } from '../../ui/Ring/Ring.logic.ts';
 import type { IconName } from '../../ui/Icon/Icon.tsx';
@@ -31,9 +31,13 @@ export type FeedContext = {
   parentAgent: string | null;
   // The agent of another thread the store knows (a child of this one), or null.
   agentOf: (threadId: string) => string | null;
-  // The operator's name for the system lines ("<name> asked to cancel the
-  // thread"); null — "You". The messages keep the "you" party and the
-  // Message block names it.
+  // The user of this browser's session: an event of theirs (identity.userId)
+  // is "you" — and so is one written before users existed. Another user's
+  // goes under their name. Null — nobody signed in (a scene).
+  userId: string | null;
+  // Your name for the system lines ("<name> asked to cancel the thread");
+  // null — "You". The messages keep the "you" party and the Message block
+  // names it.
   you: string | null;
 };
 
@@ -215,8 +219,40 @@ function userAtts(payload: EventPayloads['user.message'], key: string): Attachme
   return Array.isArray(payload.blocks) ? contentAtts(payload.blocks, key) : [];
 }
 
-function who(event: Event): string {
-  return event.actor === 'user' ? 'you' : (event.agentName ?? 'system');
+// The identity of a user-authored event (user.message, the thread
+// commands) — in the payload, as the channel wrote it.
+function identityOf(event: Event): UserIdentity | undefined {
+  const identity = (event.payload as { identity?: unknown }).identity;
+
+  return identity && typeof identity === 'object' ? (identity as UserIdentity) : undefined;
+}
+
+// Another user's name for an event of theirs; null when the event is yours
+// — or from before users existed, when every user's event reads as yours.
+function otherUser(event: Event, ctx: FeedContext): string | null {
+  const identity = identityOf(event);
+
+  if (!identity?.userId || identity.userId === ctx.userId) {
+    return null;
+  }
+
+  return identity.displayName || identity.username || 'another user';
+}
+
+// The party an event speaks for: "you" for a user's (the Message block and
+// the system lines name you), another user by their name, an agent by its.
+function who(event: Event, ctx: FeedContext): string {
+  return event.actor === 'user' ? (otherUser(event, ctx) ?? 'you') : (event.agentName ?? 'system');
+}
+
+// The words of a command's author in a system line: a person — your name
+// (Settings), "You", or the other user's name; an agent — its name.
+function actorWords(event: Event, ctx: FeedContext): string {
+  if (event.actor !== 'user') {
+    return event.agentName ?? 'system';
+  }
+
+  return otherUser(event, ctx) ?? ctx.you ?? 'You';
 }
 
 function planState(status: string): PlanItemView['state'] {
@@ -458,7 +494,7 @@ class Builder {
         const text = event.payload.input ?? '';
         const atts = Array.isArray(event.payload.files) && event.payload.files.length > 0 ? messageFileAtts(event.payload.files, key) : fileIdAtts(event.payload.fileIds ?? [], key);
 
-        this.push({ kind: 'message', key, at, from: who(event), to: this.ctx.agent, variant: 'task', tag: 'task', text, atts, fold: shouldFold(text) });
+        this.push({ kind: 'message', key, at, from: who(event, this.ctx), to: this.ctx.agent, variant: 'task', tag: 'task', text, atts, fold: shouldFold(text) });
       } else if (event.threadId) {
         const child: ChildItem = {
           kind: 'child',
@@ -541,13 +577,13 @@ class Builder {
     }
 
     if (is(event, 'thread.cancel')) {
-      this.push({ kind: 'sys', key, at, icon: 'circle-slash', text: `${who(event) === 'you' ? (this.ctx.you ?? 'You') : who(event)} asked to cancel the thread${event.payload.reason ? ` — ${event.payload.reason}` : ''}` });
+      this.push({ kind: 'sys', key, at, icon: 'circle-slash', text: `${actorWords(event, this.ctx)} asked to cancel the thread${event.payload.reason ? ` — ${event.payload.reason}` : ''}` });
 
       return;
     }
 
     if (is(event, 'thread.interrupt')) {
-      this.push({ kind: 'sys', key, at, icon: 'square', level: 'normal', text: `${who(event) === 'you' ? (this.ctx.you ?? 'You') : who(event)} stopped the turn — the agent halted and is awaiting a message` });
+      this.push({ kind: 'sys', key, at, icon: 'square', level: 'normal', text: `${actorWords(event, this.ctx)} stopped the turn — the agent halted and is awaiting a message` });
 
       return;
     }
@@ -558,13 +594,13 @@ class Builder {
     // (thread.decide) draws no line of its own: the resolved card says it
     // (agent.ask.resolved, with who decided).
     if (is(event, 'thread.finish')) {
-      this.push({ kind: 'sys', key, at, icon: 'flag', level: 'normal', text: `${who(event) === 'you' ? (this.ctx.you ?? 'You') : who(event)} asked the agent to finish the thread — it wraps up and ends with its report` });
+      this.push({ kind: 'sys', key, at, icon: 'flag', level: 'normal', text: `${actorWords(event, this.ctx)} asked the agent to finish the thread — it wraps up and ends with its report` });
 
       return;
     }
 
     if (is(event, 'thread.pause')) {
-      this.push({ kind: 'sys', key, at, icon: 'moon', level: 'normal', text: `${who(event) === 'you' ? (this.ctx.you ?? 'You') : who(event)} paused the thread` });
+      this.push({ kind: 'sys', key, at, icon: 'moon', level: 'normal', text: `${actorWords(event, this.ctx)} paused the thread` });
 
       return;
     }
@@ -598,11 +634,13 @@ class Builder {
       const card = this.items.find((item): item is MessageItem => item.kind === 'message' && item.ask?.askId === event.payload.askId && item.ask.outcome === null);
 
       if (card) {
-        // Decided from Balabash — the operator by name (the name Settings
-        // holds, else the identity's); closed in the external system — no one.
+        // Decided from Balabash — by name: yours (Settings, else the
+        // identity's, else "you"), another user's; closed in the external
+        // system — no one.
         const identity = event.payload.by?.identity;
+        const other = identity?.userId && identity.userId !== this.ctx.userId ? identity.displayName || identity.username || 'another user' : null;
 
-        card.ask = { ...card.ask!, outcome: event.payload.outcome, decidedBy: identity ? (this.ctx.you ?? identity.username ?? 'you') : null, decidedAt: identity ? at : null };
+        card.ask = { ...card.ask!, outcome: event.payload.outcome, decidedBy: identity ? (other ?? this.ctx.you ?? identity.username ?? 'you') : null, decidedAt: identity ? at : null };
       } else {
         this.push({ kind: 'sys', key, at, icon: 'check', text: `Question resolved: ${event.payload.outcome}` });
       }
@@ -652,7 +690,9 @@ class Builder {
         return;
       }
 
-      this.push({ kind: 'message', key, at, from: 'you', to: this.ctx.agent, variant: 'user', text, atts, fold: false });
+      // Another user's message (a shared workspace): their words under
+      // their name — a person's block, not yours.
+      this.push({ kind: 'message', key, at, from: otherUser(event, this.ctx) ?? 'you', to: this.ctx.agent, variant: 'user', text, atts, fold: false });
 
       return;
     }

@@ -1,4 +1,5 @@
-import type { MeResponse, NamesView, SettingsPatchRequest } from '../../../api/contract.ts';
+import type { MeResponse } from '../../../api/contract.ts';
+import type { NamesPatch, NamesSaved } from './actions.ts';
 import type { ApiFailure } from '../../lib/api/index.ts';
 import type { Action } from '../types.ts';
 
@@ -53,17 +54,17 @@ export type SessionState = {
   signedInHere: boolean;
 };
 
-export type SettingsField = keyof SettingsPatchRequest;
+export type SettingsField = keyof NamesPatch;
 export type SettingsSaving = Record<SettingsField, boolean>;
 export type SettingsSaved = Record<SettingsField, number>;
 
-export const SETTINGS_FIELDS: readonly SettingsField[] = ['workspaceName', 'operatorName'];
+export const SETTINGS_FIELDS: readonly SettingsField[] = ['workspaceName', 'displayName'];
 
-export function patchFields(patch: SettingsPatchRequest): SettingsField[] {
+export function patchFields(patch: NamesPatch): SettingsField[] {
   return SETTINGS_FIELDS.filter(field => patch[field] !== undefined);
 }
 
-function withSaving(state: SessionState, patch: SettingsPatchRequest, saving: boolean): SettingsSaving {
+function withSaving(state: SessionState, patch: NamesPatch, saving: boolean): SettingsSaving {
   const next = { ...state.settingsSaving };
 
   for (const field of patchFields(patch)) {
@@ -84,23 +85,32 @@ function ahead(seq: bigint | null, held: bigint | null, orEqual = false): boolea
   return held === null || (orEqual ? seq >= held : seq > held);
 }
 
-// The answer carries both names as the row had them at its event: taken
-// as a whole when that event is ahead of the names held, else left — a
-// late answer of one card never puts back the other card's name saved
-// meanwhile, nor a name another tab saved after. The count of the saved
+// The answer of the workspace's name carries the names as the row had
+// them at its event: taken when that event is ahead of the names held,
+// else left — a late answer never puts back a name another tab saved
+// after. The answer of your name is the user as the server now words
+// them: taken as is (no event, no position). The count of the saved
 // fields moves either way: the save did land.
-function withSaved(state: SessionState, patch: SettingsPatchRequest, settings: NamesView, seq: bigint | null): Pick<SessionState, 'me' | 'settingsSaved' | 'namesSeq'> {
+function withSaved(state: SessionState, patch: NamesPatch, answer: NamesSaved): Pick<SessionState, 'me' | 'settingsSaved' | 'namesSeq'> {
   const saved = { ...state.settingsSaved };
 
   for (const field of patchFields(patch)) {
     saved[field] += 1;
   }
 
-  if (!state.me || !ahead(seq, state.namesSeq)) {
+  if (!state.me) {
     return { me: state.me, settingsSaved: saved, namesSeq: state.namesSeq };
   }
 
-  return { me: { ...state.me, ...settings }, settingsSaved: saved, namesSeq: seq };
+  if (answer.kind === 'user') {
+    return { me: { ...state.me, user: answer.user }, settingsSaved: saved, namesSeq: state.namesSeq };
+  }
+
+  if (!ahead(answer.seq, state.namesSeq)) {
+    return { me: state.me, settingsSaved: saved, namesSeq: state.namesSeq };
+  }
+
+  return { me: { ...state.me, ...answer.settings }, settingsSaved: saved, namesSeq: answer.seq };
 }
 
 export const initialSession: SessionState = {
@@ -109,8 +119,8 @@ export const initialSession: SessionState = {
   error: null,
   login: { request: null, error: null, codePrinted: false },
   logoutPending: false,
-  settingsSaving: { workspaceName: false, operatorName: false },
-  settingsSaved: { workspaceName: 0, operatorName: 0 },
+  settingsSaving: { workspaceName: false, displayName: false },
+  settingsSaved: { workspaceName: 0, displayName: 0 },
   namesSeq: null,
   leaving: null,
   signedInHere: false,
@@ -152,7 +162,7 @@ export function sessionReducer(state: SessionState = initialSession, action: Act
     case 'SAVE_SETTINGS':
       return { ...state, settingsSaving: withSaving(state, action.patch, true) };
     case 'SAVE_SETTINGS_DONE':
-      return { ...state, ...withSaved(state, action.patch, action.settings, action.seq), settingsSaving: withSaving(state, action.patch, false) };
+      return { ...state, ...withSaved(state, action.patch, action.saved), settingsSaving: withSaving(state, action.patch, false) };
     case 'SAVE_SETTINGS_FAIL':
       return { ...state, settingsSaving: withSaving(state, action.patch, false) };
     case 'SNAPSHOT_LOAD_DONE': {
@@ -160,8 +170,9 @@ export function sessionReducer(state: SessionState = initialSession, action: Act
       // least as of asOfSeq — a change between /me and the stamp is here
       // and the tail from the stamp will not bring it. Taken whole when the
       // stamp is at or ahead of the names held; a snapshot stamped behind
-      // them (a Retry answering late) keeps the names, the tail from its
-      // stamp brings their event again. Nobody signed in — nothing to do.
+      // them (a Retry answering late) keeps the workspace's name, the tail
+      // from its stamp brings its event again (the user is read by place —
+      // taken either way). Nobody signed in — nothing to do.
       if (!state.me) {
         return state;
       }
@@ -169,7 +180,7 @@ export function sessionReducer(state: SessionState = initialSession, action: Act
       const { asOfSeq, me } = action.snapshot;
 
       if (!ahead(asOfSeq, state.namesSeq, true)) {
-        return { ...state, me: { ...me, workspaceName: state.me.workspaceName, operatorName: state.me.operatorName } };
+        return { ...state, me: { ...me, workspaceName: state.me.workspaceName } };
       }
 
       return { ...state, me, namesSeq: asOfSeq };
@@ -184,9 +195,9 @@ export function sessionReducer(state: SessionState = initialSession, action: Act
         return state;
       }
 
-      const { workspaceName, operatorName } = action.event.payload;
+      const { workspaceName } = action.event.payload;
 
-      return { ...state, me: { ...state.me, workspaceName: workspaceName ?? null, operatorName: operatorName ?? null }, namesSeq: action.event.seq };
+      return { ...state, me: { ...state.me, workspaceName: workspaceName ?? null }, namesSeq: action.event.seq };
     }
     case 'LOGOUT_DONE':
     case 'SESSION_LOST':

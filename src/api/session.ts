@@ -6,7 +6,11 @@
 // token lives only in the cookie, the DB stores a sha256(token + pepper)
 // hash, the token rotates after 24 hours, the session slides for 30 days,
 // lastUsed updates are rate-limited. One session holds every workspace the
-// browser is signed in to (see "Several workspaces" below).
+// browser is signed in to (see "Several workspaces" below) and belongs to
+// one user — the one the code was issued to (web_sessions.user_id). A row
+// without a user was born before users existed: it is no session any more
+// (the browser signs in again, once), the row stays for its expiry sweep —
+// and for the bundle before users, should the installation fall back to it.
 
 import crypto from 'node:crypto';
 import type { Context } from 'koa';
@@ -14,6 +18,7 @@ import { prisma } from '../db/client.ts';
 import { config } from '../config/index.ts';
 import type { SessionModel, SessionWorkspaceModel } from '../../prisma-generated/models.ts';
 import type { LoginSource } from './contract.ts';
+import type { AuthGrant } from './auth-codes.ts';
 
 const SESSION_ID_COOKIE_NAME = 'session_id';
 const SESSION_TOKEN_BYTES = 32;
@@ -172,6 +177,10 @@ export async function getSession(ctx: Context): Promise<SessionModel | null> {
     return null;
   }
 
+  if (!session.userId) {
+    return null;
+  }
+
   if (shouldRotateToken(session)) {
     // lastUsed is updated as part of rotation.
     return rotateSessionToken(ctx, session);
@@ -190,9 +199,10 @@ export async function getSession(ctx: Context): Promise<SessionModel | null> {
 /**
  * Creates a session for a user who just exchanged a one-time auth code and
  * sets the cookie. This is the ONLY place a session row is born; the
- * workspace the code was for is its first (and primary) workspace.
+ * workspace the code was for is its first (and primary) workspace, the
+ * user it was issued to is the session's user.
  */
-export async function createUserSession(ctx: Context, workspaceId: string, loginSource: LoginSource): Promise<SessionModel> {
+export async function createUserSession(ctx: Context, { workspaceId, userId }: AuthGrant, loginSource: LoginSource): Promise<SessionModel> {
   const token = generateSessionToken();
 
   const session = await prisma.$transaction(async tx => {
@@ -200,6 +210,7 @@ export async function createUserSession(ctx: Context, workspaceId: string, login
       data: {
         userAgent: ctx.headers['user-agent'] || '',
         workspaceId,
+        userId,
         tokenHash: hashSessionToken(token),
         lastUsed: new Date(),
         loginSource,
@@ -270,19 +281,25 @@ export function listSessionWorkspaces(sessionId: string): Promise<SessionWorkspa
 
 /**
  * Signs this browser in to the workspace of an exchanged code: a browser
- * with a live session adds the workspace to it (signing in to a workspace
- * it already has changes nothing), any other gets a new session.
+ * with a live session of the same user adds the workspace to it (signing
+ * in to a workspace it already has changes nothing); any other — no
+ * session, or a session of another user (the browser is somebody else's
+ * now) — gets a new session, the other user's ends.
  */
-export async function signInWorkspace(ctx: Context, workspaceId: string, loginSource: LoginSource): Promise<SessionModel> {
+export async function signInWorkspace(ctx: Context, grant: AuthGrant, loginSource: LoginSource): Promise<SessionModel> {
   const session = await getSession(ctx);
 
-  if (!session || !session.workspaceId) {
-    return createUserSession(ctx, workspaceId, loginSource);
+  if (!session || !session.workspaceId || session.userId !== grant.userId) {
+    if (session) {
+      await deleteSessionRows(session.id);
+    }
+
+    return createUserSession(ctx, grant, loginSource);
   }
 
   await prisma.sessionWorkspace.upsert({
-    where: { sessionId_workspaceId: { sessionId: session.id, workspaceId } },
-    create: { sessionId: session.id, workspaceId, loginSource },
+    where: { sessionId_workspaceId: { sessionId: session.id, workspaceId: grant.workspaceId } },
+    create: { sessionId: session.id, workspaceId: grant.workspaceId, loginSource },
     update: {},
   });
 

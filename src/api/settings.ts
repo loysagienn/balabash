@@ -1,22 +1,27 @@
 // The settings patch of the console (PATCH /api/settings): the workspace's
-// own name and the operator's name. Pure: the transport (src/api/api.ts)
-// reads the body and answers the status, the row is written there too.
+// own name — and, by the same rule, the user's name (PATCH /api/user).
+// Pure: the transport (src/api/api.ts) reads the body and answers the
+// status, the rows are written there too.
 //
 // A field absent from the body is left alone; a null, empty or blank field
 // clears the stored value (the workspace then goes by the bound Telegram
-// group's title again, the operator has no name); a string is trimmed and
-// capped — a field of another type is a refusal, never a "keep".
+// group's title again, the user's name goes back to the channel's
+// profile); a string is trimmed and capped — a field of another type is a
+// refusal, never a "keep".
 
 export const NAME_MAX_LENGTH = 100;
 
 export type SettingsPatch = {
   workspaceName?: string | null;
-  operatorName?: string | null;
 };
 
 export type SettingsField = keyof SettingsPatch;
 
-export const SETTINGS_FIELDS: readonly SettingsField[] = ['workspaceName', 'operatorName'];
+export const SETTINGS_FIELDS: readonly SettingsField[] = ['workspaceName'];
+
+export type UserPatch = {
+  displayName?: string | null;
+};
 
 export class SettingsError extends Error {
   constructor(message: string) {
@@ -25,7 +30,7 @@ export class SettingsError extends Error {
   }
 }
 
-function name(field: SettingsField, value: unknown): string | null | undefined {
+function name(field: string, value: unknown): string | null | undefined {
   if (value === undefined) {
     return undefined;
   }
@@ -59,4 +64,10 @@ export function parseSettingsPatch(raw: Record<string, unknown>): SettingsPatch 
   }
 
   return patch;
+}
+
+export function parseUserPatch(raw: Record<string, unknown>): UserPatch {
+  const displayName = name('displayName', raw.displayName);
+
+  return displayName === undefined ? {} : { displayName };
 }

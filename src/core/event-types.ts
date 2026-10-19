@@ -8,8 +8,20 @@
 import type { ContentBlock, Event, JsonObject, JsonValue, NotificationLevel, ThreadSummary, ToolResult } from './contract.ts';
 import type { SessionState } from '../projections/session.ts';
 
-// The human behind a user.message, as the channel knew them.
-export type UserIdentity = { firstName?: string; lastName?: string; username?: string };
+// The human behind a user.message or a thread command: the user, and
+// what the channel knew of them.
+export type UserIdentity = {
+  // The user behind the event (src/users) and their name as of it; absent
+  // on events written before users existed.
+  userId?: string;
+  displayName?: string | null;
+  // The channel's handle when it has one: a Telegram username, a remote
+  // system's username.
+  username?: string | null;
+  // The Telegram profile's name, on events written before users existed.
+  firstName?: string | null;
+  lastName?: string | null;
+};
 
 // A file a message refers to — user.message.files (stored by the channel
 // adapter), thread.message.files (the sender's facts, src/core/file-blocks.ts):
@@ -273,7 +285,8 @@ export type EventPayloads = {
 
 export type SettingsRecord = {
   workspaceName: string | null;
-  operatorName: string | null;
+  // The operator's name of the time before users: on events written then.
+  operatorName?: string | null;
 };
 
 // The project row as the registry events carry it (ProjectView of the

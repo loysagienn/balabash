@@ -38,7 +38,7 @@ async function newWorkspace(workspaceName: string): Promise<string> {
 
 // A browser of its own: a fresh session signed in to `workspaceId`.
 async function newBrowser(workspaceId: string): Promise<string> {
-  const reply = await stand.request('POST', '/api/auth', { body: { code: createAuthCode(workspaceId, 'console') }, cookie: null });
+  const reply = await stand.request('POST', '/api/auth', { body: { code: createAuthCode({ workspaceId, userId: stand.userId }, 'console') }, cookie: null });
 
   assert.equal(reply.status, 200, reply.text);
 
@@ -46,7 +46,7 @@ async function newBrowser(workspaceId: string): Promise<string> {
 }
 
 async function signIn(cookie: string, workspaceId: string): Promise<MeResponse> {
-  const reply = await stand.request('POST', '/api/auth', { body: { code: createAuthCode(workspaceId, 'telegram') }, cookie });
+  const reply = await stand.request('POST', '/api/auth', { body: { code: createAuthCode({ workspaceId, userId: stand.userId }, 'telegram') }, cookie });
 
   assert.equal(reply.status, 200, reply.text);
 
@@ -67,7 +67,7 @@ describe('several workspaces in one browser', () => {
   let stranger: string;
 
   before(async () => {
-    await prisma.workspace.update({ where: { id: stand.workspaceId }, data: { workspaceName: 'Personal', operatorName: 'Vladimir' } });
+    await prisma.workspace.update({ where: { id: stand.workspaceId }, data: { workspaceName: 'Personal' } });
     family = await newWorkspace('Family');
     stranger = await newWorkspace('Stranger');
   });
@@ -101,10 +101,10 @@ describe('several workspaces in one browser', () => {
 
     assert.equal(plain.current, stand.workspaceId);
     assert.deepEqual(
-      plain.workspaces.map(w => ({ workspaceId: w.workspaceId, workspaceName: w.workspaceName, operatorName: w.operatorName, loginSource: w.loginSource, at: w.signedInAt instanceof Date })),
+      plain.workspaces.map(w => ({ workspaceId: w.workspaceId, workspaceName: w.workspaceName, loginSource: w.loginSource, at: w.signedInAt instanceof Date })),
       [
-        { workspaceId: stand.workspaceId, workspaceName: 'Personal', operatorName: 'Vladimir', loginSource: 'console', at: true },
-        { workspaceId: family, workspaceName: 'Family', operatorName: null, loginSource: 'telegram', at: true },
+        { workspaceId: stand.workspaceId, workspaceName: 'Personal', loginSource: 'console', at: true },
+        { workspaceId: family, workspaceName: 'Family', loginSource: 'telegram', at: true },
       ],
     );
 

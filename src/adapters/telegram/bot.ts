@@ -1,8 +1,11 @@
 // Telegram forum adapter, inbound side (§6, §11.2). A workspace is a forum
-// group bound 1:1 to a user; activation is /start from an allowlisted login.
+// group bound 1:1 to it; activation is /start from an allowlisted login.
 // Messages of ALL members of an activated group are processed: membership is
-// the workspace trust boundary. The adapter owns transport state (tables, not
-// events) and writes canonical user.message events into threads.
+// the workspace trust boundary — and the fact that makes a member a user of
+// the workspace (src/users: the account's numeric id is the identity, an
+// allowlisted account seen first owns the workspace). The adapter owns
+// transport state (tables, not events) and writes canonical user.message
+// events into threads.
 
 import { Bot, type Context } from 'grammy';
 import { run, sequentialize } from '@grammyjs/runner';
@@ -15,6 +18,8 @@ import type { ContentBlock, FileRef, JsonObject } from '../../core/contract.ts';
 import { ensureMainThread, getMainThread, getThread } from '../../core/threads.ts';
 import { ingestFile } from '../../files/index.ts';
 import { createAuthCode } from '../../api/auth-codes.ts';
+import { resolveTelegramUser, telegramIdentity } from '../../users/index.ts';
+import type { UserRef } from '../../users/index.ts';
 
 const TELEGRAM_DOWNLOAD_LIMIT_BYTES = 20 * 1024 * 1024;
 
@@ -60,12 +65,12 @@ function isAllowedLogin(username: string | undefined): boolean {
   return Boolean(username) && config.telegramAllowedLogins.includes(username!.toLowerCase());
 }
 
-function identityOf(from: NonNullable<Context['from']>): JsonObject {
-  return {
-    username: from.username ?? null,
-    firstName: from.first_name ?? null,
-    lastName: from.last_name ?? null,
-  };
+// The user behind the account acting in a bound group, and the identity
+// their event carries. An allowlisted account may own the workspace.
+async function userOf(from: NonNullable<Context['from']>, workspaceId: string): Promise<{ user: UserRef; identity: JsonObject }> {
+  const user = await resolveTelegramUser(from, workspaceId, { claimOwner: isAllowedLogin(from.username) });
+
+  return { user, identity: telegramIdentity(user, from) as JsonObject };
 }
 
 async function getBoundGroup(chatId: number) {
@@ -159,6 +164,8 @@ export async function initTelegramBot() {
     });
 
     await ensureMainThread(workspace.id);
+    // The one whose /start created the workspace owns it.
+    await userOf(ctx.from!, workspace.id);
 
     const forumHint =
       'is_forum' in chat && chat.is_forum
@@ -215,13 +222,15 @@ export async function initTelegramBot() {
 
     // Author of the command is the parent thread (one hop down); the human
     // identity rides in the payload.
+    const { identity } = await userOf(ctx.from, group.workspaceId);
+
     await appendEvent({
       type: THREAD_CANCEL,
       actor: 'user',
       workspaceId: group.workspaceId,
       threadId: thread.parentId,
       targetThreadId: thread.id,
-      payload: { reason: 'cancelled_by_user', identity: identityOf(ctx.from) },
+      payload: { reason: 'cancelled_by_user', identity },
     });
   });
 
@@ -229,7 +238,8 @@ export async function initTelegramBot() {
   // straight back to the chat and DELIBERATELY bypasses the event journal:
   // the code must never appear in events the assistant or the web window can
   // read. Group membership is the trust boundary — anyone in the workspace
-  // group may log into its web view.
+  // group may log into its web view; the code is issued to the account that
+  // asked, so the session knows its user.
   bot.command('auth_code', async ctx => {
     const chat = ctx.chat;
 
@@ -243,7 +253,8 @@ export async function initTelegramBot() {
       return;
     }
 
-    const code = createAuthCode(group.workspaceId, 'telegram');
+    const { user } = await userOf(ctx.from, group.workspaceId);
+    const code = createAuthCode({ workspaceId: group.workspaceId, userId: user.userId }, 'telegram');
     const messageThreadId = ctx.message?.is_topic_message ? ctx.message.message_thread_id : undefined;
 
     await ctx.reply(
@@ -376,6 +387,8 @@ export async function initTelegramBot() {
       return;
     }
 
+    const { identity } = await userOf(from, group.workspaceId);
+
     await appendEvent({
       type: 'user.message',
       actor: 'user',
@@ -384,7 +397,7 @@ export async function initTelegramBot() {
       payload: {
         text,
         ...(blocks.length ? { blocks, files: fileMetas } : {}),
-        identity: identityOf(from),
+        identity,
       },
     });
   });

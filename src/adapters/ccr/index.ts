@@ -19,6 +19,7 @@ import type { Consumer } from '../../core/consumers.ts';
 import type { ContentBlock, JsonObject } from '../../core/contract.ts';
 import { SYSTEM_EXCEPTION, THREAD_INTERRUPT } from '../../core/envelope.ts';
 import { ensureOperatorWorkspace, getThread } from '../../core/threads.ts';
+import { joinConsoleUser, webIdentity } from '../../users/index.ts';
 import { subscribeSdkStream } from '../../harness/claude-sdk/stream-tap.ts';
 import { getThreadContextUsage } from '../../harness/claude-sdk/context-usage.ts';
 import { resolveOperatorCredentials } from './token.ts';
@@ -26,10 +27,6 @@ import { parseInboundUserMessage } from './frames.ts';
 import { downloadAttachment } from './attachments.ts';
 import { CcrMultiplexer } from './session.ts';
 import { startCcrDelivery } from './delivery.ts';
-
-// The one operator behind the ambient login. A constant by design: the CCR
-// plane has exactly one human, and the workspace is the trust boundary.
-const OPERATOR_IDENTITY: JsonObject = { username: 'operator' };
 
 // Echo suppression bound: pending inbound texts kept per thread while the SDK
 // session replays them back through the stream tap.
@@ -80,6 +77,11 @@ function waitingMetadata(lastLine: string | null): Record<string, unknown> {
 export async function startCcrAdapter(): Promise<CcrAdapter> {
   // The singleton channel serves the operator's workspace and nothing else.
   const { workspaceId } = await ensureOperatorWorkspace();
+  // The one human behind the ambient login is the installation's operator
+  // (src/users): the CCR plane has exactly one, the workspace is the trust
+  // boundary. The name is read once — the plane lives as long as the
+  // process, and a name set meanwhile reaches it with the next restart.
+  const OPERATOR_IDENTITY = webIdentity(await joinConsoleUser(workspaceId)) as JsonObject;
 
   // The app's working indicator per thread: report transitions only.
   const runningStates = new Map<string, 'running' | 'idle'>();

@@ -41,12 +41,18 @@ function isObject(value: unknown): value is Record<string, unknown> {
 // ---------------------------------------------------------------------------
 // Incoming event rendering: how the log's events read inside the session.
 
-// "Who speaks" prefix: the workspace is multi-voice.
+// "Who speaks" prefix: the workspace is multi-voice. The user's own name
+// (identity.displayName, the same from every channel — one person, one
+// voice) with the channel's username; the channel's first and last name
+// for events written before users existed.
 function speakerOf(payload: Record<string, unknown>): string | null {
   const identity = isObject(payload.identity) ? payload.identity : {};
-  const name = [identity.firstName, identity.lastName]
-    .filter((part): part is string => typeof part === 'string' && Boolean(part.trim()))
-    .join(' ');
+  const own = typeof identity.displayName === 'string' ? identity.displayName.trim() : '';
+  const name =
+    own ||
+    [identity.firstName, identity.lastName]
+      .filter((part): part is string => typeof part === 'string' && Boolean(part.trim()))
+      .join(' ');
   const username = typeof identity.username === 'string' && identity.username ? `@${identity.username}` : null;
 
   if (name && username) {

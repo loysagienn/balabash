@@ -21,6 +21,8 @@ import type {
   LlmRequestsResponse,
   LogoutResponse,
   MeResponse,
+  UserPatchRequest,
+  UserResponse,
   ProjectResponse,
   ProvisionSecretsResponse,
   PublicationResponse,
@@ -86,6 +88,11 @@ export type Api = {
   settings: {
     get(signal?: AbortSignal): Promise<SettingsFactsResponse>;
     update(patch: SettingsPatchRequest): Promise<SettingsResponse>;
+  };
+  // Your own name (PATCH /api/user): the answer is the user as /api/me
+  // words them.
+  user: {
+    update(patch: UserPatchRequest): Promise<UserResponse>;
   };
   // The project registry's changes (stage 6b): the answer carries the row
   // as the snapshot has it; the same change arrives as a project.* event
@@ -259,6 +266,9 @@ export function createApi(options: FetchOptions = {}): Api {
     settings: {
       get: signal => apiFetch<SettingsFactsResponse>('/api/settings', { signal }),
       update: patch => apiFetch<SettingsResponse>('/api/settings', { method: 'PATCH', body: patch }),
+    },
+    user: {
+      update: patch => apiFetch<UserResponse>('/api/user', { method: 'PATCH', body: patch }),
     },
     projects: {
       create: input => apiFetch<CreateProjectResponse>('/api/projects', { method: 'POST', body: input }),

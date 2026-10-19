@@ -12,10 +12,10 @@
 // primary, for a sign-in; "Open in the external system" otherwise).
 // decided — the question is resolved: no badge, no buttons, the card loses
 // its amber edge, a line under the text says the outcome (and who
-// decided). agent / to = "you" is the operator: shown by name (you) when
-// Settings has one, else as "you"; the avatar takes the initial — a name
-// outside the catalog (a reply written in an external system, tag
-// "external") gets its initial on the neutral color.
+// decided). agent / to = "you" is you: shown by name (you) when you have
+// one, else as "you"; the avatar takes the initial — a name outside the
+// catalog (another user of the workspace, a reply written in an external
+// system with the tag "external") gets its initial on the neutral color.
 
 import { useState } from 'react';
 import type { ReactNode } from 'react';
@@ -32,10 +32,11 @@ export type MessageVariant = 'task' | 'user' | 'ask';
 export type MessageLink = { href: string; label: string; variant?: BtnVariant };
 
 // Whether the header names the recipient: only between two agents — never
-// when the operator ("you") writes or is written to, nor for a reply from
-// a person in an external system (tag "external").
-export function showsRecipient(agent: string, to: string, tag?: string): boolean {
-  return agent !== 'you' && to !== 'you' && to !== '' && tag !== 'external';
+// when a person writes or is written to: you ("you"), another user of the
+// workspace (variant "user" under their name), a reply from a person in an
+// external system (tag "external").
+export function showsRecipient(agent: string, to: string, tag?: string, variant?: MessageVariant): boolean {
+  return agent !== 'you' && to !== 'you' && to !== '' && tag !== 'external' && variant !== 'user';
 }
 
 export type MessageProps = {
@@ -64,7 +65,7 @@ export function Message({ agent, to, you, time, variant, tag, fold, quick, onQui
       <Avatar agent={agent} you={you} size="sm" className="msg-av" />
       <div className="msg-h">
         <b className="msg-from">{name(agent)}</b>
-        {showsRecipient(agent, to, tag) ? (
+        {showsRecipient(agent, to, tag, variant) ? (
           <>
             <Icon name="arrow-right" className="msg-arrow" />
             <span className="msg-to">{to}</span>

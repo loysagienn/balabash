@@ -2,12 +2,12 @@
 // sign-out (of the tab's workspace: the others stay signed in). A signed-in outcome cascades into SNAPSHOT_LOAD (the store
 // hydrates, the stream process opens the tail).
 
-import type { NamesView, SettingsPatchRequest } from '../../../api/contract.ts';
 import { toApiFailure } from '../../lib/api/index.ts';
 import type { ActionHandler } from '../types.ts';
 import { snapshotLoad } from '../stream/actions.ts';
 import { pushToast } from '../ui/actions.ts';
 import { consoleCodeDone, consoleCodeFail, leaveWorkspace, loginDone, loginFail, logoutDone, logoutFail, saveSettingsDone, saveSettingsFail, sessionCheckDone, sessionCheckFail } from './actions.ts';
+import type { NamesPatch, NamesSaved } from './actions.ts';
 import { patchFields } from './reducer.ts';
 
 export const sessionCheckHandler: ActionHandler<'SESSION_CHECK'> =
@@ -134,17 +134,31 @@ export const logoutHandler: ActionHandler<'LOGOUT'> =
 // the name is cleared. Clearing is what the patch asked for — null or a
 // blank string, the form's way — not what the answer carries: a cleared
 // workspace name answers the group's title.
-export function savedWords(patch: SettingsPatchRequest, settings: NamesView): string {
+export function savedWords(patch: NamesPatch, saved: NamesSaved): string {
   return patchFields(patch)
     .map(field => {
       const label = field === 'workspaceName' ? 'Workspace name' : 'Your name';
       const sent = patch[field];
-      const value = settings[field];
+      const value = saved.kind === 'user' ? saved.user.displayName : field === 'workspaceName' ? saved.settings.workspaceName : null;
       const cleared = sent === null || sent === undefined || sent.trim() === '' || value === null;
 
       return cleared ? `${label} cleared` : `${label}: “${value}”`;
     })
     .join(' · ');
+}
+
+// Where a patch goes: the workspace's name to /api/settings, yours to
+// /api/user — each card sends one field.
+async function saveNames(api: Parameters<ActionHandler<'SAVE_SETTINGS'>>[0]['api'], patch: NamesPatch): Promise<NamesSaved> {
+  if (patch.displayName !== undefined) {
+    const { user } = await api.user.update({ displayName: patch.displayName });
+
+    return { kind: 'user', user };
+  }
+
+  const { settings, seq } = await api.settings.update({ workspaceName: patch.workspaceName });
+
+  return { kind: 'settings', settings, seq };
 }
 
 // A card saves while no save of its field is in flight (a second press
@@ -161,10 +175,10 @@ export const saveSettingsHandler: ActionHandler<'SAVE_SETTINGS'> =
     next(action);
 
     try {
-      const { settings, seq } = await api.settings.update(action.patch);
+      const saved = await saveNames(api, action.patch);
 
-      dispatch(saveSettingsDone(action.patch, settings, seq));
-      dispatch(pushToast({ title: 'Saved', desc: savedWords(action.patch, settings), state: 'done' }));
+      dispatch(saveSettingsDone(action.patch, saved));
+      dispatch(pushToast({ title: 'Saved', desc: savedWords(action.patch, saved), state: 'done' }));
     } catch (error) {
       const failure = toApiFailure(error);
 

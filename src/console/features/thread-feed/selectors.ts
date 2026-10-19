@@ -6,7 +6,7 @@
 
 import { createSelector } from 'reselect';
 import { makeSelectThreadEvents } from '../../store/feed/selectors.ts';
-import { selectOperatorName } from '../../store/session/selectors.ts';
+import { selectUserId, selectUserName } from '../../store/session/selectors.ts';
 import type { State } from '../../store/types.ts';
 import { projectFeed } from './project.ts';
 import type { FeedContext, FeedItem } from './project.ts';
@@ -47,12 +47,13 @@ export function selectThreadAgents(state: State): Map<string, string> {
 }
 
 const selectFeedContext = createSelector(
-  [(state: State, threadId: string) => threadId, (state: State, threadId: string) => state.threads.byId[threadId]?.agent ?? 'agent', (state: State, threadId: string) => state.threads.byId[threadId]?.parentId ?? null, selectThreadAgents, selectOperatorName],
-  (threadId, agent, parentId, agents, you): FeedContext => ({
+  [(state: State, threadId: string) => threadId, (state: State, threadId: string) => state.threads.byId[threadId]?.agent ?? 'agent', (state: State, threadId: string) => state.threads.byId[threadId]?.parentId ?? null, selectThreadAgents, selectUserId, selectUserName],
+  (threadId, agent, parentId, agents, userId, you): FeedContext => ({
     threadId,
     agent,
     parentAgent: parentId ? (agents.get(parentId) ?? 'parent') : null,
     agentOf: id => agents.get(id) ?? null,
+    userId,
     you,
   }),
 );

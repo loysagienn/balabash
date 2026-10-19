@@ -85,7 +85,7 @@ describe('thread commands over the api', () => {
         workspaceId: stand.workspaceId,
         threadId: stand.mainThreadId,
         targetThreadId: child,
-        payload: { reason: 'interrupted_by_user', identity: { username: 'operator' }, source: 'web' },
+        payload: { reason: 'interrupted_by_user', identity: { userId: stand.userId, displayName: 'Operator' }, source: 'web' },
       },
     );
     assert.equal(typeof event.seq, 'bigint');
@@ -110,7 +110,7 @@ describe('thread commands over the api', () => {
     assert.equal(event.type, 'thread.cancel');
     assert.equal(event.threadId, stand.mainThreadId);
     assert.equal(event.targetThreadId, child);
-    assert.deepEqual(event.payload, { reason: 'wrong task', identity: { username: 'operator' }, source: 'web' });
+    assert.deepEqual(event.payload, { reason: 'wrong task', identity: { userId: stand.userId, displayName: 'Operator' }, source: 'web' });
 
     const bare = await stand.request('POST', `/api/threads/${child}/cancel`);
 
@@ -319,13 +319,13 @@ describe('the finish, pause and decide commands over the api', () => {
     assert.deepEqual(
       (await commandsTo(remote)).map(command => [command.type, command.actor, command.threadId, command.payload]),
       [
-        ['thread.finish', 'user', stand.mainThreadId, { reason: 'finished_by_user', identity: { username: 'operator' }, source: 'web' }],
-        ['thread.pause', 'user', stand.mainThreadId, { identity: { username: 'operator' }, source: 'web' }],
+        ['thread.finish', 'user', stand.mainThreadId, { reason: 'finished_by_user', identity: { userId: stand.userId, displayName: 'Operator' }, source: 'web' }],
+        ['thread.pause', 'user', stand.mainThreadId, { identity: { userId: stand.userId, displayName: 'Operator' }, source: 'web' }],
       ],
     );
     assert.deepEqual(
       (await commandsTo(local)).map(command => [command.type, command.payload]),
-      [['thread.finish', { reason: 'finished_by_user', identity: { username: 'operator' }, source: 'web' }]],
+      [['thread.finish', { reason: 'finished_by_user', identity: { userId: stand.userId, displayName: 'Operator' }, source: 'web' }]],
     );
     assert.equal(await threadStatus(remote), 'active');
     assert.equal(await threadStatus(local), 'active');
@@ -361,7 +361,7 @@ describe('the finish, pause and decide commands over the api', () => {
     const decided = await stand.request('POST', `/api/threads/${remote}/decide`, { body: { askId: 'a1', decision: 'deny' } });
 
     assert.equal(decided.status, 200, decided.text);
-    assert.deepEqual(decided.json<ThreadCommandResponse>().event.payload, { askId: 'a1', decision: 'deny', identity: { username: 'operator' }, source: 'web' });
+    assert.deepEqual(decided.json<ThreadCommandResponse>().event.payload, { askId: 'a1', decision: 'deny', identity: { userId: stand.userId, displayName: 'Operator' }, source: 'web' });
 
     // Resolved: no longer open.
     await appendEvent({ type: 'agent.ask.resolved', actor: 'agent', agentName: 'fake_agent', workspaceId: stand.workspaceId, threadId: remote, payload: { askId: 'a1', outcome: 'deny' } });

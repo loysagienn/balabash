@@ -105,23 +105,23 @@ describe('the tab’s workspace', () => {
 });
 
 describe('the switcher’s list', () => {
-  const me: MeResponse = { workspaceId: 'p', workspaceName: 'Personal (renamed)', operatorName: 'Vladimir', mainThreadId: 't' };
+  const me: MeResponse = { workspaceId: 'p', workspaceName: 'Personal (renamed)', mainThreadId: 't', user: { userId: 'me', displayName: 'Vladimir' } };
   const list: WorkspacesResponse = {
     current: 'p',
     workspaces: [
-      { workspaceId: 'p', workspaceName: 'Personal', operatorName: 'Vladimir', signedInAt: new Date(1), loginSource: 'console' },
-      { workspaceId: 'f', workspaceName: null, operatorName: null, signedInAt: new Date(2), loginSource: 'telegram' },
+      { workspaceId: 'p', workspaceName: 'Personal', signedInAt: new Date(1), loginSource: 'console' },
+      { workspaceId: 'f', workspaceName: null, signedInAt: new Date(2), loginSource: 'telegram' },
     ],
   };
 
-  it('in the order signed in, the tab’s own speaking with `me`, an unnamed one as “Workspace”', () => {
+  it('in the order signed in, the tab’s own speaking with `me`, an unnamed one as “Workspace”, your name under each', () => {
     const items = workspaceItems(me, list, { p: 6, f: 3 });
 
     assert.deepEqual(
       items.map(item => [item.workspaceId, item.name, item.operator, item.color, item.current]),
       [
         ['p', 'Personal (renamed)', 'Vladimir', 6, true],
-        ['f', 'Workspace', null, 3, false],
+        ['f', 'Workspace', 'Vladimir', 3, false],
       ],
     );
   });

@@ -83,7 +83,12 @@ const api: Api = {
     get: async () => {
       throw new Error('not here');
     },
-    update: async () => ({ settings: { workspaceName: 'Workspace', operatorName: null }, seq: null }),
+    update: async () => ({ settings: { workspaceName: 'Workspace' }, seq: null }),
+  },
+  user: {
+    update: async () => {
+      throw new Error('not here');
+    },
   },
   apps: {
     list: async () => ({ apps: [], publicAppsBase: '' }),
