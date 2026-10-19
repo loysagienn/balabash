@@ -11,7 +11,7 @@
 //
 // What goes where (the table in the document is the spec; the code is the
 // truth):
-//   users                  as is, same ids — data/workspace/<workspaceId> and
+//   users → workspaces     as is, same ids — data/workspace/<workspaceId> and
 //                          data/agent-state move without renames
 //   events                 row by row, seq preserved, payload text → jsonb;
 //                          the seq sequence is bumped past max(seq)

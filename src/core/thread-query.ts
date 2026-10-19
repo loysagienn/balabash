@@ -33,7 +33,7 @@ export function escapeLike(value: string): string {
 }
 
 export function threadsWhere(workspaceId: string, { status, parentId, projectId, agent, q, createdAtGte, createdAtLte, beforeCreatedSeq }: ThreadFilters): Prisma.Sql {
-  const parts: Prisma.Sql[] = [Prisma.sql`threads.user_id = ${workspaceId}`];
+  const parts: Prisma.Sql[] = [Prisma.sql`threads.workspace_id = ${workspaceId}`];
 
   if (status !== undefined) {
     parts.push(Prisma.sql`threads.status = ${status}`);

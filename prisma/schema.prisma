@@ -30,7 +30,7 @@ model Event {
   type           String // canonical type (§4.2) or agent domain type '<agent>.*'
   actor          String // 'user' | 'system' | 'agent'
   agentName      String? @map("agent_name") // agent name when actor='agent' (runId is a payload detail)
-  workspaceId    String? @map("user_id") // workspace; null = installation-level event
+  workspaceId    String? @map("workspace_id") // workspace; null = installation-level event
   threadId       String? @map("thread_id") // author's thread; null = event outside threads
   targetThreadId String? @map("target_thread_id") // addressee thread, one hop (§4.3)
   payload        Json
@@ -51,7 +51,7 @@ model Event {
 // Never import this model outside src/core.
 model Thread {
   id          String  @id
-  workspaceId String  @map("user_id")
+  workspaceId String  @map("workspace_id")
   parentId    String? @map("parent_id") // null = the workspace's main thread
   agent       String
   title       String?
@@ -90,7 +90,7 @@ model Workspace {
   workspaceName String?  @map("workspace_name")
   operatorName  String?  @map("operator_name")
 
-  @@map("users")
+  @@map("workspaces")
 }
 
 // Telegram adapter state: a forum group bound 1:1 to a workspace (§6).
@@ -98,7 +98,7 @@ model Workspace {
 // ignored — there is no one to attribute events to.
 model TelegramGroup {
   chatId      BigInt   @id @map("chat_id")
-  workspaceId String?  @unique @map("user_id")
+  workspaceId String?  @unique @map("workspace_id")
   status      String // 'unbound' | 'active'
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
@@ -137,7 +137,7 @@ model Session {
   createdAt   DateTime  @default(now()) @map("created_at")
   lastUsed    DateTime? @map("last_used")
   userAgent   String?   @map("user_agent")
-  workspaceId String?   @map("user_id")
+  workspaceId String?   @map("workspace_id")
   language    String?   @map("language")
   tokenHash   String?   @unique @map("token_hash")
   rotatedAt   DateTime? @map("rotated_at")
@@ -157,12 +157,12 @@ model Session {
 // The workspaces a web session is signed in to: one browser, one session
 // cookie, several workspaces. A row is born by a code exchange (the first
 // one creates the session too) and dies with the sign-out of that workspace
-// or with the session. web_sessions.user_id is the session's primary
+// or with the session. web_sessions.workspace_id is the session's primary
 // workspace — always one of these rows; requests that do not name a
 // workspace act in it.
 model SessionWorkspace {
   sessionId   String   @map("session_id")
-  workspaceId String   @map("user_id")
+  workspaceId String   @map("workspace_id")
   createdAt   DateTime @default(now()) @map("created_at")
   // Where the code that signed this workspace in came from: 'telegram' or
   // 'console' (as web_sessions.login_source).
@@ -207,7 +207,7 @@ model CcrDelivery {
 // connection.* events living in the auth thread.
 model Connection {
   id           String   @id @default(uuid())
-  workspaceId  String   @map("user_id")
+  workspaceId  String   @map("workspace_id")
   threadId     String?  @map("thread_id") // thread that initiated the flow; connection.* events are addressed to it
   server       String // mcp-servers config name
   accountKey   String   @map("account_key") // immutable mnemonic slug — the account's address within (workspace, server)
@@ -248,7 +248,7 @@ model OauthClient {
 // in the link handed to the operator.
 model OauthClientRequest {
   id          String   @id @default(uuid())
-  workspaceId String   @map("user_id")
+  workspaceId String   @map("workspace_id")
   threadId    String?  @map("thread_id") // thread that issued the link; oauth_client.provisioned is addressed to it
   server      String
   nonce       String   @unique
@@ -277,7 +277,7 @@ model ExternalServerSecret {
 // values go directly to ExternalServerSecret.
 model ExternalServerSecretRequest {
   id          String   @id @default(uuid())
-  workspaceId String   @map("user_id")
+  workspaceId String   @map("workspace_id")
   threadId    String?  @map("thread_id") // thread that issued the link; secrets.provisioned is addressed to it
   server      String
   nonce       String   @unique
@@ -297,7 +297,7 @@ model LlmRequest {
   id        String   @id @default(uuid())
   createdAt DateTime @default(now()) @map("created_at")
 
-  workspaceId String  @map("user_id")
+  workspaceId String  @map("workspace_id")
   threadId    String? @map("thread_id") // the run's thread this request served
   provider    String // 'openai' | 'anthropic'
   model       String // model as reported by the response, not the requested alias
@@ -351,7 +351,7 @@ model LlmRequest {
 model ScheduledTask {
   id              String    @id @default(uuid())
   slug            String    @unique
-  workspaceId     String    @map("user_id")
+  workspaceId     String    @map("workspace_id")
   name            String
   description     String?
   kind            String // 'note' | 'code' | 'command'
@@ -385,7 +385,7 @@ model ScheduledTask {
 // may carry a different command — the journal keeps what actually executed.
 model JobRun {
   id          String @id
-  workspaceId String @map("user_id")
+  workspaceId String @map("workspace_id")
   slug        String
 
   command String
@@ -424,7 +424,7 @@ model JobRun {
 // an accepted blur).
 model Project {
   id          String    @id @default(uuid())
-  workspaceId String    @map("user_id")
+  workspaceId String    @map("workspace_id")
   title       String
   slug        String
   description String
@@ -449,7 +449,7 @@ model Project {
 model AppPublication {
   id          String   @id @default(uuid())
   slug        String   @unique // [a-z0-9-], reserved names rejected at publish
-  workspaceId String   @map("user_id")
+  workspaceId String   @map("workspace_id")
   path        String // workspace-relative path of the app folder
   createdAt   DateTime @default(now()) @map("created_at")
 
@@ -461,7 +461,7 @@ model File {
   id               String    @id @default(uuid())
   bucket           String
   objectKey        String    @map("object_key")
-  workspaceId      String?   @map("user_id")
+  workspaceId      String?   @map("workspace_id")
   contentType      String?   @map("content_type")
   sizeBytes        Int?      @map("size_bytes")
   etag             String?
@@ -491,7 +491,7 @@ model File {
 // delivered to the session.
 model RemoteThread {
   threadId       String   @id @map("thread_id")
-  workspaceId    String   @map("user_id")
+  workspaceId    String   @map("workspace_id")
   kind           String // catalog name of the remote agent
   ref            String // the session in the external system (opaque to the core)
   link           String? // where a human looks at it in the external UI

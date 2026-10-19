@@ -53,7 +53,7 @@ function toThread(row: ThreadReadRow): Thread {
 // source; `= 'true'::jsonb` reads a boolean and nothing else as true (a
 // missing or odd value is not), with no cast that could fail on an odd
 // payload.
-const THREAD_COLUMNS = Prisma.sql`threads.id, threads.user_id AS "workspaceId", threads.parent_id AS "parentId", threads.agent, threads.title,
+const THREAD_COLUMNS = Prisma.sql`threads.id, threads.workspace_id AS "workspaceId", threads.parent_id AS "parentId", threads.agent, threads.title,
        threads.description, threads.status, threads.summary, threads.project_id AS "projectId",
        COALESCE(started.payload -> 'headless' = 'true'::jsonb, false) AS headless,
        COALESCE(started.payload -> 'remote' = 'true'::jsonb, false) AS remote,
@@ -105,7 +105,7 @@ export async function listThreads(workspaceId: string, { limit = 100, order = 'a
 export async function getLatestTerminalThread(workspaceId: string): Promise<Thread | null> {
   const [thread] = await readThreads(
     prisma,
-    Prisma.sql`threads.user_id = ${workspaceId} AND threads.terminal_seq IS NOT NULL`,
+    Prisma.sql`threads.workspace_id = ${workspaceId} AND threads.terminal_seq IS NOT NULL`,
     Prisma.sql`ORDER BY threads.terminal_seq DESC LIMIT 1`,
   );
 
@@ -179,7 +179,7 @@ export async function listMainThreads(): Promise<Thread[]> {
 
 // The workspace's main thread: the only thread without a parent (§5.5).
 export async function getMainThread(workspaceId: string, db: DbClient = prisma): Promise<Thread | null> {
-  const [thread] = await readThreads(db, Prisma.sql`threads.user_id = ${workspaceId} AND threads.parent_id IS NULL`, Prisma.sql`LIMIT 1`);
+  const [thread] = await readThreads(db, Prisma.sql`threads.workspace_id = ${workspaceId} AND threads.parent_id IS NULL`, Prisma.sql`LIMIT 1`);
 
   return thread ?? null;
 }
@@ -242,7 +242,7 @@ export async function ensureMainThread(workspaceId: string): Promise<Thread> {
 // by /start — and may hold several workspaces; this resolves exactly one:
 // a single workspace is it, no workspace at all (a fresh install without Telegram) is
 // created here together with its main thread — the channel-neutral analogue
-// of /start — and several workspaces need OPERATOR_USER_ID to disambiguate (a
+// of /start — and several workspaces need OPERATOR_WORKSPACE_ID to disambiguate (a
 // loud error instead of a silent "oldest wins").
 export async function ensureOperatorWorkspace(): Promise<Thread> {
   const workspaces = await prisma.workspace.findMany({ select: { id: true }, orderBy: { createdAt: 'asc' } });
@@ -252,7 +252,7 @@ export async function ensureOperatorWorkspace(): Promise<Thread> {
 
   if (configured) {
     if (!workspaces.some(workspace => workspace.id === configured)) {
-      throw new Error(`OPERATOR_USER_ID ${configured} does not exist in the users table`);
+      throw new Error(`OPERATOR_WORKSPACE_ID ${configured} does not exist in the workspaces table`);
     }
 
     workspaceId = configured;
@@ -263,7 +263,7 @@ export async function ensureOperatorWorkspace(): Promise<Thread> {
     console.log(`[threads] operator workspace created: workspace ${workspaceId}`);
   } else {
     throw new Error(
-      `several workspaces in the database — set OPERATOR_USER_ID to the operator's workspace: ${workspaces.map(workspace => workspace.id).join(', ')}`,
+      `several workspaces in the database — set OPERATOR_WORKSPACE_ID to the operator's workspace: ${workspaces.map(workspace => workspace.id).join(', ')}`,
     );
   }
 

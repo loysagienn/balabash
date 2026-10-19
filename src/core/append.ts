@@ -92,7 +92,7 @@ type ThreadRow = {
 
 async function lockThread(tx: Tx, id: string): Promise<ThreadRow | null> {
   const rows = await tx.$queryRaw<ThreadRow[]>`
-    SELECT id, user_id AS "workspaceId", parent_id AS "parentId", status
+    SELECT id, workspace_id AS "workspaceId", parent_id AS "parentId", status
     FROM threads WHERE id = ${id} FOR UPDATE`;
 
   return rows[0] ?? null;
@@ -105,7 +105,7 @@ async function lockActiveDescendants(tx: Tx, threadId: string): Promise<ThreadRo
       UNION ALL
       SELECT t.id FROM threads t JOIN subtree s ON t.parent_id = s.id
     )
-    SELECT id, user_id AS "workspaceId", parent_id AS "parentId", status
+    SELECT id, workspace_id AS "workspaceId", parent_id AS "parentId", status
     FROM threads
     WHERE id IN (SELECT id FROM subtree) AND status = 'active'
     ORDER BY created_seq

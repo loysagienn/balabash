@@ -45,7 +45,7 @@ describe('test PostgreSQL', () => {
     assert.equal(row.name, db.name);
     assert.match(db.name, /_test$/);
     assert.equal(row.applied, migrations);
-    assert.deepEqual(await rows(db.url, 'select count(*)::int as n from users'), [{ n: 0 }]);
+    assert.deepEqual(await rows(db.url, 'select count(*)::int as n from workspaces'), [{ n: 0 }]);
   });
 
   test('the child is cut off from the inherited DATABASE_URL and the guard lets the copy through', () => {
@@ -69,11 +69,11 @@ describe('test PostgreSQL', () => {
     const [a, b] = await Promise.all([createTestDatabase(), createTestDatabase()]);
 
     try {
-      await rows(a.url, "insert into users (id, created_at, updated_at) values ('u-a', now(), now())");
+      await rows(a.url, "insert into workspaces (id, created_at, updated_at) values ('u-a', now(), now())");
 
-      assert.deepEqual(await rows(a.url, 'select id from users'), [{ id: 'u-a' }]);
-      assert.deepEqual(await rows(b.url, 'select id from users'), []);
-      assert.deepEqual(await rows(db.url, 'select id from users'), []);
+      assert.deepEqual(await rows(a.url, 'select id from workspaces'), [{ id: 'u-a' }]);
+      assert.deepEqual(await rows(b.url, 'select id from workspaces'), []);
+      assert.deepEqual(await rows(db.url, 'select id from workspaces'), []);
     } finally {
       await Promise.all([a.drop(), b.drop()]);
     }

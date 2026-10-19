@@ -225,7 +225,7 @@ export async function createUserSession(ctx: Context, workspaceId: string, login
 // in one of them — the one it names (the header for fetches, ?ws= for what
 // the browser loads by itself: the event stream, file bytes, a link), or
 // the session's primary one when it names none. The primary
-// (web_sessions.user_id) is always a signed-in workspace: signing out of it
+// (web_sessions.workspace_id) is always a signed-in workspace: signing out of it
 // hands the role to the oldest remaining one.
 
 export const WORKSPACE_HEADER = 'x-balabash-workspace';

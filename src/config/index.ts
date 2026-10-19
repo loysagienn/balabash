@@ -49,10 +49,12 @@ export const config = {
 
   // The operator's workspace: the one
   // workspace a singleton channel (CCR) or an offline script serves. Needed
-  // only when the users table holds several rows — with zero or one workspace
-  // ensureOperatorWorkspace() resolves it without configuration.
+  // only when the workspaces table holds several rows — with zero or one
+  // workspace ensureOperatorWorkspace() resolves it without configuration.
+  // OPERATOR_USER_ID is the variable's former name: still read so an
+  // installation whose .env predates the rename boots; app.ts says so at boot.
   get operatorWorkspaceId(): string | null {
-    return process.env.OPERATOR_USER_ID?.trim() || null;
+    return process.env.OPERATOR_WORKSPACE_ID?.trim() || process.env.OPERATOR_USER_ID?.trim() || null;
   },
 
   get openaiApiKey(): string {

@@ -111,7 +111,7 @@ export async function latestJobRuns(workspaceId: string): Promise<JobRunView[]> 
       id, slug, trigger, status, exit_code AS "exitCode", started_at AS "startedAt", finished_at AS "finishedAt",
       duration_ms AS "durationMs", stdout_truncated AS "stdoutTruncated", stderr_truncated AS "stderrTruncated"
     FROM job_runs
-    WHERE user_id = ${workspaceId}
+    WHERE workspace_id = ${workspaceId}
     ORDER BY slug, started_at DESC, id DESC
   `;
 

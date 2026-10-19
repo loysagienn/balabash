@@ -72,6 +72,10 @@ try {
 await prisma.$queryRaw`SELECT 1`;
 console.log('[app] balabash: database reachable');
 
+if (!process.env.OPERATOR_WORKSPACE_ID && process.env.OPERATOR_USER_ID) {
+  console.warn('[app] OPERATOR_USER_ID is the former name of OPERATOR_WORKSPACE_ID — rename it in .env');
+}
+
 // Runs live only in memory: threads orphaned by the previous process death
 // are cancelled before anything can address them. A planned restart
 // leaves nothing to tombstone — the safe window required every non-remote

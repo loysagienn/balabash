@@ -157,7 +157,7 @@ async function readLastModels(workspaceId: string): Promise<Map<string, string |
   const rows = await prisma.$queryRaw<Array<{ agentName: string | null; payload: JsonObject }>>`
     SELECT DISTINCT ON (agent_name) agent_name AS "agentName", payload
     FROM events
-    WHERE user_id = ${workspaceId} AND type = 'session.started' AND agent_name IS NOT NULL
+    WHERE workspace_id = ${workspaceId} AND type = 'session.started' AND agent_name IS NOT NULL
     ORDER BY agent_name, seq DESC`;
   const models = new Map<string, string | null>();
 
