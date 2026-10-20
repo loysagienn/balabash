@@ -23,7 +23,7 @@
 
 import crypto from 'node:crypto';
 import { config } from '../../config/index.ts';
-import type { TurnPrompt } from '../turn-contract.ts';
+import type { PrewarmPrompt, TurnPrompt } from '../turn-contract.ts';
 import { getLlmBackend } from './backend.ts';
 import { buildTranscript } from './transcript.ts';
 
@@ -180,31 +180,26 @@ export function resetPromptState(threadId: string): void {
   states.delete(threadId);
 }
 
-export type KeepalivePrompt = TurnPrompt & { lastSeq: bigint };
+export type KeepalivePrompt = PrewarmPrompt & { lastSeq: bigint };
 
-type BuildKeepalivePromptOptions = Pick<BuildTurnPromptOptions, 'threadId' | 'model' | 'instructions' | 'tools' | 'statusText'>;
+type BuildKeepalivePromptOptions = Pick<BuildTurnPromptOptions, 'threadId' | 'model' | 'instructions' | 'tools'>;
 
 /**
  * The prompt of a prewarm ping: the thread's frozen chunks as the last turn
- * sent them, under the same head. Null when there is nothing worth keeping
+ * sent them, under the same head — and nothing after them: the status tail
+ * is no part of the cached prefix. Null when there is nothing worth keeping
  * warm — no state, a changed head (the next turn rebuilds anyway) or a
  * prefix already past its TTL (rewriting a cold prefix speculatively costs
  * as much as the cold turn it would save).
  */
-export function buildKeepalivePrompt({
-  threadId,
-  model,
-  instructions,
-  tools,
-  statusText,
-}: BuildKeepalivePromptOptions): KeepalivePrompt | null {
+export function buildKeepalivePrompt({ threadId, model, instructions, tools }: BuildKeepalivePromptOptions): KeepalivePrompt | null {
   const state = states.get(threadId);
 
   if (!state || state.headHash !== headHashOf(model, instructions, tools) || !isWarm(state)) {
     return null;
   }
 
-  return { ...toPrompt([...state.chunks], statusText, threadId), lastSeq: state.lastSeq };
+  return { chunks: [...state.chunks], cacheKey: threadId, lastSeq: state.lastSeq };
 }
 
 // A successful prewarm ping extends the prefix lifetime by another TTL.

@@ -19,10 +19,13 @@ import type { ProjectModel } from './store.ts';
 
 export const SLUG_PATTERN = /^[a-z][a-z0-9-]*$/;
 export const SLUG_MAX_LENGTH = 64;
-// The longest title and description the registry takes (the description
-// is a ~300-char scent; the cap only keeps a runaway body out).
+// The longest title and description the registry takes. The description is
+// a ~300-char top-level statement of what the project is; the cap is the
+// backstop of that norm — a description that grew into a state report (the
+// drift the norm forbids) is refused with the norm in the error, so the
+// agent that wrote it reads why.
 export const TITLE_MAX_LENGTH = 200;
-export const DESCRIPTION_MAX_LENGTH = 2_000;
+export const DESCRIPTION_MAX_LENGTH = 500;
 
 // bad_request — the input itself; not_found — no such project in this
 // workspace (a foreign one answers the same); conflict — the title, the
@@ -74,7 +77,10 @@ function checkTitle(title: string): void {
 
 function checkDescription(description: string): void {
   if (description.length > DESCRIPTION_MAX_LENGTH) {
-    throw new ProjectError('bad_request', `description must be at most ${DESCRIPTION_MAX_LENGTH} chars`);
+    throw new ProjectError(
+      'bad_request',
+      `description must be at most ${DESCRIPTION_MAX_LENGTH} chars (got ${description.length}) — it is a ~300-char top-level statement of what the project is; details, the course of work and status belong in the project folder, not here`,
+    );
   }
 }
 

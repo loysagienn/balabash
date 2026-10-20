@@ -24,6 +24,7 @@ import {
 import type { AppendInput } from './envelope.ts';
 import { notifyAppended } from './live.ts';
 import { threadCompletionFields, threadStartFields } from '../projections/thread.ts';
+import { projectRecord } from '../projects/store.ts';
 
 // jsonb and text cannot hold U+0000 (PostgreSQL 22P05 "unsupported Unicode
 // escape sequence" / "invalid byte sequence"): a payload carrying it — a
@@ -322,9 +323,45 @@ async function appendTerminal(tx: Tx, input: AppendInput): Promise<AppendResult>
     },
   });
 
+  if (input.type === THREAD_COMPLETED) {
+    await bumpProjectRecency(tx, threadId);
+  }
+
   await cascadeCancel(tx, thread, threadId);
 
   return { written: true, event };
+}
+
+// A thread completing is work done on its project: the project's updatedAt
+// ("last worked", the order of the live list) moves without any agent
+// touching the registry. A registry change is an event too (the console's
+// snapshot is a projection of the log — src/core/registry-events.ts), so
+// the bump is journaled as project.updated authored by the thread, in the
+// terminal's transaction. A project the row no longer finds (never deleted,
+// so only a foreign or corrupt id) is skipped, not an error.
+async function bumpProjectRecency(tx: Tx, threadId: string): Promise<void> {
+  const thread = await tx.thread.findUniqueOrThrow({ where: { id: threadId }, select: { id: true, workspaceId: true, agent: true, projectId: true } });
+
+  if (!thread.projectId) {
+    return;
+  }
+
+  const project = await tx.project.findUnique({ where: { id: thread.projectId } });
+
+  if (!project || project.workspaceId !== thread.workspaceId) {
+    return;
+  }
+
+  const row = await tx.project.update({ where: { id: project.id }, data: { updatedAt: new Date() } });
+
+  await appendEventIn(tx, {
+    type: 'project.updated',
+    actor: 'agent',
+    agentName: thread.agent,
+    threadId: thread.id,
+    workspaceId: thread.workspaceId,
+    payload: projectRecord(row),
+  });
 }
 
 // Projection fields a thread.completed carries besides the terminal itself

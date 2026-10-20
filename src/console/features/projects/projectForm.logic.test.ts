@@ -41,7 +41,7 @@ describe('validateProjectForm', () => {
     assert.equal(validateProjectForm({ title: 'R', slug: '1reno', description: 'd' }, 'create').slug, 'Lowercase letters, digits and dashes, starting with a letter.');
     assert.equal(validateProjectForm({ title: 'R', slug: 'a'.repeat(65), description: 'd' }, 'create').slug, 'At most 64 characters.');
     assert.equal(validateProjectForm({ title: 'x'.repeat(201), slug: 'r', description: 'd' }, 'create').title, 'At most 200 characters.');
-    assert.equal(validateProjectForm({ title: 'R', slug: 'r', description: 'x'.repeat(2001) }, 'create').description, 'At most 2000 characters.');
+    assert.equal(validateProjectForm({ title: 'R', slug: 'r', description: 'x'.repeat(501) }, 'create').description, 'At most 500 characters — what the project is, top level only.');
   });
 
   it('leaves the slug alone on edit', () => {
@@ -55,7 +55,7 @@ describe('fieldOfFailure', () => {
     assert.equal(fieldOfFailure('title must be at most 200 chars'), 'title');
     assert.equal(fieldOfFailure('slug must match /^[a-z][a-z0-9-]*$/ and be at most 64 chars'), 'slug');
     assert.equal(fieldOfFailure('the path "x" in the workspace file area is taken by a file — pick another slug'), 'slug');
-    assert.equal(fieldOfFailure('description must be at most 2000 chars'), 'description');
+    assert.equal(fieldOfFailure('description must be at most 500 chars'), 'description');
     assert.equal(fieldOfFailure('title "A" or slug "a" is already taken — check the projects list'), null);
     assert.equal(fieldOfFailure('Failed to fetch'), null);
   });

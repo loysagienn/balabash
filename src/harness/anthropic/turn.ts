@@ -19,16 +19,17 @@
 //   last frozen chunk — both with the 1-hour TTL (backend.ts). The status
 //   rides after the chunks as a mid-conversation system message, so its
 //   change every turn costs nothing cached. The prewarm ping is the same
-//   request with max_tokens: 0 — the API runs prefill, writes or refreshes
-//   the breakpoints and generates nothing. The two share one request
-//   builder on purpose — any parameter that differs between them would be a
-//   different cache entry.
+//   request without the status and with max_tokens: 0 — the API runs
+//   prefill, writes or refreshes the breakpoints and generates nothing. The
+//   two share one request builder on purpose — any parameter that differs
+//   between them ahead of the last breakpoint would be a different cache
+//   entry; the status after it is the one thing a ping leaves out.
 
 import type Anthropic from '@anthropic-ai/sdk';
 import type { EffortLevel } from '../../core/contract.ts';
 import { config } from '../../config/index.ts';
 import { MAX_TURN_ITERATIONS } from '../turn-contract.ts';
-import type { DispatchResult, FunctionCall, FunctionDefinition, RequestHead, TurnOutcome, TurnPrompt } from '../turn-contract.ts';
+import type { DispatchResult, FunctionCall, FunctionDefinition, PrewarmPrompt, RequestHead, TurnOutcome, TurnPrompt } from '../turn-contract.ts';
 import { getAnthropicClient } from './client.ts';
 import { toolResultToContent } from './content.ts';
 import type { startLlmRequestMetrics } from './llm-metrics.ts';
@@ -86,8 +87,9 @@ function toTool(definition: FunctionDefinition): Anthropic.Tool {
 // The prompt in Messages API shape: each frozen chunk a user message (the
 // last one carrying the cache breakpoint), the volatile status a system
 // message after them — it must follow a user message and be last or be
-// followed by an assistant turn, which the loop's echoes satisfy.
-function toMessages({ chunks, statusText }: TurnPrompt): Anthropic.MessageParam[] {
+// followed by an assistant turn, which the loop's echoes satisfy. A prewarm
+// prompt has no status: the request ends at the breakpoint.
+function toMessages({ chunks, statusText }: PrewarmPrompt & { statusText?: string }): Anthropic.MessageParam[] {
   return [
     ...chunks.map((text, index) => ({
       role: 'user' as const,
@@ -99,7 +101,7 @@ function toMessages({ chunks, statusText }: TurnPrompt): Anthropic.MessageParam[
         },
       ],
     })),
-    { role: 'system' as const, content: statusText },
+    ...(statusText === undefined ? [] : [{ role: 'system' as const, content: statusText }]),
   ];
 }
 
@@ -229,20 +231,26 @@ export async function runTurn({ model, instructions, tools, prompt, metrics, dis
 }
 
 type PrewarmOptions = RequestHead & {
-  prompt: TurnPrompt;
+  prompt: PrewarmPrompt;
   metrics: ReturnType<typeof startLlmRequestMetrics>;
+  // Test seam: the client and the effort, the configured ones by default.
+  deps?: {
+    client?: AnthropicTurnClient;
+    effort?: EffortLevel;
+  };
 };
 
 /**
  * Refreshes the prompt-cache prefix of a thread: the same request as a
- * turn's first one with max_tokens: 0 — the API runs prefill, writes or
- * reads the breakpoints and generates nothing. On a warm prefix this is a
+ * turn's first one up to the last breakpoint (the status after it is not
+ * part of the prefix and stays home) with max_tokens: 0 — the API runs
+ * prefill, writes or reads the breakpoints and generates nothing. On a warm prefix this is a
  * cache read that restarts the TTL; on a cold one it writes the prefix,
  * which the next real turn then finds warm. Returns the message id.
  */
-export async function prewarmPrompt({ model, instructions, tools, prompt, metrics }: PrewarmOptions): Promise<string> {
-  const client = getAnthropicClient();
-  const head: Head = { model, instructions, tools, effort: config.coordinatorEffort };
+export async function prewarmPrompt({ model, instructions, tools, prompt, metrics, deps }: PrewarmOptions): Promise<string> {
+  const client: AnthropicTurnClient = deps?.client ?? getAnthropicClient();
+  const head: Head = { model, instructions, tools, effort: deps?.effort ?? config.coordinatorEffort };
 
   const response = await metrics.measure(() => client.messages.create({ ...baseRequest(head, toMessages(prompt)), max_tokens: 0 }));
 

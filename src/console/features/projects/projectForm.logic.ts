@@ -10,7 +10,7 @@ import { capSlug, slugWords } from '../../lib/text/slug.ts';
 
 export const TITLE_MAX_LENGTH = 200;
 export const SLUG_MAX_LENGTH = 64;
-export const DESCRIPTION_MAX_LENGTH = 2_000;
+export const DESCRIPTION_MAX_LENGTH = 500;
 export const SLUG_PATTERN = /^[a-z][a-z0-9-]*$/;
 
 export type ProjectFormValues = { title: string; slug: string; description: string };
@@ -55,7 +55,7 @@ export function validateProjectForm(values: ProjectFormValues, mode: 'create' | 
   if (!description) {
     errors.description = 'A description is required — it is how agents match conversations to the project.';
   } else if (description.length > DESCRIPTION_MAX_LENGTH) {
-    errors.description = `At most ${DESCRIPTION_MAX_LENGTH} characters.`;
+    errors.description = `At most ${DESCRIPTION_MAX_LENGTH} characters — what the project is, top level only.`;
   }
 
   return errors;

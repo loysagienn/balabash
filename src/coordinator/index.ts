@@ -265,16 +265,10 @@ export function createCoordinatorRun({ threadId, workspaceId }: { threadId: stri
 
     try {
       const tools = await functionDefinitions(workspaceId);
-      const children = await listThreads(workspaceId, { status: 'active', parentId: threadId });
-      const projects = await listProjects(workspaceId, { archived: false });
-
-      const prompt = buildKeepalivePrompt({
-        threadId,
-        model: config.mainModel,
-        instructions: COORDINATOR_INSTRUCTIONS,
-        tools,
-        statusText: buildStatusText(children, projects, workspaceId, await readRemoteChildStates(children)),
-      });
+      // No status: the ping refreshes the frozen prefix and nothing after
+      // it — the status would ride behind the last breakpoint at the
+      // uncached rate for no one to read.
+      const prompt = buildKeepalivePrompt({ threadId, model: config.mainModel, instructions: COORDINATOR_INSTRUCTIONS, tools });
 
       // Nothing to keep warm: the state was reset, the head changed or the
       // prefix already went cold — the keep-alive ends here.

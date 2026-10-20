@@ -13,5 +13,7 @@ export const PROJECTS_NOTE =
   'its folder). When your work concerns a project, read its AGENTS.md BEFORE starting. Anything new worth ' +
   "keeping — results, decisions, learned facts — APPEND to the project's inbox.md, dated, with the \"why\"; " +
   "do not rewrite the project's settled files unless the task itself asks for it — a dedicated gardener " +
-  'agent consolidates later. When finishing a thread that touched a project, touch it via projects_update ' +
-  '(a call with only the id bumps its recency); refresh the description when its topic drifted.';
+  "agent consolidates later. The registry entry (projects_update) changes only when it stopped matching reality: " +
+  'the description is a ~300-char top-level statement of what the project is — no details, no course of work, ' +
+  "no status; rewrite it only when the project's topic itself moved. Never call projects_update just to bump " +
+  "the date — a thread of the project completing bumps it by itself.";

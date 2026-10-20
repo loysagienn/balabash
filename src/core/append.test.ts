@@ -116,6 +116,42 @@ describe('terminals', () => {
     assert.equal((await lifecycleOf([child])).filter(event => TERMINALS.includes(event.type)).length, 1);
   });
 
+  test('a completed thread bumps its project: updatedAt moves and a project.updated authored by the thread is journaled; a failed one and a thread outside any project bump nothing', async () => {
+    const project = await prisma.project.create({ data: { workspaceId: stand.workspaceId, title: 'Bumped', slug: 'bumped', description: 'd', updatedAt: new Date(Date.now() - 60_000) } });
+    const startIn = (id: string) =>
+      appendEvent({ type: 'thread.started', actor: 'system', workspaceId: stand.workspaceId, threadId: id, targetThreadId: stand.mainThreadId, payload: { agent: 'engineer', title: id, projectId: project.id } });
+    const bumps = async () =>
+      (await prisma.event.findMany({ where: { type: 'project.updated' }, orderBy: { seq: 'asc' } })).filter(row => (row.payload as { id: string }).id === project.id);
+
+    const failing = randomUUID();
+
+    await startIn(failing);
+    await fail(failing);
+    assert.equal((await bumps()).length, 0);
+
+    const outside = await startChild();
+
+    await complete(outside);
+    assert.equal((await bumps()).length, 0);
+    assert.equal((await prisma.project.findUniqueOrThrow({ where: { id: project.id } })).updatedAt.getTime(), project.updatedAt.getTime());
+
+    const completing = randomUUID();
+
+    await startIn(completing);
+
+    const terminal = await complete(completing);
+    const [bump, ...more] = await bumps();
+    const row = await prisma.project.findUniqueOrThrow({ where: { id: project.id } });
+
+    assert.ok(terminal.written);
+    assert.equal(more.length, 0);
+    assert.ok(bump);
+    assert.ok(bump.seq > terminal.event.seq);
+    assert.deepEqual({ actor: bump.actor, agentName: bump.agentName, threadId: bump.threadId }, { actor: 'agent', agentName: 'engineer', threadId: completing });
+    assert.ok(row.updatedAt.getTime() > project.updatedAt.getTime());
+    assert.equal((bump.payload as { updatedAt: string }).updatedAt, row.updatedAt.toISOString());
+  });
+
   test('the main thread takes none; a spawn under a closed parent and a terminal of an unknown thread are refused', async () => {
     assert.equal(await refusal(complete(stand.mainThreadId)), 'main_thread_terminal');
     assert.equal((await threadRow(stand.mainThreadId))?.status, 'active');

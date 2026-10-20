@@ -30,7 +30,7 @@ import type {
   ResponseInputItem,
 } from 'openai/resources/responses/responses';
 import { MAX_TURN_ITERATIONS } from '../turn-contract.ts';
-import type { DispatchResult, FunctionCall, RequestHead, TurnOutcome, TurnPrompt } from '../turn-contract.ts';
+import type { DispatchResult, FunctionCall, PrewarmPrompt, RequestHead, TurnOutcome, TurnPrompt } from '../turn-contract.ts';
 import { getLlmBackend } from './backend.ts';
 import type { LlmBackend } from './backend.ts';
 import { getOpenaiClient } from './client.ts';
@@ -49,17 +49,22 @@ type FunctionCallOutputItem = {
 };
 
 // The prompt in Responses API shape: each frozen chunk a user message, the
-// volatile status a developer message after them.
-function toInput({ chunks, statusText }: TurnPrompt): ResponseInput {
+// volatile status a developer message after them. A prewarm prompt has no
+// status: the request ends with the frozen prefix.
+function toInput({ chunks, statusText }: PrewarmPrompt & { statusText?: string }): ResponseInput {
   return [
     ...chunks.map(text => ({
       role: 'user' as const,
       content: [{ type: 'input_text' as const, text }],
     })),
-    {
-      role: 'developer' as const,
-      content: [{ type: 'input_text' as const, text: statusText }],
-    },
+    ...(statusText === undefined
+      ? []
+      : [
+          {
+            role: 'developer' as const,
+            content: [{ type: 'input_text' as const, text: statusText }],
+          },
+        ]),
   ];
 }
 
@@ -212,14 +217,15 @@ export async function runTurn({
 }
 
 type PrewarmOptions = RequestHead & {
-  prompt: TurnPrompt;
+  prompt: PrewarmPrompt;
   metrics: ReturnType<typeof startLlmRequestMetrics>;
   cacheComparisonResponseId?: string | null;
 };
 
 /**
  * Refreshes the prompt-cache prefix of a thread: the same request as a
- * turn's first one, with prompt_cache_options.prewarm — the server reuses
+ * turn's first one without the status tail (no part of the prefix), with
+ * prompt_cache_options.prewarm — the server reuses
  * (or writes) the prefix and generates nothing. On a warm prefix this is a
  * pure cached read; on a cold one it writes the prefix at the write rate,
  * which the next real turn then finds warm. Returns the response id.

@@ -3,7 +3,7 @@ import { describe, it } from 'node:test';
 import type Anthropic from '@anthropic-ai/sdk';
 import { MAX_TURN_ITERATIONS } from '../turn-contract.ts';
 import type { DispatchResult, FunctionCall } from '../turn-contract.ts';
-import { runTurn } from './turn.ts';
+import { prewarmPrompt, runTurn } from './turn.ts';
 import type { AnthropicTurnClient } from './turn.ts';
 
 type Scripted = { text?: string; calls?: Array<{ name: string; id?: string; input?: Record<string, unknown> }> };
@@ -113,6 +113,22 @@ describe('anthropic runTurn', () => {
       { role: 'user', content: [{ type: 'text', text: 'newest', cache_control: { type: 'ephemeral', ttl: '1h' } }] },
       { role: 'system', content: 'status' },
     ]);
+  });
+
+  it('a prewarm ping is the same request up to the last breakpoint — no status after it — with max_tokens 0', async () => {
+    const { client, requests } = makeClient([{}]);
+    const { dispatch } = dispatcher({});
+    const { deliverText } = collector();
+
+    await runTurn({ ...head, metrics, dispatch, deliverText, deps: { client, effort: 'medium' } });
+    await prewarmPrompt({ ...head, prompt: { chunks: head.prompt.chunks, cacheKey: head.prompt.cacheKey }, metrics, deps: { client, effort: 'medium' } });
+
+    const [turn, ping] = requests as [Anthropic.MessageCreateParamsNonStreaming, Anthropic.MessageCreateParamsNonStreaming];
+
+    assert.equal(ping.max_tokens, 0);
+    assert.deepEqual(ping.messages, turn.messages.slice(0, -1));
+    assert.deepEqual(ping.messages.at(-1), { role: 'user', content: [{ type: 'text', text: 'newest', cache_control: { type: 'ephemeral', ttl: '1h' } }] });
+    assert.deepEqual({ ...ping, messages: null, max_tokens: null }, { ...turn, messages: null, max_tokens: null });
   });
 
   it('delivers text as the message to the user and ends on a response without tool calls', async () => {

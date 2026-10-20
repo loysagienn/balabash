@@ -9,7 +9,7 @@ import * as openai from './openai/turn.ts';
 import { startLlmRequestMetrics as startOpenaiMetrics } from './openai/llm-metrics.ts';
 import * as anthropic from './anthropic/turn.ts';
 import { startLlmRequestMetrics as startAnthropicMetrics } from './anthropic/llm-metrics.ts';
-import type { DispatchResult, FunctionCall, LlmRequestContext, RequestHead, TurnOutcome, TurnPrompt } from './turn-contract.ts';
+import type { DispatchResult, FunctionCall, LlmRequestContext, PrewarmPrompt, RequestHead, TurnOutcome, TurnPrompt } from './turn-contract.ts';
 
 export type TurnRunOptions = RequestHead & {
   prompt: TurnPrompt;
@@ -26,7 +26,7 @@ export type TurnRunOptions = RequestHead & {
 };
 
 export type PrewarmOptions = RequestHead & {
-  prompt: TurnPrompt;
+  prompt: PrewarmPrompt;
   metrics: LlmRequestContext;
   cacheComparisonResponseId?: string | null;
 };

@@ -34,7 +34,8 @@ export function projectRecord(project: ProjectModel): ProjectRecord {
   };
 }
 
-// Live projects first, most recently touched on top; archived tail after.
+// Live projects first, most recently worked on top (updatedAt — a registry
+// change or a completed thread of the project); archived tail after.
 export function listProjects(workspaceId: string, options?: { archived?: boolean }): Promise<ProjectModel[]> {
   return prisma.project.findMany({
     where: {

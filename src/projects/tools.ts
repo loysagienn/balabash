@@ -43,8 +43,9 @@ const FUNCTIONS: ToolFunction[] = [
     description:
       'List ALL projects of this workspace — named long-lived work contexts (passive libraries), each with a ' +
       'folder in the workspace file area. No filters or pagination: live projects first (most recently ' +
-      'touched on top), archived ones after. The description of each project is the scent to match a ' +
-      'conversation against; projects_get returns one project with its folder path.',
+      'worked on top — a thread of the project completing moves it up), archived ones after. The description ' +
+      'of each project is the scent to match a conversation against; projects_get returns one project with ' +
+      'its folder path.',
     inputSchema: {
       type: 'object',
       properties: {},
@@ -80,7 +81,8 @@ const FUNCTIONS: ToolFunction[] = [
       `at most ${SLUG_MAX_LENGTH} chars. If the folder already ` +
       'exists it is ADOPTED as the project library (adopted: true in the result); a fresh AGENTS.md entry ' +
       'point is written only when the folder has none. The description is required — it is how agents and ' +
-      'the secretary match a conversation to the project, so make it a dense ~300-char scent of the topic.',
+      'the secretary match a conversation to the project: a ~300-char top-level statement of what the project ' +
+      'is, nothing more — no details, no course of work, no status (those live in the folder).',
     inputSchema: {
       type: 'object',
       properties: {
@@ -94,7 +96,7 @@ const FUNCTIONS: ToolFunction[] = [
         },
         description: {
           type: 'string',
-          description: `What the project is about (~300 chars, at most ${DESCRIPTION_MAX_LENGTH}) — the scent used to match conversations to it.`,
+          description: `What the project is, top level only (~300 chars, at most ${DESCRIPTION_MAX_LENGTH}) — the scent used to match conversations to it; no details, course of work or status.`,
         },
       },
       required: ['title', 'slug', 'description'],
@@ -109,8 +111,9 @@ const FUNCTIONS: ToolFunction[] = [
       'Update a project: change the title, the description and/or the slug. Renaming the slug RENAMES the ' +
       "project's folder in the workspace file area to match — do it only on an explicit user request, and " +
       'not while other work is running inside the folder (their paths go stale). ' +
-      'A call with only the id is a "touch": it bumps updatedAt — "work touched this project just now" — ' +
-      'and moves the project up the list. Touch the project when finishing work on it.',
+      'Change the entry only when it stopped matching reality; never call this just to bump the date — ' +
+      'a thread of the project completing bumps updatedAt by itself (a call with only the id does the same ' +
+      'and is for the operator, not for finishing work).',
     inputSchema: {
       type: 'object',
       properties: {
@@ -118,7 +121,7 @@ const FUNCTIONS: ToolFunction[] = [
         title: { type: ['string', 'null'], description: `New title (at most ${TITLE_MAX_LENGTH} chars), or null to keep the current one.` },
         description: {
           type: ['string', 'null'],
-          description: `New description (at most ${DESCRIPTION_MAX_LENGTH} chars), or null to keep the current one.`,
+          description: `New description (~300 chars of what the project is, top level only — no details, course of work or status; at most ${DESCRIPTION_MAX_LENGTH}), or null to keep the current one.`,
         },
         slug: {
           type: ['string', 'null'],

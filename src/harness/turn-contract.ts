@@ -52,6 +52,11 @@ export type TurnPrompt = {
   cacheKey: string;
 };
 
+// The prompt of a prewarm ping: the frozen chunks alone. The status rides
+// after the last cache breakpoint and is no part of the prefix a ping
+// refreshes — sending it would only be paid for at the uncached rate.
+export type PrewarmPrompt = Pick<TurnPrompt, 'chunks' | 'cacheKey'>;
+
 // The request parameters shared by every call of a thread: the prompt-cache
 // prefix depends on them (model, instructions, tools), so turns and prewarm
 // pings must agree byte for byte.

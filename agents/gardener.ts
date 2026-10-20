@@ -51,7 +51,8 @@ The operations of a pass:
 - Invalidate facts: check dated facts against their sources where feasible; mark or remove the stale ones.
 - Evict from the entry point: whatever is not the map, the identity or the stable frame moves to topical files or the journal; bring AGENTS.md back within its budget.
 - Distill the journal: compress old entries; decisions and their whys survive, play-by-play does not.
-- Finish the pass: record it in the journal (date, what was consolidated/retired and why), then touch the project via projects_update.
+- Check the registry entry: the project's description (projects_get) is a ~300-char top-level statement of what the project is — no details, no course of work, no status, no pass marks; bring it back to that shape via projects_update when it drifted, leave it alone when it matches.
+- Finish the pass: record it in the journal (date, what was consolidated/retired and why).
 
 Hard limits:
 - You invent no norms and change no intended behavior — you reorganize and compress what is there; the meaning stays the user's.
