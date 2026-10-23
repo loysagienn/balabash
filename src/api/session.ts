@@ -7,10 +7,7 @@
 // hash, the token rotates after 24 hours, the session slides for 30 days,
 // lastUsed updates are rate-limited. One session holds every workspace the
 // browser is signed in to (see "Several workspaces" below) and belongs to
-// one user — the one the code was issued to (web_sessions.user_id). A row
-// without a user was born before users existed: it is no session any more
-// (the browser signs in again, once), the row stays for its expiry sweep —
-// and for the bundle before users, should the installation fall back to it.
+// one user — the one the code was issued to (web_sessions.user_id).
 
 import crypto from 'node:crypto';
 import type { Context } from 'koa';
@@ -174,10 +171,6 @@ export async function getSession(ctx: Context): Promise<SessionModel | null> {
     await deleteSessionRows(session.id);
     clearSessionCookie(ctx);
 
-    return null;
-  }
-
-  if (!session.userId) {
     return null;
   }
 

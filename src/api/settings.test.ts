@@ -5,7 +5,7 @@ import { NAME_MAX_LENGTH, SettingsError, parseSettingsPatch, parseUserPatch } fr
 describe('parseSettingsPatch', () => {
   it('leaves an absent field alone and keeps only the field it knows', () => {
     assert.deepEqual(parseSettingsPatch({}), {});
-    assert.deepEqual(parseSettingsPatch({ workspaceName: 'Home', operatorName: 'Vladimir', other: 1 }), { workspaceName: 'Home' });
+    assert.deepEqual(parseSettingsPatch({ workspaceName: 'Home', displayName: 'Vladimir', other: 1 }), { workspaceName: 'Home' });
   });
 
   it('trims a name and clears on null, empty and blank', () => {

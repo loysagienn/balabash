@@ -66,7 +66,7 @@ describe('projectFeed — a question for the user (agent.ask)', () => {
 });
 
 describe('projectFeed — messages', () => {
-  it('shows another user’s message under their name as a person’s block; yours and the ones from before users are "you"', () => {
+  it('shows another user’s message under their name as a person’s block; yours are "you"', () => {
     resetSeq(1n);
 
     const items = projectFeed(
@@ -74,7 +74,6 @@ describe('projectFeed — messages', () => {
         event({ type: 'user.message', threadId: 't1', actor: 'user', payload: { text: 'hers', source: 'web', identity: { userId: 'u2', displayName: 'Ksenia' } } }),
         event({ type: 'user.message', threadId: 't1', actor: 'user', payload: { text: 'nameless', identity: { userId: 'u3', displayName: null, username: 'kate' } } }),
         event({ type: 'user.message', threadId: 't1', actor: 'user', payload: { text: 'mine', source: 'web', identity: { userId: 'me', displayName: 'Vladimir' } } }),
-        event({ type: 'user.message', threadId: 't1', actor: 'user', payload: { text: 'legacy', identity: { username: 'loysagienn', firstName: 'Vladimir' } } }),
         event({ type: 'thread.cancel', threadId: 'main', targetThreadId: 't1', actor: 'user', payload: { reason: 'enough', identity: { userId: 'u2', displayName: 'Ksenia' } } }),
         event({ type: 'thread.interrupt', threadId: 'main', targetThreadId: 't1', actor: 'user', payload: { identity: { userId: 'me', displayName: 'Vladimir' } } }),
       ],
@@ -87,7 +86,6 @@ describe('projectFeed — messages', () => {
         ['Ksenia', 'user', 'hers'],
         ['kate', 'user', 'nameless'],
         ['you', 'user', 'mine'],
-        ['you', 'user', 'legacy'],
         'Ksenia asked to cancel the thread — enough',
         'Vladimir stopped the turn — the agent halted and is awaiting a message',
       ],

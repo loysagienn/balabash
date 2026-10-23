@@ -18,7 +18,7 @@ describe('registry events in the envelope', () => {
   test('the names of Settings changing is canonical, written by the operator', () => {
     assert.equal(isCanonicalType('settings.updated'), true);
     assert.equal(isCanonicalType('settings.cleared'), false);
-    validateEnvelope({ type: 'settings.updated', actor: 'user', workspaceId: 'u', payload: { workspaceName: 'Home', operatorName: null } });
+    validateEnvelope({ type: 'settings.updated', actor: 'user', workspaceId: 'u', payload: { workspaceName: 'Home' } });
   });
 
   test('any actor may write them; a thread needs its user', () => {

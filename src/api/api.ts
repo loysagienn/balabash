@@ -134,10 +134,9 @@ async function readJsonBody(ctx: Context): Promise<Record<string, unknown> | nul
 }
 
 // Session gate for every endpoint except the code exchange itself. The
-// session row always carries a workspaceId and a userId (anonymous
-// sessions are never created, a row without a user is no session —
-// session.ts), but the columns are nullable — the guard re-checks. The
-// request acts in one workspace of the session (session.ts, "Several
+// session row always carries a workspaceId (anonymous sessions are never
+// created — session.ts), but the column is nullable — the guard re-checks.
+// The request acts in one workspace of the session (session.ts, "Several
 // workspaces"): the one it names, or the primary one; naming a workspace
 // this browser is not signed in to is a 401 of its own code — the tab's
 // workspace is gone, the browser's session is not. The user of the session
@@ -145,7 +144,7 @@ async function readJsonBody(ctx: Context): Promise<Record<string, unknown> | nul
 async function gate(ctx: Context, next: Next, { fallbackToPrimary }: { fallbackToPrimary: boolean }): Promise<void> {
   const session = await getSession(ctx);
 
-  if (!session || !session.workspaceId || !session.userId) {
+  if (!session || !session.workspaceId) {
     sendError(ctx, 401, 'unauthorized', 'No valid session');
 
     return;

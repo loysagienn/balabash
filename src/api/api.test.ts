@@ -1011,7 +1011,7 @@ describe('editing a Markdown file over the api', () => {
 
 describe('settings over the api', () => {
   test('PATCH /settings stores the workspace’s name and /me reads it back beside the user', async () => {
-    const reply = await stand.request('PATCH', '/api/settings', { body: { workspaceName: '  Home  ', operatorName: 'Vladimir' } });
+    const reply = await stand.request('PATCH', '/api/settings', { body: { workspaceName: '  Home  ', displayName: 'Vladimir' } });
 
     assert.equal(reply.status, 200, reply.text);
     assert.deepEqual(reply.json<SettingsResponse>().settings, { workspaceName: 'Home' });
@@ -1026,8 +1026,7 @@ describe('settings over the api', () => {
 
     const workspace = await prisma.workspace.findUniqueOrThrow({ where: { id: stand.workspaceId } });
 
-    // The operator's name of the time before users is nobody's to write.
-    assert.deepEqual({ workspaceName: workspace.workspaceName, operatorName: workspace.operatorName }, { workspaceName: null, operatorName: null });
+    assert.equal(workspace.workspaceName, null);
 
     // Each change journals settings.updated by the operator with the name
     // the call answered — what every other tab folds into its `me` — and
@@ -1150,10 +1149,7 @@ describe('settings over the api', () => {
       assert.deepEqual(Object.keys(ownFacts.session).sort(), ['createdAt', 'loginSource', 'userAgent']);
       assert.deepEqual(Object.keys(ownFacts.telegram).sort(), ['botUsername', 'enabled', 'group']);
 
-      // A session born before the column, and one with a value the
-      // contract does not name: both read as unknown.
-      await prisma.session.update({ where: { id: phoneRow.id }, data: { loginSource: null } });
-      assert.equal((await stand.request('GET', '/api/settings', { cookie: phone })).json<SettingsFactsResponse>().session.loginSource, null);
+      // A value the contract does not name reads as unknown.
       await prisma.session.update({ where: { id: phoneRow.id }, data: { loginSource: 'carrier-pigeon' } });
       assert.equal((await stand.request('GET', '/api/settings', { cookie: phone })).json<SettingsFactsResponse>().session.loginSource, null);
     } finally {

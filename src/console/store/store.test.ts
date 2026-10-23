@@ -488,9 +488,7 @@ describe('session start-up', () => {
     // the stamp is what the snapshot already told.
     store.dispatch(eventAction(event({ seq: 100n, type: 'settings.updated', actor: 'user', payload: { workspaceName: 'Within' } })));
     assert.deepEqual([store.getState().session.me?.workspaceName, selectUserName(store.getState())], [ME.workspaceName, null]);
-    // An event of the time before users carries the operator's name too:
-    // it is nobody's now.
-    store.dispatch(eventAction(event({ seq: 101n, type: 'settings.updated', actor: 'user', payload: { workspaceName: 'Home', operatorName: 'Vladimir' } })));
+    store.dispatch(eventAction(event({ seq: 101n, type: 'settings.updated', actor: 'user', payload: { workspaceName: 'Home' } })));
     assert.deepEqual([store.getState().session.me?.workspaceName, selectUserName(store.getState())], ['Home', null]);
     assert.deepEqual(store.getState().session.me?.user, ME.user, 'the rest of me is kept');
 

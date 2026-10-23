@@ -105,16 +105,10 @@ function truncateLongStrings(value: unknown, limit: number): TruncateResult {
 // "Who speaks" for user messages: a compact display name from the identity
 // payload — group transcripts are multi-voice (§6). The user's own name
 // (displayName — one person, one voice whatever the channel) with the
-// channel's username; the channel's first and last name for events
-// written before users existed.
+// channel's username.
 function renderIdentity(identity: unknown): string | null {
   const object = asObject(identity);
-  const own = typeof object.displayName === 'string' ? object.displayName.trim() : '';
-  const name =
-    own ||
-    [object.firstName, object.lastName]
-      .filter((part): part is string => typeof part === 'string' && Boolean(part.trim()))
-      .join(' ');
+  const name = typeof object.displayName === 'string' ? object.displayName.trim() : '';
   const username = typeof object.username === 'string' && object.username ? `@${object.username}` : null;
 
   if (name && username) {

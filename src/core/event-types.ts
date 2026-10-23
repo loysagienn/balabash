@@ -11,16 +11,15 @@ import type { SessionState } from '../projections/session.ts';
 // The human behind a user.message or a thread command: the user, and
 // what the channel knew of them.
 export type UserIdentity = {
-  // The user behind the event (src/users) and their name as of it; absent
-  // on events written before users existed.
+  // The user behind the event (src/users) and their name as of it. Absent
+  // only on what somebody wrote into a remote system's session (source
+  // 'remote', src/remote/mirror.ts): a person Balabash knows by the
+  // username alone.
   userId?: string;
   displayName?: string | null;
   // The channel's handle when it has one: a Telegram username, a remote
   // system's username.
   username?: string | null;
-  // The Telegram profile's name, on events written before users existed.
-  firstName?: string | null;
-  lastName?: string | null;
 };
 
 // A file a message refers to — user.message.files (stored by the channel
@@ -276,17 +275,15 @@ export type EventPayloads = {
   'schedule.task.cancelled': TaskRecord & { reason?: 'cancelled' | 'consumed' };
   'app.published': { path: string; slug: string; name: string | null; description: string | null };
   'app.unpublished': { path: string; slug: string };
-  // The names of Settings changed (PATCH /api/settings): the effective
-  // names as /api/me reports them after the change — the stored workspace
-  // name or the bound group's title, the operator's name or null — so the
-  // console's session folds them in as a whole, and every open tab follows.
+  // The name of Settings changed (PATCH /api/settings): the effective
+  // name as /api/me reports it after the change — the stored workspace
+  // name or the bound group's title — so every open tab folds it into its
+  // session and follows.
   'settings.updated': SettingsRecord;
 };
 
 export type SettingsRecord = {
   workspaceName: string | null;
-  // The operator's name of the time before users: on events written then.
-  operatorName?: string | null;
 };
 
 // The project row as the registry events carry it (ProjectView of the

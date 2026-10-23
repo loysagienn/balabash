@@ -88,9 +88,6 @@ model Workspace {
   // (PATCH /api/settings). Null until set: the workspace then goes by the
   // bound Telegram group's title.
   workspaceName String?  @map("workspace_name")
-  // The operator's name of the time before users (src/users): read by
-  // nothing since, kept until a later migration drops it.
-  operatorName  String?  @map("operator_name")
 
   @@map("workspaces")
 }
@@ -197,12 +194,10 @@ model Session {
   rotatedAt   DateTime? @map("rotated_at")
   // Where the one-time code this session was born from came from:
   // 'telegram' (the /auth_code command in the bound group) or 'console'
-  // (printed into the server log); null for sessions born before the column.
-  loginSource String?   @map("login_source")
+  // (printed into the server log).
+  loginSource String    @map("login_source")
   // The user this browser signed in as — the one the code was issued to.
-  // Null on sessions born before users existed: such a session is no
-  // session any more (session.ts), the row waits for its expiry sweep.
-  userId      String?   @map("user_id")
+  userId      String    @map("user_id")
 
   @@index([workspaceId])
   @@index([userId])
@@ -225,7 +220,7 @@ model SessionWorkspace {
   createdAt   DateTime @default(now()) @map("created_at")
   // Where the code that signed this workspace in came from: 'telegram' or
   // 'console' (as web_sessions.login_source).
-  loginSource String?  @map("login_source")
+  loginSource String   @map("login_source")
 
   @@id([sessionId, workspaceId])
   @@index([workspaceId])

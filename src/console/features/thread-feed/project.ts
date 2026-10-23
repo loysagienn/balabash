@@ -32,8 +32,8 @@ export type FeedContext = {
   // The agent of another thread the store knows (a child of this one), or null.
   agentOf: (threadId: string) => string | null;
   // The user of this browser's session: an event of theirs (identity.userId)
-  // is "you" — and so is one written before users existed. Another user's
-  // goes under their name. Null — nobody signed in (a scene).
+  // is "you"; another user's goes under their name. Null — nobody signed
+  // in (a scene).
   userId: string | null;
   // Your name for the system lines ("<name> asked to cancel the thread");
   // null — "You". The messages keep the "you" party and the Message block
@@ -227,8 +227,9 @@ function identityOf(event: Event): UserIdentity | undefined {
   return identity && typeof identity === 'object' ? (identity as UserIdentity) : undefined;
 }
 
-// Another user's name for an event of theirs; null when the event is yours
-// — or from before users existed, when every user's event reads as yours.
+// Another user's name for an event of theirs; null when the event is
+// yours. (What somebody wrote into a remote session has no userId and is
+// drawn on its own path: source 'remote', below.)
 function otherUser(event: Event, ctx: FeedContext): string | null {
   const identity = identityOf(event);
 

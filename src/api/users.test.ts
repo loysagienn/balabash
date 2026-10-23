@@ -13,7 +13,6 @@ import { sessionCookie, startStand } from '../test-support/stand.ts';
 import type { Stand } from '../test-support/stand.ts';
 import type { MeResponse, PostThreadMessageResponse, ThreadCommandResponse } from './contract.ts';
 
-type ErrorBody = { error: { code: string; message: string } };
 
 let stand: Stand;
 let prisma: typeof import('../db/client.ts')['prisma'];
@@ -59,35 +58,6 @@ describe('the user of a web session', () => {
 
     assert.equal(session?.userId, stand.userId);
     assert.deepEqual((await stand.request('GET', '/api/me')).json<MeResponse>().user, { userId: stand.userId, displayName: 'Operator' });
-  });
-
-  test('a session without a user is no session: 401, the row stays for its sweep; the browser signs in anew', async () => {
-    const code = createAuthCode({ workspaceId: stand.workspaceId, userId: stand.userId }, 'telegram');
-    const signedIn = await stand.request('POST', '/api/auth', { body: { code }, cookie: null });
-
-    assert.equal(signedIn.status, 200, signedIn.text);
-
-    const legacy = sessionCookie(signedIn.headers['set-cookie'] ?? []);
-    const row = await sessionOf(legacy);
-
-    assert.ok(row);
-    await prisma.session.update({ where: { id: row.id }, data: { userId: null } });
-
-    const refused = await stand.request('GET', '/api/me', { cookie: legacy });
-
-    assert.equal(refused.status, 401);
-    assert.equal(refused.json<ErrorBody>().error.code, 'unauthorized');
-    assert.ok(await prisma.session.findUnique({ where: { id: row.id } }), 'the row is not deleted');
-
-    const again = await stand.request('POST', '/api/auth', { body: { code: createAuthCode({ workspaceId: stand.workspaceId, userId: stand.userId }, 'telegram') }, cookie: legacy });
-
-    assert.equal(again.status, 200, again.text);
-
-    const fresh = sessionCookie(again.headers['set-cookie'] ?? []);
-
-    assert.notEqual(fresh, legacy);
-    assert.equal((await sessionOf(fresh))?.userId, stand.userId);
-    assert.ok(await prisma.session.findUnique({ where: { id: row.id } }), 'the legacy row is still not ours to delete');
   });
 
   test('a browser signed in as one user that exchanges another user’s code becomes that user’s: a new session, the old one gone', async () => {

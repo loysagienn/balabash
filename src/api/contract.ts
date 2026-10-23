@@ -126,7 +126,7 @@ export type WebSessionView = {
   // The User-Agent the browser sent at sign-in, as recorded ('' when it
   // sent none).
   userAgent: string;
-  // How the code came — null for a session born before the fact was kept.
+  // How the code came; null for a stored value the contract does not name.
   loginSource: LoginSource | null;
 };
 
