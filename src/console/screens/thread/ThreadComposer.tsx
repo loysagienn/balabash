@@ -5,7 +5,9 @@
 // any uploads, a message of files alone — and the refusal of the last send
 // above the box. A closed thread is the lock plate, unless a send was just
 // refused for it: then the draft stays on screen with the reason and "Copy
-// text" (the files are kept in storage).
+// text" (the files are kept in storage). The draft itself lives on the
+// server (store/drafts): a conflict with another device's version is the
+// strip's question — use that one, or keep this one.
 
 import type { Thread } from '../../../core/contract.ts';
 import { useCopy } from '../../features/clipboard/useCopy.ts';
@@ -13,6 +15,8 @@ import { fileSize } from '../../lib/format/index.ts';
 import { pick } from '../../lib/upload/pick.ts';
 import { attachFiles, removeAttachment, uploadAttachment } from '../../store/attachments/actions.ts';
 import { draftFiles, selectDraftAttachments, selectSendRefusal } from '../../store/attachments/selectors.ts';
+import { draftKeepMine, draftUseTheirs } from '../../store/drafts/actions.ts';
+import { selectDraftConflict } from '../../store/drafts/selectors.ts';
 import { useAppDispatch, useAppSelector } from '../../store/hooks.ts';
 import { sendMessage } from '../../store/threads/actions.ts';
 import { openViewer, setComposerDraft } from '../../store/ui/actions.ts';
@@ -23,7 +27,7 @@ import type { ComposerRefusal } from '../../ui/Composer/Composer.tsx';
 import { outgoingText } from '../../ui/Composer/Composer.logic.ts';
 import { ComposerLock } from '../../ui/Composer/ComposerLock.tsx';
 import { fileIcon } from '../../ui/atoms/fileIcon.ts';
-import { chipWords, refusalWords, waitWords } from './composer.logic.ts';
+import { CONFLICT_WORDS, chipWords, conflictWords, refusalWords, waitWords } from './composer.logic.ts';
 import type { ComposerLockWords } from './ThreadScreen.logic.ts';
 
 // Files into the draft of a thread: kept in the upload registry, an image's
@@ -41,6 +45,7 @@ export function ThreadComposer({ thread, lock }: { thread: Thread; lock: Compose
   const sending = useAppSelector(s => selectComposerSending(s, id));
   const atts = useAppSelector(s => selectDraftAttachments(s, id));
   const refusal = useAppSelector(s => selectSendRefusal(s, id));
+  const conflict = useAppSelector(s => selectDraftConflict(s, id));
   const attach = useAttach(id);
   const copy = useCopy();
   const { uploading, ready } = draftFiles(atts);
@@ -65,6 +70,17 @@ export function ThreadComposer({ thread, lock }: { thread: Thread; lock: Compose
       text: words.text,
       ...(words.action === 'copy' ? { action: 'Copy text', actionIcon: 'copy' as const, onAction: () => void copy(text, { done: 'Text copied', fail: 'Couldn’t copy the text' }) } : {}),
       ...(words.action === 'retry' ? { action: 'Retry', actionIcon: 'rotate-ccw' as const, onAction: send } : {}),
+    };
+  } else if (conflict) {
+    strip = {
+      state: 'act',
+      icon: 'refresh-cw',
+      text: conflictWords({ text: conflict.text, files: conflict.files.length }),
+      action: CONFLICT_WORDS.useTheirs,
+      actionVariant: 'regular',
+      onAction: () => dispatch(draftUseTheirs(id, conflict)),
+      secondary: CONFLICT_WORDS.keepMine,
+      onSecondary: () => dispatch(draftKeepMine(id)),
     };
   }
 

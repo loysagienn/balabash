@@ -45,6 +45,20 @@ function withCommand(state: UiState, threadId: string, command: ThreadCommand, p
   return Object.keys(rest).length ? { ...others, [threadId]: rest } : others;
 }
 
+function withDraftText(state: UiState, threadId: string, text: string): UiState {
+  if ((state.composerDrafts[threadId] ?? '') === text) {
+    return state;
+  }
+
+  if (text === '') {
+    const { [threadId]: dropped, ...composerDrafts } = state.composerDrafts;
+
+    return { ...state, composerDrafts };
+  }
+
+  return { ...state, composerDrafts: { ...state.composerDrafts, [threadId]: text } };
+}
+
 function withoutSending(state: UiState, threadId: string): UiState['composerSending'] {
   const { [threadId]: dropped, ...rest } = state.composerSending;
 
@@ -85,6 +99,12 @@ export function uiReducer(state: UiState = initialUi, action: Action): UiState {
       return { ...state, toasts: state.toasts.filter(toast => toast.id !== action.id) };
     case 'COMPOSER_DRAFT_SET':
       return { ...state, composerDrafts: { ...state.composerDrafts, [action.threadId]: action.text } };
+    // The server's draft into the composer (store/drafts): read while the
+    // tab had nothing unsaved, or chosen over the tab's own in a conflict.
+    case 'DRAFT_LOAD_DONE':
+      return action.applied ? withDraftText(state, action.threadId, action.draft?.text ?? '') : state;
+    case 'DRAFT_CONFLICT_USE_THEIRS':
+      return { ...state, composerDrafts: { ...state.composerDrafts, [action.threadId]: action.theirs.text } };
     case 'SEND_MESSAGE':
       return { ...state, composerSending: { ...state.composerSending, [action.threadId]: { draft: state.composerDrafts[action.threadId] ?? '' } } };
     case 'SEND_MESSAGE_DONE': {

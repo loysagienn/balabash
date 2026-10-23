@@ -1,6 +1,8 @@
 // The SSE tail over a fake log: frames arrive in seq order with the seq as
 // the id, a reconnect with Last-Event-ID catches up from the log, events
-// of another workspace are filtered, installation-level ones pass.
+// of another workspace are filtered, installation-level ones pass; the
+// draft signals of the stream's user in its workspace ride along as
+// `event: draft` frames without an id, nobody else's.
 
 import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -9,6 +11,7 @@ import type { AddressInfo } from 'node:net';
 import Koa from 'koa';
 import type { Event } from '../core/contract.ts';
 import { createLiveHub } from '../core/live.ts';
+import { createDraftSignals } from '../drafts/index.ts';
 import { parseJson } from '../utils/serialize-json.ts';
 import { createEventStreamHandler } from './event-stream.ts';
 
@@ -42,22 +45,31 @@ const hub = createLiveHub({
   pollIntervalMs: 60_000,
 });
 
-type Frame = { id: string | null; data: Event | null; comment: string | null };
+type Frame = { id: string | null; event: string | null; data: Event | null; draft: { threadId: string; revision: number } | null; comment: string | null };
+
+const drafts = createDraftSignals();
 
 function parseFrames(text: string): Frame[] {
   return text
     .split('\n\n')
     .filter(Boolean)
     .map(block => {
-      const frame: Frame = { id: null, data: null, comment: null };
+      const frame: Frame = { id: null, event: null, data: null, draft: null, comment: null };
+      const lines = block.split('\n');
 
-      for (const line of block.split('\n')) {
+      frame.event = lines.find(line => line.startsWith('event: '))?.slice(7) ?? null;
+
+      for (const line of lines) {
         if (line.startsWith(':')) {
           frame.comment = line.slice(1).trim();
         } else if (line.startsWith('id: ')) {
           frame.id = line.slice(4);
         } else if (line.startsWith('data: ')) {
-          frame.data = parseJson(line.slice(6)) as Event;
+          if (frame.event === 'draft') {
+            frame.draft = parseJson(line.slice(6)) as { threadId: string; revision: number };
+          } else {
+            frame.data = parseJson(line.slice(6)) as Event;
+          }
         }
       }
 
@@ -80,7 +92,7 @@ function openStream(path: string, headers: Record<string, string>, expectedEvent
       res.on('data', chunk => {
         text += chunk;
 
-        if (parseFrames(text).filter(frame => frame.data).length >= expectedEvents) {
+        if (parseFrames(text).filter(frame => frame.data || frame.draft).length >= expectedEvents) {
           finish();
         }
       });
@@ -99,10 +111,11 @@ function openStream(path: string, headers: Record<string, string>, expectedEvent
 describe('GET /api/events/stream', () => {
   before(async () => {
     const app = new Koa();
-    const handler = createEventStreamHandler({ hub, readAfter: async (seq, limit) => log.filter(event => event.seq > seq).slice(0, limit), heartbeatMs: 60_000, pageSize: 2 });
+    const handler = createEventStreamHandler({ hub, readAfter: async (seq, limit) => log.filter(event => event.seq > seq).slice(0, limit), drafts, heartbeatMs: 60_000, pageSize: 2 });
 
     app.use(async (ctx, next) => {
       ctx.state.workspaceId = 'u1';
+      ctx.state.userId = ctx.get('x-test-user') || 'me';
       await next();
     });
     app.use(async ctx => {
@@ -167,6 +180,28 @@ describe('GET /api/events/stream', () => {
     assert.deepEqual(
       data.map(frame => frame.id),
       ['5', '6', '8'],
+    );
+  });
+
+  test('the draft signals of the stream’s user in its workspace are `draft` frames without an id; another user’s and another workspace’s are not', async () => {
+    const streamed = openStream('/api/events/stream?after=8', { 'x-test-user': 'me' }, 2);
+
+    await new Promise(resolve => setTimeout(resolve, 50));
+    drafts.notify({ userId: 'ksenia', workspaceId: 'u1', threadId: 't', revision: 1 });
+    drafts.notify({ userId: 'me', workspaceId: 'other', threadId: 't', revision: 1 });
+    drafts.notify({ userId: 'me', workspaceId: 'u1', threadId: 't', revision: 3 });
+    push(9, 'u1');
+    hub.notify(9n);
+
+    const { frames } = await streamed;
+    const seen = frames.filter(frame => frame.data || frame.draft);
+
+    assert.deepEqual(
+      seen.map(frame => [frame.event, frame.id, frame.draft, frame.data?.seq ?? null]),
+      [
+        ['draft', null, { threadId: 't', revision: 3 }, null],
+        [null, '9', null, 9n],
+      ],
     );
   });
 

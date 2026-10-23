@@ -154,6 +154,8 @@ function fakeApi(overrides: ApiOverrides = {}, calls: Calls = []): Api {
     get: async () => ({ thread: thread({ id: 't1' }) }),
     events: async () => ({ events: [], nextCursor: null }),
     sendMessage: async () => ({}),
+    draft: async () => ({ draft: null }),
+    saveDraft: async (id, content, baseRevision) => ({ draft: { threadId: id, text: content.text, files: [], revision: baseRevision + 1, updatedAt: new Date(0) } }),
     interrupt: async () => ({}),
     cancel: async () => ({}),
     finish: async () => ({}),
@@ -188,6 +190,8 @@ function fakeApi(overrides: ApiOverrides = {}, calls: Calls = []): Api {
       get: wrap('threads.get', threads.get),
       events: wrap('threads.events', threads.events),
       sendMessage: wrap('threads.sendMessage', threads.sendMessage),
+      draft: wrap('threads.draft', threads.draft),
+      saveDraft: wrap('threads.saveDraft', threads.saveDraft),
       interrupt: wrap('threads.interrupt', threads.interrupt),
       cancel: wrap('threads.cancel', threads.cancel),
       finish: wrap('threads.finish', threads.finish),
@@ -265,9 +269,10 @@ describe('session start-up', () => {
     assert.equal(selectRunningCount(state), 1);
     assert.deepEqual(
       calls.map(call => call.name),
-      ['me', 'snapshot', 'threads.events'],
+      ['me', 'snapshot', 'threads.events', 'threads.draft'],
     );
     assert.deepEqual(calls[2].args, ['t1', { before: 51n, limit: FEED_CHUNK }]);
+    assert.deepEqual(calls[3].args, ['t1']);
     assert.equal(state.feed.byThread.t1.exhausted, true);
     assert.equal(state.feed.byThread.t1.knownFrom, null);
   });

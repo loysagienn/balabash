@@ -48,3 +48,20 @@ export function refusalWords(refusal: SendRefusal, status: ThreadStatus, draft: 
       return { text: `Not sent — ${refusal.message.replace(/\.$/, '')}.`, action: 'retry' };
   }
 }
+
+// The strip of a conflict (store/drafts): the draft of this thread was
+// changed on another device while this tab had unsaved edits of its own —
+// nothing is overwritten, the user chooses. `theirs` — what the other
+// version holds, for the words.
+export const CONFLICT_WORDS = {
+  text: 'This draft was changed on another device.',
+  useTheirs: 'Use that',
+  keepMine: 'Keep mine',
+} as const;
+
+export function conflictWords(theirs: { text: string; files: number }): string {
+  const files = theirs.files === 1 ? 'a file' : `${theirs.files} files`;
+  const what = theirs.text && theirs.files ? `text and ${files}` : theirs.files ? files : theirs.text ? 'text' : 'an empty draft';
+
+  return `${CONFLICT_WORDS.text} It has ${what} — use that version, or keep yours?`;
+}

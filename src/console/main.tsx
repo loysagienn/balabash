@@ -20,6 +20,7 @@ import { connectStoreToVisibility } from './lib/visibility/index.ts';
 import { bootWorkspace, currentWorkspace, leaveSignedOutWorkspace } from './lib/workspace/index.ts';
 import { connectStoreToWorkspace } from './lib/workspace/process.ts';
 import { connectStoreToFeedEviction } from './lib/feed-eviction/index.ts';
+import { connectStoreToDraftSync } from './lib/drafts/index.ts';
 import { connectDocumentToTheme } from './lib/theme/index.ts';
 import { connectQueryClientToSession } from './lib/query/session.ts';
 import { connectQueryClientToSecretRequests } from './lib/query/secret-requests.ts';
@@ -76,6 +77,9 @@ connectStoreToVisibility(store);
 // The feeds of threads neither shown nor running leave the store after a
 // while (lib/feed-eviction).
 connectStoreToFeedEviction(store);
+// The composer's drafts reach the server as the typing rests and as the tab
+// goes out of view (lib/drafts).
+connectStoreToDraftSync(store);
 // The phone's two-finger zoom is off (lib/touch/pinch.ts); desktop zoom — a
 // touch screen beside a mouse included — is not.
 installPinchGuard(document, navigator, window.matchMedia(PHONE_MEDIA));

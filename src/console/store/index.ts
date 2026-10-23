@@ -39,6 +39,8 @@ import { attachmentsReducer } from './attachments/reducer.ts';
 import { uploadsReducer } from './uploads/reducer.ts';
 import { answerClashHandler, cancelUploadHandler, closeUploadsHandler, retryUploadHandler, startUploadHandler, uploadFilesHandler } from './uploads/handlers.ts';
 import { attachFilesHandler, removeAttachmentHandler, uploadAttachmentHandler } from './attachments/handlers.ts';
+import { draftsReducer } from './drafts/reducer.ts';
+import { draftChangedRemotelyHandler, draftLoadHandler, draftSaveHandler, streamOpenedHandler } from './drafts/handlers.ts';
 
 export type { Action, ActionOf, ActionType, State } from './types.ts';
 
@@ -70,6 +72,10 @@ export const handlers = (back: () => BackHistory | null) =>
     UPLOAD_RETRY: retryUploadHandler,
     UPLOAD_CLOSE: closeUploadsHandler,
     COMMAND_THREAD: commandThreadHandler,
+    DRAFT_LOAD: draftLoadHandler,
+    DRAFT_SAVE: draftSaveHandler,
+    DRAFT_CHANGED_REMOTELY: draftChangedRemotelyHandler,
+    STREAM_OPENED: streamOpenedHandler,
     CREATE_PROJECT: createProjectHandler,
     UPDATE_PROJECT: updateProjectHandler,
     SET_PROJECT_ARCHIVED: setProjectArchivedHandler,
@@ -120,6 +126,7 @@ export function createStore({ api, initialRoute, initialHash = '', enhancer, bac
     ui: uiReducer,
     attachments: attachmentsReducer,
     uploads: uploadsReducer,
+    drafts: draftsReducer,
   }) as unknown as Reducer<Domains, Action>;
 
   const reduce = (state: State | undefined, action: Action): State => {

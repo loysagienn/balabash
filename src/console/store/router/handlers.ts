@@ -20,6 +20,7 @@ import type { AppRoute } from '../../lib/router/routes.ts';
 import type { ActionHandler, Dispatch, State } from '../types.ts';
 import { loadApps } from '../apps/actions.ts';
 import { loadThread, loadThreadEvents, loadThreads } from '../threads/actions.ts';
+import { draftLoad } from '../drafts/actions.ts';
 import { threadsFiltersOf, sameFilters } from '../threads/filters.ts';
 import { routeTo } from './actions.ts';
 import { pageBehind } from './reducer.ts';
@@ -46,6 +47,15 @@ export function loadRouteData(route: AppRoute, dispatch: Dispatch, getState: () 
 
       if (!feed || (feed.knownFrom === null && !feed.exhausted && !feed.request)) {
         dispatch(loadThreadEvents(route.id, null));
+      }
+
+      // The user's draft of the thread (store/drafts): read on entering,
+      // and read again on the tab's return — typed on another device
+      // meanwhile; the handler leaves the tab's own unsaved edits alone.
+      // The snapshot's trigger repeats the entry for the route data that
+      // depends on it; the draft does not, and is already asked for.
+      if (trigger !== 'snapshot' || !state.drafts.byThread[route.id]) {
+        dispatch(draftLoad(route.id));
       }
 
       return;

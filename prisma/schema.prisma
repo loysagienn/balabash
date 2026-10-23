@@ -227,6 +227,32 @@ model SessionWorkspace {
   @@map("web_session_workspaces")
 }
 
+// A user's unsent message of a thread (src/drafts): the text and the stored
+// files of the console's composer as last saved from any of their devices —
+// one row per (user, thread), personal, read by its owner alone. Not an
+// event of the log: mutable state of a client, rewritten every few seconds
+// of typing (the same rule that keeps Session and LlmRequest out of the
+// log). revision is the optimistic lock every write names (PUT
+// baseRevision): it only grows — a cleared draft is the row with empty
+// content, never a deleted row, so a stale device can never match a
+// revision that was reused.
+model MessageDraft {
+  userId    String   @map("user_id")
+  threadId  String   @map("thread_id")
+  text      String
+  fileIds   String[] @map("file_ids")
+  revision  Int
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  // The web session that wrote it last; null when the write was not a
+  // session's (the clear of a sent message).
+  updatedBySession String? @map("updated_by_session")
+
+  @@id([userId, threadId])
+  @@index([threadId])
+  @@map("message_drafts")
+}
+
 // CCR adapter state (src/adapters/ccr): the Claude remote-control session
 // (cse_*) mirroring a claude-sdk thread into the operator's Claude app, with
 // the SSE cursor the worker resumes from. Transport state, not events.

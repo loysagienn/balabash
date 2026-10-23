@@ -90,6 +90,8 @@ const api: Api = {
     // One chunk for any thread: the thread's start, nothing older.
     events: async (threadId, query) => ({ events: query.before === undefined || query.before > started(threadId).seq ? [started(threadId)] : [], nextCursor: null }),
     sendMessage: async () => ({}),
+    draft: async () => ({ draft: null }),
+    saveDraft: async (id, content, baseRevision) => ({ draft: { threadId: id, text: content.text, files: [], revision: baseRevision + 1, updatedAt: new Date(0) } }),
     interrupt: async () => ({}),
     cancel: async () => ({}),
     finish: async () => ({}),

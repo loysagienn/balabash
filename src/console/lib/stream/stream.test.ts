@@ -25,6 +25,7 @@ class FakeEventSource {
   onopen: (() => void) | null = null;
   onmessage: ((message: { data: string }) => void) | null = null;
   onerror: (() => void) | null = null;
+  private named = new Map<string, ((message: { data: string }) => void)[]>();
 
   constructor(url: string) {
     this.url = url;
@@ -33,6 +34,15 @@ class FakeEventSource {
 
   close() {
     this.readyState = FakeEventSource.CLOSED;
+  }
+
+  addEventListener(type: string, listener: (message: { data: string }) => void) {
+    this.named.set(type, [...(this.named.get(type) ?? []), listener]);
+  }
+
+  // A named frame (`event: draft`).
+  draft(threadId: string, revision: number) {
+    this.named.get('draft')?.forEach(listener => listener({ data: stringifyJson({ threadId, revision }) }));
   }
 
   // The browser's hand: the connection opened, a frame came, the connection
@@ -118,6 +128,8 @@ const api: Api = {
     get: async () => ({ thread: thread({ id: 'a' }) }),
     events: async () => ({ events: [], nextCursor: null }),
     sendMessage: async () => ({}),
+    draft: async () => ({ draft: null }),
+    saveDraft: async (id, content, baseRevision) => ({ draft: { threadId: id, text: content.text, files: [], revision: baseRevision + 1, updatedAt: new Date(0) } }),
     interrupt: async () => ({}),
     cancel: async () => ({}),
     finish: async () => ({}),
@@ -306,6 +318,25 @@ describe('stream process', () => {
     sources()[2].broke();
     assert.equal(status(), 'reconnecting');
     assert.equal(store.getState().stream.dataAt, BROKE_AGAIN_AT);
+  });
+
+  it('a `draft` frame becomes DRAFT_CHANGED_REMOTELY, from the current source alone', async t => {
+    const { store, first, sources } = await connected(t);
+    const seen: unknown[] = [];
+    const unsubscribe = store.subscribe(() => seen.push(store.getState().drafts.nudges));
+
+    t.after(unsubscribe);
+    // The thread is not tracked by this tab: the handler reads nothing, the
+    // action still passes through (the stream's lastSeq is untouched — the
+    // frame has no seq).
+    first.draft('t1', 3);
+    assert.equal(store.getState().stream.lastSeq, 52n);
+
+    first.gaveUp();
+    t.mock.timers.tick(RETRY_AFTER_MS);
+    sources()[1].opened();
+    first.draft('t1', 4);
+    assert.equal(store.getState().stream.lastSeq, 52n);
   });
 
   it('closes for good when the session ends during the pause', async t => {

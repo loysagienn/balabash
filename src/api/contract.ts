@@ -374,6 +374,57 @@ export type WorkspaceUploadResponse = {
 };
 
 // ---------------------------------------------------------------------------
+// The draft of a thread's message: GET / PUT /api/threads/:id/draft — the
+// signed-in user's own unsent text and stored files of the thread, kept
+// on the server so a reload loses nothing and a message begun on one
+// device continues on another (src/drafts). Personal: another member of
+// the workspace has a draft of their own in the same thread. Not an event
+// of the log — read in place on opening the thread, on the tab coming
+// back, after a reconnect, and on the `draft` frame of the event stream.
+//
+// GET answers the draft, or null when the user never saved one here; a
+// cleared draft (emptied, or sent) is a draft with empty content and the
+// revision it reached. PUT names the content and the revision the client's
+// content is based on (baseRevision; 0 — none seen): the write lands when
+// that is the current revision and answers the row as saved (revision +1);
+// otherwise 409 draft_conflict with the server's current draft in
+// error.draft (null — there is no row, the base was stale regardless) —
+// nothing is written, the client decides. The content is up to 20 000
+// characters and 20 stored files of the workspace (a foreign or missing
+// one is a 400 file_not_accepted naming them, as a message's). A closed
+// thread keeps its draft (the text can still be copied).
+//
+// The event stream carries `event: draft` frames — { threadId, revision }
+// of the user's drafts in the workspace, without an id (the browser's
+// Last-Event-ID stays the log's): a hint to read the draft again, nothing
+// more.
+
+export type DraftView = {
+  threadId: string;
+  text: string;
+  // The stored files of the draft with their facts (one gone from storage
+  // is left out).
+  files: StoredFileMeta[];
+  revision: number;
+  updatedAt: Date;
+};
+
+export type DraftResponse = { draft: DraftView | null };
+
+export type PutDraftRequest = {
+  text: string;
+  fileIds: string[];
+  baseRevision: number;
+};
+
+export type DraftConflictErrorBody = {
+  error: { code: 'draft_conflict'; message: string; draft: DraftView | null };
+};
+
+// The `draft` frame of GET /api/events/stream.
+export type DraftStreamFrame = { threadId: string; revision: number };
+
+// ---------------------------------------------------------------------------
 // A stored file's facts by id: GET /api/files/:fileId/meta, under the
 // session with the ownership rule of the bytes (GET /api/files/:fileId) — a
 // foreign file and a missing one are the same 404. For the attachments of

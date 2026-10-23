@@ -7,16 +7,27 @@
 // in seq order; a comment heartbeat keeps idle proxies from cutting the
 // connection. Scoped to the session's workspace plus installation-level
 // events (workspaceId null: restarts, exceptions outside a workspace).
+//
+// Beside the log, the stream carries the user's draft signals
+// (src/drafts) as named frames — `event: draft`, data { threadId,
+// revision } — without an id: they are not events of the log, the
+// browser's Last-Event-ID stays the log's cursor, and a reconnect does not
+// replay them (the console reads the draft itself after a reconnect).
+// Ephemeral: sent the moment they arrive, before or after the catch-up.
 
 import type { Context } from 'koa';
 import type { Event } from '../core/contract.ts';
 import type { LiveHub } from '../core/live.ts';
+import type { DraftSignal, DraftSignals } from '../drafts/index.ts';
+import type { DraftStreamFrame } from './contract.ts';
 import { stringifyJson } from '../utils/serialize-json.ts';
 
 export type EventStreamDeps = {
   hub: LiveHub;
   // Events strictly after seq, oldest first, at most limit (getEventsAfter).
   readAfter: (seq: bigint, limit: number) => Promise<Event[]>;
+  // The draft signals of the users (src/drafts); none — no draft frames.
+  drafts?: Pick<DraftSignals, 'subscribe'>;
   heartbeatMs?: number;
   pageSize?: number;
 };
@@ -31,10 +42,18 @@ export function sseFrame(event: Event): string {
   return `id: ${event.seq}\ndata: ${stringifyJson(event)}\n\n`;
 }
 
-// The handler assumes the session gate already ran (ctx.state.workspaceId).
-export function createEventStreamHandler({ hub, readAfter, heartbeatMs = HEARTBEAT_MS, pageSize = 500 }: EventStreamDeps) {
+export function draftFrame(signal: DraftSignal): string {
+  const frame: DraftStreamFrame = { threadId: signal.threadId, revision: signal.revision };
+
+  return `event: draft\ndata: ${stringifyJson(frame)}\n\n`;
+}
+
+// The handler assumes the session gate already ran (ctx.state.workspaceId,
+// ctx.state.userId).
+export function createEventStreamHandler({ hub, readAfter, drafts, heartbeatMs = HEARTBEAT_MS, pageSize = 500 }: EventStreamDeps) {
   return async (ctx: Context): Promise<void> => {
     const workspaceId = ctx.state.workspaceId as string;
+    const userId = typeof ctx.state.userId === 'string' ? ctx.state.userId : null;
     const lastEventId = parseSeq(ctx.get('last-event-id') || undefined);
     const after = parseSeq(typeof ctx.query.after === 'string' ? ctx.query.after : undefined);
     const cursor = lastEventId ?? after;
@@ -84,6 +103,16 @@ export function createEventStreamHandler({ hub, readAfter, heartbeatMs = HEARTBE
       }
     });
 
+    // The user's draft signals of this workspace, written as they come.
+    const unsubscribeDrafts =
+      drafts && userId !== null
+        ? drafts.subscribe(userId, workspaceId, signal => {
+            if (!closed) {
+              res.write(draftFrame(signal));
+            }
+          })
+        : () => {};
+
     const heartbeat = setInterval(() => {
       if (!closed) {
         res.write(': ping\n\n');
@@ -98,6 +127,7 @@ export function createEventStreamHandler({ hub, readAfter, heartbeatMs = HEARTBE
       closed = true;
       clearInterval(heartbeat);
       unsubscribe();
+      unsubscribeDrafts();
       res.end();
     };
 

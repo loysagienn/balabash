@@ -23,6 +23,9 @@
    “attach” aligned with the text, “send” round; the phone’s system bar is accounted for at the bottom */
 @container thread (max-width:480px){
   .composer{padding:var(--sp-2) var(--gutter) calc(var(--sp-2) + var(--safe-bottom))}
+  .composer-note .note{flex-wrap:wrap}   /* a strip with a choice: the words take the row, the two buttons go under them, right-aligned — beside them the text would be a five-line column */
+  .composer-note .note > div{flex:1 1 12em}
+  .composer-note .note-end{margin-left:auto}
   @media (display-mode:browser){
     .composer{padding-bottom:calc(var(--sp-4) + var(--safe-bottom))}   /* in a browser tab (not the home-screen app) the box keeps 8 px more from the browser's own bar — Vladimir's request, 2026-10-16 */
   }

@@ -11,6 +11,7 @@ import type {
   CreateTaskRequest,
   CreateTaskResponse,
   DeleteTaskResponse,
+  DraftResponse,
   FileMetaResponse,
   JobRunResponse,
   JobRunsQuery,
@@ -27,6 +28,7 @@ import type {
   ProvisionSecretsResponse,
   PublicationResponse,
   PublishAppRequest,
+  PutDraftRequest,
   RenameConnectionRequest,
   RunTaskResponse,
   SecretRequestResponse,
@@ -120,6 +122,12 @@ export type Api = {
     // accepted refuses the whole message (ApiError file_not_accepted with
     // the fileIds).
     sendMessage(id: string, text: string, fileIds?: string[]): Promise<unknown>;
+    // The user's draft of the thread (store/drafts): read in place; saved
+    // over the revision the content is based on — a stale one is an
+    // ApiError draft_conflict with the server's draft in details.draft.
+    // keepalive — the save outlives the page (the tab going away).
+    draft(id: string, signal?: AbortSignal): Promise<DraftResponse>;
+    saveDraft(id: string, content: { text: string; fileIds: string[] }, baseRevision: number, options?: { keepalive?: boolean }): Promise<DraftResponse>;
     // The commands from above: a soft stop of the turn in flight, the end
     // of the thread. The outcome arrives through the event stream.
     interrupt(id: string): Promise<unknown>;
@@ -286,6 +294,9 @@ export function createApi(options: FetchOptions = {}): Api {
       get: id => apiFetch<ThreadResponse>(thread(id)),
       events: (id, query) => apiFetch<ThreadEventsResponse>(`${thread(id)}/events`, { query }),
       sendMessage: (id, text, fileIds) => apiFetch(`${thread(id)}/messages`, { method: 'POST', body: fileIds?.length ? { text, fileIds } : { text } }),
+      draft: (id, signal) => apiFetch<DraftResponse>(`${thread(id)}/draft`, { signal }),
+      saveDraft: (id, content, baseRevision, options) =>
+        apiFetch<DraftResponse>(`${thread(id)}/draft`, { method: 'PUT', body: { text: content.text, fileIds: content.fileIds, baseRevision } satisfies PutDraftRequest, keepalive: options?.keepalive ?? false }),
       interrupt: id => apiFetch(`${thread(id)}/interrupt`, { method: 'POST', body: {} }),
       cancel: (id, reason) => apiFetch(`${thread(id)}/cancel`, { method: 'POST', body: reason ? { reason } : {} }),
       finish: id => apiFetch(`${thread(id)}/finish`, { method: 'POST', body: {} }),

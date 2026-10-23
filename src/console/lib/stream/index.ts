@@ -2,6 +2,9 @@
 // (in the tab's workspace, ?ws=),
 // opened once the session is signed in and the snapshot has stamped asOfSeq,
 // closed when either goes away. Every frame becomes an event/<type> action.
+// Beside the log's frames the stream carries `draft` frames (the user's
+// draft of a thread moved on — src/drafts): each becomes
+// DRAFT_CHANGED_REMOTELY, and the drafts handler reads the draft again.
 // The browser reconnects by itself and sends Last-Event-ID; when it gives up
 // (the server answered with an error status, e.g. a lost session), the
 // process retries after a pause from the last seq it saw — the store says
@@ -10,9 +13,11 @@
 
 import type { Store } from 'redux';
 import type { Event } from '../../../core/contract.ts';
+import type { DraftStreamFrame } from '../../../api/contract.ts';
 import { parseJson } from '../../../utils/serialize-json.ts';
 import type { Action, State } from '../../store/types.ts';
 import { eventAction } from '../../store/events.ts';
+import { draftChangedRemotely } from '../../store/drafts/actions.ts';
 import { withWorkspace } from '../workspace/index.ts';
 import { streamClosed, streamConnecting, streamOpened, streamReconnecting } from '../../store/stream/actions.ts';
 
@@ -72,6 +77,14 @@ export function connectStoreToStream(store: Store<State, Action>, { now = () => 
         store.dispatch(eventAction(parseJson(message.data) as Event));
       }
     };
+
+    next.addEventListener('draft', message => {
+      if (source === next) {
+        const frame = parseJson((message as MessageEvent<string>).data) as DraftStreamFrame;
+
+        store.dispatch(draftChangedRemotely(frame.threadId, frame.revision));
+      }
+    });
 
     next.onerror = () => {
       if (source !== next) {

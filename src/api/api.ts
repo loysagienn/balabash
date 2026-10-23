@@ -23,7 +23,10 @@ import { BOT_API_TIMEOUT_MS, createTelegramFacts } from './telegram-facts.ts';
 import { countThreadsAt, ensureOperatorWorkspace, getMainThread, getThread, listThreads } from '../core/threads.ts';
 import { getEventsAfter, listThreadEvents } from '../core/events.ts';
 import { getLiveHub } from '../core/live.ts';
-import { appendEvent } from '../core/append.ts';
+import { appendEvent, appendEventIn, logTransaction } from '../core/append.ts';
+import { notifyAppended } from '../core/live.ts';
+import { clearDraftIn, draftSignals, readDraft, signalDraft, writeDraft } from '../drafts/index.ts';
+import type { DraftRecord } from '../drafts/index.ts';
 import { registryMutation } from '../core/registry-events.ts';
 import { AGENT_ASK, AGENT_ASK_RESOLVED, THREAD_CANCEL, THREAD_DECIDE, THREAD_FINISH, THREAD_INTERRUPT, THREAD_PAUSE } from '../core/envelope.ts';
 import { fileContentBlock, messageFile } from '../core/file-blocks.ts';
@@ -69,6 +72,9 @@ import type {
   CreateProjectResponse,
   CreateTaskResponse,
   DeleteTaskResponse,
+  DraftConflictErrorBody,
+  DraftResponse,
+  DraftView,
   FileMetaResponse,
   JobRunResponse,
   JobRunsResponse,
@@ -509,6 +515,7 @@ router.get('/snapshot', requireSession, async ctx => {
 const eventStream = createEventStreamHandler({
   hub: getLiveHub(),
   readAfter: (seq, limit) => getEventsAfter(seq, { limit }),
+  drafts: draftSignals,
 });
 
 router.get('/events/stream', requireSession, ctx => eventStream(ctx));
@@ -762,17 +769,26 @@ router.post('/threads/:id/messages', requireSession, async ctx => {
 
   // The form a channel writes (Telegram, CCR): the text — null for a
   // message of files alone — and, with files, their blocks and their facts.
-  const result = await appendEvent({
-    type: 'user.message',
-    actor: 'user',
-    workspaceId: thread.workspaceId,
-    threadId: thread.id,
-    payload: {
-      text: text || null,
-      ...(files.length ? { blocks: files.map(fileContentBlock), files: files.map(messageFile) } : {}),
-      identity: await requestIdentity(ctx),
-      source: 'web',
-    },
+  // The user's draft of the thread clears in the same transaction (the
+  // message sent is the draft spent — src/drafts): a save of the old text
+  // still on its way from another device lands on a stale revision.
+  const userId = ctx.state.userId as string;
+  const identity = await requestIdentity(ctx);
+  const { result, draftRevision } = await logTransaction(async tx => {
+    const appended = await appendEventIn(tx, {
+      type: 'user.message',
+      actor: 'user',
+      workspaceId: thread.workspaceId,
+      threadId: thread.id,
+      payload: {
+        text: text || null,
+        ...(files.length ? { blocks: files.map(fileContentBlock), files: files.map(messageFile) } : {}),
+        identity,
+        source: 'web',
+      },
+    });
+
+    return { result: appended, draftRevision: appended.written ? await clearDraftIn(tx, userId, thread.id) : null };
   });
 
   if (!result.written) {
@@ -781,7 +797,120 @@ router.post('/threads/:id/messages', requireSession, async ctx => {
     return;
   }
 
+  notifyAppended(result.event.seq);
+
+  if (draftRevision !== null) {
+    signalDraft({ userId, workspaceId: thread.workspaceId, threadId: thread.id, revision: draftRevision });
+  }
+
   const response: PostThreadMessageResponse = { event: result.event };
+
+  ctx.body = prepareObject(response);
+});
+
+// --------------------------------------------------------------------------
+// The user's draft of a thread's message (src/drafts; contract: DraftView):
+// read on opening the thread and on every return to it, written with the
+// revision the content is based on — a stale base is a 409 draft_conflict
+// carrying the current draft, never a silent overwrite. A thread of another
+// workspace is the same 404 as everywhere; a closed thread keeps its draft.
+
+const DRAFT_FILES_MAX = MESSAGE_FILES_MAX;
+
+function draftView(record: DraftRecord): DraftView {
+  return {
+    threadId: record.threadId,
+    text: record.text,
+    files: record.files.map(file => ({ fileId: file.id, name: file.originalFilename, contentType: file.contentType, sizeBytes: file.sizeBytes, width: file.width, height: file.height })),
+    revision: record.revision,
+    updatedAt: record.updatedAt,
+  };
+}
+
+router.get('/threads/:id/draft', requireSession, async ctx => {
+  const thread = await requireOwnThread(ctx, ctx.params.id);
+
+  if (!thread) {
+    return;
+  }
+
+  const draft = await readDraft(ctx.state.userId as string, thread.id, thread.workspaceId);
+  const response: DraftResponse = { draft: draft ? draftView(draft) : null };
+
+  ctx.body = prepareObject(response);
+});
+
+router.put('/threads/:id/draft', requireSession, async ctx => {
+  const thread = await requireOwnThread(ctx, ctx.params.id);
+
+  if (!thread) {
+    return;
+  }
+
+  const body = await readJsonBody(ctx);
+
+  if (!body) {
+    return;
+  }
+
+  if (typeof body.text !== 'string') {
+    sendError(ctx, 400, 'bad_request', 'text must be a string');
+
+    return;
+  }
+
+  if (body.text.length > MESSAGE_TEXT_MAX_CHARS) {
+    sendError(ctx, 400, 'bad_request', `text must be at most ${MESSAGE_TEXT_MAX_CHARS} characters`);
+
+    return;
+  }
+
+  const rawFileIds = body.fileIds ?? [];
+
+  if (!Array.isArray(rawFileIds) || rawFileIds.some(fileId => typeof fileId !== 'string' || !fileId.trim())) {
+    sendError(ctx, 400, 'bad_request', 'fileIds must be an array of file ids');
+
+    return;
+  }
+
+  const fileIds = [...new Set((rawFileIds as string[]).map(fileId => fileId.trim()))];
+
+  if (fileIds.length > DRAFT_FILES_MAX) {
+    sendError(ctx, 400, 'bad_request', `A draft carries at most ${DRAFT_FILES_MAX} files`);
+
+    return;
+  }
+
+  if (typeof body.baseRevision !== 'number' || !Number.isInteger(body.baseRevision) || body.baseRevision < 0) {
+    sendError(ctx, 400, 'bad_request', 'baseRevision must be a non-negative integer');
+
+    return;
+  }
+
+  const { refused } = await messageFiles(thread.workspaceId, fileIds);
+
+  if (refused.length > 0) {
+    ctx.status = 400;
+    ctx.body = prepareObject({
+      error: { code: 'file_not_accepted', message: refused.length === 1 ? '1 file was not accepted' : `${refused.length} files were not accepted`, fileIds: refused },
+    } satisfies ApiErrorBody);
+
+    return;
+  }
+
+  const session = ctx.state.session as SessionModel;
+  const outcome = await writeDraft({ userId: ctx.state.userId as string, threadId: thread.id, text: body.text, fileIds, baseRevision: body.baseRevision, sessionId: session.id }, thread.workspaceId);
+
+  if (!outcome.ok) {
+    ctx.status = 409;
+    ctx.body = prepareObject({
+      error: { code: 'draft_conflict', message: 'The draft was changed elsewhere', draft: outcome.current ? draftView(outcome.current) : null },
+    } satisfies DraftConflictErrorBody);
+
+    return;
+  }
+
+  const response: DraftResponse = { draft: draftView(outcome.draft) };
 
   ctx.body = prepareObject(response);
 });

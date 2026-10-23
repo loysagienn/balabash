@@ -20,6 +20,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { MouseEvent, PointerEvent, ReactNode } from 'react';
+import type { BtnVariant } from '../Btn/Btn.tsx';
 import type { IconName } from '../Icon/Icon.tsx';
 import { IconBtn } from '../IconBtn/IconBtn.tsx';
 import { Note } from '../Note/Note.tsx';
@@ -29,7 +30,23 @@ import { composerKeyAction, focusesField, outgoingText } from './Composer.logic.
 import '../Glass/Glass.css';
 import './Composer.css';
 
-export type ComposerRefusal = { text: string; action?: string; actionIcon?: IconName; onAction?: () => void };
+// The strip above the box: why the last send was refused (err), or a
+// question with two answers (act — the draft changed on another device:
+// use that one, or keep this one).
+export type ComposerRefusal = {
+  text: string;
+  state?: 'err' | 'act';
+  icon?: IconName;
+  action?: string;
+  actionIcon?: IconName;
+  // The action's look: ghost unless said otherwise (a choice's main answer
+  // is a regular button, the other one ghost).
+  actionVariant?: BtnVariant | 'regular';
+  onAction?: () => void;
+  secondary?: string;
+  secondaryIcon?: IconName;
+  onSecondary?: () => void;
+};
 
 export type ComposerProps = {
   to: string;
@@ -135,7 +152,18 @@ export function Composer({ to, value, onChange, onSend, onFiles, attachments, re
     <div className="composer glass" data-edge="bottom">
       {refusal ? (
         <div className="composer-note">
-          <Note state="err" icon="circle-alert" role="alert" action={refusal.action} actionIcon={refusal.actionIcon} actionVariant="ghost" onAction={refusal.onAction}>
+          <Note
+            state={refusal.state ?? 'err'}
+            icon={refusal.icon ?? 'circle-alert'}
+            role={refusal.state === 'act' ? 'status' : 'alert'}
+            action={refusal.action}
+            actionIcon={refusal.actionIcon}
+            actionVariant={refusal.actionVariant === 'regular' ? undefined : (refusal.actionVariant ?? 'ghost')}
+            onAction={refusal.onAction}
+            secondary={refusal.secondary}
+            secondaryIcon={refusal.secondaryIcon}
+            onSecondary={refusal.onSecondary}
+          >
             {refusal.text}
           </Note>
         </div>

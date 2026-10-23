@@ -14,8 +14,11 @@ export class ApiError extends Error {
   readonly code: string;
   // The files a message was refused for (file_not_accepted).
   readonly fileIds?: string[];
+  // The error object of the answer as it came, for a refusal that carries
+  // more than its words (draft_conflict: the server's draft).
+  readonly details?: Record<string, unknown>;
 
-  constructor(status: number, code: string, message: string, fileIds?: string[]) {
+  constructor(status: number, code: string, message: string, fileIds?: string[], details?: Record<string, unknown>) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
@@ -23,6 +26,10 @@ export class ApiError extends Error {
 
     if (fileIds) {
       this.fileIds = fileIds;
+    }
+
+    if (details) {
+      this.details = details;
     }
   }
 }
@@ -62,6 +69,8 @@ export type FetchInit = {
   signal?: AbortSignal;
   // A 401 is an ordinary answer here (the auth endpoints), not a lost session.
   unauthenticated?: boolean;
+  // The request outlives the page (a draft saved as the tab goes away).
+  keepalive?: boolean;
   // The answer as text, not JSON — the raw byte surface of the file area
   // (/files/<rel>): a failure there still carries the API's JSON error.
   // 'etagged' — the text with the ETag of the answer, the validator a
@@ -116,6 +125,7 @@ export function createFetch({ onUnauthorized, workspace }: FetchOptions = {}) {
       body: hasBody ? stringifyJson(init.body) : init?.text,
       credentials: 'same-origin',
       signal: init?.signal,
+      ...(init?.keepalive ? { keepalive: true } : {}),
     });
 
     const text = await response.text();
@@ -136,7 +146,7 @@ export function createFetch({ onUnauthorized, workspace }: FetchOptions = {}) {
         onUnauthorized?.(error?.code ?? 'unknown');
       }
 
-      throw new ApiError(response.status, error?.code ?? 'unknown', error?.message ?? `HTTP ${response.status}`, Array.isArray(error?.fileIds) ? error.fileIds : undefined);
+      throw new ApiError(response.status, error?.code ?? 'unknown', error?.message ?? `HTTP ${response.status}`, Array.isArray(error?.fileIds) ? error.fileIds : undefined, error ?? undefined);
     }
 
     if (init?.as === 'etagged') {

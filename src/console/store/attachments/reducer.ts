@@ -8,8 +8,10 @@
 // connection lost, anything else. The draft lives as long as the tab; a
 // sent message takes its files out of it.
 
+import type { StoredFileMeta } from '../../../api/contract.ts';
 import type { ApiFailure } from '../../lib/api/index.ts';
 import { TOO_LARGE, isTooLarge } from '../../lib/upload/words.ts';
+import { withWorkspace } from '../../lib/workspace/state.ts';
 import type { UploadError } from '../../lib/upload/words.ts';
 import type { Action } from '../types.ts';
 
@@ -85,6 +87,45 @@ function withoutRefusal(state: AttachmentsState, threadId: string): AttachmentsS
   return { ...state, refusal: rest };
 }
 
+// A stored file of the server's draft as a chip: done, with its facts
+// from storage; an image previews from its bytes (the chip's thumbnail and
+// the viewer), the way the feed shows a stored image. The id names the
+// stored file — the same file from the server twice is the same chip.
+export function storedAttachment(file: StoredFileMeta): DraftAttachment {
+  const image = (file.contentType ?? '').startsWith('image/');
+
+  return {
+    id: `stored:${file.fileId}`,
+    name: file.name ?? 'file',
+    size: file.sizeBytes ?? 0,
+    type: file.contentType ?? '',
+    image,
+    preview: image ? withWorkspace(`/api/files/${encodeURIComponent(file.fileId)}`) : null,
+    state: 'done',
+    loaded: file.sizeBytes ?? 0,
+    fileId: file.fileId,
+    error: null,
+  };
+}
+
+// The composer's chips replaced by the server's draft: its stored files,
+// with this tab's uploads still in flight kept (they are the tab's alone;
+// stored ones the server does not name are gone — removed elsewhere).
+function withServerFiles(state: AttachmentsState, threadId: string, files: StoredFileMeta[]): AttachmentsState {
+  const current = state.byThread[threadId] ?? [];
+  const uploading = current.filter(att => att.state !== 'done');
+  const next = [...files.map(file => current.find(att => att.state === 'done' && att.fileId === file.fileId) ?? storedAttachment(file)), ...uploading];
+  const same = next.length === current.length && next.every((att, index) => att === current[index]);
+
+  if (same) {
+    return state;
+  }
+
+  const { [threadId]: dropped, ...rest } = state.byThread;
+
+  return { ...state, byThread: next.length ? { ...rest, [threadId]: next } : rest };
+}
+
 export function refusalOf(error: ApiFailure): SendRefusal {
   if (error.code === 'thread_closed') {
     return { kind: 'closed', message: error.message, count: 0 };
@@ -140,6 +181,12 @@ export function attachmentsReducer(state: AttachmentsState = initialAttachments,
 
       return next;
     }
+    // The server's draft into the composer (store/drafts): read while the
+    // tab had nothing unsaved, or chosen over the tab's own in a conflict.
+    case 'DRAFT_LOAD_DONE':
+      return action.applied ? withServerFiles(state, action.threadId, action.draft?.files ?? []) : state;
+    case 'DRAFT_CONFLICT_USE_THEIRS':
+      return withServerFiles(state, action.threadId, action.theirs.files);
     case 'SEND_MESSAGE':
       return withoutRefusal(state, action.threadId);
     case 'SEND_MESSAGE_DONE': {
