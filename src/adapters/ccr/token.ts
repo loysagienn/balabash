@@ -95,3 +95,36 @@ export async function resolveOperatorCredentials(): Promise<OperatorCredentials>
 export function tokenTtlMs(creds: OperatorCredentials): number | null {
   return creds.expiresAt == null ? null : creds.expiresAt - Date.now();
 }
+
+/**
+ * Wait for the CLI to rotate the access token on disk: poll the store until
+ * the token differs from `previous`, or give up after `timeoutMs`. Returns
+ * the rotated credentials, or null when nothing changed in time (or the
+ * token came from the environment, which nobody rotates).
+ *
+ * The CLI refreshes the token only while a Claude Code process is making API
+ * calls — the one the harness spawns for a thread does so within seconds of
+ * its start, so a stale token at thread start is a race, not a dead login.
+ */
+export async function waitForTokenRotation(
+  previous: OperatorCredentials,
+  { timeoutMs, pollMs }: { timeoutMs: number; pollMs: number },
+): Promise<OperatorCredentials | null> {
+  if (previous.source === 'env') {
+    return null;
+  }
+
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() < deadline) {
+    await new Promise(resolve => setTimeout(resolve, Math.min(pollMs, Math.max(0, deadline - Date.now()))));
+
+    const current = await resolveOperatorCredentials().catch(() => null);
+
+    if (current && current.accessToken !== previous.accessToken) {
+      return current;
+    }
+  }
+
+  return null;
+}

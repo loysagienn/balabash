@@ -21,11 +21,17 @@
 //                          self-healing trigger below)
 //   terminal: false      — CredentialsRejection: the operator's OAuth bearer
 //                          itself was rejected (401). Pointless with the SAME
-//                          token, possible with a NEW one. Credentials are
-//                          re-read from disk on every attempt (the CLI rotates
-//                          them), so the ordinary backoff IS the retry-with-a-
-//                          new-credential path; if the token never changes the
-//                          operator has to log in again with the Claude CLI.
+//                          token, possible with a NEW one. Only the Claude CLI
+//                          rotates the token on disk, and only while a Claude
+//                          Code process is making API calls — the one the
+//                          harness spawns for the very thread being bound does
+//                          so within seconds of its start. So a stale token is
+//                          usually a race, not a dead login: both bridge calls
+//                          wait a bounded time for the rotation (before the
+//                          call when the file says "expired", after it on a
+//                          401) and retry with the new token; only when the
+//                          token never changes does OAuthRejectedError surface
+//                          (then the operator has to log in again).
 //
 // The worker JWT lives ~8h (measured 2026-08 on the fork); a proactive refresh
 // re-attaches before expiry so the operator never sees a dead session.
@@ -47,12 +53,13 @@ import {
 import type {
   AttachBridgeSessionOptions,
   BridgeSessionHandle,
+  CredentialsRejection,
   RemoteCredentials,
   SessionState,
 } from '@anthropic-ai/claude-agent-sdk/bridge';
 import type { SDKControlGetContextUsageResponse, SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 import { prisma } from '../../db/client.ts';
-import { resolveOperatorCredentials, tokenTtlMs } from './token.ts';
+import { resolveOperatorCredentials, tokenTtlMs, waitForTokenRotation } from './token.ts';
 import type { OperatorCredentials } from './token.ts';
 
 const BASE_URL = process.env.CCR_BASE_URL ?? 'https://api.anthropic.com';
@@ -61,6 +68,11 @@ const CURSOR_SAVE_INTERVAL_MS = 5_000;
 const REATTACH_BACKOFF_MS = [1_000, 5_000, 15_000, 60_000, 300_000];
 // Refresh the worker JWT well before its ~8h expiry.
 const JWT_REFRESH_MARGIN_MS = 30 * 60_000;
+// How long a bridge call waits for the CLI to rotate a stale OAuth token on
+// disk (measured: the thread's own Claude Code process rotates it ~1.5s after
+// start), and how often the store is re-read meanwhile.
+const TOKEN_ROTATION_WAIT_MS = 90_000;
+const TOKEN_ROTATION_POLL_MS = 1_500;
 
 export type ContextUsageOptions = { detail?: 'summary' | 'full' };
 
@@ -110,38 +122,91 @@ export function isSessionGoneError(error: unknown): boolean {
   return error instanceof SessionGoneError;
 }
 
-// The bridge rejected the operator's OAuth bearer (CredentialsRejection). The
-// message carries the remediation because this is the one failure only the
-// operator can fix: re-authenticate with the Claude CLI on this box (or, for
-// an env-provided token, replace CLAUDE_CODE_OAUTH_TOKEN).
+type BridgeCall = 'createCodeSession' | 'fetchRemoteCredentials';
+
+// The bridge rejected the operator's OAuth bearer (CredentialsRejection) and
+// the token on disk did not rotate within the wait. The message carries the
+// remediation because this is the one failure only the operator can fix: a
+// Claude Code session making API calls on this box rotates the token; a
+// login that is really gone needs re-authentication with the Claude CLI (or,
+// for an env-provided token, a new CLAUDE_CODE_OAUTH_TOKEN).
 class OAuthRejectedError extends Error {
-  constructor(call: 'createCodeSession' | 'fetchRemoteCredentials', creds: OperatorCredentials) {
+  constructor(call: BridgeCall, creds: OperatorCredentials) {
     const ttl = tokenTtlMs(creds);
     const minutes = ttl == null ? null : Math.round(Math.abs(ttl) / 60_000);
     const expiry = ttl == null ? 'expiry unknown' : ttl <= 0 ? `expired ${minutes}min ago` : `expires in ${minutes}min`;
+    const remedy =
+      creds.source === 'env'
+        ? 'replace CLAUDE_CODE_OAUTH_TOKEN'
+        : `the Claude CLI did not rotate it within ${TOKEN_ROTATION_WAIT_MS / 1000}s — ` +
+          'it rotates only while a Claude Code session makes API calls; if that does not cure it, re-authenticate with the Claude CLI on this box';
 
-    super(
-      `${call}: the operator's OAuth token was rejected (source=${creds.source}, ${expiry}); ` +
-        're-authenticate with the Claude CLI on this box — retrying with the same token cannot succeed',
-    );
+    super(`${call}: the operator's OAuth token was rejected (source=${creds.source}, ${expiry}); ${remedy}`);
     this.name = 'OAuthRejectedError';
   }
+}
+
+// Run one authenticated bridge call with the operator's current token,
+// riding out a stale token on disk: when the store says the token has
+// expired, wait for the CLI's rotation before the call (it would only earn a
+// 401); when the call comes back as a CredentialsRejection anyway, wait for
+// a rotation once and retry with the new token. A rejection that no rotation
+// cures is an OAuthRejectedError. Transient/terminal outcomes are the
+// attempt's own business (it throws or returns them).
+async function withOperatorToken<T>(
+  call: BridgeCall,
+  attempt: (creds: OperatorCredentials) => Promise<T | CredentialsRejection>,
+): Promise<T> {
+  let creds = await resolveOperatorCredentials();
+  let waited = false;
+  const ttl = tokenTtlMs(creds);
+
+  if (ttl != null && ttl <= 0) {
+    console.log(
+      `[ccr] ${call}: the OAuth token on disk expired ${Math.round(-ttl / 60_000)}min ago — waiting for the CLI to rotate it`,
+    );
+    waited = true;
+    creds =
+      (await waitForTokenRotation(creds, { timeoutMs: TOKEN_ROTATION_WAIT_MS, pollMs: TOKEN_ROTATION_POLL_MS })) ??
+      creds;
+  }
+
+  let result = await attempt(creds);
+
+  if (isCredentialsRejection(result) && !waited) {
+    console.log(`[ccr] ${call}: the OAuth token was rejected — waiting for the CLI to rotate it`);
+
+    const rotated = await waitForTokenRotation(creds, {
+      timeoutMs: TOKEN_ROTATION_WAIT_MS,
+      pollMs: TOKEN_ROTATION_POLL_MS,
+    });
+
+    if (rotated) {
+      creds = rotated;
+      result = await attempt(creds);
+    }
+  }
+
+  if (isCredentialsRejection(result)) {
+    throw new OAuthRejectedError(call, creds);
+  }
+
+  return result;
 }
 
 // POST /v1/code/sessions with the operator's current token. Returns the cse_*
 // id; every non-success outcome becomes a thrown error (see the header for
 // the classification).
 async function createRemoteSession(title: string): Promise<string> {
-  const creds = await resolveOperatorCredentials();
-  const created = await createCodeSession(BASE_URL, creds.accessToken, title, TIMEOUT_MS);
+  const created = await withOperatorToken('createCodeSession', async creds => {
+    const outcome = await createCodeSession(BASE_URL, creds.accessToken, title, TIMEOUT_MS);
 
-  if (created == null) {
-    throw new Error('createCodeSession failed (transient HTTP failure)');
-  }
+    if (outcome == null) {
+      throw new Error('createCodeSession failed (transient HTTP failure)');
+    }
 
-  if (isCredentialsRejection(created)) {
-    throw new OAuthRejectedError('createCodeSession', creds);
-  }
+    return outcome;
+  });
 
   if (isCreateSessionFailure(created)) {
     throw new Error(`createCodeSession rejected: ${created.reason} ${created.status} ${created.detail ?? ''}`);
@@ -154,22 +219,21 @@ async function createRemoteSession(title: string): Promise<string> {
 // the epoch). A deleted session surfaces as SessionGoneError so callers can
 // self-heal; everything else non-success is a thrown error.
 async function mintWorkerCredentials(cseId: string): Promise<RemoteCredentials> {
-  const creds = await resolveOperatorCredentials();
-  const remote = await fetchRemoteCredentials(
-    cseId,
-    BASE_URL,
-    creds.accessToken,
-    TIMEOUT_MS,
-    creds.trustedDeviceToken ?? undefined,
-  );
+  const remote = await withOperatorToken('fetchRemoteCredentials', async creds => {
+    const outcome = await fetchRemoteCredentials(
+      cseId,
+      BASE_URL,
+      creds.accessToken,
+      TIMEOUT_MS,
+      creds.trustedDeviceToken ?? undefined,
+    );
 
-  if (remote == null) {
-    throw new Error('fetchRemoteCredentials failed (transient failure)');
-  }
+    if (outcome == null) {
+      throw new Error('fetchRemoteCredentials failed (transient failure)');
+    }
 
-  if (isCredentialsRejection(remote)) {
-    throw new OAuthRejectedError('fetchRemoteCredentials', creds);
-  }
+    return outcome;
+  });
 
   if (isCredentialsFailure(remote)) {
     if (remote.reason === 'invalid_session_id') {
@@ -574,9 +638,10 @@ export class CcrMultiplexer {
         console.error(`[ccr] re-attach attempt ${managed.reattachAttempt} failed thread=${managed.threadId}:`, error);
 
         // An OAuthRejectedError is retried on purpose: every attach re-reads
-        // the credentials file, and the CLI may rotate the token meanwhile.
-        // If it never does, the attempts run out and the fatal description
-        // above tells the operator to log in again.
+        // the credentials file (and waits a while for its rotation), and the
+        // CLI may rotate the token meanwhile. If it never does, the attempts
+        // run out and the fatal description above tells the operator to log
+        // in again.
         //
         // Self-healing mid-run: the operator deleted the session while the
         // thread lives. Rebind to a fresh remote session; the next loop
