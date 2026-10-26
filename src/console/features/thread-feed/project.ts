@@ -331,6 +331,18 @@ class Builder {
     this.items.push(item);
   }
 
+  // The child a one-hop command of this thread is addressed to, by its
+  // agent: the child card when its start is loaded, the store otherwise;
+  // null when the command is not addressed down (a command is one hop
+  // down by contract — src/core/envelope.ts — so null is a foreign event).
+  private childWords(event: Event): string | null {
+    if (!event.targetThreadId || event.targetThreadId === this.ctx.threadId) {
+      return null;
+    }
+
+    return this.children.get(event.targetThreadId)?.agent ?? this.ctx.agentOf(event.targetThreadId) ?? 'the child';
+  }
+
   // Where the next item of a sub-agent goes: the nested feed of its parent
   // tool use, or the top level when the parent is not in the loaded range.
   private nestedOf(parentToolUseId: string | null | undefined): { items: FeedItem[]; group: () => ActionsItem } | null {
@@ -577,31 +589,42 @@ class Builder {
       return;
     }
 
+    // The one-hop commands: the words of who asked. Cancel and interrupt;
+    // finish — the agent wraps up and ends the thread with its report (a
+    // remote session, with its closing summary); pause — a remote thread's.
+    // A decision (thread.decide) draws no line of its own: the resolved
+    // card says it (agent.ask.resolved, with who decided). A command this
+    // thread gave a child of its own (own, addressed down) is in this feed
+    // too, as its author's: the line names the child — "the thread" here
+    // would read as this one.
     if (is(event, 'thread.cancel')) {
-      this.push({ kind: 'sys', key, at, icon: 'circle-slash', text: `${actorWords(event, this.ctx)} asked to cancel the thread${event.payload.reason ? ` — ${event.payload.reason}` : ''}` });
+      const child = own ? this.childWords(event) : null;
+
+      this.push({ kind: 'sys', key, at, icon: 'circle-slash', text: `${actorWords(event, this.ctx)} asked to cancel ${child ? `${child}’s thread` : 'the thread'}${event.payload.reason ? ` — ${event.payload.reason}` : ''}` });
 
       return;
     }
 
     if (is(event, 'thread.interrupt')) {
-      this.push({ kind: 'sys', key, at, icon: 'square', level: 'normal', text: `${actorWords(event, this.ctx)} stopped the turn — the agent halted and is awaiting a message` });
+      const child = own ? this.childWords(event) : null;
+
+      this.push({ kind: 'sys', key, at, icon: 'square', level: 'normal', text: child ? `${actorWords(event, this.ctx)} stopped ${child}’s turn` : `${actorWords(event, this.ctx)} stopped the turn — the agent halted and is awaiting a message` });
 
       return;
     }
 
-    // The one-hop commands: the words of who asked. Finish — the agent
-    // wraps up and ends the thread with its report (a remote session, with
-    // its closing summary); pause — a remote thread's. A decision
-    // (thread.decide) draws no line of its own: the resolved card says it
-    // (agent.ask.resolved, with who decided).
     if (is(event, 'thread.finish')) {
-      this.push({ kind: 'sys', key, at, icon: 'flag', level: 'normal', text: `${actorWords(event, this.ctx)} asked the agent to finish the thread — it wraps up and ends with its report` });
+      const child = own ? this.childWords(event) : null;
+
+      this.push({ kind: 'sys', key, at, icon: 'flag', level: 'normal', text: `${actorWords(event, this.ctx)} asked ${child ?? 'the agent'} to finish ${child ? 'its' : 'the'} thread — it wraps up and ends with its report` });
 
       return;
     }
 
     if (is(event, 'thread.pause')) {
-      this.push({ kind: 'sys', key, at, icon: 'moon', level: 'normal', text: `${actorWords(event, this.ctx)} paused the thread` });
+      const child = own ? this.childWords(event) : null;
+
+      this.push({ kind: 'sys', key, at, icon: 'moon', level: 'normal', text: `${actorWords(event, this.ctx)} paused ${child ? `${child}’s thread` : 'the thread'}` });
 
       return;
     }

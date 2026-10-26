@@ -919,6 +919,42 @@ describe('projectFeed — threads, tasks and lines', () => {
   });
 });
 
+describe('projectFeed — the commands this thread gave its children', () => {
+  it('names the child in the lines of a finish, cancel, stop or pause sent down; the same commands addressed to this thread speak of "the thread"', () => {
+    resetSeq(1n);
+
+    const items = projectFeed(
+      [
+        event({ type: 'thread.started', threadId: 'c9', targetThreadId: 't1', agentName: 'browser', payload: { agent: 'browser', title: 'Check the page' } }),
+        own('thread.finish', { reason: 'finished_by_parent' }, { targetThreadId: 'c9' }),
+        own('thread.cancel', { reason: 'enough' }, { targetThreadId: 'c9' }),
+        own('thread.interrupt', { reason: 'stuck' }, { targetThreadId: 'c9' }),
+        own('thread.pause', {}, { targetThreadId: 'c9' }),
+        // A child neither the loaded range nor the store knows.
+        own('thread.finish', { reason: 'finished_by_parent' }, { targetThreadId: 'c7' }),
+        // The same command addressed to this thread, from the parent.
+        event({ type: 'thread.finish', threadId: 'main', targetThreadId: 't1', agentName: 'coordinator', payload: { reason: 'finished_by_coordinator' } }),
+        event({ type: 'thread.cancel', threadId: 'main', targetThreadId: 't1', agentName: 'coordinator', payload: { reason: 'enough' } }),
+      ],
+      ctx,
+    );
+
+    assert.deepEqual(
+      items.map(item => (item.kind === 'sys' ? item.text : item.kind)),
+      [
+        'child',
+        'engineer asked browser to finish its thread — it wraps up and ends with its report',
+        'engineer asked to cancel browser’s thread — enough',
+        'engineer stopped browser’s turn',
+        'engineer paused browser’s thread',
+        'engineer asked the child to finish its thread — it wraps up and ends with its report',
+        'coordinator asked the agent to finish the thread — it wraps up and ends with its report',
+        'coordinator asked to cancel the thread — enough',
+      ],
+    );
+  });
+});
+
 describe('projectFeed — the operator in the system lines', () => {
   it('names the operator when Settings has a name, says "You" otherwise; the messages keep the "you" party', () => {
     const events = [

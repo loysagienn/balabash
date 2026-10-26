@@ -34,12 +34,14 @@ export function threadCommands(thread: Thread, state: StateName, finishAsked: bo
   return { running, stopEnabled: running && state === 'run', remote, pauseEnabled: remote && state === 'wait' && !finishAsked };
 }
 
-// A finish already asked for — the time of the thread.finish among the
-// loaded events of an active thread (any requester), null when none: the
+// A finish already asked for — the time of the thread.finish addressed to
+// this thread among its loaded events (any requester), null when none: the
 // agent is wrapping up, asking again only repeats the request — the
-// button reads "Finish requested" and a note says what happens next.
-export function finishAskedAt(events: readonly { type: string; createdAt: Date }[]): Date | null {
-  const asked = events.find(event => event.type === 'thread.finish');
+// button reads "Finish requested" and a note says what happens next. A
+// thread's events include the commands it gave its own children (it is
+// their author); a thread.finish it sent down is the child's, not its own.
+export function finishAskedAt(events: readonly { type: string; targetThreadId: string | null; createdAt: Date }[], threadId: string): Date | null {
+  const asked = events.find(event => event.type === 'thread.finish' && event.targetThreadId === threadId);
 
   return asked ? asked.createdAt : null;
 }

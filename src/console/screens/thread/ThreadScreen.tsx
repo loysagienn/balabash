@@ -317,7 +317,7 @@ function ThreadPage({ thread }: { thread: ThreadRecord }) {
   // COMMAND_THREAD, the outcome comes back with the tail (thread.cancelled
   // ends the thread and the buttons with it; thread.finish turns Finish
   // into "Finish requested"). Finish and Cancel ask first (rule 13).
-  const finishAsked = finishAskedAt(events);
+  const finishAsked = finishAskedAt(events, id);
   const commands = threadCommands(thread, state, finishAsked !== null);
   const stopping = useAppSelector(s => selectThreadCommandPending(s, id, 'interrupt'));
   const cancelling = useAppSelector(s => selectThreadCommandPending(s, id, 'cancel'));

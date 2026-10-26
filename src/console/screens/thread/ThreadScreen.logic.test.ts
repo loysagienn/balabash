@@ -57,8 +57,12 @@ describe('thread page words', () => {
   it('reads when a finish was asked and words the note under the controls', () => {
     const askedAt = new Date(2026, 9, 9, 15, 31);
 
-    assert.equal(finishAskedAt([{ type: 'user.message', createdAt: new Date() }, { type: 'thread.finish', createdAt: askedAt }]), askedAt);
-    assert.equal(finishAskedAt([{ type: 'user.message', createdAt: new Date() }, { type: 'thread.cancel', createdAt: askedAt }]), null);
+    assert.equal(finishAskedAt([{ type: 'user.message', targetThreadId: null, createdAt: new Date() }, { type: 'thread.finish', targetThreadId: 't', createdAt: askedAt }], 't'), askedAt);
+    assert.equal(finishAskedAt([{ type: 'user.message', targetThreadId: null, createdAt: new Date() }, { type: 'thread.cancel', targetThreadId: 't', createdAt: askedAt }], 't'), null);
+    // A finish this thread asked of its own child (its author, addressed
+    // down) is the child's — the thread itself was not asked to finish.
+    assert.equal(finishAskedAt([{ type: 'thread.finish', targetThreadId: 'c9', createdAt: askedAt }], 't'), null);
+    assert.equal(finishAskedAt([{ type: 'thread.finish', targetThreadId: 'c9', createdAt: new Date() }, { type: 'thread.finish', targetThreadId: 't', createdAt: askedAt }], 't'), askedAt);
     assert.equal(finishNote(thread({ id: 't' }), askedAt), 'Asked at 15:31 — the agent finishes its turn, wraps up and ends the thread with its report. To stop at once, cancel the thread.');
     assert.equal(
       finishNote(thread({ id: 'r', remote: true }), askedAt),
