@@ -5,6 +5,7 @@
 
 import * as apps from './apps.ts';
 import * as current_datetime from './current_datetime.ts';
+import * as drive from './drive.ts';
 import * as gmail from './gmail.ts';
 import * as http_get from './http_get.ts';
 import * as storage_download_file from './storage_download_file.ts';
@@ -14,6 +15,7 @@ import * as workspace_files from './workspace_files.ts';
 export const localToolModules: Record<string, Record<string, unknown>> = {
   apps,
   current_datetime,
+  drive,
   gmail,
   http_get,
   storage_download_file,

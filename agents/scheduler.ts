@@ -58,6 +58,7 @@ export const agent = {
   tools: [
     'current_datetime',
     'events',
+    'drive',
     'gmail',
     'http_get',
     'notion',

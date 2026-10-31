@@ -136,12 +136,21 @@ async function readConnections(workspaceId: string): Promise<ConnectionView[]> {
   return (await listWorkspaceConnections(workspaceId)).map(connectionView);
 }
 
-function readServices(): ServiceView[] {
-  return listUserAuthServers().map(server => ({
+// The catalog of connectable services, with whether a manual OAuth client
+// is in place (one query over the oauth_clients rows of the manual ones).
+async function readServices(): Promise<ServiceView[]> {
+  const servers = listUserAuthServers();
+  const manual = servers.filter(server => server.clientRegistration === 'manual').map(server => server.name);
+  const provisioned = new Set(
+    manual.length ? (await prisma.oauthClient.findMany({ where: { server: { in: manual } }, select: { server: true } })).map(row => row.server) : [],
+  );
+
+  return servers.map(server => ({
     name: server.name,
     description: server.description || null,
     multiAccount: server.identityProbe !== null,
     manualClient: server.clientRegistration === 'manual',
+    clientProvisioned: server.clientRegistration !== 'manual' || provisioned.has(server.name),
   }));
 }
 
@@ -278,7 +287,7 @@ export async function buildSnapshot(workspaceId: string, readMe: () => Promise<M
     apps: { apps, publicAppsBase: publicAppsBase() },
     tasks,
     connections,
-    services: readServices(),
+    services: await readServices(),
     secretRequests,
     agents,
     systemLog,

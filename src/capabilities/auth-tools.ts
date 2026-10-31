@@ -194,26 +194,35 @@ function lifecycleFunctions(connections: ConnectionRow[]): ToolFunction[] {
   ];
 }
 
-// request_oauth_client_credentials: manual-registration servers still missing
-// an installation-level OAuth client.
+// request_oauth_client_credentials: every manual-registration server, with
+// whether its installation OAuth client is in place. A missing client is the
+// step before the first authorization; a provisioned one is replaced only
+// when the user asks (a rotated secret, another Google project) — the new
+// values take over for the next authorizations and refreshes, existing
+// accounts stay connected.
 async function requestOauthClientFunction(): Promise<ToolFunction | null> {
-  const missingClients: UserAuthServer[] = [];
+  const manualServers = listUserAuthServers().filter(server => server.clientRegistration === 'manual');
 
-  for (const server of listUserAuthServers()) {
-    if (server.clientRegistration === 'manual' && !(await getOauthClient(server.name))) {
-      missingClients.push(server);
-    }
-  }
-
-  if (!missingClients.length) {
+  if (!manualServers.length) {
     return null;
   }
 
+  const lines = await Promise.all(
+    manualServers.map(async server => {
+      const provisioned = Boolean(await getOauthClient(server.name));
+      const status = provisioned
+        ? 'client provisioned — issue a link only when the user asks to replace or rotate it'
+        : 'client MISSING — required before the first authorization';
+
+      return `- ${server.name}: ${status}. ${server.description}`;
+    }),
+  );
+
   return serverEnumFunction(
     REQUEST_OAUTH_CLIENT_FUNCTION_NAME,
-    `Create a one-time web link where the operator can securely enter installation-level OAuth client credentials. Values go directly to the database and are never returned to the model or written to the event log. Send the link to the user and wait for an oauth_client.provisioned event in this thread. Integrations missing a manual OAuth client:\n${missingClients.map(server => `- ${server.name}: ${server.description}`).join('\n')}`,
-    missingClients.map(server => server.name),
-    'The integration whose installation OAuth client must be provisioned',
+    `Create a one-time web link where the operator can securely enter installation-level OAuth client credentials (client ID and client secret of the OAuth app registered at the provider) for an integration whose provider has no dynamic client registration. Values go directly to the database and are never returned to the model or written to the event log. Send the link to the user and wait for an oauth_client.provisioned event in this thread; then continue with request_authorization. Each integration's description says what the operator must set up at the provider first. Several integrations may share one provider OAuth app (gmail and drive share one Google client): the operator enters the same client ID for each, with any valid secret of that client. Replacing a provisioned client keeps the connected accounts; the new values serve the next authorizations and token refreshes. Integrations with a manual OAuth client:\n${lines.join('\n')}`,
+    manualServers.map(server => server.name),
+    'The integration whose installation OAuth client must be provisioned or replaced',
   );
 }
 
@@ -388,7 +397,9 @@ export function createAuthToolServer(): BuiltinToolServer {
       if (toolName === REQUEST_OAUTH_CLIENT_FUNCTION_NAME) {
         const url = await requestOauthClientCredentials(ctx.workspaceId, ctx.threadId, server);
 
-        return `One-time operator link for the installation OAuth client of "${server}" (valid 15 minutes): ${url}\nSend it to the user and wait — an oauth_client.provisioned event arrives in this thread when the client is saved.`;
+        const replacing = Boolean(await getOauthClient(server));
+
+        return `One-time operator link for the installation OAuth client of "${server}"${replacing ? ' (replacing the provisioned one; connected accounts stay)' : ''}: ${url}\nSend it to the user and wait — an oauth_client.provisioned event arrives in this thread when the client is saved${replacing ? '' : '; after that, request_authorization can issue the sign-in link'}.`;
       }
 
       if (toolName === REQUEST_EXTERNAL_SERVER_CREDENTIALS_FUNCTION_NAME) {

@@ -48,6 +48,7 @@ const JOB_STDOUT_REPORT_CHARS = 1_000;
 const TASK_REPOSITORY_SERVERS = [
     'current_datetime',
     'events',
+    'drive',
     'gmail',
     'http_get',
     'notion',

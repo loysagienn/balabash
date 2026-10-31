@@ -211,6 +211,15 @@ export function connectionsReducer(state: ConnectionsState = initialConnections,
     }
     case 'event/connection.disconnected':
       return withoutRow(state, action.event.payload.connectionId);
+    case 'event/oauth_client.provisioned': {
+      // The service's installation OAuth client is in place: its Connect
+      // dialog offers the sign-in link from now on.
+      const { server } = action.event.payload;
+
+      return state.catalog.some(service => service.name === server && service.clientProvisioned === false)
+        ? { ...state, catalog: state.catalog.map(service => (service.name === server ? { ...service, clientProvisioned: true } : service)) }
+        : state;
+    }
     case 'RENAME_CONNECTION':
       return withRename(state, action.id, form => ({ ...form, pending: true, error: null }));
     case 'RENAME_CONNECTION_DONE': {

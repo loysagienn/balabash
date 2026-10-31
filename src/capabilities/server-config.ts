@@ -40,9 +40,10 @@ export type EnabledTools = string[];
 export type IdentityProbeConfig = {
   // GET endpoint answering with JSON describing the authorized account.
   url: string;
-  // Top-level response field with the stable account id (machine part).
+  // Response field with the stable account id (machine part): a top-level
+  // name or a dotted path into nested objects ("user.emailAddress").
   idField: string;
-  // Top-level response field with the display label (login/email); optional.
+  // Response field with the display label (login/email), same addressing; optional.
   labelField?: string;
   // Authorization header scheme; providers differ (Yandex wants "OAuth").
   authScheme?: 'Bearer' | 'OAuth';

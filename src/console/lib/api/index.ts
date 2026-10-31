@@ -34,6 +34,7 @@ import type {
   SecretRequestResponse,
   ForgetInstallationSecretsResponse,
   InstallationSecretRequestResponse,
+  OauthClientRequestResponse,
   InstallationServicesResponse,
   SettingsFactsResponse,
   SettingsPatchRequest,
@@ -214,6 +215,9 @@ export type Api = {
     disconnect(id: string): Promise<ConnectionResponse>;
     reconnect(id: string): Promise<ConnectLinkResponse>;
     connect(input: StartConnectionRequest): Promise<ConnectLinkResponse>;
+    // The installation OAuth client of a service with a manual one: the
+    // answer names the secrets form to open (provide or replace).
+    requestOauthClient(server: string): Promise<OauthClientRequestResponse>;
   };
   // The trusted window of a one-time link (the second data layer too): the
   // field metadata of a secret request, and the values going to storage —
@@ -338,6 +342,7 @@ export function createApi(options: FetchOptions = {}): Api {
       disconnect: id => apiFetch<ConnectionResponse>(connection(id), { method: 'DELETE' }),
       reconnect: id => apiFetch<ConnectLinkResponse>(`${connection(id)}/reconnect`, { method: 'POST', body: {} }),
       connect: input => apiFetch<ConnectLinkResponse>('/api/connections', { method: 'POST', body: input }),
+      requestOauthClient: server => apiFetch<OauthClientRequestResponse>(`/api/services/${encodeURIComponent(server)}/oauth-client-request`, { method: 'POST', body: {} }),
     },
     secretRequests: {
       get: (id, signal) => apiFetch<SecretRequestResponse>(secretRequest(id), { signal }),

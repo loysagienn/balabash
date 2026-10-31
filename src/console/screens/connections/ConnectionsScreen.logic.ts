@@ -13,6 +13,14 @@ import { countOf, dateTimeLabel, shortDate } from '../../lib/format/index.ts';
 
 export const NAME_MAX_LENGTH = 200;
 
+// Whether a service's first sign-in waits for Balabash's own OAuth client
+// at the provider: a manual client the server reports missing. A snapshot
+// of a build without the field says nothing — the dialog offers the link
+// and the server's refusal speaks.
+export function clientMissing(service: ServiceView): boolean {
+  return service.manualClient && service.clientProvisioned === false;
+}
+
 // The six-state palette over the row's status (the design: connected ·
 // pending · needs sign-in); a status the console does not know is shown
 // as it is, in the quiet state.

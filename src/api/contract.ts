@@ -1014,7 +1014,19 @@ export type ServiceView = {
   multiAccount: boolean;
   // Whether an installation-level OAuth client must be provisioned by hand.
   manualClient: boolean;
+  // Whether that client is in place (true for a service without a manual
+  // client): a missing one is provided from the Connect dialog before the
+  // first sign-in. Absent in the answer of a build that predates it.
+  clientProvisioned?: boolean;
 };
+
+// POST /api/services/:name/oauth-client-request — the request the secrets
+// form at /secrets/<requestId> fulfils with the service's installation OAuth
+// client (client ID and secret; addressed to the main thread; a request
+// open for the service is replaced, its link kept). For a service with a
+// manual client only — 404 otherwise. A provisioned client is replaced by
+// the same route; connected accounts stay.
+export type OauthClientRequestResponse = { requestId: string };
 
 // A service of the installation: an external MCP server whose credentials
 // are the installation's (${secret:NAME} in its config) — one set for every

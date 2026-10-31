@@ -51,6 +51,9 @@ agent on OpenAI Codex. An agent picks its backend with a one-line declaration.
 
 **Integrations out of the box**
 - **Gmail** — search, read, threads, attachments, drafts, send; per-user Google OAuth.
+- **Google Drive** — search across My Drive and shared drives, read Docs/Sheets as text, download
+  and upload files through file storage, replace a file's content; per-user Google OAuth, the same
+  Google OAuth client as Gmail.
 - **Notion** — the official hosted MCP server; each user connects their own workspace.
 - **Claude Design** — the official Claude Design MCP server, attached to the designer agent through
   the Claude Code harness; the operator signs in once on the host (`/design-login`).

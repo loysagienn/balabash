@@ -58,15 +58,17 @@ before(async () => {
   // The links are built from CONSOLE_DOMAIN; the stand sets its own, this
   // file names a domain of its own to tell the two apart.
   process.env.CONSOLE_DOMAIN = DOMAIN;
+  // The snapshot (read by the OAuth-client test) names the secretary's model.
+  process.env.MAIN_OPENAI_MODEL ??= 'test-model';
 
   const { registerUserAuthServer } = await import('../capabilities/tool-manager.ts');
-  const service = (name: string, identityProbe: boolean) =>
+  const service = (name: string, identityProbe: boolean, clientRegistration: 'dynamic' | 'manual' = 'dynamic') =>
     registerUserAuthServer({
       name,
       origin: 'external',
       url: `https://${name}.example/mcp`,
       description: `${name} service`,
-      clientRegistration: 'dynamic',
+      clientRegistration,
       scope: null,
       authorizationParams: null,
       identityProbe: identityProbe ? { url: `https://${name}.example/me`, idField: 'id', labelField: 'email' } : null,
@@ -82,6 +84,9 @@ before(async () => {
   service('fresh', false);
   service('race', false);
   service('race2', false);
+  // A provider without dynamic client registration: Balabash's own OAuth
+  // client is provisioned by the operator before the first sign-in.
+  service('manual', true, 'manual');
 
   const row = (id: string, server: string, accountKey: string, displayName: string, data: Record<string, unknown> = {}) =>
     prisma.connection.create({ data: { id, workspaceId: stand.workspaceId, server, accountKey, displayName, status: 'connected', ...data } });
@@ -281,6 +286,67 @@ describe('connecting a new account from the catalog', () => {
 
     assert.equal(badName.status, 400, badName.text);
     assert.equal(await prisma.connection.count({ where: { workspaceId: stand.workspaceId, server: 'solo' } }), 1);
+  });
+});
+
+describe('the installation OAuth client of a service', () => {
+  test('the catalog says the manual client is missing; POST /services/:name/oauth-client-request opens the request the secrets form fulfils, and the client provisioned there turns the catalog and lets the sign-in link through', async () => {
+    const before = await stand.request('GET', '/api/snapshot');
+
+    assert.equal(before.status, 200, before.text);
+
+    const services = (service: string) => before.json<{ services: Array<{ name: string; manualClient: boolean; clientProvisioned?: boolean }> }>().services.find(entry => entry.name === service);
+
+    assert.deepEqual({ manualClient: services('manual')?.manualClient, clientProvisioned: services('manual')?.clientProvisioned }, { manualClient: true, clientProvisioned: false });
+    assert.deepEqual({ manualClient: services('solo')?.manualClient, clientProvisioned: services('solo')?.clientProvisioned }, { manualClient: false, clientProvisioned: true });
+
+    // Without the client the sign-in link is refused (409: a rule of the registry).
+    const refused = await stand.request('POST', '/api/connections', { body: { server: 'manual', name: 'Main' } });
+
+    assert.equal(refused.status, 409, refused.text);
+
+    const opened = await stand.request('POST', '/api/services/manual/oauth-client-request', { body: {} });
+
+    assert.equal(opened.status, 200, opened.text);
+
+    const { requestId } = opened.json<{ requestId: string }>();
+    const request = await stand.request('GET', `/api/secret-requests/${requestId}`);
+
+    assert.equal(request.status, 200, request.text);
+    assert.equal(request.json<{ request: { kind: string; server: string } }>().request.kind, 'oauth-client');
+    assert.equal(request.json<{ request: { kind: string; server: string } }>().request.server, 'manual');
+
+    const requested = await prisma.event.findFirst({ where: { type: 'oauth_client.requested' }, orderBy: { seq: 'desc' } });
+
+    assert.ok(requested, 'oauth_client.requested journaled');
+    // Addressed to the main thread — the console's request has no author
+    // thread of its own, as the auth agent's would.
+    assert.equal(requested.threadId ?? requested.targetThreadId, stand.mainThreadId);
+    assert.equal((requested.payload as { server?: string }).server, 'manual');
+
+    const provisioned = await stand.request('POST', `/api/secret-requests/${requestId}`, { body: { values: { client_id: 'id-1', client_secret: 'secret-1' } } });
+
+    assert.equal(provisioned.status, 200, provisioned.text);
+
+    const after = await stand.request('GET', '/api/snapshot');
+    const manual = after.json<{ services: Array<{ name: string; clientProvisioned?: boolean }> }>().services.find(entry => entry.name === 'manual');
+
+    assert.equal(manual?.clientProvisioned, true);
+
+    // Replacing: the same route with a client in place opens a new request.
+    const replacing = await stand.request('POST', '/api/services/manual/oauth-client-request', { body: {} });
+
+    assert.equal(replacing.status, 200, replacing.text);
+    assert.notEqual(replacing.json<{ requestId: string }>().requestId, '');
+  });
+
+  test('a service with dynamic registration and an unknown service have no client to provide: 404', async () => {
+    for (const name of ['solo', 'nowhere']) {
+      const reply = await stand.request('POST', `/api/services/${name}/oauth-client-request`, { body: {} });
+
+      assert.equal(reply.status, 404, reply.text);
+      assert.equal(reply.json<ErrorBody>().error.code, 'not_found');
+    }
   });
 });
 

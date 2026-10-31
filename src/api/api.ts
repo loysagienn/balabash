@@ -39,9 +39,9 @@ import { FileNotFoundError, getFile, getWorkspaceFile, ingestFile, openFileConte
 import type { StorageBody } from '../files/storage.ts';
 import { verifyDownloadLink } from '../files/storage/local.ts';
 import { forgetExternalServerSecrets, getExternalServerSecretRequest, isExternalSecretServer, openExternalServerCredentialsRequest, provisionExternalServerSecrets } from '../capabilities/external-secrets.ts';
-import { listClaudeConnectorTargets, listExternalSecretTargets, refreshExternalServers } from '../capabilities/tool-manager.ts';
+import { getUserAuthServer, listClaudeConnectorTargets, listExternalSecretTargets, refreshExternalServers } from '../capabilities/tool-manager.ts';
 import { resolveOperatorCredentials, tokenTtlMs } from '../adapters/ccr/token.ts';
-import { ConnectionError, disconnectConnection, getOauthClientRequest, getWorkspaceConnection, provisionOauthClient, reconnectConnection, renameConnection, startConnection, connectionView } from '../capabilities/connections/index.ts';
+import { ConnectionError, disconnectConnection, getOauthClientRequest, getWorkspaceConnection, openOauthClientRequest, provisionOauthClient, reconnectConnection, renameConnection, startConnection, connectionView } from '../capabilities/connections/index.ts';
 import { AppManagementError, listApps, publishApp, unpublishApp } from '../apps/management.ts';
 import { ProjectError, archiveProject, createProject, parseProjectInput, parseProjectPatch, unarchiveProject, updateProject } from '../projects/mutations.ts';
 import { projectView } from '../projects/store.ts';
@@ -65,6 +65,7 @@ import type {
   ConnectLinkResponse,
   ForgetInstallationSecretsResponse,
   InstallationSecretRequestResponse,
+  OauthClientRequestResponse,
   InstallationServiceView,
   InstallationServicesResponse,
   ConnectorServiceView,
@@ -1896,6 +1897,33 @@ router.post('/installation-services/:name/secret-request', requireSession, async
 
   const { id } = await openExternalServerCredentialsRequest(workspaceId, mainThreadId, name);
   const response: InstallationSecretRequestResponse = { requestId: id };
+
+  ctx.body = prepareObject(response);
+});
+
+// The installation OAuth client of a per-user service with a manual one
+// (gmail, drive): the Connect dialog's "Provide OAuth client" / "Replace
+// OAuth client" — the request the secrets form fulfils, as the auth agent's
+// request_oauth_client_credentials opens it.
+router.post('/services/:name/oauth-client-request', requireSession, async ctx => {
+  const workspaceId = ctx.state.workspaceId as string;
+  const { name } = ctx.params;
+  const server = getUserAuthServer(name);
+
+  if (!server || server.clientRegistration !== 'manual') {
+    sendError(ctx, 404, 'not_found', 'No such service with an installation OAuth client');
+
+    return;
+  }
+
+  const mainThreadId = await requireMainThreadId(ctx);
+
+  if (!mainThreadId) {
+    return;
+  }
+
+  const { id } = await openOauthClientRequest(workspaceId, mainThreadId, name);
+  const response: OauthClientRequestResponse = { requestId: id };
 
   ctx.body = prepareObject(response);
 });

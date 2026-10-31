@@ -31,7 +31,7 @@ export const agent = {
   name: 'auth',
   description:
     'Connect, re-authorize or provision an external integration. Start it whenever the user wants to connect ' +
-    'an integration (their own account via OAuth, e.g. Gmail), an integration reports expired authorization, ' +
+    'an integration (their own account via OAuth, e.g. Gmail or Google Drive), an integration reports expired authorization, ' +
     'or a server needs installation credentials (API keys) or an installation OAuth client. The thread opens ' +
     'as a separate thread where the auth assistant walks the user through one-time secure links; ' +
     'credential values never pass through the chat. It reports back with a summary of what got connected.',

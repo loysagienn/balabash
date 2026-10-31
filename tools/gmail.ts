@@ -5,19 +5,26 @@
 // incoming /mcp request carries the user's Google access token as a Bearer
 // header. The token is used directly against the Gmail API and is never kept
 // in module state — each request gets its own McpServer bound to that token.
+// The endpoint, the bearer check and the fetch are the Google plumbing shared
+// with the other Google servers (google_shared.ts).
 //
 // Deliberately NOT the official Gmail MCP developer preview
-// (gmailmcp.googleapis.com): a previous run proved the preview API cannot be
-// enabled for this installation's Google project, while the plain Gmail API
-// is generally available.
+// (gmailmcp.googleapis.com): it could not download attachments into Balabash
+// file storage — a file would have reached the model's context instead of
+// the user — while the plain Gmail API is generally available and gives the
+// bytes.
 
-import crypto from 'node:crypto';
-import http from 'node:http';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { z } from 'zod';
 import { toErrorResult, toStructuredResult } from '../src/capabilities/tool-result.ts';
 import type { FileRef } from '../src/core/contract.ts';
+import {
+  GOOGLE_AUTHORIZATION_PARAMS,
+  callerWorkspaceId,
+  googleJson,
+  serveGoogleMcp,
+  type GoogleApi,
+} from './google_shared.ts';
 
 type ToolFilesApi = {
   ingest: (input: {
@@ -29,22 +36,13 @@ type ToolFilesApi = {
   }) => Promise<FileRef>;
 };
 
-// The calling run's identity rides in the MCP request _meta (set by the tool
-// manager for local servers). A stored file must belong to that workspace —
-// an ownerless file cannot be delivered back to the user.
-function callerWorkspaceId(extra: { _meta?: Record<string, unknown> }): string | null {
-  const balabash = extra._meta?.balabash;
-  const workspaceId =
-    balabash && typeof balabash === 'object' && !Array.isArray(balabash)
-      ? (balabash as Record<string, unknown>).workspaceId
-      : undefined;
-
-  return typeof workspaceId === 'string' && workspaceId ? workspaceId : null;
-}
-
 const GMAIL_API_BASE = 'https://gmail.googleapis.com/gmail/v1/users/me';
-const TOKENINFO_URL = 'https://oauth2.googleapis.com/tokeninfo';
-const GOOGLE_AUTHORIZATION_SERVER = 'https://accounts.google.com';
+
+const GMAIL_API: GoogleApi = {
+  name: 'Gmail API',
+  forbiddenHint:
+    'Check that the Gmail API is enabled in the Google Cloud project of the OAuth client and that the granted scopes include gmail.readonly and gmail.compose.',
+};
 
 // Minimum scopes covering the capability: search/read (readonly) plus
 // drafts and sending (compose). No gmail.modify — labels/trash are out of
@@ -83,65 +81,12 @@ type GmailMessage = {
   payload?: GmailPart;
 };
 
-class GmailApiError extends Error {
-  status: number;
-
-  constructor(message: string, status: number) {
-    super(message);
-    this.status = status;
-  }
-}
-
 async function gmailFetch(
   accessToken: string,
   path: string,
   init?: { method?: string; body?: unknown },
 ): Promise<Record<string, unknown>> {
-  const method = init?.method ?? 'GET';
-  const response = await fetch(`${GMAIL_API_BASE}${path}`, {
-    method,
-    headers: {
-      authorization: `Bearer ${accessToken}`,
-      accept: 'application/json',
-      ...(init?.body !== undefined ? { 'content-type': 'application/json' } : {}),
-    },
-    body: init?.body !== undefined ? JSON.stringify(init.body) : undefined,
-  });
-  const text = await response.text();
-
-  if (!response.ok) {
-    // Surface the provider's own diagnostics verbatim: a bare status code has
-    // already caused wrong blind diagnoses in this installation.
-    let detail = text.slice(0, 1_000);
-
-    try {
-      const parsed = JSON.parse(text) as { error?: { status?: string; message?: string } };
-
-      if (parsed?.error?.message) {
-        detail = `${parsed.error.status ? `${parsed.error.status}: ` : ''}${parsed.error.message}`;
-      }
-    } catch {
-      // Keep the raw body.
-    }
-
-    if (response.status === 401) {
-      // Whatever the gate believed about this token, Gmail has the last
-      // word: forget the cached verdict so the next request re-validates
-      // (and lets the Balabash client refresh the token).
-      forgetTokenValidity(accessToken);
-    }
-
-    const hint =
-      response.status === 401
-        ? ' The Google access token expired or was rejected; Balabash refreshes it on the next call — retry once. Ask the user to re-authorize via request_authorization only if the 401 persists across retries.'
-        : response.status === 403
-          ? ' Check that the Gmail API is enabled in the Google Cloud project of the OAuth client and that the granted scopes include gmail.readonly and gmail.compose.'
-          : '';
-
-    throw new GmailApiError(`Gmail API ${response.status} on ${method} ${path.split('?')[0]}: ${detail}${hint}`, response.status);
-  }
-
-  return text ? (JSON.parse(text) as Record<string, unknown>) : {};
+  return googleJson(GMAIL_API, accessToken, `${GMAIL_API_BASE}${path}`, { method: init?.method, json: init?.body });
 }
 
 // ---------------------------------------------------------------------------
@@ -749,213 +694,20 @@ function createMcpServer(accessToken: string, filesApi: ToolFilesApi): McpServer
   return server;
 }
 
-// ---------------------------------------------------------------------------
-// Bearer token validation (Google tokeninfo, short-lived cache)
-// ---------------------------------------------------------------------------
-
-// Cache keyed by token hash so no token value sits in module state. An entry
-// only records "this token was valid until T".
-const tokenValidityCache = new Map<string, number>();
-const TOKEN_CACHE_MAX_TTL_MS = 10 * 60 * 1000;
-const TOKEN_CACHE_SAFETY_MS = 30 * 1000;
-const TOKEN_CACHE_MAX_ENTRIES = 500;
-
-function pruneTokenCache(): void {
-  const now = Date.now();
-
-  for (const [key, validUntil] of tokenValidityCache) {
-    if (validUntil <= now) {
-      tokenValidityCache.delete(key);
-    }
-  }
-
-  while (tokenValidityCache.size > TOKEN_CACHE_MAX_ENTRIES) {
-    const oldest = tokenValidityCache.keys().next().value;
-
-    if (oldest === undefined) {
-      break;
-    }
-
-    tokenValidityCache.delete(oldest);
-  }
-}
-
-function tokenCacheKey(accessToken: string): string {
-  return crypto.createHash('sha256').update(accessToken).digest('base64');
-}
-
-function forgetTokenValidity(accessToken: string): void {
-  tokenValidityCache.delete(tokenCacheKey(accessToken));
-}
-
-async function isAccessTokenValid(accessToken: string): Promise<boolean> {
-  const key = tokenCacheKey(accessToken);
-  const cached = tokenValidityCache.get(key);
-
-  if (cached !== undefined && cached > Date.now()) {
-    return true;
-  }
-
-  let response: Response;
-
-  try {
-    response = await fetch(TOKENINFO_URL, {
-      method: 'POST',
-      headers: { 'content-type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ access_token: accessToken }),
-    });
-  } catch (error) {
-    // tokeninfo unreachable: fail open — if the token is actually bad, the
-    // Gmail API call itself will report it clearly. Loudly: a silent pass
-    // here once turned a one-off network hiccup into a blind re-authorization.
-    console.warn(
-      `[gmail] tokeninfo unreachable, letting the request through unverified: ${error instanceof Error ? error.message : String(error)}`,
-    );
-
-    return true;
-  }
-
-  if (!response.ok) {
-    await response.body?.cancel().catch(() => {});
-
-    return false;
-  }
-
-  const info = (await response.json().catch(() => ({}))) as { expires_in?: string | number };
-  const expiresInMs = Number(info.expires_in ?? 0) * 1000;
-  const ttl = Math.min(expiresInMs - TOKEN_CACHE_SAFETY_MS, TOKEN_CACHE_MAX_TTL_MS);
-
-  if (ttl > 0) {
-    pruneTokenCache();
-    tokenValidityCache.set(key, Date.now() + ttl);
-  }
-
-  return true;
-}
-
-// ---------------------------------------------------------------------------
-// HTTP endpoint: protected-resource metadata + authenticated /mcp
-// ---------------------------------------------------------------------------
-
-async function readJsonBody(request: http.IncomingMessage): Promise<unknown> {
-  const chunks: Buffer[] = [];
-
-  for await (const chunk of request) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-  }
-
-  const body = Buffer.concat(chunks).toString('utf8');
-
-  return body ? JSON.parse(body) : undefined;
-}
-
-function sendJson(response: http.ServerResponse, status: number, payload: unknown, headers?: Record<string, string>): void {
-  response.writeHead(status, { 'content-type': 'application/json', ...headers });
-  response.end(JSON.stringify(payload));
-}
-
-function sendUnauthorized(response: http.ServerResponse, origin: string, description: string): void {
-  sendJson(
-    response,
-    401,
-    { error: 'invalid_token', error_description: description },
-    {
-      'www-authenticate':
-        `Bearer error="invalid_token", error_description="${description}", ` +
-        `resource_metadata="${origin}/.well-known/oauth-protected-resource/mcp"`,
-    },
-  );
-}
-
 export async function start(ctx: { filesApi: ToolFilesApi }) {
-  const httpServer = http.createServer(async (request, response) => {
-    const origin = `http://${request.headers.host ?? '127.0.0.1'}`;
-    const pathname = new URL(request.url ?? '/', origin).pathname;
-
-    // RFC 9728 protected resource metadata: tells the Balabash OAuth client
-    // that the authorization server for this resource is Google. Both the
-    // path-aware and the root well-known locations are served.
-    if (
-      request.method === 'GET' &&
-      (pathname === '/.well-known/oauth-protected-resource/mcp' || pathname === '/.well-known/oauth-protected-resource')
-    ) {
-      sendJson(response, 200, {
-        resource: `${origin}/mcp`,
-        authorization_servers: [GOOGLE_AUTHORIZATION_SERVER],
-        scopes_supported: SCOPES,
-        bearer_methods_supported: ['header'],
-      });
-      return;
-    }
-
-    if (pathname !== '/mcp' || request.method !== 'POST') {
-      sendJson(response, 405, {
-        jsonrpc: '2.0',
-        error: { code: -32000, message: 'Method not allowed.' },
-        id: null,
-      });
-      return;
-    }
-
-    const bearerMatch = /^Bearer\s+(.+)$/i.exec(request.headers.authorization ?? '');
-    const accessToken = bearerMatch?.[1]?.trim();
-
-    if (!accessToken) {
-      sendUnauthorized(response, origin, 'Missing bearer token');
-      return;
-    }
-
-    if (!(await isAccessTokenValid(accessToken))) {
-      // An expired access token: the 401 makes the Balabash MCP client
-      // refresh it with the stored refresh token and retry transparently.
-      sendUnauthorized(response, origin, 'Google access token is invalid or expired');
-      return;
-    }
-
-    const server = createMcpServer(accessToken, ctx.filesApi);
-    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
-
-    try {
-      const body = await readJsonBody(request);
-
-      await server.connect(transport);
-      await transport.handleRequest(request, response, body);
-    } catch (error) {
-      if (!response.headersSent) {
-        sendJson(response, 500, {
-          jsonrpc: '2.0',
-          error: { code: -32603, message: error instanceof Error ? error.message : String(error) },
-          id: null,
-        });
-      }
-    } finally {
-      await transport.close().catch(() => {});
-      await server.close().catch(() => {});
-    }
+  const endpoint = await serveGoogleMcp({
+    serverName: 'gmail',
+    scopes: SCOPES,
+    createMcpServer: accessToken => createMcpServer(accessToken, ctx.filesApi),
   });
-
-  await new Promise<void>((resolve, reject) => {
-    httpServer.once('error', reject);
-    httpServer.listen(0, '127.0.0.1', () => {
-      httpServer.off('error', reject);
-      resolve();
-    });
-  });
-
-  const address = httpServer.address();
-
-  if (!address || typeof address === 'string') {
-    await new Promise<void>(resolve => httpServer.close(() => resolve()));
-    throw new Error('Local MCP server did not receive a TCP port');
-  }
 
   return {
     config: {
       transport: 'http' as const,
-      url: `http://127.0.0.1:${address.port}/mcp`,
+      url: endpoint.url,
       auth: 'user' as const,
       description:
-        "Gmail integration over the plain Gmail REST API. Each user connects their own Google account through a one-time OAuth link; until then no Gmail tools are available for them. After authorization the gmail_* tools can search mail with Gmail query syntax, read full messages and threads as plain text, download attachments into Balabash file storage, manage plain-text drafts (replies in a thread included) and send mail — each tool describes itself. Outgoing attachments and HTML composition are not supported. Requested Google scopes: gmail.readonly and gmail.compose. Operator prerequisite (one-time, before the first authorization): a Google Cloud project with the Gmail API enabled and an OAuth 2.0 'Web application' client whose authorized redirect URI is https://<balabash-domain>/oauth/callback; provision its client ID and secret via request_oauth_client_credentials. While that Google OAuth app is in Testing mode, Google expires refresh tokens after 7 days and users must re-authorize weekly; publishing the app removes this limit.",
+        "Gmail integration over the plain Gmail REST API. Each user connects their own Google account through a one-time OAuth link; until then no Gmail tools are available for them. After authorization the gmail_* tools can search mail with Gmail query syntax, read full messages and threads as plain text, download attachments into Balabash file storage, manage plain-text drafts (replies in a thread included) and send mail — each tool describes itself. Outgoing attachments and HTML composition are not supported. Requested Google scopes: gmail.readonly and gmail.compose. Operator prerequisite (one-time, before the first authorization): a Google Cloud project with the Gmail API enabled and an OAuth 2.0 'Web application' client whose authorized redirect URI is https://<balabash-domain>/oauth/callback; provision its client ID and secret via request_oauth_client_credentials. The same Google project and client serve the drive integration. While that Google OAuth app is in Testing mode, Google expires refresh tokens after 7 days and users must re-authorize weekly; publishing the app removes this limit.",
       clientRegistration: 'manual' as const,
       scope: SCOPES.join(' '),
       // Identity probe: the platform asks Gmail who authorized, right after
@@ -965,23 +717,8 @@ export async function start(ctx: { filesApi: ToolFilesApi }) {
         idField: 'emailAddress',
         labelField: 'emailAddress',
       },
-      authorizationParams: {
-        // Google only issues a refresh token for offline access, and only
-        // reliably on a consent-prompted flow; without these the connection
-        // dies as soon as the first access token expires.
-        access_type: 'offline',
-        prompt: 'consent',
-      },
+      authorizationParams: GOOGLE_AUTHORIZATION_PARAMS,
     },
-    close: () =>
-      new Promise<void>((resolve, reject) => {
-        httpServer.close(error => {
-          if (error) {
-            reject(error);
-          } else {
-            resolve();
-          }
-        });
-      }),
+    close: endpoint.close,
   };
 }

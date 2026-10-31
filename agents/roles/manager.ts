@@ -54,6 +54,7 @@ ${REMOTE_AGENTS_NOTE}`;
 export const MANAGER_TOOLS = [
   'current_datetime',
   'events',
+  'drive',
   'gmail',
   'http_get',
   'notion',

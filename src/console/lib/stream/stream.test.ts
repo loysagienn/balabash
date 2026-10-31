@@ -78,6 +78,9 @@ const api: Api = {
     rename: async () => {
       throw new Error('not here');
     },
+    requestOauthClient: async () => {
+      throw new Error('not here');
+    },
     disconnect: async () => {
       throw new Error('not here');
     },

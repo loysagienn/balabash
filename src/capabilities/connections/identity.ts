@@ -10,6 +10,23 @@ import type { IdentityProbeConfig } from '../server-config.ts';
 
 export type ProbedIdentity = { id: string; label: string | null };
 
+// A field of the probe's answer by its path: a top-level name, or a dotted
+// path into nested objects ("user.emailAddress" — Drive's about resource
+// wraps the account in "user"). Pure; undefined when the path breaks.
+export function readField(body: unknown, path: string): unknown {
+  let value: unknown = body;
+
+  for (const segment of path.split('.')) {
+    if (!isObject(value)) {
+      return undefined;
+    }
+
+    value = value[segment];
+  }
+
+  return value;
+}
+
 function isObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
@@ -41,14 +58,14 @@ export async function probeIdentity(probe: IdentityProbeConfig, accessToken: str
   const body: unknown = await response.json().catch(() => {
     throw new Error('identity probe answered non-JSON');
   });
-  const rawId = isObject(body) ? body[probe.idField] : undefined;
+  const rawId = readField(body, probe.idField);
   const id = typeof rawId === 'string' ? rawId : typeof rawId === 'number' ? String(rawId) : '';
 
   if (!id) {
     throw new Error(`identity probe response has no "${probe.idField}"`);
   }
 
-  const rawLabel = probe.labelField && isObject(body) ? body[probe.labelField] : undefined;
+  const rawLabel = probe.labelField ? readField(body, probe.labelField) : undefined;
 
   return { id, label: typeof rawLabel === 'string' && rawLabel ? rawLabel : null };
 }

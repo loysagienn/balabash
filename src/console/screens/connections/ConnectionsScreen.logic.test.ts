@@ -8,7 +8,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import type { ConnectionView, ConnectorServiceView, InstallationServiceView, ServiceView } from '../../../api/contract.ts';
-import { accountMeta, canConnect, catalogCount, catalogEntries, connectorWords, installationWords, linkAlive, nameHint, nameRequired, objState, pendingWords, rowAction, scopeList, serviceIcon, statusWords, validateConnectName, validateRename } from './ConnectionsScreen.logic.ts';
+import { accountMeta, canConnect, catalogCount, catalogEntries, clientMissing, connectorWords, installationWords, linkAlive, nameHint, nameRequired, objState, pendingWords, rowAction, scopeList, serviceIcon, statusWords, validateConnectName, validateRename } from './ConnectionsScreen.logic.ts';
 
 const NOW = new Date(2026, 9, 10, 22, 30);
 
@@ -99,6 +99,15 @@ describe('the catalog', () => {
     assert.equal(validateConnectName('x'.repeat(201), false), 'At most 200 characters.');
     assert.equal(validateRename(' '), 'Required.');
     assert.equal(validateRename('Personal'), null);
+  });
+});
+
+describe('a service with a manual OAuth client', () => {
+  it('the first sign-in waits for the client only when the server reports it missing', () => {
+    assert.equal(clientMissing(service({ manualClient: true, clientProvisioned: false })), true);
+    assert.equal(clientMissing(service({ manualClient: true, clientProvisioned: true })), false);
+    assert.equal(clientMissing(service({ manualClient: true })), false);
+    assert.equal(clientMissing(service({ manualClient: false, clientProvisioned: false })), false);
   });
 });
 

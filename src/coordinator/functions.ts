@@ -50,6 +50,7 @@ export const COORDINATOR_BUNDLE: ToolBundle = {
     'apps',
     'current_datetime',
     'events',
+    'drive',
     'gmail',
     'http_get',
     // Notion is deliberately absent: its tool catalog is the heaviest head

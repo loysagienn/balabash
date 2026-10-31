@@ -147,6 +147,7 @@ function fakeApi(overrides: ApiOverrides = {}, calls: Calls = []): Api {
     disconnect: async id => ({ connection: connectionRow(id) }),
     reconnect: async id => link(connectionRow(id)),
     connect: async input => link(connectionRow('new', { server: input.server, accountKey: 'new', displayName: input.name ?? input.server, status: 'pending' })),
+    requestOauthClient: async () => ({ requestId: 'req-1' }),
     ...overrides.connections,
   };
   const threads: Api['threads'] = {
@@ -178,6 +179,7 @@ function fakeApi(overrides: ApiOverrides = {}, calls: Calls = []): Api {
       disconnect: wrap('connections.disconnect', connections.disconnect),
       reconnect: wrap('connections.reconnect', connections.reconnect),
       connect: wrap('connections.connect', connections.connect),
+      requestOauthClient: wrap('connections.requestOauthClient', connections.requestOauthClient),
     },
     projects: {
       create: wrap('projects.create', projects.create),

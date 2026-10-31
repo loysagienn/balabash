@@ -549,15 +549,26 @@ export async function requestOauthClientCredentials(
   threadId: string,
   serverName: string,
 ): Promise<string> {
+  const row = await openOauthClientRequest(workspaceId, threadId, serverName);
+
+  return secretRequestUrl(row.id, workspaceId);
+}
+
+// The request itself, by id — the console's route answers the id and sends
+// the tab to the form. A provisioned client is replaced through the same
+// request: provisionOauthClient upserts the row.
+export async function openOauthClientRequest(
+  workspaceId: string,
+  threadId: string,
+  serverName: string,
+): Promise<{ id: string }> {
   const server = getServer(serverName);
 
   if (server.clientRegistration !== 'manual') {
-    throw new Error(`Integration "${server.name}" uses Dynamic Client Registration`);
+    throw new ConnectionError('not_found', `Integration "${server.name}" uses Dynamic Client Registration`);
   }
 
-  const row = await openSecretRequest('oauth-client', { workspaceId, threadId, server: server.name });
-
-  return secretRequestUrl(row.id, workspaceId);
+  return openSecretRequest('oauth-client', { workspaceId, threadId, server: server.name });
 }
 
 export type OauthClientRequestView = {
