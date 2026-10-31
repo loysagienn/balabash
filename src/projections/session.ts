@@ -21,14 +21,20 @@ export type SessionView = {
   // The model and the effort of the session (the newest session.started);
   // absent until one is folded — and in a snapshot of a server older than
   // the field. remoteLink — a remote session's address in the external
-  // system (src/remote), present for remote sessions alone.
-  started?: { model: string; effort: string | null; remoteLink?: string };
+  // system (src/remote), present for remote sessions alone. fallback — the
+  // session moved to `model` from the model it started on (a session-scope
+  // session.fallback after the start; the first one's `from` stays through
+  // later hops): from, and the refusal category of the first hop (null when
+  // the API named none or the switch was observed without a notice).
+  started?: { model: string; effort: string | null; remoteLink?: string; fallback?: { from: string; category: string | null } };
 };
 
 export const SESSION_EVENT_PREFIX = 'session.';
 
-// The event types the view is folded from — the snapshot reads only these.
-export const SESSION_VIEW_TYPES = ['session.state', 'session.context', 'session.started'] as const;
+// The event types the view is folded from — the snapshot reads only these,
+// and folds them in seq order (a fallback older than the newest start is
+// the previous session's and must fold before it).
+export const SESSION_VIEW_TYPES = ['session.state', 'session.context', 'session.started', 'session.fallback'] as const;
 
 export function isSessionEvent(type: string): boolean {
   return type.startsWith(SESSION_EVENT_PREFIX);
@@ -54,6 +60,18 @@ function sessionStartedFrom(payload: JsonObject): NonNullable<SessionView['start
     effort: typeof effort === 'string' && effort !== '' ? effort : null,
     ...(typeof remoteLink === 'string' && remoteLink !== '' ? { remoteLink } : {}),
   };
+}
+
+// A session-scope fallback: the model the session moves to and the one it
+// leaves; null for a sub-agent's (local) fallback or a malformed payload.
+function sessionFallbackFrom(payload: JsonObject): { from: string; to: string; category: string | null } | null {
+  const { from, to, scope, category } = payload;
+
+  if (scope !== 'session' || typeof from !== 'string' || from === '' || typeof to !== 'string' || to === '') {
+    return null;
+  }
+
+  return { from, to, category: typeof category === 'string' && category !== '' ? category : null };
 }
 
 function sessionContextFrom(payload: JsonObject): SessionView['context'] {
@@ -101,6 +119,23 @@ export function foldSession(view: SessionView | null, type: string, payload: Jso
       }
 
       return { state: view?.state ?? 'wait', context: view?.context ?? null, started };
+    }
+    case 'session.fallback': {
+      const fallback = sessionFallbackFrom(payload);
+
+      if (fallback === null || view?.started?.model === fallback.to) {
+        return view;
+      }
+
+      // A fallback before any start names the model the session runs on
+      // now; the effort stays unknown.
+      const started = view?.started ?? { model: fallback.from, effort: null };
+
+      return {
+        state: view?.state ?? 'wait',
+        context: view?.context ?? null,
+        started: { ...started, model: fallback.to, fallback: started.fallback ?? { from: fallback.from, category: fallback.category } },
+      };
     }
     default:
       return view;

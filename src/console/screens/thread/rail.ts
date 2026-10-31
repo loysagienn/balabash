@@ -1,20 +1,26 @@
 // What the details rail reads: the model and effort of the session — an
-// active one has them in the store's sessions (the newest session.started,
-// however far back), a finished one from the loaded events' session.started
-// — the remote session's link (remoteLink of the same event) alike, the
-// latest session.context likewise, and the compactions of the loaded
-// events.
+// active one has them in the store's sessions (the newest session.started
+// and the session-scope session.fallback after it, however far back), a
+// finished one from the loaded events' session.started and session.fallback
+// — the remote session's link (remoteLink of the start) alike, the latest
+// session.context likewise, and the compactions of the loaded events.
+// fallback — the session moved to `model` from another one: the model it
+// left and the refusal category (projections/session.ts).
 
 import type { Event } from '../../../core/contract.ts';
 import type { EventOf } from '../../../core/event-types.ts';
+import type { SessionView } from '../../../projections/session.ts';
 
-export type RailSessionInfo = { model: string | null; effort: string | null; remoteLink: string | null; context: { used: number; max: number } | null; compactions: number };
+export type RailFallback = { from: string; category: string | null };
+
+export type RailSessionInfo = { model: string | null; effort: string | null; remoteLink: string | null; fallback: RailFallback | null; context: { used: number; max: number } | null; compactions: number };
 
 // What the rail reads from the thread's loaded events.
-export function railSessionInfo(events: readonly Event[], live: { used: number; max: number } | null, started?: { model: string; effort: string | null; remoteLink?: string } | null): RailSessionInfo {
+export function railSessionInfo(events: readonly Event[], live: { used: number; max: number } | null, started?: SessionView['started'] | null): RailSessionInfo {
   let model: string | null = null;
   let effort: string | null = null;
   let remoteLink: string | null = null;
+  let fallback: RailFallback | null = null;
   let context = live;
   let compactions = 0;
 
@@ -25,6 +31,14 @@ export function railSessionInfo(events: readonly Event[], live: { used: number; 
       model = payload.model ?? model;
       effort = payload.effort ?? effort;
       remoteLink = payload.remoteLink ?? remoteLink;
+      fallback = null;
+    } else if (event.type === 'session.fallback') {
+      const payload = (event as EventOf<'session.fallback'>).payload;
+
+      if (payload.scope === 'session' && payload.to) {
+        fallback ??= { from: payload.from, category: payload.category ?? null };
+        model = payload.to;
+      }
     } else if (event.type === 'session.context' && !live) {
       const payload = (event as EventOf<'session.context'>).payload;
 
@@ -36,7 +50,9 @@ export function railSessionInfo(events: readonly Event[], live: { used: number; 
     }
   }
 
-  return started ? { model: started.model, effort: started.effort, remoteLink: started.remoteLink ?? null, context, compactions } : { model, effort, remoteLink, context, compactions };
+  return started
+    ? { model: started.model, effort: started.effort, remoteLink: started.remoteLink ?? null, fallback: started.fallback ?? null, context, compactions }
+    : { model, effort, remoteLink, fallback, context, compactions };
 }
 
 // A remote session's link as the rail shows it: the address without its

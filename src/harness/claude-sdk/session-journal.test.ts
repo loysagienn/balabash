@@ -295,6 +295,112 @@ describe('mapSdkMessage', () => {
     assert.deepEqual(mapSdkMessage(memory, frame({ type: 'stream_event', event: {} })), []);
     assert.deepEqual(mapSdkMessage(memory, frame({ type: 'system', subtype: 'status', status: 'compacting' })), []);
   });
+
+  it('journals the refusal fallback of the CLI and moves the session to the fallback model; a local one leaves it', () => {
+    const memory = createTurnMemory();
+
+    mapSdkMessage(memory, { ...init, model: 'claude-fable-5-1[1m]' } as SDKMessage);
+    assert.equal(memory.model, 'claude-fable-5-1');
+
+    const notice = (extra: Record<string, unknown>) =>
+      frame({ type: 'system', subtype: 'model_refusal_fallback', trigger: 'refusal', direction: 'retry', original_model: 'claude-fable-5-1', fallback_model: 'claude-opus-4-8', request_id: 'req_1', content: 'Switched to Opus 4.8.', ...extra });
+
+    // A sub-agent's response alone came from the fallback model: the session model stays.
+    assert.deepEqual(mapSdkMessage(memory, notice({ scope: 'local', api_refusal_category: 'cyber', api_refusal_explanation: null })), [
+      { type: 'session.fallback', payload: { from: 'claude-fable-5-1', to: 'claude-opus-4-8', scope: 'local', source: 'refusal', category: 'cyber', text: 'Switched to Opus 4.8.' } },
+    ]);
+    assert.equal(memory.model, 'claude-fable-5-1');
+
+    // The session's own thread fell back: the session runs on the fallback model from here on.
+    assert.deepEqual(mapSdkMessage(memory, notice({ scope: 'session', api_refusal_category: 'cyber', api_refusal_explanation: 'Flagged as cyber.' })), [
+      { type: 'session.fallback', payload: { from: 'claude-fable-5-1', to: 'claude-opus-4-8', scope: 'session', source: 'refusal', category: 'cyber', explanation: 'Flagged as cyber.', text: 'Switched to Opus 4.8.' } },
+    ]);
+    assert.equal(memory.model, 'claude-opus-4-8');
+
+    // The response frames and the next turn's init agree with the notice: nothing more is written.
+    assert.deepEqual(mapSdkMessage(memory, frame({ type: 'assistant', message: { role: 'assistant', model: 'claude-opus-4-8', content: [] }, parent_tool_use_id: null })), []);
+    assert.deepEqual(mapSdkMessage(memory, { ...init, model: 'claude-opus-4-8' } as SDKMessage), []);
+
+    // An older CLI sends no scope — the session's; a refusal without a category.
+    const older = createTurnMemory();
+
+    mapSdkMessage(older, init);
+    assert.deepEqual(mapSdkMessage(older, notice({ original_model: 'claude-opus-5-5', fallback_model: 'claude-opus-5', content: '' })), [
+      { type: 'session.fallback', payload: { from: 'claude-opus-5-5', to: 'claude-opus-5', scope: 'session', source: 'refusal', category: null } },
+    ]);
+    assert.equal(older.model, 'claude-opus-5');
+
+    // A refusal nothing retried.
+    assert.deepEqual(
+      mapSdkMessage(older, frame({ type: 'system', subtype: 'model_refusal_no_fallback', original_model: 'claude-opus-5', request_id: null, api_refusal_category: 'bio', api_refusal_explanation: 'Declined.', content: 'The request was declined.' })),
+      [{ type: 'session.refusal', payload: { model: 'claude-opus-5', category: 'bio', explanation: 'Declined.', text: 'The request was declined.' } }],
+    );
+  });
+
+  it('journals the CLI’s notices about the session as session.notice; empty banners are nothing', () => {
+    const memory = createTurnMemory();
+    const notice = (message: Record<string, unknown>) => mapSdkMessage(memory, frame(message)).map(entry => (entry.type === 'session.notice' ? entry.payload : entry.type));
+
+    mapSdkMessage(memory, init);
+    assert.deepEqual(notice({ type: 'system', subtype: 'mirror_error', error: 'timeout', key: { projectKey: 'p', sessionId: SESSION } }), [
+      { kind: 'mirror_error', level: 'error', text: 'Transcript mirror dropped a batch: timeout', detail: { key: { projectKey: 'p', sessionId: SESSION } } },
+    ]);
+    assert.deepEqual(notice({ type: 'system', subtype: 'permission_denied', tool_name: 'Bash', tool_use_id: 'toolu_9', agent_id: 'a1', decision_reason_type: 'rule', decision_reason: 'deny rule', message: 'Permission denied' }), [
+      { kind: 'permission_denied', level: 'warning', text: 'Bash was denied: deny rule', detail: { toolName: 'Bash', toolUseId: 'toolu_9', message: 'Permission denied', agentId: 'a1', decisionReasonType: 'rule' } },
+    ]);
+    assert.deepEqual(notice({ type: 'system', subtype: 'permission_denied', tool_name: 'Edit', tool_use_id: 'toolu_10', message: 'no' }), [
+      { kind: 'permission_denied', level: 'warning', text: 'Edit was denied', detail: { toolName: 'Edit', toolUseId: 'toolu_10', message: 'no' } },
+    ]);
+    assert.deepEqual(notice({ type: 'system', subtype: 'informational', content: 'Hook blocked the prompt', level: 'warning', tag: 'hook', prevent_continuation: true }), [
+      { kind: 'informational', level: 'warning', text: 'Hook blocked the prompt', detail: { level: 'warning', tag: 'hook', preventContinuation: true } },
+    ]);
+    assert.deepEqual(notice({ type: 'system', subtype: 'informational', content: 'Loaded 3 skills', level: 'info' }), [{ kind: 'informational', level: 'info', text: 'Loaded 3 skills', detail: { level: 'info' } }]);
+    assert.deepEqual(notice({ type: 'system', subtype: 'informational', content: '  ', level: 'notice' }), []);
+    assert.deepEqual(notice({ type: 'system', subtype: 'notification', key: 'k', text: 'Out of disk', priority: 'immediate' }), [
+      { kind: 'notification', level: 'warning', text: 'Out of disk', detail: { key: 'k', priority: 'immediate' } },
+    ]);
+    assert.deepEqual(notice({ type: 'system', subtype: 'notification', key: 'k2', text: 'Tip', priority: 'low' }), [{ kind: 'notification', level: 'info', text: 'Tip', detail: { key: 'k2', priority: 'low' } }]);
+    assert.deepEqual(notice({ type: 'system', subtype: 'notification', key: 'k3', text: '', priority: 'high' }), []);
+    assert.deepEqual(notice({ type: 'system', subtype: 'worker_shutting_down', reason: 'host update' }), [
+      { kind: 'worker_shutting_down', level: 'warning', text: 'Worker shutting down — host update', detail: { reason: 'host update' } },
+    ]);
+    assert.deepEqual(notice({ type: 'conversation_reset', new_conversation_id: 'c2', trigger: 'clear' }), [
+      { kind: 'conversation_reset', level: 'warning', text: 'Conversation reset (clear) — the transcript starts anew', detail: { newConversationId: 'c2', trigger: 'clear' } },
+    ]);
+    assert.deepEqual(notice({ type: 'conversation_reset', new_conversation_id: 'c3' }), [
+      { kind: 'conversation_reset', level: 'warning', text: 'Conversation reset — the transcript starts anew', detail: { newConversationId: 'c3' } },
+    ]);
+  });
+
+  it('observes a switch the CLI did not announce from the model the frames name — on the main thread only', () => {
+    const memory = createTurnMemory();
+    const served = (model: string, parent: string | null = null) => frame({ type: 'assistant', message: { role: 'assistant', model, content: [] }, parent_tool_use_id: parent });
+
+    mapSdkMessage(memory, init);
+    // The session's own model, with or without the context-window suffix; a sub-agent's own model; the CLI's error frames.
+    assert.deepEqual(mapSdkMessage(memory, served('claude-opus-5-5')), []);
+    assert.deepEqual(mapSdkMessage(memory, served('claude-opus-5-5[1m]')), []);
+    assert.deepEqual(mapSdkMessage(memory, served('claude-haiku-4-5', 'toolu_agent')), []);
+    assert.deepEqual(mapSdkMessage(memory, served('<synthetic>')), []);
+    assert.equal(memory.model, 'claude-opus-5-5');
+
+    // Another model answered the main thread.
+    assert.deepEqual(mapSdkMessage(memory, served('claude-opus-4-8')), [
+      { type: 'session.fallback', payload: { from: 'claude-opus-5-5', to: 'claude-opus-4-8', scope: 'session', source: 'observed' } },
+    ]);
+    assert.deepEqual(mapSdkMessage(memory, served('claude-opus-4-8')), []);
+    // The next turn's init names the model the session runs on now.
+    assert.deepEqual(mapSdkMessage(memory, { ...init, model: 'claude-opus-5-5' } as SDKMessage), [
+      { type: 'session.fallback', payload: { from: 'claude-opus-4-8', to: 'claude-opus-5-5', scope: 'session', source: 'observed' } },
+    ]);
+
+    // A session whose start named no Claude model id compares nothing.
+    const alias = createTurnMemory();
+
+    mapSdkMessage(alias, { ...init, model: 'opus' } as SDKMessage);
+    assert.equal(alias.model, null);
+    assert.deepEqual(mapSdkMessage(alias, served('claude-opus-4-8')), []);
+  });
 });
 
 describe('startClaudeSessionJournal', () => {

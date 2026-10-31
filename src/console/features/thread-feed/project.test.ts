@@ -890,6 +890,13 @@ describe('projectFeed — threads, tasks and lines', () => {
         own('thread.notification', { text: 'urgent!', level: 'urgent' }, { actor: 'system' }),
         own('session.compaction', { trigger: 'auto', preTokens: 182_000, postTokens: 41_000 }),
         own('session.retry', { attempt: 2, maxRetries: 5, retryDelayMs: 8000, errorStatus: 529 }),
+        own('session.fallback', { from: 'claude-fable-5-1', to: 'claude-opus-4-8', scope: 'session', source: 'refusal', category: 'cyber', text: 'Switched.' }),
+        own('session.fallback', { from: 'claude-fable-5-1', to: 'claude-opus-4-8', scope: 'local', source: 'refusal', category: null }),
+        own('session.fallback', { from: 'claude-opus-4-8', to: 'claude-opus-5-5', scope: 'session', source: 'observed' }),
+        own('session.refusal', { model: 'claude-opus-5-5', category: 'bio', text: 'Declined.' }),
+        own('session.notice', { kind: 'mirror_error', level: 'error', text: 'Transcript mirror dropped a batch: timeout' }),
+        own('session.notice', { kind: 'permission_denied', level: 'warning', text: 'Bash was denied: deny rule' }),
+        own('session.notice', { kind: 'informational', level: 'info', text: 'Loaded 3 skills' }),
         own('session.state', { state: 'run' }),
         event({ type: 'thread.cancel', threadId: 'main', targetThreadId: 't1', agentName: 'coordinator', payload: { reason: 'enough' } }),
         event({ type: 'thread.cancelled', threadId: 't1', targetThreadId: 'main', actor: 'system', payload: { reason: 'enough', requestedBy: 'coordinator' } }),
@@ -907,6 +914,13 @@ describe('projectFeed — threads, tasks and lines', () => {
         ['sys', 'urgent!'],
         ['sys', 'Context compacted: 182k → 41k tokens'],
         ['ev', 'API error 529 · retry 2 of 5 in 8s'],
+        ['sys', 'Safeguards flagged a message (cyber) — switched from claude-fable-5-1 to claude-opus-4-8 for the rest of the session'],
+        ['sys', 'Safeguards flagged a message — a sub-agent’s response came from claude-opus-4-8 instead of claude-fable-5-1; the session model is unchanged'],
+        ['sys', 'The response came from claude-opus-5-5, not claude-opus-4-8 — the model changed without a notice'],
+        ['error', 'claude-opus-5-5 declined the turn (bio) — no fallback ran'],
+        ['sys', 'Transcript mirror dropped a batch: timeout'],
+        ['sys', 'Bash was denied: deny rule'],
+        ['sys', 'Loaded 3 skills'],
         ['sys', 'coordinator asked to cancel the thread — enough'],
         ['sys', 'Thread cancelled by coordinator — enough'],
         ['error', 'System exception'],
@@ -915,7 +929,10 @@ describe('projectFeed — threads, tasks and lines', () => {
       ],
     );
     assert.equal(items[1]!.kind === 'sys' ? items[1]!.level : null, 'urgent');
-    assert.equal(items[8]!.kind === 'sys' ? items[8]!.state : null, 'act');
+    assert.equal(items[4]!.kind === 'sys' ? items[4]!.state : null, 'act');
+    assert.equal(items[7]!.kind === 'error' ? items[7]!.text : null, 'Declined.');
+    assert.deepEqual(items.slice(8, 11).map(item => (item.kind === 'sys' ? [item.icon, item.state] : null)), [['circle-alert', 'err'], ['triangle-alert', 'act'], ['info', undefined]]);
+    assert.equal(items[15]!.kind === 'sys' ? items[15]!.state : null, 'act');
   });
 });
 

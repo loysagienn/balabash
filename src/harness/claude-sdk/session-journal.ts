@@ -32,6 +32,19 @@
 //   turn is the runner's agent.message);
 // - the turn itself, then the context window measured after it;
 // - sub-agent tasks, compaction, API retries, tool-use summaries;
+// - the model serving the session: the CLI's refusal-fallback notice (a
+//   safeguard declined the turn, the CLI retried it on another model — the
+//   session moves to that model for good, or a sub-agent's response alone
+//   came from it) and a refusal nothing retried; as a guard against a switch
+//   the CLI did not announce, the model named on every main-thread
+//   assistant frame and on every turn's init is compared with the model the
+//   session is known to run on — a different one is journaled as an
+//   observed fallback. Sub-agent frames are not compared: a sub-agent may
+//   run its own model by design;
+// - the CLI's notices about the session, as session.notice: a transcript
+//   batch it dropped, a tool call it auto-denied, its informational
+//   banners and notifications, the worker's reason for shutting down, a
+//   conversation reset;
 // - never: stream_event deltas, tool_progress ticks, rate limits (not a fact
 //   of the thread), hooks and status chatter.
 //
@@ -58,17 +71,31 @@ type PendingText = { text: string; parentToolUseId: string | null };
 // not yet known to be intermediate (the last two are a turn's and clear at
 // its result), and the clock a thought is measured from — the time of the
 // last frame that bounds the model's output, per parentToolUseId (null —
-// the session's own frames).
+// the session's own frames) — and the model the session is known to run on
+// (the init's, then a session-scope fallback's; null until an init names a
+// Claude model id).
 export type TurnMemory = {
   started: boolean;
   state: SessionState;
   tools: Map<string, { name: string; parentToolUseId: string | null }>;
   pendingText: PendingText | null;
   bounds: Map<string | null, number>;
+  model: string | null;
 };
 
 export function createTurnMemory(): TurnMemory {
-  return { started: false, state: 'wait', tools: new Map(), pendingText: null, bounds: new Map() };
+  return { started: false, state: 'wait', tools: new Map(), pendingText: null, bounds: new Map(), model: null };
+}
+
+// A Claude model id as the frames name it, without the context-window
+// suffix the CLI appends (`claude-opus-5-5[1m]`); null for anything else —
+// an alias, the `<synthetic>` model of the CLI's own error frames.
+export function claudeModelId(value: unknown): string | null {
+  if (typeof value !== 'string' || !value.startsWith('claude-')) {
+    return null;
+  }
+
+  return value.replace(/\[1m\]$/, '');
 }
 
 const STATE_OF_FRAME: Record<string, SessionState> = { idle: 'wait', running: 'run', requires_action: 'act' };
@@ -141,6 +168,21 @@ export function mapSdkMessage(memory: TurnMemory, message: SDKMessage, at = Date
     }
   };
 
+  // A main-thread frame names its model: one other than the session's is a
+  // fallback the CLI did not announce (or announced with a frame the
+  // journal has already folded — then the models agree and nothing is
+  // written). The session is known to run on it from here on.
+  const observeModel = (value: unknown): void => {
+    const model = claudeModelId(value);
+
+    if (model === null || memory.model === null || model === memory.model) {
+      return;
+    }
+
+    entries.push({ type: 'session.fallback', payload: { from: memory.model, to: model, scope: 'session', source: 'observed' } });
+    memory.model = model;
+  };
+
   switch (message.type) {
     case 'system':
       switch (message.subtype) {
@@ -152,6 +194,7 @@ export function mapSdkMessage(memory: TurnMemory, message: SDKMessage, at = Date
 
           if (!memory.started) {
             memory.started = true;
+            memory.model = claudeModelId(message.model);
             entries.push({
               type: 'session.started',
               payload: {
@@ -163,6 +206,8 @@ export function mapSdkMessage(memory: TurnMemory, message: SDKMessage, at = Date
                 cwd: message.cwd,
               },
             });
+          } else {
+            observeModel(message.model);
           }
 
           break;
@@ -248,9 +293,122 @@ export function mapSdkMessage(memory: TurnMemory, message: SDKMessage, at = Date
             },
           });
           break;
+        case 'model_refusal_fallback': {
+          // The CLI retried a refused turn on its fallback model. Older
+          // CLIs send no scope — theirs is the session's. The frames of the
+          // refused leg the CLI retracts (retracted_message_uuids) stay in
+          // the journal as they were observed.
+          const scope = message.scope ?? 'session';
+
+          setState('run');
+          entries.push({
+            type: 'session.fallback',
+            payload: {
+              from: message.original_model,
+              to: message.fallback_model,
+              scope,
+              source: 'refusal',
+              category: message.api_refusal_category ?? null,
+              ...(message.api_refusal_explanation ? { explanation: message.api_refusal_explanation } : {}),
+              ...(message.content ? { text: message.content } : {}),
+            },
+          });
+
+          if (scope === 'session') {
+            memory.model = claudeModelId(message.fallback_model) ?? memory.model;
+          }
+
+          break;
+        }
+        case 'model_refusal_no_fallback':
+          setState('run');
+          entries.push({
+            type: 'session.refusal',
+            payload: {
+              model: message.original_model,
+              category: message.api_refusal_category ?? null,
+              ...(message.api_refusal_explanation ? { explanation: message.api_refusal_explanation } : {}),
+              ...(message.content ? { text: message.content } : {}),
+            },
+          });
+          break;
+        case 'mirror_error':
+          entries.push({
+            type: 'session.notice',
+            payload: { kind: 'mirror_error', level: 'error', text: `Transcript mirror dropped a batch: ${message.error}`, detail: { key: message.key as unknown as JsonObject } },
+          });
+          break;
+        case 'permission_denied':
+          entries.push({
+            type: 'session.notice',
+            payload: {
+              kind: 'permission_denied',
+              level: 'warning',
+              text: `${message.tool_name} was denied${message.decision_reason ? `: ${message.decision_reason}` : ''}`,
+              detail: {
+                toolName: message.tool_name,
+                toolUseId: message.tool_use_id,
+                message: message.message,
+                ...(message.agent_id !== undefined ? { agentId: message.agent_id } : {}),
+                ...(message.decision_reason_type !== undefined ? { decisionReasonType: message.decision_reason_type } : {}),
+              },
+            },
+          });
+          break;
+        case 'informational':
+          if (message.content.trim()) {
+            entries.push({
+              type: 'session.notice',
+              payload: {
+                kind: 'informational',
+                level: message.level === 'warning' ? 'warning' : 'info',
+                text: message.content,
+                detail: {
+                  level: message.level,
+                  ...(message.tag !== undefined ? { tag: message.tag } : {}),
+                  ...(message.tool_use_id !== undefined ? { toolUseId: message.tool_use_id } : {}),
+                  ...(message.prevent_continuation !== undefined ? { preventContinuation: message.prevent_continuation } : {}),
+                },
+              },
+            });
+          }
+
+          break;
+        case 'notification':
+          if (message.text.trim()) {
+            entries.push({
+              type: 'session.notice',
+              payload: {
+                kind: 'notification',
+                level: message.priority === 'high' || message.priority === 'immediate' ? 'warning' : 'info',
+                text: message.text,
+                detail: { key: message.key, priority: message.priority },
+              },
+            });
+          }
+
+          break;
+        case 'worker_shutting_down':
+          entries.push({
+            type: 'session.notice',
+            payload: { kind: 'worker_shutting_down', level: 'warning', text: `Worker shutting down — ${message.reason}`, detail: { reason: message.reason } },
+          });
+          break;
         default:
           break;
       }
+      break;
+
+    case 'conversation_reset':
+      entries.push({
+        type: 'session.notice',
+        payload: {
+          kind: 'conversation_reset',
+          level: 'warning',
+          text: `Conversation reset${message.trigger ? ` (${message.trigger})` : ''} — the transcript starts anew`,
+          detail: { newConversationId: message.new_conversation_id, ...(message.trigger !== undefined ? { trigger: message.trigger } : {}) },
+        },
+      });
       break;
 
     case 'assistant': {
@@ -265,6 +423,10 @@ export function mapSdkMessage(memory: TurnMemory, message: SDKMessage, at = Date
       let content = false;
 
       setState('run');
+
+      if (parentToolUseId === null) {
+        observeModel(message.message?.model);
+      }
 
       for (const block of blocks) {
         if (block.type === 'thinking') {

@@ -963,6 +963,43 @@ class Builder {
       return;
     }
 
+    if (is(event, 'session.fallback')) {
+      const { from, to, scope, source, category } = event.payload;
+      const flagged = `Safeguards flagged a message${category ? ` (${category})` : ''}`;
+      const text =
+        source === 'observed'
+          ? `The response came from ${to}, not ${from} — the model changed without a notice`
+          : scope === 'local'
+            ? `${flagged} — a sub-agent’s response came from ${to} instead of ${from}; the session model is unchanged`
+            : `${flagged} — switched from ${from} to ${to} for the rest of the session`;
+
+      this.push({ kind: 'sys', key, at, icon: 'triangle-alert', state: 'act', text });
+
+      return;
+    }
+
+    if (is(event, 'session.refusal')) {
+      const { model, category, explanation, text } = event.payload;
+
+      this.push({ kind: 'error', key, at, icon: 'triangle-alert', title: `${model} declined the turn${category ? ` (${category})` : ''} — no fallback ran`, text: explanation || text || 'The turn ended with the refusal.', plain: true });
+
+      return;
+    }
+
+    if (is(event, 'session.notice')) {
+      const { level, text } = event.payload;
+
+      this.push(
+        level === 'error'
+          ? { kind: 'sys', key, at, icon: 'circle-alert', state: 'err', text }
+          : level === 'warning'
+            ? { kind: 'sys', key, at, icon: 'triangle-alert', state: 'act', text }
+            : { kind: 'sys', key, at, icon: 'info', text },
+      );
+
+      return;
+    }
+
     if (is(event, 'session.turn')) {
       if (event.payload.isError && event.payload.error) {
         this.push({ kind: 'error', key, at, icon: 'circle-alert', title: 'The turn ended with an error', text: event.payload.error });

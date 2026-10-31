@@ -311,6 +311,8 @@ describe('the sessions of the snapshot', () => {
     await written({ type: 'session.started', actor: 'agent', agentName: 'engineer', workspaceId: stand.workspaceId, threadId: engineer, payload: { model: 'claude-fable-5-1', effort: 'low', tools: [], mcpServers: [] } });
     await written({ type: 'session.state', actor: 'agent', agentName: 'engineer', workspaceId: stand.workspaceId, threadId: engineer, payload: { state: 'run' } });
     await written({ type: 'session.context', actor: 'agent', agentName: 'engineer', workspaceId: stand.workspaceId, threadId: engineer, payload: { totalTokens: 10, maxTokens: 100, percentage: 10 } });
+    // The previous session's fallback is older than the newest start and does not survive it.
+    await written({ type: 'session.fallback', actor: 'agent', agentName: 'engineer', workspaceId: stand.workspaceId, threadId: engineer, payload: { from: 'claude-fable-5-1', to: 'claude-opus-5', scope: 'session', source: 'refusal', category: 'bio' } });
     await written({ type: 'session.started', actor: 'agent', agentName: 'engineer', workspaceId: stand.workspaceId, threadId: engineer, payload: { model: 'claude-opus-5-5', effort: 'high', tools: [], mcpServers: [] } });
     await written({ type: 'session.state', actor: 'agent', agentName: 'engineer', workspaceId: stand.workspaceId, threadId: engineer, payload: { state: 'wait' } });
 
@@ -333,6 +335,22 @@ describe('the sessions of the snapshot', () => {
     }
 
     assert.deepEqual(folded, expected);
+  });
+
+  test('a session that fell back after its start runs on the fallback model — the fallback row folds after the start, whatever the type order', async () => {
+    const engineer = await startChild('engineer');
+
+    await written({ type: 'session.started', actor: 'agent', agentName: 'engineer', workspaceId: stand.workspaceId, threadId: engineer, payload: { model: 'claude-fable-5-1', effort: 'high', tools: [], mcpServers: [] } });
+    await written({ type: 'session.fallback', actor: 'agent', agentName: 'engineer', workspaceId: stand.workspaceId, threadId: engineer, payload: { from: 'claude-fable-5-1', to: 'claude-opus-4-8', scope: 'session', source: 'refusal', category: 'cyber' } });
+
+    const response = await stand.request('GET', '/api/snapshot');
+
+    assert.equal(response.status, 200, response.text);
+    assert.deepEqual(response.json<{ sessions: Record<string, SessionView> }>().sessions[engineer], {
+      state: 'wait',
+      context: null,
+      started: { model: 'claude-opus-4-8', effort: 'high', fallback: { from: 'claude-fable-5-1', category: 'cyber' } },
+    });
   });
 });
 

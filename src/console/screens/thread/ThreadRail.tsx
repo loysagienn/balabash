@@ -95,6 +95,30 @@ function engineWords(engine: string | null, info: RailSessionInfo): string | nul
   return engine ? (info.effort ? `${engine} · effort ${info.effort}` : engine) : null;
 }
 
+// The model row, and under it the fallback the session took: the model it
+// left and why (the refusal category the API named, if any).
+function modelItems(info: RailSessionInfo): KeyValueItem[] {
+  if (!info.model) {
+    return [];
+  }
+
+  const items: KeyValueItem[] = [{ key: 'model', value: <Code>{info.model}</Code> }];
+
+  if (info.fallback) {
+    items.push({
+      key: 'fallback',
+      value: (
+        <>
+          from <Code>{info.fallback.from}</Code>
+          {info.fallback.category ? ` · ${info.fallback.category}` : ''}
+        </>
+      ),
+    });
+  }
+
+  return items;
+}
+
 export function ThreadRail({ thread, title, state, engine, info, parent, project, commands, now }: ThreadDetailsProps) {
   const active = isActiveState(state);
   const copyLink = useCopyLink(thread.id);
@@ -146,7 +170,7 @@ export function ThreadRail({ thread, title, state, engine, info, parent, project
         <RailSection title="Session">
           <KeyValue
             items={[
-              ...(info.model ? [{ key: 'model', value: <Code>{info.model}</Code> }] : []),
+              ...modelItems(info),
               ...(engineText ? [{ key: 'engine', value: engineText }] : []),
               ...(info.remoteLink ? [remoteSessionItem(info.remoteLink)] : []),
             ]}
@@ -208,7 +232,7 @@ export function ThreadDetailsSheet({ thread, title, state, engine, info, parent,
         </>
       ),
     },
-    ...(info.model ? [{ key: 'model', value: <Code>{info.model}</Code> }] : []),
+    ...modelItems(info),
     ...(engineText ? [{ key: 'engine', value: engineText }] : []),
     ...(info.remoteLink ? [remoteSessionItem(info.remoteLink)] : []),
     ...(info.context && info.context.max > 0 && !thread.remote

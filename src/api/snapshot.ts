@@ -47,10 +47,12 @@ async function readHeadSeq(): Promise<bigint> {
 }
 
 // The sessions behind the active threads of the window: the newest
-// session.state, session.context and session.started of each (the model and
-// effort the rail names), folded like the console folds the tail
-// (src/projections/session.ts). A thread without session events has no
-// entry — the client derives a state from the thread then.
+// session.state, session.context, session.started and session.fallback of
+// each (the model and effort the rail names), folded in seq order like the
+// console folds the tail (src/projections/session.ts) — the newest fallback
+// may be the previous session's, older than the newest start, and then the
+// start wins. A thread without session events has no entry — the client
+// derives a state from the thread then.
 async function readSessions(threads: Thread[]): Promise<Record<string, SessionView>> {
   const activeIds = threads.filter(thread => thread.status === 'active').map(thread => thread.id);
   const sessions: Record<string, SessionView> = {};
@@ -59,11 +61,13 @@ async function readSessions(threads: Thread[]): Promise<Record<string, SessionVi
     return sessions;
   }
 
-  const rows = await prisma.$queryRaw<Array<{ threadId: string; type: string; payload: JsonObject }>>`
-    SELECT DISTINCT ON (thread_id, type) thread_id AS "threadId", type, payload
+  const rows = await prisma.$queryRaw<Array<{ threadId: string; type: string; payload: JsonObject; seq: bigint }>>`
+    SELECT DISTINCT ON (thread_id, type) thread_id AS "threadId", type, payload, seq
     FROM events
     WHERE thread_id IN (${Prisma.join(activeIds)}) AND type IN (${Prisma.join([...SESSION_VIEW_TYPES])})
     ORDER BY thread_id, type, seq DESC`;
+
+  rows.sort((a, b) => (a.seq < b.seq ? -1 : a.seq > b.seq ? 1 : 0));
 
   for (const row of rows) {
     const view = foldSession(sessions[row.threadId] ?? null, row.type, row.payload);

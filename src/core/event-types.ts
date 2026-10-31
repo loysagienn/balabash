@@ -218,6 +218,43 @@ export type EventPayloads = {
   };
   'session.compaction': { trigger: 'manual' | 'auto'; preTokens: number; postTokens?: number; durationMs?: number };
   'session.retry': { attempt: number; maxRetries: number; retryDelayMs: number; errorStatus: number | null; error?: string };
+  // Another model than the session's served a response (Claude). source
+  // 'refusal' — the CLI's own notice (system/model_refusal_fallback): the
+  // model's safeguards declined the turn and the CLI retried it on its
+  // fallback model; category — the refusal category the API named ('cyber',
+  // 'bio', …; null when none), explanation — its prose, text — the CLI's
+  // banner, all display-only. 'observed' — no notice: the response frame
+  // itself named a model other than the one the session ran on (a switch
+  // the CLI did not announce — server-side, an older CLI). scope 'session'
+  // — the session's own thread: the CLI moves the session to the model for
+  // good after a refusal; 'local' — a sub-agent's response alone came from
+  // it, the session model is unchanged.
+  'session.fallback': {
+    from: string;
+    to: string;
+    scope: 'session' | 'local';
+    source: 'refusal' | 'observed';
+    category?: string | null;
+    explanation?: string | null;
+    text?: string;
+  };
+  // The model declined the turn (stop_reason refusal) and no fallback ran
+  // (system/model_refusal_no_fallback): the turn ends with the refusal.
+  'session.refusal': { model: string; category: string | null; explanation?: string | null; text?: string };
+  // A notice of the CLI about the session — a fact the thread would
+  // otherwise lose: mirror_error — the CLI dropped a transcript batch it
+  // could not persist; permission_denied — a tool call was auto-denied
+  // without a prompt; informational — a text banner of the loop (a hook's
+  // block reason among them); notification — the REPL notification queue;
+  // worker_shutting_down — the worker's own reason for going away;
+  // conversation_reset — the transcript was mounted anew. text — one line
+  // for a human; detail — the frame's own fields, camelCase.
+  'session.notice': {
+    kind: 'mirror_error' | 'permission_denied' | 'informational' | 'notification' | 'worker_shutting_down' | 'conversation_reset';
+    level: 'info' | 'warning' | 'error';
+    text: string;
+    detail?: JsonObject;
+  };
 
   // Integrations. The lifecycle events of a connection carry the row's id
   // (connectionId) so a projection keyed by id (the console's connections

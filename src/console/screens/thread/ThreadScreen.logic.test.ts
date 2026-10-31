@@ -123,10 +123,20 @@ describe('thread page words', () => {
       event({ type: 'session.context', threadId: 't', payload: { totalTokens: 142_000, maxTokens: 200_000, percentage: 71 } }),
     ];
 
-    assert.deepEqual(railSessionInfo(events, null), { model: 'claude-fable-5-1', effort: 'high', remoteLink: null, context: { used: 142_000, max: 200_000 }, compactions: 1 });
+    assert.deepEqual(railSessionInfo(events, null), { model: 'claude-fable-5-1', effort: 'high', remoteLink: null, fallback: null, context: { used: 142_000, max: 200_000 }, compactions: 1 });
     assert.deepEqual(railSessionInfo(events, { used: 150_000, max: 200_000 }).context, { used: 150_000, max: 200_000 });
     // An active session names its model itself, whatever the loaded events hold.
-    assert.deepEqual(railSessionInfo([], null, { model: 'claude-opus-5-5', effort: null }), { model: 'claude-opus-5-5', effort: null, remoteLink: null, context: null, compactions: 0 });
+    assert.deepEqual(railSessionInfo([], null, { model: 'claude-opus-5-5', effort: null }), { model: 'claude-opus-5-5', effort: null, remoteLink: null, fallback: null, context: null, compactions: 0 });
+    // A session that fell back runs on the fallback model; the rail names the model it left and why. A sub-agent's fallback is not the session's.
+    const fallen = [
+      ...events,
+      event({ type: 'session.fallback', threadId: 't', payload: { from: 'claude-fable-5-1', to: 'claude-opus-4-8', scope: 'session', source: 'refusal', category: 'cyber' } }),
+      event({ type: 'session.fallback', threadId: 't', payload: { from: 'claude-opus-4-8', to: 'claude-haiku-4-5', scope: 'local', source: 'refusal', category: 'cyber' } }),
+    ];
+
+    assert.deepEqual(railSessionInfo(fallen, null), { model: 'claude-opus-4-8', effort: 'high', remoteLink: null, fallback: { from: 'claude-fable-5-1', category: 'cyber' }, context: { used: 142_000, max: 200_000 }, compactions: 1 });
+    assert.equal(railSessionInfo([...fallen, event({ type: 'session.started', threadId: 't', payload: { model: 'claude-fable-5-1', tools: [], mcpServers: [] } })], null).fallback, null);
+    assert.deepEqual(railSessionInfo([], null, { model: 'claude-opus-4-8', effort: 'high', fallback: { from: 'claude-fable-5-1', category: null } }).fallback, { from: 'claude-fable-5-1', category: null });
     // A remote session: its address in the external system, from the events or the live session.
     const remote = [event({ type: 'session.started', threadId: 'r', payload: { model: 'ext', tools: [], mcpServers: [], remoteLink: 'https://ext/chat/s1' } })];
 
