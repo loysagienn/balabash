@@ -14,10 +14,24 @@
 // result is dropped as well: it is a code echo naming Playwright's own copy
 // of the file by a path relative to the app process — a trap for a model
 // that would Read it. The sink's line is the whole result.
+//
+// Files the model names (browser_run_code_unsafe `filename`, storage state):
+// the server resolves a relative name against the MCP client's first root
+// and, unless `allowUnrestrictedFileAccess` is set, admits only files under
+// its output directory or that root — with no root declared, the root is the
+// app process's cwd (the repository), which has nothing to do with the
+// session. So the kit declares the session's working directory as the root
+// (`cwd`), and an agent whose inner model already holds the host's shell can
+// lift the file guard altogether (`unrestrictedFileAccess`): Playwright calls
+// it a convenience fence, not a boundary, and a Claude Code session's
+// scratchpad (/tmp/claude-<uid>/<cwd slug>/<session>/scratchpad) lies outside
+// every root the fence would allow.
 
+import { pathToFileURL } from 'node:url';
 import { createConnection } from '@playwright/mcp';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
+import { ListRootsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import type { BrowserContext } from 'playwright';
 import type { JsonObject, SdkBridgeTool } from '../../src/core/contract.ts';
 
@@ -51,10 +65,34 @@ export async function connectPlaywrightMcp(options: {
   outputDir: string;
   clientName: string;
   context(): Promise<BrowserContext>;
+  // The session's working directory, declared as the MCP root: relative file
+  // names resolve against it and it is an allowed root for the files the
+  // model names. Without it the server falls back to the app process's cwd.
+  cwd?: string;
+  // Lift the server's file guard: a file the model names may lie anywhere
+  // on the host (and file:// navigation is allowed). For an agent whose
+  // inner model has the host's shell anyway.
+  unrestrictedFileAccess?: boolean;
 }): Promise<PlaywrightMcp> {
-  const connection = await createConnection({ outputDir: options.outputDir, imageResponses: 'allow' }, options.context);
+  const connection = await createConnection(
+    {
+      outputDir: options.outputDir,
+      imageResponses: 'allow',
+      ...(options.unrestrictedFileAccess ? { allowUnrestrictedFileAccess: true } : {}),
+    },
+    options.context,
+  );
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-  const client = new Client({ name: options.clientName, version: '2.0.0' });
+  const client = new Client(
+    { name: options.clientName, version: '2.0.0' },
+    options.cwd ? { capabilities: { roots: {} } } : undefined,
+  );
+
+  if (options.cwd) {
+    const root = { uri: pathToFileURL(options.cwd).href, name: 'session' };
+
+    client.setRequestHandler(ListRootsRequestSchema, () => ({ roots: [root] }));
+  }
 
   await connection.connect(serverTransport);
   await client.connect(clientTransport);

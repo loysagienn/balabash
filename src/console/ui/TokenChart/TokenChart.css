@@ -1,7 +1,7 @@
 @layer components{
 /* ── Token chart: composition of model tokens per request ──  .tchart (container “tchart”)
    > .tchart-legend (.tchart-lg > .tchart-lg-h + .tchart-lg-items > .tchart-key[data-s] > .tchart-sw)
-   + .tchart-frame[role=img] > .tchart-y (.tchart-y-t, .tchart-y-s[data-p]) + .tchart-scroll > .tchart-plot
+   + .tchart-frame[role=group] > .tchart-y (.tchart-y-t, .tchart-y-s[data-p]) + .tchart-scroll > .tchart-plot
      (.tchart-grid[data-p] > i, .tchart-req[data-hour][data-tail][data-flip][data-sel][data-hush] > .tchart-in, .tchart-out > .tchart-seg[data-s][--v];
       .tchart-mk > .tchart-ka | .tchart-err; .tchart-x; .tip.tchart-tip > .tchart-tip-h + .tchart-rows > .tchart-row[data-g] > .tchart-sw, label, .tchart-v, .tchart-pc)
    + .tchart-detail (phone: the selected request instead of the tooltip)

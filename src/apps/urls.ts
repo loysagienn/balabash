@@ -26,6 +26,9 @@ export function publicAppUrl(slug: string): string {
   return `${publicAppsBase()}/${encodeURIComponent(slug)}`;
 }
 
+// `appPath` is the app's folder path in the workspace file area, so an app
+// kept under a workbench folder named `apps/` reads /apps/apps/<name>: the
+// first segment is the owner surface, the rest the folder — by construction.
 export function ownerAppUrl(appPath: string): string {
   return `https://${config.consoleDomain}/apps/${appPath.split('/').map(encodeURIComponent).join('/')}`;
 }

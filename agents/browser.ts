@@ -296,6 +296,9 @@ export const agent = {
           outputDir,
           clientName: 'balabash-browser',
           context: async () => browserContext,
+          // The workbench is the root the files the model names resolve
+          // against; the file fence stays — this browser walks the open web.
+          cwd,
         });
 
         cleanup.playwrightConnection = playwright;

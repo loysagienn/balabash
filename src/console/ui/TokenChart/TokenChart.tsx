@@ -239,7 +239,7 @@ function Chart({ reqs, now, className }: { reqs: TokenRequest[]; now: Date; clas
           </div>
         </div>
       </div>
-      <div className="tchart-frame" role="img" aria-label={model.aria}>
+      <div className="tchart-frame" role="group" aria-label={model.aria}>
         <div className="tchart-y" aria-hidden="true">
           <span className="tchart-y-t">Input</span>
           <span className="tchart-y-s" data-p="in">
