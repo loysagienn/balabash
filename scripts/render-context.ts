@@ -118,6 +118,16 @@ async function renderAgent(declaration: AgentDeclaration, workspaceId: string): 
   if (declaration.session) {
     sections.push(renderSection('System prompt (session.instructions)', declaration.session.instructions));
 
+    if (declaration.session.environment) {
+      sections.push(
+        renderSection(
+          'Environment addendum',
+          `(the declaration's environment starts per run — a browser, a server — and may append the facts that exist only ` +
+            `then (an address, a path) to the prompt above; see agents/${declaration.name}.ts)`,
+        ),
+      );
+    }
+
     sections.push(
       renderSection(
         `Initial message (${declaration.session.initialMessage ? 'declaration template' : 'platform default: the prompt verbatim'}, rendered with a placeholder prompt)`,

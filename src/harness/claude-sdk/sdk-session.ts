@@ -4,7 +4,9 @@
 // nothing else — no native claude_code tools, no user-scope MCP servers or
 // settings. The 'full' preset (the workbench agents) keeps the bridge
 // and unlocks the native claude_code toolset plus project settings from cwd.
-// Prompt cache lives inside the SDK.
+// Claude Code Artifacts (the harness's Artifact tools, claude.ai) are off by
+// default in SDK sessions; a session that asks for them gets the CLI's switch
+// through its environment. Prompt cache lives inside the SDK.
 //
 // The factory is synchronous per contract while the bridge setup is async:
 // pushes arriving before the session is up are queued, and `turns` awaits
@@ -18,11 +20,14 @@ import type { ClaudeSession } from './session.ts';
 import { createBridgeServer } from './bridge.ts';
 import type { BridgeServer } from './bridge.ts';
 import { mergeEnv } from '../env.ts';
-import { nativeMcpServers } from './native-servers.ts';
 import { emitSdkMessage, emitSdkSessionEnd } from './stream-tap.ts';
 import { registerContextUsageProvider } from './context-usage.ts';
 import { planLimits } from './plan-limits.ts';
 import { DEFAULT_EFFORT } from '../default-effort.ts';
+
+// Claude Code's switch for its Artifact tools in SDK sessions (off by
+// default there), and no browser tab on publish.
+const ARTIFACTS_ENV: Record<string, string> = { CLAUDE_CODE_ARTIFACT: '1', CLAUDE_CODE_ARTIFACT_AUTO_OPEN: '0' };
 
 export type SdkSessionDeps = {
   tools: ToolsApi;
@@ -82,8 +87,11 @@ export function createClaudeSession(options: SdkSessionOptions, deps: SdkSession
     const created = startClaudeSession(options.initialMessage, {
       cwd: options.cwd ?? deps.cwd,
       // SDK `env` replaces the subprocess environment entirely, so merge the
-      // extra variables over the inherited app environment.
-      ...(options.env ? { env: mergeEnv(options.env) } : {}),
+      // extra variables over the inherited app environment. Artifacts: the
+      // CLI's own switch; no browser opens on a server.
+      ...(options.env || options.artifacts
+        ? { env: mergeEnv({ ...(options.artifacts ? ARTIFACTS_ENV : {}), ...(options.env ?? {}) }) }
+        : {}),
       ...(options.model ? { model: options.model } : {}),
       effort,
       systemPrompt: options.instructions,
@@ -95,9 +103,7 @@ export function createClaudeSession(options: SdkSessionOptions, deps: SdkSession
       // platform plugin (skills like balabash:app-builder): workbench agents
       // run with cwd in the workspace file area, where repo skills are
       // invisible, so the plugin path delivers them (design №15 of /apps).
-      // skipMcpDiscovery: the MCP surface stays owned by the Balabash bridge —
-      // plus the first-party harness servers the agent opted into (see
-      // native-servers.ts), which the CLI authenticates itself.
+      // skipMcpDiscovery: the MCP surface stays owned by the Balabash bridge.
       ...(full
         ? {
             settingSources: ['project' as const],
@@ -107,7 +113,6 @@ export function createClaudeSession(options: SdkSessionOptions, deps: SdkSession
       strictMcpConfig: true,
       mcpServers: {
         balabash: { type: 'sdk', name: 'balabash', instance: bridge.server },
-        ...nativeMcpServers(options.nativeServers),
       },
     });
 

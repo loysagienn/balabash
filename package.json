@@ -25,7 +25,7 @@
     "build-console-dev": "NODE_ENV=development node ./build/build-console.js",
     "types": "tsc --noEmit && tsc --noEmit -p src/console/tsconfig.json",
     "postinstall": "node scripts/patch-sdk-bridge.mjs",
-    "test": "node --test --no-warnings=ExperimentalWarning --test-global-setup=src/test-support/global-setup.ts \"src/**/*.test.ts\" \"tools/**/*.test.ts\""
+    "test": "node --test --no-warnings=ExperimentalWarning --test-global-setup=src/test-support/global-setup.ts \"src/**/*.test.ts\" \"tools/**/*.test.ts\" \"agents/**/*.test.ts\""
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.289",

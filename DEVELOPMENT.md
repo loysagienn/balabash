@@ -16,7 +16,8 @@ confidential from them.
   one file per world fact, every prompt imports instead of retelling.
   `agents/roles/` holds a brief shared by agents that play one role on
   different backends; `agents/kit/` — pieces shared by agent modules (the
-  Playwright MCP of the agents that carry a browser).
+  Playwright MCP of the agents that carry a browser, the loopback static
+  server an agent renders its workbench files from).
 - `tools/` — the repository's in-process tool servers (MCP over loopback
   HTTP): the workbench (`workspace`, `workspace_files`), `gmail` and `drive`
   over the shared Google plumbing, `http_get`, `apps`, … registered in

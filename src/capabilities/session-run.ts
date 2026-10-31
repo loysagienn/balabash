@@ -586,14 +586,14 @@ export function createSessionRun(
 
   const startSession = (environment: SessionEnvironment | null): AgentSdkSession =>
     ctx.harness.sdkSession({
-      instructions: spec.instructions,
+      instructions: environment?.instructions ? `${spec.instructions}\n\n${environment.instructions}` : spec.instructions,
       // The platform default session-opening message is the spawn prompt
       // verbatim; a declaration overrides it only for a different opening move.
       initialMessage: spec.initialMessage ? spec.initialMessage(prompt) : prompt,
       ...(spec.model ? { model: spec.model } : {}),
       ...(spec.effort ? { effort: spec.effort } : {}),
       ...(spec.preset ? { preset: spec.preset } : {}),
-      ...(spec.nativeServers ? { nativeServers: spec.nativeServers } : {}),
+      ...(spec.artifacts ? { artifacts: true } : {}),
       ...(cwd ? { cwd } : {}),
       // Scripts run from the session reach the workspace database the same way
       // run_script children do: via the WORKSPACE_DB env variable; the

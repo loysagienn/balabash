@@ -132,10 +132,6 @@ export type ToolResult = {
 // backend unchanged. 'high' is the platform default.
 export type EffortLevel = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
-// First-party MCP servers of the Claude Code harness an agent may opt into by
-// name (see src/harness/claude-sdk/native-servers.ts). Claude sessions only.
-export type NativeMcpServerName = 'claude_design';
-
 // Machine-readable domain event declared by an agent: types '<agent>.*',
 // the first segment must equal the agent's name.
 export type AgentEventDecl = {
@@ -161,9 +157,9 @@ export type SessionAgentSpec = {
   model?: string; // agent-level choice; omit for the SDK default
   effort?: EffortLevel; // reasoning effort; default 'high'
   preset?: 'bridge-only' | 'full'; // see SdkSessionOptions.preset
-  // First-party harness MCP servers to attach (Claude agents only); see
-  // SdkSessionOptions.nativeServers.
-  nativeServers?: NativeMcpServerName[];
+  // Claude Code Artifacts in the session (Claude agents only); see
+  // SdkSessionOptions.artifacts.
+  artifacts?: boolean;
   // Session working directory; default — the run's stateDir. A function form
   // resolves per run from the calling user's id (e.g. a per-user workbench
   // under data/workspace/<workspaceId>/...); the resolved directory is created
@@ -179,6 +175,10 @@ export type SessionAgentSpec = {
 
 export type SessionEnvironment = {
   extraTools?: SdkBridgeTool[]; // bridge-only tools on top of the base verbs
+  // Facts that exist only once the environment is up (an address, a path),
+  // appended to the declaration's instructions for this run; the static
+  // prompt names the fact and where it stands.
+  instructions?: string;
   dispose?(): Promise<void>;
 };
 
@@ -454,10 +454,11 @@ export type SdkSessionOptions = {
   // Codex's native tools plus the bridge, in the app's isolated CODEX_HOME).
   preset?: 'bridge-only' | 'full';
   cwd?: string; // session working directory; default — the run's stateDir
-  // First-party MCP servers of the Claude Code harness to attach next to the
-  // bridge (e.g. claude_design). The harness authenticates them itself with
-  // the host's Claude login; ignored by the codex backend.
-  nativeServers?: NativeMcpServerName[];
+  // Claude Code Artifacts: the harness's own Artifact tool family (Artifact,
+  // ArtifactData, ArtifactComments) publishing to claude.ai under the host's
+  // Claude login. Off by default in SDK sessions; the claude backend switches
+  // it on per session through the CLI's environment. Ignored by codex.
+  artifacts?: boolean;
   // Extra environment variables for the session process, merged over the app
   // process environment (e.g. WORKSPACE_DB — the workspace database path).
   env?: Record<string, string>;

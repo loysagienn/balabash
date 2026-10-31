@@ -54,9 +54,9 @@ the next boot reports into the log.
   - Codex-based agents (codex, image_generator) run on the host's ChatGPT
     login: `~/.codex/auth.json`, linked into the app's isolated
     `data/codex-home/` at the first session.
-  - Claude Design (the designer agent) is a first-party MCP server of the
-    Claude Code harness: sign in once in an interactive Claude Code session
-    (`claude mcp add … && /design-login`).
+  - Claude Code Artifacts (the designer agent's medium — design canvases,
+    design systems, decks on claude.ai) publish under that same host Claude
+    login; nothing more to sign in.
 - **The browser**: `npx playwright install chromium`. With `DISPLAY` set,
   Chromium runs headful on that X display (an Xvfb on the host, watched
   through noVNC) so the user can take over logins and CAPTCHAs; without it,

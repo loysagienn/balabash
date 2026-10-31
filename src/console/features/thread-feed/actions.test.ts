@@ -23,7 +23,7 @@ describe('nativeAction', () => {
     assert.deepEqual(nativeAction('Grep', { pattern: 'slug', path: '/src/api' }).label, { icon: 'search', tool: 'Grep', arg: 'slug in src/api' });
     assert.deepEqual(nativeAction('WebFetch', { url: 'https://example.com/a' }).label, { icon: 'globe', tool: 'WebFetch', arg: 'example.com/a' });
     assert.deepEqual(nativeAction('Agent', { description: 'find refs', prompt: 'long' }).label, { icon: 'bot', tool: 'Agent', arg: 'find refs' });
-    assert.deepEqual(nativeAction('mcp__claude_design__get_file', { path: 'x.html' }).label, { icon: 'plug', tool: 'get_file', arg: 'x.html' });
+    assert.deepEqual(nativeAction('mcp__qase__get_file', { path: 'x.html' }).label, { icon: 'plug', tool: 'get_file', arg: 'x.html' });
     assert.deepEqual(nativeAction('ToolSearch', { query: 'select:Foo', max_results: 1 }).label, { icon: 'wrench', tool: 'ToolSearch', arg: 'select:Foo' });
   });
 

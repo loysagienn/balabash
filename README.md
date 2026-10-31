@@ -44,7 +44,7 @@ Setup and operation: [SETUP.md](SETUP.md). Working on the code: [DEVELOPMENT.md]
 | 🛠 **engineer** | Software engineering on the host with the native toolset (shell, files, web, git) in whatever repository a task or a project points to — Balabash's own included, where it builds and requests a restart of itself. |
 | 📐 **architect** | Architectural reasoning and audits at maximum reasoning effort; advises, never implements. |
 | ⏰ **scheduler** | Engineers scheduled tasks that need code: workspace jobs and `run(ctx)` bodies. |
-| 🎨 **designer** | Design work in Claude Design: landing pages, UI screens, decks, option canvases; verifies its renders in its own browser with a fresh-eyes verifier. |
+| 🎨 **designer** | Design work in Claude Design on claude.ai (Artifacts): design canvases of UI screens, landing pages and option boards, design systems, decks; verifies its renders in its own browser with a fresh-eyes verifier. |
 | 🌿 **gardener** | One care pass over a project library: drains the inbox into the settled files and the journal, consolidates, reports every removal. |
 | 🔑 **auth** | Connects, re-authorizes and provisions integrations. Sends links only — credential values never pass through it. |
 | **browser** | A headless sub-agent driving a real Chromium through Playwright; headful on a virtual display so the user can watch and take over (logins, CAPTCHAs) through VNC. |
@@ -71,8 +71,8 @@ the user. A system arrives as an installation driver, not as repository code.
 - **Notion** — the official hosted MCP server; each user connects their own workspace.
 - **Perplexity** — search, ask, reason, deep research on the installation's key.
 - **Qase** — test management through the official MCP server on the operator's token.
-- **Claude Design** — the official MCP server attached to the designer agent through the
-  Claude Code harness; the operator signs in once on the host.
+- **Claude Code Artifacts** — the harness's Artifact tools, on for the designer agent: design
+  canvases, design systems and decks published to claude.ai under the host's Claude login.
 - **Web** — fetch pages and download files into storage, with SSRF protection (DNS/IP
   blocklists, redirect and size caps).
 - **Browser** — a persistent per-user Chromium profile for anything without an API.

@@ -39,10 +39,9 @@ const SESSION_KEYS = new Set([
   'effort',
   'preset',
   'cwd',
-  'nativeServers',
+  'artifacts',
   'environment',
 ]);
-const NATIVE_SERVERS = new Set(['claude_design']);
 const SESSION_EFFORTS = new Set(['low', 'medium', 'high', 'xhigh', 'max']);
 const SESSION_PRESETS = new Set(['bridge-only', 'full']);
 
@@ -219,17 +218,13 @@ export function validateAgent(module: Record<string, unknown>, filename: string)
       throw new Error(`${filename} agent.session.preset must be one of bridge-only, full`);
     }
 
-    if (session.nativeServers !== undefined) {
-      const names = session.nativeServers;
-
-      if (!Array.isArray(names) || names.some(name => typeof name !== 'string' || !NATIVE_SERVERS.has(name))) {
-        throw new Error(
-          `${filename} agent.session.nativeServers must be an array of: ${[...NATIVE_SERVERS].join(', ')}`,
-        );
+    if (session.artifacts !== undefined) {
+      if (typeof session.artifacts !== 'boolean') {
+        throw new Error(`${filename} agent.session.artifacts must be a boolean when present`);
       }
 
       if (candidate.sdk !== 'claude') {
-        throw new Error(`${filename} agent.session.nativeServers is supported by the claude sdk only`);
+        throw new Error(`${filename} agent.session.artifacts is supported by the claude sdk only`);
       }
     }
 
