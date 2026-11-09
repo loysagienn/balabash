@@ -29,6 +29,22 @@ import { DEFAULT_EFFORT } from '../default-effort.ts';
 // default there), and no browser tab on publish.
 const ARTIFACTS_ENV: Record<string, string> = { CLAUDE_CODE_ARTIFACT: '1', CLAUDE_CODE_ARTIFACT_AUTO_OPEN: '0' };
 
+// Native Claude Code tools withheld from full-preset sessions (the agents'
+// context composition, project library claude-prompt-composition.md): the
+// Workflow orchestrator (Balabash has the thread tree), the in-session cron
+// and claude.ai routines (the scheduler), desktop push notifications (thread
+// notifications) and git worktree switching (never asked for).
+const NATIVE_TOOLS_OFF = [
+  'Workflow',
+  'CronCreate',
+  'CronDelete',
+  'CronList',
+  'RemoteTrigger',
+  'PushNotification',
+  'EnterWorktree',
+  'ExitWorktree',
+];
+
 export type SdkSessionDeps = {
   tools: ToolsApi;
   // Working directory of the inner session — the run's persistent stateDir.
@@ -111,6 +127,13 @@ export function createClaudeSession(options: SdkSessionOptions, deps: SdkSession
         ? {
             settingSources: ['project' as const],
             plugins: [{ type: 'local' as const, path: path.resolve('plugins', 'balabash'), skipMcpDiscovery: true }],
+            // Native tools no Balabash agent has a use for: each duplicates a
+            // Balabash mechanism (the thread tree, the scheduler, thread
+            // notifications) or has no application in a headless session.
+            // Workflows go off through the setting so the workflow-authoring
+            // skill and the "ultracode" trigger leave with the tool.
+            disallowedTools: NATIVE_TOOLS_OFF,
+            settings: { disableWorkflows: true },
           }
         : { tools: [], settingSources: [] }),
       strictMcpConfig: true,
