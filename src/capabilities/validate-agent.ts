@@ -40,6 +40,7 @@ const SESSION_KEYS = new Set([
   'preset',
   'cwd',
   'artifacts',
+  'imageGeneration',
   'environment',
 ]);
 const SESSION_EFFORTS = new Set(['low', 'medium', 'high', 'xhigh', 'max']);
@@ -225,6 +226,16 @@ export function validateAgent(module: Record<string, unknown>, filename: string)
 
       if (candidate.sdk !== 'claude') {
         throw new Error(`${filename} agent.session.artifacts is supported by the claude sdk only`);
+      }
+    }
+
+    if (session.imageGeneration !== undefined) {
+      if (typeof session.imageGeneration !== 'boolean') {
+        throw new Error(`${filename} agent.session.imageGeneration must be a boolean when present`);
+      }
+
+      if (candidate.sdk !== 'codex') {
+        throw new Error(`${filename} agent.session.imageGeneration is supported by the codex sdk only`);
       }
     }
 

@@ -195,7 +195,7 @@ export function createCodexSession(options: SdkSessionOptions, deps: CodexSessio
         // invocation, resumed by thread id), so the whole session sees them
         // (session-config.ts: the brief, the bridge, reasoning summaries on,
         // the host layer off).
-        config: codexSessionConfig(options.instructions, bridge.url),
+        config: codexSessionConfig(options.instructions, bridge.url, { imageGeneration: options.imageGeneration === true }),
       });
       const threadOptions = {
         ...(options.model ? { model: options.model } : {}),

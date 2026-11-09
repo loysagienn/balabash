@@ -214,6 +214,8 @@ export const agent = {
     model: 'gpt-6-astra',
     effort: 'high',
     preset: 'full',
+    // The one Codex agent that draws: image_gen and the imagegen skill stay on.
+    imageGeneration: true,
     cwd: (workspaceId: string) => workspaceFilesDir(workspaceId),
     environment: (ctx: RunContext, cwd: string) => createEnvironment(ctx, cwd),
   },

@@ -160,6 +160,9 @@ export type SessionAgentSpec = {
   // Claude Code Artifacts in the session (Claude agents only); see
   // SdkSessionOptions.artifacts.
   artifacts?: boolean;
+  // Codex's built-in image generation in the session (Codex agents only);
+  // see SdkSessionOptions.imageGeneration.
+  imageGeneration?: boolean;
   // Session working directory; default — the run's stateDir. A function form
   // resolves per run from the calling user's id (e.g. a per-user workbench
   // under data/workspace/<workspaceId>/...); the resolved directory is created
@@ -473,6 +476,10 @@ export type SdkSessionOptions = {
   // Claude login. Off by default in SDK sessions; the claude backend switches
   // it on per session through the CLI's environment. Ignored by codex.
   artifacts?: boolean;
+  // Codex's built-in image generation: the image_gen tool inside exec and the
+  // bundled imagegen skill. Off by default — the image_generator agent is the
+  // one that draws; other sessions hand image work to it. Ignored by claude.
+  imageGeneration?: boolean;
   // Extra environment variables for the session process, merged over the app
   // process environment (e.g. WORKSPACE_DB — the workspace database path).
   env?: Record<string, string>;

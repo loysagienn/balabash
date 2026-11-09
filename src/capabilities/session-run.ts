@@ -617,6 +617,7 @@ export function createSessionRun(
       ...(spec.effort ? { effort: spec.effort } : {}),
       ...(spec.preset ? { preset: spec.preset } : {}),
       ...(spec.artifacts ? { artifacts: true } : {}),
+      ...(spec.imageGeneration ? { imageGeneration: true } : {}),
       ...(cwd ? { cwd } : {}),
       // Scripts run from the session reach the workspace database the same way
       // run_script children do: via the WORKSPACE_DB env variable; the

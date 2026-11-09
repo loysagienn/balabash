@@ -27,7 +27,20 @@ export const CODEX_REASONING_SUMMARY = 'detailed';
 // calls apart from other MCP servers by it).
 export const BRIDGE_SERVER = 'balabash';
 
-export function codexSessionConfig(instructions: string, bridgeUrl: string): CodexSessionConfig {
+// What a session may switch on beyond the base: Codex's built-in image
+// generation (the image_gen tool inside exec plus the bundled imagegen skill)
+// — the image_generator agent's own means; off everywhere else.
+export type CodexSessionFeatures = { imageGeneration: boolean };
+
+// Codex's bundled skills (CODEX_HOME/skills/.system) by name: all but
+// imagegen have no place in a Balabash session — openai-docs fires on the
+// word Codex, skill-installer writes into the app's codex-home, skill-creator
+// authors skills nobody asked for. Without image generation the whole bundle
+// goes (`skills.bundled.enabled`); with it, the three are turned off one by
+// one and imagegen stays listed.
+const BUNDLED_SKILLS_OFF = ['openai-docs', 'skill-installer', 'skill-creator'];
+
+export function codexSessionConfig(instructions: string, bridgeUrl: string, enabled: CodexSessionFeatures = { imageGeneration: false }): CodexSessionConfig {
   return {
     // The brief is a developer message ahead of the conversation — the
     // system-prompt position — not a prefix of the first user turn.
@@ -54,6 +67,13 @@ export function codexSessionConfig(instructions: string, bridgeUrl: string): Cod
       apps: false,
       plugins: false,
       memories: false,
+      // Goals (per-turn token and time budgets the model sets itself) — the
+      // platform keeps the limits; the tools only cost context.
+      goals: false,
+      image_generation: enabled.imageGeneration,
     },
+    skills: enabled.imageGeneration
+      ? { config: BUNDLED_SKILLS_OFF.map(name => ({ name, enabled: false })) }
+      : { bundled: { enabled: false } },
   };
 }
