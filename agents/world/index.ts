@@ -17,6 +17,7 @@ export { OUTPUT_NOTE } from './output.ts';
 export { PROJECTS_NOTE, PROJECTS_WORLD_NOTE } from './projects.ts';
 export { REMOTE_AGENTS_NOTE } from './remote-agents.ts';
 export { REPO_RULES_NOTE } from './repo-rules.ts';
+export { BROWSER_RELAUNCHED_NOTE, SESSION_RESUMED_IDLE_NOTE, SESSION_RESUMED_INTERRUPTED_NOTE } from './session-resume.ts';
 export { THREAD_DIALOGUE_NOTE } from './thread-dialogue.ts';
 export { THREAD_NAMING_NOTE } from './thread-naming.ts';
 export { WORKBENCH_NOTE } from './workbench.ts';

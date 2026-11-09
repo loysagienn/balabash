@@ -309,6 +309,29 @@ describe('the rows of threads', () => {
     assert.equal('remote' in (await prisma.thread.findUniqueOrThrow({ where: { id: remote } })), false);
   });
 
+  test('the busy run threads: no session.state yet or the last one run — a thread between turns and a remote thread are not', async () => {
+    const starting = await startChild('engineer', 'Still starting');
+    const working = await startChild('engineer', 'Mid-turn');
+    const idle = await startChild('engineer', 'Between turns');
+    const remote = await startChild('fake_agent', 'A remote session', { remote: true });
+    const state = (threadId: string, value: string) =>
+      appendEvent({ type: 'session.state', actor: 'agent', agentName: 'engineer', workspaceId: stand.workspaceId, threadId, payload: { state: value } });
+
+    await state(working, 'wait');
+    await state(working, 'run');
+    await state(idle, 'run');
+    await state(idle, 'wait');
+
+    const busy = (await threads.listBusyRunThreads()).map(t => t.id);
+
+    assert.ok(busy.includes(starting) && busy.includes(working));
+    assert.ok(!busy.includes(idle) && !busy.includes(remote));
+
+    for (const id of [starting, working, idle, remote]) {
+      await close(id, 'cancelled');
+    }
+  });
+
   test('a remote thread has no run to tombstone and does not block the restart window; its parent still takes it along', async () => {
     const local = await startChild('engineer', 'A local run');
     const remote = await startChild('fake_agent', 'A remote session', { remote: true });

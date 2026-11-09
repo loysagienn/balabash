@@ -44,7 +44,13 @@ import { describeFinishRequest } from '../src/capabilities/thread-verbs.ts';
 import { connectPlaywrightMcp, createPlaywrightBridgeTools, imageExtension } from './kit/playwright.ts';
 import type { PlaywrightImageSink } from './kit/playwright.ts';
 import { workspaceDbPath, workspaceFilesDir } from '../src/workspace/layout.ts';
-import { BLOCKED_PATH_NOTE, WORKSPACE_STORAGE_NOTE } from './world/index.ts';
+import {
+  BLOCKED_PATH_NOTE,
+  BROWSER_RELAUNCHED_NOTE,
+  SESSION_RESUMED_IDLE_NOTE,
+  SESSION_RESUMED_INTERRUPTED_NOTE,
+  WORKSPACE_STORAGE_NOTE,
+} from './world/index.ts';
 
 const NOVNC_URL = 'https://novnc.loysagienn.com/vnc.html';
 
@@ -246,6 +252,20 @@ export const agent = {
     // flushed into the session once it exists.
     const preSessionInbox: string[] = [];
 
+    // The session's opening message. A fresh run: the operator's first
+    // instruction. A run resumed after an app restart: the restart note —
+    // at once when a turn was cut off; otherwise the run stays dormant (no
+    // browser, no session) until the operator writes, and that message rides
+    // behind the note.
+    let wakeDormant: ((text: string) => void) | null = null;
+    const opening: Promise<string> = !ctx.resume
+      ? Promise.resolve(buildInitialMessage(prompt))
+      : ctx.resume.interrupted
+        ? Promise.resolve(`${SESSION_RESUMED_INTERRUPTED_NOTE} ${BROWSER_RELAUNCHED_NOTE}`)
+        : new Promise(resolve => {
+            wakeDormant = text => resolve(`${SESSION_RESUMED_IDLE_NOTE} ${BROWSER_RELAUNCHED_NOTE}\n\n${text}`);
+          });
+
     const stop = (error?: unknown) => {
       if (settled) {
         return;
@@ -253,6 +273,8 @@ export const agent = {
 
       settled = true;
       cleanup.session?.close();
+      // A dormant resumed run cancelled before anything woke it.
+      wakeDormant?.('');
 
       if (error === undefined) {
         resolveFinished();
@@ -265,6 +287,12 @@ export const agent = {
 
     void (async () => {
       try {
+        const initialMessage = await opening;
+
+        if (settled) {
+          return;
+        }
+
         cleanup.releaseProfile = await acquireProfileLock(ctx.stateDir, ctx.signal);
 
         const profileDir = path.join(ctx.stateDir, 'profile');
@@ -311,7 +339,8 @@ export const agent = {
 
         const session = ctx.harness.sdkSession({
           instructions: `${SYSTEM_PROMPT}\n\n${BLOCKED_PATH_NOTE}\n\n${buildInstructions()}`,
-          initialMessage: buildInitialMessage(prompt),
+          initialMessage,
+          ...(ctx.resume ? { resume: ctx.resume.sdkSessionId } : {}),
           model: 'claude-opus-5-5',
           // Full native preset: shell and file tools on the workbench next to
           // the browser tools (post-processing extracted data, saving files).
@@ -378,6 +407,15 @@ export const agent = {
     })();
 
     const sessionPush = (text: string): void => {
+      if (wakeDormant) {
+        const wake = wakeDormant;
+
+        wakeDormant = null;
+        wake(text);
+
+        return;
+      }
+
       if (!cleanup.session) {
         preSessionInbox.push(text);
 

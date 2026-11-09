@@ -93,6 +93,9 @@ export function createClaudeSession(options: SdkSessionOptions, deps: SdkSession
         ? { env: mergeEnv({ ...(options.artifacts ? ARTIFACTS_ENV : {}), ...(options.env ?? {}) }) }
         : {}),
       ...(options.model ? { model: options.model } : {}),
+      // The continuation of a session the CLI persisted (a run resumed after
+      // an app restart): same cwd, the transcript is found by its id.
+      ...(options.resume ? { resume: options.resume } : {}),
       effort,
       systemPrompt: options.instructions,
       permissionMode: 'bypassPermissions',

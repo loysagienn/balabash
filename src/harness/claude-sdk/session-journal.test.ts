@@ -64,7 +64,8 @@ describe('mapSdkMessage', () => {
 
     const first = mapSdkMessage(memory, init);
 
-    assert.deepEqual(types(first), ['session.state', 'session.started']);
+    assert.deepEqual(types(first), ['session.state', 'session.started', 'session.sdk']);
+    assert.deepEqual(first[2].payload, { sdk: 'claude', sdkSessionId: SESSION });
     assert.deepEqual(first[0].payload, { state: 'run' });
     assert.deepEqual(first[1].payload, {
       model: 'claude-opus-5-5',
@@ -432,7 +433,7 @@ describe('startClaudeSessionJournal', () => {
 
       assert.deepEqual(
         writes.map(write => `${write.threadId}:${typeof write.input === 'function' ? 'producer' : types(write.input).join(',')}`),
-        ['t1:session.state,session.started', 't2:session.state,session.started', 't1:session.tool.started', 't1:session.turn,session.state', 't1:producer'],
+        ['t1:session.state,session.started,session.sdk', 't2:session.state,session.started,session.sdk', 't1:session.tool.started', 't1:session.turn,session.state', 't1:producer'],
       );
 
       const producer = writes.at(-1)!.input as () => Promise<JournalEntry[]>;
@@ -448,7 +449,7 @@ describe('startClaudeSessionJournal', () => {
       assert.equal(writes.length, 6);
       emitSdkSessionEnd('t1');
       emitSdkMessage('t1', init);
-      assert.deepEqual(types(writes.at(-1)!.input as JournalEntry[]), ['session.state', 'session.started']);
+      assert.deepEqual(types(writes.at(-1)!.input as JournalEntry[]), ['session.state', 'session.started', 'session.sdk']);
     } finally {
       stop();
     }

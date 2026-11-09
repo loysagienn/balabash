@@ -955,6 +955,19 @@ class Builder {
       return;
     }
 
+    // The run came back after an app restart and continues its saved session
+    // (src/capabilities/resume-runs.ts); a turn cut off by the restart is
+    // picked up at once, an idle thread waits for its next message.
+    if (is(event, 'session.resumed')) {
+      this.push(
+        event.payload.interrupted
+          ? { kind: 'sys', key, at, icon: 'rotate-cw', state: 'act', text: 'The app restarted mid-turn — the session resumed from its saved history and picks the cut-off turn up' }
+          : { kind: 'sys', key, at, icon: 'rotate-cw', text: 'The app restarted — the session resumed from its saved history' },
+      );
+
+      return;
+    }
+
     if (is(event, 'session.retry')) {
       const { attempt, maxRetries, retryDelayMs, errorStatus } = event.payload;
 

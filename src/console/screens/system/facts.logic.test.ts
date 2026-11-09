@@ -128,14 +128,14 @@ describe('the restart in the way', () => {
   it('names who asked and what the window waits for, this workspace’s threads last as links', () => {
     const threads = [{ id: 't1', title: 'Web UI: screens', agent: 'engineer' }];
 
-    assert.deepEqual(restartNote(request, { ...waiting, threads }, NOW), { lead: 'Requested by engineer at 16:05', threads, tail: ' · waiting for 1 thread to close:' });
+    assert.deepEqual(restartNote(request, { ...waiting, threads }, NOW), { lead: 'Requested by engineer at 16:05', threads, tail: ' · waiting for 1 thread to finish a turn:' });
     assert.deepEqual(restartNote(request, { ...waiting, secretaryTurn: true, workspaceJob: true, logQuiet: false }, NOW).tail, ' · waiting for a secretary turn to end, a workspace job to end, the log to go quiet');
-    assert.deepEqual(restartNote(request, { ...waiting, threads, otherThreads: 2, logQuiet: false }, NOW).tail, ' · waiting for the log to go quiet, 2 threads of other workspaces to close, 1 thread to close:');
+    assert.deepEqual(restartNote(request, { ...waiting, threads, otherThreads: 2, logQuiet: false }, NOW).tail, ' · waiting for the log to go quiet, 2 threads of other workspaces to finish a turn, 1 thread to finish a turn:');
     assert.deepEqual(restartNote(request, waiting, NOW).tail, ' · restarting now');
     assert.deepEqual(restartNote({ ...request, requestedBy: null, force: true }, undefined, NOW), { lead: 'Requested by the operator at 16:05 · force', threads: [], tail: ' · checking the safe window' });
     assert.equal(restartNote(request, null, NOW).tail, ' · checking the safe window');
     // Another workspace's request: no requester to name, its threads a count.
-    assert.deepEqual(restartNote({ ...request, requestedBy: null, own: false }, { ...waiting, otherThreads: 1 }, NOW), { lead: 'Requested from another workspace at 16:05', threads: [], tail: ' · waiting for 1 thread of other workspaces to close' });
+    assert.deepEqual(restartNote({ ...request, requestedBy: null, own: false }, { ...waiting, otherThreads: 1 }, NOW), { lead: 'Requested from another workspace at 16:05', threads: [], tail: ' · waiting for 1 thread of other workspaces to finish a turn' });
   });
 
   it('is the facts’ pending unless the log completed it, else the log’s newest request after its newest completion', () => {

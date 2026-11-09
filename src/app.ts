@@ -10,10 +10,11 @@ import { promisify } from 'node:util';
 import type { Consumer } from './core/consumers.ts';
 import { prisma } from './db/client.ts';
 import { config } from './config/index.ts';
-import { COORDINATOR_AGENT, tombstoneActiveThreads } from './core/threads.ts';
+import { COORDINATOR_AGENT } from './core/threads.ts';
 import { getFile, getFileDownloadUrl, ingestFile, openFileContent } from './files/index.ts';
 import { loadAgents, repositoryAgentNames } from './capabilities/agent-catalog.ts';
 import { spawnAgentRun } from './capabilities/agent-runtime.ts';
+import { resumeThreadRuns, tombstoneUnresumableThreads } from './capabilities/resume-runs.ts';
 import { loadRemoteAgents } from './capabilities/remote-agent-source.ts';
 import { createRemoteDriverContext, refreshRemoteSecretTargets, registerRemoteSecretTargets } from './capabilities/remote-agent-secrets.ts';
 import { appendEvent } from './core/append.ts';
@@ -76,16 +77,16 @@ if (!process.env.OPERATOR_WORKSPACE_ID && process.env.OPERATOR_USER_ID) {
   console.warn('[app] OPERATOR_USER_ID is the former name of OPERATOR_WORKSPACE_ID — rename it in .env');
 }
 
-// Runs live only in memory: threads orphaned by the previous process death
-// are cancelled before anything can address them. A planned restart
-// leaves nothing to tombstone — the safe window required every non-remote
-// child thread to finish first. Remote threads (the mirrors of sessions in
-// external systems, src/remote) are not orphans: they have no run, and the
-// remote engine picks them up from their rows.
-const tombstoned = await tombstoneActiveThreads('process_restart');
+// Runs live only in memory, sessions in their SDK's store: a thread the
+// previous process left active gets its run back below when its session is
+// named in the journal (resume-runs.ts); one without a session is cancelled
+// here, before anything can address it. Remote threads (the mirrors of
+// sessions in external systems, src/remote) are not orphans: they have no
+// run, and the remote engine picks them up from their rows.
+const tombstoned = await tombstoneUnresumableThreads();
 
 if (tombstoned > 0) {
-  console.log(`[app] tombstoned ${tombstoned} orphaned threads`);
+  console.log(`[app] tombstoned ${tombstoned} orphaned threads without a saved session`);
 }
 
 // The files surface of the installation's extensions (local tool servers
@@ -180,12 +181,21 @@ consumers.push({ name: 'codex-plan-limits', stop: startCodexPlanLimits() });
 // rises the run that would otherwise answer for the stale state.
 await settleMainThreadStates();
 
+// The threads that survived the sweep resume their sessions — runs
+// registered before the router starts, so what was addressed to them while
+// the process was down reaches them in order.
+const resumedRuns = await resumeThreadRuns();
+
+if (resumedRuns.resumed + resumedRuns.failed > 0) {
+  console.log(`[app] resumed ${resumedRuns.resumed} thread runs (${resumedRuns.failed} could not resume)`);
+}
+
 consumers.push(
   startThreadRouter({
     // Lazy rise: a remote thread's facade (no run — the engine answers for
     // it, after a restart as before), and the coordinator of a main thread.
-    // Any other active child without a run in memory is resume territory —
-    // deliberately deferred.
+    // Any other active child has its run registered — spawned, or resumed at
+    // boot (resume-runs.ts).
     createRun: thread => {
       if (thread.remote) {
         return remoteFacade(thread);

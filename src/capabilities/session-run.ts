@@ -7,7 +7,7 @@
 // and tool-catalog resyncs.
 
 import { mkdirSync } from 'node:fs';
-import { THREAD_NAMING_NOTE } from '../../agents/world/index.ts';
+import { SESSION_RESUMED_IDLE_NOTE, SESSION_RESUMED_INTERRUPTED_NOTE, THREAD_NAMING_NOTE } from '../../agents/world/index.ts';
 import { workspaceDbPath, workspaceTasksDir } from '../workspace/layout.ts';
 import { fileContentBlock } from '../core/file-blocks.ts';
 import {
@@ -542,7 +542,7 @@ export function createSessionRun(
   const headless = declaration.headless === true;
   // Children spawned by this run: their replies are labeled by threadId in
   // the dialogue (a thread.message whose author is not the parent).
-  const childThreadIds = new Set<string>();
+  const childThreadIds = new Set<string>(ctx.resume?.childThreadIds ?? []);
 
   const end: EndState = { result: null };
   let settled = false;
@@ -570,7 +570,29 @@ export function createSessionRun(
   let session: AgentSdkSession | null = null;
   const preSessionInbox: string[] = [];
 
+  // The message the session opens with. A fresh run: the spawn prompt. A run
+  // resumed after an app restart: the restart note — at once when a turn was
+  // cut off; otherwise the run stays dormant (no session, no environment)
+  // until the first message arrives, which then rides behind the note.
+  let wakeDormant: ((text: string) => void) | null = null;
+  const opening: Promise<string> = !ctx.resume
+    ? Promise.resolve(spec.initialMessage ? spec.initialMessage(prompt) : prompt)
+    : ctx.resume.interrupted
+      ? Promise.resolve(SESSION_RESUMED_INTERRUPTED_NOTE)
+      : new Promise(resolve => {
+          wakeDormant = text => resolve(`${SESSION_RESUMED_IDLE_NOTE}\n\n${text}`);
+        });
+
   const pushText = (text: string): void => {
+    if (wakeDormant) {
+      const wake = wakeDormant;
+
+      wakeDormant = null;
+      wake(text);
+
+      return;
+    }
+
     if (!session) {
       preSessionInbox.push(text);
 
@@ -584,12 +606,13 @@ export function createSessionRun(
     }
   };
 
-  const startSession = (environment: SessionEnvironment | null): AgentSdkSession =>
+  const startSession = (environment: SessionEnvironment | null, initialMessage: string): AgentSdkSession =>
     ctx.harness.sdkSession({
       instructions: environment?.instructions ? `${spec.instructions}\n\n${environment.instructions}` : spec.instructions,
       // The platform default session-opening message is the spawn prompt
       // verbatim; a declaration overrides it only for a different opening move.
-      initialMessage: spec.initialMessage ? spec.initialMessage(prompt) : prompt,
+      initialMessage,
+      ...(ctx.resume ? { resume: ctx.resume.sdkSessionId } : {}),
       ...(spec.model ? { model: spec.model } : {}),
       ...(spec.effort ? { effort: spec.effort } : {}),
       ...(spec.preset ? { preset: spec.preset } : {}),
@@ -614,6 +637,9 @@ export function createSessionRun(
 
     settled = true;
     session?.close();
+    // A dormant resumed run cancelled before anything woke it: release the
+    // start sequence waiting on its opening.
+    wakeDormant?.('');
 
     if (error === undefined) {
       resolveFinished();
@@ -645,6 +671,12 @@ export function createSessionRun(
     let environment: SessionEnvironment | null = null;
 
     try {
+      const initialMessage = await opening;
+
+      if (settled) {
+        return;
+      }
+
       if (spec.environment) {
         environment = await spec.environment(ctx, cwd ?? ctx.stateDir);
       }
@@ -655,7 +687,7 @@ export function createSessionRun(
         return;
       }
 
-      const created = startSession(environment);
+      const created = startSession(environment, initialMessage);
 
       session = created;
 

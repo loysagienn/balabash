@@ -420,6 +420,20 @@ export type RunContext = {
   tools: ToolsApi; // the bundled tool set; calls are journaled as tool.call.*
   files: FilesApi;
   stateDir: string; // persistent per-agent/per-workspace directory
+  // Set when the run continues the thread's session after an app restart
+  // (src/capabilities/resume-runs.ts) instead of opening a new one.
+  resume?: RunResume;
+};
+
+// The continuation of a thread's session after an app restart: the SDK's own
+// session to resume (the thread's newest session.sdk), whether a turn was in
+// flight when the old process went down (the thread's last session.state was
+// `run`), and the thread's active children (a fresh run learns them as it
+// spawns; a resumed one is told).
+export type RunResume = {
+  sdkSessionId: string;
+  interrupted: boolean;
+  childThreadIds: string[];
 };
 
 // ---------------------------------------------------------------------------
@@ -462,6 +476,11 @@ export type SdkSessionOptions = {
   // Extra environment variables for the session process, merged over the app
   // process environment (e.g. WORKSPACE_DB — the workspace database path).
   env?: Record<string, string>;
+  // Continue this session of the SDK's own store instead of starting a new
+  // one (claude: the session id — the transcript the CLI keeps for the
+  // session's cwd; codex: the thread id). initialMessage is then the first
+  // message of the continuation.
+  resume?: string;
 };
 
 // One completed session turn: the final text the inner model produced. A

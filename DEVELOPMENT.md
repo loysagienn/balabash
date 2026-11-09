@@ -79,9 +79,9 @@ confidential from them.
   `npm start`, no `npm run dev`, no `kill`, no supervisor commands). A live
   process is serving the user right now. Code changes go live only through
   an app restart, which is requested, not performed: `request_restart`
-  records the request and the app restarts under the supervisor once every
-  non-main thread is closed — so after requesting one, wrap up and end your
-  thread to let it happen.
+  records the request and the app restarts under the supervisor once no
+  agent turn is in flight — so after requesting one, end your turn to let it
+  happen; your thread keeps its session and continues after the restart.
 - Database schema changes ride the same restart: edit `prisma/schema.prisma`,
   author an SQL migration into
   `prisma/migrations/<timestamp>_<name>/migration.sql`

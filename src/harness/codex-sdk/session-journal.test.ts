@@ -9,6 +9,10 @@ describe('mapCodexEvent', () => {
   it('journals a turn: state, commands with their exit code, a patch, the plan, reasoning, the usage', () => {
     const memory = createCodexTurnMemory();
 
+    assert.deepEqual(mapCodexEvent(memory, ev({ type: 'thread.started', thread_id: 'x' })), [
+      { type: 'session.sdk', payload: { sdk: 'codex', sdkSessionId: 'x' } },
+    ]);
+    // The next exec of the same thread announces it again: nothing new.
     assert.deepEqual(mapCodexEvent(memory, ev({ type: 'thread.started', thread_id: 'x' })), []);
     assert.deepEqual(mapCodexEvent(memory, ev({ type: 'turn.started' })), [{ type: 'session.state', payload: { state: 'run' } }]);
 

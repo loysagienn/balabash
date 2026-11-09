@@ -141,7 +141,8 @@ export function startThreadRouter({ createRun, spawnRun }: RouterHooks): Consume
 
         const thread = await getThread(event.threadId);
 
-        if (!thread || thread.status !== 'active') {
+        // A run already registered (resumed at boot) is not spawned twice.
+        if (!thread || thread.status !== 'active' || getRun(thread.id)) {
           return;
         }
 

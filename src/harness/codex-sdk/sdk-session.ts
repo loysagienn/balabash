@@ -197,7 +197,7 @@ export function createCodexSession(options: SdkSessionOptions, deps: CodexSessio
         // the host layer off).
         config: codexSessionConfig(options.instructions, bridge.url),
       });
-      const thread = codex.startThread({
+      const threadOptions = {
         ...(options.model ? { model: options.model } : {}),
         // Reasoning effort: the platform scale is a subset of Codex's, so the
         // value passes through; the platform default is explicit
@@ -211,7 +211,10 @@ export function createCodexSession(options: SdkSessionOptions, deps: CodexSessio
         sandboxMode: 'danger-full-access',
         approvalPolicy: 'never',
         webSearchMode: 'live',
-      });
+      } as const;
+      // A run resumed after an app restart continues its Codex thread (the
+      // rollout in CODEX_HOME); every turn is a `codex exec … resume` anyway.
+      const thread = options.resume ? codex.resumeThread(options.resume, threadOptions) : codex.startThread(threadOptions);
 
       for await (const input of queue.iterable) {
         if (closed) {

@@ -574,7 +574,7 @@ export function DevUi() {
               The agent is waiting for your reply — a 2FA confirmation code.
             </Note>
             <Note state="wait" icon="hourglass">
-              Restart requested: waiting for 2 threads to close.
+              Restart requested: waiting for 2 threads to finish a turn.
             </Note>
             <Note state="off" icon="archive">
               This project is archived.

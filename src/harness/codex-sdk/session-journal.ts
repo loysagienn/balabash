@@ -9,7 +9,7 @@
 // item.completed pair, or the time since the turn's start or the previous
 // completed item (any item: a bridge call, a message, a plan — whether
 // journaled or not) when the start frame did not come; the to-do list is
-// session.plan. No context
+// session.plan; the thread id is session.sdk. No context
 // measurement (Codex offers none), no sub-agent frames, no init frame. The
 // content of an MCP result passes sanitizeToolResult: no bytes in the log.
 
@@ -35,10 +35,12 @@ export type CodexTurnMemory = {
   // — what a reasoning item without a start frame is measured from.
   reasoningFrom: Map<string, number>;
   bound: number | null;
+  // The Codex thread id last journaled (session.sdk).
+  sdkSessionId: string | null;
 };
 
 export function createCodexTurnMemory(): CodexTurnMemory {
-  return { state: 'wait', started: new Set(), reasoningFrom: new Map(), bound: null };
+  return { state: 'wait', started: new Set(), reasoningFrom: new Map(), bound: null, sdkSessionId: null };
 }
 
 type ToolView = { name: string; input: JsonObject } | null;
@@ -95,6 +97,16 @@ export function mapCodexEvent(memory: CodexTurnMemory, event: ThreadEvent, at = 
   };
 
   switch (event.type) {
+    // Every `codex exec` of the session announces the thread; the id is
+    // journaled when it first appears (the first turn) or changes.
+    case 'thread.started':
+      if (event.thread_id && event.thread_id !== memory.sdkSessionId) {
+        memory.sdkSessionId = event.thread_id;
+        entries.push({ type: 'session.sdk', payload: { sdk: 'codex', sdkSessionId: event.thread_id } });
+      }
+
+      break;
+
     case 'turn.started':
       setState('run');
       memory.bound = at;

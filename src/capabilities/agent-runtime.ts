@@ -13,6 +13,7 @@ import type {
   JsonObject,
   NotificationLevel,
   RunContext,
+  RunResume,
   SpawnOptions,
   Thread,
   ToolResult,
@@ -148,8 +149,10 @@ function createFilesApi(workspaceId: string, agentName: string): FilesApi {
 
 // Spawns the run for a freshly started child thread (router hook). Returns
 // null when the run cannot start; the failure is journaled as the thread's
-// terminal, so the parent learns about it the ordinary way.
-export async function spawnAgentRun(thread: Thread, startedEvent: Event): Promise<RoutedRun | null> {
+// terminal, so the parent learns about it the ordinary way. With `resume` the
+// run continues the thread's saved SDK session after an app restart
+// (resume-runs.ts) — the same run, built from the same thread.started.
+export async function spawnAgentRun(thread: Thread, startedEvent: Event, resume?: RunResume): Promise<RoutedRun | null> {
   const failThread = async (error: string) => {
     await appendEvent({
       type: THREAD_FAILED,
@@ -360,6 +363,7 @@ export async function spawnAgentRun(thread: Thread, startedEvent: Event): Promis
     tools,
     files,
     stateDir,
+    ...(resume ? { resume } : {}),
   };
 
   let run;
@@ -392,7 +396,7 @@ export async function spawnAgentRun(thread: Thread, startedEvent: Event): Promis
     error => failThread(getErrorMessage(error)),
   );
 
-  console.log(`[agent-run:${threadId}] started agent "${agentName}"`);
+  console.log(`[agent-run:${threadId}] ${resume ? 'resumed' : 'started'} agent "${agentName}"`);
 
   return {
     accept: event => {

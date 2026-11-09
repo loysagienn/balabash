@@ -81,10 +81,12 @@ export type TurnMemory = {
   pendingText: PendingText | null;
   bounds: Map<string | null, number>;
   model: string | null;
+  // The SDK session id last journaled (session.sdk).
+  sdkSessionId: string | null;
 };
 
 export function createTurnMemory(): TurnMemory {
-  return { started: false, state: 'wait', tools: new Map(), pendingText: null, bounds: new Map(), model: null };
+  return { started: false, state: 'wait', tools: new Map(), pendingText: null, bounds: new Map(), model: null, sdkSessionId: null };
 }
 
 // A Claude model id as the frames name it, without the context-window
@@ -208,6 +210,11 @@ export function mapSdkMessage(memory: TurnMemory, message: SDKMessage, at = Date
             });
           } else {
             observeModel(message.model);
+          }
+
+          if (message.session_id && message.session_id !== memory.sdkSessionId) {
+            memory.sdkSessionId = message.session_id;
+            entries.push({ type: 'session.sdk', payload: { sdk: 'claude', sdkSessionId: message.session_id } });
           }
 
           break;

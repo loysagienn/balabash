@@ -158,6 +158,17 @@ export type EventPayloads = {
     // link: this one leaves the installation.
     remoteLink?: string;
   };
+  // The id of the inner session in its SDK's own store (Claude: the
+  // session_id of the init frame — the transcript the CLI keeps under
+  // ~/.claude/projects; Codex: the thread id — the rollout under CODEX_HOME).
+  // Journaled when a session first names it and again only when it changes;
+  // the thread's newest one is the session to resume or to delete.
+  'session.sdk': { sdk: 'claude' | 'codex'; sdkSessionId: string };
+  // The thread's run came back after an app restart and continues the named
+  // session (src/capabilities/resume-runs.ts); `interrupted` — a turn was in
+  // flight when the old process went down, and the continuation opens with
+  // the note about it at once (otherwise on the first message).
+  'session.resumed': { sdkSessionId: string; interrupted: boolean };
   'session.state': { state: SessionState };
   // A turn of the inner session (Claude: the result frame; Codex: the
   // turn.completed/failed event). Claude's totalCostUsd is cumulative over

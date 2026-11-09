@@ -1204,8 +1204,9 @@ export type FileAreaTotalsView = {
 // words (reason, requester, thread) only when the request came from this
 // workspace (`own`); another workspace's request is a bare fact — that a
 // restart is pending since when, and whether it is forced (a forced
-// restart cancels every workspace's threads). What it waits for names the
-// threads of this workspace and counts the others.
+// restart cuts every workspace's agent turns in flight). What it waits for
+// names the threads of this workspace with a turn in flight and counts the
+// others.
 export type PendingRestartView = {
   // The seq of the system.restart.requested event — a completion of the log
   // with a greater seq means this view is stale.
@@ -1220,7 +1221,7 @@ export type PendingRestartView = {
   // the first poll.
   waiting: {
     threads: { id: string; title: string | null; agent: string }[];
-    // Active threads of other workspaces in the way — a count, not names.
+    // Threads of other workspaces with a turn in flight — a count, not names.
     otherThreads: number;
     secretaryTurn: boolean;
     workspaceJob: boolean;

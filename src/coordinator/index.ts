@@ -113,7 +113,7 @@ export function buildStatusText(children: Thread[], projects: ProjectModel[], wo
     const origin = pendingRestart.own ? `(${pendingRestart.reason})` : '(requested from another workspace)';
 
     lines.push(
-      `restart pending: requested ${pendingRestart.requestedAt.toISOString()} ${origin} — happens once every child thread is closed and the log goes quiet; avoid starting new threads`,
+      `restart pending: requested ${pendingRestart.requestedAt.toISOString()} ${origin} — happens once no agent turn is in flight and the log goes quiet (threads between turns continue after it); avoid starting new threads`,
     );
   }
 

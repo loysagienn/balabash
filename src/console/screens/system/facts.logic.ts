@@ -180,7 +180,7 @@ export type RestartNote = {
   // links after the tail; empty when the wait is for something else, or
   // unknown.
   threads: { id: string; title: string | null; agent: string }[];
-  // " · waiting for 2 threads to close:" / " · waiting for a secretary turn to end" / " · restarting now" / " · checking the safe window"
+  // " · waiting for 2 threads to finish a turn:" / " · waiting for a secretary turn to end" / " · restarting now" / " · checking the safe window"
   tail: string;
 };
 
@@ -202,11 +202,11 @@ function waitWords(waiting: NonNullable<PendingRestartView['waiting']>): string 
     reasons.push('the log to go quiet');
   }
   if ((waiting.otherThreads ?? 0) > 0) {
-    reasons.push(`${countOf(waiting.otherThreads, 'thread')} of other workspaces to close`);
+    reasons.push(`${countOf(waiting.otherThreads, 'thread')} of other workspaces to finish a turn`);
   }
   // Last: the threads of this workspace follow as links.
   if (waiting.threads.length) {
-    reasons.push(`${countOf(waiting.threads.length, 'thread')} to close:`);
+    reasons.push(`${countOf(waiting.threads.length, 'thread')} to finish a turn:`);
   }
 
   if (reasons.length === 0) {

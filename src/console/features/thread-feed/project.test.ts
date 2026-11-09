@@ -936,6 +936,28 @@ describe('projectFeed — threads, tasks and lines', () => {
   });
 });
 
+describe('projectFeed — a session resumed after an app restart', () => {
+  it('draws a line: plain for an idle thread, in the act state when the restart cut a turn off', () => {
+    resetSeq(70n);
+
+    const items = projectFeed(
+      [
+        own('session.resumed', { sdkSessionId: 's1', interrupted: false }),
+        own('session.resumed', { sdkSessionId: 's1', interrupted: true }),
+      ],
+      ctx,
+    );
+
+    assert.deepEqual(
+      items.map(item => (item.kind === 'sys' ? [item.icon, item.state, item.text] : [item.kind])),
+      [
+        ['rotate-cw', undefined, 'The app restarted — the session resumed from its saved history'],
+        ['rotate-cw', 'act', 'The app restarted mid-turn — the session resumed from its saved history and picks the cut-off turn up'],
+      ],
+    );
+  });
+});
+
 describe('projectFeed — the commands this thread gave its children', () => {
   it('names the child in the lines of a finish, cancel, stop or pause sent down; the same commands addressed to this thread speak of "the thread"', () => {
     resetSeq(1n);

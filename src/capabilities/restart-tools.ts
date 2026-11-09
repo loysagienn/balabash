@@ -23,11 +23,13 @@ const REQUEST_RESTART_FUNCTION: ToolFunction = {
   toolName: REQUEST_RESTART_FUNCTION_NAME,
   description:
     'Request an app restart so that a freshly built bundle goes live. The restart does not happen ' +
-    'immediately: it waits for a safe window — every non-main thread closed (including the requesting ' +
-    'one), no running turn, 20 seconds of log quiet — then the process restarts under the supervisor. ' +
-    'After the restart a system.restart.completed event is delivered to the requesting thread (or to the ' +
-    'main thread when it has already finished). Set force=true only when the user explicitly wants active ' +
-    'threads cancelled to let the restart through.',
+    'immediately: it waits for a safe window — no agent turn in flight in any thread (the requesting ' +
+    'one included), no secretary turn, no running workspace job, 20 seconds of log quiet — then the ' +
+    'process restarts under the supervisor. A thread waiting between turns is no obstacle: it keeps its ' +
+    'session and continues after the restart. A system.restart.completed event is then delivered to the ' +
+    'requesting thread (or to the main thread when it has already finished). Set force=true only when the ' +
+    'user explicitly wants the restart without waiting for agent turns: the turns in flight are cut off ' +
+    'and their threads resume with a note about it.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -37,7 +39,7 @@ const REQUEST_RESTART_FUNCTION: ToolFunction = {
       },
       force: {
         type: ['boolean', 'null'],
-        description: 'Cancel all active non-main threads instead of waiting for them. Null for the normal wait.',
+        description: 'Restart without waiting for agent turns in flight — they are cut off. Null for the normal wait.',
       },
     },
     required: ['reason'],
@@ -113,9 +115,9 @@ async function requestRestart(args: JsonObject, ctx: BuiltinServerCallContext): 
 
   const lines = [
     force
-      ? 'Restart is pending; all active non-main threads will be cancelled to open the safe window.'
-      : 'Restart is pending. It waits for a safe window: every non-main thread closed (including this one, if the request came from an agent thread), no running turn, and 20 seconds of log quiet.',
-    'Finish this thread to let the restart happen; a system.restart.completed event will report it.',
+      ? 'Restart is pending and forced: it does not wait for agent turns — those in flight are cut off, and their threads resume with a note.'
+      : 'Restart is pending. It waits for a safe window: no agent turn in flight (this one included, if the request came from an agent thread), no secretary turn, no running job, and 20 seconds of log quiet.',
+    'End this turn to let the restart happen. This thread keeps its session and continues after the restart; a system.restart.completed event will report it.',
     ...(staleWarning ? [staleWarning] : []),
   ];
 

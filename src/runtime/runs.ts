@@ -1,6 +1,7 @@
 // In-memory run registry (§7.3): threadId → run. Runs are ephemeral by
-// design (§5.5) — the registry is process state, never persisted; restart
-// safety comes from the tombstone, not from here.
+// design (§5.5) — the registry is process state, never persisted; across a
+// restart a thread's run is rebuilt over its SDK session
+// (src/capabilities/resume-runs.ts), not restored from here.
 
 import type { Event } from '../core/contract.ts';
 

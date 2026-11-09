@@ -159,16 +159,40 @@ export async function countThreadsAt(workspaceId: string, filters: ThreadCountFi
 // The threads whose life is a run of this process: every active non-main
 // thread except the remote ones — a remote agent's thread mirrors a session
 // elsewhere, holds nothing in memory and survives a restart as a row and a
-// cursor (src/remote). The restart's safe window and the boot tombstone
-// both ask for this set.
+// cursor (src/remote). The boot sweep and the resume of runs ask for this
+// set; the restart's safe window for its busy part.
 const ACTIVE_RUN_THREADS = Prisma.sql`threads.status = 'active' AND threads.parent_id IS NOT NULL
   AND NOT COALESCE(started.payload -> 'remote' = 'true'::jsonb, false)`;
 
-// Every active non-main, non-remote thread across all workspaces — the
-// restart module's safe-window check (a pending restart waits until this
-// list is empty; a remote thread is no obstacle).
+// Every active non-main, non-remote thread across all workspaces — the boot
+// sweep and the resume of runs (src/capabilities/resume-runs.ts).
 export async function listActiveChildThreads(): Promise<Thread[]> {
   return readThreads(prisma, ACTIVE_RUN_THREADS, Prisma.sql`ORDER BY threads.created_seq`);
+}
+
+// The run threads with an agent turn in flight: the last session.state their
+// journal wrote is `run`, or none yet — a run still starting (its
+// environment, a browser, the SDK's first frame). The restart's safe window
+// waits for this list to empty: a thread between turns keeps its session
+// and resumes after the restart, a turn in flight would be cut off.
+export async function listBusyRunThreads(): Promise<Thread[]> {
+  return readThreads(
+    prisma,
+    Prisma.sql`${ACTIVE_RUN_THREADS} AND COALESCE((
+      SELECT state.payload ->> 'state' FROM events state
+      WHERE state.thread_id = threads.id AND state.type = 'session.state'
+      ORDER BY state.seq DESC LIMIT 1), 'run') = 'run'`,
+    Prisma.sql`ORDER BY threads.created_seq`,
+  );
+}
+
+// The active children of a thread — the dialogue partners a resumed run is
+// told about (a fresh run learns them as it spawns).
+export async function listActiveChildIds(threadId: string): Promise<string[]> {
+  const rows = await prisma.$queryRaw<Array<{ id: string }>>`
+    SELECT id FROM threads WHERE parent_id = ${threadId} AND status = 'active' ORDER BY created_seq`;
+
+  return rows.map(row => row.id);
 }
 
 // Every main thread across all workspaces, oldest first — the boot sweep
@@ -386,12 +410,21 @@ export async function startThread(options: StartThreadInput): Promise<Thread> {
 // already terminal no-ops (a remote child of a cancelled thread goes with
 // its parent — a thread does not outlive its parent, remote or not).
 
-export async function tombstoneActiveThreads(reason: string): Promise<number> {
+//
+// `spare` keeps a thread alive through the boot sweep: one whose run resumes
+// its saved SDK session (src/capabilities/resume-runs.ts). A spared thread
+// still goes when an ancestor is cancelled — the cascade decides, not the
+// predicate.
+export async function tombstoneActiveThreads(reason: string, spare?: (thread: Thread) => Promise<boolean>): Promise<number> {
   const rows = await readThreads(prisma, ACTIVE_RUN_THREADS, Prisma.sql`ORDER BY threads.created_seq`);
 
   let cancelled = 0;
 
   for (const row of rows) {
+    if (spare && (await spare(row))) {
+      continue;
+    }
+
     const result: AppendResult = await appendEvent({
       type: THREAD_CANCELLED,
       actor: 'system',

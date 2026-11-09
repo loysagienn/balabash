@@ -8,16 +8,20 @@ for working on the code.
 
 One Node.js process (`dist/app.js`), started from the repository root — every
 runtime path (`data/`, `dist/`, `files/`) resolves from the cwd. Boot order:
-`prisma migrate deploy` → database check → tombstone of orphaned threads →
-agent catalog (repository agents, then `data/remote-agents`) → tool servers
-(repository `tools/`, then `data/tools` and `data/mcp-servers`) → web server
-→ channel adapters (Telegram and CCR when configured) → router, consumers,
+`prisma migrate deploy` → database check → tombstone of orphaned threads
+without a saved session → agent catalog (repository agents, then
+`data/remote-agents`) → tool servers (repository `tools/`, then `data/tools`
+and `data/mcp-servers`) → web server → channel adapters (Telegram and CCR
+when configured) → resume of the surviving threads' runs → router, consumers,
 schedule heart, indexer → restart module. The process listens on one
 loopback port (`HTTP_PORT`); a TLS-terminating reverse proxy sends the whole
 console host (and the apps host, if any) to it with `Host` and
 `X-Forwarded-Proto` preserved.
 
-Code changes go live only through a restart. In production the process runs
+Code changes go live only through a restart. A requested restart waits for a
+safe window — no agent or secretary turn in flight, no running workspace job,
+20 s of log quiet; threads between turns keep their SDK sessions and resume
+after it. In production the process runs
 under `supervisor.js`, which reads exit codes alone: `42` — a restart was
 requested and the safe window reached, relaunch at once; `0` — stop; anything
 else — a crash, relaunch with backoff, and after three quick crashes roll

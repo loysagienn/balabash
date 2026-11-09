@@ -4,9 +4,12 @@
 // by design.
 //
 // The safe window is structural first, heuristic second:
-// - no active non-main thread with a run in any workspace (the projection;
-//   a remote agent's thread — the mirror of a session elsewhere, no run
-//   here — neither blocks the window nor is cancelled by force),
+// - no agent turn in flight in any run thread of any workspace (the
+//   journal's last session.state; a thread between turns is no obstacle —
+//   it keeps its SDK session and its run resumes after the restart,
+//   src/capabilities/resume-runs.ts; a remote agent's thread — the mirror
+//   of a session elsewhere, no run here — never blocks); force skips this
+//   wait and cuts the turns in flight, their threads resume with a note,
 // - no coordinator turn in flight (injected — the in-memory truth; a pure
 //   "quiet log" heuristic would kill a turn mid-inference and lose the
 //   reply, because the lazy rise cannot replay it),
@@ -30,7 +33,7 @@ import {
   THREAD_NOTIFICATION,
 } from '../core/envelope.ts';
 import { getEventsAfter, getLastEventSeq, getLogQuietSeconds } from '../core/events.ts';
-import { getMainThread, listActiveChildThreads, tombstoneActiveThreads } from '../core/threads.ts';
+import { getMainThread, listBusyRunThreads } from '../core/threads.ts';
 import type { PendingRestartView } from '../api/contract.ts';
 
 // Kept in sync with supervisor.js by hand — the supervisor is dependency-free
@@ -52,10 +55,9 @@ type PendingRestart = {
   requestedBy: string | null;
   force: boolean;
   requestedAt: Date;
-  forceApplied: boolean;
   notified: boolean;
-  // What the newest poll found in the way, every workspace's threads with
-  // their owner; null before the first poll.
+  // What the newest poll found in the way — every workspace's threads with
+  // an agent turn in flight, with their owner; null before the first poll.
   waiting: {
     threads: { id: string; title: string | null; agent: string; workspaceId: string }[];
     secretaryTurn: boolean;
@@ -241,24 +243,14 @@ export function startRestartModule({ isBusy, hasActiveJobs, hasRemoteWork, onRes
       return;
     }
 
-    // Force: open the window by cancelling every active non-main thread —
-    // the ordinary cascade machinery, one explicit terminal each.
-    if (current.force && !current.forceApplied) {
-      current.forceApplied = true;
-
-      const cancelled = await tombstoneActiveThreads('restart_requested');
-
-      console.log(`[restart] force: cancelled ${cancelled} active thread(s)`);
-
-      return;
-    }
-
-    const activeChildren = await listActiveChildThreads();
+    // Agent turns in flight hold the window; force does not wait for them —
+    // the restart cuts them off and their threads resume with a note.
+    const busyThreads = current.force ? [] : await listBusyRunThreads();
     const blockedBy: string[] = [];
 
-    if (activeChildren.length) {
+    if (busyThreads.length) {
       blockedBy.push(
-        `${activeChildren.length} active thread(s): ${activeChildren
+        `an agent turn in flight in ${busyThreads.length} thread(s): ${busyThreads
           .slice(0, 5)
           .map(thread => thread.title ?? thread.agent)
           .join(', ')}`,
@@ -289,7 +281,7 @@ export function startRestartModule({ isBusy, hasActiveJobs, hasRemoteWork, onRes
     }
 
     current.waiting = {
-      threads: activeChildren.map(thread => ({ id: thread.id, title: thread.title, agent: thread.agent, workspaceId: thread.workspaceId })),
+      threads: busyThreads.map(thread => ({ id: thread.id, title: thread.title, agent: thread.agent, workspaceId: thread.workspaceId })),
       secretaryTurn,
       workspaceJob,
       logQuiet,
@@ -334,7 +326,6 @@ export function startRestartModule({ isBusy, hasActiveJobs, hasRemoteWork, onRes
         requestedBy: typeof event.payload.requestedBy === 'string' ? event.payload.requestedBy : null,
         force,
         requestedAt: event.createdAt,
-        forceApplied: false,
         notified: false,
         waiting: null,
       };
