@@ -31,19 +31,21 @@ const ARTIFACTS_ENV: Record<string, string> = { CLAUDE_CODE_ARTIFACT: '1', CLAUD
 
 // Native Claude Code tools withheld from full-preset sessions (the agents'
 // context composition, project library claude-prompt-composition.md): the
-// Workflow orchestrator (Balabash has the thread tree), the in-session cron
-// and claude.ai routines (the scheduler), desktop push notifications (thread
-// notifications) and git worktree switching (never asked for).
-const NATIVE_TOOLS_OFF = [
-  'Workflow',
-  'CronCreate',
-  'CronDelete',
-  'CronList',
-  'RemoteTrigger',
-  'PushNotification',
-  'EnterWorktree',
-  'ExitWorktree',
-];
+// Workflow orchestrator (Balabash has the thread tree), claude.ai routines
+// (the scheduler), desktop push notifications (thread notifications) and git
+// worktree switching (never asked for). The in-session cron stays: with
+// ScheduleWakeup it is how an agent keeps watch over an external state the
+// harness cannot notify it about (a CI run) — the /loop skill's two modes.
+const NATIVE_TOOLS_OFF = ['Workflow', 'RemoteTrigger', 'PushNotification', 'EnterWorktree', 'ExitWorktree'];
+
+// Bundled Claude Code skills hidden from the model (`off`: neither listed nor
+// invocable): each configures the CLI itself or a terminal (update-config,
+// keybindings-help, fewer-permission-prompts — a headless session has no
+// settings to edit and no permission prompts), writes a CLAUDE.md into a
+// repository (init — the project libraries hold the instructions), or drives
+// claude.ai routines (schedule — the scheduler is Balabash's). Each had zero
+// invocations in the journal when it was turned off.
+const BUNDLED_SKILLS_OFF = ['update-config', 'keybindings-help', 'fewer-permission-prompts', 'init', 'schedule'];
 
 export type SdkSessionDeps = {
   tools: ToolsApi;
@@ -133,7 +135,10 @@ export function createClaudeSession(options: SdkSessionOptions, deps: SdkSession
             // Workflows go off through the setting so the workflow-authoring
             // skill and the "ultracode" trigger leave with the tool.
             disallowedTools: NATIVE_TOOLS_OFF,
-            settings: { disableWorkflows: true },
+            settings: {
+              disableWorkflows: true,
+              skillOverrides: Object.fromEntries(BUNDLED_SKILLS_OFF.map(name => [name, 'off' as const])),
+            },
           }
         : { tools: [], settingSources: [] }),
       strictMcpConfig: true,
