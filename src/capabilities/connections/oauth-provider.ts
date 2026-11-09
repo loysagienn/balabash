@@ -62,6 +62,35 @@ export function registrationServesRedirect(info: OAuthClientInformationMixed, re
   return uris.includes(redirect);
 }
 
+// Whether a stored client registration was obtained from the given
+// authorization server. A resource server may hand its authorization to
+// another server (context.avride.ai, 2026-10-26: the MCP server stopped
+// proxying OAuth itself and names Avride ID directly since), and discovery
+// (RFC 9728) follows the move at the next flow — but the client_id a DCR
+// registration got from the former server means nothing to the new one:
+// invalid_client at the consent step, where no code of ours runs to notice.
+// The interactive provider stamps a registration it saves with the
+// authorization server it was obtained from (authorization_server — our
+// own field in the row, not part of the DCR answer); a stamp naming another
+// server makes the registration stale. A registration without a stamp — one
+// saved before the stamp existed, or a client the operator provisioned by
+// hand — is not judged: its origin is not known, and a guess would replace
+// a working client. Servers compare as issuers: a trailing slash is the one
+// shape difference discovery produces (URL serializers add it to a bare
+// origin), not another server.
+export function registrationFromAuthorizationServer(
+  info: OAuthClientInformationMixed,
+  authorizationServer: string,
+): boolean {
+  const stamp = (info as { authorization_server?: unknown }).authorization_server;
+
+  if (typeof stamp !== 'string') {
+    return true;
+  }
+
+  return stamp.replace(/\/+$/, '') === authorizationServer.replace(/\/+$/, '');
+}
+
 function clientMetadata(): OAuthClientMetadata {
   return {
     client_name: 'Balabash',
@@ -92,9 +121,14 @@ async function saveClientInformation(server: string, info: OAuthClientInformatio
 
 // Used only by an interactive authorization flow. It captures the provider's
 // consent URL and persists the PKCE verifier on the connection row.
+// authorizationServer is the one discovery named for this flow (the caller
+// discovers it the way the SDK is about to): the registration is judged
+// against it and a new registration is stamped with it. Without it the
+// origin of the registration is not judged.
 export function createInteractiveAuthProvider(
   connection: ConnectionModel,
   authorizationRedirect: { url: URL | null },
+  authorizationServer?: string,
 ): OAuthClientProvider {
   return {
     get redirectUrl() {
@@ -128,9 +162,27 @@ export function createInteractiveAuthProvider(
         return undefined;
       }
 
+      if (
+        info &&
+        authorizationServer !== undefined &&
+        !registrationFromAuthorizationServer(info, authorizationServer)
+      ) {
+        console.log(
+          `[oauth] the "${connection.server}" client is registered at another authorization server — registering anew at ${authorizationServer}`,
+        );
+
+        return undefined;
+      }
+
       return info;
     },
-    saveClientInformation: info => saveClientInformation(connection.server, info),
+    saveClientInformation: info =>
+      saveClientInformation(
+        connection.server,
+        authorizationServer === undefined
+          ? info
+          : ({ ...info, authorization_server: authorizationServer } as unknown as OAuthClientInformationMixed),
+      ),
     tokens: () => undefined,
     saveTokens: async tokens => {
       await prisma.connection.update({

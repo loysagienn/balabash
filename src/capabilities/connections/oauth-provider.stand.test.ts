@@ -6,8 +6,12 @@
 // saveClientInformation replaces the row); the transport provider — a
 // background refresh, no redirect URI in play — keeps serving the stored
 // client; a client provisioned by hand (no redirect_uris) is served by
-// both. No authorization server is involved: the judgement is read-only,
-// the row changes only through saveClientInformation, as the SDK does it.
+// both. The interactive provider also judges a registration against the
+// authorization server the flow discovered (given to it by the caller): a
+// registration stamped with another server is no client either, and a
+// registration it saves is stamped with the server of the flow. No
+// authorization server is contacted: the judgement is read-only, the row
+// changes only through saveClientInformation, as the SDK does it.
 //
 // Run: npm test  (node:test, native type stripping — no build needed).
 
@@ -55,8 +59,8 @@ function store(clientInformation: Prisma.InputJsonObject) {
   return prisma.oauthClient.create({ data: { server: SERVER, clientInformation } });
 }
 
-function interactive() {
-  return provider.createInteractiveAuthProvider(connection, { url: null });
+function interactive(authorizationServer?: string) {
+  return provider.createInteractiveAuthProvider(connection, { url: null }, authorizationServer);
 }
 
 function transport() {
@@ -117,5 +121,53 @@ describe('the client registration and the current redirect URI', () => {
   test('no row at all: both providers report no client', async () => {
     assert.equal(await interactive().clientInformation(), undefined);
     assert.equal(await transport().clientInformation(), undefined);
+  });
+});
+
+describe('the client registration and the authorization server of the flow', () => {
+  const ID = 'https://id.test';
+  const FORMER = 'https://mcp.notion.test/mcp';
+
+  test('a registration stamped with the server of the flow is served; one stamped with another server: the interactive flow sees no client, the background refresh keeps it', async () => {
+    const current = { client_id: 'dcr-id', redirect_uris: [REDIRECT], authorization_server: ID };
+
+    await store(current);
+    assert.deepEqual(await interactive(ID).clientInformation(), current);
+    assert.deepEqual(await interactive(`${ID}/`).clientInformation(), current, 'a trailing slash is the same server');
+
+    await prisma.oauthClient.deleteMany({ where: { server: SERVER } });
+
+    const moved = { client_id: 'dcr-former', redirect_uris: [REDIRECT], authorization_server: FORMER };
+
+    await store(moved);
+    assert.equal(await interactive(ID).clientInformation(), undefined);
+    assert.deepEqual(await transport().clientInformation(), moved);
+    assert.deepEqual(await storedRow(), moved, 'the judgement itself changes nothing');
+  });
+
+  test('a registration without a stamp, or a flow without a known server, is not judged', async () => {
+    const unstamped = { client_id: 'dcr-old', redirect_uris: [REDIRECT] };
+
+    await store(unstamped);
+    assert.deepEqual(await interactive(ID).clientInformation(), unstamped);
+
+    await prisma.oauthClient.deleteMany({ where: { server: SERVER } });
+    await store({ client_id: 'dcr-former', redirect_uris: [REDIRECT], authorization_server: FORMER });
+    assert.deepEqual(await interactive().clientInformation(), {
+      client_id: 'dcr-former',
+      redirect_uris: [REDIRECT],
+      authorization_server: FORMER,
+    });
+  });
+
+  test('the SDK’s save through a flow with a known server stamps the row with it; without one it saves the answer as is', async () => {
+    const answer = { client_id: 'dcr-new', redirect_uris: [REDIRECT] };
+
+    await interactive(ID).saveClientInformation!(answer);
+    assert.deepEqual(await storedRow(), { ...answer, authorization_server: ID });
+    assert.deepEqual(await interactive(ID).clientInformation(), { ...answer, authorization_server: ID });
+
+    await interactive().saveClientInformation!(answer);
+    assert.deepEqual(await storedRow(), answer);
   });
 });

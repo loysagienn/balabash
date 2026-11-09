@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { registrationServesRedirect } from './oauth-provider.ts';
+import { registrationFromAuthorizationServer, registrationServesRedirect } from './oauth-provider.ts';
 
 const REDIRECT = 'https://console.example/oauth/callback';
 
@@ -43,5 +43,44 @@ describe('registrationServesRedirect', () => {
   it('never judges a client without redirect_uris — a manually provisioned one', () => {
     assert.equal(registrationServesRedirect({ client_id: 'c', client_secret: 's' }, REDIRECT), true);
     assert.equal(registrationServesRedirect({ client_id: 'c', redirect_uris: 'not-a-list' } as never, REDIRECT), true);
+  });
+});
+
+describe('registrationFromAuthorizationServer', () => {
+  const ID = 'https://id.example';
+
+  it('accepts a registration stamped with the given authorization server', () => {
+    assert.equal(registrationFromAuthorizationServer({ client_id: 'c', authorization_server: ID } as never, ID), true);
+  });
+
+  it('compares issuers as origins — a trailing slash is not another server', () => {
+    assert.equal(
+      registrationFromAuthorizationServer({ client_id: 'c', authorization_server: `${ID}/` } as never, ID),
+      true,
+    );
+    assert.equal(
+      registrationFromAuthorizationServer({ client_id: 'c', authorization_server: ID } as never, `${ID}/`),
+      true,
+    );
+  });
+
+  it('rejects a registration obtained from another authorization server', () => {
+    assert.equal(
+      registrationFromAuthorizationServer(
+        { client_id: 'c', authorization_server: 'https://mcp.example/mcp' } as never,
+        ID,
+      ),
+      false,
+    );
+    assert.equal(
+      registrationFromAuthorizationServer({ client_id: 'c', authorization_server: 'HTTPS://id.example' } as never, ID),
+      false,
+    );
+  });
+
+  it('never judges a registration without a stamp — saved before the stamp, or provisioned by hand', () => {
+    assert.equal(registrationFromAuthorizationServer({ client_id: 'c', redirect_uris: ['https://x/cb'] }, ID), true);
+    assert.equal(registrationFromAuthorizationServer({ client_id: 'c', client_secret: 's' }, ID), true);
+    assert.equal(registrationFromAuthorizationServer({ client_id: 'c', authorization_server: 42 } as never, ID), true);
   });
 });

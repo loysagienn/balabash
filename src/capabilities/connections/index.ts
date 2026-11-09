@@ -12,7 +12,7 @@
 // append redirects them to the main thread when that thread is gone (§4.3).
 
 import crypto from 'node:crypto';
-import { auth } from '@modelcontextprotocol/sdk/client/auth.js';
+import { auth, discoverOAuthServerInfo } from '@modelcontextprotocol/sdk/client/auth.js';
 import { Prisma } from '../../../prisma-generated/client.ts';
 import type { ConnectionModel } from '../../../prisma-generated/models.ts';
 import { prisma } from '../../db/client.ts';
@@ -682,8 +682,14 @@ export async function handleConnectClick(serverName: string, nonce: string): Pro
   row.pendingState = pendingState;
   await prisma.connection.update({ where: { id: row.id }, data: { pendingState } });
 
+  // The authorization server of this flow, discovered the way the SDK's
+  // auth() is about to discover it (fresh, not the process-wide cache — a
+  // resource server that moved its authorization is seen moved here too):
+  // the stored client registration is judged against it, see
+  // registrationFromAuthorizationServer.
+  const { authorizationServerUrl } = await discoverOAuthServerInfo(server.url);
   const capture: { url: URL | null } = { url: null };
-  const result = await auth(createInteractiveAuthProvider(row, capture), {
+  const result = await auth(createInteractiveAuthProvider(row, capture, authorizationServerUrl), {
     serverUrl: server.url,
     ...(server.scope ? { scope: server.scope } : {}),
   });
@@ -765,8 +771,11 @@ export async function handleOauthCallback(query: Record<string, unknown>): Promi
   }
 
   try {
+    // The same judgement of the client registration as at the consent step,
+    // against the same (freshly discovered) authorization server.
+    const { authorizationServerUrl } = await discoverOAuthServerInfo(server.url);
     const capture: { url: URL | null } = { url: null };
-    const result = await auth(createInteractiveAuthProvider(row, capture), {
+    const result = await auth(createInteractiveAuthProvider(row, capture, authorizationServerUrl), {
       serverUrl: server.url,
       authorizationCode: code,
     });
