@@ -334,8 +334,9 @@ async function measureClaude(file: string): Promise<ClaudeMeasure | null> {
     if (kind === 'skill_listing') {
       const content = str(attachment.content);
 
+      // A skill set to name-only lists as a bare `- name` line, no colon.
       for (const line of content.split(/\n(?=- )/)) {
-        const match = /^- ([^\s:]+(?::[^\s:]+)?):/.exec(line);
+        const match = /^- ([^\s:]+(?::[^\s:]+)?)(?::|\s*$)/.exec(line);
 
         if (match) {
           skills.push({ name: match[1]!, chars: line.length, origin: skillOrigin(match[1]!) });
