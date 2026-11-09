@@ -9,6 +9,10 @@
 //   *   — crash: relaunch with backoff; after QUICK_CRASH_LIMIT consecutive
 //         quick crashes roll dist/ back to the last bundle that reached a
 //         healthy uptime, leaving a marker the app reports on its next boot.
+//         The marker speaks for this supervisor run only: a new run starts
+//         by discarding one left behind (the operator relaunched by hand,
+//         and npm run supervise rebuilds dist/ first — whatever boots now is
+//         not the bundle that marker rolled back to).
 //
 // The supervisor itself changes rarely and only by hand — keep it boring.
 
@@ -166,5 +170,25 @@ for (const signal of ['SIGINT', 'SIGTERM']) {
   });
 }
 
+// A marker from an earlier supervisor run is stale: it was written for a
+// bundle that run rolled dist/ back to, and nothing guarantees dist/ still
+// holds it (npm run supervise rebuilds before starting). Had the app booted
+// on it, the restart completion would have claimed a rollback that did not
+// happen (2026-11-09: three environment crashes, ^C, relaunch — the fresh
+// bundle booted and reported rolledBack=true).
+function discardStaleRollbackMarker() {
+  try {
+    if (!fs.existsSync(ROLLBACK_MARKER)) {
+      return;
+    }
+
+    fs.rmSync(ROLLBACK_MARKER, { force: true });
+    log('discarded a rollback marker left by a previous supervisor run');
+  } catch (error) {
+    console.error('[supervisor] failed to discard the stale rollback marker:', error);
+  }
+}
+
+discardStaleRollbackMarker();
 log('starting dist/app.js');
 start();
