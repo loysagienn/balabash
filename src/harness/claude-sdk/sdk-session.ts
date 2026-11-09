@@ -47,6 +47,13 @@ const NATIVE_TOOLS_OFF = ['Workflow', 'RemoteTrigger', 'PushNotification', 'Ente
 // invocations in the journal when it was turned off.
 const BUNDLED_SKILLS_OFF = ['update-config', 'keybindings-help', 'fewer-permission-prompts', 'init', 'schedule'];
 
+// Bundled skills listed by name only (`name-only`: invocable, but without the
+// description that makes the model reach for them by itself): claude-api, a
+// Messages API reference whose description fires on any mention of Claude —
+// in this codebase, most tasks — while the skill itself does not cover the
+// Agent SDK the agents run on. Named explicitly, it still loads whole.
+const BUNDLED_SKILLS_NAME_ONLY = ['claude-api'];
+
 export type SdkSessionDeps = {
   tools: ToolsApi;
   // Working directory of the inner session — the run's persistent stateDir.
@@ -137,7 +144,10 @@ export function createClaudeSession(options: SdkSessionOptions, deps: SdkSession
             disallowedTools: NATIVE_TOOLS_OFF,
             settings: {
               disableWorkflows: true,
-              skillOverrides: Object.fromEntries(BUNDLED_SKILLS_OFF.map(name => [name, 'off' as const])),
+              skillOverrides: Object.fromEntries([
+                ...BUNDLED_SKILLS_OFF.map(name => [name, 'off' as const]),
+                ...BUNDLED_SKILLS_NAME_ONLY.map(name => [name, 'name-only' as const]),
+              ]),
             },
           }
         : { tools: [], settingSources: [] }),
