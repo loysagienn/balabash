@@ -18,6 +18,14 @@ loopback port (`HTTP_PORT`); a TLS-terminating reverse proxy sends the whole
 console host (and the apps host, if any) to it with `Host` and
 `X-Forwarded-Proto` preserved.
 
+Sessions of finished threads are not kept forever: once a day the app
+deletes, through each SDK's own means (the Claude transcript with its
+tool-results directory, the Codex rollout with its sqlite rows and generated
+images), the sessions of threads finished more than `SESSION_RETENTION_DAYS`
+ago (default 7), journaling `session.deleted` into the thread. Sessions that
+accumulated before this existed are removed once with
+`npm run cleanup-sessions` (`scripts/AGENTS.md`).
+
 Code changes go live only through a restart. A requested restart waits for a
 safe window — no agent or secretary turn in flight, no running workspace job,
 20 s of log quiet; threads between turns keep their SDK sessions and resume

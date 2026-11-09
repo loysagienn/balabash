@@ -149,8 +149,9 @@ each run owns a thread — its context and its visibility boundary.**
   persisted; an agent's session lives in its SDK's own store (the Claude CLI's transcript,
   the Codex rollout) and the journal names it. On boot every thread whose session is named
   gets its run back with the session resumed; a thread without one is tombstoned, and events
-  addressed to dead threads are redirected to the main thread. A remote agent's thread holds
-  no run at all: its row is its whole state.
+  addressed to dead threads are redirected to the main thread. A finished thread's session
+  is deleted after a retention period (7 days by default); the journal keeps the fact. A
+  remote agent's thread holds no run at all: its row is its whole state.
 - **Agents are declarations.** An agent module declares its SDK, prompt, tools and spawn
   rights; the platform supplies the session lifecycle, event-to-message rendering, live
   tool-catalog sync and the standard verbs (`end_thread`, `send_file`, spawning). Prompts

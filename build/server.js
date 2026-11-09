@@ -39,6 +39,7 @@ function getOptions(NODE_ENV, APP_VERSION) {
       'rebuild-threads': './scripts/rebuild-threads.ts',
       'render-context': './scripts/render-context.ts',
       'import-sqlite': './scripts/import-sqlite.ts',
+      'cleanup-sessions': './scripts/cleanup-sessions.ts',
     },
     bundle: true,
     outdir: './dist',

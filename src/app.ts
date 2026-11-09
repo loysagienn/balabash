@@ -30,6 +30,7 @@ import { startScheduleHeart } from './schedule/heart.ts';
 import { startWorkspaceIndexer } from './workspace/indexer.ts';
 import { startFileAreaTotals } from './workspace/totals.ts';
 import { startTelemetry } from './runtime/telemetry.ts';
+import { startSessionCleanup } from './capabilities/session-cleanup.ts';
 import { createScheduleToolServer } from './schedule/tools.ts';
 import { createProjectsToolServer } from './projects/tools.ts';
 import { createCoordinatorRun, hasActiveCoordinatorTurns, settleMainThreadStates } from './coordinator/index.ts';
@@ -262,6 +263,11 @@ if (config.indexerEnabled) {
 // timers, not log consumers, but they stop like one.
 consumers.push(startFileAreaTotals());
 consumers.push(startTelemetry());
+
+// The retention of SDK sessions: once a day the sessions of threads finished
+// over SESSION_RETENTION_DAYS ago are deleted from their SDKs' stores. Not a
+// log consumer, but it stops like one.
+consumers.push(startSessionCleanup());
 
 // Every boot satisfies the restart requests recorded before it — report the
 // completions (with the supervisor's rollback marker and a migration

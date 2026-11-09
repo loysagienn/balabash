@@ -968,6 +968,21 @@ class Builder {
       return;
     }
 
+    // The retention sweep deleted the finished thread's session from its
+    // SDK's store (src/capabilities/session-cleanup.ts): the saved history
+    // is gone, the journal stays.
+    if (is(event, 'session.deleted')) {
+      this.push({
+        kind: 'sys',
+        key,
+        at,
+        icon: 'trash-2',
+        text: event.payload.found ? 'The saved session history was deleted after the retention period' : 'The saved session history was already gone when the retention period ended',
+      });
+
+      return;
+    }
+
     if (is(event, 'session.retry')) {
       const { attempt, maxRetries, retryDelayMs, errorStatus } = event.payload;
 

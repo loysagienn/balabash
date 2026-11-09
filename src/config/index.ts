@@ -147,6 +147,20 @@ export const config = {
     return minutes * 60 * 1000;
   },
 
+  // How long the SDK session of a finished thread is kept (the Claude
+  // transcript, the Codex rollout) before the daily sweep deletes it
+  // (src/capabilities/session-cleanup.ts). Days; default 7.
+  get sessionRetentionDays(): number {
+    const raw = process.env.SESSION_RETENTION_DAYS;
+    const days = raw === undefined || raw.trim() === '' ? 7 : Number(raw);
+
+    if (!Number.isFinite(days) || days <= 0) {
+      throw new Error('SESSION_RETENTION_DAYS must be a positive number of days');
+    }
+
+    return days;
+  },
+
   // The workspace annotation indexer is background hygiene, not a feature
   // anyone waits for: INDEXER_ENABLED="false" switches it off entirely (no
   // passes, no model calls). Default on.

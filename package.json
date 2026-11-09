@@ -21,6 +21,7 @@
     "rebuild-threads": "node --enable-source-maps --env-file=.env ./dist/rebuild-threads.js",
     "render-context": "node --enable-source-maps --env-file=.env ./dist/render-context.js",
     "import-sqlite": "node --enable-source-maps --env-file=.env ./dist/import-sqlite.js",
+    "cleanup-sessions": "node --enable-source-maps --env-file=.env ./dist/cleanup-sessions.js",
     "build-console": "NODE_ENV=production node ./build/build-console.js",
     "build-console-dev": "NODE_ENV=development node ./build/build-console.js",
     "types": "tsc --noEmit && tsc --noEmit -p src/console/tsconfig.json",

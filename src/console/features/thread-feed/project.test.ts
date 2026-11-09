@@ -958,6 +958,28 @@ describe('projectFeed — a session resumed after an app restart', () => {
   });
 });
 
+describe('projectFeed — a session deleted by the retention sweep', () => {
+  it('draws a line: the history was deleted, or was already gone', () => {
+    resetSeq(75n);
+
+    const items = projectFeed(
+      [
+        own('session.deleted', { sdk: 'claude', sdkSessionId: 's1', found: true }),
+        own('session.deleted', { sdk: 'codex', sdkSessionId: 's2', found: false }),
+      ],
+      ctx,
+    );
+
+    assert.deepEqual(
+      items.map(item => (item.kind === 'sys' ? [item.icon, item.text] : [item.kind])),
+      [
+        ['trash-2', 'The saved session history was deleted after the retention period'],
+        ['trash-2', 'The saved session history was already gone when the retention period ended'],
+      ],
+    );
+  });
+});
+
 describe('projectFeed — the commands this thread gave its children', () => {
   it('names the child in the lines of a finish, cancel, stop or pause sent down; the same commands addressed to this thread speak of "the thread"', () => {
     resetSeq(1n);

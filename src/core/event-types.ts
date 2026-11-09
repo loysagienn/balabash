@@ -169,6 +169,10 @@ export type EventPayloads = {
   // flight when the old process went down, and the continuation opens with
   // the note about it at once (otherwise on the first message).
   'session.resumed': { sdkSessionId: string; interrupted: boolean };
+  // The thread's session was deleted from its SDK's store by the retention
+  // sweep (src/capabilities/session-cleanup.ts); `found` — the store still
+  // had it (false: it was already gone). Written into the finished thread.
+  'session.deleted': { sdk: 'claude' | 'codex'; sdkSessionId: string; found: boolean };
   'session.state': { state: SessionState };
   // A turn of the inner session (Claude: the result frame; Codex: the
   // turn.completed/failed event). Claude's totalCostUsd is cumulative over

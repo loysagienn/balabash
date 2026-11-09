@@ -16,6 +16,22 @@ stopped.
 npm run build && npm run rebuild-threads
 ```
 
+## cleanup-sessions (`scripts/cleanup-sessions.ts`)
+
+One-time removal of the SDK sessions that accumulated before the daily
+retention sweep (`src/capabilities/session-cleanup.ts`) existed and belong to
+no thread the journal can ask: Claude transcripts older than N days in the
+CLI's project directories of Balabash's own agents (`data/workspace/*/files`,
+`data/agent-state/*` — never the operator's interactive projects), Codex
+rollouts and generated images older than N days in `data/codex-home`. The
+sessions of active threads are spared. Each session goes through its SDK's
+own means (`deleteSession`, `codex delete --force`). Without `--apply` it is
+a dry run that lists what would go, with sizes; safe next to the live app.
+
+```
+npm run build && npm run cleanup-sessions [-- --older-than 7] [-- --apply]
+```
+
 ## console-icons (`scripts/console-icons.mjs`)
 
 Renders the console's app icons (`src/console/public/*.png`: the tab's
