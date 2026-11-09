@@ -66,8 +66,10 @@ const BUNDLED_SKILLS_OFF = [
 // description that makes the model reach for them by itself): claude-api, a
 // Messages API reference whose description fires on any mention of Claude —
 // in this codebase, most tasks — while the skill itself does not cover the
-// Agent SDK the agents run on. Named explicitly, it still loads whole.
-const BUNDLED_SKILLS_NAME_ONLY = ['claude-api'];
+// Agent SDK the agents run on; dataviz, a charting method whose description
+// is the longest of all and was reached for once. Named explicitly, each
+// still loads whole.
+const BUNDLED_SKILLS_NAME_ONLY = ['claude-api', 'dataviz'];
 
 export type SdkSessionDeps = {
   tools: ToolsApi;
