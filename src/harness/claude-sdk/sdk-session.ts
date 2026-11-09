@@ -36,16 +36,31 @@ const ARTIFACTS_ENV: Record<string, string> = { CLAUDE_CODE_ARTIFACT: '1', CLAUD
 // worktree switching (never asked for). The in-session cron stays: with
 // ScheduleWakeup it is how an agent keeps watch over an external state the
 // harness cannot notify it about (a CI run) — the /loop skill's two modes.
-const NATIVE_TOOLS_OFF = ['Workflow', 'RemoteTrigger', 'PushNotification', 'EnterWorktree', 'ExitWorktree'];
+// ReportFindings exists for the code-review skill's output; it leaves with it.
+const NATIVE_TOOLS_OFF = ['Workflow', 'RemoteTrigger', 'PushNotification', 'EnterWorktree', 'ExitWorktree', 'ReportFindings'];
 
 // Bundled Claude Code skills hidden from the model (`off`: neither listed nor
 // invocable): each configures the CLI itself or a terminal (update-config,
 // keybindings-help, fewer-permission-prompts — a headless session has no
 // settings to edit and no permission prompts), writes a CLAUDE.md into a
-// repository (init — the project libraries hold the instructions), or drives
-// claude.ai routines (schedule — the scheduler is Balabash's). Each had zero
-// invocations in the journal when it was turned off.
-const BUNDLED_SKILLS_OFF = ['update-config', 'keybindings-help', 'fewer-permission-prompts', 'init', 'schedule'];
+// repository (init — the project libraries hold the instructions), drives
+// claude.ai routines (schedule — the scheduler is Balabash's), authors mods
+// of the CLI (plugin-authoring), or is a situational review or launch
+// routine the agents never reached for (code-review with its ReportFindings
+// tool, simplify, security-review, run). Each had zero invocations in the
+// journal when it was turned off.
+const BUNDLED_SKILLS_OFF = [
+  'update-config',
+  'keybindings-help',
+  'fewer-permission-prompts',
+  'init',
+  'schedule',
+  'plugin-authoring',
+  'code-review',
+  'simplify',
+  'security-review',
+  'run',
+];
 
 // Bundled skills listed by name only (`name-only`: invocable, but without the
 // description that makes the model reach for them by itself): claude-api, a
