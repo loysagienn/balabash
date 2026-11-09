@@ -48,8 +48,9 @@ confidential from them.
   HTTP; `db/test-guard.ts` keeps test children off the live database).
 - `scripts/` — offline maintenance scripts (`scripts/AGENTS.md`); among them
   `render-context`, the verification instrument for any work on prompts and
-  tool descriptions, and `patch-sdk-bridge.mjs`, run by `postinstall` and
-  every build.
+  tool descriptions, `measure-context`, the measure of what a session's first
+  request actually carried (our prompt and what the CLI added around it), and
+  `patch-sdk-bridge.mjs`, run by `postinstall` and every build.
 - `plugins/balabash/` — the platform plugin (skills) every full-preset agent
   session loads, whatever its working directory; Codex sessions get the same
   skills linked into their home.

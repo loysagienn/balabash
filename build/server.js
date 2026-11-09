@@ -40,6 +40,7 @@ function getOptions(NODE_ENV, APP_VERSION) {
       'render-context': './scripts/render-context.ts',
       'import-sqlite': './scripts/import-sqlite.ts',
       'cleanup-sessions': './scripts/cleanup-sessions.ts',
+      'measure-context': './scripts/measure-context.ts',
     },
     bundle: true,
     outdir: './dist',

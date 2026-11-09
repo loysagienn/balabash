@@ -81,3 +81,47 @@ script lists them and exits. Connecting per-user servers (gmail, notion) may
 hit the network; a server that fails to connect is reported inside the
 output instead of failing the run. Safe to run next to the live app: it
 renders texts and never journals events or calls tools.
+
+## measure-context (`scripts/measure-context.ts`)
+
+The context measure: what the model of an agent's session actually received
+in its first request — our prompt and everything the SDK's CLI added around
+it: the CLI prefix, the dynamic block (environment, deferred tool names,
+sub-agent types, skill listing, mode reminders, date), the system reminders
+folded into the first user message (project instructions found from cwd up,
+session context, commit attribution), the native tool definitions — each with
+its size in chars and an estimate of its tokens (the request's real usage
+spread over its chars), plus the request's real token usage. Where
+`render-context` shows the instruction layer Balabash composes,
+`measure-context` shows the whole request the session's transcript recorded;
+together they tell what is ours and what is the CLI's. The instrument of the
+work on the agents' context composition (`claude-prompt-composition.md` in
+the project library): measure before and after a change and diff the output.
+
+Sources: Claude — the CLI's transcript (`attachment` records, one per element
+of the dynamic block and of the reminders; `api-request-shape` with the
+system blocks and the tool definitions as sent, CLI ≥ 2.1.3xx, or the
+`prompt_snapshot` attachments of older CLIs; `api-request-blob` messages; the
+first `assistant` record's usage). Codex — the rollout (`session_meta`,
+`turn_context`, the developer and user items of the first turn, the first
+`token_count`); the Codex binary's own system prompt and tool definitions are
+not written to the rollout, so for Codex only their total is measurable (the
+input tokens minus the known texts).
+
+By default the newest session of every repository agent found in the stores
+of this installation: the Claude project directories derived from the agents'
+cwds (`data/workspace/*/files`, `data/agent-state/*`, the repository root —
+the scheduler's cwd, shared with the operator's own sessions there) and the
+Codex rollouts of `data/codex-home`. A session is attributed to its agent by
+the journal (`session.sdk` of its thread) when it knows it, else by the
+system prompt's head against the catalog's instructions (within the session's
+SDK — manager and codex share one brief), else by its agent-state directory;
+unattributed sessions are skipped. Agents without a session in the stores are
+named in the log. Output: `data/context-measure/<agent>.md` per session plus
+`summary.md` (overwritten on every run); `--session <id>` measures that one
+session into `<agent>-<id>.md`. Read-only: it reads transcripts and the
+journal and writes the reports; safe next to the live app.
+
+```
+npm run build && npm run measure-context [-- --session <id>] [-- --out <dir>]
+```
