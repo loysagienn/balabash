@@ -76,6 +76,12 @@ confidential from them.
   `npm run build`. Building is safe: the running app loaded its bundle into
   memory and is not affected by files on disk. `npm test` is safe too — it
   runs on its own PostgreSQL.
+- Every package goes into `dependencies` (`npm install <pkg>`, never `-D`);
+  `devDependencies` stays empty. The installation's `node_modules` is the
+  runtime and the workbench at once — the bundle keeps packages external, and
+  the type check and the tests run from the same tree — and an agent's shell
+  inherits the app's `NODE_ENV=production`, under which npm omits dev
+  packages and removes the ones already installed.
 - NEVER start, stop or restart the Balabash app process yourself (no
   `npm start`, no `npm run dev`, no `kill`, no supervisor commands). A live
   process is serving the user right now. Code changes go live only through
