@@ -82,6 +82,14 @@ confidential from them.
   the type check and the tests run from the same tree — and an agent's shell
   inherits the app's `NODE_ENV=production`, under which npm omits dev
   packages and removes the ones already installed.
+- npm runs a dependency's install script only when `allowScripts` in
+  `package.json` names the package, pinned to its version. After updating a
+  package listed there, approve the new version
+  (`npm install-scripts approve <pkg>`), run `npm rebuild <pkg>` and drop the
+  old entry — otherwise its script is silently skipped (the test PostgreSQL
+  loses its library links, a fresh install gets no Prisma engines). A package
+  not listed there yet is the user's decision: an install script is trust in
+  the package.
 - NEVER start, stop or restart the Balabash app process yourself (no
   `npm start`, no `npm run dev`, no `kill`, no supervisor commands). A live
   process is serving the user right now. Code changes go live only through
