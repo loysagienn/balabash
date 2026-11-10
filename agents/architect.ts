@@ -22,7 +22,7 @@ import {
   WORKSPACE_STORAGE_NOTE,
 } from './world/index.ts';
 
-const ARCHITECT_MODEL = 'claude-fable-5-1';
+const ARCHITECT_MODEL = 'claude-fable-5-2';
 
 const SYSTEM_PROMPT = `You are Balabash's software architect, talking to the user directly in a dedicated thread. ${BALABASH_PREAMBLE}
 
