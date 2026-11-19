@@ -487,6 +487,7 @@ const ALWAYS_INCLUDED_EVENTS = 10;
 const TIME_MARKER_GAP_MS = 30 * 60 * 1000;
 
 type TranscriptLine = {
+  seq: number;
   at: string;
   event: string;
 };
@@ -524,6 +525,10 @@ export type Transcript = {
   // cover the whole input slice. Renderer omissions (null renders) are by
   // design and do not raise the flag.
   dropped: boolean;
+  // Seq of the oldest event the text holds; null when it holds none. With
+  // `dropped` it tells where the text starts, so a reader pages on from
+  // there.
+  oldestSeq: number | null;
 };
 
 export type TranscriptOptions = {
@@ -536,6 +541,7 @@ export function buildTranscript(events: TranscriptEvent[], options: TranscriptOp
   const rendered = events.map(event => renderEvent(event)).filter(item => item !== null);
 
   const lines = rendered.map((item, index) => ({
+    seq: Number(item.envelope.seq),
     at: item.at,
     event: JSON.stringify(finalizeEvent(item, stringLimitForPosition(rendered.length - 1 - index))),
   }));
@@ -556,5 +562,6 @@ export function buildTranscript(events: TranscriptEvent[], options: TranscriptOp
   return {
     text: renderLines(included),
     dropped: included.length < lines.length,
+    oldestSeq: included[0]?.seq ?? null,
   };
 }

@@ -64,6 +64,9 @@ export async function getLogQuietSeconds(): Promise<number | null> {
 
 type TranscriptOptions = {
   afterSeq?: bigint;
+  // Only events older than this seq: with `last`, a page of the transcript
+  // read from the newest events back into history.
+  beforeSeq?: bigint;
   limit?: number;
   // Return only the newest `last` events (still oldest-first) — the snapshot
   // shape run turns are built from.
@@ -79,12 +82,14 @@ type TranscriptOptions = {
 // listThreadEvents).
 export async function getTranscript(
   threadId: string,
-  { afterSeq, limit, last }: TranscriptOptions = {},
+  { afterSeq, beforeSeq, limit, last }: TranscriptOptions = {},
 ): Promise<Event[]> {
   const where = {
     OR: [{ threadId }, { targetThreadId: threadId }],
     NOT: { type: { startsWith: SESSION_EVENT_PREFIX } },
-    ...(afterSeq !== undefined ? { seq: { gt: afterSeq } } : {}),
+    ...(afterSeq !== undefined || beforeSeq !== undefined
+      ? { seq: { ...(afterSeq !== undefined ? { gt: afterSeq } : {}), ...(beforeSeq !== undefined ? { lt: beforeSeq } : {}) } }
+      : {}),
   };
 
   if (last !== undefined) {
@@ -112,6 +117,8 @@ type ListThreadEventsOptions = {
   // Newer than seq, OLDEST first (the live tail of a chat). Exclusive with
   // beforeSeq.
   afterSeq?: bigint;
+  // Only events of these types.
+  types?: string[];
   limit?: number;
 };
 
@@ -124,11 +131,12 @@ type ListThreadEventsOptions = {
 // duplicates, no gaps at page boundaries.
 export async function listThreadEvents(
   threadId: string,
-  { beforeSeq, afterSeq, limit = 100 }: ListThreadEventsOptions = {},
+  { beforeSeq, afterSeq, types, limit = 100 }: ListThreadEventsOptions = {},
 ): Promise<Event[]> {
   const rows = await prisma.event.findMany({
     where: {
       OR: [{ threadId }, { targetThreadId: threadId }],
+      ...(types !== undefined ? { type: { in: types } } : {}),
       ...(beforeSeq !== undefined ? { seq: { lt: beforeSeq } } : {}),
       ...(afterSeq !== undefined ? { seq: { gt: afterSeq } } : {}),
     },
@@ -145,6 +153,19 @@ export async function getWorkspaceEvent(workspaceId: string, seq: bigint): Promi
   const row = await prisma.event.findFirst({ where: { workspaceId, seq } });
 
   return row ? toEvent(row) : null;
+}
+
+// The seqs of the workspace's events with these stable ids, by id: how a
+// reference kept as an event id (the refs of a thread summary) becomes a
+// position in the log. An id that names no event of the workspace is absent.
+export async function getWorkspaceEventSeqs(workspaceId: string, ids: string[]): Promise<Map<string, bigint>> {
+  if (!ids.length) {
+    return new Map();
+  }
+
+  const rows = await prisma.event.findMany({ where: { workspaceId, id: { in: ids } }, select: { id: true, seq: true } });
+
+  return new Map(rows.map(row => [row.id, row.seq]));
 }
 
 type GetWorkspaceEventsOptions = {
