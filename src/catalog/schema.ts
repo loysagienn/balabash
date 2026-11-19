@@ -4,7 +4,7 @@
 // read this one form.
 
 import { z } from 'zod';
-import type { JsonSchema } from '../core/contract.ts';
+import type { JsonSchema } from './json.ts';
 import { getNamedType } from './types.ts';
 
 export const TYPE_REF_PREFIX = '#/types/';
@@ -67,6 +67,13 @@ function tidy(value: unknown): unknown {
   return out;
 }
 
+// How zod writes `z.json()`: a reference to a recursive schema it names
+// itself. In the catalog "any JSON value" is the empty schema; a verbatim type
+// built over it (a JSON object) keeps its own form and its reference to it.
+function isOwnRecursion(definition: unknown): boolean {
+  return isObject(definition) && typeof definition.$ref === 'string' && definition.$ref.startsWith('#/$defs/__schema');
+}
+
 // `io` chooses the side of the schema: in an input a field with a default is
 // optional, in an output every key is present.
 export function toCatalogSchema(schema: z.ZodType, io: 'input' | 'output'): CatalogSchema {
@@ -81,12 +88,12 @@ export function toCatalogSchema(schema: z.ZodType, io: 'input' | 'output'): Cata
     const type = getNamedType(name);
 
     if (!type) {
-      // zod names a recursive schema itself (`__schema0`); only a verbatim
-      // type (JsonValue) may hold one, and its inside is never read.
+      // zod names a recursive schema itself (`__schema0`); only the verbatim
+      // "any JSON value" holds one, and it is written as the empty schema.
       continue;
     }
 
-    definitions[name] = type.use === 'verbatim' ? {} : (tidy(definition) as JsonSchema);
+    definitions[name] = isOwnRecursion(definition) ? {} : (tidy(definition) as JsonSchema);
   }
 
   return { schema: tidy(body) as JsonSchema, definitions };

@@ -2,10 +2,14 @@
 
 import assert from 'node:assert/strict';
 import { describe as suite, it } from 'node:test';
+import { z } from 'zod';
+import { buildCatalog } from './catalog.ts';
+import { capability } from './definition.ts';
 import { describe } from './describe.ts';
 import { CapabilityError } from './errors.ts';
 import { computeGrant, type GrantPolicy } from './grant.ts';
-import { OLD, WORK, testCatalog, testConnections } from './test-tree.ts';
+import { CALLER, OLD, WORK, testCatalog, testConnections } from './test-tree.ts';
+import { JsonObject, namedType } from './types.ts';
 
 const catalog = testCatalog();
 const connections = testConnections({ accounts: { mail: [WORK, OLD] }, secrets: ['search'] });
@@ -14,7 +18,7 @@ const grantOf = (policy: Partial<GrantPolicy> = {}) =>
   computeGrant(
     catalog,
     { allows: () => true, actions: ['describe', 'run_program'], ...policy },
-    { workspaceId: 'workspace-1', connections },
+    { caller: CALLER, connections },
   );
 
 async function errorOf(promise: Promise<unknown>): Promise<CapabilityError> {
@@ -134,9 +138,51 @@ suite('describe', () => {
     assert.equal(action.kind, 'not_found');
   });
 
+  it('gives a verbatim type with the type it is made of', async () => {
+    const Entry = namedType(
+      'TestJournalEntry',
+      { description: 'One entry of the test journal.' },
+      z.strictObject({ seq: z.int(), payload: JsonObject.describe('Form set by the type of the entry.') }),
+    );
+    const { catalog: journal } = buildCatalog({
+      summary: 'The test journal.',
+      children: [
+        capability({
+          name: 'get_entry',
+          summary: 'Load one entry of the journal',
+          description: 'Load one entry of the journal.',
+          input: z.strictObject({ seq: z.int() }),
+          output: Entry,
+          run: input => ({ seq: input.seq, payload: {} }),
+        }),
+      ],
+    });
+    const grant = await computeGrant(
+      journal,
+      { allows: () => true, actions: ['describe'] },
+      { caller: CALLER, connections },
+    );
+    const shown = await describe(grant, { name: 'get_entry' }, env);
+
+    assert.ok(shown.kind === 'capability');
+    assert.deepEqual(shown.types, [
+      [
+        '/** One entry of the test journal. */',
+        'type TestJournalEntry = {',
+        '  seq: number;',
+        '  payload: JsonObject;  // Form set by the type of the entry.',
+        '};',
+      ].join('\n'),
+      "/** A JSON object carried verbatim in another system's format; the field that uses it names what sets its form. */\ntype JsonObject = { [key: string]: JsonValue };",
+      '/** Any JSON value carried verbatim; the field that uses it names what sets its form. */\ntype JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };',
+    ]);
+  });
+
   it('checks its own input like any capability', async () => {
     const grant = await grantOf();
     const error = await errorOf(describe(grant, { vertex: 'notes' }, env));
+
+    assert.equal((await errorOf(describe(grant, null, env))).kind, 'invalid_input');
 
     assert.equal(error.kind, 'invalid_input');
     assert.match(

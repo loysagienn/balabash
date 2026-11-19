@@ -2,6 +2,8 @@
 // agent, one definition and one name per capability for every harness and
 // for the journal.
 //
+// The module stands on its own: it imports nothing from the rest of the app.
+//
 // - definition.ts — what an author writes: a capability and a node;
 // - types.ts — named types, declared once and named in signatures;
 // - errors.ts — the one error channel and its closed set of kinds;
@@ -65,6 +67,7 @@ export {
   type GrantPolicy,
 } from './grant.ts';
 export { call, invokeCapability, type InvokeEnv } from './invoke.ts';
+export type { JsonSchema } from './json.ts';
 export { declarationText, signatureText, typeDefinitionText } from './signature.ts';
 export {
   Account,

@@ -3,14 +3,14 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { computeGrant, grantedGuide, nearestNode, type GrantPolicy } from './grant.ts';
-import { OLD, WORK, testCatalog, testConnections } from './test-tree.ts';
+import { CALLER, OLD, WORK, testCatalog, testConnections } from './test-tree.ts';
 
 const catalog = testCatalog();
 const everything: GrantPolicy = { allows: () => true, actions: ['describe', 'run_program'] };
 const connected = testConnections({ accounts: { mail: [WORK] }, secrets: ['search'] });
 
 const grantOf = (policy: GrantPolicy, connections = connected) =>
-  computeGrant(catalog, policy, { workspaceId: 'workspace-1', connections });
+  computeGrant(catalog, policy, { caller: CALLER, connections });
 
 describe('the grant', () => {
   it('holds the whole tree for a policy that cuts nothing, with every connection in place', async () => {

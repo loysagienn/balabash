@@ -8,6 +8,7 @@
 
 import { z } from 'zod';
 import { ERROR_KINDS } from './errors.ts';
+import type * as json from './json.ts';
 
 // Where a type may stand. `output` — only in outputs (every key always
 // present); `input` — only in inputs; `any` — in both; `verbatim` — someone
@@ -95,6 +96,11 @@ export const JsonObject = namedType(
   },
   z.record(z.string(), JsonValue),
 );
+
+// The same names as TypeScript types: what a value of these types is in the
+// code of a capability.
+export type JsonValue = json.JsonValue;
+export type JsonObject = json.JsonObject;
 
 export const CapabilityErrorType = namedType(
   'CapabilityError',

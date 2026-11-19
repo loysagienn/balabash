@@ -3,7 +3,7 @@
 // and owned by the platform — a kind answers "who fixes it". An author throws
 // CapabilityError with a kind; any other exception becomes `internal`.
 
-import type { JsonValue } from '../core/contract.ts';
+import type { JsonValue } from './json.ts';
 
 export const ERROR_KINDS = [
   'invalid_input', // the caller: the arguments do not fit the input type or the capability's own conditions

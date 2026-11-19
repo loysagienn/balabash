@@ -10,9 +10,14 @@
 //   secret connection needs the installation's secrets.
 // - A recipe of a guide is shown only when the caller has everything it
 //   requires.
+//
+// A grant belongs to its caller and carries it: what `describe` shows, which
+// account a call acts as and whom the action runs for are all read from the
+// one grant, so they cannot come from different callers.
 
 import type { ActionName } from './actions.ts';
 import type { Catalog, CatalogNode, CatalogVertex } from './catalog.ts';
+import type { Caller } from './definition.ts';
 import type { AccountValue } from './types.ts';
 
 // What the catalog needs to know about connections; the platform's
@@ -35,7 +40,9 @@ export type GrantPolicy = {
 
 export type Grant = {
   catalog: Catalog;
-  workspaceId: string;
+  // Whose grant it is: the one the policy was asked about, the one every
+  // call under this grant is made on behalf of.
+  caller: Caller;
   actions: ReadonlySet<ActionName>;
   // Full names of the granted vertices; the root ('') is always there.
   vertices: ReadonlySet<string>;
@@ -62,7 +69,7 @@ async function connectionInPlace(
 export async function computeGrant(
   catalog: Catalog,
   policy: GrantPolicy,
-  env: { workspaceId: string; connections: ConnectionsPort },
+  env: { caller: Caller; connections: ConnectionsPort },
 ): Promise<Grant> {
   const vertices = new Set<string>(['']);
 
@@ -76,7 +83,7 @@ export async function computeGrant(
         continue;
       }
 
-      if (policy.allows(child) && (await connectionInPlace(child, env.workspaceId, env.connections))) {
+      if (policy.allows(child) && (await connectionInPlace(child, env.caller.workspaceId, env.connections))) {
         vertices.add(child.fullName);
         await visit(child);
       }
@@ -85,7 +92,7 @@ export async function computeGrant(
 
   await visit(catalog.root);
 
-  return { catalog, workspaceId: env.workspaceId, actions: new Set(policy.actions), vertices };
+  return { catalog, caller: { ...env.caller }, actions: new Set(policy.actions), vertices };
 }
 
 export function grantedVertex(grant: Grant, fullName: string): CatalogVertex | null {

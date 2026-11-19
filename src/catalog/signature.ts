@@ -4,8 +4,8 @@
 // conditions between fields are all printed. One printer for every
 // capability — its own or of an external server.
 
-import type { JsonSchema } from '../core/contract.ts';
 import type { InputRule } from './definition.ts';
+import type { JsonSchema } from './json.ts';
 import { typeRefName } from './schema.ts';
 
 const pad = (depth: number): string => '  '.repeat(depth);
@@ -87,9 +87,37 @@ export function objectText(schema: JsonSchema, depth: number, rules: string[] = 
   return `{\n${[...rules.map(rule => `${pad(depth + 1)}// ${rule}`), ...lines].join('\n')}\n${pad(depth)}}`;
 }
 
+// The schema keywords the printer reads. The build refuses an input type
+// that carries any other: a signature is the whole contract of an input.
+export const PRINTED_KEYWORDS: ReadonlySet<string> = new Set([
+  '$ref',
+  'type',
+  'const',
+  'enum',
+  'anyOf',
+  'oneOf',
+  'properties',
+  'required',
+  'additionalProperties',
+  'items',
+  'description',
+  'default',
+  'minimum',
+  'maximum',
+  'exclusiveMinimum',
+  'exclusiveMaximum',
+  'multipleOf',
+  'minLength',
+  'maxLength',
+  'minItems',
+  'maxItems',
+  'pattern',
+]);
+
 // Everything the schema limits a value by, the way a signature says it:
 // [integer, 1..25, default 10]. That a number is an integer is said only in
-// an input: there the caller has to obey it.
+// an input: there the caller has to obey it. The limits of the elements of an
+// array come last: [1..50 items, each: integer, ≥1].
 export function constraintText(schema: JsonSchema, input = false): string {
   const parts: string[] = [];
   const range = (low: unknown, high: unknown, unit: string): string =>
@@ -105,6 +133,18 @@ export function constraintText(schema: JsonSchema, input = false): string {
 
   if (schema.minimum !== undefined || schema.maximum !== undefined) {
     parts.push(range(schema.minimum, schema.maximum, ''));
+  }
+
+  if (schema.exclusiveMinimum !== undefined) {
+    parts.push(`>${schema.exclusiveMinimum}`);
+  }
+
+  if (schema.exclusiveMaximum !== undefined) {
+    parts.push(`<${schema.exclusiveMaximum}`);
+  }
+
+  if (schema.multipleOf !== undefined) {
+    parts.push(`multiple of ${schema.multipleOf}`);
   }
 
   if (schema.minLength !== undefined || schema.maxLength !== undefined) {
@@ -125,6 +165,16 @@ export function constraintText(schema: JsonSchema, input = false): string {
 
   if (schema.default !== undefined) {
     parts.push(`default ${JSON.stringify(schema.default)}`);
+  }
+
+  // An element that is an object prints its own fields, a named type its own
+  // definition; a plain element has no other place for its limits.
+  if (isSchema(schema.items) && !typeRefName(schema.items) && !schema.items.properties) {
+    const each = constraintText(schema.items, input);
+
+    if (each) {
+      parts.push(`each: ${each.slice(1, -1)}`);
+    }
   }
 
   return parts.length ? `[${parts.join(', ')}]` : '';

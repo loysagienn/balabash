@@ -4,11 +4,11 @@
 // (CatalogBuildError lists every problem at once); a text over its length
 // budget or a field comment repeated verbatim is a warning.
 
-import type { JsonSchema } from '../core/contract.ts';
 import { ACTIONS, ACTION_NAMES, type ActionName } from './actions.ts';
 import type { Capability, Connection, InputRule, Node, Recipe, RootDefinition, Vertex } from './definition.ts';
+import type { JsonSchema } from './json.ts';
 import { namedTypeSchema, toCatalogSchema, typeRefName } from './schema.ts';
-import { referencedTypes, type Callable, type TypeDefinition } from './signature.ts';
+import { PRINTED_KEYWORDS, constraintText, referencedTypes, type Callable, type TypeDefinition } from './signature.ts';
 import { getNamedType } from './types.ts';
 
 // The field the platform adds to the input of every capability under a node
@@ -92,12 +92,15 @@ export function accountConnectionOf(capability: CatalogCapability): Connection |
   return capability.connectionNode?.connection?.type === 'account' ? capability.connectionNode.connection : null;
 }
 
+// Where a schema stands, and so which rules it obeys. A type that serves
+// both sides (`use: 'any'`) stands in both and obeys both.
 type SchemaSide = {
+  // An input: no null, nothing the signature does not print.
   input: boolean;
+  // An output: every key of an object is always present.
+  output: boolean;
   // Field names stay as the external server calls them.
   external: boolean;
-  // Every key of an object is always present.
-  strict: boolean;
 };
 
 export function buildCatalog(root: RootDefinition): { catalog: Catalog; warnings: string[] } {
@@ -257,8 +260,10 @@ export function buildCatalog(root: RootDefinition): { catalog: Catalog; warnings
     return refs;
   };
 
+  // A name that broke the rule of a segment is already reported; only a
+  // well-formed one is looked for in texts.
   const nakedNames = [
-    ...capabilities.map(capability => capability.fullName),
+    ...capabilities.map(capability => capability.fullName).filter(name => SEGMENT_PATTERN.test(name)),
     ...ACTION_NAMES.filter(name => name.includes('_')),
   ];
 
@@ -322,7 +327,7 @@ export function buildCatalog(root: RootDefinition): { catalog: Catalog; warnings
         problem(where, `unknown type reference ${String(schema.$ref)}`);
       } else if (side.input && type.use === 'output') {
         problem(where, `the output type ${type.name} stands in an input`);
-      } else if (!side.input && type.use === 'input') {
+      } else if (side.output && type.use === 'input') {
         problem(where, `the input type ${type.name} stands in an output`);
       }
 
@@ -330,6 +335,32 @@ export function buildCatalog(root: RootDefinition): { catalog: Catalog; warnings
     }
 
     const typesOfValue = typeList(schema);
+    const isUnion = Array.isArray(schema.anyOf) || Array.isArray(schema.oneOf);
+
+    // A schema that says nothing about its value takes anything, a value
+    // that is not JSON included. Someone else's JSON is carried by the
+    // verbatim types, which check that it is JSON.
+    if (
+      !typesOfValue.length &&
+      !isUnion &&
+      schema.const === undefined &&
+      !Array.isArray(schema.enum) &&
+      schema.properties === undefined
+    ) {
+      problem(where, 'a value of any form (verbatim JSON is named by the type JsonValue or JsonObject)');
+
+      return;
+    }
+
+    // The signature is the whole contract of an input: a limit it cannot
+    // print would be checked without the caller ever seeing it.
+    if (side.input) {
+      for (const key of Object.keys(schema)) {
+        if (!PRINTED_KEYWORDS.has(key)) {
+          problem(where, `"${key}" in an input type, which the signature cannot print`);
+        }
+      }
+    }
 
     if (side.input && (typesOfValue.includes('null') || (Array.isArray(schema.enum) && schema.enum.includes(null)))) {
       problem(where, 'null in an input type (an optional field is left out instead)');
@@ -341,6 +372,13 @@ export function buildCatalog(root: RootDefinition): { catalog: Catalog; warnings
       for (const [index, option] of options.entries()) {
         if (side.input && isSchema(option) && option.type === 'null') {
           problem(where, 'null in an input type (an optional field is left out instead)');
+        }
+
+        if (side.input && isSchema(option) && constraintText(option, true)) {
+          problem(
+            `${where}<${key} ${index}>`,
+            `a limit inside a union ${constraintText(option, true)}, which the signature does not print`,
+          );
         }
 
         checkSchema(option, `${where}<${key} ${index}>`, side);
@@ -376,7 +414,7 @@ export function buildCatalog(root: RootDefinition): { catalog: Catalog; warnings
           problem(at, 'field name is not camelCase');
         }
 
-        if (side.strict && !required.has(name)) {
+        if (side.output && !required.has(name)) {
           problem(at, 'an output key that is not always present (an optional field in an output)');
         }
 
@@ -430,9 +468,9 @@ export function buildCatalog(root: RootDefinition): { catalog: Catalog; warnings
 
         if (type.use !== 'verbatim') {
           checkSchema(schema, `types.${name}`, {
-            input: type.use === 'input',
+            input: type.use === 'input' || type.use === 'any',
+            output: type.use === 'output' || type.use === 'any',
             external: false,
-            strict: type.use === 'output',
           });
         }
       }
@@ -446,8 +484,10 @@ export function buildCatalog(root: RootDefinition): { catalog: Catalog; warnings
   // -------------------------------------------------------------------------
   // Capabilities and actions share the shape of a callable
 
-  const checkCallable = (item: Callable, side: { external: boolean; isAction: boolean }): void => {
+  // Checks a callable and gives the named types its signature uses.
+  const checkCallable = (item: Callable, side: { external: boolean; isAction: boolean }): string[] => {
     const { name } = item;
+    const used = collectTypes([item.input, item.output]);
 
     if (!item.description) {
       problem(name, 'no description');
@@ -460,8 +500,10 @@ export function buildCatalog(root: RootDefinition): { catalog: Catalog; warnings
       problem(name, 'input must be a strict object');
     }
 
-    checkSchema(item.input, `${name} input`, { input: true, external: side.external, strict: false });
-    checkSchema(item.output, `${name} output`, { input: false, external: side.external, strict: true });
+    // Only the input of an external server keeps the server's field names:
+    // the output type is written by us.
+    checkSchema(item.input, `${name} input`, { input: true, output: false, external: side.external });
+    checkSchema(item.output, `${name} output`, { input: false, output: true, external: false });
 
     const inputFields = isSchema(item.input.properties) ? item.input.properties : {};
     const inputRequired = new Set(Array.isArray(item.input.required) ? (item.input.required as string[]) : []);
@@ -491,13 +533,18 @@ export function buildCatalog(root: RootDefinition): { catalog: Catalog; warnings
       }
     }
 
-    // Lists page one way: limit and cursor in, nextCursor out.
-    const outputFields = isSchema(item.output.properties) ? item.output.properties : {};
+    // Lists page one way: limit and cursor in, nextCursor out. The page may
+    // be a named type.
+    const outputType = typeRefName(item.output);
+    const outputBody = outputType ? (types.get(outputType)?.schema ?? {}) : item.output;
+    const outputFields = isSchema(outputBody.properties) ? outputBody.properties : {};
     const pages = ['cursor' in inputFields, 'limit' in inputFields, 'nextCursor' in outputFields];
 
     if (!side.isAction && (pages[0] || pages[2]) && !pages.every(Boolean)) {
       problem(name, 'a paged list takes limit and cursor and returns nextCursor — all three');
     }
+
+    return used;
   };
 
   const actions = new Map<ActionName, CatalogAction>();
@@ -508,8 +555,7 @@ export function buildCatalog(root: RootDefinition): { catalog: Catalog; warnings
     const output = convert(`${name} output`, () => toCatalogSchema(definition.output, 'output').schema);
     const action: CatalogAction = { name, description: definition.description, input, output, types: [] };
 
-    checkCallable(action, { external: false, isAction: true });
-    action.types = collectTypes([input, output]);
+    action.types = checkCallable(action, { external: false, isAction: true });
     actions.set(name, action);
   }
 
@@ -535,7 +581,7 @@ export function buildCatalog(root: RootDefinition): { catalog: Catalog; warnings
     checkText(capability.summary, `${fullName} summary`);
     budget(capability.summary, BUDGET.summary, fullName, 'the summary');
 
-    checkCallable(
+    capability.types = checkCallable(
       {
         name: fullName,
         description: capability.description,
@@ -545,8 +591,6 @@ export function buildCatalog(root: RootDefinition): { catalog: Catalog; warnings
       },
       { external: capability.external, isAction: false },
     );
-
-    capability.types = collectTypes([capability.input, capability.output]);
   }
 
   for (const node of nodes) {

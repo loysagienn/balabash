@@ -56,8 +56,10 @@ export function ruleIssues(rules: InputRule[], input: Record<string, unknown>): 
 }
 
 // The input of an action, checked the same way as the input of a capability.
+// Only an input that was not passed at all stands for an empty one: an
+// explicit `null` is a value, and it does not fit.
 export function parseActionInput(grant: Grant, action: ActionDefinition, input: unknown): unknown {
-  const parsed = action.input.safeParse(input ?? {});
+  const parsed = action.input.safeParse(input === undefined ? {} : input);
 
   if (!parsed.success) {
     const declared = grant.catalog.actions.get(action.name);

@@ -6,7 +6,7 @@
 
 import { ACTIONS, type DescribeValue } from './actions.ts';
 import type { CatalogCapability, CatalogNode, CatalogVertex } from './catalog.ts';
-import { CapabilityError } from './errors.ts';
+import { CapabilityError, toCapabilityError } from './errors.ts';
 import {
   connectionNodeOf,
   grantedChildren,
@@ -27,7 +27,7 @@ export type DescribeEnv = {
 async function accountsOf(grant: Grant, vertex: CatalogVertex, env: DescribeEnv): Promise<AccountValue[]> {
   const connection = connectionNodeOf(vertex)?.connection;
 
-  return connection?.type === 'account' ? env.connections.accounts(grant.workspaceId, connection.service) : [];
+  return connection?.type === 'account' ? env.connections.accounts(grant.caller.workspaceId, connection.service) : [];
 }
 
 export function capabilitySignature(capability: CatalogCapability): string {
@@ -78,13 +78,19 @@ async function describeCapability(
   };
 }
 
+// The outcome is the value or a CapabilityError, whatever failed on the way
+// (the connections layer included).
 export async function describe(grant: Grant, input: unknown, env: DescribeEnv): Promise<DescribeValue> {
-  const { name = '' } = parseActionInput(grant, ACTIONS.describe, input) as { name?: string };
-  const vertex = grantedVertex(grant, name);
+  try {
+    const { name = '' } = parseActionInput(grant, ACTIONS.describe, input) as { name?: string };
+    const vertex = grantedVertex(grant, name);
 
-  if (!vertex) {
-    throw new CapabilityError('not_found', `You have no vertex \`${name}\`. ${nearestNodeHint(grant, name)}`);
+    if (!vertex) {
+      throw new CapabilityError('not_found', `You have no vertex \`${name}\`. ${nearestNodeHint(grant, name)}`);
+    }
+
+    return await (vertex.kind === 'node' ? describeNode(grant, vertex, env) : describeCapability(grant, vertex, env));
+  } catch (error) {
+    throw toCapabilityError(error);
   }
-
-  return vertex.kind === 'node' ? describeNode(grant, vertex, env) : describeCapability(grant, vertex, env);
 }

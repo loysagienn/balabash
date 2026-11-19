@@ -7,7 +7,7 @@ import { z } from 'zod';
 import { CatalogBuildError, accountConnectionOf, buildCatalog } from './catalog.ts';
 import { capability, node, type RootDefinition, type Vertex } from './definition.ts';
 import { testCatalog, testRoot } from './test-tree.ts';
-import { FileRef, namedType } from './types.ts';
+import { FileRef, JsonObject, JsonValue, namedType } from './types.ts';
 
 const leaf = (overrides: Partial<Parameters<typeof capability>[0]> = {}) =>
   capability({
@@ -121,6 +121,29 @@ describe('the build of the catalog', () => {
     assert.deepEqual(catalog.types.get('WorkspacePath')?.schema, { type: 'string', maxLength: 300 });
   });
 
+  it('keeps the form of the verbatim types: a JSON object is an object of JSON values', () => {
+    const { catalog: built } = buildCatalog(
+      root([
+        leaf({
+          input: z.strictObject({ options: JsonObject.describe('Form set by the agent.').optional() }),
+          output: z.strictObject({ ok: z.boolean(), raw: JsonValue }),
+        }),
+      ]),
+    );
+    const ping = built.vertices.get('ping');
+
+    assert.ok(ping?.kind === 'capability');
+    assert.deepEqual(ping.input.properties, {
+      options: { description: 'Form set by the agent.', $ref: '#/types/JsonObject' },
+    });
+    assert.deepEqual(ping.types, ['JsonObject', 'JsonValue']);
+    assert.deepEqual(built.types.get('JsonObject')?.schema, {
+      type: 'object',
+      additionalProperties: { $ref: '#/types/JsonValue' },
+    });
+    assert.deepEqual(built.types.get('JsonValue')?.schema, {});
+  });
+
   it('reports every broken rule at once', () => {
     const problems = problemsOf(root([leaf({ name: 'Ping' }), leaf({ name: 'pong', summary: 'Two. Sentences.' })]));
 
@@ -132,6 +155,7 @@ describe('the rules of the scheme that stop the build', () => {
   it('names: a snake_case segment, unique full names, not the name of an action', () => {
     assertProblem(root([leaf({ name: 'getNote' })]), /getNote: name "getNote" is not a snake_case segment/);
     assertProblem(root([leaf({ name: 'call' })]), /call: the full name is taken by an action/);
+    assertProblem(root([leaf({ name: 'read(' })]), /read\(: name "read\(" is not a snake_case segment/);
     assertProblem(
       root([
         leaf({ name: 'notes_list' }),
@@ -190,19 +214,49 @@ describe('the rules of the scheme that stop the build', () => {
     );
   });
 
-  it('an external node keeps the field names of its server', () => {
-    assert.deepEqual(
-      problemsOf(
-        root([
-          node({
-            name: 'ext',
-            summary: 'External.',
-            external: true,
-            children: [leaf({ input: z.strictObject({ page_id: z.string() }) })],
-          }),
-        ]),
-      ),
-      [],
+  it('a value of any form is carried only by the verbatim types, which take nothing but JSON', () => {
+    assertProblem(root([leaf({ output: z.unknown() })]), /ping output: a value of any form/);
+    assertProblem(
+      root([leaf({ output: z.strictObject({ data: z.record(z.string(), z.any()) }) })]),
+      /ping output\.data\{\}: a value of any form/,
+    );
+    assertProblem(
+      root([leaf({ input: z.strictObject({ items: z.array(z.unknown()) }) })]),
+      /ping input\.items\[\]: a value of any form/,
+    );
+    assertProblem(
+      root([leaf({ output: z.strictObject({ count: z.bigint() }) })]),
+      /ping output: the type does not convert/,
+    );
+    assert.equal(JsonValue.safeParse({ count: 5n }).success, false);
+    assert.equal(JsonObject.safeParse({ at: new Date() }).success, false);
+    assert.equal(JsonObject.safeParse('text').success, false);
+  });
+
+  it('an input carries only what its signature prints', () => {
+    assertProblem(
+      root([leaf({ input: z.strictObject({ email: z.email() }) })]),
+      /ping input\.email: "format" in an input type, which the signature cannot print/,
+    );
+    assertProblem(
+      root([leaf({ input: z.strictObject({ pair: z.tuple([z.string(), z.string()]) }) })]),
+      /ping input\.pair: "prefixItems" in an input type/,
+    );
+    assertProblem(
+      root([leaf({ input: z.strictObject({ id: z.union([z.string().max(5), z.boolean()]) }) })]),
+      /ping input\.id<anyOf 0>: a limit inside a union \[≤5 chars\], which the signature does not print/,
+    );
+    assert.deepEqual(problemsOf(root([leaf({ output: z.strictObject({ email: z.email() }) })])), []);
+  });
+
+  it('an external node keeps the field names of its server in inputs only', () => {
+    const ext = (overrides: Parameters<typeof leaf>[0]) =>
+      root([node({ name: 'ext', summary: 'External.', external: true, children: [leaf(overrides)] })]);
+
+    assert.deepEqual(problemsOf(ext({ input: z.strictObject({ page_id: z.string() }) })), []);
+    assertProblem(
+      ext({ output: z.strictObject({ page_id: z.string() }) }),
+      /ext_ping output\.page_id: field name is not camelCase/,
     );
   });
 
@@ -216,6 +270,25 @@ describe('the rules of the scheme that stop the build', () => {
       ]),
       /a paged list takes limit and cursor and returns nextCursor/,
     );
+
+    const Page = namedType(
+      'TestPage',
+      { description: 'One page of a test list.' },
+      z.strictObject({ items: z.array(z.string()), nextCursor: z.string().nullable() }),
+    );
+
+    assert.deepEqual(
+      problemsOf(
+        root([
+          leaf({
+            input: z.strictObject({ limit: z.int().min(1).max(50).default(10), cursor: z.string().optional() }),
+            output: Page,
+          }),
+        ]),
+      ),
+      [],
+    );
+    assertProblem(root([leaf({ output: Page })]), /a paged list takes limit and cursor and returns nextCursor/);
   });
 
   it('input rules name optional fields of the input', () => {
@@ -267,6 +340,24 @@ describe('the rules of the scheme that stop the build', () => {
     );
     assertProblem(notes([{ text: 'Use it.', requires: ['pong'] }]), /requires "pong", which is not in the catalog/);
     assertProblem(root([leaf()], { guide: [{ text: 'Use `ping`.' }] }), /names `ping` from outside the node/);
+  });
+
+  it('types: a type of both sides obeys the rules of both', () => {
+    const Shared = namedType(
+      'TestSharedType',
+      { description: 'A type that stands in inputs and in outputs.', use: 'any' },
+      z.strictObject({ id: z.string().nullable(), note: z.string().optional(), file: FileRef }),
+    );
+    const problems = problemsOf(root([leaf({ input: z.strictObject({ shared: Shared }) })]));
+
+    assert.deepEqual(
+      problems.filter(text => text.startsWith('types.TestSharedType')),
+      [
+        'types.TestSharedType.id: null in an input type (an optional field is left out instead)',
+        'types.TestSharedType.note: an output key that is not always present (an optional field in an output)',
+        'types.TestSharedType.file: the output type FileRef stands in an input',
+      ],
+    );
   });
 
   it('types: an output type is strict too', () => {

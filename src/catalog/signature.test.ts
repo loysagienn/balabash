@@ -4,6 +4,9 @@
 
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { z } from 'zod';
+import { buildCatalog } from './catalog.ts';
+import { capability } from './definition.ts';
 import { capabilitySignature } from './describe.ts';
 import { declarationText, typeDefinitionText } from './signature.ts';
 import { testCatalog } from './test-tree.ts';
@@ -207,6 +210,45 @@ describe('the signature printer', () => {
     assert.equal(
       signature('notes_archive_purge'),
       ['notes_archive_purge(input: {}): {', '  purged: number;', '}'].join('\n'),
+    );
+  });
+
+  it('prints every limit of an input: open bounds, a step, the limits of the elements of an array', () => {
+    const { catalog: limits } = buildCatalog({
+      summary: 'Limits.',
+      children: [
+        capability({
+          name: 'limits',
+          summary: 'Take limited values',
+          description: 'Take limited values.',
+          input: z.strictObject({
+            share: z.number().positive().lt(1),
+            step: z.int().min(0).multipleOf(5),
+            ids: z.array(z.int().min(1)).min(1).max(50),
+            tags: z.array(z.string().min(1).max(20)).optional(),
+            grid: z.array(z.array(z.int())).optional(),
+          }),
+          output: z.strictObject({ ids: z.array(z.int().min(1)) }),
+          run: () => ({ ids: [] }),
+        }),
+      ],
+    });
+    const vertex = limits.vertices.get('limits');
+
+    assert.ok(vertex?.kind === 'capability');
+    assert.equal(
+      capabilitySignature(vertex),
+      [
+        'limits(input: {',
+        '  share: number;  // [>0, <1]',
+        '  step: number;  // [integer, ≥0, multiple of 5]',
+        '  ids: number[];  // [1..50 items, each: integer, ≥1]',
+        '  tags?: string[];  // [each: 1..20 chars]',
+        '  grid?: number[][];  // [each: each: integer]',
+        '}): {',
+        '  ids: number[];  // [each: ≥1]',
+        '}',
+      ].join('\n'),
     );
   });
 });
