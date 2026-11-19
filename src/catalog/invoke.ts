@@ -16,7 +16,7 @@
 
 import { ACTIONS } from './actions.ts';
 import { ACCOUNT_FIELD, accountConnectionOf } from './catalog.ts';
-import type { Connection } from './definition.ts';
+import type { Connection, ProgramScope } from './definition.ts';
 import { capabilitySignature } from './describe.ts';
 import { CapabilityError, toCapabilityError } from './errors.ts';
 import { grantedVertex, nearestNodeHint, type ConnectionsPort, type Grant } from './grant.ts';
@@ -27,6 +27,8 @@ import type { AccountValue } from './types.ts';
 export type InvokeEnv = {
   connections: ConnectionsPort;
   signal?: AbortSignal;
+  // The run of a program the call is made from.
+  program?: ProgramScope;
 };
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -112,6 +114,7 @@ async function invoke(grant: Grant, name: string, input: unknown, env: InvokeEnv
     caller: grant.caller,
     account,
     signal: env.signal ?? null,
+    program: env.program ?? null,
   });
 
   // A value that does not fit the output type is a defect of the capability:

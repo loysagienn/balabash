@@ -46,7 +46,7 @@ describe('the call of a capability', () => {
       {
         name: 'notes_list',
         input: { status: 'open', limit: 10 },
-        ctx: { caller: CALLER, account: null, signal: null },
+        ctx: { caller: CALLER, account: null, signal: null, program: null },
       },
     ]);
   });

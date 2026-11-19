@@ -26,14 +26,20 @@
 // names: the build lets no recipe through that requires what the tree does
 // not have.
 
-import { buildCatalog, type Catalog, type RootDefinition } from '../catalog/index.ts';
+import {
+  buildCatalog,
+  countRunningPrograms,
+  killRunningPrograms,
+  type Catalog,
+  type RootDefinition,
+} from '../catalog/index.ts';
 import { getEvent } from './events.ts';
 import { fileCapabilities } from './files.ts';
 import { projects } from './projects.ts';
 import { system } from './system.ts';
 import { threads } from './threads.ts';
 import { web } from './web.ts';
-import { workspace } from './workspace.ts';
+import { countRunningCommands, killRunningCommands, workspace } from './workspace.ts';
 
 export const root: RootDefinition = {
   summary: 'Everything Balabash can do for you.',
@@ -101,4 +107,19 @@ export function catalog(): Catalog {
   built ??= buildCatalog(root).catalog;
 
   return built;
+}
+
+// What the scheme runs outside the app's own process: the runs of programs
+// and the commands called directly (a command of a program ends with its
+// run). Processes of their own would outlive the app, so its shutdown stops
+// them all, and a restart waits while there are any. By the time
+// stopRunningWork returns every process has got its signal, and a call still
+// on its way to a process starts none.
+export function hasRunningWork(): boolean {
+  return countRunningPrograms() + countRunningCommands() > 0;
+}
+
+export function stopRunningWork(): void {
+  killRunningPrograms();
+  killRunningCommands();
 }

@@ -17,7 +17,7 @@ import net from 'node:net';
 import type { AddressInfo } from 'node:net';
 import path from 'node:path';
 import zlib from 'node:zlib';
-import { CapabilityError, buildCatalog, computeGrant, invokeCapability } from '../catalog/index.ts';
+import { CapabilityError, buildCatalog, computeGrant, executeProgram, invokeCapability } from '../catalog/index.ts';
 import type { Catalog, ConnectionsPort, ErrorKind, Grant } from '../catalog/index.ts';
 import type { JsonObject } from '../core/contract.ts';
 import { startStand } from '../test-support/stand.ts';
@@ -142,6 +142,11 @@ function serve(request: http.IncomingMessage, response: http.ServerResponse): vo
     }
   } else if (route === '/to-file') {
     redirect('/files/report.pdf', 301);
+  } else if (route === '/slow-file') {
+    setTimeout(() => {
+      response.writeHead(200, { 'content-type': 'application/pdf' });
+      response.end(PDF);
+    }, 800);
   } else if (route === '/to-private') {
     redirect(`http://private.test:${port}/json`);
   } else if (route === '/to-literal') {
@@ -681,5 +686,24 @@ describe('web_download', () => {
 
     // The file of exactly the limit is taken.
     assert.equal((await invoke('web_download', { url: site('/big'), maxFileBytes: 5000 })).sizeBytes, 5000);
+  });
+
+  test('started by a program that then ran out of time, goes on to its own end: the file is stored', async () => {
+    const before = await storedFiles();
+    const run = await executeProgram(
+      grant,
+      { code: `return await call('web_download', { url: ${JSON.stringify(site('/slow-file'))} });`, timeoutMs: 300 },
+      { connections: NO_CONNECTIONS },
+    );
+
+    assert.equal(run.outcome, 'timeout');
+    assert.deepEqual(run.error?.details, { unfinishedCalls: ['web_download'] });
+    assert.equal(await storedFiles(), before);
+
+    // The time of the program is not the time of the call: the download ends
+    // by its own timeoutSeconds.
+    await new Promise(resolve => setTimeout(resolve, 1500));
+    assert.equal(await storedFiles(), before + 1);
+    assert.deepEqual(await leftovers(), []);
   });
 });

@@ -20,7 +20,21 @@ export type CallContext = {
   // account connection (the platform takes it from the `account` field of the
   // input and resolves it), null everywhere else.
   account: AccountValue | null;
+  // Fires when the call is cancelled: nobody waits for its outcome any more.
   signal: AbortSignal | null;
+  // The run of a program the call was made from, null for a call made
+  // directly.
+  program: ProgramScope | null;
+};
+
+// The run of a program, as a call made from it sees it.
+export type ProgramScope = {
+  // The id of the run: the trace of the call carries it.
+  runId: string;
+  // Fires when the run is over, however it ended. A call goes on to its own
+  // end all the same; only what belongs to the run and must not outlive it —
+  // a command the program started — is stopped by this signal.
+  ended: AbortSignal;
 };
 
 // A condition between optional fields of the input, printed in the signature

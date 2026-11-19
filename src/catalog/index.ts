@@ -11,7 +11,9 @@
 // - signature.ts — the printer of signatures in TypeScript notation;
 // - grant.ts — the catalog for one caller;
 // - actions.ts, describe.ts, invoke.ts — the actions an agent works with the
-//   tree by, and the one path of a call.
+//   tree by, and the one path of a call;
+// - program.ts — the runner of programs and the action `run_program`;
+//   program-process.ts — the process one run lives in.
 
 export {
   ACTIONS,
@@ -43,6 +45,7 @@ export {
   type InputRule,
   type Node,
   type NodeDefinition,
+  type ProgramScope,
   type Recipe,
   type RootDefinition,
   type Vertex,
@@ -68,6 +71,16 @@ export {
 } from './grant.ts';
 export { call, invokeCapability, type InvokeEnv } from './invoke.ts';
 export type { JsonSchema } from './json.ts';
+export {
+  countRunningPrograms,
+  executeProgram,
+  killRunningPrograms,
+  runProgram,
+  type ProgramEnv,
+  type ProgramLaunch,
+  type ProgramOutcome,
+  type ProgramRun,
+} from './program.ts';
 export { declarationText, signatureText, typeDefinitionText } from './signature.ts';
 export {
   Account,

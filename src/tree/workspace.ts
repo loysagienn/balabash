@@ -120,16 +120,17 @@ const runCommand = capability({
     stderrTruncated: z.boolean(),
     durationMs: z.int(),
   }),
-  async run(input, { caller, signal }) {
-    // Killed by whoever cancels the call (a program out of time takes its
-    // command with it) and by the shutdown of the app.
+  async run(input, { caller, signal, program }) {
+    // Killed by whoever cancels the call, by the end of the program that
+    // started it (a program out of time takes its command with it) and by
+    // the shutdown of the app.
     const running = new AbortController();
-    const cancelled = signal ? AbortSignal.any([signal, running.signal]) : running.signal;
+    const cancelled = AbortSignal.any([running.signal, ...(signal ? [signal] : []), ...(program ? [program.ended] : [])]);
 
     runningCommands.add(running);
 
     try {
-      return await runInArea(input, caller.workspaceId, cancelled);
+      return await runInArea(input, caller.workspaceId, cancelled, program?.ended ?? null);
     } finally {
       runningCommands.delete(running);
     }
@@ -139,7 +140,12 @@ const runCommand = capability({
 type CommandInput = { command: string; cwd?: string | undefined; timeoutSeconds: number };
 type CommandOutput = { stdout: string; stdoutTruncated: boolean; stderr: string; stderrTruncated: boolean; durationMs: number };
 
-async function runInArea(input: CommandInput, workspaceId: string, cancelled: AbortSignal): Promise<CommandOutput> {
+async function runInArea(
+  input: CommandInput,
+  workspaceId: string,
+  cancelled: AbortSignal,
+  programEnded: AbortSignal | null,
+): Promise<CommandOutput> {
   const relCwd = input.cwd === undefined ? null : areaPath(input.cwd, 'cwd');
   const { filesDir, dbPath } = await provideWorkbench(workspaceId);
   const cwd = relCwd === null ? filesDir : absolutePath(workspaceId, relCwd);
@@ -194,11 +200,13 @@ async function runInArea(input: CommandInput, workspaceId: string, cancelled: Ab
 
   const what = outcome.timedOut
     ? `The command ran longer than ${input.timeoutSeconds} seconds and was killed`
-    : cancelled.aborted
-      ? 'The command was killed: the call was cancelled'
-      : outcome.exitCode === null
-        ? 'The command was killed by a signal'
-        : `The command exited with code ${outcome.exitCode}`;
+    : programEnded?.aborted
+      ? 'The command was killed with the program that started it'
+      : cancelled.aborted
+        ? 'The command was killed: the call was cancelled'
+        : outcome.exitCode === null
+          ? 'The command was killed by a signal'
+          : `The command exited with code ${outcome.exitCode}`;
 
   throw new CapabilityError(
     'external_error',
