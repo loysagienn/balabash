@@ -135,6 +135,11 @@ describe('the tree', () => {
         'workspace_apps_list',
         'workspace_apps_publish',
         'workspace_apps_unpublish',
+        'web',
+        'web_get',
+        'web_download',
+        'system',
+        'system_request_restart',
       ],
     );
   });
@@ -651,6 +656,24 @@ describe('projects', () => {
     assert.equal(slugs[slugs.length - 1], 'old-work');
     assert.ok(!slugs.includes('theirs'));
     assert.deepEqual(projects.map((project: Value) => project.archived), slugs.map((slug: string) => slug === 'old-work'));
+
+    // So does a thread of a project, the moment it starts and again when it
+    // completes: nobody touches the record.
+    const newWork = await invoke('projects_get', { project: 'new-work' });
+    const working = await startChild('Work on new-work', { projectId: newWork.id });
+    const atStart = (await invoke('projects_list', {})).projects;
+
+    assert.deepEqual([atStart[0].slug, atStart[1].slug], ['new-work', 'garden']);
+    assert.ok(Date.parse(atStart[0].updatedAt) > Date.parse(newWork.updatedAt));
+    assert.deepEqual({ ...atStart[0], updatedAt: null }, { ...newWork, updatedAt: null });
+
+    await invoke('projects_update', { project: 'garden', description: 'What the garden is today.' });
+    await append('thread.completed', working, { summary: { text: 'Done.' } });
+
+    const atEnd = (await invoke('projects_list', {})).projects;
+
+    assert.deepEqual([atEnd[0].slug, atEnd[1].slug], ['new-work', 'garden']);
+    assert.ok(Date.parse(atEnd[0].updatedAt) >= Date.parse(atStart[0].updatedAt));
 
     const back = await invoke('projects_unarchive', { project: 'old-work' });
 

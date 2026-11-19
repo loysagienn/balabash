@@ -5,12 +5,10 @@
 // their tool bundles. The tool changes nothing by itself: the event is the
 // request, the log is the audit trail.
 
-import { stat, readdir } from 'node:fs/promises';
-import path from 'node:path';
 import type { JsonObject } from '../core/contract.ts';
-import { appendEvent } from '../core/append.ts';
-import { SYSTEM_RESTART_REQUESTED } from '../core/envelope.ts';
 import { getThread } from '../core/threads.ts';
+import { bundleState } from '../runtime/bundle.ts';
+import { requestRestart } from '../runtime/restart.ts';
 import type { ToolFunction } from './mcp-client.ts';
 import type { BuiltinServerCallContext, BuiltinToolServer } from './tool-manager.ts';
 
@@ -47,50 +45,21 @@ const REQUEST_RESTART_FUNCTION: ToolFunction = {
   },
 };
 
-// Newest mtime across the source tree, to warn when dist/ predates the last
-// edit — the restart would boot the previous bundle. A convention nudge, not
-// a gate: the agent owns building.
-const WATCHED_SOURCES = ['src', 'agents', 'tools', 'tasks', 'build', 'prisma', 'mcp-servers', 'package.json', 'supervisor.js'];
-
-async function newestMtimeMs(target: string): Promise<number> {
-  let stats;
-
-  try {
-    stats = await stat(target);
-  } catch {
-    return 0;
-  }
-
-  if (!stats.isDirectory()) {
-    return stats.mtimeMs;
-  }
-
-  const entries = await readdir(target, { withFileTypes: true });
-  const nested = await Promise.all(entries.map(entry => newestMtimeMs(path.join(target, entry.name))));
-
-  return Math.max(stats.mtimeMs, ...nested);
-}
-
+// A warning when dist/ is missing or predates the last edit — the restart
+// would boot nothing or the previous bundle. A convention nudge, not a gate:
+// the agent owns building.
 async function getStaleBuildWarning(): Promise<string | null> {
-  const distPath = path.resolve('dist', 'app.js');
-  let distStats;
-
-  try {
-    distStats = await stat(distPath);
-  } catch {
-    return 'WARNING: dist/app.js does not exist — run `npm run build` before the restart, or it will fail to boot.';
+  switch (await bundleState()) {
+    case 'missing':
+      return 'WARNING: dist/app.js does not exist — run `npm run build` before the restart, or it will fail to boot.';
+    case 'stale':
+      return 'WARNING: sources changed after the last build — run `npm run build` first, or the restart will boot the previous bundle.';
+    case 'current':
+      return null;
   }
-
-  const sourceMtimes = await Promise.all(WATCHED_SOURCES.map(source => newestMtimeMs(path.resolve(source))));
-
-  if (Math.max(...sourceMtimes) > distStats.mtimeMs) {
-    return 'WARNING: sources changed after the last build — run `npm run build` first, or the restart will boot the previous bundle.';
-  }
-
-  return null;
 }
 
-async function requestRestart(args: JsonObject, ctx: BuiltinServerCallContext): Promise<string> {
+async function requestRestartTool(args: JsonObject, ctx: BuiltinServerCallContext): Promise<string> {
   const reason = typeof args.reason === 'string' ? args.reason.trim() : '';
 
   if (!reason) {
@@ -101,17 +70,7 @@ async function requestRestart(args: JsonObject, ctx: BuiltinServerCallContext): 
   const thread = await getThread(ctx.threadId);
   const staleWarning = await getStaleBuildWarning();
 
-  await appendEvent({
-    type: SYSTEM_RESTART_REQUESTED,
-    actor: 'system',
-    workspaceId: ctx.workspaceId,
-    threadId: ctx.threadId,
-    payload: {
-      reason,
-      ...(force ? { force: true } : {}),
-      ...(thread ? { requestedBy: thread.agent } : {}),
-    },
-  });
+  await requestRestart({ workspaceId: ctx.workspaceId, threadId: ctx.threadId, reason, force, requestedBy: thread?.agent ?? null });
 
   const lines = [
     force
@@ -136,7 +95,7 @@ export function createRestartToolServer(): BuiltinToolServer {
         throw new Error(`Unknown restart tool "${toolName}"`);
       }
 
-      return requestRestart(args, ctx);
+      return requestRestartTool(args, ctx);
     },
   };
 }

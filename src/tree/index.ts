@@ -15,6 +15,10 @@
 //   type WorkspaceFile) and `apps`;
 // - file-area.ts — the workspace file area as the tree reaches it: the path
 //   a caller names, the workbench a write needs;
+// - web.ts — the node `web` with `get` and `download`; web-request.ts — a
+//   GET to the public internet: the addresses it reaches, its redirects and
+//   its time;
+// - system.ts — the node `system` with `request_restart`;
 // - cursor.ts — the cursor of a list paged along the log;
 // - transcript.ts — the course of a thread as text.
 //
@@ -26,7 +30,9 @@ import { buildCatalog, type Catalog, type RootDefinition } from '../catalog/inde
 import { getEvent } from './events.ts';
 import { fileCapabilities } from './files.ts';
 import { projects } from './projects.ts';
+import { system } from './system.ts';
 import { threads } from './threads.ts';
+import { web } from './web.ts';
 import { workspace } from './workspace.ts';
 
 export const root: RootDefinition = {
@@ -82,6 +88,8 @@ export const root: RootDefinition = {
     threads,
     projects,
     workspace,
+    web,
+    system,
   ],
 };
 

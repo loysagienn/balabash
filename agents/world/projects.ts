@@ -16,4 +16,4 @@ export const PROJECTS_NOTE =
   "agent consolidates later. The registry entry (projects_update) changes only when it stopped matching reality: " +
   'the description is a ~300-char top-level statement of what the project is — no details, no course of work, ' +
   "no status; rewrite it only when the project's topic itself moved. Never call projects_update just to bump " +
-  "the date — a thread of the project completing bumps it by itself.";
+  "the date — a thread of the project starting or completing bumps it by itself.";

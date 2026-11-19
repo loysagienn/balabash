@@ -101,6 +101,42 @@ export function getPendingRestart(workspaceId: string): PendingRestartView | nul
   };
 }
 
+// The request of a restart: the event is the request and the log is its
+// audit trail; the module's consumer picks it up and waits for the window.
+// Written on behalf of the requesting thread, which gets the completion.
+// The answer says what the restart now pending is: a forced request stays
+// forced whatever a later one asks (the consumer below), so the requests
+// since the last completion are read from the log — this one among them.
+export async function requestRestart(request: {
+  workspaceId: string;
+  threadId: string;
+  reason: string;
+  force: boolean;
+  // The agent of the requesting thread.
+  requestedBy: string | null;
+}): Promise<{ forced: boolean }> {
+  await appendEvent({
+    type: SYSTEM_RESTART_REQUESTED,
+    actor: 'system',
+    workspaceId: request.workspaceId,
+    threadId: request.threadId,
+    payload: {
+      reason: request.reason,
+      ...(request.force ? { force: true } : {}),
+      ...(request.requestedBy ? { requestedBy: request.requestedBy } : {}),
+    },
+  });
+
+  if (request.force) {
+    return { forced: true };
+  }
+
+  const lastCompletedSeq = (await getLastEventSeq(SYSTEM_RESTART_COMPLETED)) ?? 0n;
+  const pendingRequests = await getEventsAfter(lastCompletedSeq, { types: [SYSTEM_RESTART_REQUESTED], limit: 50 });
+
+  return { forced: pendingRequests.some(event => event.payload.force === true) };
+}
+
 async function readRollbackMarker(): Promise<{ at?: string; reason?: string } | null> {
   let raw: string;
 

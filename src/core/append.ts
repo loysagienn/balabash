@@ -280,6 +280,8 @@ async function appendThreadStarted(tx: Tx, input: AppendInput): Promise<AppendRe
     },
   });
 
+  await bumpProjectRecency(tx, threadId);
+
   return { written: true, event };
 }
 
@@ -332,13 +334,14 @@ async function appendTerminal(tx: Tx, input: AppendInput): Promise<AppendResult>
   return { written: true, event };
 }
 
-// A thread completing is work done on its project: the project's updatedAt
-// ("last worked", the order of the live list) moves without any agent
-// touching the registry. A registry change is an event too (the console's
-// snapshot is a projection of the log — src/core/registry-events.ts), so
-// the bump is journaled as project.updated authored by the thread, in the
-// terminal's transaction. A project the row no longer finds (never deleted,
-// so only a foreign or corrupt id) is skipped, not an error.
+// A thread of a project starting and a thread of a project completing are
+// both work on the project: its updatedAt ("last worked", the order of the
+// live list) moves without any agent touching the registry. A registry
+// change is an event too (the console's snapshot is a projection of the log
+// — src/core/registry-events.ts), so the bump is journaled as
+// project.updated authored by the thread, in the transaction of the
+// thread's own event, right after it. A project the row no longer finds
+// (never deleted, so only a foreign or corrupt id) is skipped, not an error.
 async function bumpProjectRecency(tx: Tx, threadId: string): Promise<void> {
   const thread = await tx.thread.findUniqueOrThrow({ where: { id: threadId }, select: { id: true, workspaceId: true, agent: true, projectId: true } });
 

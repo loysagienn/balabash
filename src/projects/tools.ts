@@ -112,8 +112,8 @@ const FUNCTIONS: ToolFunction[] = [
       "project's folder in the workspace file area to match — do it only on an explicit user request, and " +
       'not while other work is running inside the folder (their paths go stale). ' +
       'Change the entry only when it stopped matching reality; never call this just to bump the date — ' +
-      'a thread of the project completing bumps updatedAt by itself (a call with only the id does the same ' +
-      'and is for the operator, not for finishing work).',
+      'a thread of the project starting or completing bumps updatedAt by itself (a call with only the id does ' +
+      'the same and is for the operator, not for finishing work).',
     inputSchema: {
       type: 'object',
       properties: {

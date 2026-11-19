@@ -242,8 +242,18 @@ const TEXT_TYPES = new Set([
   'application/toml',
   'application/sql',
   'application/javascript',
+  'application/ecmascript',
+  'application/graphql',
+  'application/x-www-form-urlencoded',
   'application/x-sh',
 ]);
+
+// Whether a MIME type (lower case, without parameters) names text: content
+// that is read as characters — by a model shown a stored file, by a caller
+// of `web_get` reading a body.
+export function isTextType(type: string): boolean {
+  return type.startsWith('text/') || TEXT_TYPES.has(type) || type.endsWith('+json') || type.endsWith('+xml');
+}
 
 // How a stored file is shown, by its type: the recorded one, or — for a file
 // stored without a telling type — the one its name gives. null: the file is
@@ -261,7 +271,7 @@ export function viewKind(file: Pick<StoredFile, 'contentType' | 'originalFilenam
     return 'pdf';
   }
 
-  return type.startsWith('text/') || TEXT_TYPES.has(type) || type.endsWith('+json') || type.endsWith('+xml') ? 'text' : null;
+  return isTextType(type) ? 'text' : null;
 }
 
 const viewFile = capability({
