@@ -177,21 +177,30 @@ export function readMeta(db: DatabaseSync, relPath: string): FileMeta {
 // The write primitive of the metadata: annotating a file. A null keeps
 // the existing value (COALESCE) — callers update title and description
 // independently. The caller is responsible for the database existing (the
-// tools' ensureWorkspace provisions it).
+// tools' ensureWorkspace provisions it). The stamp is the moment of the
+// write, or the moment the caller gives, to the millisecond — the precision
+// the indexer compares it with the file's mtime by: a stamp of whole seconds
+// stood before a file written within the same second, and the indexer
+// annotated over it. A caller that must not be annotated over passes a
+// moment not older than the file.
 export function upsertMeta(
   dbPath: string,
   relPath: string,
   title: string | null,
   description: string | null,
+  stampedAt?: Date,
 ): Promise<FileMeta> {
+  // 'YYYY-MM-DD HH:MM:SS.sss' in UTC, the form of the default.
+  const stamp = stampedAt ? stampedAt.toISOString().replace('T', ' ').replace('Z', '') : null;
+
   return withWorkspaceDb(dbPath, db => {
     db.prepare(
-      "INSERT INTO _files (path, title, description, updated_at) VALUES (?, ?, ?, datetime('now')) " +
+      "INSERT INTO _files (path, title, description, updated_at) VALUES (?, ?, ?, COALESCE(?, strftime('%Y-%m-%d %H:%M:%f', 'now'))) " +
         'ON CONFLICT(path) DO UPDATE SET ' +
         'title = COALESCE(excluded.title, _files.title), ' +
         'description = COALESCE(excluded.description, _files.description), ' +
         'updated_at = excluded.updated_at',
-    ).run(relPath, title, description);
+    ).run(relPath, title, description, stamp);
 
     return readMeta(db, relPath);
   });
@@ -273,7 +282,8 @@ export async function readAnnotationTimes(workspaceId: string): Promise<Map<stri
     }>;
 
     for (const row of rows) {
-      // sqlite datetime('now') stores 'YYYY-MM-DD HH:MM:SS' in UTC.
+      // 'YYYY-MM-DD HH:MM:SS.sss' in UTC; a row stamped before the
+      // milliseconds carries whole seconds.
       const parsed = new Date(`${row.updated_at.replace(' ', 'T')}Z`);
 
       if (!Number.isNaN(parsed.getTime())) {

@@ -109,14 +109,56 @@ describe('a path of the workspace file area', () => {
       ['/etc/passwd', /not absolute/],
       ['plain//notes.md', /empty segments/],
       ['./plain/notes.md', /write it as "plain\/notes\.md"/],
-      [' plain/notes.md', /write it as "plain\/notes\.md"/],
-      ['plain\\notes.md', /write it as "plain\/notes\.md"/],
+      [' plain/notes.md', /begins or ends with white space.*not addressed here/],
+      ['plain\\notes.md', /holds a backslash.*not addressed here/],
       ['plain/', /empty segments/],
+      ['plain/no\0tes.md', /NUL character/],
+      ['a'.repeat(301), /<=300 characters/],
     ] as const) {
       await refuses(invoke('workspace_files_stat', { path: given }), 'invalid_input', message);
     }
 
     assert.equal((await invoke('workspace_files_stat', { path: 'plain/notes.md' })).path, 'plain/notes.md');
+  });
+
+  test('a path of a listing names the file it stands for, and a refusal never points at a neighbour', async () => {
+    // Names a shell leaves: a space inside the path is part of a name the
+    // area addresses; white space at the edge of the whole path and a
+    // backslash are not, and the refusal does not offer the file beside.
+    await put('odd/ draft.txt', 'inner space');
+    await put('odd/draft.txt', 'the neighbour');
+    await put(' edge.txt', 'edge space');
+    await put('edge.txt', 'the neighbour');
+    await put('odd/back\\slash.txt', 'backslash');
+
+    const listing = await invoke('workspace_files_list', { path: 'odd' });
+
+    assert.deepEqual(listing.files.map((file: Value) => file.path), ['odd/ draft.txt', 'odd/back\\slash.txt', 'odd/draft.txt']);
+    assert.deepEqual(
+      [(await invoke('workspace_files_stat', { path: 'odd/ draft.txt' })).sizeBytes, (await invoke('workspace_files_read', { path: 'odd/ draft.txt' })).content],
+      [11, 'inner space'],
+    );
+
+    const edge = await refuses(invoke('workspace_files_delete', { path: ' edge.txt' }), 'invalid_input', /not addressed here/);
+
+    assert.doesNotMatch(edge.message, /write it as/);
+    await refuses(invoke('workspace_files_delete', { path: 'odd/back\\slash.txt' }), 'invalid_input', /not addressed here/);
+    assert.deepEqual([await onDisk(' edge.txt'), await onDisk('edge.txt'), await onDisk('odd/draft.txt')], ['edge space', 'the neighbour', 'the neighbour']);
+  });
+
+  test('a path longer than a path can be is not passed for a defect, nor left out in silence', async () => {
+    const deep = `long/${'d'.repeat(200)}`;
+
+    await put(`${deep}/${'f'.repeat(120)}.txt`, 'far');
+    await put(`${deep}/near.txt`, 'near');
+
+    const refusal = await refuses(invoke('workspace_files_list', { path: deep }), 'conflict', /longer than 300 characters/);
+
+    assert.match(refusal.message, /reached from a shell/);
+    assert.equal((await invoke('workspace_files_read', { path: `${deep}/near.txt` })).content, 'near');
+    // A name longer than a name of the file system can be: nothing is there, and nothing can be put there.
+    await refuses(invoke('workspace_files_stat', { path: `long/${'n'.repeat(290)}` }), 'not_found', /no file/);
+    await refuses(invoke('workspace_files_write', { path: `long/${'n'.repeat(290)}`, content: 'x' }), 'invalid_input', /longer than the file system takes/);
   });
 });
 
@@ -339,18 +381,130 @@ describe('workspace_query', () => {
     );
   });
 
-  test("SQL that SQLite rejects, that holds nothing, or that would run in part is the caller's to change", async () => {
+  test('the cap is counted in bytes: text of two-byte characters takes half the rows', async () => {
+    const series = 'WITH RECURSIVE series(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM series WHERE n < 150)';
+    const { rows, truncated } = await invoke('workspace_query', { sql: `${series} SELECT printf('%.*c', 500, 'я') AS filler FROM series` });
+
+    assert.equal(truncated, true);
+    assert.ok(Buffer.byteLength(JSON.stringify(rows)) <= 50_000, `${Buffer.byteLength(JSON.stringify(rows))} bytes`);
+    assert.ok(rows.length > 40 && rows.length < 50, `${rows.length} rows of a kilobyte each`);
+    // A first row that fills the cap by its bytes, not by its characters.
+    await refuses(invoke('workspace_query', { sql: "SELECT printf('%.*c', 30000, 'я') AS huge" }), 'invalid_input', /first row alone is larger than the cap/);
+  });
+
+  test('a write that returns rows has written, whatever the caps leave of its rows', async () => {
+    const count = async (where: string) => (await invoke('workspace_query', { sql: `SELECT count(*) AS n FROM returned WHERE ${where}` })).rows[0].n;
+
+    await invoke('workspace_query', { sql: 'CREATE TABLE returned (id INTEGER PRIMARY KEY, body TEXT)' });
+
+    // A first row over the cap: the refusal of a read would say "nothing
+    // happened", and the row is in the table — the answer is a success
+    // that shows its rows were cut.
+    assert.deepEqual(await invoke('workspace_query', { sql: "INSERT INTO returned (body) VALUES (printf('%.*c', 60000, 'x')) RETURNING body" }), {
+      rows: [],
+      truncated: true,
+      changes: null,
+    });
+    assert.equal(await count('length(body) = 60000'), 1);
+
+    // More rows than the cap: every row is written, 200 come back.
+    const many = await invoke('workspace_query', {
+      sql: "WITH RECURSIVE series(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM series WHERE n < 300) INSERT INTO returned (body) SELECT 'row ' || n FROM series RETURNING id",
+    });
+
+    assert.deepEqual([many.rows.length, many.truncated, many.changes], [200, true, null]);
+    assert.equal(await count("body LIKE 'row %'"), 300);
+  });
+
+  test('several statements run one after another, each cut where SQLite ends it', async () => {
+    // A statement stands on the one before it; a semicolon in a string, in a
+    // comment and in the body of a trigger ends nothing.
+    const script = `
+      CREATE TABLE script_log (note TEXT); -- a comment; with a semicolon
+      CREATE TABLE script_items (id INTEGER PRIMARY KEY, name TEXT);
+      CREATE TRIGGER script_items_log AFTER INSERT ON script_items BEGIN
+        INSERT INTO script_log (note) VALUES ('added; ' || new.name);
+        UPDATE script_log SET note = note || ';' WHERE note = '';
+      END;
+      /* a block; comment */
+      INSERT INTO script_items (name) VALUES ('one; two'), ('three');;
+      UPDATE script_items SET name = upper(name) WHERE id = 2;
+    `;
+
+    assert.deepEqual(await invoke('workspace_query', { sql: script }), { rows: null, truncated: false, changes: 5 });
+    assert.deepEqual((await invoke('workspace_query', { sql: 'SELECT name FROM script_items ORDER BY id' })).rows, [{ name: 'one; two' }, { name: 'THREE' }]);
+    assert.deepEqual((await invoke('workspace_query', { sql: 'SELECT note FROM script_log ORDER BY rowid' })).rows, [{ note: 'added; one; two' }, { note: 'added; three' }]);
+  });
+
+  test('a script longer than the window its statements are cut by runs whole', async () => {
+    // 6 000 statements, about 400 KB: statements cross every edge of a window.
+    const inserts = Array.from({ length: 6_000 }, (_, index) => `INSERT INTO bulk (n, note) VALUES (${index}, '${'я'.repeat(index % 40)}; ${index}');`);
+    const value = await invoke('workspace_query', { sql: `CREATE TABLE bulk (n INTEGER, note TEXT);\n${inserts.join('\n')}` });
+
+    assert.deepEqual(value, { rows: null, truncated: false, changes: 6_000 });
+    assert.deepEqual((await invoke('workspace_query', { sql: 'SELECT count(*) AS n, sum(n) AS total, max(length(note)) AS longest FROM bulk' })).rows, [
+      { n: 6_000, total: (5_999 * 6_000) / 2, longest: 45 },
+    ]);
+
+    // One statement larger than the window.
+    const wide = await invoke('workspace_query', { sql: `INSERT INTO bulk (n, note) VALUES (-1, '${'w'.repeat(200_000)}'); DELETE FROM bulk WHERE n = 0` });
+
+    assert.deepEqual(wide, { rows: null, truncated: false, changes: 2 });
+  });
+
+  test("SQL that SQLite rejects, that holds nothing, or that would lose its rows is the caller's to change", async () => {
     await refuses(invoke('workspace_query', { sql: 'SELEKT 1' }), 'invalid_input', /syntax error/);
     await refuses(invoke('workspace_query', { sql: 'SELECT * FROM no_such_table' }), 'invalid_input', /no such table/);
     await refuses(invoke('workspace_query', { sql: '  ' }), 'invalid_input', /holds no statement/);
     await refuses(invoke('workspace_query', { sql: '-- only a comment' }), 'invalid_input', /holds no statement/);
+    await refuses(invoke('workspace_query', { sql: 'SELECT 1 \0 FROM items' }), 'invalid_input', /NUL character/);
     await refuses(
       invoke('workspace_query', { sql: "SELECT 1; INSERT INTO items (name) VALUES ('lost')" }),
       'invalid_input',
-      /first statement returns rows and another statement follows/,
+      /Statement 1 returns rows.*Nothing has run/,
     );
     // The statement after the rows did not run; a trailing comment is not a statement.
     assert.deepEqual((await invoke('workspace_query', { sql: "SELECT count(*) AS n FROM items WHERE name = 'lost'; -- done" })).rows, [{ n: 0 }]);
+  });
+
+  test('a script that stops half-way says what has run, and the database agrees', async () => {
+    const names = async () => (await invoke('workspace_query', { sql: "SELECT name FROM halfway ORDER BY name" })).rows.map((row: Value) => row.name);
+
+    // Rows in a statement that is not the first: seen only once the ones
+    // before it have run.
+    const late = await refuses(
+      invoke('workspace_query', { sql: "CREATE TABLE halfway (name TEXT UNIQUE); INSERT INTO halfway VALUES ('kept'); SELECT * FROM halfway; INSERT INTO halfway VALUES ('never')" }),
+      'invalid_input',
+      /Statement 3 returns rows/,
+    );
+
+    assert.match(late.message, /Statements 1–2 have run and what they changed is kept: do not run them again\. Run the row-returning statement in a call of its own/);
+    assert.deepEqual(await names(), ['kept']);
+
+    // A failure of SQLite in a later statement.
+    const failed = await refuses(
+      invoke('workspace_query', { sql: "INSERT INTO halfway VALUES ('second'); INSERT INTO halfway VALUES ('kept'); INSERT INTO halfway VALUES ('never')" }),
+      'invalid_input',
+      /Statement 2: UNIQUE constraint failed/,
+    );
+
+    assert.match(failed.message, /Statement 1 has run and what it changed is kept: do not run it again/);
+    assert.deepEqual(await names(), ['kept', 'second']);
+
+    // The script's own transaction: a failure inside it rolls it back.
+    const rolledBack = await refuses(
+      invoke('workspace_query', { sql: "INSERT INTO halfway VALUES ('before'); BEGIN; INSERT INTO halfway VALUES ('inside'); INSERT INTO halfway VALUES ('kept'); COMMIT" }),
+      'invalid_input',
+      /Statement 4: UNIQUE constraint failed/,
+    );
+
+    assert.match(rolledBack.message, /the transaction the script opened is rolled back, what ran before it is kept/);
+    assert.deepEqual(await names(), ['before', 'kept', 'second']);
+
+    // A transaction left open would be lost at the end of the call: said, not passed for a success.
+    await refuses(invoke('workspace_query', { sql: "BEGIN; INSERT INTO halfway VALUES ('unfinished')" }), 'invalid_input', /leaves a transaction open.*rolled back/);
+    assert.deepEqual(await names(), ['before', 'kept', 'second']);
+    assert.deepEqual(await invoke('workspace_query', { sql: "BEGIN; INSERT INTO halfway VALUES ('committed'); COMMIT" }), { rows: null, truncated: false, changes: 1 });
   });
 
   test("the database is the workspace's own", async () => {
@@ -440,6 +594,90 @@ describe('workspace_run_command', () => {
     assert.equal(countRunningCommands(), 0);
   });
 
+  // Whether a process is still there: a killed one is gone, or waits as a
+  // zombie for the init of the host to collect it.
+  async function gone(pid: number): Promise<boolean> {
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      const state = await fs.readFile(`/proc/${pid}/stat`, 'utf8').then(
+        stat => stat.slice(stat.lastIndexOf(')') + 2, stat.lastIndexOf(')') + 3),
+        () => null,
+      );
+
+      if (state === null || state === 'Z') {
+        return true;
+      }
+
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+
+    return false;
+  }
+
+  test('what a command leaves in the background ends with the command', async () => {
+    // The shell exits at once and its output is closed: the job in the
+    // background holds nothing of the call, and still belongs to it.
+    const value = await invoke('workspace_run_command', { command: 'sleep 30 > /dev/null 2>&1 & echo $!' });
+    const pid = Number(value.stdout.trim());
+
+    assert.ok(Number.isInteger(pid) && pid > 0, value.stdout);
+    assert.ok(await gone(pid), 'the background job was killed when the command ended');
+  });
+
+  test('a command killed after its shell had exited did not succeed', async () => {
+    // The shell exits with 0 at once; the job it started holds the output,
+    // so the command is not over — and is then cancelled, or runs out of time.
+    const cancel = new AbortController();
+    const cancelled = invoke('workspace_run_command', { command: 'echo begun; sleep 30 &' }, grant, cancel.signal);
+
+    await new Promise(resolve => setTimeout(resolve, 400));
+    cancel.abort();
+
+    const refusal = await refuses(cancelled, 'external_error', /the call was cancelled/);
+
+    assert.deepEqual(refusal.details, { exitCode: null, timedOut: false, stdout: 'begun\n', stdoutTruncated: false, stderr: '', stderrTruncated: false });
+
+    const late = await refuses(invoke('workspace_run_command', { command: 'sleep 30 &', timeoutSeconds: 1 }), 'external_error', /ran longer than 1 seconds/);
+
+    assert.deepEqual([(late.details as JsonObject).exitCode, (late.details as JsonObject).timedOut], [null, true]);
+  });
+
+  test('a call cancelled before its command exists starts nothing, and is counted from the moment it is taken', async () => {
+    const { countRunningCommands, killRunningCommands } = await import('./workspace.ts');
+    const cancel = new AbortController();
+
+    cancel.abort();
+
+    const refusal = await refuses(
+      invoke('workspace_run_command', { command: 'echo ran > never-started.txt' }, grant, cancel.signal),
+      'external_error',
+      /was not started: the call was cancelled/,
+    );
+
+    assert.deepEqual(refusal.details, { exitCode: null, timedOut: false, stdout: '', stdoutTruncated: false, stderr: '', stderrTruncated: false });
+
+    // The shutdown reaches a call that is still on its way to a process.
+    const taken = invoke('workspace_run_command', { command: 'echo ran > never-started.txt' });
+
+    assert.equal(countRunningCommands(), 1);
+    killRunningCommands();
+    await refuses(taken, 'external_error', /was not started/);
+    assert.equal(countRunningCommands(), 0);
+    await assert.rejects(fs.stat(path.join(area, 'never-started.txt')), /ENOENT/);
+  });
+
+  test('a character is never broken, neither between two chunks of the output nor by the cap', async () => {
+    // Bytes of one character written apart: two chunks of the stream.
+    const split = await invoke('workspace_run_command', { command: "printf '\\321'; sleep 0.3; printf '\\217\\n'" });
+
+    assert.equal(split.stdout, 'я\n');
+
+    // 15 000 characters of two units each: the cap of 20 000 falls on a whole character.
+    const capped = await invoke('workspace_run_command', { command: "printf 'a'; for i in $(seq 1 15000); do printf '😀'; done" });
+
+    assert.equal(capped.stdoutTruncated, true);
+    assert.equal(capped.stdout, '😀'.repeat(10_000));
+  });
+
   test('the output is capped per stream with the end kept', async () => {
     const value = await invoke('workspace_run_command', { command: 'head -c 30000 /dev/zero | tr "\\0" a; echo; echo the-end' });
 
@@ -497,6 +735,63 @@ describe('workspace_files', () => {
     const { rows } = await invoke('workspace_query', { sql: "SELECT path, updated_at >= datetime('now', '-1 minute') AS fresh FROM _files ORDER BY path" });
 
     assert.deepEqual(rows, [{ path: 'notes/2026/plan.md', fresh: 1 }]);
+  });
+
+  test('an annotation written by hand is never older than its file, by the comparison the annotator makes', async () => {
+    const { readAnnotationTimes } = await import('../workspace/files.ts');
+    // What the indexer asks of every file: is it newer than its annotation?
+    const wouldBeAnnotatedOver = async (relPath: string) => {
+      const annotatedAt = (await readAnnotationTimes(stand.workspaceId)).get(relPath);
+      const { mtime } = await fs.stat(path.join(area, relPath));
+
+      return !annotatedAt || mtime > annotatedAt;
+    };
+
+    // Several writes, so that some land late in their second.
+    for (let round = 0; round < 6; round += 1) {
+      await invoke('workspace_files_write', { path: 'stamped/titled.md', content: `round ${round}`, title: 'By hand' });
+      assert.equal(await wouldBeAnnotatedOver('stamped/titled.md'), false, 'written with its title');
+
+      // New content under the title it had.
+      await invoke('workspace_files_write', { path: 'stamped/titled.md', content: `round ${round}, again` });
+      assert.equal(await wouldBeAnnotatedOver('stamped/titled.md'), false, 'rewritten under its title');
+      await new Promise(resolve => setTimeout(resolve, 170));
+    }
+
+    // A file dated ahead of the clock keeps its annotation too.
+    const ahead = new Date(Date.now() + 3_600_000);
+
+    await fs.utimes(path.join(area, 'stamped/titled.md'), ahead, ahead);
+    await invoke('workspace_files_write', { path: 'stamped/titled.md', description: 'Dated ahead.' });
+    assert.equal(await wouldBeAnnotatedOver('stamped/titled.md'), false, 'dated ahead of the clock');
+    assert.equal((await invoke('workspace_files_stat', { path: 'stamped/titled.md' })).title, 'By hand');
+  });
+
+  test('writes and a delete of one path run one at a time, the content with its annotation', async () => {
+    // Twenty writes at once: the file ends as one of them, whole — the
+    // content and the title of the same call.
+    const writes = Array.from({ length: 20 }, (_, index) =>
+      invoke('workspace_files_write', { path: 'raced/file.md', content: `content ${index}`, title: `title ${index}` }),
+    );
+
+    await Promise.all(writes);
+
+    const [content, { title }] = [await onDisk('raced/file.md'), await invoke('workspace_files_stat', { path: 'raced/file.md' })];
+
+    assert.equal(title, content.replace('content', 'title'));
+
+    // A write and a delete at once: the file with its annotation, or neither.
+    for (let round = 0; round < 5; round += 1) {
+      await Promise.allSettled([
+        invoke('workspace_files_write', { path: 'raced/gone.md', content: 'x', title: 'Kept or gone' }),
+        invoke('workspace_files_delete', { path: 'raced/gone.md' }),
+      ]);
+
+      const exists = await fs.stat(path.join(area, 'raced/gone.md')).then(() => true, () => false);
+      const annotated = (await invoke('workspace_query', { sql: "SELECT count(*) AS n FROM _files WHERE path = 'raced/gone.md'" })).rows[0].n;
+
+      assert.equal(annotated, exists ? 1 : 0, `round ${round}`);
+    }
   });
 
   test('write refuses what it cannot mean', async () => {

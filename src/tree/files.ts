@@ -4,7 +4,6 @@
 // the path in the workspace file area is the local form of a file, and the
 // two capabilities of the bridge turn one into the other.
 
-import { createReadStream } from 'node:fs';
 import fs from 'node:fs/promises';
 import { Readable } from 'node:stream';
 import { z } from 'zod';
@@ -22,7 +21,7 @@ import {
   sanitizeRelPath,
   withFileWriteLock,
 } from '../workspace/files.ts';
-import { absolutePath, areaPath, provideFolder, provideWorkbench } from './file-area.ts';
+import { absolutePath, areaPath, orAbsent, provideFolder, provideWorkbench } from './file-area.ts';
 
 export function fileRefValue(file: StoredFile): FileRefValue {
   return {
@@ -92,34 +91,47 @@ const exportFile = capability({
   async run(input, { caller }) {
     const relPath = areaPath(input.path);
     const absPath = absolutePath(caller.workspaceId, relPath);
-    const stats = await fs.stat(absPath).catch(() => null);
+    const absent = () => new CapabilityError('not_found', `There is no file at "${relPath}" in the workspace file area.`);
+    // One open file for the look and for the bytes: a file replaced under
+    // this name meanwhile does not give its bytes under the other's size.
+    const handle = await orAbsent(fs.open(absPath, 'r'));
 
-    if (!stats?.isFile()) {
-      throw new CapabilityError('not_found', `There is no file at "${relPath}" in the workspace file area.`);
+    if (!handle) {
+      throw absent();
     }
 
-    if (stats.size > UPLOAD_MAX_BYTES) {
-      throw new CapabilityError(
-        'invalid_input',
-        `The file at "${relPath}" is ${stats.size} bytes: larger than a stored file can be (${UPLOAD_MAX_BYTES} bytes).`,
-      );
+    try {
+      const stats = await handle.stat();
+
+      if (!stats.isFile()) {
+        throw absent();
+      }
+
+      if (stats.size > UPLOAD_MAX_BYTES) {
+        throw new CapabilityError(
+          'invalid_input',
+          `The file at "${relPath}" is ${stats.size} bytes: larger than a stored file can be (${UPLOAD_MAX_BYTES} bytes).`,
+        );
+      }
+
+      const name = given('name', input.name) ?? relPath.slice(relPath.lastIndexOf('/') + 1);
+      const contentType = given('contentType', input.contentType) ?? guessContentType(name);
+
+      // The bytes are copied into storage: what the file becomes afterwards
+      // does not reach the reference.
+      const stored = await ingestFile({
+        body: handle.createReadStream({ autoClose: false }),
+        workspaceId: caller.workspaceId,
+        originalFilename: name,
+        contentType,
+        sizeBytes: stats.size,
+        scope: 'workspace',
+      });
+
+      return fileRefValue(stored);
+    } finally {
+      await handle.close();
     }
-
-    const name = given('name', input.name) ?? relPath.slice(relPath.lastIndexOf('/') + 1);
-    const contentType = given('contentType', input.contentType) ?? guessContentType(name);
-
-    // The bytes are copied into storage: what the file becomes afterwards
-    // does not reach the reference.
-    const stored = await ingestFile({
-      body: createReadStream(absPath),
-      workspaceId: caller.workspaceId,
-      originalFilename: name,
-      contentType,
-      sizeBytes: stats.size,
-      scope: 'workspace',
-    });
-
-    return fileRefValue(stored);
   },
 });
 

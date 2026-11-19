@@ -13,10 +13,19 @@ import { WorkspaceDbBusyError } from '../workspace/sqlite.ts';
 
 // A WorkspacePath of an input, checked: relative, inside the area, and
 // written the one way a result writes it — the path a call names is the
-// path a value gives back. A path the area would accept after tidying
-// (a leading "./", a backslash, a space around it) is refused with the tidy
-// form named: a caller that compares paths never meets two spellings.
+// path a value gives back, and it names the entry of the disk that carries
+// exactly this name. The workspace layer tidies a path before use (white
+// space around it, a backslash, a leading "./"), so a path it would change
+// is refused here, not passed on to land on another entry. Only for "./"
+// is the tidy form the same file and named as the way to write it; a name
+// that really begins or ends with white space, or holds a backslash, is one
+// these capabilities do not address — the refusal says so and points
+// nowhere else.
 export function areaPath(raw: string, field = 'path'): string {
+  if (raw.includes('\0')) {
+    throw new CapabilityError('invalid_input', `The ${field} holds a NUL character.`);
+  }
+
   let tidy: string;
 
   try {
@@ -29,11 +38,48 @@ export function areaPath(raw: string, field = 'path'): string {
     throw error;
   }
 
-  if (tidy !== raw) {
-    throw new CapabilityError('invalid_input', `The ${field} "${raw}" is not in its plain form: write it as "${tidy}".`);
+  if (tidy === raw) {
+    return tidy;
   }
 
-  return tidy;
+  if (raw !== raw.trim()) {
+    throw new CapabilityError(
+      'invalid_input',
+      `The ${field} "${raw}" begins or ends with white space, and a name like that is not addressed here. If the white space is not part of the name, pass the ${field} without it.`,
+    );
+  }
+
+  if (raw.includes('\\')) {
+    throw new CapabilityError(
+      'invalid_input',
+      `The ${field} "${raw}" holds a backslash, and a name with one is not addressed here. The folders of a path are separated by "/".`,
+    );
+  }
+
+  throw new CapabilityError('invalid_input', `The ${field} "${raw}" is not in its plain form: write it as "${tidy}".`);
+}
+
+// Whether a failure of the file system says "there is nothing at this
+// path": a missing entry, a file where a folder of the path should be, a
+// name longer than a name can be. Anything else (no permission, no
+// descriptors) is a failure of the read, not an absence.
+export function isAbsence(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException | null)?.code;
+
+  return code === 'ENOENT' || code === 'ENOTDIR' || code === 'ENAMETOOLONG';
+}
+
+// The outcome of a look at the file system, with absence as null.
+export async function orAbsent<T>(look: Promise<T>): Promise<T | null> {
+  try {
+    return await look;
+  } catch (error) {
+    if (isAbsence(error)) {
+      return null;
+    }
+
+    throw error;
+  }
 }
 
 export function absolutePath(workspaceId: string, relPath: string): string {
@@ -54,7 +100,7 @@ export async function provideWorkbench(workspaceId: string): Promise<Workbench> 
 
   await fs.mkdir(workbench.filesDir, { recursive: true });
   await fs.mkdir(workspaceTmpDir(workspaceId), { recursive: true });
-  await ensureFilesDb(workbench.dbPath);
+  await writingDatabase('nothing was done', () => ensureFilesDb(workbench.dbPath));
 
   return workbench;
 }
@@ -72,8 +118,16 @@ export async function provideFolder(workspaceId: string, relPath: string): Promi
       throw new CapabilityError('conflict', `A folder of the path "${relPath}" is taken by a file.`);
     }
 
+    if (code === 'ENAMETOOLONG') {
+      throw nameTooLong(relPath);
+    }
+
     throw error;
   }
+}
+
+export function nameTooLong(relPath: string): CapabilityError {
+  return new CapabilityError('invalid_input', `A name in the path "${relPath}" is longer than the file system takes.`);
 }
 
 // A write of the workspace database made on the caller's behalf. Another

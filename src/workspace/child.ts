@@ -14,6 +14,7 @@
 //     binds (app endpoints).
 
 import { spawn } from 'node:child_process';
+import { StringDecoder } from 'node:string_decoder';
 import { childBusyTimeoutMs } from './sqlite.ts';
 
 // ---------------------------------------------------------------------------
@@ -57,6 +58,19 @@ export type RunChildOptions = {
   // Aborting it kills the child's whole group, as the timeout does: the
   // outcome then carries exitCode null and timedOut false.
   signal?: AbortSignal;
+  // The child's group is the call's until the call is over: what the child
+  // left running in it once its own process has gone and its output is
+  // closed (a background job with its output sent elsewhere) is killed
+  // before the outcome is given. Without it such a process outlives the
+  // call, out of reach of the timeout and of the signal.
+  ownsGroup?: boolean;
+  // Text for the child's standard input, closed after it. Without it the
+  // child has no input at all.
+  input?: string;
+  // Each stream is decoded as one text: a character split between two
+  // chunks of a stream is not broken, and the cap never cuts a character
+  // written as a surrogate pair.
+  wholeCharacters?: boolean;
 };
 
 // Kill the child's whole process group: `bash -c` (and scripts generally)
@@ -75,13 +89,21 @@ function killGroup(pid: number | undefined, fallback: () => void): void {
   }
 }
 
+function isHighSurrogate(unit: number): boolean {
+  return unit >= 0xd800 && unit <= 0xdbff;
+}
+
+function isLowSurrogate(unit: number): boolean {
+  return unit >= 0xdc00 && unit <= 0xdfff;
+}
+
 export function runChild(command: string, args: string[], options: RunChildOptions): Promise<ChildOutcome> {
   return new Promise((resolve, reject) => {
     const startedAt = Date.now();
     const child = spawn(command, args, {
       cwd: options.cwd,
       env: options.env,
-      stdio: ['ignore', 'pipe', 'pipe'],
+      stdio: [options.input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
       // Own process group: the timeout (and any external sweep) kills the
       // whole tree, not just the direct child.
       detached: true,
@@ -89,6 +111,13 @@ export function runChild(command: string, args: string[], options: RunChildOptio
 
     if (child.pid !== undefined) {
       options.onSpawn?.(child.pid);
+    }
+
+    if (child.stdin) {
+      // A child that died before reading its input closes the pipe: the
+      // outcome of the child tells it, not an error of the write.
+      child.stdin.on('error', () => {});
+      child.stdin.end(options.input);
     }
 
     let timedOut = false;
@@ -108,23 +137,40 @@ export function runChild(command: string, args: string[], options: RunChildOptio
     const buffers = { stdout: '', stderr: '' };
     const truncated = { stdout: false, stderr: false };
     const tailKeep = options.capMode === 'tail';
+    const decoders = options.wholeCharacters
+      ? { stdout: new StringDecoder('utf8'), stderr: new StringDecoder('utf8') }
+      : null;
 
     // Keep consuming (so the pipe never backpressures the child), but cap the
     // buffer: head-keep stops buffering past the cap, tail-keep slides the
     // window and keeps only the last maxOutputChars.
-    const collect = (stream: 'stdout' | 'stderr') => (chunk: Buffer) => {
+    const append = (stream: 'stdout' | 'stderr', text: string) => {
       if (!tailKeep && truncated[stream]) return;
-      buffers[stream] += chunk.toString('utf8');
+      buffers[stream] += text;
       if (buffers[stream].length > options.maxOutputChars) {
-        buffers[stream] = tailKeep
+        let kept = tailKeep
           ? buffers[stream].slice(-options.maxOutputChars)
           : buffers[stream].slice(0, options.maxOutputChars);
+
+        // The cut fell inside a surrogate pair: the half goes too.
+        if (decoders && tailKeep && isLowSurrogate(kept.charCodeAt(0))) {
+          kept = kept.slice(1);
+        } else if (decoders && !tailKeep && isHighSurrogate(kept.charCodeAt(kept.length - 1))) {
+          kept = kept.slice(0, -1);
+        }
+
+        buffers[stream] = kept;
         truncated[stream] = true;
       }
     };
 
-    child.stdout.on('data', collect('stdout'));
-    child.stderr.on('data', collect('stderr'));
+    const collect = (stream: 'stdout' | 'stderr') => (chunk: Buffer) => {
+      append(stream, decoders ? decoders[stream].write(chunk) : chunk.toString('utf8'));
+    };
+
+    // Both are pipes whatever the input is.
+    child.stdout?.on('data', collect('stdout'));
+    child.stderr?.on('data', collect('stderr'));
 
     child.once('error', error => {
       clearTimeout(timer);
@@ -135,6 +181,17 @@ export function runChild(command: string, args: string[], options: RunChildOptio
     child.once('close', exitCode => {
       clearTimeout(timer);
       options.signal?.removeEventListener('abort', abort);
+
+      if (options.ownsGroup) {
+        killGroup(child.pid, () => {});
+      }
+
+      if (decoders) {
+        // Bytes of a character the stream ended inside.
+        append('stdout', decoders.stdout.end());
+        append('stderr', decoders.stderr.end());
+      }
+
       resolve({
         exitCode,
         timedOut,
@@ -155,18 +212,27 @@ export function runChild(command: string, args: string[], options: RunChildOptio
 //       statement streams rows up to the caps, anything else goes through
 //       exec() (multi-statement scripts work) and reports the change count.
 //   { mode: 'sql', sql }              — the capability workspace_query
-//       (src/tree/workspace.ts): the same two paths, one form of the answer
-//       whatever the statement — { rows, truncated, changes }, a blob as
-//       its size in data. What the other mode passes in silence is refused
-//       here by name: SQL that holds no statement, a row-returning
-//       statement with another one after it (prepare() takes the first
-//       statement only — the rest would never run), a first row larger
-//       than the byte cap.
+//       (src/tree/workspace.ts): one form of the answer whatever the
+//       statement — { rows, truncated, changes }, a blob as its size in
+//       data, the cap of the rows counted in bytes of UTF-8. The statements
+//       are prepared and run one after another on one connection, each
+//       cut where SQLite ends it: a statement may stand on what the one
+//       before it created, and a row-returning statement is seen where it
+//       stands. What the other mode passes in silence is refused here by
+//       name: SQL that holds no statement; a row-returning statement that
+//       is not the only one (its rows would be lost) — the refusal says
+//       what has already run; a script that leaves its transaction open
+//       (closing the connection rolls it back); a first row larger than
+//       the byte cap, when the statement wrote nothing. A writing
+//       statement whose first row is over the cap has written: it answers
+//       with no rows and truncated, not with a refusal.
 //   { mode: 'statement', statement, kind, params, readOnly } — an app
 //       endpoint: one prepared statement, values bound ONLY as named
 //       parameters (no SQL concatenation by construction); kind = run | all
 //       | get. readOnly opens the connection read-only (SQLITE_OPEN_READONLY):
 //       a write attempt is an SQL error, whatever the statement text says.
+// The payload of the third mode arrives on the standard input (argv[1] is
+// "-"): an argument of a process holds about 128 KB, a script may be longer.
 // Caps arrive via env (SQL_MAX_ROWS / SQL_MAX_BYTES), the database path via
 // WORKSPACE_DB, the lock policy via SQL_BUSY_TIMEOUT_MS (src/workspace/
 // sqlite.ts: the child is its own process, so it waits for a foreign writer
@@ -179,7 +245,7 @@ export function runChild(command: string, args: string[], options: RunChildOptio
 
 const SQL_RUNNER = `
 const { DatabaseSync } = require('node:sqlite');
-const payload = JSON.parse(process.argv[1]);
+const payload = JSON.parse(process.argv[1] === '-' ? require('node:fs').readFileSync(0, 'utf8') : process.argv[1]);
 const maxRows = Number(process.env.SQL_MAX_ROWS);
 const maxBytes = Number(process.env.SQL_MAX_BYTES);
 const blobValue = payload.mode === 'sql'
@@ -211,15 +277,112 @@ const collectRows = iterator => {
 };
 // A refusal of the SQL as given, worded for the one who wrote it.
 const refuse = message => Object.assign(new Error(message), { refusal: true });
-// Whether the text holds a statement: prepare() of blank or comment-only
-// text gives a finalized statement, and reading it throws.
-const holdsStatement = (db, text) => {
-  try {
-    db.prepare(text).sourceSQL;
-    return true;
-  } catch (error) {
-    return !/statement has been finalized/i.test(String(error && error.message));
+// The rows of the capability's answer: as many whole rows as the caps take,
+// the size counted in bytes of the JSON as UTF-8 — the first row too.
+const rowsWithinCaps = iterator => {
+  const rows = [];
+  let bytes = 2;
+  let truncated = false;
+  for (const row of iterator) {
+    if (rows.length >= maxRows) { truncated = true; break; }
+    const clean = cleanRow(row);
+    const size = Buffer.byteLength(JSON.stringify(clean)) + (rows.length > 0 ? 1 : 0);
+    if (bytes + size > maxBytes) { truncated = true; break; }
+    rows.push(clean);
+    bytes += size;
   }
+  return { rows, truncated };
+};
+// The next statement of a script, from a position of its text: the prepared
+// statement and where its text ends — null when nothing but blanks and
+// comments is left. The end is SQLite's own (the text of a prepared
+// statement is the part of the input it took), so a semicolon in a string,
+// a comment or the body of a trigger ends nothing. prepare() reads its whole
+// input, and a script of many statements would be read again for each of
+// them: the statement is prepared from a window of the text, widened until
+// the statement ends inside it — a statement that ends before the end of
+// its input ended at its own semicolon, whatever follows.
+const SCRIPT_WINDOW = 4096;
+const nextStatement = (db, sql, at) => {
+  for (let size = SCRIPT_WINDOW; ; size *= 4) {
+    const whole = at + size >= sql.length;
+    const piece = whole ? sql.slice(at) : sql.slice(at, at + size);
+    let stmt;
+    let text;
+    try {
+      stmt = db.prepare(piece);
+    } catch (error) {
+      if (whole) throw error;
+      continue;
+    }
+    try {
+      text = stmt.sourceSQL;
+    } catch (error) {
+      // prepare() of blank or comment-only text gives a finalized statement.
+      if (!(error && error.code === 'ERR_INVALID_STATE')) throw error;
+      if (whole) return null;
+      continue;
+    }
+    if (whole || text.length < piece.length) return { stmt, end: at + text.length };
+  }
+};
+const totalChanges = db => Number(db.prepare('SELECT total_changes() AS c').get().c);
+// What a script that stops at the statement of a given index (from 0) has
+// already done.
+const alreadyRun = (db, index) => {
+  if (index === 0) return 'Nothing has run.';
+  const before = index === 1 ? 'Statement 1 has run' : 'Statements 1–' + index + ' have run';
+  if (db.isTransaction) return before + '; the transaction the script opened is rolled back, what ran before it is kept.';
+  return before + (index === 1 ? ' and what it changed is kept: do not run it again.' : ' and what they changed is kept: do not run them again.');
+};
+const runScript = (db, sql) => {
+  if (sql.includes('\\0')) throw refuse('The SQL holds a NUL character.');
+  const changesBefore = totalChanges(db);
+  let at = 0;
+  let index = 0;
+  for (;;) {
+    let next;
+    try {
+      next = nextStatement(db, sql, at);
+    } catch (error) {
+      throw atStatement(db, error, index);
+    }
+    if (next === null) break;
+    if (next.stmt.columns().length > 0) {
+      let follows = true;
+      try { follows = nextStatement(db, sql, next.end) !== null; } catch (error) { /* text that does not prepare is still a statement */ }
+      if (index > 0 || follows) {
+        throw refuse('Statement ' + (index + 1) + ' returns rows, and several statements go in one call only when none of them returns rows. ' + alreadyRun(db, index) + ' Run the row-returning statement in a call of its own.');
+      }
+      const { rows, truncated } = rowsWithinCaps(next.stmt.iterate());
+      if (rows.length === 0 && truncated && totalChanges(db) === changesBefore) {
+        throw refuse('The first row alone is larger than the cap of ' + maxBytes + ' bytes: select fewer columns or shorter values (substr, length).');
+      }
+      return { rows, truncated, changes: null };
+    }
+    try {
+      next.stmt.run();
+    } catch (error) {
+      throw atStatement(db, error, index);
+    }
+    at = next.end;
+    index += 1;
+  }
+  if (index === 0) throw refuse('The SQL holds no statement.');
+  if (db.isTransaction) {
+    throw refuse('The script leaves a transaction open (a BEGIN without its COMMIT): it is rolled back, and nothing the script did after the BEGIN is kept.');
+  }
+  return { rows: null, truncated: false, changes: totalChanges(db) - changesBefore };
+};
+// A failure of a statement that is not the first: the one who reads it
+// learns which statement it was and what stands before it.
+const atStatement = (db, error, index) => {
+  if (index === 0 || !error || typeof error.message !== 'string') return error;
+  const code = error.errcode;
+  const busy = typeof code === 'number' && ((code & 0xff) === 5 || (code & 0xff) === 6);
+  if (!busy) error.message = 'Statement ' + (index + 1) + ': ' + error.message + '. ' + alreadyRun(db, index);
+  else error.afterStatements = alreadyRun(db, index);
+  return error;
 };
 try {
   const db = new DatabaseSync(process.env.WORKSPACE_DB, {
@@ -240,24 +403,7 @@ try {
       out = { rows, rowCount: rows.length, truncated };
     }
   } else if (payload.mode === 'sql') {
-    if (!holdsStatement(db, payload.sql)) throw refuse('The SQL holds no statement.');
-    const stmt = db.prepare(payload.sql);
-    if (stmt.columns().length > 0) {
-      const first = stmt.sourceSQL;
-      if (payload.sql.startsWith(first) && holdsStatement(db, payload.sql.slice(first.length))) {
-        throw refuse('The first statement returns rows and another statement follows it: the rest would not run. Several statements go in one call only when none of them returns rows; run the row-returning statement in a call of its own.');
-      }
-      const { rows, truncated } = collectRows(stmt.iterate());
-      if (rows.length === 1 && JSON.stringify(rows[0]).length > maxBytes) {
-        throw refuse('The first row alone is larger than the cap of ' + maxBytes + ' bytes: select fewer columns or shorter values (substr, length).');
-      }
-      out = { rows, truncated, changes: null };
-    } else {
-      const before = db.prepare('SELECT total_changes() AS c').get().c;
-      db.exec(payload.sql);
-      const after = db.prepare('SELECT total_changes() AS c').get().c;
-      out = { rows: null, truncated: false, changes: Number(after - before) };
-    }
+    out = runScript(db, payload.sql);
   } else {
     const stmt = db.prepare(payload.sql);
     if (stmt.columns().length > 0) {
@@ -276,15 +422,17 @@ try {
   let message = String((error && error.message) || error);
   // SQLite's busy family by its result code (5 SQLITE_BUSY, 6 SQLITE_LOCKED,
   // in the low byte), as isBusyError reads it; the words alone would take
-  // SQL that merely mentions them for a lock.
+  // SQL that merely mentions them for a lock. The two older modes word
+  // their refusal by the words, as they always did.
   const code = error && error.errcode;
   const locked = typeof code === 'number'
     ? (code & 0xff) === 5 || (code & 0xff) === 6
     : !(error && error.refusal) && /database is locked/i.test(message);
-  if (locked) {
+  if (payload.mode === 'sql' ? locked : /database is locked/i.test(message)) {
     message += ' (another writer held workspace.sqlite for more than ' +
       Math.round(Number(process.env.SQL_BUSY_TIMEOUT_MS) / 1000) + 's; retry once it commits)';
   }
+  if (error && error.afterStatements) message += ' ' + error.afterStatements;
   process.stdout.write(JSON.stringify({ sqlError: message, locked }));
   process.exitCode = 3;
 }
@@ -327,7 +475,8 @@ async function runSql(
   payload: Record<string, unknown>,
   caps: SqlCaps,
 ): Promise<SqlChildResult> {
-  const outcome = await runChild(process.execPath, ['-e', SQL_RUNNER, JSON.stringify(payload)], {
+  const viaInput = payload.mode === 'sql';
+  const outcome = await runChild(process.execPath, ['-e', SQL_RUNNER, viaInput ? '-' : JSON.stringify(payload)], {
     cwd,
     env: childEnv(dbPath, {
       SQL_MAX_ROWS: String(caps.maxRows),
@@ -337,6 +486,7 @@ async function runSql(
     timeoutMs: caps.timeoutMs,
     // The runner emits at most ~maxBytes of rows plus envelope; leave headroom.
     maxOutputChars: caps.maxBytes * 4,
+    ...(viaInput ? { input: JSON.stringify(payload) } : {}),
   });
 
   if (outcome.timedOut) {

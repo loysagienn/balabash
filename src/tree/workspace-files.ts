@@ -17,7 +17,7 @@ import {
   withFileWriteLock,
   type WorkspaceFileNode,
 } from '../workspace/files.ts';
-import { absolutePath, areaPath, provideFolder, provideWorkbench, writingDatabase } from './file-area.ts';
+import { absolutePath, areaPath, nameTooLong, orAbsent, provideFolder, provideWorkbench, writingDatabase } from './file-area.ts';
 
 export const WorkspaceFile = namedType(
   'WorkspaceFile',
@@ -65,7 +65,7 @@ const read = capability({
   }),
   async run(input, { caller }) {
     const relPath = areaPath(input.path);
-    const handle = await fs.open(absolutePath(caller.workspaceId, relPath), 'r').catch(() => null);
+    const handle = await orAbsent(fs.open(absolutePath(caller.workspaceId, relPath), 'r'));
 
     if (!handle) {
       throw noFile(relPath);
@@ -129,51 +129,65 @@ const write = capability({
 
     const { dbPath } = await provideWorkbench(workspaceId);
 
-    if (content !== undefined) {
-      await provideFolder(workspaceId, relPath);
+    // One write of a path at a time, the content together with its
+    // annotation: two writes never leave the content of one under the title
+    // of the other, and a delete does not pass between them.
+    return withFileWriteLock(workspaceId, relPath, async () => {
+      if (content !== undefined) {
+        await provideFolder(workspaceId, relPath);
 
-      // The file changes in one step: a reader sees the old content or the
-      // new one.
-      await withFileWriteLock(workspaceId, relPath, () => replaceFileContent(workspaceId, relPath, Buffer.from(content, 'utf8'))).catch(
-        error => {
+        // The file changes in one step: a reader sees the old content or the
+        // new one.
+        await replaceFileContent(workspaceId, relPath, Buffer.from(content, 'utf8')).catch(error => {
           const code = (error as NodeJS.ErrnoException).code;
 
           if (code === 'EISDIR' || code === 'ENOTEMPTY' || code === 'ENOTDIR') {
             throw new CapabilityError('conflict', `The path "${relPath}" is taken by a directory.`);
           }
 
+          if (code === 'ENAMETOOLONG') {
+            throw nameTooLong(relPath);
+          }
+
           throw error;
-        },
+        });
+      }
+
+      const written = await statFile(workspaceId, relPath);
+
+      if (!written) {
+        throw new CapabilityError(
+          'not_found',
+          `There is no file at "${relPath}" in the workspace file area: pass content to create it.`,
+        );
+      }
+
+      // The annotation is stamped whenever it has, or gets, something to
+      // keep: the stamp is what holds it against the background annotator,
+      // which rewrites an annotation older than its file. A file written
+      // without one, and never annotated, is left for the annotator.
+      const annotates = input.title !== undefined || input.description !== undefined;
+
+      if (!annotates && written.title === null && written.description === null) {
+        return workspaceFileValue(written);
+      }
+
+      // The stamp is the present moment and never older than the file, to
+      // the millisecond the annotator compares by: a stamp of whole seconds
+      // would stand before the file written within the same second.
+      const stamp = new Date(Math.max(Date.now(), written.modifiedAt === null ? 0 : Date.parse(written.modifiedAt)));
+      const meta = await writingDatabase(
+        content === undefined ? 'the title and description are unchanged' : 'the content is written, the title and description are not',
+        () => upsertMeta(dbPath, relPath, input.title?.trim() ?? null, input.description?.trim() ?? null, stamp),
       );
-    }
 
-    const written = await statFile(workspaceId, relPath);
-
-    if (!written) {
-      throw new CapabilityError(
-        'not_found',
-        `There is no file at "${relPath}" in the workspace file area: pass content to create it.`,
-      );
-    }
-
-    // The annotation is stamped whenever it has, or gets, something to
-    // keep: the stamp is what holds it against the background annotator,
-    // which rewrites an annotation older than its file. A file written
-    // without one, and never annotated, is left for the annotator.
-    const annotates = input.title !== undefined || input.description !== undefined;
-
-    if (!annotates && written.title === null && written.description === null) {
-      return workspaceFileValue(written);
-    }
-
-    const meta = await writingDatabase(
-      content === undefined ? 'the title and description are unchanged' : 'the content is written, the title and description are not',
-      () => upsertMeta(dbPath, relPath, input.title?.trim() ?? null, input.description?.trim() ?? null),
-    );
-
-    return workspaceFileValue({ ...written, ...meta });
+      return workspaceFileValue({ ...written, ...meta });
+    });
   },
 });
+
+// The longest path a WorkspacePath carries.
+const PATH_MAX_CHARS = 300;
 
 const list = capability({
   name: 'list',
@@ -195,11 +209,22 @@ const list = capability({
       throw new CapabilityError('not_found', `There is no directory at "${relDir}" in the workspace file area.`);
     }
 
-    return {
-      // The listing names its folders; a value carries their paths.
-      directories: listing.directories.map(name => (relDir ? `${relDir}/${name}` : name)),
-      files: listing.files.map(workspaceFileValue),
-    };
+    // The listing names its folders; a value carries their paths.
+    const directories = listing.directories.map(name => (relDir ? `${relDir}/${name}` : name));
+    const files = listing.files.map(workspaceFileValue);
+    // A path longer than a path of the area can be is on the disk all the
+    // same (a shell made it). The listing cannot name it, and a listing
+    // that left it out would pass for the whole directory.
+    const unnamed = [...directories, ...files.map(file => file.path)].find(entry => entry.length > PATH_MAX_CHARS);
+
+    if (unnamed !== undefined) {
+      throw new CapabilityError(
+        'conflict',
+        `The directory holds an entry whose path is longer than ${PATH_MAX_CHARS} characters ("${unnamed.slice(0, 80)}…"): such a path is not addressed here, and the listing cannot name it. That entry is reached from a shell.`,
+      );
+    }
+
+    return { directories, files };
   },
 });
 
@@ -231,26 +256,32 @@ const remove = capability({
   async run(input, { caller }) {
     const relPath = areaPath(input.path);
     const absPath = absolutePath(caller.workspaceId, relPath);
-    // The entry itself, not what a link points to: deleting a link removes
-    // the link.
-    const stats = await fs.lstat(absPath).catch(() => null);
 
-    if (stats?.isDirectory()) {
-      throw new CapabilityError('invalid_input', `"${relPath}" is a directory: only a file is deleted here.`);
-    }
+    // Under the lock of the path's writes: a write of the same path runs
+    // whole before or after, and does not annotate a file this call removes.
+    return withFileWriteLock(caller.workspaceId, relPath, async () => {
+      // The entry itself, not what a link points to: deleting a link removes
+      // the link. A look that fails for another reason than absence says
+      // nothing about the file, and nothing is deleted on it.
+      const stats = await orAbsent(fs.lstat(absPath));
 
-    // The annotation goes first, so a call that cannot write it deletes
-    // nothing — and the one a file deleted elsewhere left behind goes too,
-    // though the call still finds no file.
-    await writingDatabase('nothing is deleted', () => deleteMeta(caller.workspaceId, [relPath]));
+      if (stats?.isDirectory()) {
+        throw new CapabilityError('invalid_input', `"${relPath}" is a directory: only a file is deleted here.`);
+      }
 
-    if (!stats) {
-      throw noFile(relPath);
-    }
+      // The annotation goes first, so a call that cannot write it deletes
+      // nothing — and the one a file deleted elsewhere left behind goes too,
+      // though the call still finds no file.
+      await writingDatabase('nothing is deleted', () => deleteMeta(caller.workspaceId, [relPath]));
 
-    await fs.rm(absPath, { force: true });
+      if (!stats) {
+        throw noFile(relPath);
+      }
 
-    return null;
+      await fs.rm(absPath, { force: true });
+
+      return null;
+    });
   },
 });
 
