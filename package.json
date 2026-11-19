@@ -30,14 +30,14 @@
     "test": "node --test --no-warnings=ExperimentalWarning --test-global-setup=src/test-support/global-setup.ts \"src/**/*.test.ts\" \"tools/**/*.test.ts\" \"agents/**/*.test.ts\""
   },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.3.322",
+    "@anthropic-ai/claude-agent-sdk": "^0.3.328",
     "@anthropic-ai/sdk": "^1.6.0",
     "@aws-sdk/client-s3": "^3.1124.0",
     "@aws-sdk/s3-request-presigner": "^3.1124.0",
     "@grammyjs/runner": "^2.0.3",
     "@koa/router": "^15.7.0",
     "@modelcontextprotocol/sdk": "^1.30.0",
-    "@openai/codex-sdk": "^0.167.0",
+    "@openai/codex-sdk": "^0.170.0",
     "@playwright/mcp": "0.0.80",
     "@prisma/adapter-pg": "^7.10.0",
     "@prisma/client": "^7.10.0",
