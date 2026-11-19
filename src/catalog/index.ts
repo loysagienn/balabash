@@ -72,6 +72,7 @@ export {
 export { call, invokeCapability, type InvokeEnv } from './invoke.ts';
 export type { JsonSchema } from './json.ts';
 export {
+  countProgramCalls,
   countRunningPrograms,
   executeProgram,
   killRunningPrograms,
@@ -80,6 +81,8 @@ export {
   type ProgramLaunch,
   type ProgramOutcome,
   type ProgramRun,
+  type ProgramStart,
+  type RunProgramEnv,
 } from './program.ts';
 export { declarationText, signatureText, typeDefinitionText } from './signature.ts';
 export {

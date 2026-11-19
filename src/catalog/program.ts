@@ -7,12 +7,18 @@
 //
 // - Every run is a process of its own (program-process.ts): hung or heavy
 //   code never holds the app, and the limit of time kills the process.
+// - The launcher names the run when it keeps a record of it from the start
+//   (`ProgramLaunch.start`): the record is written first, the run begins
+//   after, and its calls and its outcome carry that same id.
 // - A call of the program comes to the app and takes the one path of a call
-//   (invoke.ts) under the grant of the run, carrying the id of the run.
+//   (invoke.ts) under the grant of the run, carrying the id of the run. The
+//   process sends no more than a few at a time; the rest wait their turn
+//   inside it, in its own memory.
 // - When the run is over — returned, failed, out of time or stopped — its
 //   scope says so (`ProgramScope.ended`): a command the program started is
-//   killed with it. Any other call that had started goes on to its own end;
-//   a call that had not started yet starts no more.
+//   killed with it. Any other call that had started goes on to its own end
+//   and stays counted as work in flight until then (countProgramCalls); a
+//   call that had not started yet starts no more.
 // - A launcher that cancels the run (`ProgramEnv.signal`) cancels its calls
 //   with it: each call in flight gets the same signal a cancelled direct
 //   call gets.
@@ -25,7 +31,6 @@
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import os from 'node:os';
-import { StringDecoder } from 'node:string_decoder';
 import { ACTIONS } from './actions.ts';
 import type { ProgramScope } from './definition.ts';
 import { describe } from './describe.ts';
@@ -36,39 +41,39 @@ import { invokeCapability } from './invoke.ts';
 import type { JsonValue } from './json.ts';
 import { PROGRAM_PROCESS } from './program-process.ts';
 
-// How many calls of one run are carried out at a time; the rest wait their
-// turn in the order they were made. A program may start any number at once
-// (a Promise.all over a list), and each call in flight holds its own
-// resources in the app.
-const MAX_CALLS_IN_FLIGHT = 8;
-
-// The end of the console output kept with a run.
-const CONSOLE_TAIL_CHARS = 20_000;
+// The end of the console output kept with a run, in bytes of UTF-8: the
+// 16 KiB the journal of runs gives.
+const CONSOLE_TAIL_BYTES = 16 * 1024;
 
 // The heap of a program's process: code that eats memory dies alone.
 const PROGRAM_HEAP_MB = 512;
 
 // What the standard error of a process that died is cut to in the error.
-const STDERR_TAIL_CHARS = 2_000;
+const STDERR_TAIL_BYTES = 2_000;
 
 export type ProgramOutcome = 'ok' | 'failed' | 'timeout' | 'aborted';
 
-// One run of a program: the content of its record.
+// One run of a program: the content of its record. How it ended says what
+// it left — a value (null when the program had nothing to say) or the error
+// that ended it, never both and never neither.
 export type ProgramRun = {
   id: string;
   code: string;
   startedAt: Date;
   endedAt: Date;
   durationMs: number;
-  outcome: ProgramOutcome;
-  // What the program returned; null when the outcome is not `ok` (and when
-  // it returned null).
-  value: JsonValue | null;
-  // Why the run did not end well; null when the outcome is `ok`.
-  error: CapabilityErrorValue | null;
   // The end of what the program wrote to `console`.
   console: string;
   consoleTruncated: boolean;
+} & (
+  | { outcome: 'ok'; value: JsonValue; error: null }
+  | { outcome: Exclude<ProgramOutcome, 'ok'>; value: null; error: CapabilityErrorValue }
+);
+
+// A run as its launcher has named it.
+export type ProgramStart = {
+  id: string;
+  startedAt: Date;
 };
 
 export type ProgramEnv = {
@@ -81,6 +86,12 @@ export type ProgramLaunch = {
   // The body of an async function.
   code: string;
   timeoutMs: number;
+  // The id of the run and the moment it began, when the launcher keeps a
+  // record of the run from its start: it names the run, writes the record
+  // (the schedule journals `running` and gives the id at once) and launches
+  // after — the calls of the run and its outcome carry the same id. The
+  // runner names the run itself otherwise.
+  start?: ProgramStart;
   // The heap of the process, when not the usual one.
   heapMb?: number;
 };
@@ -95,8 +106,18 @@ type Request = { id: number; kind: 'call' | 'describe'; name: string | null; inp
 // scope has ended.
 const runningPrograms = new Set<() => void>();
 
+// The calls of programs being carried out, whatever became of their runs: a
+// call that outlived its program (a download still on its way into storage
+// after the program ran out of time) is work in flight until its action has
+// ended, and a restart waits for it as it waits for a run.
+let callsInFlight = 0;
+
 export function countRunningPrograms(): number {
   return runningPrograms.size;
+}
+
+export function countProgramCalls(): number {
+  return callsInFlight;
 }
 
 export function killRunningPrograms(): void {
@@ -105,33 +126,30 @@ export function killRunningPrograms(): void {
   }
 }
 
-// The end of a stream of text, kept whole characters.
-function tail(maxChars: number) {
-  const decoder = new StringDecoder('utf8');
-  let text = '';
+// The end of a stream of text, measured in bytes of UTF-8 and cut at a whole
+// character.
+function tail(maxBytes: number) {
+  let kept: Buffer = Buffer.alloc(0);
   let truncated = false;
 
-  const append = (piece: string) => {
-    text += piece;
-
-    if (text.length > maxChars) {
-      text = text.slice(-maxChars);
-      truncated = true;
-
-      // The cut fell inside a surrogate pair: the half goes too.
-      const first = text.charCodeAt(0);
-
-      if (first >= 0xdc00 && first <= 0xdfff) {
-        text = text.slice(1);
-      }
-    }
-  };
-
   return {
-    write: (chunk: Buffer) => append(decoder.write(chunk)),
-    end: () => append(decoder.end()),
+    write(chunk: Buffer) {
+      kept = kept.length ? Buffer.concat([kept, chunk]) : chunk;
+
+      if (kept.length > maxBytes) {
+        kept = kept.subarray(kept.length - maxBytes);
+        truncated = true;
+      }
+    },
     get text() {
-      return text;
+      let from = 0;
+
+      // The cut fell inside a character: what is left of it goes too.
+      while (truncated && from < kept.length && (kept[from]! & 0xc0) === 0x80) {
+        from += 1;
+      }
+
+      return kept.subarray(from).toString('utf8');
     },
     get truncated() {
       return truncated;
@@ -199,19 +217,18 @@ function seconds(ms: number): string {
 // The runner itself: one run of a program under a grant. It never throws —
 // whatever happened is the outcome of the run.
 export function executeProgram(grant: Grant, launch: ProgramLaunch, env: ProgramEnv): Promise<ProgramRun> {
-  const id = randomUUID();
-  const startedAt = new Date();
+  const id = launch.start?.id ?? randomUUID();
+  const startedAt = launch.start?.startedAt ?? new Date();
   const ended = new AbortController();
   const scope: ProgramScope = { runId: id, ended: ended.signal };
-  const output = tail(CONSOLE_TAIL_CHARS);
-  const stderr = tail(STDERR_TAIL_CHARS);
+  const output = tail(CONSOLE_TAIL_BYTES);
+  const stderr = tail(STDERR_TAIL_BYTES);
 
   return new Promise(resolve => {
     let verdict: Verdict | null = null;
     let closed = false;
     // The calls being carried out, by the id the process gave them.
     const inFlight = new Map<number, string>();
-    const waiting: Request[] = [];
 
     const close = () => {
       if (closed) {
@@ -221,7 +238,6 @@ export function executeProgram(grant: Grant, launch: ProgramLaunch, env: Program
       closed = true;
       runningPrograms.delete(stop);
       env.signal?.removeEventListener('abort', cancel);
-      output.end();
 
       const endedAt = new Date();
       const last: Verdict = verdict ?? {
@@ -235,11 +251,11 @@ export function executeProgram(grant: Grant, launch: ProgramLaunch, env: Program
         startedAt,
         endedAt,
         durationMs: endedAt.getTime() - startedAt.getTime(),
-        outcome: last.outcome,
-        value: last.outcome === 'ok' ? last.value : null,
-        error: last.outcome === 'ok' ? null : last.error.toValue(),
         console: output.text,
         consoleTruncated: output.truncated,
+        ...(last.outcome === 'ok'
+          ? { outcome: last.outcome, value: last.value, error: null }
+          : { outcome: last.outcome, value: null, error: last.error.toValue() }),
       });
     };
 
@@ -291,16 +307,16 @@ export function executeProgram(grant: Grant, launch: ProgramLaunch, env: Program
 
     const answer = (request: Request, payload: { ok: true; value: JsonValue } | { ok: false; error: CapabilityErrorValue }) => {
       inFlight.delete(request.id);
+      callsInFlight -= 1;
 
       if (!verdict && child.connected) {
         child.send({ type: 'settle', id: request.id, payload: JSON.stringify(payload) });
       }
-
-      pump();
     };
 
     const carryOut = (request: Request) => {
       inFlight.set(request.id, request.kind === 'describe' ? 'describe' : String(request.name));
+      callsInFlight += 1;
 
       const outcome: Promise<JsonValue> =
         request.kind === 'describe'
@@ -317,20 +333,16 @@ export function executeProgram(grant: Grant, launch: ProgramLaunch, env: Program
       );
     };
 
-    // A call that has not started when the run is over starts no more.
-    const pump = () => {
-      while (!verdict && inFlight.size < MAX_CALLS_IN_FLIGHT && waiting.length) {
-        carryOut(waiting.shift()!);
-      }
-    };
-
     child.stdout?.on('data', (chunk: Buffer) => output.write(chunk));
     child.stderr?.on('data', (chunk: Buffer) => stderr.write(chunk));
 
     child.on('message', (message: { type?: string } & Record<string, unknown>) => {
       if (message.type === 'request') {
-        waiting.push(message as unknown as Request);
-        pump();
+        // The process sends a call when its turn has come. One that arrives
+        // when the run is over starts no more.
+        if (!verdict) {
+          carryOut(message as unknown as Request);
+        }
       } else if (message.type === 'done') {
         try {
           decide(verdictOf(String(message.report)));
@@ -350,8 +362,6 @@ export function executeProgram(grant: Grant, launch: ProgramLaunch, env: Program
     });
 
     child.once('close', (exitCode, signal) => {
-      stderr.end();
-
       // The process went away by itself, without a word about the program.
       if (/heap out of memory/i.test(stderr.text)) {
         decide({
@@ -389,10 +399,19 @@ export function executeProgram(grant: Grant, launch: ProgramLaunch, env: Program
   });
 }
 
+export type RunProgramEnv = ProgramEnv & {
+  // The run as the keeper of this call's record has named it.
+  start?: ProgramStart;
+  // The keeper of this call's record gets the run whole — its id, its times,
+  // its console — before the run becomes the answer of the call: the one who
+  // called gets the value or the error and nothing else.
+  record?: (run: ProgramRun) => void | Promise<void>;
+};
+
 // The action `run_program`: the launch on the spot. The program acts under
 // the grant of the one who called and gives its value to them; whatever went
 // wrong leaves as the error of this call.
-export async function runProgram(grant: Grant, input: unknown, env: ProgramEnv): Promise<JsonValue> {
+export async function runProgram(grant: Grant, input: unknown, env: RunProgramEnv): Promise<JsonValue> {
   let args: { code: string; timeoutSeconds: number };
 
   try {
@@ -401,9 +420,19 @@ export async function runProgram(grant: Grant, input: unknown, env: ProgramEnv):
     throw toCapabilityError(error);
   }
 
-  const run = await executeProgram(grant, { code: args.code, timeoutMs: args.timeoutSeconds * 1000 }, env);
+  const run = await executeProgram(
+    grant,
+    { code: args.code, timeoutMs: args.timeoutSeconds * 1000, ...(env.start ? { start: env.start } : {}) },
+    env,
+  );
 
-  if (run.error) {
+  try {
+    await env.record?.(run);
+  } catch (error) {
+    throw toCapabilityError(error);
+  }
+
+  if (run.outcome !== 'ok') {
     throw new CapabilityError(run.error.kind, run.error.message, run.error.details);
   }
 

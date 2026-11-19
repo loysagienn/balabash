@@ -23,6 +23,8 @@
 //                      { ok: true, value } | { ok: false, error }
 //   process → app  { type: 'request', id, kind: 'call' | 'describe', name, input }
 //                      input: JSON text, or null when none was passed
+//                      sent when its turn has come: no more than
+//                      CALLS_AT_A_TIME of them are with the app at once
 //                  { type: 'done', report }          report: JSON text of
 //                      { outcome: 'value', value }
 //                      { outcome: 'not_json', path, what }
@@ -38,14 +40,31 @@
 // the line of an exception is read from them.
 export const PROGRAM_FILE = 'program.js';
 
+// How many calls of one run are with the app at a time; the rest wait their
+// turn in the order they were made. A program may start any number at once
+// (a Promise.all over a list): each call in flight holds its own resources
+// in the app, and the ones that wait lie with their inputs in the memory of
+// the program's own process, which has its own limit.
+export const CALLS_AT_A_TIME = 8;
+
 const PRELUDE = String.raw`
-(function (hostRequest, hostPrint) {
+(function (hostRequest, hostPrint, callsAtATime) {
   'use strict';
 
   const AsyncFunction = (async function () {}).constructor;
   const pending = new Map();
+  // The calls whose turn has not come, and how many are with the app.
+  const waiting = [];
+  let sent = 0;
   let lastId = 0;
   let idleWaiters = [];
+
+  function pump() {
+    while (sent < callsAtATime && waiting.length) {
+      sent += 1;
+      hostRequest.apply(null, waiting.shift());
+    }
+  }
 
   class CapabilityError extends Error {
     constructor(value) {
@@ -72,7 +91,8 @@ const PRELUDE = String.raw`
       }
       lastId += 1;
       pending.set(lastId, { resolve: resolve, reject: reject });
-      hostRequest(lastId, kind, name, text);
+      waiting.push([lastId, kind, name, text]);
+      pump();
     });
   }
 
@@ -98,6 +118,8 @@ const PRELUDE = String.raw`
     const entry = pending.get(id);
     if (!entry) return;
     pending.delete(id);
+    sent -= 1;
+    pump();
     const outcome = JSON.parse(payload);
     if (outcome.ok) entry.resolve(outcome.value);
     else entry.reject(new CapabilityError(outcome.error));
@@ -242,6 +264,7 @@ const send = message => { if (process.connected) process.send(message); };
 const prelude = vm.runInContext(${JSON.stringify(PRELUDE)}, context, { filename: 'program-prelude.js' })(
   (id, kind, name, input) => send({ type: 'request', id, kind, name, input }),
   print,
+  ${CALLS_AT_A_TIME},
 );
 
 // The descriptor itself, never process.stdout: the stream would switch the

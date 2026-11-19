@@ -10,7 +10,7 @@ import { buildCatalog } from './catalog.ts';
 import { capability } from './definition.ts';
 import { CapabilityError } from './errors.ts';
 import { computeGrant, type GrantPolicy } from './grant.ts';
-import { countRunningPrograms, executeProgram, killRunningPrograms, runProgram } from './program.ts';
+import { countProgramCalls, countRunningPrograms, executeProgram, killRunningPrograms, runProgram, type ProgramRun } from './program.ts';
 import { CALLER, WORK, testConnections, testRoot, type Calls } from './test-tree.ts';
 
 const calls: Calls = [];
@@ -188,6 +188,62 @@ describe('a program', () => {
     assert.equal(action.kind, 'unknown_capability');
   });
 
+  it('runs under the id and the start its launcher gave: the calls and the outcome carry them', async () => {
+    const start = { id: 'run-named-by-its-launcher', startedAt: new Date(Date.now() - 5_000) };
+
+    calls.length = 0;
+
+    const pending = executeProgram(
+      await grantOf(),
+      { code: `await call('get_note', { id: 7 }); await call('wait', { ms: 300 }); return 1;`, timeoutMs: 20_000, start },
+      env,
+    );
+
+    // The program is still waiting for a call, and the call it made is
+    // already under the id the launcher knew before the launch.
+    await sleep(200);
+    assert.equal(countRunningPrograms(), 1);
+    assert.deepEqual(
+      calls.map(entry => entry.ctx.program?.runId),
+      [start.id],
+    );
+
+    const outcome = await pending;
+
+    assert.equal(outcome.outcome, 'ok');
+    assert.equal(outcome.id, start.id);
+    assert.equal(outcome.startedAt, start.startedAt);
+    assert.equal(outcome.durationMs, outcome.endedAt.getTime() - start.startedAt.getTime());
+    assert.ok(outcome.durationMs >= 5_000);
+  });
+
+  it('gives the keeper of the record the whole run before the caller gets the value or the error', async () => {
+    const grant = await grantOf();
+    const kept: ProgramRun[] = [];
+    const start = { id: 'run-of-a-recorded-call', startedAt: new Date() };
+    const value = await runProgram(grant, { code: `console.log('for the record'); return { n: 1 };` }, { ...env, start, record: run => void kept.push(run) });
+
+    assert.deepEqual(value, { n: 1 });
+    assert.equal(kept.length, 1);
+    assert.equal(kept[0]?.id, start.id);
+    assert.equal(kept[0]?.startedAt, start.startedAt);
+    assert.equal(kept[0]?.outcome, 'ok');
+    assert.equal(kept[0]?.console, 'for the record\n');
+
+    // A run that failed is recorded too, with what it had said, and the
+    // record is there by the time the error leaves.
+    const failed = await errorOf(
+      runProgram(grant, { code: `console.log('said before'); throw new Error('broke');` }, { ...env, record: async run => void kept.push(run) }),
+    );
+
+    assert.equal(failed.kind, 'invalid_input');
+    assert.equal(kept.length, 2);
+    assert.equal(kept[1]?.outcome, 'failed');
+    assert.equal(kept[1]?.error?.message, failed.message);
+    assert.equal(kept[1]?.console, 'said before\n');
+    assert.match(kept[1]?.id ?? '', /^[0-9a-f-]{36}$/);
+  });
+
   it('returns any JSON value, and null when it has nothing to say', async () => {
     const grant = await grantOf();
 
@@ -340,6 +396,12 @@ describe('the time of a program', () => {
   });
 
   it('takes the command of the program with it and lets any other started call reach its end', async () => {
+    // The call the run before this one left behind is still counted, as it
+    // should be: it has to end first.
+    while (countProgramCalls() > 0) {
+      await sleep(50);
+    }
+
     log.length = 0;
 
     const outcome = await run(
@@ -355,9 +417,14 @@ describe('the time of a program', () => {
     const mine = () => log.filter(entry => entry.startsWith('hold:') || entry.startsWith('outlives:'));
 
     assert.deepEqual(mine(), ['hold:ended']);
+    // The run is over, and the call that outlived it is still work in
+    // flight: a restart waits for it.
+    assert.equal(countRunningPrograms(), 0);
+    assert.equal(countProgramCalls(), 1);
 
     await sleep(900);
     assert.deepEqual(mine(), ['hold:ended', 'outlives:done']);
+    assert.equal(countProgramCalls(), 0);
   });
 
   it('starts no call that was still waiting its turn when the run was over', async () => {
@@ -406,19 +473,31 @@ describe('the console of a program', () => {
     assert.equal(outcome.consoleTruncated, false);
   });
 
-  it('keeps the end of a long output', async () => {
-    const outcome = await run(`
-      for (let index = 0; index < 3000; index += 1) console.log('line ' + index + ' ' + '😀'.repeat(10));
-      console.log('the last line');
-      return null;
-    `);
+  it('keeps the last 16 KiB of a long output, whole characters', async () => {
+    // Lines of different lengths in bytes: the cut falls inside a character
+    // for some of them.
+    for (const filler of ['😀'.repeat(10), 'ёжик в тумане', 'я']) {
+      const outcome = await run(`
+        for (let index = 0; index < 3000; index += 1) console.log('line ' + index + ' ' + ${JSON.stringify(filler)});
+        console.log('последняя строка');
+        return null;
+      `);
+      const bytes = Buffer.byteLength(outcome.console, 'utf8');
 
-    assert.equal(outcome.outcome, 'ok');
-    assert.equal(outcome.consoleTruncated, true);
-    assert.ok(outcome.console.length <= 20_000);
-    assert.ok(outcome.console.endsWith('the last line\n'));
-    // No half of a character at the cut.
-    assert.ok(!/^[\udc00-\udfff]/.test(outcome.console));
+      assert.equal(outcome.outcome, 'ok');
+      assert.equal(outcome.consoleTruncated, true);
+      // Bytes of UTF-8, not characters: Cyrillic text of 16 KiB is about
+      // half as many characters.
+      assert.ok(bytes <= 16 * 1024 && bytes > 16 * 1024 - 4, `${bytes} bytes`);
+      assert.ok(outcome.console.endsWith('последняя строка\n'));
+      // No half of a character at the cut.
+      assert.ok(!outcome.console.includes('\ufffd'));
+    }
+
+    const short = await run(`console.log('ё'.repeat(8000)); return null;`);
+
+    assert.equal(short.consoleTruncated, false);
+    assert.equal(short.console.length, 8001);
   });
 });
 

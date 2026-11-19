@@ -36,6 +36,7 @@ let files: typeof import('../files/index.ts');
 // The node over the test's network, and the node of the tree.
 let grant: Grant;
 let treeGrant: Grant;
+let hasRunningWork: () => boolean;
 let server: http.Server;
 let garbage: net.Server;
 let switching: net.Server;
@@ -270,6 +271,7 @@ before(async () => {
 
   grant = await grantOver(buildCatalog({ summary: 'The web over the network of a test.', children: [webNode(testNet)] }).catalog);
   treeGrant = await grantOver(tree.catalog());
+  ({ hasRunningWork } = tree);
 
   server = http.createServer(serve);
   port = await listen(server);
@@ -699,10 +701,14 @@ describe('web_download', () => {
     assert.equal(run.outcome, 'timeout');
     assert.deepEqual(run.error?.details, { unfinishedCalls: ['web_download'] });
     assert.equal(await storedFiles(), before);
+    // The run is over and the download is not: it is still work in flight,
+    // which a restart waits for.
+    assert.equal(hasRunningWork(), true);
 
     // The time of the program is not the time of the call: the download ends
     // by its own timeoutSeconds.
     await new Promise(resolve => setTimeout(resolve, 1500));
+    assert.equal(hasRunningWork(), false);
     assert.equal(await storedFiles(), before + 1);
     assert.deepEqual(await leftovers(), []);
   });
