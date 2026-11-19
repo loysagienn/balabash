@@ -12,15 +12,16 @@ export type CodexSessionConfig = NonNullable<CodexOptions['config']>;
 // Reasoning summaries are what the feed's "Thought" row shows for a Codex
 // session (the session journal maps the `reasoning` item to
 // session.thinking). Codex asks the API for `summary: "auto"` unless told
-// otherwise, and "auto" resolves to the model's own default — for gpt-6-astra
-// the CLI's model metadata says `default_reasoning_summary: "none"`, so the
-// reasoning items came back with an empty summary and the SDK stream never
-// carried a `reasoning` item (the live log had no Codex thought at all,
-// 2026-10-10). The thread options of the SDK have no field for it; the
-// config key does the job: with "detailed" the `item.completed` of the
-// reasoning item arrives with the summary's text (probed with `codex exec
-// --json`, 2026-10-10). "detailed" over "concise": the row shows the thought
-// itself, as the Claude feed does, not a headline.
+// otherwise, and "auto" resolves to the model's own default — for the Astra
+// models (gpt-6-astra, gpt-6.2-astra) the CLI's model metadata says
+// `default_reasoning_summary: "none"`, so the reasoning items came back with
+// an empty summary and the SDK stream never carried a `reasoning` item (the
+// live log had no Codex thought at all, 2026-10-10). The thread options of
+// the SDK have no field for it; the config key does the job: with "detailed"
+// the `item.completed` of the reasoning item arrives with the summary's text
+// (probed with `codex exec --json`: gpt-6-astra 2026-10-10, gpt-6.2-astra
+// 2026-11-19). "detailed" over "concise": the row shows the thought itself,
+// as the Claude feed does, not a headline.
 export const CODEX_REASONING_SUMMARY = 'detailed';
 
 // The name of the bridge's MCP server in the session (the journal tells its

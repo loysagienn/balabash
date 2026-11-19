@@ -28,7 +28,7 @@ export const agent = {
 
   session: {
     instructions: MANAGER_INSTRUCTIONS,
-    model: 'gpt-6-astra',
+    model: 'gpt-6.2-astra',
     effort: 'high',
     preset: 'full',
     cwd: (workspaceId: string) => workspaceFilesDir(workspaceId),

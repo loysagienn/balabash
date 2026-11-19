@@ -211,7 +211,7 @@ export const agent = {
 
   session: {
     instructions: INSTRUCTIONS,
-    model: 'gpt-6-astra',
+    model: 'gpt-6.2-astra',
     effort: 'high',
     preset: 'full',
     // The one Codex agent that draws: image_gen and the imagegen skill stay on.
