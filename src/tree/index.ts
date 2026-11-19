@@ -8,8 +8,15 @@
 // - events.ts — the type Event and `get_event`;
 // - threads.ts — the node `threads` and the type Thread;
 // - projects.ts — the node `projects` and the type Project;
-// - files.ts — a stored file as a FileRef;
-// - cursor.ts — the cursor of a list paged along the log.
+// - files.ts — a stored file as a FileRef and the file capabilities of the
+//   root: `export_file`, `import_file`, `get_file_url`, `view_file`;
+// - workspace.ts — the node `workspace` with `query` and `run_command`;
+//   workspace-files.ts and workspace-apps.ts — its nodes `files` (with the
+//   type WorkspaceFile) and `apps`;
+// - file-area.ts — the workspace file area as the tree reaches it: the path
+//   a caller names, the workbench a write needs;
+// - cursor.ts — the cursor of a list paged along the log;
+// - transcript.ts — the course of a thread as text.
 //
 // A recipe of the root joins its guide together with the capability it
 // names: the build lets no recipe through that requires what the tree does
@@ -17,8 +24,10 @@
 
 import { buildCatalog, type Catalog, type RootDefinition } from '../catalog/index.ts';
 import { getEvent } from './events.ts';
+import { fileCapabilities } from './files.ts';
 import { projects } from './projects.ts';
 import { threads } from './threads.ts';
+import { workspace } from './workspace.ts';
 
 export const root: RootDefinition = {
   summary: 'Everything Balabash can do for you.',
@@ -47,11 +56,33 @@ export const root: RootDefinition = {
       text: 'A file in a result is a reference, never content. Where an input asks for a file, pass the id of the reference.',
     },
     {
+      text: 'To work with the content of a stored file, put it into the workspace file area with `import_file`.',
+      requires: ['import_file'],
+    },
+    {
+      text: 'A file you produced in the workspace file area becomes a reference with `export_file`.',
+      requires: ['export_file'],
+    },
+    { text: 'To look at a stored image, PDF or text yourself, use `view_file`.', requires: ['view_file'] },
+    {
+      text: 'When something outside Balabash has to fetch a stored file itself, give it the address from `get_file_url`.',
+      requires: ['get_file_url'],
+    },
+    {
       text: "A reference handed to you names a thread and an event seq: read the event with `get_event` first. A thread's final report is its thread.completed event.",
       requires: ['get_event'],
     },
   ],
-  children: [getEvent, threads, projects],
+  children: [
+    fileCapabilities.exportFile,
+    fileCapabilities.importFile,
+    fileCapabilities.getFileUrl,
+    fileCapabilities.viewFile,
+    getEvent,
+    threads,
+    projects,
+    workspace,
+  ],
 };
 
 let built: Catalog | null = null;

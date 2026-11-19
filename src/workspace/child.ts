@@ -8,9 +8,10 @@
 //
 // Two layers here:
 //   - runChild/childEnv — generic spawn-with-caps (also used by run_script);
-//   - the SQL child program + queryInChild/statementInChild — the two entry
-//     points into workspace.sqlite: free-form SQL (data_query) and a single
-//     prepared statement with named binds (app endpoints).
+//   - the SQL child program + queryInChild/sqlInChild/statementInChild — the
+//     entry points into workspace.sqlite: free-form SQL (data_query; the
+//     capability workspace_query) and a single prepared statement with named
+//     binds (app endpoints).
 
 import { spawn } from 'node:child_process';
 import { childBusyTimeoutMs } from './sqlite.ts';
@@ -53,6 +54,9 @@ export type RunChildOptions = {
   // process-group id — children run detached in their own group). Lets the
   // caller register the group for an external kill (shutdown sweep).
   onSpawn?: (pid: number) => void;
+  // Aborting it kills the child's whole group, as the timeout does: the
+  // outcome then carries exitCode null and timedOut false.
+  signal?: AbortSignal;
 };
 
 // Kill the child's whole process group: `bash -c` (and scripts generally)
@@ -93,6 +97,14 @@ export function runChild(command: string, args: string[], options: RunChildOptio
       killGroup(child.pid, () => child.kill('SIGKILL'));
     }, options.timeoutMs);
 
+    const abort = () => killGroup(child.pid, () => child.kill('SIGKILL'));
+
+    if (options.signal?.aborted) {
+      abort();
+    } else {
+      options.signal?.addEventListener('abort', abort, { once: true });
+    }
+
     const buffers = { stdout: '', stderr: '' };
     const truncated = { stdout: false, stderr: false };
     const tailKeep = options.capMode === 'tail';
@@ -116,11 +128,13 @@ export function runChild(command: string, args: string[], options: RunChildOptio
 
     child.once('error', error => {
       clearTimeout(timer);
+      options.signal?.removeEventListener('abort', abort);
       reject(error);
     });
 
     child.once('close', exitCode => {
       clearTimeout(timer);
+      options.signal?.removeEventListener('abort', abort);
       resolve({
         exitCode,
         timedOut,
@@ -135,11 +149,19 @@ export function runChild(command: string, args: string[], options: RunChildOptio
 }
 
 // ---------------------------------------------------------------------------
-// The SQL child program. One CommonJS source for `node -e`, two modes picked
-// by the JSON payload in argv[1]:
+// The SQL child program. One CommonJS source for `node -e`, three modes
+// picked by the JSON payload in argv[1]:
 //   { mode: 'query', sql }            — data_query: any SQL; a row-returning
 //       statement streams rows up to the caps, anything else goes through
 //       exec() (multi-statement scripts work) and reports the change count.
+//   { mode: 'sql', sql }              — the capability workspace_query
+//       (src/tree/workspace.ts): the same two paths, one form of the answer
+//       whatever the statement — { rows, truncated, changes }, a blob as
+//       its size in data. What the other mode passes in silence is refused
+//       here by name: SQL that holds no statement, a row-returning
+//       statement with another one after it (prepare() takes the first
+//       statement only — the rest would never run), a first row larger
+//       than the byte cap.
 //   { mode: 'statement', statement, kind, params, readOnly } — an app
 //       endpoint: one prepared statement, values bound ONLY as named
 //       parameters (no SQL concatenation by construction); kind = run | all
@@ -151,7 +173,8 @@ export function runChild(command: string, args: string[], options: RunChildOptio
 // synchronously through SQLite's busy handler; the wait stays clear of the
 // kill timeout so a lock that outlasts it surfaces as an SQL error). Row
 // values are wire-safed in the child: blobs become placeholders, bigints
-// become numbers.
+// become numbers. A refusal the child words itself is { sqlError }; `locked`
+// marks the one that is a lock outlasting the wait rather than the SQL.
 // ---------------------------------------------------------------------------
 
 const SQL_RUNNER = `
@@ -159,11 +182,14 @@ const { DatabaseSync } = require('node:sqlite');
 const payload = JSON.parse(process.argv[1]);
 const maxRows = Number(process.env.SQL_MAX_ROWS);
 const maxBytes = Number(process.env.SQL_MAX_BYTES);
+const blobValue = payload.mode === 'sql'
+  ? size => ({ blobSizeBytes: size })
+  : size => '<blob ' + size + ' bytes>';
 const cleanRow = row => {
   const clean = {};
   for (const key of Object.keys(row)) {
     const value = row[key];
-    if (value instanceof Uint8Array) clean[key] = '<blob ' + value.byteLength + ' bytes>';
+    if (value instanceof Uint8Array) clean[key] = blobValue(value.byteLength);
     else if (typeof value === 'bigint') clean[key] = Number(value);
     else clean[key] = value;
   }
@@ -183,6 +209,18 @@ const collectRows = iterator => {
   }
   return { rows, truncated };
 };
+// A refusal of the SQL as given, worded for the one who wrote it.
+const refuse = message => Object.assign(new Error(message), { refusal: true });
+// Whether the text holds a statement: prepare() of blank or comment-only
+// text gives a finalized statement, and reading it throws.
+const holdsStatement = (db, text) => {
+  try {
+    db.prepare(text).sourceSQL;
+    return true;
+  } catch (error) {
+    return !/statement has been finalized/i.test(String(error && error.message));
+  }
+};
 try {
   const db = new DatabaseSync(process.env.WORKSPACE_DB, {
     timeout: Number(process.env.SQL_BUSY_TIMEOUT_MS),
@@ -201,6 +239,25 @@ try {
       const { rows, truncated } = collectRows(stmt.iterate(payload.params));
       out = { rows, rowCount: rows.length, truncated };
     }
+  } else if (payload.mode === 'sql') {
+    if (!holdsStatement(db, payload.sql)) throw refuse('The SQL holds no statement.');
+    const stmt = db.prepare(payload.sql);
+    if (stmt.columns().length > 0) {
+      const first = stmt.sourceSQL;
+      if (payload.sql.startsWith(first) && holdsStatement(db, payload.sql.slice(first.length))) {
+        throw refuse('The first statement returns rows and another statement follows it: the rest would not run. Several statements go in one call only when none of them returns rows; run the row-returning statement in a call of its own.');
+      }
+      const { rows, truncated } = collectRows(stmt.iterate());
+      if (rows.length === 1 && JSON.stringify(rows[0]).length > maxBytes) {
+        throw refuse('The first row alone is larger than the cap of ' + maxBytes + ' bytes: select fewer columns or shorter values (substr, length).');
+      }
+      out = { rows, truncated, changes: null };
+    } else {
+      const before = db.prepare('SELECT total_changes() AS c').get().c;
+      db.exec(payload.sql);
+      const after = db.prepare('SELECT total_changes() AS c').get().c;
+      out = { rows: null, truncated: false, changes: Number(after - before) };
+    }
   } else {
     const stmt = db.prepare(payload.sql);
     if (stmt.columns().length > 0) {
@@ -217,11 +274,18 @@ try {
   process.stdout.write(JSON.stringify(out));
 } catch (error) {
   let message = String((error && error.message) || error);
-  if (/database is locked/i.test(message)) {
+  // SQLite's busy family by its result code (5 SQLITE_BUSY, 6 SQLITE_LOCKED,
+  // in the low byte), as isBusyError reads it; the words alone would take
+  // SQL that merely mentions them for a lock.
+  const code = error && error.errcode;
+  const locked = typeof code === 'number'
+    ? (code & 0xff) === 5 || (code & 0xff) === 6
+    : !(error && error.refusal) && /database is locked/i.test(message);
+  if (locked) {
     message += ' (another writer held workspace.sqlite for more than ' +
       Math.round(Number(process.env.SQL_BUSY_TIMEOUT_MS) / 1000) + 's; retry once it commits)';
   }
-  process.stdout.write(JSON.stringify({ sqlError: message }));
+  process.stdout.write(JSON.stringify({ sqlError: message, locked }));
   process.exitCode = 3;
 }
 `;
@@ -238,7 +302,8 @@ export type SqlCaps = {
 export type SqlChildResult =
   | { status: 'ok'; result: Record<string, unknown> }
   | { status: 'timeout' }
-  | { status: 'sql_error'; message: string }
+  // locked: not the SQL — another writer held the database for the whole wait.
+  | { status: 'sql_error'; message: string; locked: boolean }
   | { status: 'failed'; exitCode: number | null; stderr: string };
 
 /** A JSON-representable value bindable as a named SQL parameter. */
@@ -287,7 +352,7 @@ async function runSql(
   }
 
   if (typeof parsed.sqlError === 'string') {
-    return { status: 'sql_error', message: parsed.sqlError };
+    return { status: 'sql_error', message: parsed.sqlError, locked: parsed.locked === true };
   }
 
   return { status: 'ok', result: parsed };
@@ -296,6 +361,16 @@ async function runSql(
 /** Free-form SQL (the data_query shape) against workspace.sqlite, in a child. */
 export function queryInChild(dbPath: string, cwd: string, sql: string, caps: SqlCaps): Promise<SqlChildResult> {
   return runSql(dbPath, cwd, { mode: 'query', sql }, caps);
+}
+
+/**
+ * Free-form SQL in the form of the capability workspace_query, in a child:
+ * the result is { rows, truncated, changes } — rows (a blob as
+ * { blobSizeBytes }) and changes null for a row-returning statement, rows
+ * null and the change count for anything else.
+ */
+export function sqlInChild(dbPath: string, cwd: string, sql: string, caps: SqlCaps): Promise<SqlChildResult> {
+  return runSql(dbPath, cwd, { mode: 'sql', sql }, caps);
 }
 
 /**

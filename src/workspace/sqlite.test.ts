@@ -14,7 +14,7 @@ import path from 'node:path';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { DatabaseSync } from 'node:sqlite';
 import { BUSY_SLICE_MS, LOCK_WAIT_MS, WorkspaceDbBusyError, childBusyTimeoutMs, inWriteTransaction, isBusyError, withWorkspaceDb } from './sqlite.ts';
-import { queryInChild, statementInChild } from './child.ts';
+import { queryInChild, sqlInChild, statementInChild } from './child.ts';
 import { deleteMeta, ensureFilesDb, listDir, readMeta, upsertMeta } from './files.ts';
 import { workspaceDbPath, workspaceFilesDir } from './layout.ts';
 
@@ -256,6 +256,22 @@ describe('SQL child runner (data_query / app endpoints)', () => {
 
     assert.equal(outcome.status, 'sql_error');
     assert.match(outcome.status === 'sql_error' ? outcome.message : '', /database is locked.*another writer.*1s/);
+  });
+
+  test('the lock is told apart from a refusal of the SQL itself', async () => {
+    const holder = await holdWriteLock(3_000);
+    const locked = await sqlInChild(dbPath, root, "INSERT INTO _files (path, updated_at) VALUES ('q3', '')", {
+      ...caps,
+      timeoutMs: 2_000,
+    });
+    await waitExit(holder);
+
+    assert.deepEqual([locked.status, locked.status === 'sql_error' && locked.locked], ['sql_error', true]);
+
+    // SQL that merely says the words is a refusal of the SQL.
+    const refused = await sqlInChild(dbPath, root, "SELECT * FROM \"database is locked\"", caps);
+
+    assert.deepEqual([refused.status, refused.status === 'sql_error' && refused.locked], ['sql_error', false]);
   });
 
   test('reads never wait under WAL', async () => {
