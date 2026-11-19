@@ -149,4 +149,24 @@ describe('the state of the bundle', () => {
     await at('package.json', 10);
     assert.equal(await bundleState(root), 'stale');
   });
+
+  test('the console is a bundle of its own: its sources do not make the app\'s bundle stale; a folder under the name of the bundle is no bundle', async () => {
+    const { bundleState } = await import('../runtime/bundle.ts');
+    const root = path.join(stand.dir, 'apart');
+    const at = (relPath: string, secondsAgo: number) => put(path.join('apart', relPath), secondsAgo);
+
+    await at('src/app.ts', 600);
+    await at('dist/app.js', 300);
+    await at('src/console/pages/threads.tsx', 1);
+    // The folder src itself is as old as its last own entry.
+    await fs.utimes(path.join(root, 'src'), new Date(Date.now() - 600_000), new Date(Date.now() - 600_000));
+    assert.equal(await bundleState(root), 'current');
+
+    await at('src/api/console.ts', 1);
+    assert.equal(await bundleState(root), 'stale');
+
+    await fs.rm(path.join(root, 'dist', 'app.js'));
+    await fs.mkdir(path.join(root, 'dist', 'app.js'));
+    assert.equal(await bundleState(root), 'missing');
+  });
 });

@@ -15,6 +15,7 @@ import http from 'node:http';
 import https from 'node:https';
 import { BlockList, isIP } from 'node:net';
 import type { LookupFunction } from 'node:net';
+import { pipeline } from 'node:stream';
 import zlib from 'node:zlib';
 import { CapabilityError } from '../catalog/index.ts';
 
@@ -25,41 +26,64 @@ const USER_AGENT = 'Balabash/1.0';
 // ---------------------------------------------------------------------------
 // The addresses that are not of the public internet.
 
-const notPublic = new BlockList();
+// IPv4: every address is of the public internet except the special-purpose
+// blocks (the IANA IPv4 special-purpose registry) nobody reaches globally.
+const specialV4 = new BlockList();
 
-notPublic.addSubnet('0.0.0.0', 8, 'ipv4'); // "this network"
-notPublic.addSubnet('10.0.0.0', 8, 'ipv4'); // private
-notPublic.addSubnet('100.64.0.0', 10, 'ipv4'); // carrier-grade NAT
-notPublic.addSubnet('127.0.0.0', 8, 'ipv4'); // loopback
-notPublic.addSubnet('169.254.0.0', 16, 'ipv4'); // link-local (cloud metadata)
-notPublic.addSubnet('172.16.0.0', 12, 'ipv4'); // private
-notPublic.addSubnet('192.0.0.0', 24, 'ipv4'); // IETF protocol assignments
-notPublic.addSubnet('192.0.2.0', 24, 'ipv4'); // documentation
-notPublic.addSubnet('192.168.0.0', 16, 'ipv4'); // private
-notPublic.addSubnet('198.18.0.0', 15, 'ipv4'); // benchmarking
-notPublic.addSubnet('198.51.100.0', 24, 'ipv4'); // documentation
-notPublic.addSubnet('203.0.113.0', 24, 'ipv4'); // documentation
-notPublic.addSubnet('224.0.0.0', 3, 'ipv4'); // multicast, reserved, broadcast
-// An IPv4-mapped address (::ffff:a.b.c.d) is checked by BlockList against
-// the IPv4 subnets above; a subnet for ::ffff:0:0/96 would match them all.
-notPublic.addSubnet('::', 96, 'ipv6'); // unspecified, loopback, IPv4-compatible
-notPublic.addSubnet('64:ff9b::', 96, 'ipv6'); // NAT64
-notPublic.addSubnet('64:ff9b:1::', 48, 'ipv6'); // local-use NAT64
-notPublic.addSubnet('100::', 64, 'ipv6'); // discard-only
-notPublic.addSubnet('2001:db8::', 32, 'ipv6'); // documentation
-notPublic.addSubnet('2002::', 16, 'ipv6'); // 6to4
-notPublic.addSubnet('fc00::', 7, 'ipv6'); // unique local
-notPublic.addSubnet('fe80::', 10, 'ipv6'); // link-local
-notPublic.addSubnet('fec0::', 10, 'ipv6'); // site-local
-notPublic.addSubnet('ff00::', 8, 'ipv6'); // multicast
+specialV4.addSubnet('0.0.0.0', 8, 'ipv4'); // "this network"
+specialV4.addSubnet('10.0.0.0', 8, 'ipv4'); // private
+specialV4.addSubnet('100.64.0.0', 10, 'ipv4'); // carrier-grade NAT
+specialV4.addSubnet('127.0.0.0', 8, 'ipv4'); // loopback
+specialV4.addSubnet('169.254.0.0', 16, 'ipv4'); // link-local (cloud metadata)
+specialV4.addSubnet('172.16.0.0', 12, 'ipv4'); // private
+specialV4.addSubnet('192.0.0.0', 24, 'ipv4'); // IETF protocol assignments
+specialV4.addSubnet('192.0.2.0', 24, 'ipv4'); // documentation
+specialV4.addSubnet('192.88.99.0', 24, 'ipv4'); // the 6to4 relay anycast, deprecated
+specialV4.addSubnet('192.168.0.0', 16, 'ipv4'); // private
+specialV4.addSubnet('198.18.0.0', 15, 'ipv4'); // benchmarking
+specialV4.addSubnet('198.51.100.0', 24, 'ipv4'); // documentation
+specialV4.addSubnet('203.0.113.0', 24, 'ipv4'); // documentation
+specialV4.addSubnet('224.0.0.0', 3, 'ipv4'); // multicast, reserved, broadcast
+
+// IPv6 the other way round: the public internet is the global unicast space
+// 2000::/3 and nothing else — whatever lies outside it (loopback, NAT64,
+// unique local, link-local, multicast, a block assigned tomorrow) is not
+// public without being listed — less the special-purpose blocks inside it
+// (the IANA IPv6 special-purpose registry).
+const globalUnicastV6 = new BlockList();
+
+globalUnicastV6.addSubnet('2000::', 3, 'ipv6');
+
+const specialV6 = new BlockList();
+
+// IETF protocol assignments, the whole block: Teredo, benchmarking, ORCHID.
+// The few anycast services inside it are not where a GET goes.
+specialV6.addSubnet('2001::', 23, 'ipv6');
+specialV6.addSubnet('2001:db8::', 32, 'ipv6'); // documentation
+specialV6.addSubnet('2002::', 16, 'ipv6'); // 6to4
+specialV6.addSubnet('3fff::', 20, 'ipv6'); // documentation
+
+// An IPv4-mapped address (::ffff:a.b.c.d, in any notation) is the IPv4
+// address it carries: BlockList checks it against the IPv4 subnets.
+const mappedV4 = new BlockList();
+
+mappedV4.addSubnet('::ffff:0:0', 96, 'ipv6');
 
 export function isPublicAddress(raw: string): boolean {
   // Without the zone of a link-local address ("fe80::1%eth0").
   const address = raw.split('%')[0] ?? '';
-  const family = isIP(address);
 
-  // What is not an address is not a public one.
-  return family === 0 ? false : !notPublic.check(address, family === 4 ? 'ipv4' : 'ipv6');
+  switch (isIP(address)) {
+    case 4:
+      return !specialV4.check(address, 'ipv4');
+    case 6:
+      return mappedV4.check(address, 'ipv6')
+        ? !specialV4.check(address, 'ipv6')
+        : globalUnicastV6.check(address, 'ipv6') && !specialV6.check(address, 'ipv6');
+    default:
+      // What is not an address is not a public one.
+      return false;
+  }
 }
 
 export type ResolvedAddress = { address: string; family: number };
@@ -82,7 +106,9 @@ export const internet: Net = {
 
 export type CallTime = {
   signal: AbortSignal;
-  // Why the signal fired, as the outcome of the call.
+  // Whether the signal fired because the time ran out, not by cancellation.
+  expired(): boolean;
+  // Why the signal fired, as the outcome of an exchange it cut.
   ended(): CapabilityError;
 };
 
@@ -91,6 +117,7 @@ export function callTime(timeoutSeconds: number, cancelled: AbortSignal | null):
 
   return {
     signal: cancelled ? AbortSignal.any([timeout, cancelled]) : timeout,
+    expired: () => timeout.aborted,
     ended: () =>
       timeout.aborted
         ? new CapabilityError('unavailable', `No complete response within ${timeoutSeconds} seconds: the request was dropped.`)
@@ -255,6 +282,17 @@ function send(
       response.on('error', () => {});
       resolve(response);
     });
+    // A server that switches protocols instead of answering: the request
+    // ends with neither a response nor an error.
+    request.once('upgrade', (response, socket) => {
+      socket.destroy();
+      reject(
+        new CapabilityError('external_error', `${url.host} answered the GET by switching protocols (${response.statusCode}), not with a response.`),
+      );
+    });
+    // Whatever closes the request before a response ends the wait: every
+    // exchange has an outcome, with or without an event that names it.
+    request.once('close', () => reject(exchangeFailure(new Error('the connection closed without a response'), url, time)));
     request.end();
   });
 }
@@ -298,6 +336,8 @@ function headersOf(response: http.IncomingMessage): Record<string, string> {
 // The content codings this side takes off.
 const DECODED_CODINGS = new Set(['gzip', 'x-gzip', 'deflate', 'br', 'zstd']);
 
+const ZSTD_WINDOW_LOG_MAX = 23;
+
 function decoderOf(coding: string): zlib.Gunzip | zlib.Inflate | zlib.BrotliDecompress | zlib.ZstdDecompress | null {
   switch (coding) {
     case 'gzip':
@@ -308,7 +348,10 @@ function decoderOf(coding: string): zlib.Gunzip | zlib.Inflate | zlib.BrotliDeco
     case 'br':
       return zlib.createBrotliDecompress();
     case 'zstd':
-      return zlib.createZstdDecompress();
+      // The window of a frame is memory the decoder holds whatever the
+      // limit on its output: 8 MB is what a content coding may ask for
+      // (RFC 9659), a frame that asks for more is refused.
+      return zlib.createZstdDecompress({ params: { [zlib.constants.ZSTD_d_windowLogMax]: ZSTD_WINDOW_LOG_MAX } });
     default:
       return null;
   }
@@ -316,12 +359,10 @@ function decoderOf(coding: string): zlib.Gunzip | zlib.Inflate | zlib.BrotliDeco
 
 async function* bodyChunks(response: http.IncomingMessage, coding: string, url: URL, time: CallTime): AsyncGenerator<Buffer> {
   const decoder = decoderOf(coding);
-  // A failure of the connection reaches the decoder, and with it the reader.
-  const body = decoder ? response.pipe(decoder) : response;
-
-  if (decoder) {
-    response.on('error', error => decoder.destroy(error));
-  }
+  // The connection and the decoder end together: a failure of the
+  // connection — one that came before the first byte was asked for too —
+  // reaches the decoder, and with it the reader.
+  const body = decoder ? pipeline(response, decoder, () => {}) : response;
 
   try {
     for await (const chunk of body) {
@@ -335,7 +376,7 @@ async function* bodyChunks(response: http.IncomingMessage, coding: string, url: 
     const code = (error as NodeJS.ErrnoException | null)?.code ?? '';
     const message = error instanceof Error ? error.message : String(error);
 
-    if (decoder && /^(Z_|ERR_BROTLI|ERR_ZSTD|ERR_ZLIB)/.test(code)) {
+    if (decoder && /^(Z_|ZSTD_|ERR_BROTLI|ERR_ZSTD|ERR_ZLIB)/.test(code)) {
       // A body without a single byte carries no coded stream to end badly.
       if (code === 'Z_BUF_ERROR' && decoder.bytesWritten === 0) {
         return;

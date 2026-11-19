@@ -36,11 +36,15 @@ export async function uploadStorageObject(input: {
   contentType?: string | null;
   contentLength?: number | null;
   cacheControl?: string | null;
+  // Cuts the upload: nothing is left under the key by this side.
+  signal?: AbortSignal;
 }): Promise<{ ETag?: string; sizeBytes?: number }> {
   if (isLocal(input.bucket)) {
     // The local driver measures what it wrote; the caller's contentLength
     // is a claim (a gzip-compressed download reports the wire size).
-    const { etag, sizeBytes } = await local.writeLocalObject(config.filesRoot, input.key, input.body as local.LocalStorageBody);
+    const { etag, sizeBytes } = await local.writeLocalObject(config.filesRoot, input.key, input.body as local.LocalStorageBody, {
+      signal: input.signal,
+    });
 
     return { ETag: etag, sizeBytes };
   }

@@ -23,7 +23,7 @@
 
 import { readFile, unlink } from 'node:fs/promises';
 import path from 'node:path';
-import { appendEvent } from '../core/append.ts';
+import { appendEvent, appendEventIn, logTransaction } from '../core/append.ts';
 import { startConsumer } from '../core/consumers.ts';
 import type { Consumer } from '../core/consumers.ts';
 import {
@@ -33,6 +33,7 @@ import {
   THREAD_NOTIFICATION,
 } from '../core/envelope.ts';
 import { getEventsAfter, getLastEventSeq, getLogQuietSeconds } from '../core/events.ts';
+import { notifyAppended } from '../core/live.ts';
 import { getMainThread, listBusyRunThreads } from '../core/threads.ts';
 import type { PendingRestartView } from '../api/contract.ts';
 
@@ -107,6 +108,9 @@ export function getPendingRestart(workspaceId: string): PendingRestartView | nul
 // The answer says what the restart now pending is: a forced request stays
 // forced whatever a later one asks (the consumer below), so the requests
 // since the last completion are read from the log — this one among them.
+// The reading and the append are one transaction of the log: a request is
+// recorded together with its answer, or the call fails and nothing is
+// recorded.
 export async function requestRestart(request: {
   workspaceId: string;
   threadId: string;
@@ -115,26 +119,37 @@ export async function requestRestart(request: {
   // The agent of the requesting thread.
   requestedBy: string | null;
 }): Promise<{ forced: boolean }> {
-  await appendEvent({
-    type: SYSTEM_RESTART_REQUESTED,
-    actor: 'system',
-    workspaceId: request.workspaceId,
-    threadId: request.threadId,
-    payload: {
-      reason: request.reason,
-      ...(request.force ? { force: true } : {}),
-      ...(request.requestedBy ? { requestedBy: request.requestedBy } : {}),
-    },
+  const { seq, forced } = await logTransaction(async tx => {
+    const appended = await appendEventIn(tx, {
+      type: SYSTEM_RESTART_REQUESTED,
+      actor: 'system',
+      workspaceId: request.workspaceId,
+      threadId: request.threadId,
+      payload: {
+        reason: request.reason,
+        ...(request.force ? { force: true } : {}),
+        ...(request.requestedBy ? { requestedBy: request.requestedBy } : {}),
+      },
+    });
+
+    // A request is no terminal and no command of a thread: it is written.
+    const written = appended.written ? appended.event.seq : null;
+
+    if (request.force) {
+      return { seq: written, forced: true };
+    }
+
+    const lastCompletedSeq = (await getLastEventSeq(SYSTEM_RESTART_COMPLETED, tx)) ?? 0n;
+    const pendingRequests = await getEventsAfter(lastCompletedSeq, { types: [SYSTEM_RESTART_REQUESTED], limit: 50, reader: tx });
+
+    return { seq: written, forced: pendingRequests.some(event => event.payload.force === true) };
   });
 
-  if (request.force) {
-    return { forced: true };
+  if (seq !== null) {
+    notifyAppended(seq);
   }
 
-  const lastCompletedSeq = (await getLastEventSeq(SYSTEM_RESTART_COMPLETED)) ?? 0n;
-  const pendingRequests = await getEventsAfter(lastCompletedSeq, { types: [SYSTEM_RESTART_REQUESTED], limit: 50 });
-
-  return { forced: pendingRequests.some(event => event.payload.force === true) };
+  return { forced };
 }
 
 async function readRollbackMarker(): Promise<{ at?: string; reason?: string } | null> {

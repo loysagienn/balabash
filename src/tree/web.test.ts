@@ -22,7 +22,7 @@ import type { Catalog, ConnectionsPort, ErrorKind, Grant } from '../catalog/inde
 import type { JsonObject } from '../core/contract.ts';
 import { startStand } from '../test-support/stand.ts';
 import type { Stand } from '../test-support/stand.ts';
-import { internet, isPublicAddress } from './web-request.ts';
+import { callTime, internet, isPublicAddress, openPublicUrl } from './web-request.ts';
 import type { Net } from './web-request.ts';
 
 const NO_CONNECTIONS: ConnectionsPort = {
@@ -38,8 +38,10 @@ let grant: Grant;
 let treeGrant: Grant;
 let server: http.Server;
 let garbage: net.Server;
+let switching: net.Server;
 let port: number;
 let garbagePort: number;
+let switchingPort: number;
 // How many times each name was resolved.
 const resolved = new Map<string, number>();
 
@@ -102,6 +104,8 @@ const site = (route: string) => `http://site.test:${port}${route}`;
 
 const PDF = Buffer.from('%PDF-1.7\n\0\u0001\u0002 the bytes of a file\n');
 const REPORT = 'отчёт';
+// Longer than a name may be, and its 146th character is a surrogate pair.
+const LONG_NAME = `${'я'.repeat(145)}${'😀'.repeat(100)}.pdf`;
 
 // The test's server: one route per behaviour of a server.
 function serve(request: http.IncomingMessage, response: http.ServerResponse): void {
@@ -188,6 +192,24 @@ function serve(request: http.IncomingMessage, response: http.ServerResponse): vo
   } else if (route === '/cut') {
     response.writeHead(200, { 'content-type': 'application/pdf', 'content-length': 1000 });
     response.write('only the beginning', () => request.socket.destroy());
+  } else if (route === '/cut-packed') {
+    response.writeHead(200, { 'content-type': 'text/plain', 'content-encoding': 'gzip', 'content-length': 1000 });
+    response.write(zlib.gzipSync('d'.repeat(5000)).subarray(0, 20), () => request.socket.destroy());
+  } else if (route === '/zstd') {
+    text(200, zlib.zstdCompressSync('zstd says hello'), { 'content-encoding': 'zstd' });
+  } else if (route === '/zstd-wide') {
+    // A frame whose window is 16 MB.
+    text(200, zlib.zstdCompressSync(Buffer.alloc(20_000_000), { params: { [zlib.constants.ZSTD_c_windowLog]: 24 } }), { 'content-encoding': 'zstd' });
+  } else if (route === '/untyped-stream') {
+    // Bytes without a type, and no end to them.
+    response.writeHead(200);
+    response.write(Buffer.from([1, 0, 2, 3]));
+  } else if (route === '/long-name') {
+    response.writeHead(200, { 'content-type': 'application/pdf', 'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(LONG_NAME)}` });
+    response.end(PDF);
+  } else if (route === '/huge') {
+    response.writeHead(200, { 'content-type': 'application/zip', 'content-length': 300_000_001 });
+    response.write('the beginning');
   } else if (route === '/files/report.pdf') {
     response.writeHead(200, { 'content-type': 'application/pdf', 'content-length': PDF.length });
     response.end(PDF);
@@ -252,12 +274,19 @@ before(async () => {
     socket.end('these are not the words of HTTP\r\n\r\n');
   });
   garbagePort = await listen(garbage);
+  // Something that answers a GET by switching protocols.
+  switching = net.createServer(socket => {
+    socket.on('error', () => {});
+    socket.once('data', () => socket.write('HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: other\r\n\r\n'));
+  });
+  switchingPort = await listen(switching);
 });
 
 after(async () => {
   server.closeAllConnections();
   server.close();
   garbage.close();
+  switching.close();
   await stand.stop();
 });
 
@@ -272,30 +301,81 @@ describe('the addresses of the public internet', () => {
       '192.168.0.1',
       '169.254.169.254',
       '100.64.0.1',
+      '100.127.255.255',
       '0.0.0.0',
-      '224.0.0.1',
-      '255.255.255.255',
+      '0.1.2.3',
+      '192.0.0.1',
       '192.0.2.1',
+      '192.88.99.1',
+      '192.88.99.255',
+      '198.18.0.1',
+      '198.19.255.255',
+      '198.51.100.1',
+      '203.0.113.1',
+      '224.0.0.1',
+      '240.0.0.1',
+      '255.255.255.255',
       '::',
       '::1',
       '::127.0.0.1',
       '::ffff:127.0.0.1',
       '::ffff:7f00:1',
       '::ffff:10.0.0.1',
+      '0:0:0:0:0:ffff:10.0.0.1',
+      '::ffff:192.88.99.1',
+      '::ffff:c058:6301',
       'fe80::1',
       'fe80::1%eth0',
+      'fec0::1',
       'fc00::1',
       'fd12:3456::1',
       'ff02::1',
       '64:ff9b::7f00:1',
+      '64:ff9b:1::1',
+      '100::1',
+      '2001::1',
+      '2001:2::1',
+      '2001:10::1',
+      '2001:1ff:ffff::1',
       '2001:db8::1',
+      '2002:7f00:1::1',
+      '3fff::1',
+      '3fff:fff:ffff::1',
+      // Outside the global unicast space: nothing public is assigned there.
+      '1::1',
+      '4000::1',
+      '5f00::1',
       'not an address',
       '',
     ]) {
       assert.equal(isPublicAddress(address), false, address);
     }
 
-    for (const address of ['8.8.8.8', '1.1.1.1', '172.32.0.1', '100.128.0.1', '::ffff:8.8.8.8', '2606:4700:4700::1111', '2a00:1450::200e']) {
+    for (const address of [
+      '8.8.8.8',
+      '1.1.1.1',
+      '172.15.255.255',
+      '172.32.0.1',
+      '100.63.255.255',
+      '100.128.0.1',
+      '192.0.1.1',
+      '192.88.98.1',
+      '192.88.100.1',
+      '198.17.255.255',
+      '198.20.0.1',
+      '223.255.255.255',
+      '::ffff:8.8.8.8',
+      '::ffff:808:808',
+      '::ffff:192.88.98.1',
+      '2606:4700:4700::1111',
+      '2a00:1450::200e',
+      '2001:200::1',
+      '2001:4860:4860::8888',
+      '2001:db9::1',
+      '2003::1',
+      '2620:fe::fe',
+      '3fff:1000::1',
+    ]) {
       assert.equal(isPublicAddress(address), true, address);
     }
   });
@@ -457,6 +537,14 @@ describe('web_get', () => {
     assert.deepEqual([words.contentType, words.bodyKind, words.content, words.downloadedBytes], [null, 'text', 'plain words', 11]);
     assert.deepEqual([bytes.contentType, bytes.bodyKind, bytes.content, bytes.downloadedBytes, bytes.sizeBytes], [null, 'binary', null, null, 4]);
     assert.deepEqual([latin.content, latin.downloadedBytes], ['café', 4]);
+
+    // Told as the beginning arrives: the rest of a binary body is not
+    // waited for.
+    const started = Date.now();
+    const stream = await invoke('web_get', { url: site('/untyped-stream'), timeoutSeconds: 20 });
+
+    assert.deepEqual([stream.bodyKind, stream.content, stream.sizeBytes], ['binary', null, null]);
+    assert.ok(Date.now() - started < 5000);
   });
 
   test('a content coding is taken off: the limit and the count are of the content; a coding nobody knows leaves a body that is not for reading', async () => {
@@ -470,10 +558,14 @@ describe('web_get', () => {
     assert.deepEqual([gzip.content, gzip.downloadedBytes, gzip.truncated, gzip.headers['content-encoding']], [packed, packed.length, false, 'gzip']);
     assert.deepEqual([cut.content, cut.downloadedBytes, cut.truncated], [packed.slice(0, 1000), 1000, true]);
     assert.equal(brotli.content, 'brotli says hello');
+    assert.equal((await invoke('web_get', { url: site('/zstd') })).content, 'zstd says hello');
     assert.deepEqual([nothing.bodyKind, nothing.content, nothing.downloadedBytes], ['text', '', 0]);
     assert.deepEqual([odd.bodyKind, odd.content, odd.sizeBytes, odd.headers['content-encoding']], ['binary', null, 13, 'x-odd']);
 
     await refuses(invoke('web_get', { url: site('/bad-gzip') }), 'external_error', /The body site\.test:\d+ sent is not valid "gzip" content/);
+    // A frame that asks the decoder for more memory than a content coding
+    // may is not decoded.
+    await refuses(invoke('web_get', { url: site('/zstd-wide') }), 'external_error', /is not valid "zstd" content/);
   });
 
   test('no answer is unavailable: the time is for the whole request — the headers and the body — and a dropped connection is not a response', async () => {
@@ -489,6 +581,36 @@ describe('web_get', () => {
     await new Promise(resolve => setTimeout(resolve, 50));
     await refuses(invoke('web_get', { url: `http://site.test:${garbagePort}/` }), 'unavailable', /No response from site\.test:\d+: ECONNREFUSED/);
     garbagePort = await listen(garbage);
+  });
+
+  test('every exchange has an outcome well before its time is out: a server that switches protocols, a coded body whose connection broke before the first byte was read', async () => {
+    const started = Date.now();
+
+    await refuses(invoke('web_get', { url: `http://site.test:${switchingPort}/`, timeoutSeconds: 60 }), 'external_error', /^site\.test:\d+ answered the GET by switching protocols \(101\), not with a response\.$/);
+    await refuses(invoke('web_download', { url: `http://site.test:${switchingPort}/file`, timeoutSeconds: 60 }), 'external_error', /switching protocols/);
+
+    for (const [route, acceptEncoding] of [['/cut-packed', 'gzip'], ['/cut', 'identity']] as const) {
+      const answer = await openPublicUrl(site(route), { net: testNet, time: callTime(60, null), acceptEncoding });
+
+      // The connection breaks while nobody reads.
+      await new Promise(resolve => setTimeout(resolve, 300));
+
+      await refuses(
+        (async () => {
+          for await (const _chunk of answer.chunks()) {
+            // Whatever arrived before the break.
+          }
+        })(),
+        'unavailable',
+        /The connection to site\.test:\d+ failed before the body was complete/,
+      );
+      answer.close();
+    }
+
+    await refuses(invoke('web_get', { url: site('/cut-packed'), timeoutSeconds: 60 }), 'unavailable', /failed before the body was complete/);
+    await refuses(invoke('web_download', { url: site('/cut-packed'), timeoutSeconds: 60 }), 'unavailable', /failed before the body was complete/);
+    assert.ok(Date.now() - started < 10_000);
+    assert.deepEqual(await leftovers(), []);
   });
 
   test('a call that is cancelled drops the request', async () => {
@@ -528,6 +650,13 @@ describe('web_download', () => {
     assert.equal(await new Response(await files.openFileContent(packed.id)).text(), 'c'.repeat(4000));
   });
 
+  test('a name longer than a name may be is cut by characters with its extension kept, and the file under it is stored and read', async () => {
+    const long = await invoke('web_download', { url: site('/long-name') });
+
+    assert.equal(long.name, `${'я'.repeat(145)}😀.pdf`);
+    assert.deepEqual(Buffer.from(await new Response(await files.openFileContent(long.id)).arrayBuffer()), PDF);
+  });
+
   test('fails as a whole and stores nothing: a status that is not 2xx, an empty body, a file over the limit — declared or found on the way — a body cut off, no answer in time', async () => {
     const before = await storedFiles();
     const missing = await refuses(invoke('web_download', { url: site('/missing') }), 'external_error', /\/missing answered 404 Not Found: nothing was stored\.$/);
@@ -539,6 +668,9 @@ describe('web_download', () => {
     await refuses(invoke('web_download', { url: site('/big'), maxFileBytes: 1000 }), 'invalid_input', /^The file is 5000 bytes, over the limit of 1000 bytes: nothing was stored\./);
     await refuses(invoke('web_download', { url: site('/big-chunked'), maxFileBytes: 4000 }), 'invalid_input', /^The file is larger than the limit of 4000 bytes: nothing was stored\./);
     await refuses(invoke('web_download', { url: site('/packed-file'), maxFileBytes: 1000 }), 'invalid_input', /larger than the limit of 1000 bytes/);
+    // Advice to raise the limit is given only while it can be raised.
+    await refuses(invoke('web_download', { url: site('/big'), maxFileBytes: 1000 }), 'invalid_input', /Raise maxFileBytes if the file is wanted\.$/);
+    await refuses(invoke('web_download', { url: site('/huge'), maxFileBytes: 300_000_000 }), 'invalid_input', /^The file is 300000001 bytes, over the limit of 300000000 bytes: nothing was stored\. That is the largest file a download takes\.$/);
     await refuses(invoke('web_download', { url: site('/cut') }), 'unavailable', /The connection to site\.test:\d+ failed before the body was complete/);
     await refuses(invoke('web_download', { url: site('/stalls'), timeoutSeconds: 1 }), 'unavailable', /No complete response within 1 seconds/);
     await refuses(invoke('web_download', { url: site('/hops/6') }), 'external_error', /More than 5 redirects/);

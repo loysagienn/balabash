@@ -280,7 +280,10 @@ async function appendThreadStarted(tx: Tx, input: AppendInput): Promise<AppendRe
     },
   });
 
-  await bumpProjectRecency(tx, threadId);
+  // A thread outside any project — most are — has no date to move.
+  if (projectId) {
+    await bumpProjectRecency(tx, threadId);
+  }
 
   return { written: true, event };
 }

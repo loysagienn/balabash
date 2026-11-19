@@ -43,6 +43,8 @@ export async function uploadStorageObject(input: {
   contentType?: string | null;
   contentLength?: number | null;
   cacheControl?: string | null;
+  // Cuts the upload: the request is dropped.
+  signal?: AbortSignal;
 }) {
   return createStorageClient().send(
     new PutObjectCommand({
@@ -54,6 +56,7 @@ export async function uploadStorageObject(input: {
       CacheControl: input.cacheControl ?? undefined,
       ACL: 'private',
     }),
+    { abortSignal: input.signal },
   );
 }
 

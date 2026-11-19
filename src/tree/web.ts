@@ -3,7 +3,7 @@
 // addresses it reaches and how long it may take is web-request.ts; here is
 // what each capability makes of the answer.
 
-import { createReadStream } from 'node:fs';
+import { createReadStream, type ReadStream } from 'node:fs';
 import fs from 'node:fs/promises';
 import { Readable } from 'node:stream';
 import { z } from 'zod';
@@ -37,10 +37,9 @@ function declaredLength(answer: WebAnswer): number | null {
 // ---------------------------------------------------------------------------
 // get
 
-// A body without a declared type is text unless its beginning holds a NUL.
-function looksBinary(bytes: Buffer): boolean {
-  return bytes.subarray(0, 4096).includes(0);
-}
+// A body without a declared type is text unless its beginning — this many
+// bytes — holds a NUL.
+const SNIFFED_BYTES = 4096;
 
 // The bytes of a text body as characters. A body cut at the byte limit may
 // end inside a character: the cut-off bytes are dropped, not replaced.
@@ -116,7 +115,17 @@ function get(net: Net) {
         let size = 0;
         let truncated = false;
 
+        let arrived = 0;
+
         for await (const chunk of answer.chunks()) {
+          // Told as the beginning arrives: a binary body is not read
+          // further, however long the server takes to send the rest.
+          if (type === null && arrived < SNIFFED_BYTES && chunk.subarray(0, SNIFFED_BYTES - arrived).includes(0)) {
+            return binary;
+          }
+
+          arrived += chunk.length;
+
           if (size + chunk.length > input.maxContentBytes) {
             chunks.push(chunk.subarray(0, input.maxContentBytes - size));
             size = input.maxContentBytes;
@@ -128,16 +137,10 @@ function get(net: Net) {
           size += chunk.length;
         }
 
-        const bytes = Buffer.concat(chunks);
-
-        if (type === null && looksBinary(bytes)) {
-          return binary;
-        }
-
         return {
           ...response,
           bodyKind: 'text' as const,
-          content: decodeText(bytes, charset, truncated),
+          content: decodeText(Buffer.concat(chunks), charset, truncated),
           downloadedBytes: size,
           truncated,
           sizeBytes: null,
@@ -189,14 +192,18 @@ function filename(raw: string): string | null {
     return null;
   }
 
-  if (cleaned.length <= FILENAME_MAX_LENGTH) {
+  // Counted and cut by characters: a cut never leaves half of a surrogate
+  // pair in the name.
+  const characters = Array.from(cleaned);
+
+  if (characters.length <= FILENAME_MAX_LENGTH) {
     return cleaned;
   }
 
   const dot = cleaned.lastIndexOf('.');
-  const extension = dot > 0 ? cleaned.slice(dot).slice(0, 20) : '';
+  const extension = dot > 0 ? Array.from(cleaned.slice(dot)).slice(0, 20) : [];
 
-  return cleaned.slice(0, FILENAME_MAX_LENGTH - extension.length) + extension;
+  return [...characters.slice(0, FILENAME_MAX_LENGTH - extension.length), ...extension].join('');
 }
 
 // The filename of a Content-Disposition header: the extended form
@@ -250,10 +257,14 @@ function downloadName(answer: WebAnswer, type: string | null): string {
   );
 }
 
+const MAX_FILE_BYTES = 300_000_000;
+
 function tooLarge(sizeBytes: number | null, maxFileBytes: number): CapabilityError {
+  const advice = maxFileBytes < MAX_FILE_BYTES ? 'Raise maxFileBytes if the file is wanted.' : 'That is the largest file a download takes.';
+
   return new CapabilityError(
     'invalid_input',
-    `The file is ${sizeBytes === null ? 'larger than' : `${sizeBytes} bytes, over`} the limit of ${maxFileBytes} bytes: nothing was stored. Raise maxFileBytes if the file is wanted.`,
+    `The file is ${sizeBytes === null ? 'larger than' : `${sizeBytes} bytes, over`} the limit of ${maxFileBytes} bytes: nothing was stored. ${advice}`,
   );
 }
 
@@ -281,7 +292,7 @@ function download(net: Net) {
     input: z.strictObject({
       url: z.string(),
       timeoutSeconds: z.number().min(1).max(300).default(60).describe('For the whole download.'),
-      maxFileBytes: z.int().min(1000).max(300_000_000).default(100_000_000),
+      maxFileBytes: z.int().min(1000).max(MAX_FILE_BYTES).default(100_000_000),
     }),
     output: FileRef,
     async run(input, { caller, signal }) {
@@ -290,6 +301,7 @@ function download(net: Net) {
       // asked for; one the server applies anyway is taken off.
       const answer = await openPublicUrl(input.url, { net, time, acceptEncoding: 'identity' });
       let temp: string | null = null;
+      let content: ReadStream | null = null;
 
       try {
         if (answer.status < 200 || answer.status > 299) {
@@ -327,21 +339,45 @@ function download(net: Net) {
 
         const { type } = contentTypeOf(answer.headers['content-type']);
         const name = downloadName(answer, type);
+        // The time of the call covers the way into storage too: bytes
+        // still on their way there when it runs out are dropped. A file
+        // whose bytes storage has taken is stored, and the call answers
+        // with it.
+        content = createReadStream(temp);
+
         const stored = await ingestFile({
-          body: createReadStream(temp),
+          body: content,
           workspaceId: caller.workspaceId,
           originalFilename: name,
           contentType: type ?? guessContentType(name),
           sizeBytes: size,
           scope: DOWNLOAD_SCOPE,
+          signal: time.signal,
+        }).catch((error: unknown) => {
+          if (!time.signal.aborted) {
+            throw error;
+          }
+
+          throw new CapabilityError(
+            'unavailable',
+            time.expired()
+              ? `The file arrived, but storing it did not finish within ${input.timeoutSeconds} seconds: nothing was stored.`
+              : 'The call was cancelled while the file was being stored: nothing was stored.',
+          );
         });
 
         return fileRefValue(stored);
       } finally {
         answer.close();
+        // An upload that was cut may not have closed what it was reading.
+        content?.destroy();
 
         if (temp !== null) {
-          await fs.rm(temp, { force: true });
+          // A copy that could not be removed is not the caller's failure:
+          // the outcome of the call stands.
+          await fs.rm(temp, { force: true }).catch((error: unknown) => {
+            console.warn(`[web] the temporary copy of a download stays behind (${temp}):`, error);
+          });
         }
       }
     },
