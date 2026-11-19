@@ -26,6 +26,9 @@ confidential from them.
 - `src/` — the app. `core/` (event log, envelopes, threads), `capabilities/`
   (tool servers, the tool manager, the agent runtime and session runner,
   agent validation, per-user connections and installation secrets),
+  `catalog/` (the capability catalog of the new tool scheme: what an author
+  writes, the build with the rules of the scheme, signatures, grants,
+  `describe` and the one path of a call; no port is wired to it yet),
   `coordinator/` (the secretary: instructions and function definitions),
   `harness/` (the model backends: `claude-sdk/`, `codex-sdk/`, `openai/`,
   `anthropic/`), `adapters/` (surfaces: `telegram/`, `ccr/`), `api/` (the
