@@ -4,6 +4,8 @@
 
 import { CapabilityError } from '../catalog/index.ts';
 
+const MAX_SEQ = 2n ** 63n - 1n;
+
 export function seqCursor(seq: bigint | number): string {
   return String(seq);
 }
@@ -14,11 +16,12 @@ export function cursorSeq(cursor: string | undefined): bigint | undefined {
     return undefined;
   }
 
-  // A seq is a bigint of the database: 18 digits keep any cursor inside it.
-  if (!/^\d{1,18}$/.test(cursor)) {
+  // What seqCursor writes: a position of the log — a positive integer of
+  // the database's bigint, without leading zeros.
+  if (!/^[1-9]\d{0,18}$/.test(cursor) || BigInt(cursor) > MAX_SEQ) {
     throw new CapabilityError(
       'invalid_input',
-      'cursor is not a value this capability gave: pass `nextCursor` of the previous result as it is, or leave cursor out for the first page.',
+      'cursor is not a cursor of this list: pass `nextCursor` of the previous result as it is, or leave cursor out for the first page.',
     );
   }
 

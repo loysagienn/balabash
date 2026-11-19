@@ -25,7 +25,10 @@ export const COORDINATOR_AGENT = 'coordinator';
 // plus `headless` and `remote`, read from the thread's own thread.started.
 type ThreadReadRow = ThreadRow & { headless: boolean; remote: boolean };
 
-function toThread(row: ThreadReadRow): Thread {
+// A thread without the summary it left: what a list of threads shows.
+export type ThreadHead = Omit<Thread, 'summary'>;
+
+function toThreadHead(row: Omit<ThreadReadRow, 'summary'>): ThreadHead {
   return {
     id: row.id,
     workspaceId: row.workspaceId,
@@ -34,7 +37,6 @@ function toThread(row: ThreadReadRow): Thread {
     title: row.title,
     description: row.description,
     status: row.status as ThreadStatus,
-    summary: row.summary as ThreadSummary | null,
     projectId: row.projectId,
     headless: row.headless,
     remote: row.remote,
@@ -45,6 +47,10 @@ function toThread(row: ThreadReadRow): Thread {
   };
 }
 
+function toThread(row: ThreadReadRow): Thread {
+  return { ...toThreadHead(row), summary: row.summary as ThreadSummary | null };
+}
+
 // Every read of threads is raw SQL over this shape: the columns of the
 // projection aliased to the model's field names, and the spawn-time facts
 // `headless` and `remote` joined in from the thread.started the row was
@@ -53,12 +59,17 @@ function toThread(row: ThreadReadRow): Thread {
 // source; `= 'true'::jsonb` reads a boolean and nothing else as true (a
 // missing or odd value is not), with no cast that could fail on an odd
 // payload.
-const THREAD_COLUMNS = Prisma.sql`threads.id, threads.workspace_id AS "workspaceId", threads.parent_id AS "parentId", threads.agent, threads.title,
-       threads.description, threads.status, threads.summary, threads.project_id AS "projectId",
+//
+// The summary is the one heavy column — a whole report — and stands apart:
+// a read of many threads that does not show it does not carry it out of the
+// database (listThreadHeads).
+const THREAD_HEAD_COLUMNS = Prisma.sql`threads.id, threads.workspace_id AS "workspaceId", threads.parent_id AS "parentId", threads.agent, threads.title,
+       threads.description, threads.status, threads.project_id AS "projectId",
        COALESCE(started.payload -> 'headless' = 'true'::jsonb, false) AS headless,
        COALESCE(started.payload -> 'remote' = 'true'::jsonb, false) AS remote,
        threads.created_seq AS "createdSeq", threads.terminal_seq AS "terminalSeq",
        threads.created_at AS "createdAt", threads.updated_at AS "updatedAt"`;
+const THREAD_COLUMNS = Prisma.sql`${THREAD_HEAD_COLUMNS}, threads.summary`;
 const THREADS_FROM = Prisma.sql`threads LEFT JOIN events started ON started.seq = threads.created_seq`;
 
 async function readThreads(db: DbClient, where: Prisma.Sql, tail: Prisma.Sql = Prisma.empty): Promise<Thread[]> {
@@ -96,6 +107,18 @@ export async function listThreads(workspaceId: string, { limit = 100, order = 'a
   }
 
   return threads;
+}
+
+// The same threads in the same order as listThreads with order 'desc' —
+// the same filters, newest first — without their summaries.
+export async function listThreadHeads(workspaceId: string, { limit = 100, ...filters }: ThreadFilters & { limit?: number } = {}): Promise<ThreadHead[]> {
+  const rows = await prisma.$queryRaw<Omit<ThreadReadRow, 'summary'>[]>`
+    SELECT ${THREAD_HEAD_COLUMNS}
+    FROM ${THREADS_FROM}
+    WHERE ${threadsWhere(workspaceId, filters)}
+    ORDER BY threads.created_seq DESC LIMIT ${limit}`;
+
+  return rows.map(toThreadHead);
 }
 
 // The thread of the workspace that ended last — the one with the greatest

@@ -238,10 +238,28 @@ describe('threads_list', () => {
     assert.deepEqual((await invoke('threads_list', { createdAtGte: '2999-01-01T00:00:00+03:00' })).threads, []);
   });
 
+  test('a moment finer than a millisecond stays inside the range asked for', async () => {
+    const all = (await invoke('threads_list', {})).threads as Value[];
+    const third = all.find(thread => thread.threadId === ids[2]) as Value;
+    // A moment after the start of the thread, by less than a millisecond.
+    const justAfter = (third.createdAt as string).replace('Z', '0001Z');
+    const shows = async (filter: JsonObject) => ((await invoke('threads_list', filter)).threads as Value[]).some(thread => thread.threadId === ids[2]);
+
+    assert.equal(await shows({ createdAtGte: justAfter }), false, 'started before the moment');
+    assert.equal(await shows({ createdAtLte: justAfter }), true);
+    // The same moment written with more digits is the same moment.
+    assert.equal(await shows({ createdAtGte: (third.createdAt as string).replace('Z', '000Z') }), true);
+  });
+
   test('a moment without an offset, a made-up cursor and a limit out of range are invalid input', async () => {
     await refuses(invoke('threads_list', { createdAtGte: '2026-01-31T09:00:00' }), 'invalid_input', /createdAtGte is not an ISO 8601 date-time with an offset/);
     await refuses(invoke('threads_list', { createdAtLte: 'yesterday' }), 'invalid_input', /createdAtLte is not an ISO 8601 date-time/);
-    await refuses(invoke('threads_list', { cursor: 'next' }), 'invalid_input', /cursor is not a value this capability gave/);
+    for (const cursor of ['next', '0', '00042', '-1', '9223372036854775808']) {
+      await refuses(invoke('threads_list', { cursor }), 'invalid_input', /cursor is not a cursor of this list/);
+    }
+
+    // The largest position the log can hold is a cursor like any other.
+    assert.ok((await invoke('threads_list', { cursor: '9223372036854775807', limit: 1 })).threads.length === 1);
     await refuses(invoke('threads_list', { limit: 1001 }), 'invalid_input', /limit/);
     await refuses(invoke('threads_list', { status: null }), 'invalid_input', /status/);
   });
@@ -364,13 +382,35 @@ describe('threads_get_events', () => {
 });
 
 describe('threads_get_transcript', () => {
-  // The lines of a transcript that are events: the time markers aside.
+  // A transcript is a line per event.
   const eventLines = (transcript: string) =>
     transcript
       .split('\n')
       .filter(Boolean)
-      .map(line => JSON.parse(line) as Value)
-      .filter(line => line.type !== 'system.time');
+      .map(line => JSON.parse(line) as Value);
+  const PAGE_LIMIT = 50_000;
+
+  // Every page of the thread, read to the end: the lines in the order of
+  // the log, and the size of the largest page.
+  async function readAll(threadId: string, limit = 400): Promise<{ lines: Value[]; pages: number; largest: number }> {
+    const lines: Value[] = [];
+    let cursor: string | undefined;
+    let pages = 0;
+    let largest = 0;
+
+    do {
+      const result = await invoke('threads_get_transcript', { threadId, limit, ...(cursor ? { cursor } : {}) });
+      const page = eventLines(result.transcript);
+
+      assert.ok(page.length > 0, 'a page with a next one shows events');
+      lines.unshift(...page);
+      largest = Math.max(largest, result.transcript.length);
+      cursor = result.nextCursor ?? undefined;
+      pages += 1;
+    } while (cursor);
+
+    return { lines, pages, largest };
+  }
 
   test('a page reads in chronological order, each event with its seq, the session journal aside', async () => {
     const threadId = await startChild('Has a course');
@@ -384,7 +424,7 @@ describe('threads_get_transcript', () => {
 
     const first = await invoke('threads_get_transcript', { threadId, limit: 3 });
 
-    assert.deepEqual(eventLines(first.transcript).map(line => [line.seq, line.text]), [[seqs[1], 'step 2'], [seqs[2], 'step 3'], [seqs[3], 'step 4']]);
+    assert.deepEqual(eventLines(first.transcript).map(line => [line.seq, line.payload.text]), [[seqs[1], 'step 2'], [seqs[2], 'step 3'], [seqs[3], 'step 4']]);
     assert.ok(!first.transcript.includes('inner'));
 
     const second = await invoke('threads_get_transcript', { threadId, limit: 3, cursor: first.nextCursor });
@@ -408,22 +448,67 @@ describe('threads_get_transcript', () => {
       seqs.push((await append('thread.progress', threadId, { text: `${step}:${'x'.repeat(5000)}` })).seq);
     }
 
-    const seen: number[] = [];
-    let cursor: string | undefined;
-    let pages = 0;
+    const { lines, pages, largest } = await readAll(threadId);
 
-    do {
-      const result = await invoke('threads_get_transcript', { threadId, limit: 400, ...(cursor ? { cursor } : {}) });
-      const lines = eventLines(result.transcript);
+    assert.ok(pages > 1, 'the page is cut by its size');
+    assert.ok(largest <= PAGE_LIMIT);
+    assert.deepEqual(lines.slice(1).map(line => line.seq), seqs, 'every event once, none lost between pages');
+    assert.ok(lines.slice(1).every(line => line.truncated === true && line.payload.text.length < 5000), 'a long text is cut and marked');
+  });
 
-      assert.ok(lines.length < 31, 'the page is cut by its size');
-      seen.unshift(...lines.map(line => line.seq as number));
-      cursor = result.nextCursor ?? undefined;
-      pages += 1;
-    } while (cursor);
+  test('no page outgrows its size: a payload of many short values is cut to its first items, then to its size alone', async () => {
+    const threadId = await startChild('Has large events');
+    const rows = Array.from({ length: 20_000 }, (_item, index) => `row ${index}`);
+    const list = await append('tool.call.completed', threadId, { functionName: 'workspace_query', result: { structuredContent: { rows } } });
+    const wide = await append('tool.call.completed', threadId, {
+      functionName: 'workspace_query',
+      result: { structuredContent: Object.fromEntries(rows.slice(0, 5_000).map((row, index) => [`key${index}`, row])) },
+    });
+    const seqs: number[] = [list.seq, wide.seq];
 
-    assert.ok(pages > 1);
-    assert.deepEqual(seen.slice(1), seqs, 'every event once, none lost between pages');
+    // The ten newest events are long too: nothing is exempt from the size.
+    for (let step = 0; step < 10; step += 1) {
+      seqs.push((await append('thread.progress', threadId, { text: `${step}:${'x'.repeat(8000)}` })).seq);
+    }
+
+    const { lines, largest } = await readAll(threadId);
+
+    assert.ok(largest <= PAGE_LIMIT, `the largest page is ${largest} characters`);
+    assert.deepEqual(lines.slice(1).map(line => line.seq), seqs, 'every event once, in the order of the log');
+
+    const [, listLine, wideLine] = lines as [Value, Value, Value];
+
+    assert.equal(listLine.truncated, true);
+    assert.deepEqual(listLine.payload.result.structuredContent.rows.slice(0, 2), ['row 0', 'row 1']);
+    assert.match(listLine.payload.result.structuredContent.rows.at(-1), /^… \d+ more$/);
+    assert.equal(listLine.payload.functionName, 'workspace_query');
+    // No measure fits five thousand keys: the line keeps the event and the
+    // size of what `get_event` gives by its seq.
+    assert.deepEqual([wideLine.truncated, 'payload' in wideLine, wideLine.type], [true, false, 'tool.call.completed']);
+    assert.ok(wideLine.payloadChars > 50_000);
+    assert.equal(JSON.stringify((await invoke('get_event', { seq: wide.seq })).payload).length, wideLine.payloadChars);
+  });
+
+  test('every line names its author, whoever reads: a message of the secretary in a child thread', async () => {
+    const threadId = await startChild('Talks to its parent');
+    const author = { actor: 'agent' as const };
+    const asked = await append('thread.message', stand.mainThreadId, { text: 'Do this.' }, { ...author, agentName: 'coordinator', targetThreadId: threadId });
+    const answered = await append('thread.message', threadId, { text: 'Done.' }, { ...author, agentName: 'engineer', targetThreadId: stand.mainThreadId });
+    const [started, question, answer] = eventLines((await invoke('threads_get_transcript', { threadId })).transcript) as [Value, Value, Value];
+
+    // The thread's own events carry no threadId; an event from another
+    // thread carries the id of that thread, and nothing says "addressed
+    // here".
+    assert.deepEqual(Object.keys(started), ['seq', 'type', 'actor', 'targetThreadId', 'createdAt', 'payload']);
+    assert.deepEqual(
+      { ...question, createdAt: null },
+      { seq: asked.seq, type: 'thread.message', actor: 'agent', agentName: 'coordinator', threadId: stand.mainThreadId, createdAt: null, payload: { text: 'Do this.' } },
+    );
+    assert.deepEqual(
+      { ...answer, createdAt: null },
+      { seq: answered.seq, type: 'thread.message', actor: 'agent', agentName: 'engineer', targetThreadId: stand.mainThreadId, createdAt: null, payload: { text: 'Done.' } },
+    );
+    assert.equal(question.createdAt, (await invoke('get_event', { seq: asked.seq })).createdAt);
   });
 
   test('a thread without a course of its own gives its start; another workspace is not found', async () => {
@@ -479,8 +564,8 @@ describe('projects', () => {
     await invoke('projects_create', input('cellar'));
     await fs.writeFile(path.join(filesDir, 'a-file'), 'not a folder');
 
-    await refuses(invoke('projects_create', input('cellar', 'Another title')), 'conflict', /slug "cellar" is already taken/);
-    await refuses(invoke('projects_create', input('cellar-two', 'Title of cellar')), 'conflict', /title "Title of cellar" is already taken/);
+    await refuses(invoke('projects_create', input('cellar', 'Another title')), 'conflict', /^The slug "cellar" is taken by the project "cellar"\. Pick another slug\.$/);
+    await refuses(invoke('projects_create', input('cellar-two', 'Title of cellar')), 'conflict', /^The title "Title of cellar" is taken by the project "cellar"\. Pick another title\.$/);
     await refuses(invoke('projects_create', input('a-file')), 'conflict', /taken by a file/);
     await refuses(invoke('projects_create', input('Bad Slug')), 'invalid_input', /projects_create\(input/);
     await refuses(invoke('projects_create', input('blank-title', '   ')), 'invalid_input', /non-empty title/);
@@ -515,8 +600,8 @@ describe('projects', () => {
     await refuses(invoke('projects_update', { project: 'workshop' }), 'invalid_input', /at least one of: title, description, slug/);
     await refuses(invoke('projects_update', { project: 'workshop', title: '  ' }), 'invalid_input', /title is blank/);
     await refuses(invoke('projects_update', { project: 'nowhere', title: 'New' }), 'not_found', /no project/);
-    await refuses(invoke('projects_update', { project: 'workshop', title: 'Garden' }), 'conflict', /title "Garden" is already taken/);
-    await refuses(invoke('projects_update', { project: 'workshop', slug: 'garden' }), 'conflict', /slug "garden" is already taken/);
+    await refuses(invoke('projects_update', { project: 'workshop', title: 'Garden' }), 'conflict', /The title "Garden" is taken by the project "garden"/);
+    await refuses(invoke('projects_update', { project: 'workshop', slug: 'garden' }), 'conflict', /The slug "garden" is taken by the project "garden"/);
     await refuses(invoke('projects_update', { project: 'workshop', slug: 'a-file' }), 'conflict', /already taken/);
     assert.equal((await invoke('projects_get', { project: 'workshop' })).title, 'The shed');
   });
@@ -530,6 +615,13 @@ describe('projects', () => {
     assert.deepEqual([archived.project.archived, archived.changed], [true, true]);
     assert.deepEqual([(await invoke('projects_archive', { project: 'old-work' })).changed], [false]);
     assert.match(await fs.readFile(path.join(filesDir, 'old-work', 'AGENTS.md'), 'utf8'), /^# Title of old-work/);
+    // An archived project keeps its title, and the refusal names it by the
+    // address it reads by.
+    await refuses(
+      invoke('projects_create', input('old-work-again', 'Title of old-work')),
+      'conflict',
+      /taken by the project "old-work", which is archived: an archived project keeps its title\. Pick another title\./,
+    );
 
     // A change of the record moves the project to the top of the live list.
     await invoke('projects_update', { project: 'garden', description: 'What the garden is now.' });

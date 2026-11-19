@@ -6,11 +6,11 @@ import { z } from 'zod';
 import { CapabilityError, FileRef, capability, namedType, node, type Caller } from '../catalog/index.ts';
 import type { Thread as ThreadRecord } from '../core/contract.ts';
 import { getTranscript, getWorkspaceEventSeqs, listThreadEvents } from '../core/events.ts';
-import { getThread, listThreads } from '../core/threads.ts';
-import { buildTranscript } from '../harness/openai/transcript.ts';
+import { getThread, listThreadHeads, type ThreadHead } from '../core/threads.ts';
 import { cursorSeq, page, seqCursor } from './cursor.ts';
 import { Event, eventValue } from './events.ts';
 import { workspaceFileRefs } from './files.ts';
+import { transcriptPage } from './transcript.ts';
 
 const THREAD_STATUSES = ['active', 'completed', 'failed', 'cancelled'] as const;
 
@@ -38,7 +38,7 @@ export const Thread = namedType(
 
 export type ThreadValue = z.input<typeof Thread>;
 
-export function threadValue(thread: ThreadRecord): ThreadValue {
+export function threadValue(thread: ThreadHead): ThreadValue {
   return {
     threadId: thread.id,
     parentThreadId: thread.parentId,
@@ -67,10 +67,17 @@ async function workspaceThread(caller: Caller, threadId: string): Promise<Thread
 
 const dateTime = z.iso.datetime({ offset: true });
 
-// A moment of a filter. The signature cannot print a format, so the action
-// checks it: an explicit offset is required — a time without one would mean
-// the clock of the server.
-function moment(field: string, value: string | undefined): Date | undefined {
+// A fraction of a second finer than a millisecond: digits after the third,
+// not all of them zeros.
+const FINER_THAN_MILLISECOND = /\.\d{3}\d*[1-9]/;
+
+// A moment of a filter, as a bound of the range asked for. The signature
+// cannot print a format, so the action checks it: an explicit offset is
+// required — a time without one would mean the clock of the server. The log
+// keeps moments to the millisecond, and a finer value becomes the nearest
+// millisecond inside the range: the next one for the bound "at or after",
+// the same one for "at or before".
+function moment(field: string, value: string | undefined, bound: 'from' | 'to'): Date | undefined {
   if (value === undefined) {
     return undefined;
   }
@@ -82,7 +89,10 @@ function moment(field: string, value: string | undefined): Date | undefined {
     );
   }
 
-  return new Date(value);
+  // Date drops what is finer than a millisecond.
+  const date = new Date(value);
+
+  return bound === 'from' && FINER_THAN_MILLISECOND.test(value) ? new Date(date.getTime() + 1) : date;
 }
 
 const list = capability({
@@ -91,20 +101,19 @@ const list = capability({
   description: 'List the threads of the workspace, newest first, without their summaries.',
   input: z.strictObject({
     status: z.enum(THREAD_STATUSES).optional(),
-    createdAtGte: z.string().describe('Started at or after this ISO 8601 time.').optional(),
-    createdAtLte: z.string().describe('Started at or before this ISO 8601 time.').optional(),
+    createdAtGte: z.string().describe('Started at or after this time: ISO 8601 with an explicit offset.').optional(),
+    createdAtLte: z.string().describe('Started at or before this time: ISO 8601 with an explicit offset.').optional(),
     limit: z.int().min(1).max(1000).default(100),
     cursor: z.string().optional(),
   }),
   output: z.strictObject({ threads: z.array(Thread), nextCursor: z.string().nullable() }),
   async run(input, { caller }) {
-    const createdAtGte = moment('createdAtGte', input.createdAtGte);
-    const createdAtLte = moment('createdAtLte', input.createdAtLte);
+    const createdAtGte = moment('createdAtGte', input.createdAtGte, 'from');
+    const createdAtLte = moment('createdAtLte', input.createdAtLte, 'to');
     const beforeCreatedSeq = cursorSeq(input.cursor);
     // The order is the order of the log: a thread is as new as its
-    // thread.started.
-    const found = await listThreads(caller.workspaceId, {
-      order: 'desc',
+    // thread.started. The list shows no summaries and reads none.
+    const found = await listThreadHeads(caller.workspaceId, {
       limit: input.limit + 1,
       ...(input.status !== undefined ? { status: input.status } : {}),
       ...(createdAtGte !== undefined ? { createdAtGte } : {}),
@@ -186,17 +195,13 @@ const getTranscriptPage = capability({
       ...(beforeSeq !== undefined ? { beforeSeq } : {}),
     });
     const events = found.length > limit ? found.slice(1) : found;
-    // The transcript has a size budget of its own, filled from the newest
-    // event back: what did not fit is left to the next page.
-    const transcript = buildTranscript(events);
-    const oldest =
-      transcript.dropped && transcript.oldestSeq !== null
-        ? transcript.oldestSeq
-        : found.length > limit
-          ? events[0]?.seq
-          : undefined;
+    // The text has a size of its own, filled from the newest event back:
+    // what did not fit is left to the next page, which starts before the
+    // oldest event shown.
+    const { text, taken } = transcriptPage(thread.id, events);
+    const oldest = taken < events.length || found.length > limit ? events[events.length - taken] : undefined;
 
-    return { transcript: transcript.text, nextCursor: oldest === undefined ? null : seqCursor(oldest) };
+    return { transcript: text, nextCursor: oldest ? seqCursor(oldest.seq) : null };
   },
 });
 

@@ -84,13 +84,21 @@ const REFUSALS: Record<ProjectErrorCode, ErrorKind> = {
 };
 
 // A refusal of the registry in the kinds of the catalog; anything else is a
-// defect and stays what it is.
+// defect and stays what it is. A taken title or slug names its holder by
+// the slug — the address a caller can read the project by.
 async function registry<T>(change: () => Promise<T>): Promise<T> {
   try {
     return await change();
   } catch (error) {
     if (error instanceof ProjectError) {
-      throw new CapabilityError(REFUSALS[error.code], error.message);
+      const { clash } = error;
+
+      throw new CapabilityError(
+        REFUSALS[error.code],
+        clash
+          ? `The ${clash.field} "${clash.value}" is taken by the project "${clash.project.slug}"${clash.project.archived ? `, which is archived: an archived project keeps its ${clash.field}` : ''}. Pick another ${clash.field}.`
+          : error.message,
+      );
     }
 
     throw error;
