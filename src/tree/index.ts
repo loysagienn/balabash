@@ -21,6 +21,10 @@
 //   web-perplexity.ts — its node `perplexity`, an external MCP server on
 //   the installation's key; external-server.ts — a call of a tool of such a
 //   server;
+// - gmail.ts — the node `gmail` over the Gmail API, on the access of the
+//   user's account; gmail-mail.ts — a mail as a value and as the raw
+//   message the API takes; google-api.ts — a request to an API of Google on
+//   the access of an account;
 // - connections.ts — the node `connections`; services.ts — the services the
 //   nodes declare, told to the app's connections layer, and the connections
 //   port of the catalog over that layer;
@@ -44,6 +48,7 @@ import { refreshSecretServices } from '../capabilities/connections/services.ts';
 import { connections } from './connections.ts';
 import { getEvent } from './events.ts';
 import { fileCapabilities } from './files.ts';
+import { gmail } from './gmail.ts';
 import { projects } from './projects.ts';
 import { registerServices } from './services.ts';
 import { system } from './system.ts';
@@ -105,6 +110,7 @@ export const root: RootDefinition = {
     projects,
     workspace,
     web,
+    gmail,
     connections,
     system,
   ],

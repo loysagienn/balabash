@@ -7,6 +7,7 @@
 import { Prisma } from '../../../prisma-generated/client.ts';
 import { prisma } from '../../db/client.ts';
 import type { IdentityProbeConfig } from '../server-config.ts';
+import { connectionAccessToken } from './oauth-provider.ts';
 
 export type ProbedIdentity = { id: string; label: string | null };
 
@@ -41,9 +42,20 @@ export function getAccessToken(tokens: unknown): string | null {
     : null;
 }
 
-// The probe runs on hot paths (OAuth callback, lazy backfill around turn
-// start) — a hung provider must not hang them.
+// The probe runs on hot paths (the OAuth callback, the link for one more
+// account) — a hung provider must not hang them.
 const PROBE_TIMEOUT_MS = 10_000;
+
+// The provider answered the probe with a refusal. 401 is of the token: a
+// newer one may be let in.
+export class ProbeRefusedError extends Error {
+  status: number;
+
+  constructor(status: number) {
+    super(`identity probe answered ${status}`);
+    this.status = status;
+  }
+}
 
 export async function probeIdentity(probe: IdentityProbeConfig, accessToken: string): Promise<ProbedIdentity> {
   const response = await fetch(probe.url, {
@@ -52,7 +64,7 @@ export async function probeIdentity(probe: IdentityProbeConfig, accessToken: str
   });
 
   if (!response.ok) {
-    throw new Error(`identity probe answered ${response.status}`);
+    throw new ProbeRefusedError(response.status);
   }
 
   const body: unknown = await response.json().catch(() => {
@@ -84,12 +96,16 @@ export function identityLabel(identity: unknown): string | null {
   return typeof label === 'string' && label ? label : null;
 }
 
-// Lazy backfill for a pre-multi-account row without identity: probe with the
-// stored access token and record the answer. Refuses to write a twin (two
-// rows claiming one provider account) — that conflict is surfaced to the
-// caller, never resolved silently here.
+// Backfill for a row without identity — one connected before the service
+// declared its probe, or one whose probe got no answer at the callback: ask
+// the provider who the account is and record the answer. The account is
+// asked the way a call of it acts: on its current access, renewed when it
+// has expired or the provider refuses it — a row that has not been used
+// since its token ran out is no reason to send the user to re-authorize.
+// Refuses to write a twin (two rows claiming one provider account) — that
+// conflict is surfaced to the caller, never resolved silently here.
 export async function backfillConnectionIdentity(
-  probe: IdentityProbeConfig,
+  service: { url: string; identityProbe: IdentityProbeConfig },
   connectionId: string,
 ): Promise<{ ok: true } | { ok: false; reason: string }> {
   const row = await prisma.connection.findUnique({ where: { id: connectionId } });
@@ -102,16 +118,22 @@ export async function backfillConnectionIdentity(
     return { ok: true };
   }
 
-  const accessToken = getAccessToken(row.tokens);
-
-  if (!accessToken) {
-    return { ok: false, reason: 'no stored access token' };
+  if (row.status !== 'connected') {
+    return { ok: false, reason: 'the account is not connected' };
   }
 
   let identity: ProbedIdentity;
 
   try {
-    identity = await probeIdentity(probe, accessToken);
+    const accessToken = await connectionAccessToken(row, service.url);
+
+    identity = await probeIdentity(service.identityProbe, accessToken).catch(async (error: unknown) => {
+      if (!(error instanceof ProbeRefusedError) || error.status !== 401) {
+        throw error;
+      }
+
+      return probeIdentity(service.identityProbe, await connectionAccessToken(row, service.url, accessToken));
+    });
   } catch (error) {
     return { ok: false, reason: getErrorMessage(error) };
   }

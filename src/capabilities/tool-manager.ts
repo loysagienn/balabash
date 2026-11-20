@@ -357,7 +357,7 @@ async function ensureWorkspaceServers(workspaceId: string): Promise<ConnectionRo
         // guard and the account surface see it. Off the hot path: the turn
         // does not wait for the provider round-trip.
         if (server.identityProbe && !row.identityId) {
-          void backfillConnectionIdentity(server.identityProbe, row.id)
+          void backfillConnectionIdentity({ url: server.url, identityProbe: server.identityProbe }, row.id)
             .then(backfill => {
               if (!backfill.ok) {
                 console.warn(

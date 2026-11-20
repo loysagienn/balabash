@@ -437,7 +437,7 @@ function assertCanCreate(server: AccountService, rows: ConnectionModel[], backfi
 
     throw new ConnectionError(
       'conflict',
-      `Cannot add another "${server.name}" account yet: the identity of account "${blind.accountKey}" is unknown (${reason}). Use that account once (a live call refreshes its token and records the identity), or re-authorize it, then retry.`,
+      `Cannot add another "${server.name}" account yet: the identity of account "${blind.accountKey}" is unknown (${reason}). Retry once the reason is gone, or re-authorize that account first.`,
     );
   }
 }
@@ -459,7 +459,7 @@ async function issueLink(workspaceId: string, threadId: string, server: AccountS
 
   if (wouldCreate(target, seen) && server.identityProbe) {
     for (const row of identityUnknown(seen)) {
-      const backfill = await backfillConnectionIdentity(server.identityProbe, row.id);
+      const backfill = await backfillConnectionIdentity({ url: server.url, identityProbe: server.identityProbe }, row.id);
 
       if (!backfill.ok) {
         backfillRefusals.set(row.id, backfill.reason);
@@ -825,7 +825,7 @@ export async function handleOauthCallback(query: Record<string, unknown>): Promi
     } catch (error) {
       // Identity is a best-effort annotation at this point — a crash here
       // must not turn a completed authorization into a raw 500 with no
-      // journaled event. The lazy backfill retries later.
+      // journaled event. The backfill asks again later.
       console.error(`[connections] identity establishment failed for "${row.server}" (${row.accountKey}):`, error);
       outcome = { kind: 'unknown', reason: getErrorMessage(error) };
     }
@@ -883,7 +883,7 @@ export async function handleOauthCallback(query: Record<string, unknown>): Promi
 type IdentityOutcome =
   | { kind: 'ok'; label: string | null }
   // The probe could not answer; the connection stays identity-less and the
-  // lazy backfill retries on later connects.
+  // backfill asks again before another account is added.
   | { kind: 'unknown'; reason: string }
   | { kind: 'twin'; twinId: string; twinAccountKey: string; twinName: string; label: string | null }
   | { kind: 'wrong-account'; error: string };
