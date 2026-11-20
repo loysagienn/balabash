@@ -1,23 +1,16 @@
-// The installation MCP configs that appear on the Connections screen.
-// Their status is the last probe. Agent capabilities come from src/tree.
+// Load installation MCP settings once. Credential-backed services register
+// here; the tree installs the discovered claude.ai connectors.
 import { probeExternalService } from './mcp-client.ts';
 import { readExternalServerConfigs, type ExternalServerConfig } from './server-config.ts';
 import { getSecretReferenceNames, resolveExternalServerSecrets } from './server-secrets.ts';
 import { registerAccountService, registerSecretServiceSource, type SecretService } from './connections/services.ts';
 
 type Service = SecretService & {
-  config: ExternalServerConfig;
+  config: Exclude<ExternalServerConfig, { transport: 'claude-connector' }>;
   version: string | null;
   retryAfter: number;
 };
 const services: Service[] = [];
-
-export function listClaudeConnectorTargets() {
-  return services
-    .filter(service => service.config.transport === 'claude-connector')
-    .map(({ name, description, connected, error }) => ({ name, description, connected, error }))
-    .sort((a, b) => a.name.localeCompare(b.name));
-}
 
 async function refresh(): Promise<void> {
   for (const service of services) {
@@ -48,10 +41,15 @@ function refreshServices(): Promise<void> {
   return pending;
 }
 
-// Called once at boot before startTree registers catalog services and refreshes
-// all sources. Only a service shown to the operator has a reason to be probed.
-export async function loadExternalServices(): Promise<void> {
+// Called by startTree before the first grants or Connections requests.
+export async function loadExternalServices() {
+  const connectors: [string, Extract<ExternalServerConfig, { transport: 'claude-connector' }>][] = [];
   for (const [name, config] of Object.entries(await readExternalServerConfigs())) {
+    if (config.transport === 'claude-connector') {
+      connectors.push([name, config]);
+      continue;
+    }
+
     if (config.transport === 'http' && config.auth === 'user') {
       registerAccountService({
         name, url: config.url, description: config.description?.trim() || name, setup: null,
@@ -62,7 +60,7 @@ export async function loadExternalServices(): Promise<void> {
     }
 
     const secretNames = getSecretReferenceNames(config);
-    if (secretNames.length || config.transport === 'claude-connector') {
+    if (secretNames.length) {
       services.push({
         name, description: config.description ?? null, secretNames, config,
         connected: false, error: null, retryAfter: 0, version: null,
@@ -71,8 +69,9 @@ export async function loadExternalServices(): Promise<void> {
   }
 
   registerSecretServiceSource({
-    list: () => services.filter(service => service.secretNames.length)
+    list: () => services
       .map(({ name, description, secretNames, connected, error }) => ({ name, description, secretNames, connected, error })),
     refresh: refreshServices,
   });
+  return connectors;
 }

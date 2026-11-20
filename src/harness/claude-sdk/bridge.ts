@@ -3,7 +3,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
-import { grantedGuide, grantedVertex, ruleText, typeText, type JsonValue } from '../../catalog/index.ts';
+import { grantedGuide, grantedVertex, ruleText, returnTypeText, type JsonValue } from '../../catalog/index.ts';
 import type { AgentPassport, JsonObject, SessionEnvironmentTool } from '../../core/contract.ts';
 import { catalogInstructions, grantKey } from '../catalog-context.ts';
 import { mcpCatalog, mcpError, registerCatalogHandlers } from '../catalog-mcp.ts';
@@ -36,7 +36,7 @@ export async function createClaudePort(agent: AgentPassport, workspaceId: string
         // successful hook replaces it with a reference and just the companion.
         value = {
           ...opened, parent: leaf.parent.fullName, guide: leaf.parent.fullName ? grantedGuide(grant, leaf.parent) : [],
-          returns: typeText(leaf.output, 0), rules: leaf.inputRules.map(ruleText),
+          returns: returnTypeText(leaf), rules: leaf.inputRules.map(ruleText),
         };
       }
       return { content: [{ type: 'text' as const, text: JSON.stringify(value) }] };

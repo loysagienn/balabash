@@ -26,6 +26,7 @@ import { connectionView, listProvisionedOauthClients, listWorkspaceConnections }
 import { listAccountServices } from '../capabilities/connections/services.ts';
 import { readOpenSecretRequests } from '../capabilities/secret-requests.ts';
 import { declaredNodes, getAgents, isRemoteAgent, startable } from '../capabilities/agent-catalog.ts';
+import { connectorNamesFor } from '../tree/connectors.ts';
 import { coordinator } from '../../agents/access.ts';
 import { DEFAULT_EFFORT } from '../harness/default-effort.ts';
 import { config } from '../config/index.ts';
@@ -186,7 +187,7 @@ function remoteAgentView(agent: RemoteAgentDeclaration): AgentView {
     description: agent.description,
     icon: agent.icon ?? null,
     sdk: 'remote',
-    nodes: [],
+    nodes: connectorNamesFor(agent),
     agents: startable(agent.name).map(child => child.name),
     modes: agent.modes,
     defaultMode: agent.defaultMode,
@@ -204,7 +205,7 @@ function agentView(agent: AgentDeclaration, lastModel: string | null): AgentView
     description: agent.description,
     icon: agent.icon ?? null,
     sdk: agent.sdk,
-    nodes: declaredNodes(agent),
+    nodes: [...declaredNodes(agent), ...connectorNamesFor(agent)],
     agents: startable(agent.name).map(child => child.name),
     modes: agent.modes,
     defaultMode: agent.defaultMode,
@@ -225,7 +226,7 @@ function coordinatorView(): AgentView {
     description: coordinator.description,
     icon: null,
     sdk: 'openai',
-    nodes: declaredNodes(coordinator),
+    nodes: [...declaredNodes(coordinator), ...connectorNamesFor(coordinator)],
     agents: startable(coordinator.name).map(agent => agent.name),
     modes: coordinator.modes,
     defaultMode: coordinator.defaultMode,

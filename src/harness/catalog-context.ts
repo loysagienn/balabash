@@ -1,7 +1,7 @@
 import { agentGrantPolicy, isRemoteAgent, startable } from '../capabilities/agent-catalog.ts';
 import { computeGrant, grantedChildren, grantedGuide, type ActionName, type CatalogNode, type Grant } from '../catalog/index.ts';
 import type { AgentPassport } from '../core/contract.ts';
-import { catalog } from '../tree/index.ts';
+import { currentCatalog } from '../tree/index.ts';
 import { connectionsPort } from '../tree/services.ts';
 
 export const portActions = ['describe', 'run_program'] as const;
@@ -9,12 +9,15 @@ export const portActions = ['describe', 'run_program'] as const;
 export async function catalogContext(agent: AgentPassport, workspaceId: string, threadId: string, actions: readonly ActionName[] = portActions) {
   const connections = connectionsPort();
   const caller = { workspaceId, threadId, agentName: agent.name };
-  const grant = await computeGrant(catalog(), agentGrantPolicy(agent, actions), { caller, connections });
+  const grant = await computeGrant(await currentCatalog(), agentGrantPolicy(agent, actions), { caller, connections });
   return { grant, connections };
 }
 
 export function grantKey(grant: Grant): string {
-  return JSON.stringify([...grant.vertices]);
+  return JSON.stringify(Array.from(grant.vertices, name => {
+    const vertex = grant.catalog.vertices.get(name);
+    return vertex?.kind === 'node' && vertex.installation ? [name, vertex.installation.revision] : name;
+  }));
 }
 
 export function* grantedCapabilities(grant: Grant) {

@@ -1010,11 +1010,12 @@ export type InstallationServiceView = {
 // in data/mcp-servers): the provider's authorization lives in the operator's
 // claude.ai account, the proxy takes the operator's ambient Claude CLI
 // token — nothing to provide or forget here, the catalog shows it
-// read-only. state: connected; token_expired — connected, but the ambient
+// read-only. state: connected; token_expired — the ambient
 // token on this box has expired (calls fail until a Claude Code session
 // rotates it; tokenExpiresAt says since when); failed — the connection
 // itself failed (error says why, retried on the next look).
 export type ConnectorServiceView = {
+  recipients: string[];
   name: string;
   description: string | null;
   state: 'connected' | 'token_expired' | 'failed';

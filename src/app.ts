@@ -20,7 +20,6 @@ import { createRemoteDriverContext, refreshRemoteSecretTargets, registerRemoteSe
 import { appendEvent } from './core/append.ts';
 import { SYSTEM_EXCEPTION } from './core/envelope.ts';
 import { startReauthDetector } from './capabilities/reauth-detector.ts';
-import { loadExternalServices } from './capabilities/external-services.ts';
 import { hasRunningWork, startTree, stopRunningWork } from './tree/index.ts';
 import { startScheduleHeart } from './schedule/heart.ts';
 import { hasUnsettledRuns, sweepAbortedRuns } from './schedule/programs.ts';
@@ -121,8 +120,6 @@ loadAgents(
 );
 registerRemoteSecretTargets();
 await refreshRemoteSecretTargets();
-
-await loadExternalServices();
 
 // The tree of the capability catalog: its services join the connections
 // layer before the web surface and the schedule can ask for one.

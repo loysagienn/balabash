@@ -14,11 +14,24 @@ const RULE =
   'Chain calls for the current turn in exec. To test code for a scheduled task, pass its body to run_program({code}). ' +
   'Inside that program, invoke capabilities with call(name, input).';
 
+// MCP requires an object result. Local references in a server output schema
+// move with it under structuredContent.value (an explicit $id owns its base).
+function underValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(underValue);
+  if (!value || typeof value !== 'object' || '$id' in value) return value;
+  return Object.fromEntries(Object.entries(value).map(([key, item]) => [
+    key, key === '$ref' && typeof item === 'string' && (item === '#' || item.startsWith('#/'))
+      ? '#/properties/value' + item.slice(1) : underValue(item),
+  ]));
+}
+
 export async function createCodexPort(agent: AgentPassport, workspaceId: string, threadId: string) {
   const catalog = await mcpCatalog(agent, workspaceId, threadId);
   const { grant } = catalog;
   const tools: Tool[] = catalog.entries.map(({ tool, output }) => {
-    const properties: Record<string, JsonSchema> = { value: expandSchema(grant.catalog, output) };
+    const leaf = grantedVertex(grant, tool.name);
+    const properties: Record<string, JsonSchema> = { value: leaf?.kind === 'capability' && leaf.definition.serverSchemas?.output
+      ? underValue(output) as JsonSchema : expandSchema(grant.catalog, output) };
     if (tool.name === 'describe') properties.guide = { type: 'array', items: { type: 'string' } };
     return { ...tool, outputSchema: { type: 'object', properties, required: ['value'], additionalProperties: false } };
   });

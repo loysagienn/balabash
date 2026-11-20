@@ -58,7 +58,7 @@ export {
   type RootDefinition,
   type Vertex,
 } from './definition.ts';
-export { capabilitySignature, capabilityTypeDefinitions, describe, type DescribeEnv } from './describe.ts';
+export { returnTypeText, capabilitySignature, capabilityTypeDefinitions, describe, type DescribeEnv } from './describe.ts';
 export {
   CapabilityError,
   ERROR_KINDS,

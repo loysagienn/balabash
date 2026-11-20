@@ -17,7 +17,8 @@ import {
   type Grant,
 } from './grant.ts';
 import { parseActionInput } from './input.ts';
-import { signatureText, typeDefinitionText } from './signature.ts';
+import { PRINTED_KEYWORDS, constraintText, signatureText, typeDefinitionText, typeText } from './signature.ts';
+import type { JsonSchema } from './json.ts';
 import type { AccountValue } from './types.ts';
 
 export type DescribeEnv = {
@@ -30,7 +31,41 @@ async function accountsOf(grant: Grant, vertex: CatalogVertex, env: DescribeEnv)
   return connection?.type === 'account' ? env.connections.accounts(grant.caller.workspaceId, connection.service) : [];
 }
 
+// Imported schemas can express constraints outside the authored catalog
+// vocabulary (local refs, conditionals, open objects, tuple arrays). Show
+// those schemas exactly when TypeScript notation would omit information.
+function needsSchemaText(schema: JsonSchema): boolean {
+  for (const [key, value] of Object.entries(schema)) {
+    if (key === '$ref' || (!PRINTED_KEYWORDS.has(key) && !['title', '$schema'].includes(key))) return true;
+    if (key === 'properties') {
+      if (schema.additionalProperties !== false) return true;
+      if (Object.values(value as object).some(child => typeof child === 'boolean' || needsSchemaText(child))) return true;
+    }
+    if (key === 'items' || key === 'additionalProperties') {
+      if (key === 'items' && (typeof value === 'boolean' || Array.isArray(value))) return true;
+      if (typeof value === 'object' && value && needsSchemaText(value as JsonSchema)) return true;
+    }
+    if (key === 'oneOf' || key === 'anyOf') {
+      if (key === 'oneOf' || (value as JsonSchema[]).some(child => needsSchemaText(child) || constraintText(child, true))) return true;
+    }
+  }
+  return false;
+}
+
+function serverTypeText(schema: JsonSchema, input = false): string {
+  return needsSchemaText(schema) ? 'JSON Schema ' + JSON.stringify(schema) : typeText(schema, 0, input);
+}
+
+export function returnTypeText(capability: CatalogCapability): string {
+  return capability.definition.serverSchemas?.output
+    ? serverTypeText(capability.output)
+    : typeText(capability.output, 0);
+}
+
 export function capabilitySignature(capability: CatalogCapability): string {
+  if (capability.definition.serverSchemas) {
+    return `${capability.fullName}(input: ${serverTypeText(capability.input, true)}): ${returnTypeText(capability)}`;
+  }
   return signatureText({
     name: capability.fullName,
     description: capability.description,

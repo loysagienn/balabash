@@ -7,7 +7,7 @@
 
 import { z } from 'zod';
 import { CapabilityError, capability, node, secretAuthority, type CallContext, type JsonObject, type Node } from '../catalog/index.ts';
-import { CredentialsRefusedError, callServerTool, type ToolAnswer } from './external-server.ts';
+import { CredentialsRefusedError, callServerTool, type ToolAnswer } from '../capabilities/mcp-client.ts';
 import { secretsAccepted, secretsRefused } from './services.ts';
 
 export const PERPLEXITY_MCP_URL = 'https://api.perplexity.ai/mcp';

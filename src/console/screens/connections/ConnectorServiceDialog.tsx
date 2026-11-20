@@ -19,7 +19,7 @@ export function ConnectorServiceDialog({ service, onClose }: { service: Connecto
     <Dialog title={service.name} cancel="Close" onClose={onClose}>
       <div className="form">
         {service.state === 'connected' ? (
-          <Note icon="circle-check">Connected through claude.ai. Its tools serve every workspace of this installation.</Note>
+          <Note icon="circle-check">Connected through claude.ai. Agent and profile recipients: {service.recipients.join(', ') || 'none'}.</Note>
         ) : service.state === 'token_expired' ? (
           <Note state="act" icon="clock-alert">
             The Claude CLI token on this box expired{service.tokenExpiresAt ? ` ${startedLabel(service.tokenExpiresAt, now)}` : ''}: calls fail until a Claude Code session on the box
@@ -33,7 +33,7 @@ export function ConnectorServiceDialog({ service, onClose }: { service: Connecto
         {service.description ? <p className="conn-connect-note">{service.description}</p> : null}
         <p className="conn-connect-note">
           Managed on claude.ai: the authorization with the provider is the operator’s claude.ai connector, reached through Anthropic’s MCP proxy on the Claude CLI login of this box. To
-          connect a different account or disconnect it, use claude.ai’s connector settings; to remove it from Balabash, delete its file in data/mcp-servers.
+          connect a different account or disconnect it, use claude.ai’s connector settings; to remove it from Balabash, delete its file in data/mcp-servers and restart Balabash.
         </p>
       </div>
     </Dialog>

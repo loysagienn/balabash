@@ -4,6 +4,7 @@
 // `describe`, the check of arguments, the declarations for the ports and the
 // signatures for programs are all derived from it.
 
+import type { JsonSchema } from './json.ts';
 import type { z } from 'zod';
 import type { AccountValue } from './types.ts';
 
@@ -57,6 +58,9 @@ export type CapabilityDefinition<I extends z.ZodObject = z.ZodObject, O extends 
   description: string;
   input: I;
   output: O;
+  // Discovery supplies the JSON Schemas directly. The parsers below validate
+  // those same schemas without converting them through a second dialect.
+  serverSchemas?: { input: JsonSchema; output?: JsonSchema };
   inputRules?: InputRule[];
   // Gets a value of the input type and the caller; returns a value of the
   // output type or throws a CapabilityError.
@@ -152,6 +156,9 @@ export type NodeDefinition = {
   // An external server: the names of input fields stay as the server calls
   // them.
   external?: boolean;
+  // Installation nodes address agents or profiles; revision identifies the
+  // discovered contract for ports that retain an opening across turns.
+  installation?: { recipients: string[]; revision: string };
   children: Vertex[];
 };
 

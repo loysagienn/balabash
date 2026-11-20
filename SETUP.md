@@ -123,6 +123,27 @@ At boot, Connections loads external service settings from
 `data/remote-agents/<name>.ts`. Drivers can import packages and repository types
 with `import type`. They receive platform services through `ctx`.
 
+A claude.ai connector becomes a catalog node named after its file. For example,
+`data/mcp-servers/slack.json` can contain:
+
+```json
+{
+  "transport": "claude-connector",
+  "serverId": "mcpsrv_REPLACE",
+  "description": "Search and send Slack workspace messages as the operator.",
+  "recipients": ["general", "coordinator"]
+}
+```
+
+Set the actual Anthropic MCP server id and the agent or profile names that
+should receive the node. An empty or omitted list grants it to no agent.
+Scheduled programs use the full installation tree. Calls in every workspace
+act as the provider account linked in the operator’s claude.ai settings.
+Connections shows the recipients and discovery or CLI login status. Claude
+Code refreshes its login on this host; an environment token override must
+be replaced by the operator. Change the provider account on claude.ai.
+Edit or remove the JSON file and restart Balabash to change the local configuration.
+
 Remote kinds declare `modes` (for example `['user', 'headless']`),
 `defaultMode` (one of those modes), and `recipients` (agent or access
 profile names, e.g. `['coordinator', 'engineer']`). The shared access profiles,

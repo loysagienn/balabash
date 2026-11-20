@@ -131,7 +131,7 @@ describe('the catalog with the services of the installation', () => {
   });
 
   it('puts the claude.ai connectors into the same list by name', () => {
-    const connector: ConnectorServiceView = { name: 'slack', description: null, state: 'connected', error: null, tokenExpiresAt: null };
+    const connector: ConnectorServiceView = { name: 'slack', recipients: ['general'], description: null, state: 'connected', error: null, tokenExpiresAt: null };
     const entries = catalogEntries([perUser('notion')], [installation('youtrack', 'connected')], [connector]);
 
     assert.deepEqual(

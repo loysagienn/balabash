@@ -64,19 +64,19 @@ export function getSecretReferenceNames(value: unknown): string[] {
   return [...names].sort();
 }
 
-export type ResolvedExternalServerSecrets = {
+export type ResolvedExternalServerSecrets<T extends ExternalServerConfig = ExternalServerConfig> = {
   // null: at least one referenced secret is missing — the server stays pending.
-  config: ExternalServerConfig | null;
+  config: T | null;
   secretNames: string[];
   // Stable fingerprint of the used secret rows; a change means the secrets
   // were re-provisioned and the server must reconnect.
   secretVersion: string | null;
 };
 
-export async function resolveExternalServerSecrets(
+export async function resolveExternalServerSecrets<T extends ExternalServerConfig>(
   serverName: string,
-  config: ExternalServerConfig,
-): Promise<ResolvedExternalServerSecrets> {
+  config: T,
+): Promise<ResolvedExternalServerSecrets<T>> {
   const secretNames = getSecretReferenceNames(config);
 
   if (!secretNames.length) {

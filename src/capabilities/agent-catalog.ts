@@ -87,7 +87,7 @@ export function passport(name: string): AgentPassport | RemoteAgentDeclaration |
   return name === coordinator.name ? coordinator : getAgent(name);
 }
 
-function addressedTo(recipients: readonly string[], agent: AgentPassport | RemoteAgentDeclaration): boolean {
+export function addressedTo(recipients: readonly string[], agent: AgentPassport | RemoteAgentDeclaration): boolean {
   return recipients.includes(agent.name) || ('access' in agent && !!agent.access.profile && recipients.includes(agent.access.profile));
 }
 
@@ -160,5 +160,10 @@ export function agentGrantPolicy(agent: AgentPassport | RemoteAgentDeclaration, 
     }
   }
 
-  return { actions, allows: vertex => (vertex.kind === 'node' ? nodes : root).has(vertex.fullName) };
+  return {
+    actions,
+    allows: vertex => vertex.kind === 'node' && vertex.installation
+      ? addressedTo(vertex.installation.recipients, agent)
+      : (vertex.kind === 'node' ? nodes : root).has(vertex.fullName),
+  };
 }

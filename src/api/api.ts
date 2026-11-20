@@ -39,9 +39,8 @@ import { FileNotFoundError, getFile, getWorkspaceFile, ingestFile, openFileConte
 import type { StorageBody } from '../files/storage.ts';
 import { verifyDownloadLink } from '../files/storage/local.ts';
 import { forgetExternalServerSecrets, getExternalServerSecretRequest, isExternalSecretServer, openExternalServerCredentialsRequest, provisionExternalServerSecrets } from '../capabilities/external-secrets.ts';
-import { listClaudeConnectorTargets } from '../capabilities/external-services.ts';
+import { connectorServiceViews } from '../tree/connectors.ts';
 import { getAccountService, refreshSecretServices, listSecretServices, type SecretService } from '../capabilities/connections/services.ts';
-import { resolveOperatorCredentials, tokenTtlMs } from '../adapters/ccr/token.ts';
 import { ConnectionError, disconnectConnection, getOauthClientRequest, getWorkspaceConnection, openOauthClientRequest, provisionOauthClient, reconnectConnection, renameConnection, startConnection, connectionView } from '../capabilities/connections/index.ts';
 import { AppManagementError, listApps, publishApp, unpublishApp } from '../apps/management.ts';
 import { ProjectError, archiveProject, createProject, parseProjectInput, parseProjectPatch, unarchiveProject, updateProject } from '../projects/mutations.ts';
@@ -69,7 +68,6 @@ import type {
   OauthClientRequestResponse,
   InstallationServiceView,
   InstallationServicesResponse,
-  ConnectorServiceView,
   ConnectionResponse,
   CreateProjectResponse,
   CreateTaskResponse,
@@ -1823,40 +1821,6 @@ function installationServiceView(target: SecretService): InstallationServiceView
   const state = target.connected ? 'connected' : target.error ? 'failed' : 'missing';
 
   return { name: target.name, description: target.description, secretNames: target.secretNames, state, error: state === 'failed' ? target.error : null };
-}
-
-async function connectorServiceViews(): Promise<ConnectorServiceView[]> {
-  const targets = listClaudeConnectorTargets();
-
-  if (!targets.length) {
-    return [];
-  }
-
-  let tokenExpiresAt: Date | null = null;
-  let tokenError: string | null = null;
-
-  try {
-    const credentials = await resolveOperatorCredentials();
-    const ttl = tokenTtlMs(credentials);
-
-    if (ttl != null && ttl <= 0 && credentials.expiresAt != null) {
-      tokenExpiresAt = new Date(credentials.expiresAt);
-    }
-  } catch (error) {
-    tokenError = error instanceof Error ? error.message : String(error);
-  }
-
-  return targets.map(target => {
-    if (!target.connected) {
-      return { name: target.name, description: target.description, state: 'failed', error: target.error, tokenExpiresAt: null };
-    }
-
-    if (tokenError) {
-      return { name: target.name, description: target.description, state: 'failed', error: tokenError, tokenExpiresAt: null };
-    }
-
-    return { name: target.name, description: target.description, state: tokenExpiresAt ? 'token_expired' : 'connected', error: null, tokenExpiresAt };
-  });
 }
 
 router.get('/installation-services', requireSession, async ctx => {

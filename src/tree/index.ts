@@ -22,8 +22,8 @@
 //   GET to the public internet: the addresses it reaches, its redirects and
 //   its time;
 //   web-perplexity.ts — its node `perplexity`, an external MCP server on
-//   the installation's key; external-server.ts — a call of a tool of such a
-//   server;
+//   the installation's key; capabilities/mcp-client.ts handles MCP exchanges;
+// - connectors.ts and discovered-node.ts — installation nodes from MCP discovery;
 // - gmail.ts — the node `gmail` over the Gmail API, on the access of the
 //   user's account; gmail-mail.ts — a mail as a value and as the raw
 //   message the API takes;
@@ -53,7 +53,10 @@ import {
   killRunningPrograms,
   type Catalog,
   type RootDefinition,
+  type Node,
 } from '../catalog/index.ts';
+import { loadExternalServices } from '../capabilities/external-services.ts';
+import { configureConnectors, refreshConnectors } from './connectors.ts';
 import { refreshSecretServices } from '../capabilities/connections/services.ts';
 import { connections } from './connections.ts';
 import { drive } from './drive.ts';
@@ -86,10 +89,10 @@ export const root: RootDefinition = {
       requires: ['run_program'],
     },
     {
-      text: 'A failed call gives an error with a kind. invalid_input, unknown_capability, not_found, conflict: change the call. auth_required: the user has to connect or re-authorize the account. external_error: the outside system refused; read its message. unavailable: no answer came and the outcome is unknown; before retrying a write, check whether it took effect. internal: a defect of Balabash; report it.',
+      text: 'A failed call gives an error with a kind. invalid_input, unknown_capability, not_found, conflict: change the call. auth_required: follow the credential instructions in the error. external_error: the outside system refused; read its message. unavailable: no answer came and the outcome is unknown; before retrying a write, check whether it took effect. internal: a defect of Balabash; report it.',
     },
     {
-      text: 'Lists page one way: pass `nextCursor` of a result as `cursor` to get the next page; null means there is nothing more.',
+      text: 'For lists with `nextCursor`, pass it as `cursor` for the next page; null means the list is complete.',
     },
     {
       text: "A node that works with the user's accounts lists them in `describe`; each of its capabilities takes `account`, the address of the account to act as.",
@@ -156,12 +159,29 @@ export const root: RootDefinition = {
 
 let built: Catalog | null = null;
 
-// The catalog of this installation, built once: a broken rule of the scheme
-// stops the first use.
+const installed = new Map<string, Node>();
+
+function publishNode(name: string, node: Node | null): void {
+  if (installed.get(name)?.installation?.revision === node?.installation?.revision) return;
+  const next = new Map(installed);
+  if (node) next.set(name, node);
+  else next.delete(name);
+  const nodes = [...next.values()].sort((a, b) => a.name.localeCompare(b.name));
+  // Validate collisions before publishing anything. Existing turns keep their snapshot.
+  const catalog = buildCatalog({ ...root, children: [...root.children, ...nodes] }).catalog;
+  if (node) installed.set(name, node);
+  else installed.delete(name);
+  built = catalog;
+}
+
 export function catalog(): Catalog {
   built ??= buildCatalog(root).catalog;
-
   return built;
+}
+
+export async function currentCatalog(): Promise<Catalog> {
+  await refreshConnectors();
+  return catalog();
 }
 
 // What the app does with the tree when it starts, before anyone can ask for
@@ -171,8 +191,10 @@ export function catalog(): Catalog {
 // answers for them. The catalog owns definitions of its nodes' services. The schedule gets what its programs run against:
 // this catalog and these connections.
 export async function startTree(): Promise<void> {
+  configureConnectors(await loadExternalServices(), publishNode);
   registerServices(catalog());
-  setProgramHost({ catalog: catalog(), connections: connectionsPort(), traceCall: journalProgramCall });
+  await refreshConnectors();
+  setProgramHost({ catalog: currentCatalog, connections: connectionsPort(), traceCall: journalProgramCall });
   await refreshSecretServices();
 }
 

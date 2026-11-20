@@ -90,7 +90,7 @@ const list = capability({
   name: 'list',
   summary: 'List the services, their accounts and the state of installation credentials',
   description:
-    'List what can be connected and how it stands. Account services are connected by each user with their own account; installation services are connected once for everyone, by secrets.',
+    'List services managed in Balabash. Each user connects their own account to an account service. Installation credentials are shared.',
   input: z.strictObject({}),
   output: z.strictObject({
     accountServices: z.array(

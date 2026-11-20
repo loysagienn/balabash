@@ -1,7 +1,7 @@
 // The catalog view for a port that assembles the model's context.
 import { catalogContext, catalogInstructions, grantKey, grantedCapabilities, guideForLeaf, portActions, vertexLine } from './catalog-context.ts';
 import {
-  ACTION_NAMES, FileRef, expandSchema, grantedVertex, ruleText, toCapabilityError, typeText,
+  ACTION_NAMES, FileRef, expandSchema, grantedVertex, ruleText, toCapabilityError, returnTypeText,
   type Catalog, type CatalogCapability, type FileRefValue, type Grant, type JsonSchema, type JsonValue,
 } from '../catalog/index.ts';
 import type { AgentPassport } from '../core/contract.ts';
@@ -25,7 +25,9 @@ function definition(tree: Catalog, name: string, description: string, input: Jso
 }
 
 function capabilityDefinition(tree: Catalog, vertex: CatalogCapability): FunctionDefinition {
-  return definition(tree, vertex.fullName, vertex.description, vertex.input);
+  return vertex.definition.serverSchemas
+    ? { type: 'function', name: vertex.fullName, description: vertex.description, parameters: vertex.input, strict: false }
+    : definition(tree, vertex.fullName, vertex.description, vertex.input);
 }
 
 export async function createCatalogPort(agent: AgentPassport, workspaceId: string, threadId: string, opening: 'function' | 'signature') {
@@ -63,7 +65,7 @@ export async function createCatalogPort(agent: AgentPassport, workspaceId: strin
           return { kind: 'catalog', text: [...guide, opened.description, opened.signature, ...opened.types, ...accounts].join('\n') };
         }
         const text = [
-          ...guide, 'Returns: ' + typeText(vertex.output, 0), ...vertex.inputRules.map(ruleText), ...opened.types, ...accounts,
+          ...guide, 'Returns: ' + returnTypeText(vertex), ...vertex.inputRules.map(ruleText), ...opened.types, ...accounts,
         ].join('\n');
         const tool = capabilityDefinition(tree, vertex);
         return { kind: 'catalog', text, ...(openings.introduce(call.callId, tool, text) ? { definition: tool } : {}) };

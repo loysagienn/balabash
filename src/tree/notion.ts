@@ -12,7 +12,7 @@ import {
   type CallContext,
   type CapabilityDefinition,
 } from '../catalog/index.ts';
-import { callServerTool, CredentialsRefusedError, type ToolAnswer } from './external-server.ts';
+import { callServerTool, CredentialsRefusedError, type ToolAnswer } from '../capabilities/mcp-client.ts';
 
 const NOTION_URL = 'https://mcp.notion.com/mcp';
 

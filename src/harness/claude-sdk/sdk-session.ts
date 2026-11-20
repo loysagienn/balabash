@@ -127,7 +127,7 @@ export function createClaudeSession(options: SdkSessionOptions, deps: SdkSession
       // SDK `env` replaces the subprocess environment entirely, so merge the
       // extra variables over the inherited app environment. Artifacts: the
       // CLI's own switch; no browser opens on a server.
-      env: mergeEnv({ ...(options.artifacts ? ARTIFACTS_ENV : {}), ...options.env, ENABLE_TOOL_SEARCH: 'true' }),
+      env: mergeEnv({ ...(options.artifacts ? ARTIFACTS_ENV : {}), ...options.env, ENABLE_TOOL_SEARCH: 'true', ENABLE_CLAUDEAI_MCP_SERVERS: 'false' }),
       ...(options.model ? { model: options.model } : {}),
       // The continuation of a session the CLI persisted (a run resumed after
       // an app restart): same cwd, the transcript is found by its id.

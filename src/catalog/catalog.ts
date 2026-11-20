@@ -40,6 +40,7 @@ export type CatalogNode = {
   guide: Recipe[];
   connection: Connection | null;
   external: boolean;
+  installation?: Node['installation'];
   children: CatalogVertex[];
 };
 
@@ -170,8 +171,8 @@ export function buildCatalog(root: RootDefinition): { catalog: Catalog; warnings
     connectionNode: CatalogNode | null,
   ): CatalogCapability => {
     const fullName = parent.fullName ? `${parent.fullName}_${definition.name}` : definition.name;
-    const own = convert(`${fullName} input`, () => toCatalogSchema(definition.input, 'input').schema);
-    const output = convert(`${fullName} output`, () => toCatalogSchema(definition.output, 'output').schema);
+    const own = definition.serverSchemas?.input ?? convert(`${fullName} input`, () => toCatalogSchema(definition.input, 'input').schema);
+    const output = definition.serverSchemas?.output ?? convert(`${fullName} output`, () => toCatalogSchema(definition.output, 'output').schema);
     const account = connectionNode?.connection?.type === 'account';
     const ownProperties = isSchema(own.properties) ? own.properties : {};
 
@@ -220,6 +221,7 @@ export function buildCatalog(root: RootDefinition): { catalog: Catalog; warnings
       summary: definition.summary,
       guide: definition.guide ?? [],
       connection: definition.connection ?? null,
+      installation: definition.installation,
       external: parent.external || definition.external === true,
       children: [],
     };
@@ -520,8 +522,7 @@ export function buildCatalog(root: RootDefinition): { catalog: Catalog; warnings
       problem(name, 'input must be a strict object');
     }
 
-    // Only the input of an external server keeps the server's field names:
-    // the output type is written by us.
+    // Authored integrations keep the server’s input names and define their output.
     checkSchema(item.input, `${name} input`, { input: true, output: false, external: side.external });
     checkSchema(item.output, `${name} output`, { input: false, output: true, external: false });
 
@@ -585,6 +586,14 @@ export function buildCatalog(root: RootDefinition): { catalog: Catalog; warnings
 
   for (const capability of capabilities) {
     const { fullName } = capability;
+
+    // Provider-owned texts and JSON Schemas obey the server's contract. The
+    // common build still registers names, detects collisions and collects
+    // the platform types used by the fallback result.
+    if (capability.definition.serverSchemas) {
+      capability.types = collectTypes([capability.output]);
+      continue;
+    }
 
     if (!capability.summary) {
       problem(fullName, 'no summary');
@@ -665,11 +674,11 @@ export function buildCatalog(root: RootDefinition): { catalog: Catalog; warnings
       problem(fullName, 'a node without a summary');
     }
 
-    if (refsIn(node.summary).length) {
+    if (!node.installation && refsIn(node.summary).length) {
       problem(fullName, 'a node summary names capabilities');
     }
 
-    checkText(node.summary, `${fullName} summary`);
+    if (!node.installation) checkText(node.summary, `${fullName} summary`);
     budget(node.summary, BUDGET.nodeSummary, fullName, 'the node summary');
 
     // What a recipe may name without declaring it: the capabilities that are

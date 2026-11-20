@@ -15,7 +15,7 @@ export async function mcpCatalog(agent: AgentPassport, workspaceId: string, thre
     ...portActions.map(name => ({ name, entry: tree.actions.get(name)!, action: true })),
     ...Array.from(grantedCapabilities(grant), entry => ({ name: entry.fullName, entry, action: false })),
   ].map(({ name, entry, action }) => ({
-    tool: { name, description: entry.description, inputSchema: { ...expandSchema(tree, entry.input), type: 'object' as const } },
+    tool: { name, description: entry.description, inputSchema: { ...('definition' in entry && entry.definition.serverSchemas ? entry.input : expandSchema(tree, entry.input)), type: 'object' as const } },
     output: entry.output, action,
   }));
   return {

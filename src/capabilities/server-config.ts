@@ -41,13 +41,14 @@ export type ExternalServerConfig =
       // The one credential involved is the operator's ambient CLI token:
       // it rotates only while a Claude Code session runs on this box, so a
       // quiet 8h boundary leaves the connector failing with 401 until the
-      // next turn (mcp-client.ts ClaudeConnectorAuthError) — nothing to
+      // next turn (claude-connector.ts) — nothing to
       // re-authorize, neither here nor at the provider.
       transport: 'claude-connector';
       // The connector's Anthropic server id (mcpsrv_…). Discoverable via
       // GET https://api.anthropic.com/v1/mcp_servers with the ambient token
       // and the "anthropic-beta: mcp-servers-2025-12-04" header.
       serverId: string;
+      recipients?: string[];
       description?: string;
     }
   | {
@@ -114,6 +115,11 @@ function validateExternalServerConfig(raw: unknown, source: string): ExternalSer
 
     if (raw.description !== undefined && typeof raw.description !== 'string') {
       throw new Error(`${source}: "description" must be a string`);
+    }
+
+    if (raw.recipients !== undefined && (!Array.isArray(raw.recipients) ||
+        raw.recipients.some(name => typeof name !== 'string' || !name.trim()))) {
+      throw new Error(`${source}: "recipients" must be an array of agent or profile names`);
     }
 
     if (getSecretReferenceNames(raw).length) {
