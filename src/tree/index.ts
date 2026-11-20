@@ -178,9 +178,9 @@ export async function startTree(): Promise<void> {
 // after the run is over — and the commands called directly (a command of a
 // program ends with its run). A restart waits while there is any. The runs
 // and the commands are processes of their own and would outlive the app, so
-// its shutdown stops them all: by the time stopRunningWork returns every
-// process has got its signal, and a call still on its way to a process
-// starts none.
+// boot sweeps their recorded process groups after a crash. During graceful
+// shutdown, stopRunningWork signals every active process and cancels any
+// command still waiting to start.
 export function hasRunningWork(): boolean {
   return countRunningPrograms() + countProgramCalls() + countRunningCommands() > 0;
 }

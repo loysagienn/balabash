@@ -12,7 +12,11 @@ import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { CapabilityError, computeGrant, executeProgram, runProgram } from '../catalog/index.ts';
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
+import { fileURLToPath } from 'node:url';
+import { sweepProcessGroups } from '../runtime/process-groups.ts';
+import { CapabilityError, computeGrant, executeProgram, invokeCapability, runProgram } from '../catalog/index.ts';
 import type { ConnectionsPort, Grant } from '../catalog/index.ts';
 import { startStand } from '../test-support/stand.ts';
 import type { Stand } from '../test-support/stand.ts';
@@ -89,6 +93,7 @@ describe('a program over the tree', () => {
 
     assert.deepEqual(value, { rows: [{ value: 12 }], described: 'workspace_query' });
     assert.equal(await fs.readFile(path.join(area, 'report/numbers.txt'), 'utf8'), '3\n4\n5\n');
+    assert.deepEqual(await fs.readdir('data/process-groups'), []);
   });
 
   test('gets a failed command as an error with the exit code and the output, and fails with it when it does not catch it', async () => {
@@ -132,6 +137,82 @@ describe('a program over the tree', () => {
     assert.ok(pid > 0);
     assert.ok(await until(() => !alive(pid), 3_000), 'the shell of the command is gone');
     assert.ok(await until(() => !tree.hasRunningWork(), 3_000), 'nothing of the scheme is left running');
+  });
+
+  test('a registration failure keeps both program and command bodies from starting', async () => {
+    const dir = 'data/process-groups';
+    await fs.rm(dir, { recursive: true, force: true });
+    await fs.writeFile(dir, 'occupied');
+    try {
+      const command = { command: 'touch unregistered' };
+      await assert.rejects(invokeCapability(grant, 'workspace_run_command', command, env), /process-groups/);
+      const run = await executeProgram(grant, { code: "return 'executed';", timeoutMs: 5_000 }, env);
+      assert.equal(run.outcome, 'failed');
+      assert.match(run.error!.message, /process-groups/);
+      await assert.rejects(fs.stat(path.join(area, 'unregistered')), { code: 'ENOENT' });
+    } finally {
+      await fs.unlink(dir);
+      await fs.mkdir(dir);
+    }
+  });
+
+  test('a stale record for a live group with another boot or start time leaves it running', async () => {
+    const child = spawn('sleep', ['30'], { detached: true, stdio: 'ignore' });
+    const exited = once(child, 'exit');
+    try {
+      const boot = (await fs.readFile('/proc/sys/kernel/random/boot_id', 'utf8')).trim();
+      const stat = await fs.readFile(`/proc/${child.pid}/stat`, 'utf8');
+      const start = stat.slice(stat.lastIndexOf(')') + 2).split(' ')[19];
+      await fs.mkdir('data/process-groups', { recursive: true });
+      await fs.writeFile(`data/process-groups/${boot}.${child.pid}.${BigInt(start) + 1n}`, '');
+      await fs.writeFile(`data/process-groups/00000000-0000-0000-0000-000000000000.${child.pid}.${start}`, '');
+      sweepProcessGroups();
+      assert.deepEqual(await fs.readdir('data/process-groups'), []);
+      child.kill('SIGTERM');
+      assert.deepEqual(await exited, [null, 'SIGTERM']);
+    } finally {
+      child.kill('SIGKILL');
+      await exited;
+    }
+  });
+
+  test('boot kills a busy program and a leaderless command group left by a crashed app', async () => {
+    const owner = spawn(process.execPath, [
+      fileURLToPath(new URL('../test-support/process-group-owner.ts', import.meta.url)), stand.workspaceId, stand.mainThreadId,
+    ], { stdio: 'inherit' });
+    const exited = once(owner, 'exit');
+    const registry = 'data/process-groups';
+    try {
+      const pids = path.join(area, 'crash.pids');
+      assert.ok(await until(() => fs.stat(pids).then(() => true, () => false), 10_000));
+      const [shell, sleep] = (await fs.readFile(pids, 'utf8')).trim().split(' ').map(Number);
+      assert.ok(await until(() => !alive(shell), 3_000), 'the shell has been reaped');
+      const groups = (await fs.readdir(registry)).map(name => Number(name.split('.')[1]));
+      assert.equal(groups.length, 2);
+      assert.ok(groups.includes(shell));
+      const program = groups.find(pid => pid !== shell)!;
+
+      owner.kill('SIGKILL');
+      await exited;
+      assert.ok(alive(program) && alive(sleep));
+      sweepProcessGroups();
+
+      // An orphan may still be a zombie until the host reaps it.
+      const stopped = (pid: number) => fs.readFile(`/proc/${pid}/stat`, 'utf8').then(
+        stat => stat.slice(stat.lastIndexOf(')') + 2).startsWith('Z '),
+        (error: NodeJS.ErrnoException) => {
+          if (error.code === 'ENOENT' || error.code === 'ESRCH') return true;
+          throw error;
+        },
+      );
+      assert.ok(await until(async () => await stopped(program) && await stopped(sleep), 3_000));
+      assert.deepEqual(await fs.readdir(registry), []);
+      sweepProcessGroups();
+    } finally {
+      owner.kill('SIGKILL');
+      await exited;
+      sweepProcessGroups();
+    }
   });
 
   test('stopped with everything else the scheme runs, ends as aborted and leaves no command behind', async () => {

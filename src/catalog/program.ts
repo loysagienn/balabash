@@ -32,6 +32,7 @@ import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import os from 'node:os';
 import vm from 'node:vm';
+import { recordProcessGroup } from '../runtime/process-groups.ts';
 import { ACTIONS } from './actions.ts';
 import type { ProgramScope } from './definition.ts';
 import { describe } from './describe.ts';
@@ -272,6 +273,7 @@ export function executeProgram(grant: Grant, launch: ProgramLaunch, env: Program
   return new Promise(resolve => {
     let verdict: Verdict | null = null;
     let closed = false;
+    let releaseGroup: (() => void) | undefined;
     // The calls being carried out, by the id the process gave them.
     const inFlight = new Map<number, string>();
 
@@ -281,6 +283,11 @@ export function executeProgram(grant: Grant, launch: ProgramLaunch, env: Program
       }
 
       closed = true;
+      try {
+        releaseGroup?.();
+      } catch (error) {
+        verdict = { outcome: 'failed', error: toCapabilityError(error) };
+      }
       runningPrograms.delete(stop);
       env.signal?.removeEventListener('abort', cancel);
 
@@ -331,7 +338,7 @@ export function executeProgram(grant: Grant, launch: ProgramLaunch, env: Program
       [`--max-old-space-size=${launch.heapMb ?? PROGRAM_HEAP_MB}`, '-e', PROGRAM_PROCESS],
       // Nothing of the app's environment: the program has no host, and its
       // process needs none.
-      { cwd: os.tmpdir(), env: {}, stdio: ['ignore', 'pipe', 'pipe', 'ipc'] },
+      { cwd: os.tmpdir(), env: {}, detached: true, stdio: ['ignore', 'pipe', 'pipe', 'ipc'] },
     );
 
     const timer = setTimeout(() => {
@@ -437,8 +444,13 @@ export function executeProgram(grant: Grant, launch: ProgramLaunch, env: Program
       env.signal?.addEventListener('abort', cancel, { once: true });
 
       // A process that did not start has no channel: its `error` tells it.
-      if (child.connected) {
-        child.send({ type: 'start', code: launch.code });
+      if (child.connected && child.pid !== undefined) {
+        try {
+          releaseGroup = recordProcessGroup(child.pid);
+          child.send({ type: 'start', code: launch.code });
+        } catch (error) {
+          decide({ outcome: 'failed', error: toCapabilityError(error) });
+        }
       }
     }
   });

@@ -3,7 +3,10 @@
 // run that is over does to the calls it had started.
 
 import assert from 'node:assert/strict';
-import { describe, it } from 'node:test';
+import { before, after, describe, it } from 'node:test';
+import { mkdtemp, rm } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { z } from 'zod';
 import { buildCatalog } from './catalog.ts';
@@ -12,6 +15,18 @@ import { CapabilityError } from './errors.ts';
 import { computeGrant, type GrantPolicy } from './grant.ts';
 import { countProgramCalls, countRunningPrograms, executeProgram, killRunningPrograms, programSyntaxProblem, runProgram, type ProgramRun } from './program.ts';
 import { CALLER, WORK, testConnections, testRoot, type Calls } from './test-tree.ts';
+
+// The runner records its process groups under data/ in the installation.
+const originalCwd = process.cwd();
+let dir: string;
+before(async () => {
+  dir = await mkdtemp(path.join(os.tmpdir(), 'balabash-programs-'));
+  process.chdir(dir);
+});
+after(async () => {
+  process.chdir(originalCwd);
+  await rm(dir, { recursive: true, force: true });
+});
 
 const calls: Calls = [];
 // What the slow capabilities of this test went through, in order.

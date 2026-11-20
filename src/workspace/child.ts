@@ -14,7 +14,9 @@
 //     binds (app endpoints).
 
 import { spawn } from 'node:child_process';
+import type { Writable } from 'node:stream';
 import { StringDecoder } from 'node:string_decoder';
+import { recordProcessGroup } from '../runtime/process-groups.ts';
 import { childBusyTimeoutMs } from './sqlite.ts';
 
 // ---------------------------------------------------------------------------
@@ -58,7 +60,7 @@ export type RunChildOptions = {
   // Aborting it kills the child's whole group, as the timeout does: the
   // outcome then carries exitCode null and timedOut false.
   signal?: AbortSignal;
-  // The child's group is the call's until the call is over: what the child
+  // Register the group for cleanup after an app crash. What the child
   // left running in it once its own process has gone and its output is
   // closed (a background job with its output sent elsewhere) is killed
   // before the outcome is given. Without it such a process outlives the
@@ -100,14 +102,33 @@ function isLowSurrogate(unit: number): boolean {
 export function runChild(command: string, args: string[], options: RunChildOptions): Promise<ChildOutcome> {
   return new Promise((resolve, reject) => {
     const startedAt = Date.now();
-    const child = spawn(command, args, {
+    // fd 3 gates exec on durable registration. If the app dies before the
+    // record exists, EOF ends the starter without running the command.
+    const starterArgs = options.ownsGroup
+      ? ['-c', 'read -r start <&3 && exec 3<&- && exec "$@"', 'workspace-command', command, ...args]
+      : args;
+    const child = spawn(options.ownsGroup ? '/bin/sh' : command, starterArgs, {
       cwd: options.cwd,
       env: options.env,
-      stdio: [options.input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
+      stdio: [options.input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe', options.ownsGroup ? 'pipe' : 'ignore'],
       // Own process group: the timeout (and any external sweep) kills the
       // whole tree, not just the direct child.
       detached: true,
     });
+
+    let releaseGroup: (() => void) | undefined;
+    if (options.ownsGroup && child.pid !== undefined) {
+      const gate = child.stdio[3] as Writable;
+      gate.on('error', () => {}); // The starter may already have exited.
+      try {
+        releaseGroup = recordProcessGroup(child.pid);
+        gate.end('start\n');
+      } catch (error) {
+        gate.destroy();
+        child.kill('SIGKILL');
+        reject(error);
+      }
+    }
 
     if (child.pid !== undefined) {
       options.onSpawn?.(child.pid);
@@ -182,8 +203,11 @@ export function runChild(command: string, args: string[], options: RunChildOptio
       clearTimeout(timer);
       options.signal?.removeEventListener('abort', abort);
 
-      if (options.ownsGroup) {
-        killGroup(child.pid, () => {});
+      try {
+        releaseGroup?.();
+      } catch (error) {
+        reject(error);
+        return;
       }
 
       if (decoders) {

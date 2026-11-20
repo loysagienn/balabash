@@ -31,6 +31,7 @@ import { startScheduleHeart } from './schedule/heart.ts';
 import { hasUnsettledRuns, sweepAbortedRuns } from './schedule/programs.ts';
 import { startWorkspaceIndexer } from './workspace/indexer.ts';
 import { startFileAreaTotals } from './workspace/totals.ts';
+import { sweepProcessGroups } from './runtime/process-groups.ts';
 import { startTelemetry } from './runtime/telemetry.ts';
 import { startSessionCleanup } from './capabilities/session-cleanup.ts';
 import { createScheduleToolServer } from './schedule/tools.ts';
@@ -47,6 +48,10 @@ import { startClaudeSessionJournal } from './harness/claude-sdk/session-journal.
 import { startPlanLimitsWatch } from './harness/claude-sdk/plan-limits.ts';
 import { startCodexPlanLimits } from './harness/codex-sdk/plan-limits.ts';
 import { startCodexSessionJournal } from './harness/codex-sdk/session-journal.ts';
+
+// A crashed app can leave programs and workspace commands running. Stop
+// their groups even if the database takes time to come back up.
+sweepProcessGroups();
 
 // Pending migrations are applied before anything else touches the database:
 // schema changes ride the same restart as the code that needs them. A
@@ -92,11 +97,8 @@ if (tombstoned > 0) {
   console.log(`[app] tombstoned ${tombstoned} orphaned threads without a saved session`);
 }
 
-// A scheduled run does not survive the app either: the rows the previous
-// process left 'running' — of programs and of the former jobs — are settled
-// as 'aborted' here, before anything a run starts from is open (the web
-// surface, a resumed thread, the schedule heart), so that the sweep meets
-// no run of this process.
+// Settle the previous process's running programs and former jobs as aborted
+// before the web, resumed threads or schedule can start new runs.
 await sweepAbortedRuns();
 await sweepAbortedJobRuns();
 
