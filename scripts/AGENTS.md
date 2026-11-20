@@ -123,3 +123,24 @@ journal and writes the reports; safe next to the live app.
 ```
 npm run build && npm run measure-context [-- --session <id>] [-- --out <dir>]
 ```
+
+## migrate-agent-tools
+
+Offline step 3 of the agent-tools move. Restore a current dump into a separate PostgreSQL
+database and deploy the branch's Prisma migrations there first. Set DATABASE_URL to the
+restored database. The --database argument must match current_database() on that connection.
+
+    npm run migrate-agent-tools -- --database NAME --workspaces /path/to/data/workspace
+
+For the actual switch, keep writers and the scheduler offline in the maintenance window,
+preserve the compatible branch and backup, deploy its schema, then run the same command
+against the intended database before starting the scheduler. The migration reads workspace
+task files and writes only PostgreSQL. It prints changed-row counts after commit. Running it
+again should give zeros. On failure every change rolls back.
+
+Command tasks are translated directly. The bundled Gmail program recognizes the original
+module by its digest and takes its initial memory from that workspace's last five deliveries.
+For another code task, supply its reviewed JavaScript program body in
+`--programs DIR` under `<workspaceId>/<slug>.js`. A custom program takes responsibility
+for its own initial state. A task without a translation aborts the transaction.
+Historical job runs retain their ids, positions and the values shown by the schedule reader.

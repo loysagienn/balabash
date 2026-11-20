@@ -18,6 +18,7 @@
     "start-stand": "NODE_ENV=development nodemon --watch dist --delay 6 --env-file=.env --trace-warnings ./dist/app.js",
     "stand": "npm run build-stand & npm run start-stand",
     "generate": "prisma generate",
+    "migrate-agent-tools": "node --env-file-if-exists=.env ./dist/migrate-agent-tools.js",
     "rebuild-threads": "node --enable-source-maps --env-file=.env ./dist/rebuild-threads.js",
     "render-context": "node --enable-source-maps --env-file=.env ./dist/render-context.js",
     "import-sqlite": "node --enable-source-maps --env-file=.env ./dist/import-sqlite.js",

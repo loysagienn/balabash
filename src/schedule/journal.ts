@@ -7,7 +7,7 @@
 // a reader sees both as one journal: a job's run is read as the run of the
 // program its task turns into — one call of `workspace_run_command` — with
 // the exit of the command as the outcome and its output as the console.
-// formerRun() below is that reading, and the only place that knows the
+// formerRunData() below is that reading, and the only place that knows the
 // former form; the move of the journal writes the same into ScheduleRun,
 // after which the former half of every read here goes away.
 
@@ -84,14 +84,14 @@ function formerSummary(row: Pick<JobRunModel, keyof typeof SUMMARY>): RunSummary
   return { ...summary(row, false), status: formerStatus(row.status) };
 }
 
-function formerError(row: JobRunModel): string | null {
+function formerErrorMessage(row: JobRunModel): string | null {
   switch (row.status) {
     case 'failed':
-      return `external_error: The command exited with code ${row.exitCode ?? 'unknown'}.`;
+      return `The command exited with code ${row.exitCode ?? 'unknown'}.`;
     case 'timeout':
-      return 'external_error: The command ran longer than its limit and was killed.';
+      return 'The command ran longer than its limit and was killed.';
     case 'spawn_error':
-      return `external_error: The command could not be started: ${row.stderrTail || 'spawn error'}`;
+      return `The command could not be started: ${row.stderrTail || 'spawn error'}`;
     default:
       return null;
   }
@@ -99,16 +99,20 @@ function formerError(row: JobRunModel): string | null {
 
 // The console of a job is the ends of its two streams, one after the other,
 // kept by the limit of a run's console like any other.
-function formerRun(row: JobRunModel): RunRecord {
+export function formerRunData(row: JobRunModel): ScheduleRunModel {
   const input = { command: row.command, ...(row.cwd ? { cwd: row.cwd } : {}) };
   const between = row.stdoutTail && row.stderrTail && !row.stdoutTail.endsWith('\n') ? '\n' : '';
   const output = consoleTail(`${row.stdoutTail}${between}${row.stderrTail}`);
 
+  const message = formerErrorMessage(row);
+
   return {
-    ...formerSummary(row),
+    id: row.id, workspaceId: row.workspaceId, slug: row.slug, trigger: row.trigger,
+    startedAt: row.startedAt, finishedAt: row.finishedAt, durationMs: row.durationMs,
+    status: formerStatus(row.status), hasValue: false,
     code: `await call('workspace_run_command', ${JSON.stringify(input)});\nreturn null;`,
     value: null,
-    error: formerError(row),
+    error: message ? { kind: 'external_error', message } : null,
     console: output.text,
     consoleTruncated: output.truncated || row.stdoutTruncated || row.stderrTruncated,
   };
@@ -184,7 +188,7 @@ export async function getRun(workspaceId: string, id: string): Promise<RunRecord
 
   const former = await prisma.jobRun.findFirst({ where: { id, workspaceId } });
 
-  return former ? formerRun(former) : null;
+  return former ? programRun(formerRunData(former)) : null;
 }
 
 // The console's page cursor is a run id. Look up its position without
