@@ -23,6 +23,7 @@ test('a connector discovers paged contracts, grants by recipient, journals calls
   const free: Tool = { name: 'SearchMessages', description: 'Search messages.', inputSchema: { type: 'object' } };
   const requests: { method: string; token: string; session: string; name?: string }[] = [];
   let reply: CallToolResult = { structuredContent: { ts: 'posted', extra: true }, content: [] };
+  let refuseDiscovery = true;
   let refused = false;
   let offline = false;
   let beforeList: (() => Promise<void>) | undefined;
@@ -49,7 +50,9 @@ test('a connector discovers paged contracts, grants by recipient, journals calls
     }
     if (offline && method === 'tools/call') throw new TypeError('connection lost');
     if (method === 'tools/list') await beforeList?.();
-    if (refused && method === 'tools/call') return Response.json({ error: { message: 'token rejected' } }, { status: 401 });
+    if ((refuseDiscovery && method === 'initialize') || (refused && method === 'tools/call')) {
+      return Response.json({ error: { message: 'token rejected' } }, { status: 401 });
+    }
     if (method === 'notifications/initialized') return new Response(null, { status: 202 });
     const result = method === 'initialize'
       ? { protocolVersion: params.protocolVersion, capabilities: { tools: {} }, serverInfo: { name: 'mock', version: '1' } }
@@ -64,6 +67,14 @@ test('a connector discovers paged contracts, grants by recipient, journals calls
   await startTree();
   const agent = { ...coordinator, access: { profile: 'general' } };
   const context = () => catalogContext(agent, stand.workspaceId, stand.mainThreadId);
+  await t.test('cold start exposes a discovery refusal in Connections until a usable login arrives', async () => {
+    assert.equal((await context()).grant.vertices.has('slack'), false);
+    assert.equal((await connectorStatuses())[0].state, 'failed');
+    refuseDiscovery = false;
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = 'test-usable';
+    assert.equal((await connectorStatuses())[0].state, 'connected');
+  });
+
   const first = await context();
   const call = async (name: string, input: Record<string, string> = {}) => dispatchCatalogCall(first.grant, first.connections,
     { callId: crypto.randomUUID(), name, input });
@@ -98,11 +109,6 @@ test('a connector discovers paged contracts, grants by recipient, journals calls
     const row = await prisma.event.findUniqueOrThrow({ where: { seq: posted.seq } });
     assert.equal(row.type, 'tool.call.completed');
     assert.deepEqual((row.payload as Record<string, unknown>).value, { ts: 'posted', extra: true });
-    reply = { content: [{ type: 'text', text: 'accepted despite malformed result' }] };
-    const malformed = await send();
-    assert.ok('error' in malformed);
-    assert.equal(malformed.error.kind, 'external_error');
-    assert.equal(malformed.error.details, 'accepted despite malformed result');
     reply = { content: [{ type: 'text', text: 'message' }, { type: 'image', data: 'eA==', mimeType: 'image/png' }] };
     const mixed = await call('slack_search_messages');
     assert.ok('value' in mixed && Array.isArray(mixed.value));
@@ -113,29 +119,40 @@ test('a connector discovers paged contracts, grants by recipient, journals calls
     assert.equal(requests.filter(r => r.method === 'tools/list').length, 2);
   });
 
-  await t.test('a malformed output schedules rediscovery with the same token and leaves turns free', async sub => {
+  await t.test('a malformed output schedules rediscovery with the same token and leaves turns free', { timeout: 15_000 }, async sub => {
+    const writes = requests.filter(r => r.name === typed.name).length;
+    const listings = requests.filter(r => r.method === 'tools/list').length;
+    reply = { content: [{ type: 'text', text: 'accepted despite malformed result' }] };
+    const malformed = await send();
+    assert.ok('error' in malformed);
+    assert.equal(malformed.error.kind, 'external_error');
+    assert.equal(malformed.error.details, 'accepted despite malformed result');
     const now = Date.now();
     sub.mock.method(Date, 'now', () => now + 61_000);
     const started = Promise.withResolvers<void>();
     const resume = Promise.withResolvers<void>();
+    sub.signal.addEventListener('abort', () => resume.resolve(), { once: true });
     beforeList = () => {
       started.resolve();
       return resume.promise;
     };
     const refresh = connectorStatuses();
     try {
-      await started.promise;
+      await Promise.race([started.promise, refresh.then(() => assert.fail('expected a new tools/list request'))]);
       assert.equal(grantKey((await context()).grant), grantKey(first.grant));
     } finally {
       resume.resolve();
       beforeList = undefined;
       await refresh;
     }
-    assert.equal(requests.filter(r => r.method === 'tools/list').length, 4);
-    assert.equal(requests.filter(r => r.name === typed.name).length, 2);
+    assert.equal(requests.filter(r => r.method === 'tools/list').length, listings + 2);
+    assert.equal(requests.filter(r => r.name === typed.name).length, writes + 1);
   });
 
   await t.test('a rejected call preserves the grant and an older refusal preserves the recovered status', async () => {
+    const { createClaudeBridge } = await import('../harness/claude-sdk/bridge.ts');
+    const bridge = await createClaudeBridge(agent, stand.workspaceId, stand.mainThreadId);
+    const listChanged = t.mock.method(bridge.server.server, 'sendToolListChanged', async () => {});
     const sent = requests.filter(r => r.name === typed.name).length;
     delayNextCall = true;
     const inFlight = send();
@@ -155,6 +172,8 @@ test('a connector discovers paged contracts, grants by recipient, journals calls
     const recovered = await context();
     assert.ok(recovered.grant.vertices.has('slack_send_message'));
     assert.notEqual(grantKey(first.grant), grantKey(recovered.grant));
+    assert.equal(await bridge.refresh('next message'), 'next message');
+    assert.equal(listChanged.mock.callCount(), 1);
     assert.equal((await connectorStatuses())[0].state, 'connected');
     assert.equal(requests.at(-1)?.token, 'Bearer test-rotated');
     delayedResponse.resolve(Response.json({ error: { message: 'old token rejected' } }, { status: 401 }));
