@@ -135,7 +135,8 @@ restored database. The --database argument must match current_database() on that
 Use `--dry-run` on the restored copy to run the same translation and report the counts after
 rolling the transaction back. Both modes require the application and scheduler to stay offline
 for the target database. The script refuses other client connections with its login, including
-idle ones, and locks the affected tables against concurrent writes. Stop writers before the
+idle ones. It waits up to five seconds to acquire each table lock (for example during
+autovacuum) and excludes concurrent writes throughout the transaction. Stop writers before the
 maintenance window and keep them stopped until verification is complete.
 
 The migration reads workspace task files and writes only PostgreSQL. Without `--dry-run` it

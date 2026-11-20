@@ -39,6 +39,7 @@ describe('bridgeAction', () => {
   it('names a bridge function by its first string argument and a known icon', () => {
     assert.deepEqual(bridgeAction('spawn_agent', { agent: 'browser', title: 'Check' }).label, { icon: 'bot', tool: 'spawn_agent', arg: 'browser' });
     assert.deepEqual(bridgeAction('get_event', { seq: 17588 }).label, { icon: 'file-text', tool: 'get_event', arg: '17588' });
+    assert.deepEqual(bridgeAction('send_message', { files: ['f'] }).label, { icon: 'send', tool: 'send_message', arg: 'f' });
     assert.deepEqual(bridgeAction('gmail_search_emails', {}).label, { icon: 'inbox', tool: 'gmail_search_emails' });
   });
 });

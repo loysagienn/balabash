@@ -232,6 +232,7 @@ export function nativeAction(name: string, input: JsonObject, result?: JsonValue
 const BRIDGE_ICONS: Record<string, IconName> = {
   spawn_agent: 'bot',
   send_to_thread: 'message-square-reply',
+  send_message: 'send',
   cancel_thread: 'circle-stop',
   end_thread: 'check',
   system_request_restart: 'refresh-cw',
