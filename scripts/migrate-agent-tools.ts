@@ -30,7 +30,10 @@ try {
         ORDER BY pid`;
       if (peers.length)
         throw new Error('Close other database connections before migrating: ' + JSON.stringify(peers));
-      await tx.$executeRaw`LOCK TABLE events, job_runs, schedule_runs, scheduled_tasks IN SHARE ROW EXCLUSIVE MODE NOWAIT`;
+      // A dry run can wake autovacuum on the affected tables. Give PostgreSQL
+      // time to release its maintenance lock before the immediate real run.
+      await tx.$executeRaw`SET LOCAL lock_timeout = '5s'`;
+      await tx.$executeRaw`LOCK TABLE events, job_runs, schedule_runs, scheduled_tasks IN SHARE ROW EXCLUSIVE MODE`;
       const tasks = await migrateTasks(tx, values.workspaces ?? workspaceRoot(), values.programs);
       const jobs = await moveJobRuns(tx);
       counts = { ...tasks, jobs, ...(await migrateCalls(tx)) };
