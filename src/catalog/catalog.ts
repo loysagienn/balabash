@@ -5,11 +5,23 @@
 // budget or a field comment repeated verbatim is a warning.
 
 import { ACTIONS, ACTION_NAMES, type ActionName } from './actions.ts';
-import type { Capability, Connection, InputRule, Node, Recipe, RootDefinition, Vertex } from './definition.ts';
+import type {
+  AccountConnection,
+  Capability,
+  Connection,
+  InputRule,
+  Node,
+  Recipe,
+  RootDefinition,
+  Vertex,
+} from './definition.ts';
 import type { JsonSchema } from './json.ts';
 import { namedTypeSchema, toCatalogSchema, typeRefName } from './schema.ts';
 import { PRINTED_KEYWORDS, constraintText, referencedTypes, type Callable, type TypeDefinition } from './signature.ts';
 import { getNamedType } from './types.ts';
+
+const SERVICE_PATTERN = /^[a-z][a-z0-9_]*$/;
+const SECRET_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 // The field the platform adds to the input of every capability under a node
 // with an account connection; the author neither writes nor receives it.
@@ -88,8 +100,16 @@ function typeList(schema: JsonSchema): unknown[] {
   return Array.isArray(schema.type) ? schema.type : schema.type === undefined ? [] : [schema.type];
 }
 
-export function accountConnectionOf(capability: CatalogCapability): Connection | null {
-  return capability.connectionNode?.connection?.type === 'account' ? capability.connectionNode.connection : null;
+// The connection a capability works under: of the nearest node up its path
+// that declares one.
+export function connectionOf(capability: CatalogCapability): Connection | null {
+  return capability.connectionNode?.connection ?? null;
+}
+
+export function accountConnectionOf(capability: CatalogCapability): AccountConnection | null {
+  const connection = connectionOf(capability);
+
+  return connection?.type === 'account' ? connection : null;
 }
 
 // Where a schema stands, and so which rules it obeys. A type that serves
@@ -593,6 +613,51 @@ export function buildCatalog(root: RootDefinition): { catalog: Catalog; warnings
     );
   }
 
+  // How a service is connected is part of its node's definition: the
+  // connections layer reads it from here. A service is declared once — its
+  // accounts, its OAuth client and its secrets are stored under its name.
+  const serviceNodes = new Map<string, string>();
+
+  const checkConnection = (fullName: string, connection: Connection): void => {
+    const declaredBy = serviceNodes.get(connection.service);
+
+    if (!SERVICE_PATTERN.test(connection.service ?? '')) {
+      problem(fullName, `the service name "${connection.service}" must match ${SERVICE_PATTERN}`);
+    } else if (declaredBy !== undefined) {
+      problem(fullName, `the service "${connection.service}" is already declared by \`${declaredBy}\``);
+    } else {
+      serviceNodes.set(connection.service, fullName);
+    }
+
+    if (connection.type === 'account') {
+      const oauth = connection.oauth as AccountConnection['oauth'] | undefined;
+
+      if (!oauth || !URL.canParse(oauth.url ?? '')) {
+        problem(fullName, 'an account connection says where its authorization starts: oauth.url');
+      }
+
+      if (oauth && !['dynamic', 'manual'].includes(oauth.clientRegistration)) {
+        problem(fullName, `unknown client registration "${String(oauth.clientRegistration)}"`);
+      }
+
+      if (oauth?.clientRegistration === 'manual' && !connection.setup) {
+        problem(fullName, 'a connection with a manual OAuth client says what the operator sets up at the provider');
+      }
+
+      if (oauth?.identityProbe && (!URL.canParse(oauth.identityProbe.url ?? '') || !oauth.identityProbe.idField)) {
+        problem(fullName, 'an identity probe names its url and the field of the id');
+      }
+    }
+
+    if (connection.type === 'secret') {
+      const secrets = (connection.secrets as readonly string[] | undefined) ?? [];
+
+      if (!secrets.length || secrets.some(name => !SECRET_PATTERN.test(name)) || new Set(secrets).size !== secrets.length) {
+        problem(fullName, `a secret connection names its secrets, each once and matching ${SECRET_PATTERN}`);
+      }
+    }
+  };
+
   for (const node of nodes) {
     const { fullName } = node;
 
@@ -653,6 +718,7 @@ export function buildCatalog(root: RootDefinition): { catalog: Catalog; warnings
 
       checkText(node.connection.summary, `${fullName} connection`);
       checkText(node.connection.setup, `${fullName} connection`);
+      checkConnection(fullName, node.connection);
     }
   }
 

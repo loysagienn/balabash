@@ -5,7 +5,8 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { CapabilityError, toCapabilityError } from './errors.ts';
 import { computeGrant, type GrantPolicy } from './grant.ts';
-import { call, invokeCapability } from './invoke.ts';
+import type { CallContext } from './definition.ts';
+import { accountAuthority, call, invokeCapability, secretAuthority } from './invoke.ts';
 import { describe as describeVertex } from './describe.ts';
 import { CALLER, OLD, WORK, testCatalog, testConnections, type Calls } from './test-tree.ts';
 
@@ -46,7 +47,7 @@ describe('the call of a capability', () => {
       {
         name: 'notes_list',
         input: { status: 'open', limit: 10 },
-        ctx: { caller: CALLER, account: null, signal: null, program: null },
+        ctx: { caller: CALLER, account: null, authority: null, signal: null, program: null },
       },
     ]);
   });
@@ -68,6 +69,7 @@ describe('the call of a capability', () => {
   it('runs the action for the caller of the grant, with the accounts of its workspace', async () => {
     const asked: string[] = [];
     const perWorkspace = {
+      ...connections,
       async accounts(workspaceId: string) {
         asked.push(workspaceId);
 
@@ -210,6 +212,59 @@ describe('the call of a capability', () => {
     assert.deepEqual(calls[0]?.input, { to: 'a@b.test', text: 'Hi' });
     assert.deepEqual(calls[0]?.ctx.account, WORK);
     assert.deepEqual(await invokeCapability(grant, 'mail_labels_list', { account: 'work' }, env), { labels: [] });
+  });
+
+  it('gives the action the authority of its connection: the access of the chosen account, the secrets of the service', async () => {
+    const home = { ...WORK, account: 'home', name: 'Home' };
+    const two = testConnections({ accounts: { mail: [WORK, home] }, secrets: ['search'] });
+    const grant = await computeGrant(
+      catalog,
+      { allows: () => true, actions: ['describe', 'call'] },
+      { caller: CALLER, connections: two },
+    );
+    const tokenOf = async (ctx: CallContext | undefined, rejected?: string) =>
+      ctx ? accountAuthority(ctx).accessToken(rejected) : null;
+
+    calls.length = 0;
+    await invokeCapability(grant, 'mail_send', { to: 'a@b.test', text: 'Hi', account: 'home' }, { connections: two });
+    await invokeCapability(grant, 'mail_labels_list', { account: 'work' }, { connections: two });
+    await invokeCapability(grant, 'search_query', { text: 'x' }, { connections: two });
+    await invokeCapability(grant, 'notes_list', {}, { connections: two });
+
+    // Each call acts as the account it named, in the workspace of its caller.
+    assert.equal(await tokenOf(calls[0]?.ctx), 'token:workspace-1:mail:home');
+    assert.equal(await tokenOf(calls[1]?.ctx), 'token:workspace-1:mail:work');
+    assert.equal(await tokenOf(calls[1]?.ctx, 'token:workspace-1:mail:work'), 'token:workspace-1:mail:work:renewed');
+    assert.deepEqual(calls[2]?.ctx.authority, { type: 'secret', secrets: { SEARCH_KEY: 'key-of-search' } });
+    assert.equal(calls[2]?.ctx.account, null);
+    assert.equal(calls[3]?.ctx.authority, null);
+
+    // An action that asks for an authority its node does not give is a defect.
+    const wrong = calls[2]?.ctx;
+
+    assert.throws(() => wrong && accountAuthority(wrong), /stands under no account connection/);
+    assert.equal(wrong && secretAuthority(wrong).secrets.SEARCH_KEY, 'key-of-search');
+  });
+
+  it('refuses a call whose connection is not in place any more, without running the action', async () => {
+    const grant = await grantOf();
+    const gone = testConnections({ accounts: { mail: [WORK, OLD] } });
+    const wrongSort = {
+      ...connections,
+      async secretAuthority() {
+        return { type: 'account', accessToken: async () => 'token' } as never;
+      },
+    };
+
+    calls.length = 0;
+
+    // The grant was computed while the secrets were there.
+    const error = await errorOf(invokeCapability(grant, 'search_query', { text: 'x' }, { connections: gone }));
+    const defect = await errorOf(invokeCapability(grant, 'search_query', { text: 'x' }, { connections: wrongSort }));
+
+    assert.deepEqual(error.toValue(), { kind: 'auth_required', message: 'The secrets of "search" are not entered.' });
+    assert.equal(defect.kind, 'internal');
+    assert.deepEqual(calls, []);
   });
 
   it('answers a missing, unknown or disconnected account without running the action', async () => {

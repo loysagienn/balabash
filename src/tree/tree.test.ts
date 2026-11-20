@@ -22,6 +22,12 @@ import type { Stand } from '../test-support/stand.ts';
 const NO_CONNECTIONS: ConnectionsPort = {
   accounts: async () => [],
   secretsReady: async () => false,
+  accountAuthority: async () => {
+    throw new Error('no account is connected');
+  },
+  secretAuthority: async () => {
+    throw new Error('no secret is entered');
+  },
 };
 
 let stand: Stand;
@@ -138,6 +144,19 @@ describe('the tree', () => {
         'web',
         'web_get',
         'web_download',
+        'web_perplexity',
+        'web_perplexity_search',
+        'web_perplexity_ask',
+        'web_perplexity_reason',
+        'web_perplexity_research',
+        'connections',
+        'connections_list',
+        'connections_authorize',
+        'connections_request_oauth_client',
+        'connections_request_secret',
+        'connections_forget_secret',
+        'connections_rename',
+        'connections_disconnect',
         'system',
         'system_request_restart',
       ],

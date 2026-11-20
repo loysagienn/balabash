@@ -12,6 +12,7 @@ import { ingestFile } from '../files/index.ts';
 import { guessContentType, receiveUpload } from '../workspace/files.ts';
 import { fileRefValue, isTextType } from './files.ts';
 import { callTime, internet, openPublicUrl, type Net, type WebAnswer } from './web-request.ts';
+import { perplexityNode } from './web-perplexity.ts';
 
 // The object keys of downloaded files in storage start with this.
 const DOWNLOAD_SCOPE = 'downloads';
@@ -386,7 +387,7 @@ function download(net: Net) {
 
 // The node over a network: the internet, or — in a test — a network of the
 // test's own.
-export function webNode(net: Net = internet): Node {
+export function webNode(net: Net = internet, perplexity: Node = perplexityNode()): Node {
   return node({
     name: 'web',
     summary:
@@ -399,7 +400,7 @@ export function webNode(net: Net = internet): Node {
         text: 'Only public addresses are reachable: private, loopback and link-local addresses are refused on every redirect hop.',
       },
     ],
-    children: [get(net), download(net)],
+    children: [get(net), download(net), perplexity],
   });
 }
 

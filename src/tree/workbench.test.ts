@@ -21,6 +21,12 @@ import type { Stand } from '../test-support/stand.ts';
 const NO_CONNECTIONS: ConnectionsPort = {
   accounts: async () => [],
   secretsReady: async () => false,
+  accountAuthority: async () => {
+    throw new Error('no account is connected');
+  },
+  secretAuthority: async () => {
+    throw new Error('no secret is entered');
+  },
 };
 
 let stand: Stand;

@@ -146,7 +146,12 @@ export function testRoot(calls: Calls = []): RootDefinition {
       node({
         name: 'mail',
         summary: "The user's mail. Come here to send a letter.",
-        connection: { type: 'account', service: 'mail', summary: 'Mail of the user.' },
+        connection: {
+          type: 'account',
+          service: 'mail',
+          summary: 'Mail of the user.',
+          oauth: { url: 'https://mail.test', clientRegistration: 'dynamic' },
+        },
         children: [
           capability({
             name: 'send',
@@ -183,7 +188,7 @@ export function testRoot(calls: Calls = []): RootDefinition {
       node({
         name: 'search',
         summary: 'Search of the web. Come here to find a page.',
-        connection: { type: 'secret', service: 'search', summary: 'Web search.' },
+        connection: { type: 'secret', service: 'search', summary: 'Web search.', secrets: ['SEARCH_KEY'] },
         children: [
           capability({
             name: 'query',
@@ -219,6 +224,21 @@ export function testConnections(
     },
     async secretsReady(service) {
       return (state.secrets ?? []).includes(service);
+    },
+    // The token says whose it is: a test reads from it which account, of
+    // which workspace, an action acted as.
+    async accountAuthority(workspaceId, service, account) {
+      return {
+        type: 'account',
+        accessToken: async rejected => `token:${workspaceId}:${service}:${account}${rejected ? ':renewed' : ''}`,
+      };
+    },
+    async secretAuthority(service) {
+      if (!(state.secrets ?? []).includes(service)) {
+        throw new CapabilityError('auth_required', `The secrets of "${service}" are not entered.`);
+      }
+
+      return { type: 'secret', secrets: { SEARCH_KEY: `key-of-${service}` } };
     },
   };
 }

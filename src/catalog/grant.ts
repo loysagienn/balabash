@@ -17,17 +17,25 @@
 
 import type { ActionName } from './actions.ts';
 import type { Catalog, CatalogNode, CatalogVertex } from './catalog.ts';
-import type { Caller } from './definition.ts';
+import type { AccountAuthority, Caller, SecretAuthority } from './definition.ts';
 import type { AccountValue } from './types.ts';
 
-// What the catalog needs to know about connections; the platform's
-// connections layer stands behind it.
+// What the catalog needs from connections; the platform's connections layer
+// stands behind it. The first two answer what there is and carry no secret:
+// a grant and `describe` read them. The last two hand a call its authority
+// and are asked only on the path of a call, after the account was chosen and
+// found connected; a connection that is not in place by then is refused with
+// `auth_required`.
 export type ConnectionsPort = {
   // The accounts of an account service in the workspace, whatever their
   // status.
   accounts(workspaceId: string, service: string): Promise<AccountValue[]>;
   // Whether the installation's secrets of a secret service are in place.
   secretsReady(service: string): Promise<boolean>;
+  // The authority of one account: `account` is its address.
+  accountAuthority(workspaceId: string, service: string, account: string): Promise<AccountAuthority>;
+  // The authority of a secret service.
+  secretAuthority(service: string): Promise<SecretAuthority>;
 };
 
 export type GrantPolicy = {

@@ -32,7 +32,8 @@ import {
   OAUTH_CLIENT_PROVISIONED,
 } from '../../core/envelope.ts';
 import { config } from '../../config/index.ts';
-import { dropWorkspaceClient, getUserAuthServer, type UserAuthServer } from '../tool-manager.ts';
+import { dropWorkspaceClient } from '../tool-manager.ts';
+import { getAccountService, type AccountService } from './services.ts';
 import { createInteractiveAuthProvider } from './oauth-provider.ts';
 import { backfillConnectionIdentity, getAccessToken, identityData, identityLabel, probeIdentity } from './identity.ts';
 import type { ProbedIdentity } from './identity.ts';
@@ -78,8 +79,8 @@ function randomToken(): string {
   return crypto.randomBytes(24).toString('base64url');
 }
 
-function getServer(serverName: string): UserAuthServer {
-  const server = getUserAuthServer(serverName);
+function getServer(serverName: string): AccountService {
+  const server = getAccountService(serverName);
 
   if (!server) {
     throw new ConnectionError('not_found', `Unknown integration "${serverName}"`);
@@ -111,7 +112,7 @@ export async function getOauthClient(serverName: string): Promise<Record<string,
   return (row?.clientInformation as Record<string, unknown> | null) ?? null;
 }
 
-async function requireManualOauthClient(server: UserAuthServer): Promise<void> {
+async function requireManualOauthClient(server: AccountService): Promise<void> {
   if (server.clientRegistration !== 'manual') {
     return;
   }
@@ -325,7 +326,7 @@ type LinkResolution = { existing: ConnectionModel } | { create: { accountKey: st
 
 // The row the target names among the rows of (workspace, server) as they are
 // under the lock, or the row to create.
-function resolveLinkTarget(server: UserAuthServer, target: LinkTarget, rows: ConnectionModel[]): LinkResolution {
+function resolveLinkTarget(server: AccountService, target: LinkTarget, rows: ConnectionModel[]): LinkResolution {
   switch (target.kind) {
     case 'account': {
       const existing = rows.find(row => row.accountKey === target.accountKey);
@@ -397,7 +398,7 @@ function identityUnknown(rows: ConnectionModel[]): ConnectionModel[] {
 // identity is known (else the twin guard is blind). The backfill that
 // asks the provider ran before the lock (issueLink); its refusals are
 // told by row, a row that appeared since is told to retry.
-function assertCanCreate(server: UserAuthServer, rows: ConnectionModel[], backfillRefusals: Map<string, string>): void {
+function assertCanCreate(server: AccountService, rows: ConnectionModel[], backfillRefusals: Map<string, string>): void {
   if (!rows.length) {
     return;
   }
@@ -428,7 +429,7 @@ function assertCanCreate(server: UserAuthServer, rows: ConnectionModel[], backfi
 // so the rules hold at the write. threadId is the issuing thread — the auth
 // agent's, or the main thread when the operator asks from the console: the
 // flow's connection.* events are addressed to it.
-async function issueLink(workspaceId: string, threadId: string, server: UserAuthServer, target: LinkTarget): Promise<ConnectLink> {
+async function issueLink(workspaceId: string, threadId: string, server: AccountService, target: LinkTarget): Promise<ConnectLink> {
   await requireManualOauthClient(server);
 
   // The backfill asks the provider — outside the lock and the transaction;
@@ -762,7 +763,7 @@ export async function handleOauthCallback(query: Record<string, unknown>): Promi
     return fail('Authorization response contains no code');
   }
 
-  let server: UserAuthServer;
+  let server: AccountService;
 
   try {
     server = getServer(row.server);

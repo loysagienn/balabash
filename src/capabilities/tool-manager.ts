@@ -36,6 +36,7 @@ import { resolveExternalServerSecrets } from './server-secrets.ts';
 import { runToolHandler } from './tool-result.ts';
 import { listWorkspaceConnections, markReauthorizationRequired } from './connections/index.ts';
 import { backfillConnectionIdentity, identityLabel } from './connections/identity.ts';
+import { registerAccountService, unregisterAccountService, type AccountService } from './connections/services.ts';
 
 // MCP SDK defaults to 60s per request; deep-research-style tools legitimately
 // run for minutes. Progress notifications reset the clock when a server sends
@@ -234,6 +235,22 @@ export function listUserAuthServers(): UserAuthServer[] {
 // loadToolServers replaces it like every other entry.
 export function registerUserAuthServer(server: UserAuthServer): void {
   userAuthServers.set(server.name, server);
+  registerAccountService(accountServiceOf(server));
+}
+
+// The server as the connections layer knows it: how its accounts authorize,
+// nothing about its tools.
+function accountServiceOf(server: UserAuthServer): AccountService {
+  return {
+    name: server.name,
+    url: server.url,
+    description: server.description,
+    setup: null,
+    clientRegistration: server.clientRegistration,
+    scope: server.scope,
+    authorizationParams: server.authorizationParams,
+    identityProbe: server.identityProbe,
+  };
 }
 
 export function dropWorkspaceClient(serverName: string, workspaceId: string, accountKey: string): void {
@@ -821,10 +838,14 @@ export async function loadToolServers(input: Omit<LocalToolContext, keyof LocalT
   pendingExternalServers = nextPending;
   claudeConnectors = nextClaudeConnectors;
 
+  for (const serverName of userAuthServers.keys()) {
+    unregisterAccountService(serverName);
+  }
+
   userAuthServers.clear();
 
-  for (const [serverName, server] of nextUserAuth) {
-    userAuthServers.set(serverName, server);
+  for (const server of nextUserAuth.values()) {
+    registerUserAuthServer(server);
   }
 
   for (const server of previous.values()) {

@@ -70,7 +70,7 @@ export const ACTIONS: Record<ActionName, ActionDefinition> = {
   run_program: {
     name: 'run_program',
     description:
-      'Run a program: JavaScript that calls capabilities and returns one result. `code` is the body of an async function with only `call(name, input)`, `describe(name)` and `console` in scope; a failed call throws a CapabilityError. Intermediate values and console output stay with the run: the returned JSON value is all you get.',
+      'Run a program: JavaScript that calls capabilities and returns one result. `code` is the body of an async function with only `call(name, input)`, `describe(name)` and `console` in scope; a failed call throws a CapabilityError. Intermediate values and console output stay with the run: the returned JSON value is all you get. With nothing to return, end with `return null`.',
     input: z.strictObject({
       code: z.string(),
       timeoutSeconds: z.int().min(1).max(600).default(120),

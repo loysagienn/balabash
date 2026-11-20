@@ -5,9 +5,11 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { z } from 'zod';
 import { CatalogBuildError, accountConnectionOf, buildCatalog } from './catalog.ts';
-import { capability, node, type RootDefinition, type Vertex } from './definition.ts';
+import { capability, node, type Connection, type OAuthSettings, type RootDefinition, type Vertex } from './definition.ts';
 import { testCatalog, testRoot } from './test-tree.ts';
 import { FileRef, JsonObject, JsonValue, namedType } from './types.ts';
+
+const MAIL_OAUTH: OAuthSettings = { url: 'https://mail.test', clientRegistration: 'dynamic' };
 
 const leaf = (overrides: Partial<Parameters<typeof capability>[0]> = {}) =>
   capability({
@@ -191,12 +193,44 @@ describe('the rules of the scheme that stop the build', () => {
         node({
           name: 'mail',
           summary: 'Mail.',
-          connection: { type: 'account', service: 'mail', summary: 'Mail.' },
+          connection: { type: 'account', service: 'mail', summary: 'Mail.', oauth: MAIL_OAUTH },
           children: [leaf({ input: z.strictObject({ account: z.string() }) })],
         }),
       ]),
       /mail_ping input\.account: the account field is added by the platform/,
     );
+  });
+
+  it('connections: a service declared once, with how it is connected', () => {
+    const under = (connection: Connection, name = 'mail') =>
+      node({ name, summary: 'Mail.', connection, children: [leaf()] });
+    const account = { type: 'account', service: 'mail', summary: 'Mail.' } as const;
+    const secret = { type: 'secret', service: 'mail', summary: 'Mail.' } as const;
+
+    assert.deepEqual(problemsOf(root([under({ ...account, oauth: MAIL_OAUTH })])), []);
+    assert.deepEqual(problemsOf(root([under({ ...secret, secrets: ['MAIL_KEY'] })])), []);
+    assertProblem(
+      root([under({ ...account, service: 'Mail', oauth: MAIL_OAUTH })]),
+      /mail: the service name "Mail" must match/,
+    );
+    assertProblem(
+      root([under({ ...account, oauth: MAIL_OAUTH }), under({ ...secret, secrets: ['MAIL_KEY'] }, 'post')]),
+      /post: the service "mail" is already declared by `mail`/,
+    );
+    assertProblem(
+      root([under({ ...account, oauth: { ...MAIL_OAUTH, url: 'mail' } })]),
+      /mail: an account connection says where its authorization starts: oauth\.url/,
+    );
+    assertProblem(
+      root([under({ ...account, oauth: { ...MAIL_OAUTH, clientRegistration: 'manual' } })]),
+      /mail: a connection with a manual OAuth client says what the operator sets up at the provider/,
+    );
+    assertProblem(
+      root([under({ ...account, oauth: { ...MAIL_OAUTH, identityProbe: { url: 'https://mail.test/me', idField: '' } } })]),
+      /mail: an identity probe names its url and the field of the id/,
+    );
+    assertProblem(root([under({ ...secret, secrets: [] })]), /mail: a secret connection names its secrets/);
+    assertProblem(root([under({ ...secret, secrets: ['MAIL-KEY'] })]), /mail: a secret connection names its secrets/);
   });
 
   it('outputs: every key always present, strict objects, the pair kind: "file" reserved', () => {

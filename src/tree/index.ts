@@ -18,6 +18,12 @@
 // - web.ts — the node `web` with `get` and `download`; web-request.ts — a
 //   GET to the public internet: the addresses it reaches, its redirects and
 //   its time;
+//   web-perplexity.ts — its node `perplexity`, an external MCP server on
+//   the installation's key; external-server.ts — a call of a tool of such a
+//   server;
+// - connections.ts — the node `connections`; services.ts — the services the
+//   nodes declare, told to the app's connections layer, and the connections
+//   port of the catalog over that layer;
 // - system.ts — the node `system` with `request_restart`;
 // - cursor.ts — the cursor of a list paged along the log;
 // - transcript.ts — the course of a thread as text.
@@ -34,9 +40,11 @@ import {
   type Catalog,
   type RootDefinition,
 } from '../catalog/index.ts';
+import { connections } from './connections.ts';
 import { getEvent } from './events.ts';
 import { fileCapabilities } from './files.ts';
 import { projects } from './projects.ts';
+import { registerServices } from './services.ts';
 import { system } from './system.ts';
 import { threads } from './threads.ts';
 import { web } from './web.ts';
@@ -96,6 +104,7 @@ export const root: RootDefinition = {
     projects,
     workspace,
     web,
+    connections,
     system,
   ],
 };
@@ -103,9 +112,14 @@ export const root: RootDefinition = {
 let built: Catalog | null = null;
 
 // The catalog of this installation, built once: a broken rule of the scheme
-// stops the first use.
+// stops the first use. The services its nodes declare are told to the
+// connections layer with it: from then on they can be connected, and
+// `connectionsPort()` (./services.ts) answers for them.
 export function catalog(): Catalog {
-  built ??= buildCatalog(root).catalog;
+  if (!built) {
+    built = buildCatalog(root).catalog;
+    registerServices(built);
+  }
 
   return built;
 }

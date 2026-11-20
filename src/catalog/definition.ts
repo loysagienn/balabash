@@ -20,6 +20,10 @@ export type CallContext = {
   // account connection (the platform takes it from the `account` field of the
   // input and resolves it), null everywhere else.
   account: AccountValue | null;
+  // What the connection of the capability's node gives the action to act
+  // with: the access of the account the call acts as, or the installation's
+  // secrets of the service. Null for a capability without a connection.
+  authority: Authority | null;
   // Fires when the call is cancelled: nobody waits for its outcome any more.
   signal: AbortSignal | null;
   // The run of a program the call was made from, null for a call made
@@ -68,14 +72,72 @@ export type Recipe = {
   requires?: string[];
 };
 
-export type Connection = {
-  type: 'account' | 'secret';
+// The authority of a connection, ready to act with. The platform holds the
+// tokens and the secrets and puts them in: a capability never asks the model
+// for a secret, and its action never learns how the authority was obtained.
+export type AccountAuthority = {
+  type: 'account';
+  // The access token of the account the call acts as, good now: the platform
+  // renews it ahead of its expiry. `rejected` names a token the provider has
+  // just refused: the answer is a newer one. An account that can no longer
+  // act — its authorization is gone — answers with `auth_required`.
+  accessToken(rejected?: string): Promise<string>;
+};
+
+export type SecretAuthority = {
+  type: 'secret';
+  // The installation's secrets of the service, under the names its
+  // connection declares.
+  secrets: Readonly<Record<string, string>>;
+};
+
+export type Authority = AccountAuthority | SecretAuthority;
+
+// How the platform asks the provider who an account is: a GET with the
+// account's access token; the fields are paths into the JSON answer. A
+// service that declares a probe can hold several accounts — the probe is
+// what tells two of them apart.
+export type IdentityProbe = {
+  url: string;
+  idField: string;
+  labelField?: string;
+};
+
+// How an account of the service is authorized: OAuth 2 with the user's
+// consent.
+export type OAuthSettings = {
+  // Where the discovery of the authorization server starts: the protected
+  // resource, when it names its authorization server itself (RFC 9728, an
+  // MCP server), or the authorization server.
+  url: string;
+  // dynamic: the provider registers the client itself; manual: the operator
+  // registers an app at the provider and enters its client once for the
+  // installation.
+  clientRegistration: 'dynamic' | 'manual';
+  scope?: string;
+  // Extra parameters of the consent request.
+  authorizationParams?: Record<string, string>;
+  identityProbe?: IdentityProbe;
+};
+
+type ConnectionTexts = {
+  // The name of the service: the key its accounts, its OAuth client and its
+  // secrets are stored under. One node of the tree declares it.
   service: string;
   // What the service gives, one line for `connections_list`.
   summary: string;
   // What the operator sets up at the provider before the first authorization.
   setup?: string;
 };
+
+// Each user connects their own account.
+export type AccountConnection = ConnectionTexts & { type: 'account'; oauth: OAuthSettings };
+
+// The installation is connected once for everyone, by secrets the operator
+// enters; `secrets` names them.
+export type SecretConnection = ConnectionTexts & { type: 'secret'; secrets: readonly string[] };
+
+export type Connection = AccountConnection | SecretConnection;
 
 export type NodeDefinition = {
   name: string;

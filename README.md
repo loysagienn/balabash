@@ -79,8 +79,7 @@ the user. A system arrives as an installation driver, not as repository code.
 - **Any MCP server** (stdio or HTTP) added with a JSON file — the platform runs OAuth
   (discovery, dynamic client registration, PKCE), per-user connections with several
   accounts of one service, and `${secret:NAME}` installation credentials. In-process tool
-  servers are TypeScript modules; an installation adds its own next to the repository's
-  (Yandex Direct and Metrika run this way on the original installation).
+  servers are TypeScript modules; an installation adds its own next to the repository's.
 
 **A data workbench per workspace** — a private SQLite database, a scoped file area and a
 script runner (Python/Node), so bulk data moves disk-to-disk instead of through model

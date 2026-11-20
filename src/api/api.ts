@@ -39,7 +39,8 @@ import { FileNotFoundError, getFile, getWorkspaceFile, ingestFile, openFileConte
 import type { StorageBody } from '../files/storage.ts';
 import { verifyDownloadLink } from '../files/storage/local.ts';
 import { forgetExternalServerSecrets, getExternalServerSecretRequest, isExternalSecretServer, openExternalServerCredentialsRequest, provisionExternalServerSecrets } from '../capabilities/external-secrets.ts';
-import { getUserAuthServer, listClaudeConnectorTargets, listExternalSecretTargets, refreshExternalServers } from '../capabilities/tool-manager.ts';
+import { listClaudeConnectorTargets, listExternalSecretTargets, refreshExternalServers } from '../capabilities/tool-manager.ts';
+import { getAccountService } from '../capabilities/connections/services.ts';
 import { resolveOperatorCredentials, tokenTtlMs } from '../adapters/ccr/token.ts';
 import { ConnectionError, disconnectConnection, getOauthClientRequest, getWorkspaceConnection, openOauthClientRequest, provisionOauthClient, reconnectConnection, renameConnection, startConnection, connectionView } from '../capabilities/connections/index.ts';
 import { AppManagementError, listApps, publishApp, unpublishApp } from '../apps/management.ts';
@@ -1908,7 +1909,7 @@ router.post('/installation-services/:name/secret-request', requireSession, async
 router.post('/services/:name/oauth-client-request', requireSession, async ctx => {
   const workspaceId = ctx.state.workspaceId as string;
   const { name } = ctx.params;
-  const server = getUserAuthServer(name);
+  const server = getAccountService(name);
 
   if (!server || server.clientRegistration !== 'manual') {
     sendError(ctx, 404, 'not_found', 'No such service with an installation OAuth client');

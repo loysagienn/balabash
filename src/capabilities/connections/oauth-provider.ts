@@ -306,6 +306,77 @@ async function refreshStoredTokens(
   return fresh;
 }
 
+// The authorization of a connection is gone: there is no stored token, or
+// the provider no longer honors the refresh token. Only the user's consent
+// brings it back.
+export class AuthorizationLostError extends Error {
+  override name = 'AuthorizationLostError';
+}
+
+// What the provider answers a refresh token it no longer honors (RFC 6749
+// §5.2), as the SDK names the classes of its OAuth errors.
+const DEAD_GRANT_ERRORS = new Set(['InvalidGrantError', 'InvalidClientError', 'UnauthorizedClientError']);
+
+// The access token of a connected account for a call made straight to the
+// provider's API — no MCP transport in between to refresh on a 401. The
+// token is good now: it is renewed ahead of its expiry, as for a transport.
+// `rejected` names a token the provider has just refused: the answer is a
+// newer one — the stored token when another call has renewed it meanwhile,
+// a refreshed one otherwise. An account that cannot act any more throws
+// AuthorizationLostError; a refresh the authorization server did not answer
+// throws whatever the exchange threw — the authorization itself may be fine.
+export async function connectionAccessToken(
+  connection: { id: string; server: string },
+  serverUrl: string,
+  rejected?: string,
+): Promise<string> {
+  const provider = createTransportAuthProvider(connection, serverUrl);
+
+  if (rejected === undefined) {
+    const tokens = await provider.tokens();
+
+    if (!tokens?.access_token) {
+      throw new AuthorizationLostError('the account holds no access token');
+    }
+
+    return tokens.access_token;
+  }
+
+  const row = await prisma.connection.findUnique({ where: { id: connection.id } });
+  const stored = row?.status === 'connected' && isObject(row.tokens) ? (row.tokens as StoredTokens) : null;
+
+  if (!stored?.access_token) {
+    throw new AuthorizationLostError('the account holds no access token');
+  }
+
+  if (stored.access_token !== rejected) {
+    return stored.access_token;
+  }
+
+  if (!stored.refresh_token) {
+    throw new AuthorizationLostError('the provider refused the access token and the account holds no refresh token');
+  }
+
+  let inFlight = refreshesInFlight.get(connection.id);
+
+  if (!inFlight) {
+    inFlight = refreshStoredTokens(connection, serverUrl, provider, stored.refresh_token).finally(() => {
+      refreshesInFlight.delete(connection.id);
+    });
+    refreshesInFlight.set(connection.id, inFlight);
+  }
+
+  try {
+    return (await inFlight).access_token;
+  } catch (error) {
+    if (error instanceof Error && DEAD_GRANT_ERRORS.has(error.constructor.name)) {
+      throw new AuthorizationLostError(`the provider no longer honors the refresh token (${error.message || error.constructor.name})`);
+    }
+
+    throw error;
+  }
+}
+
 // Used by background MCP transports. It serves stored tokens (refreshing
 // them ahead of expiry) and saves the SDK's own refreshes, but deliberately
 // refuses to start an interactive flow. Addressed by connection row id: one

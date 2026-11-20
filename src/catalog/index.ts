@@ -28,6 +28,7 @@ export {
   CatalogBuildError,
   accountConnectionOf,
   buildCatalog,
+  connectionOf,
   type Catalog,
   type CatalogAction,
   type CatalogCapability,
@@ -37,11 +38,18 @@ export {
 export {
   capability,
   node,
+  type AccountAuthority,
+  type AccountConnection,
+  type Authority,
   type CallContext,
   type Caller,
   type Capability,
   type CapabilityDefinition,
   type Connection,
+  type IdentityProbe,
+  type OAuthSettings,
+  type SecretAuthority,
+  type SecretConnection,
   type InputRule,
   type Node,
   type NodeDefinition,
@@ -69,7 +77,7 @@ export {
   type Grant,
   type GrantPolicy,
 } from './grant.ts';
-export { call, invokeCapability, type InvokeEnv } from './invoke.ts';
+export { accountAuthority, call, invokeCapability, secretAuthority, type InvokeEnv } from './invoke.ts';
 export type { JsonSchema } from './json.ts';
 export {
   countProgramCalls,
