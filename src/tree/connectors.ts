@@ -62,11 +62,13 @@ async function refresh(): Promise<void> {
         name: view.name, description: config.description, recipients: view.recipients,
         guide: "Calls act as the operator's provider account connected on claude.ai.",
       }, tools, async (name, args, signal) => {
+        const generationAtStart = connector.generation;
         try {
           const deadline = AbortSignal.timeout(EXTERNAL_CALL_TIMEOUT_MS);
           return await callServerResult(server(), name, args, { signal: signal ? AbortSignal.any([signal, deadline]) : deadline });
         } catch (error) {
-          if (error instanceof CapabilityError &&
+          // Another turn may already have discovered the node on a new login.
+          if (generationAtStart === connector.generation && error instanceof CapabilityError &&
               (error.kind === 'auth_required' || (error.kind === 'unavailable' && !signal?.aborted))) {
             failed(connector, error);
           }

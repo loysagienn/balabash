@@ -24,6 +24,9 @@ test('a connector discovers paged contracts, grants by recipient, journals calls
   const requests: { method: string; token: string; session: string; name?: string }[] = [];
   let reply: CallToolResult = { structuredContent: { ts: 'posted', extra: true }, content: [] };
   let refused = false;
+  let delayNextCall = false;
+  const delayedCallStarted = Promise.withResolvers<void>();
+  const delayedResponse = Promise.withResolvers<Response>();
   const old = process.env.CLAUDE_CODE_OAUTH_TOKEN;
   t.after(() => { if (old === undefined) delete process.env.CLAUDE_CODE_OAUTH_TOKEN; else process.env.CLAUDE_CODE_OAUTH_TOKEN = old; });
   process.env.CLAUDE_CODE_OAUTH_TOKEN = 'test-first';
@@ -37,6 +40,11 @@ test('a connector discovers paged contracts, grants by recipient, journals calls
     if (init.method === 'DELETE' || init.method === 'GET') return new Response(null, { status: 405 });
     const { id, method, params } = JSON.parse(String(init.body));
     requests.push({ method, token: headers.get('authorization')!, session, name: params?.name });
+    if (delayNextCall && method === 'tools/call') {
+      delayNextCall = false;
+      delayedCallStarted.resolve();
+      return delayedResponse.promise;
+    }
     if (refused && method === 'tools/call') return Response.json({ error: { message: 'token rejected' } }, { status: 401 });
     if (method === 'notifications/initialized') return new Response(null, { status: 202 });
     const result = method === 'initialize'
@@ -85,12 +93,15 @@ test('a connector discovers paged contracts, grants by recipient, journals calls
   assert.doesNotMatch(JSON.stringify(mixed.value), /eA==/);
   assert.equal(requests.filter(r => r.method === 'tools/list').length, 2);
 
+  delayNextCall = true;
+  const inFlight = send();
+  await delayedCallStarted.promise;
   refused = true;
   const denied = await send();
   assert.ok('error' in denied);
   assert.equal(denied.error.kind, 'auth_required');
   assert.match(denied.error.message, /CLAUDE_CODE_OAUTH_TOKEN/);
-  assert.equal(requests.filter(r => r.name === 'send-message').length, 3);
+  assert.equal(requests.filter(r => r.name === 'send-message').length, 4);
   assert.equal((await connectorServiceViews())[0].state, 'failed');
   assert.equal((await context()).grant.vertices.has('slack'), false);
   refused = false;
@@ -101,6 +112,12 @@ test('a connector discovers paged contracts, grants by recipient, journals calls
   assert.notEqual(grantKey(first.grant), grantKey(recovered.grant));
   assert.equal((await connectorServiceViews())[0].state, 'connected');
   assert.equal(requests.at(-1)?.token, 'Bearer test-rotated');
+  delayedResponse.resolve(Response.json({ error: { message: 'old token rejected' } }, { status: 401 }));
+  const late = await inFlight;
+  assert.equal('error' in late && late.error.kind, 'auth_required');
+  assert.equal((await connectorServiceViews())[0].state, 'connected');
+  assert.ok((await context()).grant.vertices.has('slack'));
+  assert.equal(requests.filter(r => r.name === 'send-message').length, 4);
   // Substitute only the CLI store; never read credentials from the test host.
   const credentialsFile = path.join(homedir(), '.claude', '.credentials.json');
   let expiresAt = Date.now() - 1000;
