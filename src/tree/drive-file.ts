@@ -85,7 +85,8 @@ export type Exportable = { formats: ExportFormat[]; byDefault: ExportFormat; tex
 
 const EXPORTABLE: Record<string, Exportable> = {
   [GOOGLE_DOCUMENT]: { formats: ['docx', 'pdf', 'txt', 'md', 'html', 'odt', 'rtf', 'epub'], byDefault: 'docx', text: 'md' },
-  [GOOGLE_SPREADSHEET]: { formats: ['xlsx', 'pdf', 'csv', 'tsv', 'ods', 'html'], byDefault: 'xlsx', text: 'csv' },
+  // Drive exports a Sheet as a web page only zipped, not as text/html.
+  [GOOGLE_SPREADSHEET]: { formats: ['xlsx', 'pdf', 'csv', 'tsv', 'ods'], byDefault: 'xlsx', text: 'csv' },
   [GOOGLE_PRESENTATION]: { formats: ['pptx', 'pdf', 'txt', 'odp'], byDefault: 'pptx', text: 'txt' },
   [GOOGLE_DRAWING]: { formats: ['png', 'jpeg', 'svg', 'pdf'], byDefault: 'png', text: null },
 };

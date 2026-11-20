@@ -115,6 +115,8 @@ export const CONTENT_TYPES_BY_EXTENSION: Record<string, string> = {
   '.hpp': 'text/x-c++',
   '.xml': 'application/xml',
   '.pdf': 'application/pdf',
+  '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
   '.potx': 'application/vnd.openxmlformats-officedocument.presentationml.template',
   '.ppsx': 'application/vnd.openxmlformats-officedocument.presentationml.slideshow',

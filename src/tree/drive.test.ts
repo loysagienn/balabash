@@ -10,7 +10,9 @@
 
 import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
 import http from 'node:http';
+import path from 'node:path';
 import { CapabilityError, buildCatalog, computeGrant, invokeCapability } from '../catalog/index.ts';
 import type { Catalog, ConnectionsPort, ErrorKind, Grant } from '../catalog/index.ts';
 import type { JsonObject } from '../core/contract.ts';
@@ -98,6 +100,7 @@ const SHEET = 'application/vnd.google-apps.spreadsheet';
 const SLIDES = 'application/vnd.google-apps.presentation';
 const DRAWING = 'application/vnd.google-apps.drawing';
 const DOCX = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+const XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
 // The size of one piece of an upload, as the node cuts it.
 const PIECE = 32 * 256 * 1024;
@@ -128,12 +131,19 @@ const outsideState = {
     { id: 'sd1', name: 'Team', createdTime: '2026-01-05T09:00:00.000Z' },
     { id: 'sd2', name: 'Archive' },
   ] as Value[],
-  incomplete: false,
+  // Whether a list comes incomplete: when it looks through every shared
+  // drive ('everything'), as Drive does it, or whatever it looks through.
+  incomplete: false as false | 'everything' | 'always',
   sessions: new Map<string, Session>(),
+  // The address a session is opened at, when not the stand's own.
+  location: null as string | null,
   // What happens to the next pieces sent to a session, one entry a piece:
   // 'piece' — it is lost on the way, 'answer' — it is kept and the answer
-  // is lost, a number — only so many of its bytes are kept.
-  pieces: [] as Array<'piece' | 'answer' | number>,
+  // is lost, 'cut' — it is kept and the answer breaks off inside its body,
+  // 'busy' — Drive fails with a 503 and keeps nothing, 'kept-busy' — it
+  // keeps the piece and fails with a 503, a number — only so many of its
+  // bytes are kept, 'kept' — nothing: the piece is taken as it is.
+  pieces: [] as Array<'kept' | 'piece' | 'answer' | 'cut' | 'busy' | 'kept-busy' | number>,
 };
 
 function entry(id: string, name: string, mimeType: string, more: Value = {}, body: { content?: Buffer; exports?: Record<string, Buffer> } = {}): void {
@@ -257,7 +267,7 @@ function listFiles(response: http.ServerResponse, params: URLSearchParams): void
 
   json(response, 200, {
     files: found.slice(offset, offset + size),
-    incompleteSearch: outsideState.incomplete,
+    incompleteSearch: outsideState.incomplete === 'always' || (outsideState.incomplete === 'everything' && params.get('corpora') === 'allDrives'),
     ...(found.length > offset + size ? { nextPageToken: `o${offset + size}` } : {}),
   });
 }
@@ -303,15 +313,31 @@ function serveSession(request: http.IncomingMessage, response: http.ServerRespon
       return;
     }
 
+    if (fate === 'busy') {
+      return refusal(response, 503, 'Backend Error', 'backendError');
+    }
+
     if (Number(sent[1]) !== session.bytes.length || Number(sent[2]) - Number(sent[1]) + 1 !== body.length) {
       return refusal(response, 400, `Invalid request. The session holds ${session.bytes.length} bytes.`, 'badRequest');
     }
 
     session.bytes = Buffer.concat([session.bytes, typeof fate === 'number' ? body.subarray(0, fate) : body]);
 
-    if (fate === 'answer') {
+    if (fate === 'answer' || fate === 'cut' || fate === 'kept-busy') {
       if ((sent[3] !== '*' && session.bytes.length === Number(sent[3]))) {
         finish(session, n);
+      }
+
+      if (fate === 'kept-busy') {
+        return refusal(response, 503, 'Backend Error', 'backendError');
+      }
+
+      if (fate === 'cut') {
+        // The head says a body follows, and the connection ends inside it.
+        response.writeHead(200, { 'content-type': 'application/json', 'content-length': '4096' });
+        response.write('{"id": "u', () => request.socket.destroy());
+
+        return;
       }
 
       request.socket.destroy();
@@ -479,7 +505,7 @@ async function serveDrive(request: http.IncomingMessage, response: http.ServerRe
       made: null,
     });
 
-    return json(response, 200, {}, { location: `${origin}/upload/session/${n}` });
+    return json(response, 200, {}, { location: outsideState.location ?? `${origin}/upload/session/${n}` });
   }
 
   const session = /^\/upload\/session\/(\d+)$/.exec(path);
@@ -686,7 +712,7 @@ describe('drive: finding', () => {
     assert.match(asked.fields, /^nextPageToken,incompleteSearch,files\(id,name,mimeType,size,/);
 
     // The trash is searched too; a shared drive narrows the search.
-    outsideState.incomplete = true;
+    outsideState.incomplete = 'everything';
 
     const second = await drive('search_files', { query: "name contains 'report'", limit: 2, cursor: first.nextCursor });
 
@@ -720,9 +746,11 @@ describe('drive: finding', () => {
     const top = await drive('list_folder', { limit: 3 });
 
     assert.deepEqual(top.files.map((file: Value) => [file.fileId, file.entryKind]), [['f-empty', 'folder'], ["o'hara", 'folder'], ['f-reports', 'folder']]);
+    // The top of My Drive is listed in the user's own corpus, with no
+    // question about the folder.
     assert.deepEqual(
-      (({ q, orderBy, pageSize }) => ({ q, orderBy, pageSize }))(paramsOf(outsideState.api[from])),
-      { q: "'root' in parents and trashed = false", orderBy: 'folder,name', pageSize: '3' },
+      (({ q, orderBy, pageSize, corpora }) => ({ q, orderBy, pageSize, corpora }))(paramsOf(outsideState.api[from])),
+      { q: "'root' in parents and trashed = false", orderBy: 'folder,name', pageSize: '3', corpora: 'user' },
     );
 
     const next = await drive('list_folder', { limit: 3, cursor: top.nextCursor });
@@ -737,19 +765,40 @@ describe('drive: finding', () => {
       [['sheet1', 'google_document', 'xlsx'], ['doc1', 'google_document', 'docx'], ['pdf1', 'file', null]],
     );
     assert.equal(reports.nextCursor, null);
+    // The folder is asked what it is and where it lives, then listed there.
+    assert.deepEqual(requests(-2).map(line => line.split(/[?&]fields/)[0]), ['GET /drive/files/f-reports?supportsAllDrives=true', 'GET /drive/files?pageSize=50']);
+    assert.equal(paramsOf(outsideState.api.at(-1)!).corpora, 'user');
+
+    // A folder of a shared drive — its root too — is listed in that drive.
     assert.deepEqual((await drive('list_folder', { folderId: 'sd1' })).files.map((file: Value) => file.fileId), ['sd-file']);
+    assert.deepEqual((({ corpora, driveId }) => ({ corpora, driveId }))(paramsOf(outsideState.api.at(-1)!)), { corpora: 'drive', driveId: 'sd1' });
 
     // An id is quoted for the query, whatever it holds; an empty folder is
     // an empty list.
     assert.deepEqual(await drive('list_folder', { folderId: "o'hara" }), { files: [], nextCursor: null });
-    assert.equal(paramsOf(outsideState.api.at(-2)!).q, "'o\\'hara' in parents and trashed = false");
+    assert.equal(paramsOf(outsideState.api.at(-1)!).q, "'o\\'hara' in parents and trashed = false");
     assert.deepEqual(await drive('list_folder', { folderId: 'f-empty' }), { files: [], nextCursor: null });
+  });
+
+  test('a folder is listed whole or not at all: a list Drive calls incomplete is not its content', async () => {
+    // A search through every shared drive may come incomplete; the list of
+    // a folder does not look there.
+    outsideState.incomplete = 'everything';
+    assert.equal((await drive('search_files', { query: '' })).incompleteSearch, true);
+    assert.equal((await drive('list_folder', { folderId: 'f-reports' })).files.length, 3);
+    assert.deepEqual((await drive('list_folder', { folderId: 'sd1' })).files.map((file: Value) => file.fileId), ['sd-file']);
+
+    outsideState.incomplete = 'always';
+    await refuses(drive('list_folder'), 'unavailable', /^Google Drive could not look through the whole folder "root" this time: nothing is listed\. Try again\.$/);
+    await refuses(drive('list_folder', { folderId: 'sd1', limit: 1 }), 'unavailable', /the whole folder "sd1"/);
+    outsideState.incomplete = false;
   });
 
   test('an id that names no folder is not listed as an empty one', async () => {
     await refuses(drive('list_folder', { folderId: 'nowhere' }), 'not_found', /^There is no folder "nowhere" that the account "default" can see in Google Drive\.$/);
     await refuses(drive('list_folder', { folderId: 'pdf1' }), 'not_found', /^"pdf1" is not a folder: it is the file "report\.pdf" \(application\/pdf\)\.$/);
     await refuses(drive('list_folder', { folderId: 'sc-folder' }), 'not_found', /^"sc-folder" is not a folder: it is a shortcut to "f-reports"\.$/);
+    await refuses(drive('list_folder', { folderId: 'pdf1', cursor: 'o1' }), 'not_found', /^"pdf1" is not a folder/);
     await refuses(drive('list_folder', { folderId: ' ' }), 'invalid_input', /^folderId is empty/);
     await refuses(drive('list_folder', { cursor: 'bogus' }), 'invalid_input', /^cursor is not a nextCursor of this list/);
   });
@@ -846,10 +895,12 @@ describe('drive: reading', () => {
     const format = await refuses(
       drive('download_file', { fileId: 'sheet1', format: 'docx' }),
       'invalid_input',
-      /^The format "docx" is not available for "Budget\.xlsx" \(application\/vnd\.google-apps\.spreadsheet\): pass one of xlsx, pdf, csv, tsv, ods, html\.$/,
+      /^The format "docx" is not available for "Budget\.xlsx" \(application\/vnd\.google-apps\.spreadsheet\): pass one of xlsx, pdf, csv, tsv, ods\.$/,
     );
 
-    assert.deepEqual(format.details, { exportFormats: ['xlsx', 'pdf', 'csv', 'tsv', 'ods', 'html'] });
+    assert.deepEqual(format.details, { exportFormats: ['xlsx', 'pdf', 'csv', 'tsv', 'ods'] });
+    // Drive gives a Sheet as a web page only zipped: html is a format of a Doc.
+    await refuses(drive('download_file', { fileId: 'sheet1', format: 'html' }), 'invalid_input', /^The format "html" is not available for "Budget\.xlsx"/);
     await refuses(drive('download_file', { fileId: 'huge' }), 'invalid_input', /^"backup\.zip" is 300000001 bytes, over the 300000000 bytes a download takes: nothing was stored\.$/);
     await refuses(drive('download_file', { fileId: 'doc1', format: 'zip' }), 'invalid_input', /format/);
     assert.ok(requests(from).every(line => !/alt=media|\/export/.test(line)), requests(from).join(' | '));
@@ -884,6 +935,30 @@ describe('drive: writing', () => {
     // A file stored without a telling type goes by the type of its name.
     await drive('upload_file', { file: await stored('table.csv', 'application/octet-stream', Buffer.from('a,b\n')) });
     assert.equal(outsideState.api.at(-2)?.headers['x-upload-content-type'], 'text/csv');
+  });
+
+  test('a document of the workspace reaches Drive with the type its conversion needs', async () => {
+    // The way the guide of the node names: `export_file`, with no type
+    // said, then the upload.
+    const area = path.join(stand.dir, 'data', 'workspace', stand.workspaceId, 'files');
+
+    await fs.mkdir(area, { recursive: true });
+    await fs.writeFile(path.join(area, 'letter.docx'), 'the bytes of a letter');
+
+    const letter = await invoke('export_file', { path: 'letter.docx' });
+
+    assert.equal(letter.contentType, DOCX);
+
+    const doc = await drive('upload_file', { file: letter.id, convertTo: 'document' });
+
+    assert.equal(doc.mimeType, DOC);
+    assert.deepEqual([outsideState.api.at(-2)?.body, outsideState.api.at(-2)?.headers['x-upload-content-type']], [{ name: 'letter.docx', mimeType: DOC }, DOCX]);
+
+    // A table stored before its type was known by its name goes the same.
+    const sheet = await drive('upload_file', { file: await stored('budget.xlsx', 'application/octet-stream', Buffer.from('the bytes of a table')), convertTo: 'spreadsheet' });
+
+    assert.equal(sheet.mimeType, SHEET);
+    assert.equal(outsideState.api.at(-2)?.headers['x-upload-content-type'], XLSX);
   });
 
   test('a large file goes piece by piece: Drive says how much it holds, and the next piece starts there', async () => {
@@ -957,12 +1032,90 @@ describe('drive: writing', () => {
     ]);
     assert.ok(outsideState.entries.get(made.fileId)!.content!.equals(body));
 
-    // Drive that keeps losing pieces is not asked for ever.
+    // Drive that keeps losing pieces is not asked for ever. The session
+    // never got its last piece: there is no file.
     from = outsideState.api.length;
     outsideState.pieces = ['piece', 'piece', 'piece', 'piece'];
-    await refuses(drive('upload_file', { file: fileId }), 'unavailable', /^Google Drive did not answer: /);
+    await refuses(
+      drive('upload_file', { file: fileId }),
+      'unavailable',
+      /^The upload was given up: Google Drive failed it 4 times, the last one — Google Drive did not answer: .*\. No file was made in Drive\.$/,
+    );
     assert.equal(sent(from).length, 7);
     assert.deepEqual(outsideState.pieces, []);
+  });
+
+  test('a failure of Drive in the middle of an upload is asked about too: a 503, an answer that breaks off', async () => {
+    const body = Buffer.alloc(PIECE + 5, 9);
+    const fileId = await stored('report.bin', 'application/octet-stream', body);
+    const before = outsideState.entries.size;
+    let from = outsideState.api.length;
+
+    // A 503 to a piece Drive did not keep, then a 503 to the last piece it
+    // did keep: the session says what it holds, and the file it made.
+    outsideState.pieces = ['busy', 'kept', 'kept-busy'];
+
+    const made = await drive('upload_file', { file: fileId });
+
+    assert.deepEqual(sent(from), [
+      `bytes 0-${PIECE - 1}/${body.length} → 503`,
+      `bytes */${body.length} → 308`,
+      `bytes 0-${PIECE - 1}/${body.length} → 308`,
+      `bytes ${PIECE}-${PIECE + 4}/${body.length} → 503`,
+      `bytes */${body.length} → 200`,
+    ]);
+    assert.ok(outsideState.entries.get(made.fileId)!.content!.equals(body));
+    assert.equal(outsideState.entries.size, before + 1, 'one file was made');
+
+    // The answer that carries the file breaks off inside its body.
+    from = outsideState.api.length;
+    outsideState.pieces = ['cut'];
+
+    const replaced = await drive('update_file', { fileId: 'txt1', text: 'whole' });
+
+    assert.deepEqual(sent(from), ['bytes 0-4/5 → lost', 'bytes */5 → 200']);
+    assert.deepEqual([replaced.fileId, replaced.sizeBytes, outsideState.entries.get('txt1')?.content?.toString()], ['txt1', 5, 'whole']);
+  });
+
+  test('an upload that cannot go on is given up, and the caller is told what became of the file', async () => {
+    const small = await stored('small.bin', 'application/octet-stream', Buffer.from('small'));
+    let from = outsideState.api.length;
+
+    // The last piece was on the way every time: Drive may have made the
+    // file, and a blind repeat would make another.
+    outsideState.pieces = ['busy', 'busy', 'busy', 'busy'];
+    await refuses(
+      drive('upload_file', { file: small }),
+      'unavailable',
+      /^The upload was given up: Google Drive failed it 4 times, the last one — Google Drive refused the request \(HTTP 503 on PUT \/upload\/session\/\d+\): Backend Error \(backendError\)\. Whether Drive made the file is not known: look for it in Drive before uploading again, or there may be two\.$/,
+    );
+    assert.deepEqual(sent(from).map(line => line.split(' → ')[1]), ['503', '308', '503', '308', '503', '308', '503']);
+
+    outsideState.pieces = ['busy', 'busy', 'busy', 'busy'];
+    await refuses(drive('update_file', { fileId: 'txt1', text: 'again' }), 'unavailable', /Whether the content was replaced is not known: read the file to see; replacing it again is safe\.$/);
+    assert.equal(outsideState.entries.get('txt1')?.content?.toString(), 'whole');
+
+    // A session that answers and keeps nothing is not sent the same piece
+    // for ever.
+    from = outsideState.api.length;
+    outsideState.pieces = [0, 0, 0, 0];
+    await refuses(
+      drive('upload_file', { file: small }),
+      'external_error',
+      /^The upload was given up: Google Drive keeps taking no bytes into its upload session, which holds 0\. No file was made in Drive\.$/,
+    );
+    assert.deepEqual(sent(from), ['bytes 0-4/5 → 308', 'bytes 0-4/5 → 308', 'bytes 0-4/5 → 308', 'bytes 0-4/5 → 308']);
+    assert.deepEqual(outsideState.pieces, []);
+  });
+
+  test('the token and the bytes go only to the upload endpoint: a session opened elsewhere is not sent to', async () => {
+    const fileId = await stored('secret.txt', 'text/plain', Buffer.from('secret'));
+    const from = outsideState.api.length;
+
+    outsideState.location = 'https://uploads.example.net/session/1';
+    await refuses(drive('upload_file', { file: fileId }), 'external_error', /^Google Drive named an address for the upload that is not its upload endpoint: nothing was sent to it\.$/);
+    outsideState.location = null;
+    assert.deepEqual(sent(from), []);
   });
 
   test('a token Drive refuses in the middle of an upload is renewed, and the piece goes out again', async () => {

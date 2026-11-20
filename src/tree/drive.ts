@@ -41,7 +41,6 @@ import {
   orAbsent,
   page,
   pageToken,
-  type GoogleAnswer,
   type GoogleApi,
   type GoogleClient,
 } from './google-api.ts';
@@ -79,9 +78,10 @@ const UPLOAD_MAX_BYTES = 150_000_000;
 // own: a piece is bytes in hand, sent again when the token is renewed.
 // Drive takes pieces in multiples of 256 KiB.
 const PIECE_BYTES = 32 * 256 * 1024;
-// A piece Drive gave no answer to is not sent blindly again: the session is
-// asked what it holds — this many times in one upload at the most.
-const MAX_INQUIRIES = 3;
+// What one upload lives through at the most: a setback is a request to the
+// session that Drive failed — no whole answer, a 5xx — or a piece none of
+// whose bytes it kept.
+const MAX_SETBACKS = 3;
 
 // The longest Drive may take over the text of a document, over the bytes of
 // a download and over one piece of an upload.
@@ -162,6 +162,26 @@ function tooLargeToUpload(sizeBytes: number | null): CapabilityError {
   );
 }
 
+// What a caller is told of an upload that was given up: `undone` when the
+// session cannot have finished, `unknown` when its last piece was on the
+// way and Drive may have made the file of it.
+type GivenUp = { undone: string; unknown: string };
+
+const NEW_FILE: GivenUp = {
+  undone: 'No file was made in Drive.',
+  unknown: 'Whether Drive made the file is not known: look for it in Drive before uploading again, or there may be two.',
+};
+
+const NEW_CONTENT: GivenUp = {
+  undone: 'The file keeps the content it had.',
+  unknown: 'Whether the content was replaced is not known: read the file to see; replacing it again is safe.',
+};
+
+// A request to a session whose outcome Drive did not tell: no whole answer,
+// or a failure of its own (5xx). The session knows what it holds.
+const untold = (error: unknown): error is CapabilityError =>
+  error instanceof GoogleRefusal ? error.status >= 500 : error instanceof CapabilityError && error.kind === 'unavailable';
+
 function storedContent(file: StoredFile): Content {
   const recorded = file.contentType?.trim() || null;
   // A type that goes into a header as it is; a file stored without a
@@ -228,6 +248,10 @@ export function driveNode(
   const metadata = async (google: GoogleClient, fileId: string) =>
     (await google.json(fileUrl(fileId, { fields: FILE_FIELDS }))) as FileResource;
 
+  // The only place the token of the account and the bytes of an upload are
+  // sent to besides the API.
+  const uploadOrigin = new URL(at.upload).origin;
+
   const noFile = (fileId: string, ctx: CallContext) => `There is no file "${fileId}" that ${whose(ctx)} can see in Google Drive.`;
 
   // The file a call acts on: the one its id names, or — when the id names a
@@ -244,19 +268,26 @@ export function driveNode(
       : file;
   }
 
-  // One page of the files a query finds: in one shared drive when it is
-  // named, otherwise in everything the user sees — My Drive, the files
-  // shared with them and every shared drive.
+  // One page of the files a query finds — in everything the user sees (My
+  // Drive, the files shared with them and every shared drive), in the
+  // user's own corpus (My Drive and the files shared with them) or in one
+  // shared drive. Only the first may come incomplete: Drive does not always
+  // get through every shared drive.
   function files(
     google: GoogleClient,
-    params: { q: string; limit: number; cursor: string | undefined; orderBy?: string; sharedDriveId?: string },
+    params: { q: string; limit: number; cursor: string | undefined; orderBy?: string; within: 'everything' | 'user' | { sharedDriveId: string } },
   ) {
+    const { within } = params;
     const search = new URLSearchParams({
       pageSize: String(params.limit),
       fields: `nextPageToken,incompleteSearch,files(${FILE_FIELDS})`,
       supportsAllDrives: 'true',
       includeItemsFromAllDrives: 'true',
-      ...(params.sharedDriveId !== undefined ? { corpora: 'drive', driveId: params.sharedDriveId } : { corpora: 'allDrives' }),
+      ...(within === 'everything'
+        ? { corpora: 'allDrives' }
+        : within === 'user'
+          ? { corpora: 'user' }
+          : { corpora: 'drive', driveId: within.sharedDriveId }),
     });
 
     if (params.q.trim()) {
@@ -297,7 +328,7 @@ export function driveNode(
         limit: input.limit,
         cursor: input.cursor,
         orderBy,
-        sharedDriveId,
+        within: sharedDriveId === undefined ? 'everything' : { sharedDriveId },
       }).catch((error: unknown) => {
         if (error instanceof GoogleRefusal && error.status === 400) {
           // Everything the list was asked with is the call's own.
@@ -339,20 +370,13 @@ export function driveNode(
       const google = googleClient(DRIVE, ctx);
       const folderId = named('folderId', input.folderId);
       const absent = `There is no folder "${folderId}" that ${whose(ctx)} can see in Google Drive.`;
-      const found = await orAbsent(
-        files(google, {
-          q: `'${folderId.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}' in parents and trashed = false`,
-          limit: input.limit,
-          cursor: input.cursor,
-          orderBy: 'folder,name',
-        }),
-        absent,
-      );
-      const children = listed<FileResource>(found.files);
+      // The folder says where its children are listed whole: in its shared
+      // drive, or in the user's own corpus — "root" is the top of My Drive.
+      // It also says that it is a folder: Drive lists the children of
+      // anything, and a file has none.
+      let within: 'user' | { sharedDriveId: string } = 'user';
 
-      // Drive lists the children of anything, and a file has none: an empty
-      // first page is an empty folder only when the id names a folder.
-      if (!children.length && input.cursor === undefined && folderId !== 'root') {
+      if (folderId !== 'root') {
         const folder = await orAbsent(metadata(google, folderId), absent);
 
         if (folder.mimeType !== GOOGLE_FOLDER) {
@@ -363,9 +387,27 @@ export function driveNode(
               : `"${folderId}" is not a folder: it is the file ${JSON.stringify(folder.name ?? '')} (${folder.mimeType ?? 'no type'}).`,
           );
         }
+
+        within = folder.driveId ? { sharedDriveId: folder.driveId } : 'user';
       }
 
-      return { files: children.map(fileValue), nextCursor: text(found.nextPageToken) };
+      const found = await orAbsent(
+        files(google, {
+          q: `'${folderId.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}' in parents and trashed = false`,
+          limit: input.limit,
+          cursor: input.cursor,
+          orderBy: 'folder,name',
+          within,
+        }),
+        absent,
+      );
+
+      // A list that may miss files is not the content of the folder.
+      if (found.incompleteSearch === true) {
+        throw new CapabilityError('unavailable', `Google Drive could not look through the whole folder "${folderId}" this time: nothing is listed. Try again.`);
+      }
+
+      return { files: listed<FileResource>(found.files).map(fileValue), nextCursor: text(found.nextPageToken) };
     },
   });
 
@@ -596,63 +638,95 @@ export function driveNode(
       throw new CapabilityError('external_error', 'Google Drive opened no session for the upload: its answer names no address to send the bytes to.');
     }
 
+    if (!URL.canParse(session) || new URL(session).origin !== uploadOrigin) {
+      throw new CapabilityError('external_error', 'Google Drive named an address for the upload that is not its upload endpoint: nothing was sent to it.');
+    }
+
     return session;
   }
 
   // Sends the content to a session piece by piece and gives the file Drive
   // made of it. To every piece but the last Drive answers 308 with the
   // range it holds, and the next piece starts where that range ends — also
-  // when Drive kept less than it was sent. A piece that got no answer is
-  // not sent blindly again: the session is asked what it holds, and the
-  // upload goes on from there.
-  async function send(google: GoogleClient, session: string, content: Content, ctx: CallContext): Promise<FileResource> {
+  // when Drive kept less than it was sent.
+  //
+  // A request Drive failed (no whole answer, a 5xx) is not sent blindly
+  // again: the session is asked what it holds — the file, when it finished
+  // meanwhile — and the upload goes on from there. Every such failure and
+  // every piece Drive kept nothing of is a setback, and an upload has only
+  // so many.
+  async function send(google: GoogleClient, session: string, content: Content, ctx: CallContext, givenUp: GivenUp): Promise<FileResource> {
     let held = 0;
-    let inquiries = 0;
+    let setbacks = 0;
 
     for await (const piece of pieces(content.bytes, PIECE_BYTES)) {
       let rest = piece.bytes;
+      // The next request sends no bytes: it asks what the session holds.
+      let asking = false;
 
       for (;;) {
         // The whole size is said with the last piece at the latest.
         const total = piece.last ? String(held + rest.length) : content.sizeBytes === null ? '*' : String(content.sizeBytes);
-        const asked = `bytes */${total}`;
-        let answer: GoogleAnswer;
+        let now: number;
 
         try {
-          answer = await google.request(session, {
+          const answer = await google.request(session, {
             method: 'PUT',
-            body: rest,
-            headers: { 'content-range': rest.length ? `bytes ${held}-${held + rest.length - 1}/${total}` : asked },
+            ...(asking ? {} : { body: rest }),
+            headers: { 'content-range': asking || !rest.length ? `bytes */${total}` : `bytes ${held}-${held + rest.length - 1}/${total}` },
             answers: [308],
             timeoutMs: PIECE_TIMEOUT_MS,
           });
+
+          if (answer.status !== 308) {
+            return (await answer.json()) as FileResource;
+          }
+
+          // "Go on": Range names the last byte the session holds; a session
+          // that holds nothing sends no Range.
+          const range = /^bytes=0-(\d+)$/.exec(answer.headers.get('range') ?? '');
+
+          now = range ? Number(range[1]) + 1 : 0;
+          await answer.drop();
         } catch (error) {
-          if (!(error instanceof CapabilityError) || error.kind !== 'unavailable' || ctx.signal?.aborted || inquiries >= MAX_INQUIRIES) {
+          if (!untold(error) || ctx.signal?.aborted) {
             throw error;
           }
 
-          inquiries += 1;
-          answer = await google.request(session, { method: 'PUT', headers: { 'content-range': asked }, answers: [308] });
+          setbacks += 1;
+
+          if (setbacks > MAX_SETBACKS) {
+            throw new CapabilityError(
+              'unavailable',
+              `The upload was given up: Google Drive failed it ${setbacks} times, the last one — ${error.message.replace(/\.$/, '')}. ${piece.last ? givenUp.unknown : givenUp.undone}`,
+            );
+          }
+
+          asking = true;
+
+          continue;
         }
-
-        if (answer.status !== 308) {
-          return (await answer.json()) as FileResource;
-        }
-
-        // "Go on": Range names the last byte the session holds; a session
-        // that holds nothing sends no Range.
-        const range = /^bytes=0-(\d+)$/.exec(answer.headers.get('range') ?? '');
-        const now = range ? Number(range[1]) + 1 : 0;
-
-        await answer.drop();
 
         if (now < held || now > held + rest.length) {
           throw new CapabilityError(
             'external_error',
-            `Google Drive says its upload session holds ${now} bytes, where it was sent between ${held} and ${held + rest.length}: the upload cannot go on.`,
+            `Google Drive says its upload session holds ${now} bytes, where it was sent between ${held} and ${held + rest.length}: the upload cannot go on. ${givenUp.undone}`,
           );
         }
 
+        // Drive answered a piece and kept none of it.
+        if (!asking && rest.length && now === held) {
+          setbacks += 1;
+
+          if (setbacks > MAX_SETBACKS) {
+            throw new CapabilityError(
+              'external_error',
+              `The upload was given up: Google Drive keeps taking no bytes into its upload session, which holds ${held}. ${givenUp.undone}`,
+            );
+          }
+        }
+
+        asking = false;
         rest = rest.subarray(now - held);
         held = now;
 
@@ -661,7 +735,7 @@ export function driveNode(
         }
 
         if (piece.last) {
-          throw new CapabilityError('external_error', 'Google Drive holds every byte of the upload and did not make a file of it.');
+          throw new CapabilityError('external_error', `Google Drive holds every byte of the upload and did not make a file of it. ${givenUp.undone}`);
         }
 
         break;
@@ -712,7 +786,7 @@ export function driveNode(
         refusal => refusal.status === 404 && folderId !== undefined,
       );
 
-      return fileValue(await send(google, session, content, ctx));
+      return fileValue(await send(google, session, content, ctx, NEW_FILE));
     },
   });
 
@@ -758,7 +832,7 @@ export function driveNode(
       // The metadata is left as it is: only the content is new.
       const session = await orAbsent(openSession(google, 'PATCH', `/files/${id(targetId)}`, {}, content), noFile(fileId, ctx));
 
-      return fileValue(await send(google, session, content, ctx));
+      return fileValue(await send(google, session, content, ctx, NEW_CONTENT));
     },
   });
 

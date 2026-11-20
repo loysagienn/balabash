@@ -42,11 +42,11 @@ export type GoogleApi = {
 
 export type GoogleRequest = {
   method?: string;
-  // A JSON body — or a raw one with its content type. A body is sent again
-  // when the token is renewed, so it is bytes in hand, never a stream.
+  // A JSON body — or raw bytes, whose headers the request names itself. A
+  // body is sent again when the token is renewed, so it is bytes in hand,
+  // never a stream.
   json?: unknown;
   body?: Buffer | string;
-  contentType?: string;
   headers?: Record<string, string>;
   accept?: string;
   // The longest the API may take over this request, its body included.
@@ -207,11 +207,7 @@ export function googleClient(api: GoogleApi, ctx: CallContext): GoogleClient {
         headers: {
           authorization: `Bearer ${accessToken}`,
           accept: init.accept ?? 'application/json',
-          ...(init.json !== undefined
-            ? { 'content-type': 'application/json' }
-            : init.contentType
-              ? { 'content-type': init.contentType }
-              : {}),
+          ...(init.json !== undefined ? { 'content-type': 'application/json' } : {}),
           ...(init.headers ?? {}),
         },
         body: init.json !== undefined ? JSON.stringify(init.json) : init.body,
