@@ -14,9 +14,8 @@
 // remote thread survives one, is no obstacle to the restart window and is
 // not tombstoned at boot (src/core/threads.ts).
 //
-// The owner is whoever spawned the thread: the secretary's remote thread
-// talks to the user (an ordinary thread); another agent's is headless and
-// talks to its parent. A remote thread never ends on its own — the session
+// A user-facing thread talks to the user; a headless one to its parent.
+// The mode is recorded at spawn. A remote thread never ends on its own — the session
 // is endless and the thread merely pauses when idle. Three different
 // words: thread.interrupt stops the turn in flight (the thread waits on);
 // thread.cancel closes the thread without touching the session; thread.finish

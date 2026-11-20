@@ -335,10 +335,8 @@ type StartThreadInput = {
   // The spawned agent's thread icon (§11.2): adapters know only core, so the
   // surface hint travels in the event, not in the catalog.
   icon?: string;
-  // Headless thread (§11.2): no user surface — adapters create none for it
-  // (e.g. no Telegram topic). Like
-  // icon, the hint comes from the spawned agent's declaration and travels in
-  // the event.
+  // The mode chosen at spawn travels in the event; adapters create a user
+  // surface only for a user-facing thread.
   headless?: boolean;
   // A remote agent's thread (src/remote/engine.ts): the session runs in
   // an external system, the thread mirrors it — no run here, survives

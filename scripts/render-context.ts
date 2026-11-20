@@ -25,7 +25,8 @@ import path from 'node:path';
 import type { AgentDeclaration, RemoteAgentDeclaration, ToolDefinition } from '../src/core/contract.ts';
 import { prisma } from '../src/db/client.ts';
 import { getFile, getFileDownloadUrl, ingestFile, openFileContent } from '../src/files/index.ts';
-import { getAgents, isRemoteAgent, loadAgents, repositoryAgentNames } from '../src/capabilities/agent-catalog.ts';
+import { legacyServers } from '../src/capabilities/legacy-bundles.ts';
+import { getAgents, isRemoteAgent, loadAgents, repositoryAgentNames, startable } from '../src/capabilities/agent-catalog.ts';
 import { loadRemoteAgents } from '../src/capabilities/remote-agent-source.ts';
 import { createRemoteDriverContext } from '../src/capabilities/remote-agent-secrets.ts';
 import { createAuthToolServer } from '../src/capabilities/auth-tools.ts';
@@ -93,16 +94,17 @@ async function renderBundleTools(workspaceId: string, bundle: ToolBundle): Promi
 
 async function renderAgent(declaration: AgentDeclaration, workspaceId: string): Promise<string> {
   const bundle: ToolBundle = {
-    declared: declaration.tools,
+    declared: legacyServers(declaration.name),
   };
 
+  const children = startable(declaration.name).map(agent => agent.name);
   const header = [
     `# Agent: ${declaration.name}`,
     '',
     `- sdk: ${declaration.sdk}`,
-    `- tools bundle: ${JSON.stringify(declaration.tools)}`,
-    ...(declaration.agents?.length ? [`- spawnable sub-agents: ${declaration.agents.join(', ')}`] : []),
-    ...(declaration.headless ? ['- headless: no user-facing thread, talks only to its operator'] : []),
+    `- tools bundle: ${JSON.stringify(bundle.declared)}`,
+    ...(children.length ? [`- spawnable sub-agents: ${children.join(', ')}`] : []),
+    ...(declaration.defaultMode === 'headless' ? ['- headless: no user-facing thread, talks only to its operator'] : []),
     ...(declaration.session?.model ? [`- model: ${declaration.session.model}`] : []),
     ...(declaration.session?.effort ? [`- effort: ${declaration.session.effort}`] : []),
     ...(declaration.session?.preset ? [`- preset: ${declaration.session.preset}`] : []),
@@ -170,6 +172,8 @@ function renderRemoteAgent(declaration: RemoteAgentDeclaration): string {
     `# Agent: ${declaration.name}`,
     '',
     '- kind: remote (the session runs in an external system; the thread mirrors it — src/remote/engine.ts)',
+    `- modes: ${declaration.modes.join(', ')} (default: ${declaration.defaultMode})`,
+    `- recipients: ${declaration.recipients?.join(', ') || '(none)'}`,
     ...(declaration.secrets?.length ? [`- secrets: ${declaration.secrets.join(', ')}`] : []),
     ...(declaration.notification ? [`- notification: ${declaration.notification}`] : []),
   ].join('\n');

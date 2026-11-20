@@ -18,7 +18,7 @@ import {
   FINISH_THREAD_DESCRIPTION,
   SEND_TO_THREAD_DESCRIPTION,
 } from './thread-verbs.ts';
-import { spawnableRemoteAgents } from './agent-catalog.ts';
+import { isRemoteAgent, spawnHeadless, startable, type CatalogAgent } from './agent-catalog.ts';
 import type {
   AgentDeclaration,
   AgentRun,
@@ -282,25 +282,20 @@ function createSendFileTool(ctx: RunContext, headless: boolean): SdkBridgeTool {
   };
 }
 
-// Child-operating verbs: granted when the declaration lists spawnable
-// sub-agents. Spawning makes this agent the child's operator — it drives the
-// child with send_to_thread and receives replies as thread messages.
-// The remote kinds a declaration may spawn, in one line each for the
-// spawn_agent words: the name, the description, the options schema.
-function remoteKindWords(declaration: Pick<AgentDeclaration, 'agents' | 'tools'>): string {
-  const kinds = spawnableRemoteAgents(declaration);
+// The launch mode and options of each remote kind offered by this bridge.
+function remoteKindWords(agents: CatalogAgent[]): string {
+  const kinds = agents.filter(isRemoteAgent);
 
   if (!kinds.length) {
     return '';
   }
 
   return (
-    ' Remote agents (their session runs in an external system; the child thread mirrors it and is headless ' +
-    '— it talks only to you): ' +
+    ' Remote agents (the child thread mirrors a session in an external system): ' +
     kinds
       .map(
         kind =>
-          `${kind.name} — ${kind.description}${
+          `${kind.name} (${spawnHeadless(kind, true) ? 'talks only to you' : 'talks to the user'}) — ${kind.description}${
             kind.options && typeof kind.options.properties === 'object' && kind.options.properties
               ? ` Options: ${JSON.stringify(kind.options.properties)}.`
               : ''
@@ -314,20 +309,23 @@ function remoteKindWords(declaration: Pick<AgentDeclaration, 'agents' | 'tools'>
 
 function createChildTools(
   ctx: RunContext,
-  declaration: Pick<AgentDeclaration, 'agents' | 'tools'>,
+  declaration: AgentDeclaration,
   childThreadIds: Set<string>,
 ): SdkBridgeTool[] {
-  const allowedAgents = [...(declaration.agents ?? []), ...spawnableRemoteAgents(declaration).map(kind => kind.name)];
+  const agents = startable(declaration.name);
+  if (!agents.length) {
+    return [];
+  }
+
+  const allowedAgents = agents.map(agent => agent.name);
   const spawnAgentTool: SdkBridgeTool = {
     name: 'spawn_agent',
     description:
       `Spawn a sub-agent in a child thread and become its operator. Allowed agents: ${allowedAgents.join(', ')}. ` +
-      'The call returns the child threadId, and the sub-agent starts working asynchronously. From then on you ' +
-      'exchange messages: send it messages with send_to_thread, and its replies reach you automatically as ' +
-      'incoming messages labeled with its threadId — end your turn to let them arrive. When its work is done, ' +
-      'finish_thread asks it to wrap up and report (its summary arrives as its thread.completed — not at ' +
-      'once; wait for it); cancel_thread only when the child is no longer needed at all.' +
-      remoteKindWords(declaration),
+      'The call returns the threadId. Send instructions with send_to_thread. A headless child replies to you ' +
+      'with messages labeled by threadId; a user-facing child talks to the user. Both send you a summary ' +
+      'when they end. Use finish_thread to ask for that report, or cancel_thread to stop a child immediately.' +
+      remoteKindWords(agents),
     inputSchema: {
       type: 'object',
       properties: {
@@ -399,10 +397,7 @@ function createChildTools(
 
       childThreadIds.add(child.threadId);
 
-      return (
-        `spawned — child threadId: ${child.threadId}; its replies arrive on their own as messages labeled ` +
-        'with this id. End your turn and wait.'
-      );
+      return `Spawned child thread ${child.threadId}. Its report arrives when the thread ends.`;
     },
   };
 
@@ -497,12 +492,6 @@ function createChildTools(
   return [spawnAgentTool, sendToThreadTool, cancelThreadTool, finishThreadTool];
 }
 
-// Child-operating verbs are granted when the declaration lists sub-agents or
-// may spawn the installation's remote kinds (the "projects" rule).
-function hasChildTools(declaration: Pick<AgentDeclaration, 'agents' | 'tools'>): boolean {
-  return Boolean(declaration.agents?.length) || spawnableRemoteAgents(declaration).length > 0;
-}
-
 // ---------------------------------------------------------------------------
 
 // The base verbs as a given declaration's session sees them — the same
@@ -510,14 +499,14 @@ function hasChildTools(declaration: Pick<AgentDeclaration, 'agents' | 'tools'>):
 // definitions. For offline rendering (scripts/render-context.ts): the
 // showcase must show the real texts, not a retelling.
 export function describeSessionBridgeTools(declaration: AgentDeclaration): ToolDefinition[] {
-  const headless = declaration.headless === true;
+  const headless = declaration.defaultMode === 'headless';
   // Handlers of the built tools are never called here.
   const inertCtx = null as unknown as RunContext;
 
   const tools: SdkBridgeTool[] = [
     createEndThreadTool(inertCtx),
     createSendFileTool(inertCtx, headless),
-    ...(hasChildTools(declaration) ? createChildTools(inertCtx, declaration, new Set()) : []),
+    ...createChildTools(inertCtx, declaration, new Set()),
   ];
 
   return tools.map(tool => ({
@@ -533,7 +522,7 @@ export function createSessionRun(
   prompt: string,
   ctx: RunContext,
 ): AgentRun {
-  const headless = declaration.headless === true;
+  const headless = ctx.headless;
   // Children spawned by this run: their replies are labeled by threadId in
   // the dialogue (a thread.message whose author is not the parent).
   const childThreadIds = new Set<string>(ctx.resume?.childThreadIds ?? []);
@@ -618,7 +607,7 @@ export function createSessionRun(
       extraTools: [
         createEndThreadTool(ctx),
         createSendFileTool(ctx, headless),
-        ...(hasChildTools(declaration) ? createChildTools(ctx, declaration, childThreadIds) : []),
+        ...createChildTools(ctx, declaration, childThreadIds),
         ...(environment?.extraTools ?? []),
       ],
     });

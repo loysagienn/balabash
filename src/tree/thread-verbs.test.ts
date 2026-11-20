@@ -67,6 +67,9 @@ const driver: RemoteDriver = {
 
 const remoteAgent: RemoteAgentDeclaration = {
   kind: 'remote',
+  recipients: ['coordinator', 'general'],
+  modes: ['user', 'headless'],
+  defaultMode: 'user',
   name: 'fake_agent',
   description: 'A session in the external system of the test.',
   options: {
@@ -194,7 +197,11 @@ before(async () => {
     files: { ingest: input => files.ingestFile(input), get: fileId => files.getFile(fileId), open: fileId => files.openFileContent(fileId) },
   };
 
-  loadAgents([remoteAgent]);
+  loadAgents([
+    remoteAgent,
+    { ...remoteAgent, name: 'unassigned', recipients: [] },
+    { ...remoteAgent, name: 'private_agent', recipients: ['auth'], modes: ['user'], defaultMode: 'user' },
+  ]);
   engine.configureRemoteEngine({
     resolveKind: kind => (kind === 'fake_agent' ? { driver, context, notification: undefined } : null),
     verbTimeoutMs: 2_000,
@@ -210,6 +217,62 @@ after(async () => {
   tree.stopRunningWork();
   await engine.settled();
   await stand.stop();
+});
+
+describe('agent passports', () => {
+  test('the catalog grants named nodes, file and child verbs, and explicit root overrides', async () => {
+    const { coordinator } = await import('../../agents/access.ts');
+    const { agentGrantPolicy, getAgent } = await import('../capabilities/agent-catalog.ts');
+    const vertices = async (name: string) => {
+      const agent = name === coordinator.name ? coordinator : getAgent(name)!;
+      const grant = await computeGrant(tree.catalog(), agentGrantPolicy(agent, ['describe', 'call']), {
+        caller: { workspaceId: stand.workspaceId, threadId: stand.mainThreadId, agentName: name },
+        connections: services.connectionsPort(),
+      });
+      return grant.vertices;
+    };
+    const narrowed = agentGrantPolicy({ ...coordinator, access: { removeRoot: ['send_message'] } }, ['call']);
+    assert.equal(narrowed.allows(tree.catalog().vertices.get('send_message')!), false);
+
+    const secretary = await vertices('coordinator');
+    assert.ok(['export_file', 'import_file', 'view_file', 'get_event', 'fetch_thread_file', 'spawn_agent', 'workspace_apps_list'].every(name => secretary.has(name)));
+    assert.ok(!secretary.has('get_file_url'));
+
+    const engineer = await vertices('engineer');
+    assert.ok(['get_event', 'fetch_thread_file', 'system_request_restart', 'get_file_url', 'workspace_query'].every(name => engineer.has(name)));
+    assert.ok(!engineer.has('view_file') && !engineer.has('workspace_apps_list'));
+
+    const auth = await vertices('auth');
+    assert.ok(auth.has('spawn_agent') && auth.has('connections_list') && auth.has('get_event'));
+    assert.ok(!auth.has('fetch_thread_file') && !auth.has('import_file'));
+
+    const leaf = await vertices('image_generator');
+    assert.deepEqual([...leaf].sort(), ['', 'end_thread', 'export_file', 'get_file_url', 'import_file', 'send_message']);
+    assert.deepEqual([...(await vertices('fake_agent'))].sort(), ['', 'end_thread', 'get_file_url', 'send_message']);
+  });
+
+  test('a loaded remote kind is offered and callable only by its recipients', async () => {
+    const { getAgent, startable } = await import('../capabilities/agent-catalog.ts');
+    const { dispatchCoordinatorFunction, getCoordinatorFunctionDefinitions } = await import('../coordinator/functions.ts');
+    const names = (agent: string) => startable(agent).map(child => child.name);
+    assert.ok(getAgent('unassigned'));
+    assert.ok(names('engineer').includes('fake_agent')); // recipient by profile
+    assert.ok(!names('gardener').includes('fake_agent')); // projects alone grants nothing
+    assert.deepEqual(names('auth'), ['private_agent']);
+    const offered = await getCoordinatorFunctionDefinitions(stand.workspaceId);
+    assert.ok(offered.some(fn => fn.name === 'fake_agent'));
+    const ctx = { workspaceId: stand.workspaceId, threadId: stand.mainThreadId };
+    for (const name of ['unassigned', 'private_agent']) {
+      assert.ok(!offered.some(fn => fn.name === name));
+      assert.equal((await dispatchCoordinatorFunction({ callId: 'probe', name, arguments: '{"prompt":"Work"}' }, ctx)).kind, 'rejected');
+      await refuses(invoke('spawn_agent', { agent: name, title: 'Work', prompt: 'Work' }), 'invalid_input', /you can start/);
+    }
+
+    const { grant } = await child('auth');
+    const input = { agent: 'private_agent', title: 'Test', prompt: 'Work' };
+    assert.equal((await invoke('spawn_agent', input, grant)).headless, false);
+    await refuses(invoke('spawn_agent', { ...input, headless: true }, grant), 'invalid_input', /headless: false/);
+  });
 });
 
 describe('send_message', () => {

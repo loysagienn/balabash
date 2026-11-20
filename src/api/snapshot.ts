@@ -26,9 +26,9 @@ import { connectionView, listProvisionedOauthClients, listWorkspaceConnections }
 import { effectiveBundleServers } from '../capabilities/tool-manager.ts';
 import { listAccountServices } from '../capabilities/connections/services.ts';
 import { readOpenSecretRequests } from '../capabilities/secret-requests.ts';
-import { getAgents, isRemoteAgent, type CatalogAgent } from '../capabilities/agent-catalog.ts';
-import { COORDINATOR_AGENT } from '../core/threads.ts';
-import { COORDINATOR_BUNDLE, COORDINATOR_DESCRIPTION } from '../coordinator/functions.ts';
+import { getAgents, isRemoteAgent, startable } from '../capabilities/agent-catalog.ts';
+import { coordinator } from '../../agents/access.ts';
+import { legacyServers } from '../capabilities/legacy-bundles.ts';
 import { DEFAULT_EFFORT } from '../harness/default-effort.ts';
 import { config } from '../config/index.ts';
 import type { AgentDeclaration, RemoteAgentDeclaration } from '../core/contract.ts';
@@ -181,9 +181,7 @@ async function readLastModels(workspaceId: string): Promise<Map<string, string |
   return models;
 }
 
-// A remote agent kind: the session runs in an external system — no tool
-// passport, no sub-agents, no model of ours; the options schema is the
-// system's, shown nowhere yet.
+// A remote kind runs in the external system with its own model and tools.
 function remoteAgentView(agent: RemoteAgentDeclaration): AgentView {
   return {
     name: agent.name,
@@ -191,8 +189,9 @@ function remoteAgentView(agent: RemoteAgentDeclaration): AgentView {
     icon: agent.icon ?? null,
     sdk: 'remote',
     tools: [],
-    agents: [],
-    headless: false,
+    agents: startable(agent.name).map(child => child.name),
+    modes: agent.modes,
+    defaultMode: agent.defaultMode,
     notification: agent.notification ?? null,
     model: null,
     effort: null,
@@ -207,9 +206,10 @@ function agentView(agent: AgentDeclaration, lastModel: string | null): AgentView
     description: agent.description,
     icon: agent.icon ?? null,
     sdk: agent.sdk,
-    tools: effectiveBundleServers(agent.tools),
-    agents: agent.agents ?? [],
-    headless: agent.headless ?? false,
+    tools: effectiveBundleServers(legacyServers(agent.name)),
+    agents: startable(agent.name).map(child => child.name),
+    modes: agent.modes,
+    defaultMode: agent.defaultMode,
     notification: agent.notification ?? null,
     model: agent.session?.model ?? null,
     effort: agent.session?.effort ?? null,
@@ -220,22 +220,17 @@ function agentView(agent: AgentDeclaration, lastModel: string | null): AgentView
   };
 }
 
-// The coordinator — the secretary of the main thread — is not a catalog
-// module (its loop is src/coordinator), so its view is built from its own
-// facts: the OpenAI backend and the model of the config, the tool servers of
-// its passport (with the extension servers its "projects" brings), every catalog agent as what it launches (its spawn functions
-// derive from the whole catalog). Its requests name no reasoning effort and
-// its turns journal no session.started — effort, defaultEffort and
-// lastModel stay null.
-function coordinatorView(catalog: CatalogAgent[]): AgentView {
+// The main thread runs the configured API model and journals no SDK session.
+function coordinatorView(): AgentView {
   return {
-    name: COORDINATOR_AGENT,
-    description: COORDINATOR_DESCRIPTION,
+    name: coordinator.name,
+    description: coordinator.description,
     icon: null,
     sdk: 'openai',
-    tools: effectiveBundleServers(COORDINATOR_BUNDLE.declared),
-    agents: catalog.map(agent => agent.name),
-    headless: false,
+    tools: effectiveBundleServers(legacyServers(coordinator.name)),
+    agents: startable(coordinator.name).map(agent => agent.name),
+    modes: coordinator.modes,
+    defaultMode: coordinator.defaultMode,
     notification: null,
     model: config.mainModel,
     effort: null,
@@ -252,7 +247,7 @@ export async function readAgents(workspaceId: string): Promise<AgentView[]> {
   const lastModels = await readLastModels(workspaceId);
 
   return [
-    coordinatorView(catalog),
+    coordinatorView(),
     ...catalog.map(agent => (isRemoteAgent(agent) ? remoteAgentView(agent) : agentView(agent, lastModels.get(agent.name) ?? null))),
   ];
 }

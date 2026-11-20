@@ -128,3 +128,11 @@ boot without a build — Node runs `.ts` natively:
 runtime imports from the repository tree — packages and `import type` only,
 everything else arrives through `ctx`.
 
+
+Remote kinds declare `modes` (for example `['user', 'headless']`),
+`defaultMode` (one of those modes), and `recipients` (agent or access
+profile names, e.g. `['coordinator', 'engineer']`). A kind with no recipients
+loads its driver for existing threads and is unavailable for new launches.
+At cutover, add the recipients and both mode fields to installation
+passports. An older passport omitting both mode fields supports both modes
+and defaults to `user`.

@@ -25,8 +25,9 @@ import { startThread } from '../core/threads.ts';
 import { resolveSpawnProject } from '../projects/store.ts';
 import { getWorkspaceFile } from '../files/index.ts';
 import { messageFile } from '../core/file-blocks.ts';
-import { getAgent, getAgents, isRemoteAgent } from '../capabilities/agent-catalog.ts';
-import { RESTART_SERVER_NAME } from '../capabilities/restart-tools.ts';
+import { isRemoteAgent, spawnHeadless, startable, type CatalogAgent } from '../capabilities/agent-catalog.ts';
+import { legacyServers } from '../capabilities/legacy-bundles.ts';
+import { coordinator } from '../../agents/access.ts';
 import { callToolJournaled } from '../capabilities/tool-journal.ts';
 import {
   callServerTool,
@@ -37,43 +38,7 @@ import {
 import type { DispatchResult, FunctionCall, FunctionDefinition } from '../harness/turn-contract.ts';
 import { getLlmBackend } from '../harness/openai/backend.ts';
 
-// The coordinator's tool passport, listed explicitly like every agent's: the
-// coordinator has no native file tools, so the workspace_files hands ride
-// along; restart is the deliberately granted dangerous capability. A new
-// repository tool server reaches the coordinator only by being added here;
-// the installation's extension servers come with "projects" (the bundle
-// rule of src/capabilities/tool-manager.ts). Exported
-// for the console's agent catalog, which shows the secretary beside the
-// catalog agents with the same passport (src/api/snapshot.ts).
-export const COORDINATOR_BUNDLE: ToolBundle = {
-  declared: [
-    'apps',
-    'current_datetime',
-    'events',
-    'drive',
-    'gmail',
-    'http_get',
-    // Notion is deliberately absent: its tool catalog is the heaviest head
-    // item by far and the secretary never used it — Notion work goes to the
-    // agents that carry the server (manager, engineer, ...).
-    'perplexity',
-    'projects',
-    'remote',
-    'schedule',
-    'storage',
-    'storage_download_file',
-    'workspace',
-    'workspace_files',
-    RESTART_SERVER_NAME,
-  ],
-};
-
-// Who the coordinator is, for the console's agent catalog — the one place it
-// is described to the operator (the agents describe themselves in their
-// declarations; the coordinator's instructions speak to the model).
-export const COORDINATOR_DESCRIPTION =
-  'The secretary of the workspace: owns the main thread, talks with the user there, hands work out to the ' +
-  'agents in child threads and relays what they bring back.';
+const bundle: ToolBundle = { declared: legacyServers(coordinator.name) };
 
 const STATIC_FUNCTION_DEFINITIONS: FunctionDefinition[] = [
   {
@@ -333,8 +298,8 @@ export function remoteSpawnParameters(kind: Pick<RemoteAgentDeclaration, 'option
 }
 
 const REMOTE_SPAWN_NOTE =
-  ' The thread mirrors a session in an external system and talks to the user directly; you only start ' +
-  'it and get its summary when it ends (finish_thread asks the session for one; the session itself is ' +
+  ' The thread mirrors a session in an external system. You get its summary when it ends ' +
+  '(finish_thread asks the session for one; the session itself is ' +
   'endless and the thread merely pauses when idle). ';
 
 // Agents are sorted by name in the catalog, so the serialized bytes — and
@@ -342,7 +307,7 @@ const REMOTE_SPAWN_NOTE =
 function getAgentFunctionDefinitions(): FunctionDefinition[] {
   const definitions: FunctionDefinition[] = [];
 
-  for (const agent of getAgents()) {
+  for (const agent of startable(coordinator.name)) {
     if (RESERVED_FUNCTION_NAMES.has(agent.name)) {
       console.warn(`[coordinator] agent "${agent.name}" is shadowed by a builtin function and not exposed`);
       continue;
@@ -352,7 +317,7 @@ function getAgentFunctionDefinitions(): FunctionDefinition[] {
       definitions.push({
         type: 'function',
         name: agent.name,
-        description: `${agent.description}${REMOTE_SPAWN_NOTE}${THREAD_NAMING_NOTE}`,
+        description: `${agent.description} ${spawnHeadless(agent, false) ? 'This thread talks only to you.' : 'This thread talks to the user.'}${REMOTE_SPAWN_NOTE}${THREAD_NAMING_NOTE}`,
         strict: true,
         parameters: remoteSpawnParameters(agent),
       });
@@ -377,10 +342,10 @@ function getAgentFunctionDefinitions(): FunctionDefinition[] {
 // inner loop. A name taken by a static/builtin function or a catalog agent
 // wins over a server tool (dispatch checks in that order).
 async function getServerFunctionDefinitions(workspaceId: string): Promise<FunctionDefinition[]> {
-  const agentNames = new Set(getAgents().map(agent => agent.name));
+  const agentNames = new Set(startable(coordinator.name).map(agent => agent.name));
   const definitions: FunctionDefinition[] = [];
 
-  for (const fn of await getServerToolFunctions(workspaceId, COORDINATOR_BUNDLE)) {
+  for (const fn of await getServerToolFunctions(workspaceId, bundle)) {
     if (RESERVED_FUNCTION_NAMES.has(fn.functionName) || agentNames.has(fn.functionName)) {
       console.warn(`[coordinator] server tool "${fn.functionName}" is shadowed and not exposed`);
       continue;
@@ -473,20 +438,18 @@ export async function deliverCoordinatorText(text: string, ctx: DispatchContext)
 // Spawn a child thread for a catalog agent: thread.started addressed to the
 // coordinator's thread; the router starts the run. Async by design —
 // the model sees the thread in its transcript and status tail.
-async function executeSpawn(agentName: string, args: JsonObject, ctx: DispatchContext): Promise<void> {
+async function executeSpawn(declaration: CatalogAgent, args: JsonObject, ctx: DispatchContext): Promise<void> {
+  const agentName = declaration.name;
+  const headless = spawnHeadless(declaration, false);
   const prompt = typeof args.prompt === 'string' ? args.prompt.trim() : '';
   const threadTitle = args.thread_title;
   const title = typeof threadTitle === 'string' && threadTitle.trim() ? threadTitle.trim() : agentName;
-  const declaration = getAgent(agentName);
   const projectSlug = typeof args.project === 'string' && args.project.trim() ? args.project.trim() : undefined;
   // The attachments of the task: validated up front against the workspace
   // like send_to_thread's — a dead or foreign fileId rejects the spawn.
   const files = await Promise.all(uniqueFileIds(args.fileIds).map(fileId => getWorkspaceFile(ctx.workspaceId, fileId)));
 
-  // A remote kind: a new session from the prompt, or an existing one
-  // adopted — exactly one. The secretary's remote thread talks to the user
-  // (not headless): the owner is whoever spawned it (src/remote/engine.ts).
-  if (declaration && isRemoteAgent(declaration)) {
+  if (isRemoteAgent(declaration)) {
     const adopt = typeof args.adopt === 'string' ? args.adopt.trim() : '';
 
     if (Boolean(prompt) === Boolean(adopt)) {
@@ -504,7 +467,7 @@ async function executeSpawn(agentName: string, args: JsonObject, ctx: DispatchCo
       title,
       input: prompt || adopt,
       icon: declaration.icon,
-      headless: false,
+      headless,
       remote: true,
       options: compactOptions(args.options),
       adopt: Boolean(adopt),
@@ -527,8 +490,8 @@ async function executeSpawn(agentName: string, args: JsonObject, ctx: DispatchCo
     agent: agentName,
     title,
     input: prompt,
-    icon: declaration?.icon,
-    headless: declaration?.headless,
+    icon: declaration.icon,
+    headless,
     ...(files.length ? { files } : {}),
     project: await resolveSpawnProject(ctx.workspaceId, projectSlug),
     actor: 'agent',
@@ -670,14 +633,15 @@ export async function dispatchCoordinatorFunction(call: FunctionCall, ctx: Dispa
 
   // An agent name wins over a same-named server tool — mirroring the
   // definitions, where the shadowed server tool is not exposed.
-  if (!getAgent(call.name) && isServerToolFunction(ctx.workspaceId, COORDINATOR_BUNDLE, call.name)) {
+  const agent = startable(coordinator.name).find(candidate => candidate.name === call.name);
+  if (!agent && isServerToolFunction(ctx.workspaceId, bundle, call.name)) {
     try {
       const outcome = await callToolJournaled(
         { workspaceId: ctx.workspaceId, threadId: ctx.threadId, agentName: 'coordinator' },
         call.callId,
         call.name,
         args,
-        () => callServerTool({ workspaceId: ctx.workspaceId, threadId: ctx.threadId }, COORDINATOR_BUNDLE, call.name, args),
+        () => callServerTool({ workspaceId: ctx.workspaceId, threadId: ctx.threadId }, bundle, call.name, args),
       );
 
       return { kind: 'sync', result: outcome.result };
@@ -686,9 +650,9 @@ export async function dispatchCoordinatorFunction(call: FunctionCall, ctx: Dispa
     }
   }
 
-  if (getAgent(call.name)) {
+  if (agent) {
     try {
-      await executeSpawn(call.name, args, ctx);
+      await executeSpawn(agent, args, ctx);
 
       return { kind: 'async' };
     } catch (error) {

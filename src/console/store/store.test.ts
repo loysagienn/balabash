@@ -1743,8 +1743,8 @@ describe('agents screen', () => {
             thread({ id: 'b1', createdSeq: 8n, agent: 'browser' }),
           ],
           agents: [
-            { name: 'engineer', description: 'code', icon: null, sdk: 'claude', tools: ['events'], agents: ['browser'], headless: false, notification: null, model: 'm', effort: 'high', defaultEffort: 'high', lastModel: null },
-            { name: 'browser', description: 'web', icon: null, sdk: 'claude', tools: [], agents: [], headless: true, notification: null, model: null, effort: null, defaultEffort: 'high', lastModel: null },
+            { name: 'engineer', description: 'code', icon: null, sdk: 'claude', tools: ['events'], agents: ['browser'], modes: ['user'], defaultMode: 'user', notification: null, model: 'm', effort: 'high', defaultEffort: 'high', lastModel: null },
+            { name: 'browser', description: 'web', icon: null, sdk: 'claude', tools: [], agents: [], modes: ['headless'], defaultMode: 'headless', notification: null, model: null, effort: null, defaultEffort: 'high', lastModel: null },
           ],
         }),
     });

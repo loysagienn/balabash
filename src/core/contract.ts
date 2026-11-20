@@ -185,28 +185,35 @@ export type SessionEnvironment = {
   dispose?(): Promise<void>;
 };
 
-export type AgentDeclaration = {
-  name: string; // = spawn function name in the catalog
+export type AgentMode = 'user' | 'headless';
+
+export type AgentModes = {
+  modes: AgentMode[];
+  defaultMode: AgentMode;
+};
+
+// A node is named by its full catalog name, including each parent on the path.
+// Root capabilities can be added or removed individually.
+export type CatalogAccess = {
+  profile?: string;
+  nodes?: string[];
+  addRoot?: string[];
+  removeRoot?: string[];
+};
+
+export type AgentPassport = AgentModes & {
+  name: string;
   description: string;
-  icon?: string; // thread icon, shown by the user surface (e.g. the Telegram topic emoji)
-  sdk: 'claude' | 'codex'; // provider behind ctx.harness.sdkSession()
-  // Spawn input is the same for every agent: one non-empty text prompt — the
-  // task plus everything it should start from. No per-agent schema.
-  // The agent's tool passport: the tool-server names it gets, listed
-  // explicitly — no server reaches an agent that did not name it. A spawner's
-  // narrowing can still shrink the list.
-  tools: string[];
-  // Sub-agents this agent may spawn (part of the passport: spawning is a
-  // declared need, not an ambient right). ctx.spawn rejects anything not
-  // listed; omitted = spawns nothing. A session agent with a non-empty list
-  // gets the child-operating bridge tools (spawn_agent, send_to_thread,
-  // cancel_thread) — spawning makes it the child's operator.
+  access: CatalogAccess;
+  workspaceDisk?: boolean; // the agent can read and write files in the workbench
+  // Only repository children. Remote kinds name their recipients themselves.
   agents?: string[];
-  events?: AgentEventDecl[]; // domain types '<name>.*'
-  // A headless agent's thread has no user surface (no Telegram topic, no web chat): the user
-  // is not a participant — the agent talks to its parent via progress/summary
-  // and receives forwarded input as thread.message.
-  headless?: boolean;
+};
+
+export type AgentDeclaration = AgentPassport & {
+  icon?: string;
+  sdk: 'claude' | 'codex';
+  events?: AgentEventDecl[];
   notification?: NotificationLevel; // policy default
   resumable?: boolean; // reserved: thread resume after restart
   // Exactly one of `session` (declarative, preferred) and `run` (imperative).
@@ -223,7 +230,9 @@ export type AgentDeclaration = {
 // export start(ctx) → RemoteAgentDeclaration); the repository ships none.
 // The engine that drives them: src/remote/engine.ts.
 
-export type RemoteAgentDeclaration = {
+export type RemoteAgentDeclaration = AgentModes & {
+  // Names of agents or access profiles allowed to start this kind.
+  recipients?: string[];
   kind: 'remote';
   name: string; // = the file name; /^[a-z][a-z0-9_]*$/, never a repository agent's name
   description: string; // what the system is and when to start it — read by the spawners
@@ -392,6 +401,7 @@ export type SpawnOptions = {
 };
 
 export type RunContext = {
+  headless: boolean; // mode of this thread, including a resumed one
   threadId: string;
   workspaceId: string;
   signal: AbortSignal;

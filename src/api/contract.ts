@@ -173,7 +173,7 @@ export type {
   ThreadSummary,
 } from '../core/contract.ts';
 
-import type { Event, Thread, ThreadCounts, ThreadStatus } from '../core/contract.ts';
+import type { AgentModes, Event, Thread, ThreadCounts, ThreadStatus } from '../core/contract.ts';
 
 // GET /api/threads query: everything optional, everything scoped to the
 // session's workspaceId on the server. Newest first; `before` is the cursor —
@@ -1037,11 +1037,9 @@ export type InstallationSecretRequestResponse = { requestId: string };
 // deleted (how many values) and the server disconnected for everyone.
 export type ForgetInstallationSecretsResponse = { server: string; forgotten: number };
 
-// An agent of the catalog as the console shows it, plus the coordinator —
-// the secretary of the main thread, which is not a catalog module: its
-// engine is the OpenAI backend, its tools are the tool servers of its own
-// passport (src/coordinator/functions.ts), it launches every catalog agent.
-export type AgentView = {
+// A loaded agent or the main thread: its declared modes, the children it
+// can start, and the tools currently served by its bridge.
+export type AgentView = AgentModes & {
   name: string;
   description: string;
   icon: string | null;
@@ -1052,7 +1050,6 @@ export type AgentView = {
   // names it lists plus the extension servers "projects" brings.
   tools: string[];
   agents: string[];
-  headless: boolean;
   notification: string | null;
   // The model the declaration names; null leaves the choice to the engine.
   model: string | null;

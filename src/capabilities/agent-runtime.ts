@@ -37,7 +37,8 @@ import type { StorageBody } from '../files/storage.ts';
 import { createClaudeSession } from '../harness/claude-sdk/sdk-session.ts';
 import { createCodexSession } from '../harness/codex-sdk/sdk-session.ts';
 import type { RoutedRun } from '../runtime/router.ts';
-import { getAgent, isRemoteAgent, mayAgentSpawn } from './agent-catalog.ts';
+import { legacyServers } from './legacy-bundles.ts';
+import { getAgent, isRemoteAgent, spawnHeadless, startable } from './agent-catalog.ts';
 import { createSessionRun, withSpawnFiles } from './session-run.ts';
 import { callToolJournaled } from './tool-journal.ts';
 import { callServerTool, getServerToolFunctions, type ToolBundle } from './tool-manager.ts';
@@ -188,14 +189,14 @@ export async function spawnAgentRun(thread: Thread, startedEvent: Event, resume?
   const threadNotificationLevel =
     (startedEvent.payload.notification as NotificationLevel | undefined) ?? declaration.notification ?? 'normal';
 
-  // The effective bundle: the declaration's explicit server list, optionally
+  // The existing bridge's server list, optionally
   // narrowed by the spawner via thread.started payload. Narrowing cannot
   // widen — resolution intersects.
   const narrowedTools = Array.isArray(startedEvent.payload.tools)
     ? startedEvent.payload.tools.filter((name): name is string => typeof name === 'string')
     : undefined;
   const bundle: ToolBundle = {
-    declared: declaration.tools,
+    declared: legacyServers(agentName),
     ...(narrowedTools ? { narrowed: narrowedTools } : {}),
   };
 
@@ -219,6 +220,7 @@ export async function spawnAgentRun(thread: Thread, startedEvent: Event, resume?
   };
 
   const ctx: RunContext = {
+    headless: thread.headless,
     threadId,
     workspaceId,
     signal: abortController.signal,
@@ -246,21 +248,11 @@ export async function spawnAgentRun(thread: Thread, startedEvent: Event, resume?
     },
 
     spawn: async (childAgentName: string, prompt: string, options?: SpawnOptions) => {
-      // Spawning is a declared need (the passport's `agents` list; the
-      // remote kinds come with "projects"), not an ambient right: anything
-      // not granted rejects.
-      if (!mayAgentSpawn(declaration, childAgentName)) {
-        throw new Error(`Agent "${agentName}" may not spawn "${childAgentName}": it is not in its declaration's agents list`);
-      }
-
-      const childDeclaration = getAgent(childAgentName);
-
+      const childDeclaration = startable(agentName).find(agent => agent.name === childAgentName);
       if (!childDeclaration) {
-        throw new Error(`Unknown agent "${childAgentName}"`);
+        throw new Error(`Agent "${agentName}" may not spawn "${childAgentName}"`);
       }
 
-      // A remote kind spawned by an agent is headless: the owner is the
-      // spawner (src/remote/engine.ts: the owner is whoever spawned it).
       const remote = isRemoteAgent(childDeclaration);
 
       if (!remote && (options?.options || options?.adopt)) {
@@ -284,7 +276,7 @@ export async function spawnAgentRun(thread: Thread, startedEvent: Event, resume?
         notification: options?.notification,
         tools: options?.tools,
         icon: childDeclaration.icon,
-        headless: remote ? true : childDeclaration.headless,
+        headless: spawnHeadless(childDeclaration, true),
         ...(remote ? { remote: true, options: options?.options ?? {}, adopt: options?.adopt === true } : {}),
         ...(files.length ? { files } : {}),
         project: await resolveSpawnProject(workspaceId, options?.project),

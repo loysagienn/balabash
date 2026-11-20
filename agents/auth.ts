@@ -1,8 +1,7 @@
 // Auth agent: connecting integrations in its own thread. The
 // coordinator spawns it whenever an integration must be connected,
 // re-authorized or provisioned; the user talks to it directly in that
-// thread. It is the only agent whose bundle lists the 'auth' tool
-// server: one-time links for per-user OAuth, manual OAuth clients and
+// thread. Its connections grant provides one-time links for per-user OAuth, manual OAuth clients and
 // installation secrets. Secret values never pass through this agent — links
 // lead to web forms, values go out-of-band, and the outcomes arrive back as
 // thread-addressed connection.* / *.provisioned events. Fully declarative:
@@ -37,7 +36,9 @@ export const agent = {
     'credential values never pass through the chat. It reports back with a summary of what got connected.',
   icon: '🔑',
   sdk: 'claude',
-  tools: ['auth', 'storage', 'events'],
+  modes: ['user'],
+  defaultMode: 'user',
+  access: { nodes: ['connections', 'threads'], addRoot: ['get_event', 'get_file_url'] },
   notification: 'normal',
 
   session: {

@@ -21,7 +21,7 @@ import type { AgentDeclaration, AgentSdkSession, Event, RunContext, RunResume, S
 import { leaveReport, reportLeft } from '../core/thread-end.ts';
 import { createSessionRun } from './session-run.ts';
 
-const declaration = { name: 'probe', description: 'probe', sdk: 'claude', tools: [], headless: true } as unknown as AgentDeclaration;
+const declaration = { name: 'probe', description: 'probe', sdk: 'claude', access: {}, modes: ['headless'], defaultMode: 'headless' } satisfies AgentDeclaration;
 const spec = { instructions: 'You are a probe.' };
 
 type Probe = { ctx: RunContext; opened: SdkSessionOptions[]; pushed: string[]; abort: () => void };
@@ -50,6 +50,7 @@ function probe(resume?: RunResume): Probe {
   };
 
   const ctx = {
+    headless: true,
     threadId: 'thread-1',
     workspaceId: 'workspace-1',
     signal: controller.signal,
@@ -169,6 +170,7 @@ describe('createSessionRun ending', () => {
       close: () => {},
     };
     const ctx = {
+      headless,
       threadId,
       workspaceId: 'workspace-1',
       signal: controller.signal,
@@ -184,7 +186,7 @@ describe('createSessionRun ending', () => {
         completed.push({ summary, meta });
       },
     } as unknown as RunContext;
-    const run = createSessionRun({ ...declaration, headless } as AgentDeclaration, spec, 'Do the task', ctx);
+    const run = createSessionRun(declaration, spec, 'Do the task', ctx);
 
     return {
       run,

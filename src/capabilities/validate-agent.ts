@@ -1,9 +1,5 @@
-// Hard validation of a dynamic agent module against the agent contract
-// — adaptation of the legacy validate-agent for the AgentDeclaration shape:
-// flat object, explicit tools list, domain events '<name>.*', no
-// acceptsEvents/exclusive/triggersMainModel (gone by construction).
-
 import path from 'node:path';
+import { accessProfiles } from '../../agents/access.ts';
 import type { AgentDeclaration, AgentRun, RemoteAgentDeclaration } from '../core/contract.ts';
 import { RESERVED_DOMAINS } from '../core/envelope.ts';
 
@@ -22,10 +18,12 @@ const ALLOWED_KEYS = new Set([
   'description',
   'icon',
   'sdk',
-  'tools',
+  'access',
+  'workspaceDisk',
   'agents',
   'events',
-  'headless',
+  'modes',
+  'defaultMode',
   'notification',
   'resumable',
   'session',
@@ -48,6 +46,19 @@ const SESSION_PRESETS = new Set(['bridge-only', 'full']);
 
 export function isObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function isNameList(value: unknown): boolean {
+  return Array.isArray(value) && value.every(name => typeof name === 'string' && AGENT_NAME_PATTERN.test(name)) &&
+    new Set(value).size === value.length;
+}
+
+function checkModes(candidate: Record<string, unknown>, filename: string): void {
+  const { modes, defaultMode } = candidate;
+  if (!Array.isArray(modes) || !modes.every(mode => mode === 'user' || mode === 'headless') ||
+      new Set(modes).size !== modes.length || !modes.includes(defaultMode)) {
+    throw new Error(`${filename} modes must list supported modes (user, headless) and include defaultMode`);
+  }
 }
 
 export function validateAgent(module: Record<string, unknown>, filename: string): AgentDeclaration {
@@ -97,22 +108,27 @@ export function validateAgent(module: Record<string, unknown>, filename: string)
     throw new Error(`${filename} agent.sdk must be one of claude, codex`);
   }
 
-  const validTools =
-    Array.isArray(candidate.tools) && candidate.tools.every(name => typeof name === 'string' && Boolean(name.trim()));
+  checkModes(candidate, filename);
 
-  if (!validTools) {
-    throw new Error(`${filename} agent.tools must be an array of tool-server names`);
+  if (candidate.workspaceDisk !== undefined && typeof candidate.workspaceDisk !== 'boolean') {
+    throw new Error(`${filename} agent.workspaceDisk must be a boolean when present`);
   }
 
-  if (candidate.agents !== undefined) {
-    const validAgents =
-      Array.isArray(candidate.agents) &&
-      candidate.agents.every(name => typeof name === 'string' && AGENT_NAME_PATTERN.test(name)) &&
-      new Set(candidate.agents).size === candidate.agents.length;
-
-    if (!validAgents) {
-      throw new Error(`${filename} agent.agents must be an array of unique agent names when present`);
+  const access = candidate.access;
+  if (!isObject(access) || Object.keys(access).some(key => !['profile', 'nodes', 'addRoot', 'removeRoot'].includes(key))) {
+    throw new Error(`${filename} agent.access must declare a catalog grant`);
+  }
+  if (access.profile !== undefined && (typeof access.profile !== 'string' || !Object.hasOwn(accessProfiles, access.profile))) {
+    throw new Error(`${filename} unknown access profile "${access.profile}"`);
+  }
+  for (const key of ['nodes', 'addRoot', 'removeRoot']) {
+    if (access[key] !== undefined && !isNameList(access[key])) {
+      throw new Error(`${filename} access.${key} must list unique catalog names`);
     }
+  }
+
+  if (candidate.agents !== undefined && !isNameList(candidate.agents)) {
+    throw new Error(`${filename} agent.agents must list unique repository agent names`);
   }
 
   if (candidate.events !== undefined) {
@@ -160,10 +176,6 @@ export function validateAgent(module: Record<string, unknown>, filename: string)
 
       eventTypes.add(event.type);
     }
-  }
-
-  if (candidate.headless !== undefined && typeof candidate.headless !== 'boolean') {
-    throw new Error(`${filename} agent.headless must be a boolean when present`);
   }
 
   if (candidate.notification !== undefined && !NOTIFICATION_LEVELS.has(candidate.notification as string)) {
@@ -278,7 +290,7 @@ export function validateAgentRun(run: unknown, agentName: string): AgentRun {
 // repositoryAgents — the names of the catalog's own agents, which an
 // extension never shadows (extensions.ts).
 
-const REMOTE_KEYS = new Set(['kind', 'name', 'description', 'icon', 'notification', 'options', 'secrets', 'driver']);
+const REMOTE_KEYS = new Set(['kind', 'name', 'description', 'icon', 'notification', 'options', 'secrets', 'driver', 'recipients', 'modes', 'defaultMode']);
 const REMOTE_DRIVER_VERBS = ['open', 'describe', 'read', 'say', 'answer', 'stop'];
 const REMOTE_DRIVER_OPTIONAL_VERBS = ['fetchFile', 'list'];
 const SECRET_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -381,5 +393,15 @@ export function validateRemoteAgent(candidate: unknown, filename: string, reposi
     }
   }
 
-  return candidate as unknown as RemoteAgentDeclaration;
+  if (candidate.recipients !== undefined && !isNameList(candidate.recipients)) {
+    throw new Error(`${filename} recipients must list unique agent or profile names`);
+  }
+  // Before the installation updates its passport the driver still loads for
+  // its existing threads. Old kinds supported both modes, default user.
+  const declaration = candidate.modes === undefined && candidate.defaultMode === undefined
+    ? { ...candidate, modes: ['user', 'headless'], defaultMode: 'user' }
+    : candidate;
+  checkModes(declaration, filename);
+
+  return declaration as unknown as RemoteAgentDeclaration;
 }

@@ -12,7 +12,7 @@
 
 import type { AgentDeclaration } from '../src/core/contract.ts';
 import { workspaceFilesDir } from '../src/workspace/layout.ts';
-import { MANAGER_AGENTS, MANAGER_INSTRUCTIONS, MANAGER_TOOLS } from './roles/manager.ts';
+import { MANAGER_AGENTS, MANAGER_INSTRUCTIONS } from './roles/manager.ts';
 import { IMAGE_GENERATOR_SUBAGENT_NOTE } from './world/index.ts';
 
 export const agent = {
@@ -26,7 +26,10 @@ export const agent = {
     'this kind.',
   icon: '🎩',
   sdk: 'claude',
-  tools: MANAGER_TOOLS,
+  modes: ['user'],
+  defaultMode: 'user',
+  workspaceDisk: true,
+  access: { profile: 'general' },
   agents: [...MANAGER_AGENTS, 'image_generator'],
   notification: 'normal',
 

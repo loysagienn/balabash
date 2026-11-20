@@ -1,9 +1,8 @@
 // The 'remote' builtin tool server: what an agent may ask of a remote
 // agent's thread beyond the dialogue — today remote_fetch_file, a file of
 // the session by path, stored in the workspace and shown in the thread
-// (src/remote/engine.ts fetchRemoteFile). Granted to the coordinator and to
-// the agents that may spawn remote kinds; the caller must own the thread
-// (its parent, or the thread itself).
+// (src/remote/engine.ts fetchRemoteFile). The bridge grants the server by
+// name; the caller must own the thread (its parent, or the thread itself).
 
 import type { JsonObject, JsonValue, ToolDefinition } from '../core/contract.ts';
 import { fetchRemoteFile } from '../remote/engine.ts';

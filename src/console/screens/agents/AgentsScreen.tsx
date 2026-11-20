@@ -110,7 +110,7 @@ function AgentDetail({ agent, running }: { agent: AgentView; running: number }) 
             { key: 'model', value: <Setting value={model.value} note={model.note} code /> },
             // A remote kind has no effort of ours.
             ...(agent.sdk === 'remote' ? [] : [{ key: 'effort', value: <Setting value={effort.value} note={effort.note} /> }]),
-            { key: 'mode', value: modeLabel(agent.headless) },
+            { key: 'mode', value: modeLabel(agent) },
             {
               key: 'launches',
               value:
@@ -205,7 +205,7 @@ export function AgentsScreen({ route }: { route: AgentsRoute }) {
               title={
                 <>
                   {agent.name}
-                  {agent.headless ? <Tag>headless</Tag> : null}
+                  {!agent.modes.includes('user') ? <Tag>headless</Tag> : null}
                   {agent.sdk === 'remote' ? <Tag>remote</Tag> : null}
                 </>
               }

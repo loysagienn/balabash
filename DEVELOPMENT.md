@@ -12,7 +12,10 @@ confidential from them.
 
 - `agents/` — the agent catalog: one declaration per agent, registered in the
   static index `agents/index.ts` (a new agent is a module plus an entry
-  there). `agents/world/` is the world library: canonical prompt fragments,
+  there). An agent names catalog nodes, root overrides, spawnable repository
+  agents and thread modes in its passport. `agents/access.ts` holds named access
+  profiles and the secretary's passport. The server lists used by the current
+  bridges live in `src/capabilities/legacy-bundles.ts`. `agents/world/` is the world library: canonical prompt fragments,
   one file per world fact, every prompt imports instead of retelling.
   `agents/roles/` holds a brief shared by agents that play one role on
   different backends; `agents/kit/` — pieces shared by agent modules (the

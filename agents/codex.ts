@@ -10,7 +10,7 @@
 
 import type { AgentDeclaration } from '../src/core/contract.ts';
 import { workspaceFilesDir } from '../src/workspace/layout.ts';
-import { MANAGER_AGENTS, MANAGER_INSTRUCTIONS, MANAGER_TOOLS } from './roles/manager.ts';
+import { MANAGER_AGENTS, MANAGER_INSTRUCTIONS } from './roles/manager.ts';
 
 export const agent = {
   name: 'codex',
@@ -22,7 +22,10 @@ export const agent = {
     'or wants a task done by the OpenAI model.',
   icon: '🤖',
   sdk: 'codex',
-  tools: MANAGER_TOOLS,
+  modes: ['user'],
+  defaultMode: 'user',
+  workspaceDisk: true,
+  access: { profile: 'general' },
   agents: MANAGER_AGENTS,
   notification: 'normal',
 

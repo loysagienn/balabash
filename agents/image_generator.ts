@@ -205,8 +205,10 @@ export const agent = {
     'reports and waits for corrections — tell it explicitly to finish, or cancel the thread.',
   icon: '🖼️',
   sdk: 'codex',
-  headless: true,
-  tools: ['storage'],
+  modes: ['headless'],
+  defaultMode: 'headless',
+  workspaceDisk: true,
+  access: { nodes: [], addRoot: ['get_file_url'] },
   notification: 'normal',
 
   session: {

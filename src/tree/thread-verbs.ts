@@ -16,17 +16,9 @@
 // slug of the task): a message or a child thread of the main thread that no
 // turn of the secretary produced can be told from one that a turn did.
 //
-// Two things here are read from the agents' declarations until the scheme
-// of grants says them itself: who a thread may start (the main thread — any
-// agent of the catalog; another thread — what the declaration of its agent
-// names) and the mode a child runs in (an agent of the repository — the one
-// mode it declares; a remote agent — either). By default a remote child
-// talks to its parent when a task or a non-main thread starts it. A child
-// the secretary starts on its own turn talks to the user by default.
-
 import { z } from 'zod';
 import { CapabilityError, FileId, FileRef, JsonObject, capability, type CallContext, type Caller } from '../catalog/index.ts';
-import { getAgent, getAgents, isRemoteAgent, mayAgentSpawn, type CatalogAgent } from '../capabilities/agent-catalog.ts';
+import { isRemoteAgent, spawnHeadless, startable } from '../capabilities/agent-catalog.ts';
 import { appendEvent, type AppendResult } from '../core/append.ts';
 import type { ContentBlock, FileRef as StoredFile, JsonObject as Json, RemoteAgentDeclaration, Thread } from '../core/contract.ts';
 import { AppendError, THREAD_CANCEL, THREAD_FINISH, THREAD_MESSAGE, type AppendInput } from '../core/envelope.ts';
@@ -263,17 +255,6 @@ const endThread = capability({
 
 // --- The verbs of a child thread -------------------------------------------
 
-// The agents a thread may start.
-function startable(thread: Thread, caller: Caller): CatalogAgent[] {
-  if (thread.parentId === null) {
-    return getAgents();
-  }
-
-  const spawner = getAgent(caller.agentName);
-
-  return spawner && !isRemoteAgent(spawner) ? getAgents().filter(agent => mayAgentSpawn(spawner, agent.name)) : [];
-}
-
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
@@ -347,7 +328,7 @@ const spawnAgent = capability({
   async run(input, ctx) {
     const { caller } = ctx;
     const parent = await callingThread(caller);
-    const allowed = startable(parent, caller);
+    const allowed = startable(caller.agentName);
     const agent = allowed.find(candidate => candidate.name === input.agent);
 
     if (!agent) {
@@ -388,17 +369,7 @@ const spawnAgent = capability({
       );
     }
 
-    // An agent of the repository runs in the one mode it declares; a remote
-    // agent in either, by default the one its spawner implies.
-    const own = remote ? parent.parentId !== null || ctx.program?.task != null : agent.headless === true;
-    const headless = input.headless ?? own;
-
-    if (!remote && headless !== own) {
-      throw new CapabilityError(
-        'invalid_input',
-        `"${agent.name}" runs only ${own ? 'headless: it talks to its operator' : 'in a thread that talks to the user'}. Pass headless: ${own} or leave the field out.`,
-      );
-    }
+    const headless = spawnHeadless(agent, parent.parentId !== null || ctx.program?.task != null, input.headless);
 
     if (remote && input.options !== undefined) {
       fitOptions(agent, input.options);

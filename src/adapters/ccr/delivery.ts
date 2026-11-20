@@ -128,7 +128,7 @@ export function startCcrDelivery({ mux, isThreadBusy, bindThread, releaseThread 
       return;
     }
 
-    // A headless thread has no user surface by declaration: no session, and
+    // A headless thread has no user surface: no session, and
     // with no ccr_sessions row every later delivery skips it naturally.
     if (event.payload.headless === true) {
       return;

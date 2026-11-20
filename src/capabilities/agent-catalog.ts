@@ -10,7 +10,10 @@
 // loudly rather than failing the boot — an installation's file is not the
 // bundle's to roll back.
 
-import type { AgentDeclaration, RemoteAgentDeclaration } from '../core/contract.ts';
+import type { AgentDeclaration, AgentPassport, RemoteAgentDeclaration } from '../core/contract.ts';
+import { accessProfiles, coordinator } from '../../agents/access.ts';
+import type { GrantPolicy } from '../catalog/grant.ts';
+import { CapabilityError } from '../catalog/errors.ts';
 import { agentModules } from '../../agents/index.ts';
 import { validateAgent } from './validate-agent.ts';
 
@@ -25,14 +28,23 @@ export function isRemoteAgent(agent: CatalogAgent): agent is RemoteAgentDeclarat
 }
 
 export function loadAgents(remote: RemoteAgentDeclaration[] = []): void {
-  const loadedAgents = new Map<string, CatalogAgent>();
+  const repository = new Map<string, AgentDeclaration>();
 
   for (const [name, module] of Object.entries(agentModules)) {
     const loadedAgent = validateAgent(module, `${name}.ts`);
 
-    loadedAgents.set(loadedAgent.name, loadedAgent);
+    repository.set(loadedAgent.name, loadedAgent);
   }
 
+  for (const passport of [coordinator, ...repository.values()]) {
+    for (const name of passport.agents ?? []) {
+      if (!repository.has(name)) {
+        throw new Error(`"${passport.name}" names unknown repository agent "${name}"`);
+      }
+    }
+  }
+
+  const loadedAgents = new Map<string, CatalogAgent>(repository);
   for (const declaration of remote) {
     if (loadedAgents.has(declaration.name)) {
       throw new Error(`remote agent "${declaration.name}" shadows a repository agent`);
@@ -56,39 +68,78 @@ export function getAgent(name: string): CatalogAgent | null {
   return agents.get(name) ?? null;
 }
 
-export function getRemoteAgent(name: string): RemoteAgentDeclaration | null {
-  const agent = agents.get(name);
-
-  return agent && isRemoteAgent(agent) ? agent : null;
-}
-
-export function isRemoteAgentName(name: string): boolean {
-  return getRemoteAgent(name) !== null;
-}
-
 // Sorted by name so serialized derivations (the coordinator's function
 // definitions — part of the prompt-cache head) do not depend on load order.
 export function getAgents(): CatalogAgent[] {
   return [...agents.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
-export function getRemoteAgents(): RemoteAgentDeclaration[] {
-  return getAgents().filter(isRemoteAgent);
+// Both the list shown to the model and the spawn action use this set.
+export function startable(caller: string): CatalogAgent[] {
+  const passport = caller === coordinator.name ? coordinator : getAgent(caller);
+  if (!passport) {
+    return [];
+  }
+
+  const local = 'access' in passport ? passport : null;
+
+  return getAgents().filter(agent => {
+    if (!isRemoteAgent(agent)) {
+      return local?.agents?.includes(agent.name);
+    }
+
+    return agent.recipients?.some(name => name === caller || name === local?.access.profile);
+  });
 }
 
-// The server whose presence in a passport brings the remote kinds along —
-// the mirror of the tool-bundle rule (src/capabilities/tool-manager.ts):
-// a passport with the project registry is a working one, and the
-// installation's remote agents come with it.
-const REMOTE_GATE_SERVER = 'projects';
+// A scheduled task and a child prefer a headless child. The secretary on
+// its own turn (including a program run in place) uses the agent's default.
+export function spawnHeadless(agent: CatalogAgent, preferHeadless: boolean, requested?: boolean): boolean {
+  const defaultHeadless = agent.defaultMode === 'headless';
+  const headless = requested ?? (defaultHeadless || (preferHeadless && agent.modes.includes('headless')));
 
-// Whether a declaration may spawn the named agent: its own `agents` list,
-// or — for a remote kind — the passport's "projects".
-export function mayAgentSpawn(declaration: Pick<AgentDeclaration, 'agents' | 'tools'>, name: string): boolean {
-  return Boolean(declaration.agents?.includes(name)) || (declaration.tools.includes(REMOTE_GATE_SERVER) && isRemoteAgentName(name));
+  if (!agent.modes.includes(headless ? 'headless' : 'user')) {
+    throw new CapabilityError(
+      'invalid_input',
+      `"${agent.name}" runs only ${defaultHeadless ? 'headless: it talks to its operator' : 'in a thread that talks to the user'}. Pass headless: ${defaultHeadless} or leave the field out.`,
+    );
+  }
+
+  return headless;
 }
 
-// The remote kinds a declaration may spawn (for its spawn_agent words).
-export function spawnableRemoteAgents(declaration: Pick<AgentDeclaration, 'agents' | 'tools'>): RemoteAgentDeclaration[] {
-  return declaration.tools.includes(REMOTE_GATE_SERVER) ? getRemoteAgents() : [];
+// The port supplies its actions. The catalog still applies the workspace's
+// connections and cuts each ungranted node together with all descendants.
+export function agentGrantPolicy(agent: AgentPassport | RemoteAgentDeclaration, actions: GrantPolicy['actions']): GrantPolicy {
+  const access = 'access' in agent ? agent.access : {};
+  const profile = access.profile ? accessProfiles[access.profile] : undefined;
+  const nodes = new Set([...(profile?.nodes ?? []), ...(access.nodes ?? [])]);
+  const root = new Set(['send_message', 'end_thread']);
+
+  if ('kind' in agent) {
+    root.add('get_file_url');
+  } else if (agent.workspaceDisk || agent.name === coordinator.name) {
+    root.add('export_file');
+    root.add('import_file');
+  }
+  if (agent.name === coordinator.name) {
+    root.add('view_file');
+  }
+
+  if (startable(agent.name).length) {
+    for (const verb of ['spawn_agent', 'send_to_thread', 'finish_thread', 'cancel_thread']) {
+      root.add(verb);
+    }
+  }
+
+  for (const grant of [profile, access]) {
+    for (const name of grant?.addRoot ?? []) {
+      root.add(name);
+    }
+    for (const name of grant?.removeRoot ?? []) {
+      root.delete(name);
+    }
+  }
+
+  return { actions, allows: vertex => (vertex.kind === 'node' ? nodes : root).has(vertex.fullName) };
 }

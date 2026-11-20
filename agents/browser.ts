@@ -177,8 +177,10 @@ export const agent = {
     'or cancel the thread. If it reports that manual human intervention is needed (login, CAPTCHA), decide ' +
     'yourself or pass the request on.',
   sdk: 'claude',
-  headless: true,
-  tools: ['workspace', 'workspace_files', 'storage'],
+  modes: ['headless'],
+  defaultMode: 'headless',
+  workspaceDisk: true,
+  access: { nodes: ['workspace', 'workspace_files'], addRoot: ['get_file_url'] },
   notification: 'normal',
 
   run(prompt: string, ctx: RunContext): AgentRun {

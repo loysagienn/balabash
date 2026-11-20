@@ -80,6 +80,9 @@ export async function loadRemoteAgents({
         throw new Error(`${file} declares a remote agent already loaded`);
       }
 
+      if (!declaration.recipients?.length) {
+        console.warn(`[remote-agents] ${file} has no recipients: loaded, unavailable to spawners`);
+      }
       seen.add(declaration.name);
       declarations.push(declaration);
       loadedKinds.set(declaration.name, { declaration, context: ctx });

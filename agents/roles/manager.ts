@@ -50,22 +50,5 @@ ${BROWSER_SUBAGENT_NOTE}
 
 ${REMOTE_AGENTS_NOTE}`;
 
-// The tool passport of the manager role: the tool-server names it gets.
-export const MANAGER_TOOLS = [
-  'current_datetime',
-  'events',
-  'drive',
-  'gmail',
-  'http_get',
-  'notion',
-  'perplexity',
-  'projects',
-  'remote',
-  'schedule',
-  'storage',
-  'storage_download_file',
-  'workspace',
-];
-
 // Sub-agents the manager role may spawn.
 export const MANAGER_AGENTS = ['browser'];
