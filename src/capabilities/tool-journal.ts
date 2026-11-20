@@ -1,10 +1,8 @@
-// The one journaling point of tool.call.* (§4.3): observational, beside the
+// The legacy coordinator's tool.call.* journal: observational, beside the
 // result path. started before the call; completed with the result VERBATIM —
 // isError included ("the tool answered, albeit with an error"); failed only
 // for breakage of the call itself (a thrown transport/auth/unknown-tool
-// error), which is rethrown to the caller. Both model loops — the
-// coordinator's function dispatch and the SDK runs' ToolsApi — go through
-// here.
+// error), which is rethrown to the caller. Catalog ports use tree/call-journal.ts.
 
 import type { JsonObject } from '../core/contract.ts';
 import { appendEvent } from '../core/append.ts';

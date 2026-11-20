@@ -233,8 +233,6 @@ export function createCodexSession(options: SdkSessionOptions, deps: CodexSessio
   return {
     push: text => queue.push(text),
     turns: turns(),
-    // Every queued input starts a new CLI process with a fresh grant.
-    syncTools: async () => {},
     close: () => {
       if (closed) {
         return;

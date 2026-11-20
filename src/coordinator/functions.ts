@@ -17,7 +17,7 @@ import { resolveSpawnProject } from '../projects/store.ts';
 import { getWorkspaceFile } from '../files/index.ts';
 import { messageFile } from '../core/file-blocks.ts';
 import { isRemoteAgent, spawnHeadless, startable, type CatalogAgent } from '../capabilities/agent-catalog.ts';
-import { legacyServers } from '../capabilities/legacy-bundles.ts';
+import { coordinatorServers } from '../capabilities/legacy-bundles.ts';
 import { coordinator } from '../../agents/access.ts';
 import { callToolJournaled } from '../capabilities/tool-journal.ts';
 import {
@@ -29,7 +29,7 @@ import {
 import type { DispatchResult, FunctionCall, FunctionDefinition } from '../harness/turn-contract.ts';
 import { END_TURN_FUNCTION } from './instructions.ts';
 
-const bundle: ToolBundle = { declared: legacyServers(coordinator.name) };
+const bundle: ToolBundle = { declared: coordinatorServers };
 
 const STATIC_FUNCTION_DEFINITIONS: FunctionDefinition[] = [
   {

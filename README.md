@@ -118,8 +118,7 @@ into the log.
   table and nowhere else.
 - **Re-authorization is automatic.** An expired token opens an auth thread and notifies the
   user — one active auth thread per workspace.
-- **Every grant is explicit.** Sensitive servers (auth, restart) reach only the agents whose
-  bundles list them. An agent can start the repository children in its declaration and
+- **Every grant is explicit.** Agent passports select catalog nodes and root capabilities, including connection management and restart. An agent can start the repository children in its declaration and
   remote kinds that name it or its access profile as a recipient.
 - **Workspace isolation at every model-facing edge.** A file or thread id of another
   workspace yields the same "not found" as a missing one. Caller identity comes from the
@@ -151,8 +150,8 @@ each run owns a thread — its context and its visibility boundary.**
   remote agent's thread holds no run at all: its row is its whole state.
 - **Agents are declarations.** An agent module declares its SDK, prompt, tools and spawn
   rights; the platform supplies the session lifecycle, event-to-message rendering, live
-  tool delivery and thread completion. Codex gets its catalog over MCP at each turn;
-  catalog calls and calls inside programs use the same event journal. Prompts
+  tool delivery and thread completion. Codex and Claude receive their catalogs over MCP.
+  A Claude Code mod opens deferred capabilities through describe. Catalog calls and calls inside programs use the same event journal. Prompts
   are assembled from a world library — one file per fact, every prompt imports instead of
   retelling.
 - **The console is one more projection.** The browser hydrates from a snapshot of the

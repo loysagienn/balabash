@@ -28,8 +28,8 @@ import { listAccountServices } from '../capabilities/connections/services.ts';
 import { readOpenSecretRequests } from '../capabilities/secret-requests.ts';
 import { getAgents, isRemoteAgent, startable } from '../capabilities/agent-catalog.ts';
 import { coordinator } from '../../agents/access.ts';
-import { legacyServers } from '../capabilities/legacy-bundles.ts';
-import { BRIDGE_SERVER } from '../harness/codex-sdk/session-config.ts';
+import { coordinatorServers } from '../capabilities/legacy-bundles.ts';
+import { BRIDGE_SERVER } from '../harness/sdk-mcp-config.ts';
 import { DEFAULT_EFFORT } from '../harness/default-effort.ts';
 import { config } from '../config/index.ts';
 import type { AgentDeclaration, RemoteAgentDeclaration } from '../core/contract.ts';
@@ -207,7 +207,7 @@ function agentView(agent: AgentDeclaration, lastModel: string | null): AgentView
     description: agent.description,
     icon: agent.icon ?? null,
     sdk: agent.sdk,
-    tools: agent.sdk === 'codex' ? [BRIDGE_SERVER] : effectiveBundleServers(legacyServers(agent.name)),
+    tools: [BRIDGE_SERVER],
     agents: startable(agent.name).map(child => child.name),
     modes: agent.modes,
     defaultMode: agent.defaultMode,
@@ -228,7 +228,7 @@ function coordinatorView(): AgentView {
     description: coordinator.description,
     icon: null,
     sdk: 'openai',
-    tools: effectiveBundleServers(legacyServers(coordinator.name)),
+    tools: effectiveBundleServers(coordinatorServers),
     agents: startable(coordinator.name).map(agent => agent.name),
     modes: coordinator.modes,
     defaultMode: coordinator.defaultMode,

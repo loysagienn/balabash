@@ -14,7 +14,6 @@ import {
   PROJECTS_WORLD_NOTE,
   REMOTE_AGENTS_NOTE,
   WORKBENCH_NOTE,
-  WORKSPACE_STORAGE_NOTE,
 } from './world/index.ts';
 
 const LIBRARY_LAW = `## The law of a project library
@@ -88,8 +87,6 @@ ${LIBRARY_LAW}
 ${GARDENER_CONTRACT}
 
 ${OUTPUT_NOTE}
-
-${WORKSPACE_STORAGE_NOTE}
 
 ${REMOTE_AGENTS_NOTE}
 

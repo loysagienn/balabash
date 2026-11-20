@@ -14,8 +14,8 @@ confidential from them.
   static index `agents/index.ts` (a new agent is a module plus an entry
   there). An agent names catalog nodes, root overrides, spawnable repository
   agents and thread modes in its passport. `agents/access.ts` holds named access
-  profiles and the secretary's passport. The server lists used by the current
-  bridges live in `src/capabilities/legacy-bundles.ts`. `agents/world/` is the world library: canonical prompt fragments,
+  profiles and the secretary's passport. The server list for the openai-compatible coordinator
+  lives in `src/capabilities/legacy-bundles.ts`. `agents/world/` is the world library: canonical prompt fragments,
   one file per world fact, every prompt imports instead of retelling.
   `agents/roles/` holds a brief shared by agents that play one role on
   different backends; `agents/kit/` — pieces shared by agent modules (the
@@ -65,7 +65,7 @@ confidential from them.
   `patch-sdk-bridge.mjs`, run by `postinstall` and every build.
 - `plugins/balabash/` — the platform plugin (skills) every full-preset agent
   session loads, whatever its working directory; Codex sessions get the same
-  skills linked into their home.
+  skills linked into their home. `plugins/catalog/` is the Claude Code mod for catalog discovery in both Claude presets.
 - `prisma/` — the database schema and its migrations; `prisma-generated/` is
   the generated client (`npm run build` regenerates it).
 - `build/` — the esbuild configuration; `dist/` is the bundle output

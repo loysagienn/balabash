@@ -3,52 +3,38 @@
 // injected through ctx — the agent module never imports runtime
 // values from the bundle.
 
-import { randomUUID } from 'node:crypto';
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import type {
   Event,
-  FileRef,
   FilesApi,
   JsonObject,
   NotificationLevel,
   RunContext,
   RunResume,
-  SpawnOptions,
   Thread,
-  ToolResult,
-  ToolsApi,
 } from '../core/contract.ts';
+import { deliverThreadMessage } from '../tree/thread-verbs.ts';
 import { appendEvent } from '../core/append.ts';
-import { messageFile } from '../core/file-blocks.ts';
 import {
-  THREAD_CANCEL,
   THREAD_COMPLETED,
   THREAD_FAILED,
-  THREAD_FINISH,
-  THREAD_MESSAGE,
   THREAD_NOTIFICATION,
   THREAD_PROGRESS,
 } from '../core/envelope.ts';
-import { startThread } from '../core/threads.ts';
-import { resolveSpawnProject } from '../projects/store.ts';
-import { getWorkspaceFile, getFileDownloadUrl, ingestFile } from '../files/index.ts';
+import { ingestFile } from '../files/index.ts';
 import type { StorageBody } from '../files/storage.ts';
 import { createClaudeSession } from '../harness/claude-sdk/sdk-session.ts';
 import { createCodexSession } from '../harness/codex-sdk/sdk-session.ts';
 import type { RoutedRun } from '../runtime/router.ts';
-import { legacyServers } from './legacy-bundles.ts';
-import { getAgent, isRemoteAgent, spawnHeadless, startable } from './agent-catalog.ts';
+import { getAgent, isRemoteAgent } from './agent-catalog.ts';
 import { createSessionRun, withSpawnFiles } from './session-run.ts';
-import { callToolJournaled } from './tool-journal.ts';
-import { callServerTool, getServerToolFunctions, type ToolBundle } from './tool-manager.ts';
 import { validateAgentRun } from './validate-agent.ts';
 
 const AGENT_STATE_ROOT = path.resolve('data', 'agent-state');
 
 // Central spawn-input validation: every agent takes the same input — one
-// non-empty text prompt. Every spawn path answers to this check — the
-// coordinator's function calls and ctx.spawn alike.
+// non-empty text prompt.
 function validateAgentInput(declarationName: string, input: unknown): string {
   if (typeof input !== 'string' || !input.trim()) {
     throw new Error(`Invalid input for agent "${declarationName}": the spawn input must be a non-empty prompt string`);
@@ -63,77 +49,13 @@ function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-// File references in an outgoing thread.message: deduplicated and checked
-// against the workspace (a foreign or unknown fileId throws); the rows come
-// back for the payload's facts.
-async function validateMessageFiles(workspaceId: string, fileIds: string[] | undefined): Promise<FileRef[]> {
-  const unique = [...new Set((fileIds ?? []).map(id => id.trim()).filter(Boolean))];
-
-  return Promise.all(unique.map(fileId => getWorkspaceFile(workspaceId, fileId)));
-}
-
-// The payload of a thread.message: the text, and for the files it carries
-// both the references (fileIds — what the model reads) and their facts
-// (files — what the reader names the attachments by).
-function threadMessagePayload(text: string, files: FileRef[]): JsonObject {
-  return { text, ...(files.length ? { fileIds: files.map(file => file.id), files: files.map(messageFile) } : {}) };
-}
-
 // An event's level must not exceed the thread's level.
 function clampNotificationLevel(requested: NotificationLevel, threadLevel: NotificationLevel): NotificationLevel {
   return NOTIFICATION_RANK[requested] > NOTIFICATION_RANK[threadLevel] ? threadLevel : requested;
 }
 
-// The run's ToolsApi: the agent's bundle of tool servers (builtin
-// servers like 'storage'/'events' included through the same bundle machinery).
-// Every call goes through the one tool.call.* journaling point; the
-// completed payload is the verbatim result.
-function createToolsApi({
-  workspaceId,
-  threadId,
-  agentName,
-  bundle,
-}: {
-  workspaceId: string;
-  threadId: string;
-  agentName: string;
-  bundle: ToolBundle;
-}): ToolsApi {
-  return {
-    list: async () =>
-      (await getServerToolFunctions(workspaceId, bundle)).map(fn => ({
-        name: fn.functionName,
-        description: fn.description,
-        inputSchema: fn.inputSchema,
-      })),
-
-    call: async (name, args): Promise<ToolResult> => {
-      const outcome = await callToolJournaled({ workspaceId, threadId, agentName }, randomUUID(), name, args, () =>
-        callServerTool({ workspaceId, threadId }, bundle, name, args),
-      );
-
-      return outcome.result;
-    },
-  };
-}
-
 function createFilesApi(workspaceId: string, agentName: string): FilesApi {
   return {
-    // The one FileRef: the files layer already returns it verbatim.
-    getInfo: async fileId => getWorkspaceFile(workspaceId, fileId),
-
-    getDownloadUrl: async fileId => {
-      // Scope check first: the presigned URL layer itself is workspace-blind.
-      await getWorkspaceFile(workspaceId, fileId);
-
-      const { url } = await getFileDownloadUrl(fileId);
-
-      return url;
-    },
-
-    // Workspace-scoped by construction: the stored file belongs to the run's
-    // workspace, so it is deliverable through every workspace-scoped path (ctx.files,
-    // storage_get_file, send_message fileIds).
     ingest: async input =>
       ingestFile({
         // The contract's NodeJS.ReadableStream is a stream.Readable at
@@ -236,100 +158,7 @@ export async function spawnAgentRun(thread: Thread, startedEvent: Event, resume?
       });
     },
 
-    spawn: async (childAgentName: string, prompt: string, options?: SpawnOptions) => {
-      const childDeclaration = startable(agentName).find(agent => agent.name === childAgentName);
-      if (!childDeclaration) {
-        throw new Error(`Agent "${agentName}" may not spawn "${childAgentName}"`);
-      }
-
-      const remote = isRemoteAgent(childDeclaration);
-
-      if (!remote && (options?.options || options?.adopt)) {
-        throw new Error(`Agent "${childAgentName}" is not a remote kind: it takes no options and no adoption`);
-      }
-
-      if (options?.adopt && options.fileIds?.length) {
-        throw new Error(`Adopting a session of "${childAgentName}" takes no files: send them to the thread once it is open`);
-      }
-
-      // The attachments of the spawn prompt: validated like a thread.message's
-      // — a dead or foreign fileId rejects the spawn, not the child's reading.
-      const files = await validateMessageFiles(workspaceId, options?.fileIds);
-
-      const child = await startThread({
-        workspaceId,
-        parentThreadId: threadId,
-        agent: childAgentName,
-        title: options?.title,
-        input: validateAgentInput(childAgentName, prompt),
-        notification: options?.notification,
-        icon: childDeclaration.icon,
-        headless: spawnHeadless(childDeclaration, true),
-        ...(remote ? { remote: true, options: options?.options ?? {}, adopt: options?.adopt === true } : {}),
-        ...(files.length ? { files } : {}),
-        project: await resolveSpawnProject(workspaceId, options?.project),
-        actor: 'agent',
-        agentName,
-      });
-
-      return { threadId: child.id };
-    },
-
-    finishChild: async (childThreadId: string) => {
-      await appendEvent({
-        type: THREAD_FINISH,
-        actor: 'agent',
-        agentName,
-        workspaceId,
-        threadId,
-        targetThreadId: childThreadId,
-        payload: { reason: 'finished_by_parent' },
-      });
-    },
-
-    cancelChild: async (childThreadId: string, reason: string) => {
-      await appendEvent({
-        type: THREAD_CANCEL,
-        actor: 'agent',
-        agentName,
-        workspaceId,
-        threadId,
-        targetThreadId: childThreadId,
-        payload: { reason },
-      });
-    },
-
-    // Inter-thread dialogue: one hop is enforced by append — a target that is
-    // neither the parent nor a direct child rejects the call. File references
-    // are validated against the workspace up front: a dead or foreign fileId
-    // must reject the call, not surface later at the recipient.
-    sendToChild: async (childThreadId: string, text: string, fileIds?: string[]) => {
-      const files = await validateMessageFiles(workspaceId, fileIds);
-
-      await appendEvent({
-        type: THREAD_MESSAGE,
-        actor: 'agent',
-        agentName,
-        workspaceId,
-        threadId,
-        targetThreadId: childThreadId,
-        payload: threadMessagePayload(text, files),
-      });
-    },
-
-    sendToParent: async (text: string, fileIds?: string[]) => {
-      const files = await validateMessageFiles(workspaceId, fileIds);
-
-      await appendEvent({
-        type: THREAD_MESSAGE,
-        actor: 'agent',
-        agentName,
-        workspaceId,
-        threadId,
-        targetThreadId: thread.parentId,
-        payload: threadMessagePayload(text, files),
-      });
-    },
+    deliverTurnText: text => deliverThreadMessage({ caller: { workspaceId, threadId, agentName }, program: null }, text),
 
     harness: {
       // threadId feeds the stream taps: the session journal (session.*
@@ -338,11 +167,7 @@ export async function spawnAgentRun(thread: Thread, startedEvent: Event, resume?
       sdkSession: options =>
         declaration.sdk === 'codex'
           ? createCodexSession(options, { agent: declaration, workspaceId, cwd: stateDir, threadId })
-          : createClaudeSession(options, {
-              tools: createToolsApi({ workspaceId, threadId, agentName, bundle: { declared: legacyServers(agentName) } }),
-              cwd: stateDir,
-              threadId,
-            }),
+          : createClaudeSession(options, { agent: declaration, workspaceId, cwd: stateDir, threadId }),
     },
 
     files,
@@ -355,7 +180,7 @@ export async function spawnAgentRun(thread: Thread, startedEvent: Event, resume?
   try {
     // The attachments of the spawn prompt are read like a message's: a line
     // per file and the hint how to reach them — the bytes stay in storage.
-    const prompt = withSpawnFiles(validateAgentInput(agentName, startedEvent.payload.input), startedEvent.payload.files, declaration.sdk);
+    const prompt = withSpawnFiles(validateAgentInput(agentName, startedEvent.payload.input), startedEvent.payload.files);
 
     // The declarative form is run by the platform's session runner; run() is
     // the imperative escape hatch (validate-agent guarantees exactly one).

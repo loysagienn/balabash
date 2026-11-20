@@ -1,8 +1,7 @@
 // The AgentSdkSession factory (§8.2): the contract shape an agent receives via
 // ctx.harness.sdkSession(). Wraps the raw Claude session and the MCP bridge.
 // In the default bridge-only preset the inner model sees the bridge and
-// nothing else — no native claude_code tools, no user-scope MCP servers or
-// settings. The 'full' preset (the workbench agents) keeps the bridge
+// ToolSearch, isolated from user-scope MCP servers and settings. The 'full' preset (the workbench agents) keeps the bridge
 // and unlocks the native claude_code toolset plus project settings from cwd.
 // Claude Code Artifacts (the harness's Artifact tools, claude.ai) are off by
 // default in SDK sessions; a session that asks for them gets the CLI's switch
@@ -14,11 +13,11 @@
 
 import path from 'node:path';
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
-import type { AgentSdkSession, SdkSessionOptions, SdkTurn, ToolsApi } from '../../core/contract.ts';
+import type { AgentSdkSession, SdkSessionOptions, SdkTurn, AgentPassport } from '../../core/contract.ts';
 import { startClaudeSession } from './session.ts';
 import type { ClaudeSession } from './session.ts';
-import { createBridgeServer } from './bridge.ts';
-import type { BridgeServer } from './bridge.ts';
+import { createClaudeBridge, environmentServer } from './bridge.ts';
+import { BRIDGE_SERVER, CATALOG_CALL_TIMEOUT_SECONDS } from '../sdk-mcp-config.ts';
 import { mergeEnv } from '../env.ts';
 import { emitSdkMessage, emitSdkSessionEnd } from './stream-tap.ts';
 import { registerContextUsageProvider } from './context-usage.ts';
@@ -72,14 +71,15 @@ const BUNDLED_SKILLS_OFF = [
 const BUNDLED_SKILLS_NAME_ONLY = ['claude-api', 'dataviz'];
 
 export type SdkSessionDeps = {
-  tools: ToolsApi;
+  agent: AgentPassport;
+  workspaceId: string;
   // Working directory of the inner session — the run's persistent stateDir.
   cwd: string;
-  // When set, every raw SDKMessage of the inner stream is published on the
+  // Every raw SDKMessage of the inner stream is published on the
   // stream tap under this thread — the feed of a surface adapter's live
   // mirror (CCR) and of the session journal, which also hears the session's
   // end on close() — and the thread's context-usage provider is registered.
-  threadId?: string;
+  threadId: string;
 };
 
 // The init frame with the session's effort when the CLI left it out (the SDK
@@ -95,14 +95,13 @@ function withEffort(message: SDKMessage, effort: NonNullable<SdkSessionOptions['
 export function createClaudeSession(options: SdkSessionOptions, deps: SdkSessionDeps): AgentSdkSession {
   let closed = false;
   let session: ClaudeSession | null = null;
-  let bridge: BridgeServer | null = null;
   const pendingInputs: string[] = [];
   // Reasoning effort; the platform default is explicit (default-effort.ts)
   // rather than trusting the SDK default to stay 'high'. Also stamped onto
   // the mirrored init frame: the inner CLI omits `effort` on the SDK path,
   // and the app reads the session's effort from its newest init frame.
   const effort = options.effort ?? DEFAULT_EFFORT;
-  // Undoes the thread's context-usage and usage registrations (deps.threadId sessions).
+  // Undoes the thread's context-usage and usage registrations.
   let unregisterContextUsage: (() => void) | null = null;
   let unregisterUsage: (() => void) | null = null;
   // Set by interrupt(), consumed by the next result frame: an interrupted
@@ -115,10 +114,7 @@ export function createClaudeSession(options: SdkSessionOptions, deps: SdkSession
   let openTurns = 1;
 
   const setup: Promise<ClaudeSession | null> = (async () => {
-    bridge = await createBridgeServer({
-      tools: deps.tools,
-      extraTools: options.extraTools ?? [],
-    });
+    const bridge = await createClaudeBridge(deps.agent, deps.workspaceId, deps.threadId);
 
     if (closed) {
       return null;
@@ -131,19 +127,16 @@ export function createClaudeSession(options: SdkSessionOptions, deps: SdkSession
       // SDK `env` replaces the subprocess environment entirely, so merge the
       // extra variables over the inherited app environment. Artifacts: the
       // CLI's own switch; no browser opens on a server.
-      ...(options.env || options.artifacts
-        ? { env: mergeEnv({ ...(options.artifacts ? ARTIFACTS_ENV : {}), ...(options.env ?? {}) }) }
-        : {}),
+      env: mergeEnv({ ...(options.artifacts ? ARTIFACTS_ENV : {}), ...options.env, ENABLE_TOOL_SEARCH: 'true' }),
       ...(options.model ? { model: options.model } : {}),
       // The continuation of a session the CLI persisted (a run resumed after
       // an app restart): same cwd, the transcript is found by its id.
       ...(options.resume ? { resume: options.resume } : {}),
       effort,
-      systemPrompt: options.instructions,
+      systemPrompt: options.instructions + '\n\n' + bridge.instructions,
       permissionMode: 'bypassPermissions',
       allowDangerouslySkipPermissions: true,
-      // Bridge-only: the inner session gets the Balabash bridge and nothing
-      // else. Full: the native claude_code preset stays on and project-level
+      // Bridge-only: the inner session gets the catalog and ToolSearch. Full: the native claude_code preset stays on and project-level
       // settings (CLAUDE.md, .claude/) load from cwd — plus the repo's
       // platform plugin (skills like balabash:app-builder): workbench agents
       // run with cwd in the workspace file area, where repo skills are
@@ -152,7 +145,6 @@ export function createClaudeSession(options: SdkSessionOptions, deps: SdkSession
       ...(full
         ? {
             settingSources: ['project' as const],
-            plugins: [{ type: 'local' as const, path: path.resolve('plugins', 'balabash'), skipMcpDiscovery: true }],
             // Native tools no Balabash agent has a use for: each duplicates a
             // Balabash mechanism (the thread tree, the scheduler, thread
             // notifications) or has no application in a headless session.
@@ -167,12 +159,18 @@ export function createClaudeSession(options: SdkSessionOptions, deps: SdkSession
               ]),
             },
           }
-        : { tools: [], settingSources: [] }),
+        : { tools: ['ToolSearch'], settingSources: [] }),
+      plugins: (full ? ['catalog', 'balabash'] : ['catalog']).map(name => ({
+        type: 'local', path: path.resolve('plugins', name), skipMcpDiscovery: true,
+      })),
       strictMcpConfig: true,
       mcpServers: {
-        balabash: { type: 'sdk', name: 'balabash', instance: bridge.server },
+        [BRIDGE_SERVER]: { type: 'sdk', name: BRIDGE_SERVER, instance: bridge.server, timeout: CATALOG_CALL_TIMEOUT_SECONDS * 1000 },
+        ...(options.extraTools?.length ? {
+          environment: { type: 'sdk', name: 'environment', instance: environmentServer(options.extraTools) },
+        } : {}),
       },
-    });
+    }, bridge.refresh);
 
     // close() may have won the race while the session was starting.
     if (closed) {
@@ -187,10 +185,8 @@ export function createClaudeSession(options: SdkSessionOptions, deps: SdkSession
     // session (the CCR plane answers the app's get_context_usage with it).
     // Likewise the plan's rate limits (plan-limits.ts): any live session
     // measures them for the console.
-    if (deps.threadId) {
-      unregisterContextUsage = registerContextUsageProvider(deps.threadId, opts => created.getContextUsage(opts));
-      unregisterUsage = planLimits.registerProvider(deps.threadId, () => created.getUsage());
-    }
+    unregisterContextUsage = registerContextUsageProvider(deps.threadId, opts => created.getContextUsage(opts));
+    unregisterUsage = planLimits.registerProvider(deps.threadId, () => created.getUsage());
 
     for (const text of pendingInputs.splice(0)) {
       created.push(text);
@@ -207,9 +203,7 @@ export function createClaudeSession(options: SdkSessionOptions, deps: SdkSession
     }
 
     for await (const message of created.messages) {
-      if (deps.threadId) {
-        emitSdkMessage(deps.threadId, withEffort(message, effort));
-      }
+      emitSdkMessage(deps.threadId, withEffort(message, effort));
 
       if (message.type !== 'result') {
         continue;
@@ -269,12 +263,6 @@ export function createClaudeSession(options: SdkSessionOptions, deps: SdkSession
       }
     },
 
-    syncTools: async () => {
-      // Setup failure surfaces through `turns`; syncTools stays quiet.
-      await setup.catch(() => null);
-      await bridge?.syncTools();
-    },
-
     close: () => {
       if (closed) {
         return;
@@ -286,9 +274,7 @@ export function createClaudeSession(options: SdkSessionOptions, deps: SdkSession
       session?.close();
       // A session still starting is closed by the race check in setup.
 
-      if (deps.threadId) {
-        emitSdkSessionEnd(deps.threadId);
-      }
+      emitSdkSessionEnd(deps.threadId);
     },
   };
 }

@@ -29,8 +29,7 @@ async function start(agent: AgentDeclaration, onText: (text: string) => Promise<
   const ctx = {
     workspaceId, threadId, parentThreadId: mainThreadId, headless, signal: controller.signal,
     harness: { sdkSession: options => createCodexSession(options, { agent, workspaceId, threadId, cwd: stand.dir, codexPathOverride: cli }) },
-    pushEvent: async (_type, payload) => { await onText((payload.content as { text: string }[])[0].text); },
-    sendToParent: onText,
+    deliverTurnText: onText,
     complete: async summary => { reports.push(summary); },
   } satisfies Partial<RunContext>;
   const run = createSessionRun(agent, agent.session!, 'Begin', ctx as RunContext);

@@ -19,7 +19,6 @@ import { loadRemoteAgents } from './capabilities/remote-agent-source.ts';
 import { createRemoteDriverContext, refreshRemoteSecretTargets, registerRemoteSecretTargets } from './capabilities/remote-agent-secrets.ts';
 import { appendEvent } from './core/append.ts';
 import { SYSTEM_EXCEPTION } from './core/envelope.ts';
-import { createAuthToolServer } from './capabilities/auth-tools.ts';
 import { createEventsToolServer, createStorageToolServer } from './capabilities/builtin-tools.ts';
 import { createRestartToolServer } from './capabilities/restart-tools.ts';
 import { createRemoteToolServer } from './capabilities/remote-tools.ts';
@@ -133,7 +132,6 @@ await refreshRemoteSecretTargets();
 // Dangerous-capability servers, granted only where deliberately listed: the
 // auth tools to the auth agent, the restart request to the coordinator and
 // the engineer.
-registerBuiltinToolServer(createAuthToolServer());
 registerBuiltinToolServer(createRestartToolServer());
 
 // The workspace pull tools, split into two servers: 'storage'

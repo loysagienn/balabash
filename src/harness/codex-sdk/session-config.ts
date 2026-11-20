@@ -5,8 +5,8 @@
 // whole user layer the session sees, and a pure function of what the
 // session needs — the brief and the bridge's address.
 
+import { BRIDGE_SERVER, CATALOG_CALL_TIMEOUT_SECONDS } from '../sdk-mcp-config.ts';
 import type { CodexOptions } from '@openai/codex-sdk';
-import { MAX_RUN_PROGRAM_SECONDS } from '../../catalog/actions.ts';
 
 export type CodexSessionConfig = NonNullable<CodexOptions['config']>;
 
@@ -24,10 +24,6 @@ export type CodexSessionConfig = NonNullable<CodexOptions['config']>;
 // 2026-11-19). "detailed" over "concise": the row shows the thought itself,
 // as the Claude feed does, not a headline.
 export const CODEX_REASONING_SUMMARY = 'detailed';
-
-// The name of the bridge's MCP server in the session (the journal tells its
-// calls apart from other MCP servers by it).
-export const BRIDGE_SERVER = 'balabash';
 
 // What a session may switch on beyond the base: Codex's built-in image
 // generation (the image_gen tool inside exec plus the bundled imagegen skill)
@@ -53,7 +49,7 @@ export function codexSessionConfig(instructions: string, bridgeUrl: string, enab
         url: bridgeUrl,
         required: true,
         // Allow time for program teardown, journaling and delivery of the result.
-        tool_timeout_sec: MAX_RUN_PROGRAM_SECONDS + 60,
+        tool_timeout_sec: CATALOG_CALL_TIMEOUT_SECONDS,
         default_tools_approval_mode: 'approve',
       },
     },

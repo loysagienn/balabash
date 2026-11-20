@@ -10,7 +10,6 @@ import {
   PROJECTS_NOTE,
   REMOTE_AGENTS_NOTE,
   WORKBENCH_NOTE,
-  WORKSPACE_STORAGE_NOTE,
 } from '../world/index.ts';
 
 // The vendored official Anthropic office skills (.claude/skills/{docx,pptx,xlsx},
@@ -29,7 +28,7 @@ const OFFICE_SKILLS_NOTE =
   'fonts, the python and node libraries, pptxgenjs and docx resolvable from the workbench) are ' +
   'provisioned. Render documents and slides to images and look at them before claiming how they look.';
 
-export function managerInstructions(catalog: boolean): string {
+export function managerInstructions(): string {
   return `You are Balabash's manager: take the user's tasks and get them done with the tools available. You talk to the user directly in a dedicated thread. ${BALABASH_PREAMBLE}
 
 ${BLOCKED_PATH_NOTE}
@@ -40,7 +39,7 @@ ${WORKBENCH_NOTE}
 
 ${PROJECTS_NOTE}
 
-${catalog ? 'Give stored files descriptive names that will make sense to their recipient.' : WORKSPACE_STORAGE_NOTE}
+Give stored files descriptive names that will make sense to their recipient.
 
 ${OFFICE_SKILLS_NOTE}
 

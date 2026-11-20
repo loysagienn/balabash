@@ -38,10 +38,9 @@ import { AuthorizationLostError, connectionAccessToken, createInteractiveAuthPro
 import { ProbeRefusedError, getAccessToken, identityData, identityLabel, probeIdentity } from './identity.ts';
 import type { ProbedIdentity } from './identity.ts';
 import type { IdentityProbeConfig } from '../server-config.ts';
-import { ACCOUNT_KEY_PATTERN, DEFAULT_ACCOUNT_KEY, deriveAccountKey } from './account-key.ts';
+import { DEFAULT_ACCOUNT_KEY, deriveAccountKey } from './account-key.ts';
 
 export { createTransportAuthProvider } from './oauth-provider.ts';
-export { ACCOUNT_KEY_PATTERN } from './account-key.ts';
 
 // A refusal of a connection command, for the two callers alike: the auth
 // tools answer the model with the message, the console's endpoints map the
@@ -316,23 +315,8 @@ export async function disconnectConnection(
 // OAuth state).
 export type ConnectLink = { url: string; connection: ConnectionView; expiresAt: Date };
 
-// Issues a one-time authorization link for one account of the service and
-// answers only its address — the auth agent's request_authorization.
-export async function requestAuthorization(
-  workspaceId: string,
-  threadId: string,
-  serverName: string,
-  requestedAccountKey?: string,
-  displayName?: string,
-): Promise<string> {
-  return (await issueConnectLink(workspaceId, threadId, serverName, requestedAccountKey, displayName)).url;
-}
-
-// What a link is asked for — the three callers of the one issue.
+// What a link is asked for — the two callers of the one issue.
 type LinkTarget =
-  // The auth agent's request_authorization: the account at this address —
-  // re-authorized when it exists, born when it does not.
-  | { kind: 'account'; accountKey: string; displayName: string | undefined }
   // The console's "Reconnect": this very row, as the screen showed it —
   // re-authorized; gone meanwhile, not found (never born again).
   | { kind: 'row'; id: string }
@@ -348,17 +332,6 @@ type LinkResolution = { existing: ConnectionModel } | { create: { accountKey: st
 // under the lock, or the row to create.
 function resolveLinkTarget(server: AccountService, target: LinkTarget, rows: ConnectionModel[]): LinkResolution {
   switch (target.kind) {
-    case 'account': {
-      const existing = rows.find(row => row.accountKey === target.accountKey);
-
-      if (existing) {
-        return { existing };
-      }
-
-      // Proper naming at birth arrives with the lifecycle verbs; until then
-      // the display name falls back to the address.
-      return { create: { accountKey: target.accountKey, displayName: target.displayName?.trim() || (target.accountKey === DEFAULT_ACCOUNT_KEY ? server.name : target.accountKey) } };
-    }
     case 'row': {
       const existing = rows.find(row => row.id === target.id);
 
@@ -387,19 +360,6 @@ function resolveLinkTarget(server: AccountService, target: LinkTarget, rows: Con
 
       return { create: { accountKey: deriveAccountKey(trimmed, new Set([...rows.map(row => row.accountKey), DEFAULT_ACCOUNT_KEY])), displayName: trimmed } };
     }
-  }
-}
-
-// Whether the target, over these rows, would create a row (the gate below
-// applies) rather than re-authorize one.
-function wouldCreate(target: LinkTarget, rows: ConnectionModel[]): boolean {
-  switch (target.kind) {
-    case 'account':
-      return !rows.some(row => row.accountKey === target.accountKey);
-    case 'row':
-      return false;
-    case 'new':
-      return true;
   }
 }
 
@@ -457,7 +417,7 @@ async function issueLink(workspaceId: string, threadId: string, server: AccountS
   const backfillRefusals = new Map<string, string>();
   const seen = await prisma.connection.findMany({ where: { workspaceId, server: server.name } });
 
-  if (wouldCreate(target, seen) && server.identityProbe) {
+  if (target.kind === 'new' && server.identityProbe) {
     for (const row of identityUnknown(seen)) {
       const backfill = await backfillConnectionIdentity({ url: server.url, identityProbe: server.identityProbe }, row.id);
 
@@ -512,28 +472,6 @@ async function issueLink(workspaceId: string, threadId: string, server: AccountS
   return { url: `https://${config.consoleDomain}/connect/${server.name}?nonce=${connectNonce}`, connection: connectionView(row), expiresAt };
 }
 
-// Issues a one-time authorization link for one account of the service by
-// its address — the auth agent's request_authorization. Passing an unknown
-// accountKey starts a new account — gated on the service declaring an
-// identity probe and on every existing account's identity being known
-// (else the twin guard is blind).
-export async function issueConnectLink(
-  workspaceId: string,
-  threadId: string,
-  serverName: string,
-  requestedAccountKey?: string,
-  displayName?: string,
-): Promise<ConnectLink> {
-  const server = getServer(serverName);
-  const accountKey = requestedAccountKey ?? DEFAULT_ACCOUNT_KEY;
-
-  if (!ACCOUNT_KEY_PATTERN.test(accountKey)) {
-    throw new ConnectionError('bad_request', `Account key "${accountKey}" must match ${ACCOUNT_KEY_PATTERN}`);
-  }
-
-  return issueLink(workspaceId, threadId, server, { kind: 'account', accountKey, displayName });
-}
-
 // The console's "Reconnect" of one row: a link for that very row (its
 // re-authorization); a row of another workspace and a missing one are one
 // not-found — a row gone by the write is not born again.
@@ -549,7 +487,7 @@ export async function reconnectConnection(workspaceId: string, threadId: string,
 
 // The console's "Connect" on a service of the catalog: a link for a new
 // account. With a name — a new account named so (the address derived from
-// the name, as the auth agent derives it; a name in use is refused — that
+// the name; a name in use is refused — that
 // account is re-authorized from its own row); without — the service's
 // first account under the default address, and a refusal once the service
 // has one (another account needs a name, an existing one its own

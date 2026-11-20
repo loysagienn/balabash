@@ -6,7 +6,7 @@
 // and after a change and diff the output.
 //
 // It walks the same code paths as the live app (agent catalog, tool-manager
-// bundles, Claude base verbs, Codex catalog and the configured coordinator port), so the
+// bundles, SDK catalog ports and the configured coordinator port), so the
 // output is the truth, not a retelling. Connecting per-user servers (gmail,
 // notion) may hit the network; a server that fails to connect is reported in
 // the output instead of failing the run.
@@ -25,24 +25,20 @@ import path from 'node:path';
 import type { AgentDeclaration, RemoteAgentDeclaration, ToolDefinition } from '../src/core/contract.ts';
 import { prisma } from '../src/db/client.ts';
 import { getFile, getFileDownloadUrl, ingestFile, openFileContent } from '../src/files/index.ts';
-import { legacyServers } from '../src/capabilities/legacy-bundles.ts';
 import { getAgents, isRemoteAgent, loadAgents, repositoryAgentNames, startable } from '../src/capabilities/agent-catalog.ts';
 import { loadRemoteAgents } from '../src/capabilities/remote-agent-source.ts';
 import { createRemoteDriverContext } from '../src/capabilities/remote-agent-secrets.ts';
-import { createAuthToolServer } from '../src/capabilities/auth-tools.ts';
 import { createEventsToolServer, createStorageToolServer } from '../src/capabilities/builtin-tools.ts';
 import { createRestartToolServer } from '../src/capabilities/restart-tools.ts';
 import { createRemoteToolServer } from '../src/capabilities/remote-tools.ts';
-import { describeClaudeBridgeTools } from '../src/capabilities/session-run.ts';
 import {
-  getServerToolFunctions,
   loadToolServers,
   registerBuiltinToolServer,
-  type ToolBundle,
 } from '../src/capabilities/tool-manager.ts';
 import { createScheduleToolServer } from '../src/schedule/tools.ts';
 import { createProjectsToolServer } from '../src/projects/tools.ts';
 import { buildStatusText } from '../src/coordinator/index.ts';
+import { createClaudePort } from '../src/harness/claude-sdk/bridge.ts';
 import { createCodexPort } from '../src/harness/codex-sdk/catalog-bridge.ts';
 import { coordinatorPort } from '../src/coordinator/port.ts';
 import { getMainThread } from '../src/core/threads.ts';
@@ -75,36 +71,12 @@ function renderSection(title: string, body: string): string {
   return `## ${title}\n\n${body}`;
 }
 
-async function renderBundleTools(workspaceId: string, bundle: ToolBundle): Promise<string> {
-  const functions = await getServerToolFunctions(workspaceId, bundle);
-
-  if (!functions.length) {
-    return '(no server tools in this bundle)';
-  }
-
-  return functions
-    .map(fn =>
-      renderTool({
-        name: fn.functionName,
-        serverName: fn.serverName,
-        description: fn.description,
-        inputSchema: fn.inputSchema as ToolDefinition['inputSchema'],
-      }),
-    )
-    .join('\n\n');
-}
-
 async function renderAgent(declaration: AgentDeclaration, workspaceId: string): Promise<string> {
-  const bundle: ToolBundle = {
-    declared: legacyServers(declaration.name),
-  };
-
   const children = startable(declaration.name).map(agent => agent.name);
   const header = [
     `# Agent: ${declaration.name}`,
     '',
     `- sdk: ${declaration.sdk}`,
-    ...(declaration.sdk === 'claude' ? [`- tools bundle: ${JSON.stringify(bundle.declared)}`] : []),
     ...(children.length ? [`- spawnable sub-agents: ${children.join(', ')}`] : []),
     ...(declaration.defaultMode === 'headless' ? ['- headless: no user-facing thread, talks only to its operator'] : []),
     ...(declaration.session?.model ? [`- model: ${declaration.session.model}`] : []),
@@ -119,11 +91,10 @@ async function renderAgent(declaration: AgentDeclaration, workspaceId: string): 
 
   const sections: string[] = [header, spawnSurface];
 
+  const makePort = declaration.sdk === 'codex' ? createCodexPort : createClaudePort;
+  const port = await makePort(declaration, workspaceId, 'showcase');
   if (declaration.session) {
-    // Rendering lists definitions but makes no calls under this caller.
-    const port = declaration.sdk === 'codex' ? await createCodexPort(declaration, workspaceId, 'showcase') : null;
-    const instructions = [declaration.session.instructions, port?.instructions].filter(Boolean).join('\n\n');
-    sections.push(renderSection('System prompt', instructions));
+    sections.push(renderSection('System prompt', declaration.session.instructions + '\n\n' + port.instructions));
 
     if (declaration.session.environment) {
       sections.push(
@@ -141,20 +112,6 @@ async function renderAgent(declaration: AgentDeclaration, workspaceId: string): 
         declaration.session.initialMessage ? declaration.session.initialMessage(SAMPLE_PROMPT) : SAMPLE_PROMPT,
       ),
     );
-    if (port) {
-      const definitions = port.tools.map(tool => [
-        `### ${tool.name}`, tool.description, '```json',
-        JSON.stringify({ inputSchema: tool.inputSchema, outputSchema: tool.outputSchema }, null, 2), '```',
-      ].join('\n'));
-      sections.push(renderSection('Catalog functions in exec (ALL_TOOLS)', definitions.join('\n\n')));
-      return sections.join('\n\n') + '\n';
-    }
-    sections.push(
-      renderSection(
-        'Bridge base verbs (session-run)',
-        describeClaudeBridgeTools(declaration).map(renderTool).join('\n\n'),
-      ),
-    );
   } else {
     sections.push(
       renderSection(
@@ -165,16 +122,12 @@ async function renderAgent(declaration: AgentDeclaration, workspaceId: string): 
     );
   }
 
-  let bundleTools: string;
-
-  try {
-    bundleTools = await renderBundleTools(workspaceId, bundle);
-  } catch (error) {
-    bundleTools = `(failed to assemble the bundle: ${error instanceof Error ? error.message : String(error)})`;
-  }
-
-  sections.push(renderSection('Tool bundle (tool-manager)', bundleTools));
-
+  if (!declaration.session) sections.push(renderSection('Catalog instructions', port.instructions));
+  const definitions = port.tools.map(tool => [
+    `### ${tool.name}`, tool.description, '\`\`\`json',
+    JSON.stringify({ inputSchema: tool.inputSchema, outputSchema: tool.outputSchema, _meta: tool._meta }, null, 2), '\`\`\`',
+  ].join('\n'));
+  sections.push(renderSection(declaration.sdk === 'codex' ? 'Catalog functions in exec (ALL_TOOLS)' : 'MCP catalog (alwaysLoad actions and deferred capabilities)', definitions.join('\n\n')));
   return `${sections.join('\n\n')}\n`;
 }
 
@@ -265,7 +218,6 @@ loadAgents(
   }),
 );
 
-registerBuiltinToolServer(createAuthToolServer());
 registerBuiltinToolServer(createRestartToolServer());
 registerBuiltinToolServer(createStorageToolServer());
 registerBuiltinToolServer(createEventsToolServer());

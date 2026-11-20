@@ -1,13 +1,12 @@
 // One grant per codex exec invocation. The stateless HTTP transport creates
 // a protocol Server per request, all reading the same turn's port.
-import { randomUUID } from 'node:crypto';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import { CallToolRequestSchema, ListToolsRequestSchema, type CallToolResult, type Tool } from '@modelcontextprotocol/sdk/types.js';
+import type { CallToolResult, Tool } from '@modelcontextprotocol/sdk/types.js';
 import { expandSchema, grantedVertex, type JsonSchema, type JsonValue } from '../../catalog/index.ts';
 import type { AgentPassport } from '../../core/contract.ts';
-import { dispatchCatalogCall } from '../../tree/call-journal.ts';
-import { catalogContext, catalogInstructions, grantedCapabilities, guideForLeaf, portActions } from '../catalog-context.ts';
-import { BRIDGE_SERVER } from './session-config.ts';
+import { mcpCatalog, registerCatalogHandlers } from '../catalog-mcp.ts';
+import { BRIDGE_SERVER } from '../sdk-mcp-config.ts';
+import { catalogInstructions, guideForLeaf } from '../catalog-context.ts';
 
 const RULE =
   'In exec, open a catalog entry with tools.mcp__balabash__describe({name}). Use the same prefix for each catalog function. ' +
@@ -16,30 +15,17 @@ const RULE =
   'Inside that program, invoke capabilities with call(name, input).';
 
 export async function createCodexPort(agent: AgentPassport, workspaceId: string, threadId: string) {
-  const { grant, connections } = await catalogContext(agent, workspaceId, threadId);
-  const tree = grant.catalog;
-  const tools: Tool[] = [];
-  function add(name: string, description: string, input: JsonSchema, output: JsonSchema) {
-    // MCP requires object roots for both schemas. A uniform envelope also
-    // carries scalar, array and null results without changing their types.
-    const properties: Record<string, JsonSchema> = { value: expandSchema(tree, output) };
-    if (name === 'describe') properties.guide = { type: 'array', items: { type: 'string' } };
-    tools.push({
-      name, description, inputSchema: { ...expandSchema(tree, input), type: 'object' },
-      outputSchema: { type: 'object', properties, required: ['value'], additionalProperties: false },
-    });
-  }
-  for (const name of portActions) {
-    const action = tree.actions.get(name)!;
-    add(name, action.description, action.input, action.output);
-  }
-  for (const vertex of grantedCapabilities(grant)) {
-    add(vertex.fullName, vertex.description, vertex.input, vertex.output);
-  }
+  const catalog = await mcpCatalog(agent, workspaceId, threadId);
+  const { grant } = catalog;
+  const tools: Tool[] = catalog.entries.map(({ tool, output }) => {
+    const properties: Record<string, JsonSchema> = { value: expandSchema(grant.catalog, output) };
+    if (tool.name === 'describe') properties.guide = { type: 'array', items: { type: 'string' } };
+    return { ...tool, outputSchema: { type: 'object', properties, required: ['value'], additionalProperties: false } };
+  });
 
   const seenNodes = new Set(['']);
   async function call(name: string, input: JsonValue): Promise<CallToolResult> {
-    const result = await dispatchCatalogCall(grant, connections, { name, input, callId: randomUUID() });
+    const result = await catalog.call(name, input);
     if ('error' in result) return { isError: true, content: [{ type: 'text', text: JSON.stringify(result.error) }] };
     let guide: string[] | undefined;
     if (result.opened?.kind === 'node') seenNodes.add(result.opened.name);
@@ -55,8 +41,7 @@ export async function createCodexPort(agent: AgentPassport, workspaceId: string,
     tools,
     createServer() {
       const server = new Server({ name: BRIDGE_SERVER, version: '2.0.0' }, { capabilities: { tools: {} } });
-      server.setRequestHandler(ListToolsRequestSchema, () => ({ tools }));
-      server.setRequestHandler(CallToolRequestSchema, request => call(request.params.name, (request.params.arguments ?? {}) as JsonValue));
+      registerCatalogHandlers(server, () => ({ tools, call }));
       return server;
     },
   };

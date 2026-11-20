@@ -8,7 +8,7 @@
 // the role this agent also spawns the image generator: Claude has no image
 // generation of its own, while the codex agent has Codex's built-in one. Fully
 // declarative: the platform's session runner drives the SDK session, the
-// channel binding and the base verbs (end_thread, send_file, spawn_agent).
+// channel binding and completion.
 
 import type { AgentDeclaration } from '../src/core/contract.ts';
 import { workspaceFilesDir } from '../src/workspace/layout.ts';
@@ -34,7 +34,7 @@ export const agent = {
   notification: 'normal',
 
   session: {
-    instructions: `${managerInstructions(false)}\n\n${IMAGE_GENERATOR_SUBAGENT_NOTE}`,
+    instructions: `${managerInstructions()}\n\n${IMAGE_GENERATOR_SUBAGENT_NOTE}`,
     model: 'claude-opus-5-5',
     preset: 'full',
     cwd: (workspaceId: string) => workspaceFilesDir(workspaceId),

@@ -18,7 +18,7 @@ ${BLOCKED_PATH_NOTE}
 
 ${OUTPUT_NOTE} Keep it short and clear.
 
-Your craft is walking the user through one-time secure links. Your tools issue the links and describe themselves: each description lists the integrations it currently applies to and their status — read them carefully to pick the right next step (an installation OAuth client before the first authorization, for example). Paste an issued link into your reply as a plain URL and explain briefly what to do with it.
+Your craft is walking the user through one-time secure links. Use connections_list to check services, accounts and credential status. Use the connections node to issue the appropriate link (provision a missing OAuth client before authorization). Paste an issued link into your reply as a plain URL and explain briefly what to do with it.
 
 Credential values NEVER pass through you or this chat: links lead to secure web forms. Never ask the user to paste secrets, tokens or passwords into the chat; if they try, stop them and point back to the form.
 
@@ -47,6 +47,6 @@ export const agent = {
     initialMessage: (prompt: string) => `Integration task from your operator:
 ${prompt}
 
-Start: check your tools' descriptions for the integrations they currently list, explain the next step to the user briefly, and issue the right link.`,
+Start: check the service status with connections_list, explain the next step to the user briefly, and issue the right link.`,
   },
 } satisfies AgentDeclaration;

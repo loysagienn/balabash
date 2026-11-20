@@ -17,7 +17,7 @@
 import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { legacyServers } from '../capabilities/legacy-bundles.ts';
+import { coordinatorServers } from '../capabilities/legacy-bundles.ts';
 import { STAND_HOST, startStand } from '../test-support/stand.ts';
 import type { Stand } from '../test-support/stand.ts';
 import type { JsonObject, Thread } from '../core/contract.ts';
@@ -176,7 +176,7 @@ describe('the agent catalog of the snapshot', () => {
     assert.equal(coordinator.name, 'coordinator');
     assert.equal(coordinator.sdk, 'openai');
     assert.equal(coordinator.model, MODEL);
-    assert.deepEqual(coordinator.tools, legacyServers('coordinator'));
+    assert.deepEqual(coordinator.tools, coordinatorServers);
     assert.deepEqual(coordinator.agents, names);
     assert.deepEqual(coordinator.modes, ['user']);
     assert.equal(coordinator.defaultMode, 'user');
@@ -202,7 +202,7 @@ describe('the agent catalog of the snapshot', () => {
       assert.equal(agent.effort, decl.session?.effort ?? null, agent.name);
       assert.equal(agent.model, decl.session?.model ?? null, agent.name);
       assert.equal(agent.sdk, decl.sdk, agent.name);
-      if (decl.sdk === 'codex') assert.deepEqual(agent.tools, ['balabash']);
+      assert.deepEqual(agent.tools, ['balabash']);
     }
   });
 

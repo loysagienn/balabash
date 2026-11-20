@@ -6,8 +6,8 @@
 // thread (the coordinator or any agent that spawned it), never the user —
 // it knows nothing about the user. The thread is headless: no user-facing
 // surface. The dialogue is symmetric thread.message events: the operator sends
-// instructions (sendToChild / send_to_thread), the browser executes and
-// replies with its turn's final text (sendToParent). All the Playwright
+// instructions (send_to_thread), the browser executes and
+// replies with its turn's final text. All the Playwright
 // machinery stays in this thread, out of the operator's context; screenshots
 // are ingested into workspace files at capture time and referenced by fileId.
 //
@@ -30,27 +30,11 @@ import { mkdir, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { chromium } from 'playwright';
 import type { BrowserContext } from 'playwright';
-import type {
-  AgentDeclaration,
-  AgentRun,
-  AgentSdkSession,
-  Event,
-  JsonObject,
-  RunContext,
-  SdkBridgeTool,
-} from '../src/core/contract.ts';
-import { describeEvent, describeThreadMessage } from '../src/capabilities/session-run.ts';
-import { describeFinishRequest } from '../src/capabilities/thread-verbs.ts';
+import type { AgentDeclaration, RunContext, SessionEnvironment } from '../src/core/contract.ts';
 import { connectPlaywrightMcp, createPlaywrightBridgeTools, imageExtension } from './kit/playwright.ts';
-import type { PlaywrightImageSink } from './kit/playwright.ts';
-import { workspaceDbPath, workspaceFilesDir } from '../src/workspace/layout.ts';
-import {
-  BLOCKED_PATH_NOTE,
-  BROWSER_RELAUNCHED_NOTE,
-  SESSION_RESUMED_IDLE_NOTE,
-  SESSION_RESUMED_INTERRUPTED_NOTE,
-  WORKSPACE_STORAGE_NOTE,
-} from './world/index.ts';
+import type { PlaywrightImageSink, PlaywrightMcp } from './kit/playwright.ts';
+import { workspaceFilesDir } from '../src/workspace/layout.ts';
+import { BLOCKED_PATH_NOTE, BROWSER_RELAUNCHED_NOTE } from './world/index.ts';
 
 const NOVNC_URL = 'https://novnc.loysagienn.com/vnc.html';
 
@@ -87,10 +71,11 @@ async function acquireProfileLock(key: string, signal: AbortSignal): Promise<() 
     release = resolve;
   });
 
-  profileLockTails.set(
-    key,
-    previousTail.then(() => tail),
-  );
+  const queued = previousTail.then(() => tail);
+  profileLockTails.set(key, queued);
+  void queued.then(() => {
+    if (profileLockTails.get(key) === queued) profileLockTails.delete(key);
+  });
 
   await new Promise<void>((resolve, reject) => {
     const onAbort = () => {
@@ -111,13 +96,7 @@ async function acquireProfileLock(key: string, signal: AbortSignal): Promise<() 
     });
   });
 
-  return () => {
-    release();
-
-    if (profileLockTails.get(key) === tail) {
-      profileLockTails.delete(key);
-    }
-  };
+  return release;
 }
 
 // ---------------------------------------------------------------------------
@@ -136,9 +115,8 @@ function buildInstructions(): string {
     `- If a page requires login, CAPTCHA, 2FA, a passkey, or any other human verification: do NOT try to solve or bypass it yourself and do not ask for codes or passwords. Reply to the operator that manual intervention is required in the live browser at ${NOVNC_URL}, and continue only after the operator confirms the step is done.`,
     '- Take a screenshot only when the operator asks for one. Its result reports a stored fileId — include that exact fileId in your reply so the operator can use the file.',
     '- When an instruction asks you to collect structured data from pages (listings, tables, many items), never dump it into your reply: extract it in batches (page evaluation returning limited chunks), store it into the workspace database — into the table the operator named, or a sensibly named new one — and reply with row counts plus a small sample. The workspace data tools are shared with the operator and other agents.',
-    WORKSPACE_STORAGE_NOTE,
     "- Your working directory is the operator's workspace file area — the workbench shared with the operator and other agents. Your native tools (shell, file reads and edits) work there: `./x` for them is the same file as `x` for the workspace bridge tools. Use them for what the browser tools cannot do well — post-processing extracted data, saving page content or downloads as files. The host beyond the workbench is not yours to explore.",
-    '- End the session only when the operator explicitly instructs you to finish: close the browser, then report a concise result of the whole session. Never finish on your own initiative.',
+    '- End the session only when the operator explicitly instructs you to finish: close the browser, then call end_thread with the result of the whole session. Never finish on your own initiative.',
   ].join('\n');
 }
 
@@ -166,6 +144,41 @@ function createScreenshotSink(ctx: RunContext): PlaywrightImageSink {
 
 // ---------------------------------------------------------------------------
 
+async function createEnvironment(ctx: RunContext, cwd: string): Promise<SessionEnvironment> {
+  const release = await acquireProfileLock(ctx.stateDir, ctx.signal);
+  const profileDir = path.join(ctx.stateDir, 'profile');
+  const outputDir = path.join(ctx.stateDir, 'runs', ctx.threadId);
+  let context: BrowserContext | undefined;
+  let playwright: PlaywrightMcp | undefined;
+  const dispose = async () => {
+    await playwright?.close().catch(() => {});
+    await context?.close().catch(() => {}); // Closing a persistent context also closes Chromium.
+    await rm(outputDir, { recursive: true, force: true }).catch(() => {});
+    release();
+  };
+
+  try {
+    await mkdir(profileDir, { recursive: true });
+    await mkdir(outputDir, { recursive: true });
+    ctx.signal.throwIfAborted();
+    const browserContext = await chromium.launchPersistentContext(profileDir, {
+      executablePath: chromium.executablePath(),
+      headless: !process.env.DISPLAY,
+      args: CHROMIUM_ARGS,
+      ...(proxyServer ? { proxy: { server: proxyServer } } : {}),
+    });
+    context = browserContext;
+    playwright = await connectPlaywrightMcp({
+      outputDir, cwd, clientName: 'balabash-browser', context: async () => browserContext,
+    });
+    const extraTools = await createPlaywrightBridgeTools(playwright.client, createScreenshotSink(ctx));
+    return { extraTools, ...(ctx.resume ? { instructions: BROWSER_RELAUNCHED_NOTE } : {}), dispose };
+  } catch (error) {
+    await dispose();
+    throw error;
+  }
+}
+
 export const agent = {
   name: 'browser',
   description:
@@ -183,283 +196,12 @@ export const agent = {
   access: { nodes: ['workspace'], addRoot: ['get_file_url'] },
   notification: 'normal',
 
-  run(prompt: string, ctx: RunContext): AgentRun {
-    let settled = false;
-    let endSummary: { text: string; fileIds?: string[] } | null = null;
-    let resolveFinished: () => void;
-    let rejectFinished: (error: unknown) => void;
-
-    const finished = new Promise<void>((resolve, reject) => {
-      resolveFinished = resolve;
-      rejectFinished = reject;
-    });
-
-    const finishTool: SdkBridgeTool = {
-      name: 'finish',
-      description:
-        'End the browser session and report the final result to the operator. Call ONLY when the operator explicitly instructed you to finish, after browser_close succeeded.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          result: { type: 'string', description: 'Concise final result of the whole session.' },
-          screenshot_file_ids: {
-            type: ['array', 'null'],
-            items: { type: 'string' },
-            description: 'fileIds of screenshots taken during the session, or null.',
-          },
-        },
-        required: ['result', 'screenshot_file_ids'],
-        additionalProperties: false,
-      },
-      handler: async (args: JsonObject) => {
-        const result = typeof args.result === 'string' ? args.result.trim() : '';
-
-        if (!result) {
-          throw new Error('finish requires a non-empty result');
-        }
-
-        const fileIds = Array.isArray(args.screenshot_file_ids)
-          ? [...new Set(args.screenshot_file_ids.filter((id): id is string => typeof id === 'string' && Boolean(id.trim())).map(id => id.trim()))]
-          : [];
-
-        // The workspace's own files only (getInfo refuses a foreign or a
-        // missing fileId alike): the report goes to the user's channels.
-        for (const fileId of fileIds) {
-          await ctx.files.getInfo(fileId);
-        }
-
-        endSummary = { text: result, ...(fileIds.length ? { fileIds } : {}) };
-
-        return 'accepted — finish this turn with a short handoff';
-      },
-    };
-
-    type Cleanup = {
-      session: AgentSdkSession | null;
-      playwrightConnection: { close(): Promise<void> } | null;
-      browserContext: BrowserContext | null;
-      outputDir: string | null;
-      releaseProfile: (() => void) | null;
-    };
-
-    const cleanup: Cleanup = {
-      session: null,
-      playwrightConnection: null,
-      browserContext: null,
-      outputDir: null,
-      releaseProfile: null,
-    };
-
-    // Events routed while the browser is still starting are buffered and
-    // flushed into the session once it exists.
-    const preSessionInbox: string[] = [];
-
-    // The session's opening message. A fresh run: the operator's first
-    // instruction. A run resumed after an app restart: the restart note —
-    // at once when a turn was cut off; otherwise the run stays dormant (no
-    // browser, no session) until the operator writes, and that message rides
-    // behind the note.
-    let wakeDormant: ((text: string) => void) | null = null;
-    const opening: Promise<string> = !ctx.resume
-      ? Promise.resolve(buildInitialMessage(prompt))
-      : ctx.resume.interrupted
-        ? Promise.resolve(`${SESSION_RESUMED_INTERRUPTED_NOTE} ${BROWSER_RELAUNCHED_NOTE}`)
-        : new Promise(resolve => {
-            wakeDormant = text => resolve(`${SESSION_RESUMED_IDLE_NOTE} ${BROWSER_RELAUNCHED_NOTE}\n\n${text}`);
-          });
-
-    const stop = (error?: unknown) => {
-      if (settled) {
-        return;
-      }
-
-      settled = true;
-      cleanup.session?.close();
-      // A dormant resumed run cancelled before anything woke it.
-      wakeDormant?.('');
-
-      if (error === undefined) {
-        resolveFinished();
-      } else {
-        rejectFinished(error);
-      }
-    };
-
-    ctx.signal.addEventListener('abort', () => stop(), { once: true });
-
-    void (async () => {
-      try {
-        const initialMessage = await opening;
-
-        if (settled) {
-          return;
-        }
-
-        cleanup.releaseProfile = await acquireProfileLock(ctx.stateDir, ctx.signal);
-
-        const profileDir = path.join(ctx.stateDir, 'profile');
-        const outputDir = path.join(ctx.stateDir, 'runs', ctx.threadId);
-        const cwd = workspaceFilesDir(ctx.workspaceId);
-
-        cleanup.outputDir = outputDir;
-        await mkdir(profileDir, { recursive: true });
-        await mkdir(outputDir, { recursive: true });
-        // The session working directory must exist before the SDK starts in it.
-        await mkdir(cwd, { recursive: true });
-
-        if (ctx.signal.aborted) {
-          return;
-        }
-
-        const browserContext = await chromium.launchPersistentContext(profileDir, {
-          executablePath: chromium.executablePath(),
-          // Headful on the host's Xvfb display when available — the user can
-          // watch and intervene through noVNC; headless otherwise.
-          headless: !process.env.DISPLAY,
-          args: CHROMIUM_ARGS,
-          ...(proxyServer ? { proxy: { server: proxyServer } } : {}),
-        });
-
-        cleanup.browserContext = browserContext;
-
-        const playwright = await connectPlaywrightMcp({
-          outputDir,
-          clientName: 'balabash-browser',
-          context: async () => browserContext,
-          // The workbench is the root the files the model names resolve
-          // against; the file fence stays — this browser walks the open web.
-          cwd,
-        });
-
-        cleanup.playwrightConnection = playwright;
-
-        const playwrightTools = await createPlaywrightBridgeTools(playwright.client, createScreenshotSink(ctx));
-
-        if (ctx.signal.aborted) {
-          return;
-        }
-
-        const session = ctx.harness.sdkSession({
-          instructions: `${SYSTEM_PROMPT}\n\n${BLOCKED_PATH_NOTE}\n\n${buildInstructions()}`,
-          initialMessage,
-          ...(ctx.resume ? { resume: ctx.resume.sdkSessionId } : {}),
-          model: 'claude-opus-5-5',
-          // Full native preset: shell and file tools on the workbench next to
-          // the browser tools (post-processing extracted data, saving files).
-          preset: 'full',
-          cwd,
-          // Same as the platform session runner: the workspace database path
-          // for anything the session runs from its working directory.
-          env: { WORKSPACE_DB: workspaceDbPath(ctx.workspaceId) },
-          extraTools: [...playwrightTools, finishTool],
-        });
-
-        cleanup.session = session;
-
-        for (const text of preSessionInbox.splice(0)) {
-          session.push(text);
-        }
-
-        for await (const turn of session.turns) {
-          if (settled) {
-            return;
-          }
-
-          if (endSummary !== null) {
-            await ctx.complete(endSummary);
-            stop();
-
-            return;
-          }
-
-          if (turn.text) {
-            // The turn's final text IS the reply to the operator: an
-            // addressed thread.message, which also journals the dialogue in
-            // this thread's transcript.
-            await ctx.sendToParent(turn.text);
-          }
-        }
-
-        stop(settled ? undefined : new Error('Browser session ended before finish was called'));
-      } catch (error) {
-        stop(error);
-      } finally {
-        await cleanup.playwrightConnection?.close().catch(() => {});
-
-        const browser = cleanup.browserContext?.browser();
-
-        try {
-          if (browser?.isConnected()) {
-            await browser.close();
-          } else {
-            await cleanup.browserContext?.close();
-          }
-        } catch {
-          // The browser process may already be gone.
-        }
-
-        if (cleanup.outputDir) {
-          // Screenshots are ingested into files at capture time; the local
-          // artifacts (snapshots, console logs) are disposable.
-          await rm(cleanup.outputDir, { recursive: true, force: true }).catch(() => {});
-        }
-
-        cleanup.releaseProfile?.();
-      }
-    })();
-
-    const sessionPush = (text: string): void => {
-      if (wakeDormant) {
-        const wake = wakeDormant;
-
-        wakeDormant = null;
-        wake(text);
-
-        return;
-      }
-
-      if (!cleanup.session) {
-        preSessionInbox.push(text);
-
-        return;
-      }
-
-      try {
-        cleanup.session.push(text);
-      } catch {
-        // The session may be closing; the run terminal covers the outcome.
-      }
-    };
-
-    return {
-      accept: (event: Event) => {
-        if (settled) {
-          return;
-        }
-
-        if (event.type === 'thread.message') {
-          // The platform rendering, headless mode: the operator's text plain,
-          // attachments as fileId markers (the browser spawns no children).
-          const text = describeThreadMessage(event, true, ctx.parentThreadId);
-
-          if (text) {
-            sessionPush(text);
-          }
-
-          return;
-        }
-
-        if (event.type === 'thread.finish') {
-          // The browser's end verb is its own `finish` tool (after
-          // browser_close), not the session run's end_thread.
-          sessionPush(describeFinishRequest(event, 'finish'));
-
-          return;
-        }
-
-        sessionPush(describeEvent(event));
-      },
-      finished,
-    };
+  session: {
+    instructions: `${SYSTEM_PROMPT}\n\n${BLOCKED_PATH_NOTE}\n\n${buildInstructions()}`,
+    initialMessage: buildInitialMessage,
+    model: 'claude-opus-5-5',
+    preset: 'full',
+    cwd: workspaceFilesDir,
+    environment: createEnvironment,
   },
 } satisfies AgentDeclaration;

@@ -7,8 +7,8 @@
 // functions until it connects; servers with
 // auth: "user" are registered without a global connection — per-workspace clients
 // are created lazily once the user's connection row says "connected".
-// Module-level state is deliberate: the whole system is one process, the
-// runs consume this registry through their bundled ToolsApi.
+// Module-level state is deliberate: the whole system is one process, and
+// the openai-compatible coordinator consumes this registry.
 
 import path from 'node:path';
 import { UnauthorizedError } from '@modelcontextprotocol/sdk/client/auth.js';
@@ -220,10 +220,6 @@ const workspaceServers = new Map<string, Map<string, WorkspaceServerAccounts>>()
 // first live account.
 function canonicalClient(accounts: WorkspaceServerAccounts): ConnectedServer | null {
   return accounts.values().next().value ?? null;
-}
-
-export function listUserAuthServers(): UserAuthServer[] {
-  return [...userAuthServers.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
 // Registers one user-auth server outside loadToolServers — the test
@@ -483,40 +479,6 @@ export function listClaudeConnectorTargets(): ClaudeConnectorTarget[] {
       return { name, description, connected, error: connected ? null : (pending?.error ?? 'not connected') };
     })
     .sort((a, b) => a.name.localeCompare(b.name));
-}
-
-// One line per external server for the auth agent:
-// connected / pending: secrets missing / pending: connection failed
-// (<error>) / per-user: N accounts — the only place a server that has no
-// functions right now is still visible to any agent.
-export function describeExternalServerStatuses(
-  connections: ReadonlyArray<{ server: string; status: string }>,
-): string[] {
-  const lines: string[] = [];
-
-  for (const server of servers.values()) {
-    if (server.origin === 'external' && !pendingExternalServers.has(server.name)) {
-      lines.push(`- ${server.name}: connected`);
-    }
-  }
-
-  for (const pending of pendingExternalServers.values()) {
-    if (pending.connected && servers.has(pending.name)) {
-      lines.push(`- ${pending.name}: connected`);
-    } else if (pending.error) {
-      lines.push(`- ${pending.name}: pending — connection failed (${pending.error})`);
-    } else {
-      lines.push(`- ${pending.name}: pending — secrets missing (${pending.secretNames.join(', ')})`);
-    }
-  }
-
-  for (const server of userAuthServers.values()) {
-    const accounts = connections.filter(row => row.server === server.name && row.status === 'connected').length;
-
-    lines.push(`- ${server.name}: per-user — ${accounts} connected account${accounts === 1 ? '' : 's'}`);
-  }
-
-  return lines.sort();
 }
 
 // Forgetting a server's installation credentials (auth agent): the live

@@ -29,7 +29,7 @@ export const agent = {
   notification: 'normal',
 
   session: {
-    instructions: managerInstructions(true),
+    instructions: managerInstructions(),
     model: 'gpt-6.2-astra',
     effort: 'high',
     preset: 'full',

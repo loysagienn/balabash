@@ -861,7 +861,9 @@ function renderClaude(entry: Attributed, measure: ClaudeMeasure): string {
 
   sections.push(
     [
-      `## Deferred tools (${measure.deferred.length}; names only, loaded through ToolSearch)`,
+      `## Deferred tool inventory (${measure.deferred.length} names in the CLI attachment)`,
+      '',
+      'The catalog mod filters the names shown to the model. Compare the rendered deferred_tools_delta and request shape for prompt occupancy.',
       '',
       `- native (${native.length}): ${native.join(', ') || '—'}`,
       ...[...byServer.entries()].map(([server, count]) => `- mcp__${server}__ (${count}): ${mcp.filter(name => name.startsWith(`mcp__${server}__`)).map(name => name.slice(`mcp__${server}__`.length)).join(', ')}`),
@@ -1084,7 +1086,7 @@ if (!sessionArg) {
     '',
     'The newest session of each agent: the first request\'s tokens (usage) and the sizes in chars of its parts — our prompt, the text the SDK adds around it (Claude: the dynamic block; Codex: its own system prompt and appendices), the reminders or environment context in the user turn, the tool definitions. Details per agent in the files beside.',
     '',
-    table(['agent', 'sdk', 'session', 'date', 'first-request tokens', 'Balabash prompt', 'SDK-added text (dynamic block / Codex prompt)', 'reminders / environment', 'tool defs', 'tools', 'deferred', 'skills'], summaryRows),
+    table(['agent', 'sdk', 'session', 'date', 'first-request tokens', 'Balabash prompt', 'SDK-added text (dynamic block / Codex prompt)', 'reminders / environment', 'tool defs', 'tools', 'deferred inventory', 'skills'], summaryRows),
     '',
   ].join('\n');
   const file = path.join(outDir, 'summary.md');

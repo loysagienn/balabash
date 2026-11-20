@@ -6,8 +6,7 @@
 // opens a session.
 //
 // The end of a thread: the report the thread left during a turn — through
-// the capability `end_thread` of the catalog or the run's own tool, the
-// place is one (src/core/thread-end.ts) — completes the thread when that
+// the catalog capability `end_thread` (src/core/thread-end.ts) — completes the thread when that
 // turn has run its course: not at a text said on the way, and not at a turn
 // the user stopped; a run that is over some other way leaves no report
 // behind.
@@ -44,7 +43,6 @@ function probe(resume?: RunResume): Probe {
       turns: (async function* (): AsyncGenerator<SdkTurn> {
         await closed;
       })(),
-      syncTools: async () => {},
       close: () => close(),
     };
   };
@@ -167,7 +165,6 @@ describe('createSessionRun ending', () => {
           yield await new Promise<SdkTurn>(resolve => turns.push(resolve));
         }
       })(),
-      syncTools: async () => {},
       close: () => {},
     };
     const ctx = {
@@ -177,10 +174,7 @@ describe('createSessionRun ending', () => {
       signal: controller.signal,
       harness: { sdkSession: () => session },
       stateDir: '/tmp',
-      pushEvent: async (_type: string, payload: { content: Array<{ text: string }> }) => {
-        told.push(payload.content[0]!.text);
-      },
-      sendToParent: async (text: string) => {
+      deliverTurnText: async (text: string) => {
         told.push(text);
       },
       complete: async (summary: unknown, meta: unknown) => {

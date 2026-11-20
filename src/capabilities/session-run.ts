@@ -6,31 +6,18 @@
 // dialogue), the end-of-turn report and abort handling.
 
 import { mkdirSync } from 'node:fs';
-import { SESSION_RESUMED_IDLE_NOTE, SESSION_RESUMED_INTERRUPTED_NOTE, THREAD_NAMING_NOTE } from '../../agents/world/index.ts';
+import { SESSION_RESUMED_IDLE_NOTE, SESSION_RESUMED_INTERRUPTED_NOTE } from '../../agents/world/index.ts';
 import { workspaceDbPath } from '../workspace/layout.ts';
-import { fileContentBlock } from '../core/file-blocks.ts';
-import { dropReport, leaveReport, reportLeft, takeReport } from '../core/thread-end.ts';
-import {
-  CANCEL_REASON_PARAM_DESCRIPTION,
-  CANCEL_THREAD_DESCRIPTION,
-  describeFinishRequest,
-  FINISH_THREAD_DESCRIPTION,
-  SEND_TO_THREAD_DESCRIPTION,
-} from './thread-verbs.ts';
-import { isRemoteAgent, spawnHeadless, startable, type CatalogAgent } from './agent-catalog.ts';
+import { dropReport, reportLeft, takeReport } from '../core/thread-end.ts';
+import { describeFinishRequest } from './thread-verbs.ts';
 import type {
   AgentDeclaration,
   AgentRun,
   AgentSdkSession,
-  ContentBlock,
   Event,
-  JsonObject,
-  JsonValue,
   RunContext,
-  SdkBridgeTool,
   SessionAgentSpec,
   SessionEnvironment,
-  ToolDefinition,
 } from '../core/contract.ts';
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -70,9 +57,9 @@ function readableSize(bytes: number): string {
 }
 
 // Attached files as the session reads them: a line per file (the facts the
-// sender recorded, `who` names the sender) and a retrieval hint for the legacy bridge.
+// sender recorded, `who` names the sender) as stored.
 // The catalog supplies its own file guide.
-function describeFiles(files: unknown[], who: string, sdk: AgentDeclaration['sdk']): string[] {
+function describeFiles(files: unknown[], who: string): string[] {
   const parts: string[] = [];
 
   for (const file of files) {
@@ -87,19 +74,11 @@ function describeFiles(files: unknown[], who: string, sdk: AgentDeclaration['sdk
     );
   }
 
-  if (files.length && sdk !== 'codex') {
-    parts.push(
-      `Use the storage_get_file tool for ${files.length === 1 ? 'its' : 'their'} metadata and a download URL; fetch the URL when ` +
-        'the contents are needed. To work on a file in the workspace (scripts, workspace tools), put it there with ' +
-        'workspace_import_file where available.',
-    );
-  }
-
   return parts;
 }
 
 // A user message as the session reads it: the text, then the attached files.
-function describeUserMessage(payload: Record<string, unknown>, sdk: AgentDeclaration['sdk']): string {
+function describeUserMessage(payload: Record<string, unknown>): string {
   const speaker = speakerOf(payload);
   const text = typeof payload.text === 'string' ? payload.text : '';
   const files = Array.isArray(payload.files) ? payload.files : [];
@@ -109,24 +88,22 @@ function describeUserMessage(payload: Record<string, unknown>, sdk: AgentDeclara
     parts.push(speaker ? `${speaker}: ${text}` : text);
   }
 
-  return [...parts, ...describeFiles(files, 'the user sent', sdk)].join('\n');
+  return [...parts, ...describeFiles(files, 'the user sent')].join('\n');
 }
 
 // The spawn prompt with the attachments of thread.started (payload.files)
 // read like a message's: the spawner — the operator of the thread — attached
 // them. One rendering for the session runner and imperative run() agents
 // alike (the runtime applies it before either sees the prompt).
-export function withSpawnFiles(prompt: string, files: unknown, sdk: AgentDeclaration['sdk']): string {
-  return [prompt, ...describeFiles(Array.isArray(files) ? files : [], 'the operator attached', sdk)].join('\n');
+export function withSpawnFiles(prompt: string, files: unknown): string {
+  return [prompt, ...describeFiles(Array.isArray(files) ? files : [], 'the operator attached')].join('\n');
 }
 
 // An incoming thread.message: text plus attached file references. From the
 // parent it is the operator speaking (labeled in a user-facing thread, where the
 // operator is distinct from the user; plain in a headless thread, where the
-// operator's instructions are the only dialogue); from a spawned child it is
-// the child's reply, labeled with the child's threadId. Exported for
-// imperative run() agents (browser) — one rendering, not a clone.
-export function describeThreadMessage(
+// operator's instructions are the only dialogue); a child's reply is labeled with its threadId.
+function describeThreadMessage(
   event: Event,
   headless: boolean,
   parentThreadId: string | null,
@@ -151,367 +128,12 @@ export function describeThreadMessage(
 }
 
 // Events fanned into the run besides the dialogue: lifecycle of this thread's
-// own children, redirected facts, domain events. Exported for imperative
-// run() agents (browser) — one rendering, not a clone.
-export function describeEvent(event: Event): string {
+// own children, redirected facts, domain events.
+function describeEvent(event: Event): string {
   return `[Balabash event]\ntype: ${event.type}\npayload: ${JSON.stringify(event.payload)}`;
 }
 
 // ---------------------------------------------------------------------------
-// The standard base verbs (§7.1 base kit): every session agent gets them.
-
-// The thread's retrospective self-description (three levels, one author, one
-// moment): title — the one-time correction of the start-time guess;
-// description — "is this the thread I'm looking for" without the full report;
-// summary — the full handoff. Optional at the envelope, required here: the
-// strictness lives at the edge, where the author is the thread itself. The
-// report is left with the thread (src/core/thread-end.ts) and the run
-// completes the thread with it when the turn is over.
-function createEndThreadTool(ctx: RunContext): SdkBridgeTool {
-  return {
-    name: 'end_thread',
-    description:
-      'End this thread and report back to your operator — the one who started it. Call it when the task ' +
-      'is done, cannot continue, or you are asked to stop. In the same turn, finish with a short final text.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        title: {
-          type: 'string',
-          description:
-            `Final thread title: 2–5 words naming the work done, in the language of the thread. ${THREAD_NAMING_NOTE} ` +
-            'It replaces the start-time title in thread lists and on the user surface.',
-        },
-        description: {
-          type: 'string',
-          description:
-            'About 300 characters (soft limit): what was worked on and how it ended — enough for a reader ' +
-            'scanning threads to tell whether this is the one they are looking for, without opening the ' +
-            'full summary.',
-        },
-        summary: {
-          type: 'string',
-          description:
-            'The report for your operator: the outcome, decisions, produced files or refs, anything that ' +
-            'remains. It is the only compressed record this thread leaves behind.',
-        },
-        fileIds: {
-          type: ['array', 'null'],
-          items: { type: 'string' },
-          description: 'Stored fileIds that belong with the report, or null.',
-        },
-      },
-      required: ['title', 'description', 'summary', 'fileIds'],
-      additionalProperties: false,
-    },
-    handler: async args => {
-      const title = typeof args.title === 'string' ? args.title.trim() : '';
-      const description = typeof args.description === 'string' ? args.description.trim() : '';
-      const summary = typeof args.summary === 'string' ? args.summary.trim() : '';
-
-      if (!title || !description || !summary) {
-        throw new Error('end_thread requires non-empty title, description and summary');
-      }
-
-      const fileIds = Array.isArray(args.fileIds)
-        ? [...new Set(args.fileIds.filter((id): id is string => typeof id === 'string' && Boolean(id.trim())).map(id => id.trim()))]
-        : [];
-
-      // The files of the report are the workspace's own (getInfo — a
-      // foreign or missing fileId refuses the call, the same refusal for
-      // both): the summary is delivered to the user's channels as is.
-      for (const fileId of fileIds) {
-        await ctx.files.getInfo(fileId);
-      }
-
-      leaveReport(ctx.threadId, {
-        title,
-        description,
-        summary: { text: summary, ...(fileIds.length ? { fileIds } : {}) },
-      });
-
-      return 'accepted — finish this turn with a short final text';
-    },
-  };
-}
-
-function createSendFileTool(ctx: RunContext, headless: boolean): SdkBridgeTool {
-  return {
-    name: 'send_file',
-    description: headless
-      ? 'Send a stored Balabash file to your operator, by fileId.'
-      : 'Send a stored Balabash file into the thread, to the user, by fileId.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        fileId: { type: 'string', description: 'The Balabash file ID to send.' },
-        caption: { type: ['string', 'null'], description: 'Optional short plain-text caption.' },
-      },
-      required: ['fileId', 'caption'],
-      additionalProperties: false,
-    },
-    handler: async args => {
-      const fileId = typeof args.fileId === 'string' ? args.fileId.trim() : '';
-
-      if (!fileId) {
-        throw new Error('send_file requires fileId');
-      }
-
-      const info = await ctx.files.getInfo(fileId);
-      const caption = typeof args.caption === 'string' && args.caption.trim() ? args.caption.trim() : null;
-
-      if (headless) {
-        await ctx.sendToParent(caption ?? `[file] ${info.originalFilename ?? fileId}`, [fileId]);
-
-        return 'file sent to the operator';
-      }
-
-      const content: ContentBlock[] = [];
-
-      if (caption) {
-        content.push({ type: 'text', text: caption });
-      }
-
-      content.push(fileContentBlock(info));
-
-      await ctx.pushEvent('agent.message', { content: content as unknown as JsonValue[] } as JsonObject);
-
-      return 'file sent';
-    },
-  };
-}
-
-// The launch mode and options of each remote kind offered by this bridge.
-function remoteKindWords(agents: CatalogAgent[]): string {
-  const kinds = agents.filter(isRemoteAgent);
-
-  if (!kinds.length) {
-    return '';
-  }
-
-  return (
-    ' Remote agents (the child thread mirrors a session in an external system): ' +
-    kinds
-      .map(
-        kind =>
-          `${kind.name} (${spawnHeadless(kind, true) ? 'talks only to you' : 'talks to the user'}) — ${kind.description}${
-            kind.options && typeof kind.options.properties === 'object' && kind.options.properties
-              ? ` Options: ${JSON.stringify(kind.options.properties)}.`
-              : ''
-          }`,
-      )
-      .join(' ') +
-    ' For a remote agent, `options` carries its launch parameters and `adopt: true` makes `prompt` the ' +
-    'reference (id or link) of an existing session to adopt instead of a task.'
-  );
-}
-
-function createChildTools(
-  ctx: RunContext,
-  declaration: AgentDeclaration,
-): SdkBridgeTool[] {
-  const agents = startable(declaration.name);
-  if (!agents.length) {
-    return [];
-  }
-
-  const allowedAgents = agents.map(agent => agent.name);
-  const spawnAgentTool: SdkBridgeTool = {
-    name: 'spawn_agent',
-    description:
-      `Spawn a sub-agent in a child thread and become its operator. Allowed agents: ${allowedAgents.join(', ')}. ` +
-      'The call returns the threadId. Send instructions with send_to_thread. A headless child replies to you ' +
-      'with messages labeled by threadId; a user-facing child talks to the user. Both send you a summary ' +
-      'when they end. Use finish_thread to ask for that report, or cancel_thread to stop a child immediately.' +
-      remoteKindWords(agents),
-    inputSchema: {
-      type: 'object',
-      properties: {
-        agent: { type: 'string', description: `The agent to spawn: one of ${allowedAgents.join(', ')}.` },
-        title: {
-          type: 'string',
-          description: `Short human-readable title for the child thread. ${THREAD_NAMING_NOTE}`,
-        },
-        prompt: {
-          type: 'string',
-          description:
-            'The task for the agent, with everything it should start from: the ask, known context, ' +
-            'constraints, and references (thread ids, event seqs) each with a one-line note. Files go in ' +
-            '`fileIds`, not as ids in the text.',
-        },
-        fileIds: {
-          type: ['array', 'null'],
-          items: { type: 'string' },
-          description:
-            'Stored fileIds to attach to the task, or null. The agent gets them as attachments of its first ' +
-            'message (a remote agent receives the files themselves in its session — it has no access to ' +
-            'Balabash storage, so an id in the text is useless to it). Not with adopt.',
-        },
-        project: {
-          type: ['string', 'null'],
-          description:
-            'The slug of the project the work concerns (as listed by projects_list), or null when it concerns ' +
-            'none. Links the child thread to the project — name it whenever the task is about a project.',
-        },
-        options: {
-          type: ['object', 'null'],
-          description: 'Remote agents only: the launch parameters by the agent’s options schema; null otherwise.',
-          additionalProperties: true,
-        },
-        adopt: {
-          type: ['boolean', 'null'],
-          description: 'Remote agents only: true to adopt the existing session named by `prompt`; null or false to start a new one.',
-        },
-      },
-      required: ['agent', 'title', 'prompt', 'fileIds', 'project', 'options', 'adopt'],
-      additionalProperties: false,
-    },
-    handler: async args => {
-      const agentName = typeof args.agent === 'string' ? args.agent.trim() : '';
-      const title = typeof args.title === 'string' && args.title.trim() ? args.title.trim() : undefined;
-      const prompt = typeof args.prompt === 'string' ? args.prompt.trim() : '';
-      const project = typeof args.project === 'string' && args.project.trim() ? args.project.trim() : undefined;
-      const options = args.options && typeof args.options === 'object' && !Array.isArray(args.options) ? args.options : undefined;
-      const adopt = args.adopt === true;
-      const fileIds = Array.isArray(args.fileIds)
-        ? args.fileIds.filter((id): id is string => typeof id === 'string' && Boolean(id.trim()))
-        : [];
-
-      if (!agentName) {
-        throw new Error('spawn_agent requires agent');
-      }
-
-      if (!prompt) {
-        throw new Error('spawn_agent requires a non-empty prompt');
-      }
-
-      const child = await ctx.spawn(agentName, prompt, {
-        ...(title ? { title } : {}),
-        ...(fileIds.length ? { fileIds } : {}),
-        ...(project ? { project } : {}),
-        ...(options ? { options } : {}),
-        ...(adopt ? { adopt } : {}),
-      });
-
-      return `Spawned child thread ${child.threadId}. Its report arrives when the thread ends.`;
-    },
-  };
-
-  const sendToThreadTool: SdkBridgeTool = {
-    name: 'send_to_thread',
-    description: `${SEND_TO_THREAD_DESCRIPTION} Optionally attach stored files by fileId.`,
-    inputSchema: {
-      type: 'object',
-      properties: {
-        threadId: { type: 'string', description: 'The child threadId returned by spawn_agent.' },
-        text: { type: 'string', description: 'The message text delivered to the child agent.' },
-        fileIds: {
-          type: ['array', 'null'],
-          items: { type: 'string' },
-          description: 'Stored fileIds to attach, or null.',
-        },
-      },
-      required: ['threadId', 'text', 'fileIds'],
-      additionalProperties: false,
-    },
-    handler: async args => {
-      const threadId = typeof args.threadId === 'string' ? args.threadId.trim() : '';
-      const text = typeof args.text === 'string' ? args.text.trim() : '';
-      const fileIds = Array.isArray(args.fileIds)
-        ? args.fileIds.filter((id): id is string => typeof id === 'string' && Boolean(id.trim()))
-        : [];
-
-      if (!threadId || !text) {
-        throw new Error('send_to_thread requires threadId and non-empty text');
-      }
-
-      await ctx.sendToChild(threadId, text, fileIds.length ? fileIds : undefined);
-
-      return (
-        "sent — the child's reply will arrive on its own as a new message in this session. " +
-        'End your turn and wait for it.'
-      );
-    },
-  };
-
-  const cancelThreadTool: SdkBridgeTool = {
-    name: 'cancel_thread',
-    description: CANCEL_THREAD_DESCRIPTION,
-    inputSchema: {
-      type: 'object',
-      properties: {
-        threadId: { type: 'string', description: 'The child threadId to cancel.' },
-        reason: { type: ['string', 'null'], description: CANCEL_REASON_PARAM_DESCRIPTION },
-      },
-      required: ['threadId', 'reason'],
-      additionalProperties: false,
-    },
-    handler: async args => {
-      const threadId = typeof args.threadId === 'string' ? args.threadId.trim() : '';
-
-      if (!threadId) {
-        throw new Error('cancel_thread requires threadId');
-      }
-
-      const reason = typeof args.reason === 'string' && args.reason.trim() ? args.reason.trim() : 'cancelled';
-
-      await ctx.cancelChild(threadId, reason);
-
-      return 'cancel requested';
-    },
-  };
-
-  const finishThreadTool: SdkBridgeTool = {
-    name: 'finish_thread',
-    description: `${FINISH_THREAD_DESCRIPTION} The summary arrives as the child's thread.completed.`,
-    inputSchema: {
-      type: 'object',
-      properties: {
-        threadId: { type: 'string', description: 'The child threadId to finish.' },
-      },
-      required: ['threadId'],
-      additionalProperties: false,
-    },
-    handler: async args => {
-      const threadId = typeof args.threadId === 'string' ? args.threadId.trim() : '';
-
-      if (!threadId) {
-        throw new Error('finish_thread requires threadId');
-      }
-
-      await ctx.finishChild(threadId);
-
-      return 'finish requested — the summary arrives with the child’s completion';
-    },
-  };
-
-  return [spawnAgentTool, sendToThreadTool, cancelThreadTool, finishThreadTool];
-}
-
-// ---------------------------------------------------------------------------
-
-// The base verbs as a given declaration's session sees them — the same
-// factories that build the live tools, run with inert state, mapped to bare
-// definitions. For offline rendering (scripts/render-context.ts): the
-// showcase must show the real texts, not a retelling.
-export function describeClaudeBridgeTools(declaration: AgentDeclaration): ToolDefinition[] {
-  const headless = declaration.defaultMode === 'headless';
-  // Handlers of the built tools are never called here.
-  const inertCtx = null as unknown as RunContext;
-
-  const tools: SdkBridgeTool[] = [
-    createEndThreadTool(inertCtx),
-    createSendFileTool(inertCtx, headless),
-    ...createChildTools(inertCtx, declaration),
-  ];
-
-  return tools.map(tool => ({
-    name: tool.name,
-    description: tool.description,
-    inputSchema: tool.inputSchema,
-  }));
-}
-
 export function createSessionRun(
   declaration: AgentDeclaration,
   spec: SessionAgentSpec,
@@ -596,14 +218,7 @@ export function createSessionRun(
       // Scripts run from the session reach the workspace database the same way
       // run_script children do: via the WORKSPACE_DB env variable.
       env: { WORKSPACE_DB: workspaceDbPath(ctx.workspaceId) },
-      ...(declaration.sdk === 'claude' ? {
-        extraTools: [
-          createEndThreadTool(ctx),
-          createSendFileTool(ctx, headless),
-          ...createChildTools(ctx, declaration),
-          ...(environment?.extraTools ?? []),
-        ],
-      } : {}),
+      extraTools: environment?.extraTools,
     });
 
   const stop = (error?: unknown) => {
@@ -630,21 +245,6 @@ export function createSessionRun(
   // External cancellation (/cancel, cancel_thread, cascade): the terminal is
   // already written; just shut the session down.
   ctx.signal.addEventListener('abort', () => stop(), { once: true });
-
-  // The channel binding: where a turn's final text goes. A user-facing agent talks
-  // to the user through agent.message; a headless agent answers its operator
-  // with an addressed thread.message.
-  const deliverTurnText = async (text: string) => {
-    if (headless) {
-      await ctx.sendToParent(text);
-
-      return;
-    }
-
-    await ctx.pushEvent('agent.message', {
-      content: [{ type: 'text', text }] as unknown as JsonValue[],
-    } as JsonObject);
-  };
 
   void (async () => {
     let environment: SessionEnvironment | null = null;
@@ -688,14 +288,13 @@ export function createSessionRun(
           continue;
         }
 
-        // The report the thread left in this turn — through its end_thread
-        // tool or through the capability of the catalog, the place is one.
+        // The report left by end_thread during this turn.
         // The summary carries the report to the operator; the text said
         // after it is the goodbye — meaningful in a user-facing thread (the
         // user reads it), redundant in a headless thread (the parent gets
         // the summary).
         if (turn.text && !(headless && reportLeft(ctx.threadId) !== null)) {
-          await deliverTurnText(turn.text);
+          await ctx.deliverTurnText(turn.text);
         }
 
         // A text said on the way: the turn goes on, and the thread with it.
@@ -751,7 +350,7 @@ export function createSessionRun(
       const payload = isObject(event.payload) ? event.payload : {};
 
       if (event.type === 'user.message') {
-        const text = describeUserMessage(payload, declaration.sdk);
+        const text = describeUserMessage(payload);
 
         if (text) {
           pushText(text);
@@ -778,24 +377,7 @@ export function createSessionRun(
         return;
       }
 
-      // Any other delivered event may have changed the tool catalog (an
-      // integration connected); refresh the bridge before the model reads
-      // about it. When nothing changed the sync is a no-op diff; syncTools
-      // never rejects. Before the session exists there is nothing to sync:
-      // the bridge is built from the live catalog when the session starts.
-      const text = describeEvent(event);
-
-      if (!session) {
-        pushText(text);
-
-        return;
-      }
-
-      void session.syncTools().then(() => {
-        if (!settled) {
-          pushText(text);
-        }
-      });
+      pushText(describeEvent(event));
     },
     finished,
   };

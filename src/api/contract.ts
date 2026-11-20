@@ -1047,7 +1047,7 @@ export type AgentView = AgentModes & {
   // 'remote' — a remote agent kind of the installation (src/remote): the
   // session runs in an external system; no tools, no model of ours.
   sdk: 'claude' | 'codex' | 'openai' | 'remote';
-  // Server names shown on the card: the Codex catalog bridge or the effective legacy bundle.
+  // Server names shown on the card: the SDK catalog bridge or the coordinator’s effective legacy bundle.
   tools: string[];
   agents: string[];
   notification: string | null;
