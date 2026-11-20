@@ -40,6 +40,7 @@ import {
   type Catalog,
   type RootDefinition,
 } from '../catalog/index.ts';
+import { refreshSecretServices } from '../capabilities/connections/services.ts';
 import { connections } from './connections.ts';
 import { getEvent } from './events.ts';
 import { fileCapabilities } from './files.ts';
@@ -112,16 +113,22 @@ export const root: RootDefinition = {
 let built: Catalog | null = null;
 
 // The catalog of this installation, built once: a broken rule of the scheme
-// stops the first use. The services its nodes declare are told to the
-// connections layer with it: from then on they can be connected, and
-// `connectionsPort()` (./services.ts) answers for them.
+// stops the first use.
 export function catalog(): Catalog {
-  if (!built) {
-    built = buildCatalog(root).catalog;
-    registerServices(built);
-  }
+  built ??= buildCatalog(root).catalog;
 
   return built;
+}
+
+// What the app does with the tree when it starts, before anyone can ask for
+// a service — the console, an OAuth callback, a task: the catalog is built,
+// and the services its nodes declare are told to the connections layer.
+// From then on they can be connected, and `connectionsPort()` (./services.ts)
+// answers for them. A service a tool server defined under the same name is
+// the tree's from here on.
+export async function startTree(): Promise<void> {
+  registerServices(catalog());
+  await refreshSecretServices();
 }
 
 // What the scheme has in flight that no turn of an agent answers for: the

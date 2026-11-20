@@ -7,9 +7,11 @@
 
 import { z } from 'zod';
 import { CapabilityError, capability, node, secretAuthority, type CallContext, type JsonObject, type Node } from '../catalog/index.ts';
-import { callServerTool } from './external-server.ts';
+import { CredentialsRefusedError, callServerTool, type ToolAnswer } from './external-server.ts';
+import { secretsAccepted, secretsRefused } from './services.ts';
 
 export const PERPLEXITY_MCP_URL = 'https://api.perplexity.ai/mcp';
+const SERVICE = 'perplexity';
 const API_KEY = 'PERPLEXITY_API_KEY';
 
 const recency = z.enum(['hour', 'day', 'week', 'month', 'year']).optional().describe('Only results from this period.');
@@ -27,16 +29,39 @@ const answerOutput = z.strictObject({
   response: z.string().describe('Prose with citation marks [n], then the list of cited URLs.'),
 });
 
+// A call of the server on the key of the installation. How the server took
+// the key is the state of the service (`connections_list`): a key it does
+// not take is the operator's to replace, a call it answered shows the key
+// is good. A refusal of another kind — a quota, a bad request — says nothing
+// about the key.
+async function onKey(url: string, tool: string, input: JsonObject, ctx: CallContext): Promise<ToolAnswer> {
+  const server = { title: 'Perplexity', url, headers: { Authorization: `Bearer ${secretAuthority(ctx).secrets[API_KEY]}` } };
+
+  try {
+    const answer = await callServerTool(server, tool, input, { signal: ctx.signal });
+
+    secretsAccepted(SERVICE);
+
+    return answer;
+  } catch (error) {
+    if (error instanceof CredentialsRefusedError) {
+      secretsRefused(SERVICE, 'Perplexity refused the API key (HTTP 401)');
+
+      throw new CapabilityError(
+        'auth_required',
+        'Perplexity refused the API key of the installation (HTTP 401): the operator has to enter it again.',
+      );
+    }
+
+    throw error;
+  }
+}
+
 // The string a tool of the server answers with: the field of its structured
 // content, or — from a server that gives none — its text. An answer with
 // neither does not fit the output type.
 async function ask(url: string, tool: string, field: string, input: JsonObject, ctx: CallContext): Promise<string> {
-  const answer = await callServerTool(
-    { title: 'Perplexity', url, headers: { Authorization: `Bearer ${secretAuthority(ctx).secrets[API_KEY]}` } },
-    tool,
-    input,
-    { signal: ctx.signal },
-  );
+  const answer = await onKey(url, tool, input, ctx);
   const structured = answer.structured?.[field];
   const text = typeof structured === 'string' && structured ? structured : answer.text;
 
@@ -67,7 +92,7 @@ export function perplexityNode(url: string = PERPLEXITY_MCP_URL): Node {
     external: true,
     connection: {
       type: 'secret',
-      service: 'perplexity',
+      service: SERVICE,
       summary: 'Web search and web-grounded answers of Perplexity, on the API key of the installation.',
       secrets: [API_KEY],
     },

@@ -19,11 +19,20 @@ import {
   type SecretAuthority,
   type SecretConnection,
 } from '../catalog/index.ts';
-import { markReauthorizationRequired } from '../capabilities/connections/index.ts';
+import { listAccounts, markReauthorizationRequired } from '../capabilities/connections/index.ts';
 import { identityLabel } from '../capabilities/connections/identity.ts';
-import { AuthorizationLostError, connectionAccessToken } from '../capabilities/connections/oauth-provider.ts';
-import { getAccountService, registerAccountService, type AccountService } from '../capabilities/connections/services.ts';
-import { registerExternalSecretTargetSource, type ExternalSecretTarget } from '../capabilities/tool-manager.ts';
+import {
+  AuthorizationLostError,
+  OauthClientError,
+  connectionAccessToken,
+} from '../capabilities/connections/oauth-provider.ts';
+import {
+  getAccountService,
+  registerAccountService,
+  registerSecretServiceSource,
+  type AccountService,
+  type SecretService,
+} from '../capabilities/connections/services.ts';
 import { prisma } from '../db/client.ts';
 
 // ---------------------------------------------------------------------------
@@ -35,20 +44,46 @@ const secretServices = new Map<string, SecretConnection>();
 let stored = new Set<string>();
 let sourceRegistered = false;
 
-async function storedSecretNames(service: string): Promise<Set<string>> {
-  const rows = await prisma.externalServerSecret.findMany({ where: { server: service }, select: { key: true } });
+// The secrets a service has refused: what it said and when. A node keeps no
+// connection to its service between calls, so the last attempt a service is
+// known by is the last call that showed its secrets to it. Kept in memory: a
+// restart forgets it, and the next call says it again.
+const refused = new Map<string, { reason: string; at: number }>();
 
-  return new Set(rows.map(row => row.key));
+// A node tells how the service took the secrets of a call: refused them, or
+// let the call in.
+export function secretsRefused(service: string, reason: string): void {
+  refused.set(service, { reason, at: Date.now() });
 }
 
-async function refreshSecretServices(): Promise<void> {
+export function secretsAccepted(service: string): void {
+  refused.delete(service);
+}
+
+async function storedSecrets(service: string): Promise<Map<string, Date>> {
+  const rows = await prisma.externalServerSecret.findMany({
+    where: { server: service },
+    select: { key: true, updatedAt: true },
+  });
+
+  return new Map(rows.map(row => [row.key, row.updatedAt]));
+}
+
+async function refreshStoredSecrets(): Promise<void> {
   const next = new Set<string>();
 
   for (const connection of secretServices.values()) {
-    const names = await storedSecretNames(connection.service);
+    const secrets = await storedSecrets(connection.service);
+    const refusal = refused.get(connection.service);
 
-    if (connection.secrets.every(name => names.has(name))) {
+    if (connection.secrets.every(name => secrets.has(name))) {
       next.add(connection.service);
+    }
+
+    // A refusal is of the values it was given: secrets entered since, or
+    // deleted, are not the refused ones.
+    if (refusal && !connection.secrets.every(name => (secrets.get(name)?.getTime() ?? Infinity) <= refusal.at)) {
+      refused.delete(connection.service);
     }
   }
 
@@ -56,16 +91,21 @@ async function refreshSecretServices(): Promise<void> {
 }
 
 // The secret services of the tree join the other holders of installation
-// secrets (the kinds of remote agents) in the one list the secrets form,
-// the Connections page and `connections_list` read.
-function secretTargets(): ExternalSecretTarget[] {
-  return [...secretServices.values()].map(connection => ({
-    name: connection.service,
-    description: connection.summary,
-    secretNames: [...connection.secrets],
-    error: null,
-    connected: stored.has(connection.service),
-  }));
+// secrets (the kinds of remote agents) in the one list of the connections
+// layer, which the secrets form, the Connections page and `connections_list`
+// read.
+function secretServiceStates(): SecretService[] {
+  return [...secretServices.values()].map(connection => {
+    const refusal = refused.get(connection.service);
+
+    return {
+      name: connection.service,
+      description: connection.summary,
+      secretNames: [...connection.secrets],
+      connected: stored.has(connection.service) && !refusal,
+      error: refusal?.reason ?? null,
+    };
+  });
 }
 
 // Tells the connections layer about every service the catalog declares. The
@@ -95,7 +135,7 @@ export function registerServices(catalog: Catalog): void {
 
   if (secretServices.size && !sourceRegistered) {
     sourceRegistered = true;
-    registerExternalSecretTargetSource({ list: secretTargets, refresh: refreshSecretServices });
+    registerSecretServiceSource({ list: secretServiceStates, refresh: refreshStoredSecrets });
   }
 }
 
@@ -141,6 +181,15 @@ async function accessToken(
       throw new CapabilityError(
         'auth_required',
         `The account "${row.accountKey}" of "${service.name}" can no longer act: ${error.message}. The user has to authorize it again.`,
+      );
+    }
+
+    // The client is the installation's, not the account's: the account stays
+    // as it is and acts again once the client is put right.
+    if (error instanceof OauthClientError) {
+      throw new CapabilityError(
+        'auth_required',
+        `No account of "${service.name}" can renew its access: ${error.message}. The operator has to put the OAuth client of the installation right; the account "${row.accountKey}" stays connected.`,
       );
     }
 
@@ -190,12 +239,7 @@ async function secretAuthority(name: string): Promise<SecretAuthority> {
 export function connectionsPort(): ConnectionsPort {
   return {
     async accounts(workspaceId, service) {
-      const rows = await prisma.connection.findMany({
-        where: { workspaceId, server: service },
-        orderBy: { createdAt: 'asc' },
-      });
-
-      return rows.map(accountOf);
+      return (await listAccounts(workspaceId, service)).map(accountOf);
     },
     async secretsReady(service) {
       const connection = secretServices.get(service);
@@ -204,9 +248,9 @@ export function connectionsPort(): ConnectionsPort {
         return false;
       }
 
-      const names = await storedSecretNames(service);
+      const secrets = await storedSecrets(service);
 
-      return connection.secrets.every(name => names.has(name));
+      return connection.secrets.every(name => secrets.has(name));
     },
     accountAuthority,
     secretAuthority,

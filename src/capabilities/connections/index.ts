@@ -112,6 +112,16 @@ export async function getOauthClient(serverName: string): Promise<Record<string,
   return (row?.clientInformation as Record<string, unknown> | null) ?? null;
 }
 
+// Which services hold an OAuth client, by name — the client itself is not
+// read.
+export async function listProvisionedOauthClients(): Promise<Set<string>> {
+  return new Set((await prisma.oauthClient.findMany({ select: { server: true } })).map(row => row.server));
+}
+
+export async function hasOauthClient(serverName: string): Promise<boolean> {
+  return (await prisma.oauthClient.count({ where: { server: serverName } })) > 0;
+}
+
 async function requireManualOauthClient(server: AccountService): Promise<void> {
   if (server.clientRegistration !== 'manual') {
     return;
@@ -129,6 +139,16 @@ async function requireManualOauthClient(server: AccountService): Promise<void> {
 // canonical one in the client registry — never Postgres plan roulette.
 export async function listWorkspaceConnections(workspaceId: string) {
   return prisma.connection.findMany({ where: { workspaceId }, orderBy: { createdAt: 'asc' } });
+}
+
+// The accounts of the workspace — all, or of one service — as anyone may
+// see them: who they are and how they stand, never their tokens.
+export async function listAccounts(workspaceId: string, server?: string) {
+  return prisma.connection.findMany({
+    where: { workspaceId, server },
+    orderBy: { createdAt: 'asc' },
+    select: { id: true, server: true, accountKey: true, displayName: true, identity: true, status: true },
+  });
 }
 
 // One row of the user by its id — the address the console's endpoints

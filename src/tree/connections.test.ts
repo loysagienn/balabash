@@ -130,8 +130,20 @@ async function serve(request: http.IncomingMessage, response: http.ServerRespons
 
     seen.refreshes.push(refreshToken);
 
-    return refreshToken === 'good-refresh'
-      ? json(response, 200, { access_token: `fresh-${seen.refreshes.length}`, token_type: 'Bearer', expires_in: 3600 })
+    if (refreshToken === 'good-refresh') {
+      return json(response, 200, { access_token: `fresh-${seen.refreshes.length}`, token_type: 'Bearer', expires_in: 3600 });
+    }
+
+    // The server is down; it does not know the client; it does not honor
+    // the refresh token.
+    if (refreshToken === 'down-refresh') {
+      response.writeHead(503).end('down');
+
+      return;
+    }
+
+    return refreshToken === 'client-refresh'
+      ? json(response, 401, { error: 'invalid_client', error_description: 'Unknown client' })
       : json(response, 400, { error: 'invalid_grant', error_description: 'Token has been revoked' });
   }
 
@@ -388,6 +400,47 @@ describe('the authority of an account', () => {
     await refuses(invoke('mailbox_token', { account: 'work-mail' }), 'auth_required', /is not connected \(reauthorization_required\)/);
     assert.deepEqual(await invoke('mailbox_token', { account: 'default' }), { token: 'fresh-1' });
   });
+
+  test('a token that could not be renewed goes out only while it lives; a refused client of the installation is not the account', async () => {
+    const aged = (seconds: number) => new Date(Date.now() - seconds * 1000).toISOString();
+    const stored = (refresh: string, age: number) =>
+      connect('mailbox', 'default', { access_token: 'home-2', refresh_token: refresh, expires_in: 3600, obtained_at: aged(age) });
+    const call = (input: JsonObject = {}) => invoke('mailbox_token', { account: 'default', ...input });
+    const exchanges = () => seen.refreshes.length;
+    let before = exchanges();
+
+    // About to expire and the authorization server is down: the token still
+    // lives and goes out, and the next call does not ask the server again.
+    await stored('down-refresh', 3590);
+    assert.deepEqual(await call(), { token: 'home-2' });
+    assert.deepEqual(await call(), { token: 'home-2' });
+    assert.equal(exchanges(), before + 1);
+
+    // Expired: no token to act with, and the account is not judged.
+    await stored('down-refresh', 3700);
+    await refuses(call(), 'unavailable', /^The access token of the account "default" of "mailbox" could not be renewed: /);
+    assert.equal(exchanges(), before + 2);
+    assert.equal((await rowOf('mailbox', 'default'))?.status, 'connected');
+
+    // The provider refuses the client of the installation — ahead of the
+    // expiry and after a refused token alike: the account stays connected.
+    const journal = await events('connection.');
+
+    await stored('client-refresh', 3700);
+    await refuses(call(), 'auth_required', /^No account of "mailbox" can renew its access: the provider refused the OAuth client of the installation \(Unknown client\)\. The operator has to put the OAuth client of the installation right; the account "default" stays connected\.$/);
+    await refuses(call({ rejected: 'home-2' }), 'auth_required', /the provider refused the OAuth client of the installation/);
+    assert.equal((await rowOf('mailbox', 'default'))?.status, 'connected');
+    assert.deepEqual(await events('connection.'), journal);
+
+    // An expired token whose refresh token is dead: the authorization is
+    // gone, without a call to the provider's API in between.
+    before = exchanges();
+    await stored('dead-refresh', 3700);
+    await refuses(call(), 'auth_required', /^The account "default" of "mailbox" can no longer act: the provider no longer honors the refresh token/);
+    assert.equal(exchanges(), before + 1);
+    assert.equal((await rowOf('mailbox', 'default'))?.status, 'reauthorization_required');
+    assert.deepEqual((await events('connection.')).at(-1), ['connection.reauthorization_required', stand.mainThreadId, 'default']);
+  });
 });
 
 describe('the secrets of the installation and web_perplexity', () => {
@@ -433,7 +486,10 @@ describe('the secrets of the installation and web_perplexity', () => {
     await refuses(invoke('web_perplexity_search', { query: 'x' }), 'external_error', /^Perplexity answered `perplexity_search` with no text\.$/);
 
     perplexity = () => 401;
-    await refuses(invoke('web_perplexity_search', { query: 'x' }), 'auth_required', /^Perplexity refused the credentials of the installation \(HTTP 401\)/);
+    await refuses(invoke('web_perplexity_search', { query: 'x' }), 'auth_required', /^Perplexity refused the API key of the installation \(HTTP 401\): the operator has to enter it again\.$/);
+
+    perplexity = () => 403;
+    await refuses(invoke('web_perplexity_search', { query: 'x' }), 'external_error', /^Perplexity refused the request \(HTTP 403\)/);
 
     perplexity = () => 500;
     await refuses(invoke('web_perplexity_search', { query: 'x' }), 'external_error', /^Perplexity refused the request \(HTTP 500\)/);
@@ -445,6 +501,39 @@ describe('the secrets of the installation and web_perplexity', () => {
       'unavailable',
       /^The call to Perplexity was cancelled/,
     );
+  });
+
+  test('a key the server refused shows in the list until a call is let in or the key is entered again', async () => {
+    const state = async () => {
+      const { status, error } = (await invoke('connections_list')).installationServices[0];
+
+      return [status, error];
+    };
+    const refuse = async () => {
+      perplexity = () => 401;
+      await refuses(invoke('web_perplexity_search', { query: 'x' }), 'auth_required', /refused the API key/);
+    };
+
+    await refuse();
+    assert.deepEqual(await state(), ['failed', 'Perplexity refused the API key (HTTP 401)']);
+    assert.equal((await grantNow()).vertices.has('web_perplexity_search'), true);
+
+    // A refusal of another kind says nothing about the key.
+    perplexity = () => 500;
+    await refuses(invoke('web_perplexity_search', { query: 'x' }), 'external_error', /HTTP 500/);
+    assert.deepEqual((await state())[0], 'failed');
+
+    perplexity = () => ({ content: [{ type: 'text', text: 'An answer' }] });
+    assert.deepEqual(await invoke('web_perplexity_search', { query: 'x' }), { results: 'An answer' });
+    assert.deepEqual(await state(), ['connected', null]);
+
+    await refuse();
+    assert.deepEqual(await state(), ['failed', 'Perplexity refused the API key (HTTP 401)']);
+
+    const asked = await invoke('connections_request_secret', { service: 'perplexity' });
+
+    await secrets.provisionExternalServerSecrets(stand.workspaceId, requestIdOf(asked.url), { PERPLEXITY_API_KEY: 'key-1' });
+    assert.deepEqual(await state(), ['connected', null]);
   });
 
   test('forgotten secrets disconnect the service for everyone: the node is cut, a call under an older grant is refused', async () => {

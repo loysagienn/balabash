@@ -22,7 +22,7 @@ import { listProjects, projectView } from '../projects/store.ts';
 import { listApps } from '../apps/management.ts';
 import { publicAppsBase } from '../apps/urls.ts';
 import { taskView } from '../schedule/view.ts';
-import { connectionView, listWorkspaceConnections } from '../capabilities/connections/index.ts';
+import { connectionView, listProvisionedOauthClients, listWorkspaceConnections } from '../capabilities/connections/index.ts';
 import { effectiveBundleServers } from '../capabilities/tool-manager.ts';
 import { listAccountServices } from '../capabilities/connections/services.ts';
 import { readOpenSecretRequests } from '../capabilities/secret-requests.ts';
@@ -142,13 +142,10 @@ async function readConnections(workspaceId: string): Promise<ConnectionView[]> {
 }
 
 // The catalog of connectable services, with whether a manual OAuth client
-// is in place (one query over the oauth_clients rows of the manual ones).
+// is in place.
 async function readServices(): Promise<ServiceView[]> {
   const servers = listAccountServices();
-  const manual = servers.filter(server => server.clientRegistration === 'manual').map(server => server.name);
-  const provisioned = new Set(
-    manual.length ? (await prisma.oauthClient.findMany({ where: { server: { in: manual } }, select: { server: true } })).map(row => row.server) : [],
-  );
+  const provisioned = await listProvisionedOauthClients();
 
   return servers.map(server => ({
     name: server.name,

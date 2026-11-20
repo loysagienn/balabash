@@ -4,13 +4,13 @@
 // with secrets as installation services. Like an external MCP server with
 // ${secret:NAME} values, such a kind appears on the console's Connections
 // page and in the auth agent's request_external_server_credentials through
-// the secret-target source registered with the tool-manager, and the
-// secrets form stores the values under the kind's name.
+// the source registered with the connections layer (connections/services.ts),
+// and the secrets form stores the values under the kind's name.
 
 import type { RemoteAgentDeclaration, RemoteDriverContext, RemoteDriverFilesApi } from '../core/contract.ts';
 import { prisma } from '../db/client.ts';
 import { getLoadedRemoteKinds } from './remote-agent-source.ts';
-import { registerExternalSecretTargetSource, type ExternalSecretTarget } from './tool-manager.ts';
+import { registerSecretServiceSource, type SecretService } from './connections/services.ts';
 
 // The driver context of a kind over the live database and the files
 // surface: secrets are the kind's ExternalServerSecret rows.
@@ -32,13 +32,12 @@ export function createRemoteDriverContext(kind: string, files: RemoteDriverFiles
 }
 
 // ---------------------------------------------------------------------------
-// The kinds with secrets as installation services: the secret-target
-// source the tool-manager merges into listExternalSecretTargets().
-// `connected` = every declared secret has a value; refreshed on the same
-// occasions the external servers are (the Connections page, provisioning,
+// The kinds with secrets as installation services: a source of the
+// connections layer. `connected` = every declared secret has a value;
+// refreshed whenever the layer is (the Connections page, provisioning,
 // forgetting).
 
-let secretTargets: ExternalSecretTarget[] = [];
+let secretTargets: SecretService[] = [];
 
 export async function refreshRemoteSecretTargets(declarations: RemoteAgentDeclaration[] = getLoadedRemoteKinds()): Promise<void> {
   const withSecrets = declarations.filter(declaration => declaration.secrets?.length);
@@ -65,7 +64,7 @@ export async function refreshRemoteSecretTargets(declarations: RemoteAgentDeclar
 }
 
 export function registerRemoteSecretTargets(): void {
-  registerExternalSecretTargetSource({
+  registerSecretServiceSource({
     list: () => secretTargets,
     refresh: () => refreshRemoteSecretTargets(),
   });

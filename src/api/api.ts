@@ -39,8 +39,8 @@ import { FileNotFoundError, getFile, getWorkspaceFile, ingestFile, openFileConte
 import type { StorageBody } from '../files/storage.ts';
 import { verifyDownloadLink } from '../files/storage/local.ts';
 import { forgetExternalServerSecrets, getExternalServerSecretRequest, isExternalSecretServer, openExternalServerCredentialsRequest, provisionExternalServerSecrets } from '../capabilities/external-secrets.ts';
-import { listClaudeConnectorTargets, listExternalSecretTargets, refreshExternalServers } from '../capabilities/tool-manager.ts';
-import { getAccountService } from '../capabilities/connections/services.ts';
+import { listClaudeConnectorTargets, refreshExternalServers } from '../capabilities/tool-manager.ts';
+import { getAccountService, listSecretServices, type SecretService } from '../capabilities/connections/services.ts';
 import { resolveOperatorCredentials, tokenTtlMs } from '../adapters/ccr/token.ts';
 import { ConnectionError, disconnectConnection, getOauthClientRequest, getWorkspaceConnection, openOauthClientRequest, provisionOauthClient, reconnectConnection, renameConnection, startConnection, connectionView } from '../capabilities/connections/index.ts';
 import { AppManagementError, listApps, publishApp, unpublishApp } from '../apps/management.ts';
@@ -1832,7 +1832,7 @@ router.post('/connections', requireSession, async ctx => {
 // account, their one local dependency the ambient Claude CLI token — its
 // expiry is looked at here, since a live connection outlives it.
 
-function installationServiceView(target: ReturnType<typeof listExternalSecretTargets>[number]): InstallationServiceView {
+function installationServiceView(target: SecretService): InstallationServiceView {
   const state = target.connected ? 'connected' : target.error ? 'failed' : 'missing';
 
   return { name: target.name, description: target.description, secretNames: target.secretNames, state, error: state === 'failed' ? target.error : null };
@@ -1875,7 +1875,7 @@ async function connectorServiceViews(): Promise<ConnectorServiceView[]> {
 router.get('/installation-services', requireSession, async ctx => {
   await refreshExternalServers();
 
-  const response: InstallationServicesResponse = { services: listExternalSecretTargets().map(installationServiceView), connectors: await connectorServiceViews() };
+  const response: InstallationServicesResponse = { services: listSecretServices().map(installationServiceView), connectors: await connectorServiceViews() };
 
   ctx.body = prepareObject(response);
 });

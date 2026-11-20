@@ -37,19 +37,27 @@ function reason(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-// Who fixes a failed exchange: a server that refused the credentials — the
-// one who entered them; a server that answered with a refusal — the server;
-// no answer at all — nobody knows the outcome.
+// The server did not take the credentials of the call (HTTP 401). What that
+// means is the node's to say: it knows whose credentials went out — a secret
+// of the installation the operator has to enter again, a token of an account
+// that can be renewed and tried once more. A node that says nothing leaves
+// the call with this error: the outside system refused.
+export class CredentialsRefusedError extends CapabilityError {
+  constructor(server: ExternalServer, detail: string) {
+    super('external_error', `${server.title} refused the credentials of the call (HTTP 401): ${detail}`);
+  }
+}
+
+// Who fixes a failed exchange: a server that answered with a refusal — the
+// server (its refusal of the credentials is told apart, see above); no
+// answer at all — nobody knows the outcome.
 function failure(server: ExternalServer, error: unknown, signal: AbortSignal | null): CapabilityError {
   if (signal?.aborted) {
     return new CapabilityError('unavailable', `The call to ${server.title} was cancelled before it answered.`);
   }
 
-  if (error instanceof StreamableHTTPError && (error.code === 401 || error.code === 403)) {
-    return new CapabilityError(
-      'auth_required',
-      `${server.title} refused the credentials of the installation (HTTP ${error.code}): they have to be entered again.`,
-    );
+  if (error instanceof StreamableHTTPError && error.code === 401) {
+    return new CredentialsRefusedError(server, error.message);
   }
 
   if (error instanceof StreamableHTTPError && typeof error.code === 'number' && error.code >= 400) {

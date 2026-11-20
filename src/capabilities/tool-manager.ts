@@ -36,7 +36,13 @@ import { resolveExternalServerSecrets } from './server-secrets.ts';
 import { runToolHandler } from './tool-result.ts';
 import { listWorkspaceConnections, markReauthorizationRequired } from './connections/index.ts';
 import { backfillConnectionIdentity, identityLabel } from './connections/identity.ts';
-import { registerAccountService, unregisterAccountService, type AccountService } from './connections/services.ts';
+import {
+  refreshSecretServices,
+  registerAccountService,
+  registerSecretServiceSource,
+  unregisterAccountService,
+  type AccountService,
+} from './connections/services.ts';
 
 // MCP SDK defaults to 60s per request; deep-research-style tools legitimately
 // run for minutes. Progress notifications reset the clock when a server sends
@@ -219,10 +225,6 @@ const workspaceServers = new Map<string, Map<string, WorkspaceServerAccounts>>()
 // first live account.
 function canonicalClient(accounts: WorkspaceServerAccounts): ConnectedServer | null {
   return accounts.values().next().value ?? null;
-}
-
-export function getUserAuthServer(serverName: string): UserAuthServer | null {
-  return userAuthServers.get(serverName) ?? null;
 }
 
 export function listUserAuthServers(): UserAuthServer[] {
@@ -443,41 +445,14 @@ function withAccountParameter(fn: ToolFunction, slugs: string[], described: stri
   };
 }
 
-// Pending secret targets for the auth agent: which servers wait for which
-// installation credentials, and how their last connection attempt went.
-export type ExternalSecretTarget = {
-  name: string;
-  description: string | null;
-  secretNames: string[];
-  error: string | null;
-  connected: boolean;
-};
-
-// Other holders of installation secrets under the same form (the remote
-// agent kinds, src/capabilities/remote-agent-source.ts): they list their
-// targets here and refresh them when the external servers are refreshed,
-// so the Connections page, the auth agent and the secrets form see one
-// list.
-export type ExternalSecretTargetSource = {
-  list(): ExternalSecretTarget[];
-  refresh(): Promise<void>;
-};
-
-const externalSecretTargetSources: ExternalSecretTargetSource[] = [];
-
-export function registerExternalSecretTargetSource(source: ExternalSecretTargetSource): void {
-  externalSecretTargetSources.push(source);
-}
-
-export async function refreshExternalSecretTargetSources(): Promise<void> {
-  for (const source of externalSecretTargetSources) {
-    await source.refresh();
-  }
-}
-
-export function listExternalSecretTargets(): ExternalSecretTarget[] {
-  return [
-    ...[...pendingExternalServers.values()]
+// The tool servers that take installation secrets, as installation services
+// of the connections layer (connections/services.ts): which of them wait for
+// which secrets, and how their last connection attempt went. Their state is
+// brought up to date by refreshExternalServers, before a tool catalog and
+// before the console reads it; forgotten secrets close the live client.
+registerSecretServiceSource({
+  list: () =>
+    [...pendingExternalServers.values()]
       .filter(pending => pending.secretNames.length)
       .map(pending => ({
         name: pending.name,
@@ -486,9 +461,11 @@ export function listExternalSecretTargets(): ExternalSecretTarget[] {
         error: pending.error,
         connected: pending.connected,
       })),
-    ...externalSecretTargetSources.flatMap(source => source.list()),
-  ].sort((a, b) => a.name.localeCompare(b.name));
-}
+  refresh: async () => {},
+  forgotten: async name => {
+    await disconnectExternalServer(name);
+  },
+});
 
 // The claude.ai connectors for the catalog: connected — the client is live
 // (a failed boot connection that a later retry brought up counts too);
@@ -551,7 +528,7 @@ export function describeExternalServerStatuses(
 // client is closed and the server returns to pending with no secret version
 // — its functions disappear from every catalog until the secrets are
 // provisioned again. Returns false when no such server is configured.
-export async function disconnectExternalServer(serverName: string): Promise<boolean> {
+async function disconnectExternalServer(serverName: string): Promise<boolean> {
   const pending = pendingExternalServers.get(serverName);
 
   if (!pending) {
@@ -630,7 +607,7 @@ function toUserAuthServer(
 // — and before the console reads their states (refreshExternalServers).
 export async function refreshExternalServers(): Promise<void> {
   await ensurePendingExternalServers();
-  await refreshExternalSecretTargetSources();
+  await refreshSecretServices();
 }
 
 async function ensurePendingExternalServers(): Promise<void> {

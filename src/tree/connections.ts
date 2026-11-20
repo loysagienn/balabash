@@ -8,13 +8,14 @@
 // addressed to the calling thread.
 
 import { z } from 'zod';
-import { Account, CapabilityError, capability, node, type AccountValue, type Caller } from '../catalog/index.ts';
+import { Account, CapabilityError, capability, node, type AccountValue } from '../catalog/index.ts';
 import {
   ConnectionError,
   disconnectConnection,
-  getOauthClient,
-  issueConnectLink,
-  listWorkspaceConnections,
+  hasOauthClient,
+  listAccounts,
+  listProvisionedOauthClients,
+  reconnectConnection,
   renameConnection,
   requestOauthClientCredentials,
   startConnection,
@@ -22,15 +23,13 @@ import {
 } from '../capabilities/connections/index.ts';
 import {
   getAccountService,
+  getSecretService,
   listAccountServices,
+  listSecretServices,
+  refreshSecretServices,
   type AccountService,
 } from '../capabilities/connections/services.ts';
-import {
-  forgetExternalServerSecrets,
-  isExternalSecretServer,
-  requestExternalServerCredentials,
-} from '../capabilities/external-secrets.ts';
-import { listExternalSecretTargets, refreshExternalSecretTargetSources } from '../capabilities/tool-manager.ts';
+import { forgetExternalServerSecrets, requestExternalServerCredentials } from '../capabilities/external-secrets.ts';
 import { accountOf, accountValue } from './services.ts';
 
 // A refusal of the connections layer as an error of the call; the texts are
@@ -63,20 +62,16 @@ function accountService(name: string): AccountService {
 // Installation services are refreshed before they are looked at: whether
 // the secrets of each are stored is the state of the moment.
 async function secretService(name: string): Promise<void> {
-  await refreshExternalSecretTargetSources();
+  await refreshSecretServices();
 
-  if (!isExternalSecretServer(name)) {
-    const known = listExternalSecretTargets().map(target => target.name);
+  if (!getSecretService(name)) {
+    const known = listSecretServices().map(service => service.name);
 
     throw new CapabilityError(
       'not_found',
       `There is no installation service "${name}" that takes secrets. Installation services: ${known.join(', ') || '(none)'}.`,
     );
   }
-}
-
-async function accountsOf(caller: Caller, service: string): Promise<AccountValue[]> {
-  return (await listWorkspaceConnections(caller.workspaceId)).filter(row => row.server === service).map(accountOf);
 }
 
 function accountsText(accounts: AccountValue[]): string {
@@ -121,36 +116,34 @@ const list = capability({
     ),
   }),
   async run(_input, { caller }) {
-    const rows = await listWorkspaceConnections(caller.workspaceId);
-    const accountServices = await Promise.all(
-      listAccountServices().map(async service => ({
+    const rows = await listAccounts(caller.workspaceId);
+    const provisioned = await listProvisionedOauthClients();
+
+    await refreshSecretServices();
+
+    return {
+      accountServices: listAccountServices().map(service => ({
         service: service.name,
         summary: service.description,
         oauthClient:
           service.clientRegistration === 'dynamic'
             ? ('dynamic' as const)
-            : (await getOauthClient(service.name))
+            : provisioned.has(service.name)
               ? ('provisioned' as const)
               : ('missing' as const),
         multipleAccounts: service.identityProbe !== null,
         accounts: rows.filter(row => row.server === service.name).map(accountOf),
       })),
-    );
-
-    await refreshExternalSecretTargetSources();
-
-    return {
-      accountServices,
-      installationServices: listExternalSecretTargets().map(target => ({
-        service: target.name,
-        summary: target.description,
-        secretNames: target.secretNames,
-        status: target.connected
+      installationServices: listSecretServices().map(service => ({
+        service: service.name,
+        summary: service.description,
+        secretNames: service.secretNames,
+        status: service.connected
           ? ('connected' as const)
-          : target.error
+          : service.error
             ? ('failed' as const)
             : ('secrets_missing' as const),
-        error: target.connected ? null : target.error,
+        error: service.connected ? null : service.error,
       })),
     };
   },
@@ -174,11 +167,15 @@ const authorize = capability({
   }),
   async run(input, { caller }) {
     const service = accountService(input.service);
-    const accounts = await accountsOf(caller, service.name);
+    const rows = await listAccounts(caller.workspaceId, service.name);
+    const accounts = rows.map(accountOf);
     const name = input.name?.trim();
+    // The account a link without a name is for: the one at the address
+    // given, or the service's only one.
+    const existing = input.account === undefined ? rows[0] : rows.find(row => row.accountKey === input.account);
     let link: ConnectLink;
 
-    if (input.account !== undefined && !accounts.some(account => account.account === input.account)) {
+    if (input.account !== undefined && !existing) {
       throw new CapabilityError(
         'not_found',
         `No account "${input.account}" in "${service.name}". Accounts: ${accountsText(accounts)}. A new account is added by name, not by address.`,
@@ -198,17 +195,17 @@ const authorize = capability({
 
     try {
       // A name always starts a new account; an address — given, or of the
-      // service's only account — re-authorizes the account that holds it.
-      // A service without accounts gets its first one.
+      // service's only account — re-authorizes the very account seen here.
+      // A service without accounts gets its first one. The layer judges
+      // each of the three again when it writes: an account gone meanwhile
+      // is not born again, a first account that is no longer the first is
+      // refused.
       link =
         name !== undefined
           ? await startConnection(caller.workspaceId, caller.threadId, service.name, name)
-          : await issueConnectLink(
-              caller.workspaceId,
-              caller.threadId,
-              service.name,
-              input.account ?? accounts[0]?.account,
-            );
+          : existing
+            ? await reconnectConnection(caller.workspaceId, caller.threadId, existing.id)
+            : await startConnection(caller.workspaceId, caller.threadId, service.name, null);
     } catch (error) {
       refused(error);
     }
@@ -244,7 +241,7 @@ const requestOauthClient = capability({
       );
     }
 
-    const replacing = Boolean(await getOauthClient(service.name));
+    const replacing = await hasOauthClient(service.name);
 
     try {
       return {

@@ -8,7 +8,8 @@
 import type { JsonObject } from '../core/contract.ts';
 import type { ToolFunction } from './mcp-client.ts';
 import type { BuiltinServerCallContext, BuiltinToolServer, UserAuthServer } from './tool-manager.ts';
-import { describeExternalServerStatuses, listExternalSecretTargets, listUserAuthServers } from './tool-manager.ts';
+import { listSecretServices } from './connections/services.ts';
+import { describeExternalServerStatuses, listUserAuthServers } from './tool-manager.ts';
 import {
   disconnectConnection,
   getOauthClient,
@@ -232,7 +233,7 @@ async function requestOauthClientFunction(): Promise<ToolFunction | null> {
 // user) — the auth agent is the one agent that sees servers without
 // functions.
 function requestExternalSecretsFunction(connections: ConnectionRow[]): ToolFunction | null {
-  const targets = listExternalSecretTargets();
+  const targets = listSecretServices();
 
   if (!targets.length) {
     return null;
@@ -261,7 +262,7 @@ function requestExternalSecretsFunction(connections: ConnectionRow[]): ToolFunct
 // whose installation credentials are stored (connected, or configured and
 // failing). Forgetting returns the server to pending for everyone.
 function forgetExternalSecretsFunction(): ToolFunction | null {
-  const targets = listExternalSecretTargets().filter(target => target.connected || target.error);
+  const targets = listSecretServices().filter(target => target.connected || target.error);
 
   if (!targets.length) {
     return null;

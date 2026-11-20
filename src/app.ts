@@ -25,6 +25,7 @@ import { createRestartToolServer } from './capabilities/restart-tools.ts';
 import { createRemoteToolServer } from './capabilities/remote-tools.ts';
 import { startReauthDetector } from './capabilities/reauth-detector.ts';
 import { loadToolServers, registerBuiltinToolServer } from './capabilities/tool-manager.ts';
+import { startTree } from './tree/index.ts';
 import { isAnyJobRunning, killRunningJobs } from './schedule/engine.ts';
 import { startScheduleHeart } from './schedule/heart.ts';
 import { startWorkspaceIndexer } from './workspace/indexer.ts';
@@ -149,6 +150,10 @@ registerBuiltinToolServer(createRemoteToolServer());
 // Local tool servers see the global files surface; workspace scoping happens
 // at the calling run.
 await loadToolServers({ filesApi: extensionFilesApi });
+
+// The tree of the capability catalog: its services join the connections
+// layer before the web surface and the schedule can ask for one.
+await startTree();
 
 startWebServer();
 
