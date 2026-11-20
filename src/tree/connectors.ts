@@ -58,7 +58,7 @@ async function invoke(connector: Connector, name: string, args: JsonObject, sign
     return await callServerResult(server, name, args, { signal: signal ? AbortSignal.any([signal, deadline]) : deadline });
   } catch (error) {
     // An old call still gets its error, but cannot overwrite a newer login's status.
-    if (generation === connector.generation && error instanceof CapabilityError &&
+    if (generation === connector.generation && connector.state !== 'token_expired' && error instanceof CapabilityError &&
         (error.kind === 'auth_required' || (error.kind === 'unavailable' && !signal?.aborted))) {
       failed(connector, error);
     }

@@ -20,10 +20,12 @@ test('a connector discovers paged contracts, grants by recipient, journals calls
   const schema = { type: 'object' as const, properties: { channel_id: { type: 'string' } }, required: ['channel_id'], additionalProperties: false };
   const typed: Tool = { name: 'slack_send_message', description: 'Send a message.', inputSchema: schema,
     outputSchema: { type: 'object', properties: { ts: { $ref: '#/$defs/ID' } }, $defs: { ID: { type: 'string' } }, required: ['ts'] } };
-  const free: Tool = { name: 'search', description: 'Search messages.', inputSchema: { type: 'object' } };
+  const free: Tool = { name: 'SearchMessages', description: 'Search messages.', inputSchema: { type: 'object' } };
   const requests: { method: string; token: string; session: string; name?: string }[] = [];
   let reply: CallToolResult = { structuredContent: { ts: 'posted', extra: true }, content: [] };
   let refused = false;
+  let offline = false;
+  let beforeList: (() => Promise<void>) | undefined;
   let delayNextCall = false;
   const delayedCallStarted = Promise.withResolvers<void>();
   const delayedResponse = Promise.withResolvers<Response>();
@@ -45,6 +47,8 @@ test('a connector discovers paged contracts, grants by recipient, journals calls
       delayedCallStarted.resolve();
       return delayedResponse.promise;
     }
+    if (offline && method === 'tools/call') throw new TypeError('connection lost');
+    if (method === 'tools/list') await beforeList?.();
     if (refused && method === 'tools/call') return Response.json({ error: { message: 'token rejected' } }, { status: 401 });
     if (method === 'notifications/initialized') return new Response(null, { status: 202 });
     const result = method === 'initialize'
@@ -100,12 +104,35 @@ test('a connector discovers paged contracts, grants by recipient, journals calls
     assert.equal(malformed.error.kind, 'external_error');
     assert.equal(malformed.error.details, 'accepted despite malformed result');
     reply = { content: [{ type: 'text', text: 'message' }, { type: 'image', data: 'eA==', mimeType: 'image/png' }] };
-    const mixed = await call('slack_search');
+    const mixed = await call('slack_search_messages');
     assert.ok('value' in mixed && Array.isArray(mixed.value));
     assert.equal(mixed.value[0], 'message');
+    assert.equal(requests.at(-1)?.name, 'SearchMessages');
     assert.equal((mixed.value[1] as { kind: string }).kind, 'file');
     assert.doesNotMatch(JSON.stringify(mixed.value), /eA==/);
     assert.equal(requests.filter(r => r.method === 'tools/list').length, 2);
+  });
+
+  await t.test('a malformed output schedules rediscovery with the same token and leaves turns free', async sub => {
+    const now = Date.now();
+    sub.mock.method(Date, 'now', () => now + 61_000);
+    const started = Promise.withResolvers<void>();
+    const resume = Promise.withResolvers<void>();
+    beforeList = () => {
+      started.resolve();
+      return resume.promise;
+    };
+    const refresh = connectorStatuses();
+    try {
+      await started.promise;
+      assert.equal(grantKey((await context()).grant), grantKey(first.grant));
+    } finally {
+      resume.resolve();
+      beforeList = undefined;
+      await refresh;
+    }
+    assert.equal(requests.filter(r => r.method === 'tools/list').length, 4);
+    assert.equal(requests.filter(r => r.name === typed.name).length, 2);
   });
 
   await t.test('a rejected call preserves the grant and an older refusal preserves the recovered status', async () => {
@@ -138,6 +165,39 @@ test('a connector discovers paged contracts, grants by recipient, journals calls
     assert.equal(requests.filter(r => r.name === 'slack_send_message').length, sent + 2);
   });
 
+  await t.test('network failure and invalid replacement contracts preserve the last good tree', async sub => {
+    const current = (await context()).grant;
+    offline = true;
+    const unavailable = await send();
+    offline = false;
+    assert.equal('error' in unavailable && unavailable.error.kind, 'unavailable');
+    assert.equal((await connectorStatuses())[0].state, 'failed');
+    assert.equal(grantKey((await context()).grant), grantKey(current));
+
+    let now = Date.now() + 61_000;
+    sub.mock.method(Date, 'now', () => now);
+    const original = free.name;
+    sub.after(() => { free.name = original; });
+    free.name = 'send_message';
+    assert.match((await connectorStatuses())[0].error!, /two vertices share this full name/);
+    assert.equal(grantKey((await context()).grant), grantKey(current));
+
+    now += 61_000;
+    const prefix = 'mcp__balabash__slack_';
+    free.name = 'x'.repeat(65 - prefix.length);
+    assert.match((await connectorStatuses())[0].error!, /exceeds 64/);
+    assert.equal(grantKey((await context()).grant), grantKey(current));
+    now += 61_000;
+    free.name = free.name.slice(1);
+    assert.equal((await connectorStatuses())[0].state, 'connected');
+    assert.ok((await context()).grant.vertices.has('slack_' + free.name));
+
+    now += 60 * 60_000;
+    free.name = original;
+    assert.equal((await connectorStatuses())[0].state, 'connected');
+    assert.equal(grantKey((await context()).grant), grantKey(current));
+  });
+
   await t.test('an expired file login preserves the leaf and refuses the call before the network', async () => {
     // Substitute only the CLI store; never read credentials from the test host.
     const credentialsFile = path.join(homedir(), '.claude', '.credentials.json');
@@ -157,7 +217,10 @@ test('a connector discovers paged contracts, grants by recipient, journals calls
       state: 'token_expired', error: null, tokenExpiresAt: new Date(expiresAt),
     });
     assert.ok((await context()).grant.vertices.has('slack'));
-    const expiredCall = await send();
+    const fresh = await context();
+    const expiredCall = await dispatchCatalogCall(fresh.grant, fresh.connections, {
+      callId: crypto.randomUUID(), name: 'slack_send_message', input: { channel_id: 'c' },
+    });
     assert.equal('error' in expiredCall && expiredCall.error.kind, 'auth_required');
     assert.equal(requests.length, beforeExpiry);
     expiresAt = Date.now() + 60_000;
