@@ -5,8 +5,9 @@ import { reportSkippedExtension, type ReportExtensionFailure } from '../capabili
 import { callServerResult, CredentialsRefusedError, listServerTools } from '../capabilities/mcp-client.ts';
 import type { ExternalServerConfig } from '../capabilities/server-config.ts';
 import { getSecretReferenceNames, resolveExternalServerSecrets, resolveSecretReferences } from '../capabilities/server-secrets.ts';
-import { registerAccountService, registerSecretServiceSource, type SecretService } from '../capabilities/connections/services.ts';
+import { registerSecretServiceSource, type SecretService } from '../capabilities/connections/services.ts';
 import { warnRecipients } from '../capabilities/agent-catalog.ts';
+import { configureAccountServer } from './account-server.ts';
 import { discoverAndPublish } from './discovered-node.ts';
 
 type Config = Exclude<ExternalServerConfig, { transport: 'claude-connector' }>;
@@ -17,16 +18,17 @@ function server(name: string, config: Config) {
   return { title: name, ...config };
 }
 
-export function configureServers(configs: [string, Config][], publish: (node: Node) => void, report?: ReportExtensionFailure) {
+export async function configureServers(configs: [string, Config][], publish: (node: Node, workspaceId?: string) => void, report?: ReportExtensionFailure) {
   const services: Service[] = [];
+  const accountRefresh: (() => Promise<void>)[] = [];
   for (const [name, config] of configs) {
     warnRecipients(`[mcp-servers] ${name}`, config.recipients ?? []);
     if (config.transport === 'http' && config.auth === 'user') {
-      registerAccountService({
-        name, url: config.url, description: config.description!.trim(), setup: null,
-        clientRegistration: config.clientRegistration ?? 'dynamic', scope: config.scope ?? null,
-        authorizationParams: config.authorizationParams ?? null, identityProbe: config.identityProbe ?? null,
-      });
+      try {
+        accountRefresh.push(configureAccountServer(name, config, publish, report));
+      } catch (error) {
+        await reportSkippedExtension('mcp-servers', name + '.json', error, report);
+      }
       continue;
     }
     services.push({
@@ -82,12 +84,15 @@ export function configureServers(configs: [string, Config][], publish: (node: No
     }
   }
 
-  if (!services.length) return;
+  if (!services.length && !accountRefresh.length) return;
   // A refresh after credential provisioning must observe the committed rows,
   // even when a probe of the previous values is still running.
   let pending = Promise.resolve();
   const refreshAll = () => {
-    pending = pending.then(async () => { await Promise.all(services.map(refresh)); });
+    const update = async () => {
+      await Promise.all([...services.map(refresh), ...accountRefresh.map(run => run())]);
+    };
+    pending = pending.then(update, update);
     return pending;
   };
   registerSecretServiceSource({
@@ -95,7 +100,7 @@ export function configureServers(configs: [string, Config][], publish: (node: No
       .map(({ name, description, secretNames, connected, error }) => ({ name, description, secretNames, connected, error })),
     refresh: refreshAll,
   });
-  setInterval(refreshAll, MINUTE).unref();
+  setInterval(() => { void refreshAll().catch(error => console.error('[mcp-servers] refresh failed:', error)); }, MINUTE).unref();
 }
 
 function safeError(error: unknown, secrets: Record<string, string>) {

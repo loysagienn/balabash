@@ -170,22 +170,40 @@ let built: Catalog | null = null;
 
 const installed = new Map<string, Node>();
 
-function publishNode(node: Node): void {
+const workspaceTrees = new Map<string, { nodes: Map<string, Node>; catalog: Catalog }>();
+
+function buildTree(shared: Map<string, Node>, scoped?: Map<string, Node>) {
+  const nodes = [...new Map([...shared, ...scoped ?? []]).values()].sort((a, b) => a.name.localeCompare(b.name));
+  return buildCatalog({ ...root, children: [...root.children, ...nodes] }).catalog;
+}
+
+function publishNode(node: Node, workspaceId?: string): void {
   const { name } = node;
   const installation = node.installation!;
+  if (workspaceId) {
+    const current = workspaceTrees.get(workspaceId);
+    const previous = current?.nodes.get(name) ?? installed.get(name);
+    if (previous?.installation?.revision === installation.revision) return;
+    const nodes = new Map(current?.nodes);
+    if (installed.get(name)?.installation?.revision === installation.revision) nodes.delete(name);
+    else nodes.set(name, node);
+    if (nodes.size) workspaceTrees.set(workspaceId, { nodes, catalog: buildTree(installed, nodes) });
+    else workspaceTrees.delete(workspaceId);
+    return;
+  }
+
   const previous = installed.get(name)?.installation;
   if (previous && previous.source !== installation.source) throw new Error(`Node "${name}" is already installed`);
-  if (installation.source === 'discovered' && previous && previous.revision === installation.revision) return;
-  const next = new Map(installed);
-  next.set(name, node);
-  const nodes = [...next.values()].sort((a, b) => a.name.localeCompare(b.name));
-  // Validate collisions before publishing anything. Existing turns keep their snapshot.
-  const catalog = buildCatalog({ ...root, children: [...root.children, ...nodes] }).catalog;
+  if (installation.source === 'discovered' && previous?.revision === installation.revision) return;
+  const next = new Map(installed).set(name, node);
+  const catalog = buildTree(next);
+  const replacements = [...workspaceTrees.values()].map(tree => ({ tree, catalog: buildTree(next, tree.nodes) }));
   const subtree = catalog.vertices.get(name)!;
   if (subtree.kind !== 'node') throw new Error(`Expected node "${name}"`);
-  if (installation.source === 'authored') registerServices(subtree);
+  if (installation.source === 'authored' || subtree.connection?.type === 'account') registerServices(subtree);
   installed.set(name, node);
   built = catalog;
+  for (const replacement of replacements) replacement.tree.catalog = replacement.catalog;
 }
 
 // Agent cards show addressed nodes even before their credentials are in place.
@@ -201,7 +219,9 @@ export function installationNamesFor(agent: AgentPassport): string[] {
   return [...names].sort();
 }
 
-export function catalog(): Catalog {
+export function catalog(workspaceId?: string): Catalog {
+  const scoped = workspaceId && workspaceTrees.get(workspaceId);
+  if (scoped) return scoped.catalog;
   built ??= buildCatalog(root).catalog;
   return built;
 }
@@ -230,7 +250,7 @@ export async function startTree(report?: ReportExtensionFailure): Promise<void> 
     else servers.push([name, config]);
   }
   await loadAuthoredNodes(publishNode, names, report);
-  configureServers(servers, publishNode, report);
+  await configureServers(servers, publishNode, report);
   await startConnectors(connectors, publishNode);
   setProgramHost({ catalog, connections: connectionsPort(), traceCall: journalProgramCall });
   await refreshSecretServices();

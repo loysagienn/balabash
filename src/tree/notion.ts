@@ -12,32 +12,15 @@ import {
   type CallContext,
   type CapabilityDefinition,
 } from '../catalog/index.ts';
-import { callServerTool, CredentialsRefusedError, type ToolAnswer } from '../capabilities/mcp-client.ts';
+import { callServerTool, type ToolAnswer } from '../capabilities/mcp-client.ts';
+
+import { withAccountBearer } from '../capabilities/account-mcp.ts';
 
 const NOTION_URL = 'https://mcp.notion.com/mcp';
 
 async function callNotion(url: string, tool: string, input: JsonObject, ctx: CallContext): Promise<ToolAnswer> {
-  const authority = accountAuthority(ctx);
-  const token = await authority.accessToken();
-  const send = (access: string) =>
-    callServerTool({ title: 'Notion', url, headers: { Authorization: `Bearer ${access}` } }, tool, input, {
-      signal: ctx.signal,
-    });
-  try {
-    return await send(token);
-  } catch (error) {
-    if (!(error instanceof CredentialsRefusedError) || ctx.signal?.aborted) throw error;
-    const fresh = await authority.accessToken(token);
-    try {
-      return await send(fresh);
-    } catch (retryError) {
-      if (!(retryError instanceof CredentialsRefusedError)) throw retryError;
-      throw new CapabilityError(
-        'auth_required',
-        `Notion refused the renewed token. Re-authorize account "${ctx.account!.account}".`,
-      );
-    }
-  }
+  return withAccountBearer('Notion', ctx.account!.account, accountAuthority(ctx), ctx.signal, token =>
+    callServerTool({ title: 'Notion', url, headers: { Authorization: `Bearer ${token}` } }, tool, input, { signal: ctx.signal }));
 }
 
 const dateRange = z.strictObject({

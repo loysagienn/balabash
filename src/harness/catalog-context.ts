@@ -9,7 +9,7 @@ export const portActions = ['describe', 'run_program'] as const;
 export async function catalogContext(agent: AgentPassport, workspaceId: string, threadId: string, actions: readonly ActionName[] = portActions) {
   const connections = connectionsPort();
   const caller = { workspaceId, threadId, agentName: agent.name };
-  const grant = await computeGrant(catalog(), agentGrantPolicy(agent, actions), { caller, connections });
+  const grant = await computeGrant(catalog(workspaceId), agentGrantPolicy(agent, actions), { caller, connections });
   return { grant, connections };
 }
 

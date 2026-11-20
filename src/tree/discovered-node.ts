@@ -65,7 +65,7 @@ export async function discoverAndPublish(
   publish(discoveredNode(settings, await list(), invoke, onInvalidOutput));
 }
 
-function discoveredNode(
+export function discoveredNode(
   settings: NodeSettings,
   tools: Tool[],
   invoke: InvokeTool,
