@@ -252,8 +252,9 @@ const BRIDGE_ICONS: Record<string, IconName> = {
 
 // A function of the Balabash bridge (tool.call.*): the function by name,
 // the first string of its input as the argument.
-export function bridgeAction(functionName: string, input: JsonObject): { label: ActionLabel; input: string } {
-  const arg = firstString(input) ?? (Object.keys(input).length > 0 ? Object.values(input).map(v => String(v)).join(', ') : '');
+export function bridgeAction(functionName: string, input: JsonValue): { label: ActionLabel; input: string } {
+  const fields = input && typeof input === 'object' && !Array.isArray(input) ? input : {};
+  const arg = firstString(fields) ?? Object.values(fields).map(v => String(v)).join(', ');
   const icon = BRIDGE_ICONS[functionName] ?? (functionName.startsWith('gmail_') ? 'inbox' : functionName.startsWith('notion') ? 'file-text' : functionName.startsWith('perplexity') ? 'search' : 'wrench');
 
   return { label: { icon, tool: functionName, ...(arg ? { arg: clipLine(arg) } : {}) }, input: JSON.stringify(input, null, 2) };

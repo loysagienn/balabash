@@ -6,7 +6,7 @@
 // and after a change and diff the output.
 //
 // It walks the same code paths as the live app (agent catalog, tool-manager
-// bundles, session-run base verbs, coordinator function definitions), so the
+// bundles, session-run base verbs, the configured coordinator port), so the
 // output is the truth, not a retelling. Connecting per-user servers (gmail,
 // notion) may hit the network; a server that fails to connect is reported in
 // the output instead of failing the run.
@@ -43,8 +43,9 @@ import {
 import { createScheduleToolServer } from '../src/schedule/tools.ts';
 import { createProjectsToolServer } from '../src/projects/tools.ts';
 import { buildStatusText } from '../src/coordinator/index.ts';
-import { COORDINATOR_INSTRUCTIONS } from '../src/coordinator/instructions.ts';
-import { getCoordinatorFunctionDefinitions } from '../src/coordinator/functions.ts';
+import { coordinatorPort } from '../src/coordinator/port.ts';
+import { getMainThread } from '../src/core/threads.ts';
+import { startTree } from '../src/tree/index.ts';
 
 const OUT_DIR = path.resolve('data', 'showcase');
 
@@ -191,34 +192,23 @@ function renderRemoteAgent(declaration: RemoteAgentDeclaration): string {
 }
 
 async function renderCoordinator(workspaceId: string): Promise<string> {
+  const main = await getMainThread(workspaceId);
+  if (!main) throw new Error('The workspace has no main thread');
+  const { instructions, tools } = await coordinatorPort(workspaceId, main.id);
   const sections = [
     '# Coordinator (the secretary)',
-    renderSection('Instructions (prompt-cache head)', COORDINATOR_INSTRUCTIONS),
+    renderSection('Instructions (prompt-cache head)', instructions),
     renderSection(
       'Status tail (format sample, rendered fresh every turn)',
       `\`\`\`\n${buildStatusText([], [], workspaceId)}\n\`\`\``,
     ),
   ];
 
-  let functionsSection: string;
-
-  try {
-    const definitions = await getCoordinatorFunctionDefinitions(workspaceId);
-
-    functionsSection = definitions
-      .map(definition =>
-        renderTool({
-          name: definition.name,
-          description: definition.description ?? '',
-          inputSchema: definition.parameters as ToolDefinition['inputSchema'],
-        }),
-      )
-      .join('\n\n');
-  } catch (error) {
-    functionsSection = `(failed to assemble the function catalog: ${error instanceof Error ? error.message : String(error)})`;
-  }
-
-  sections.push(renderSection('Function catalog (static + agent spawns + tool servers)', functionsSection));
+  const functionsSection = tools.map(definition => renderTool({
+    name: definition.name, description: definition.description,
+    inputSchema: definition.parameters as ToolDefinition['inputSchema'],
+  })).join('\n\n');
+  sections.push(renderSection('Functions available at the start of the turn', functionsSection));
 
   return `${sections.join('\n\n')}\n`;
 }
@@ -272,6 +262,7 @@ registerBuiltinToolServer(createProjectsToolServer());
 registerBuiltinToolServer(createRemoteToolServer());
 
 await loadToolServers({ filesApi });
+await startTree();
 
 await mkdir(OUT_DIR, { recursive: true });
 

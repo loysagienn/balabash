@@ -250,6 +250,17 @@ const renderers: Record<string, Renderer> = {
   // the content blocks are not read at all; without it the raw MCP blocks
   // are compacted. FileRef urls are stripped by the general projection rule.
   'tool.call.completed': payload => {
+    if ('value' in payload) {
+      const { value, functionName } = payload;
+      if (functionName === 'describe' && asObject(value).kind === 'capability') {
+        return omitNullish({ functionName, described: asObject(value).name, accounts: asObject(value).accounts });
+      }
+      // Large arrays of short items would evade the per-string limit.
+      const json = JSON.stringify(value);
+      if (json.length > STRING_LIMIT_MAX) return { functionName, preview: json.slice(0, STRING_LIMIT_MAX), truncated: true };
+      return { functionName, value };
+    }
+
     const result = asObject(payload.result);
     const isError = result.isError === true ? true : undefined;
 
@@ -425,6 +436,9 @@ type RenderedEvent = {
 // event stays out of the transcript. Truncation is applied separately, once
 // the event's position among the included ones is known.
 function renderEvent(event: TranscriptEvent): RenderedEvent | null {
+  // A program's intermediate inputs and values are available by seq in the
+  // journal. Only its outer result and the domain events belong in the prompt.
+  if (event.type.startsWith('tool.call.') && asObject(event.payload).runId) return null;
   const renderer = renderers[event.type];
   const envelope: JsonObject = {
     seq: Number(event.seq),

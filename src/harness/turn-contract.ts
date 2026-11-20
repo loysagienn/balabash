@@ -8,7 +8,7 @@
 import type { ToolResult } from '../core/contract.ts';
 
 // A tool the model may call: the one definition shape of the coordinator's
-// catalog (src/coordinator/functions.ts), serialized per driver. `strict`
+// port, serialized per driver. `strict`
 // schemas carry additionalProperties: false and a full `required` list —
 // the requirement both providers share.
 export type FunctionDefinition = {
@@ -29,6 +29,7 @@ export type FunctionCall = {
 export type DispatchResult =
   // The result goes back to the model and the loop continues.
   | { kind: 'sync'; result: ToolResult }
+  | { kind: 'catalog'; text: string; definition?: FunctionDefinition; attachment?: { kind: 'image' | 'pdf'; url: string } }
   // Accepted for asynchronous execution; consequences arrive as events.
   // Acknowledged to the model as 'accepted' and the loop continues.
   | { kind: 'async' }
@@ -46,6 +47,8 @@ export type DispatchResult =
 // two into its provider's message shapes.
 export type TurnPrompt = {
   chunks: string[];
+  // Definitions introduced after each frozen transcript chunk, in opening order.
+  openings?: { afterChunk: number; definition: FunctionDefinition; text: string }[];
   statusText: string;
   // Stable per thread: routes requests to the machine holding the cache
   // where the provider supports such routing (OpenAI's prompt_cache_key).
@@ -55,7 +58,7 @@ export type TurnPrompt = {
 // The prompt of a prewarm ping: the frozen chunks alone. The status rides
 // after the last cache breakpoint and is no part of the prefix a ping
 // refreshes — sending it would only be paid for at the uncached rate.
-export type PrewarmPrompt = Pick<TurnPrompt, 'chunks' | 'cacheKey'>;
+export type PrewarmPrompt = Pick<TurnPrompt, 'chunks' | 'cacheKey' | 'openings'>;
 
 // The request parameters shared by every call of a thread: the prompt-cache
 // prefix depends on them (model, instructions, tools), so turns and prewarm

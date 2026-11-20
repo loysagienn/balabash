@@ -66,7 +66,7 @@ async function put(relPath: string, secondsAgo: number): Promise<void> {
 async function requests() {
   const rows = await prisma.event.findMany({ where: { type: 'system.restart.requested' }, orderBy: { seq: 'asc' } });
 
-  return rows.map(row => ({ actor: row.actor, workspaceId: row.workspaceId, threadId: row.threadId, payload: row.payload }));
+  return rows.map(row => ({ actor: row.actor, agentName: row.agentName, workspaceId: row.workspaceId, threadId: row.threadId, payload: row.payload }));
 }
 
 before(async () => {
@@ -97,7 +97,7 @@ describe('system_request_restart', () => {
 
     assert.deepEqual(await invoke('system_request_restart', { reason: '  A fix of the router.  ' }), { build: 'current' });
     assert.deepEqual(await requests(), [
-      { actor: 'system', workspaceId: stand.workspaceId, threadId: stand.mainThreadId, payload: { reason: 'A fix of the router.', requestedBy: 'engineer' } },
+      { actor: 'agent', agentName: 'engineer', workspaceId: stand.workspaceId, threadId: stand.mainThreadId, payload: { reason: 'A fix of the router.' } },
     ]);
 
     // A source changed after the build: the restart is registered all the
@@ -105,7 +105,7 @@ describe('system_request_restart', () => {
     await put('agents/world/new.ts', 5);
 
     assert.deepEqual(await invoke('system_request_restart', { reason: 'Built before the last edit.' }), { build: 'stale' });
-    assert.deepEqual((await requests())[1]?.payload, { reason: 'Built before the last edit.', requestedBy: 'engineer' });
+    assert.deepEqual((await requests())[1]?.payload, { reason: 'Built before the last edit.' });
   });
 
   test('a restart requested by a scheduled task records the task and run in the envelope', async () => {
@@ -114,7 +114,7 @@ describe('system_request_restart', () => {
     await invokeCapability(grant, 'system_request_restart', { reason: 'Bundle rebuilt.' }, { connections: NO_CONNECTIONS, program });
     const row = await prisma.event.findFirstOrThrow({ where: { type: 'system.restart.requested' }, orderBy: { seq: 'desc' } });
     assert.deepEqual([row.actor, row.agentName, row.taskSlug, row.taskRunId], ['task', null, program.task, program.runId]);
-    assert.deepEqual(row.payload, { reason: 'Bundle rebuilt.', requestedBy: 'task maintenance' });
+    assert.deepEqual(row.payload, { reason: 'Bundle rebuilt.' });
   });
 
   test('accepts only a nonblank reason', async () => {
@@ -142,7 +142,7 @@ test('the built-in request_restart offers only the reason and records the reques
 
   assert.match(String(reply), /End your turn/);
   assert.deepEqual((await requests()).at(-1), {
-    actor: 'system', workspaceId: stand.workspaceId, threadId: stand.mainThreadId, payload: { reason, requestedBy: 'coordinator' },
+    actor: 'agent', agentName: 'coordinator', workspaceId: stand.workspaceId, threadId: stand.mainThreadId, payload: { reason },
   });
 });
 

@@ -21,7 +21,8 @@
 // a request too), addressing the requester thread — the dead-target redirect
 // delivers it to the main thread when the requester already finished.
 
-import type { TaskAuthor } from '../core/contract.ts';
+import type { CallAuthor } from '../tree/call-author.ts';
+import { restartRequester } from '../utils/restart-requester.ts';
 import { readFile, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import { appendEvent } from '../core/append.ts';
@@ -109,20 +110,14 @@ export async function requestRestart(request: {
   workspaceId: string;
   threadId: string;
   reason: string;
-  // The agent or task that requested the restart.
-  requestedBy: string | null;
-  task?: TaskAuthor;
+  author: CallAuthor;
 }): Promise<void> {
   await appendEvent({
     type: SYSTEM_RESTART_REQUESTED,
-    actor: request.task ? 'task' : 'system',
-    task: request.task,
+    ...request.author,
     workspaceId: request.workspaceId,
     threadId: request.threadId,
-    payload: {
-      reason: request.reason,
-      ...(request.requestedBy ? { requestedBy: request.requestedBy } : {}),
-    },
+    payload: { reason: request.reason },
   });
 }
 
@@ -343,7 +338,7 @@ export function startRestartModule({ isBusy, hasProgramWork, hasRemoteWork, onRe
         workspaceId: event.workspaceId,
         threadId: event.threadId,
         reason: typeof event.payload.reason === 'string' ? event.payload.reason : 'restart',
-        requestedBy: typeof event.payload.requestedBy === 'string' ? event.payload.requestedBy : null,
+        requestedBy: restartRequester(event),
         requestedAt: event.createdAt,
         notified: false,
         waiting: null,

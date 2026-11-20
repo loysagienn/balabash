@@ -66,7 +66,7 @@ bridge base verbs and the descriptions of its real tool bundle — one markdown
 file per agent plus `coordinator.md` for the secretary, written into
 `data/showcase/` (overwritten on every run). It walks the same code paths as
 the live app (agent catalog, tool-manager bundles, session-run base verbs,
-coordinator function definitions), so the output is the truth, not a
+the configured coordinator port), so the output is the truth, not a
 retelling.
 
 This is the verification instrument for any work on prompts and tool

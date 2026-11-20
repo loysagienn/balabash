@@ -15,6 +15,7 @@
 
 import type { Event, JsonObject } from '../../../core/contract.ts';
 import type { EventOf, EventPayloads, EventType, InboundFile, SessionPlanItem, UserIdentity } from '../../../core/event-types.ts';
+import { restartRequester } from '../../../utils/restart-requester.ts';
 import { taskAuthorLabel } from '../../../utils/task-author.ts';
 import { dateTimeLabel } from '../../lib/format/index.ts';
 import { formatTokensK } from '../../ui/Ring/Ring.logic.ts';
@@ -1056,8 +1057,10 @@ class Builder {
     if (is(event, 'tool.call.completed') || is(event, 'tool.call.failed')) {
       const item = this.tools.get(`call:${event.payload.callId}`);
       const failed = is(event, 'tool.call.failed');
-      const output = failed ? event.payload.error : bridgeOutput(event.payload.result);
-      const isError = failed || event.payload.result?.isError === true;
+      const output = failed
+        ? (typeof event.payload.error === 'string' ? event.payload.error : JSON.stringify(event.payload.error, null, 2))
+        : ('value' in event.payload ? JSON.stringify(event.payload.value, null, 2) : bridgeOutput(event.payload.result));
+      const isError = failed || (!('value' in event.payload) && event.payload.result?.isError === true);
 
       if (item) {
         item.state = isError ? 'err' : 'done';
@@ -1127,7 +1130,8 @@ class Builder {
     }
 
     if (is(event, 'system.restart.requested')) {
-      this.push({ kind: 'sys', key, at, icon: 'refresh-cw', text: `Restart requested${event.payload.requestedBy ? ` by ${event.payload.requestedBy}` : ''} — ${event.payload.reason}` });
+      const who = restartRequester(event);
+      this.push({ kind: 'sys', key, at, icon: 'refresh-cw', text: `Restart requested${who ? ` by ${who}` : ''} — ${event.payload.reason}` });
 
       return;
     }

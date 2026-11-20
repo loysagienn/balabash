@@ -17,7 +17,6 @@ import type { ProjectModel } from '../projects/store.ts';
 import { getFailingConsumers } from '../core/consumers.ts';
 import { getPendingRestart } from '../runtime/restart.ts';
 import { buildTurnPrompt, buildKeepalivePrompt, markPromptStateWarm } from '../harness/openai/prompt-builder.ts';
-import type { FunctionDefinition } from '../harness/turn-contract.ts';
 import type { TurnClient } from '../harness/openai/turn.ts';
 import { getLlmBackend } from '../harness/openai/backend.ts';
 import { getTurnDriver } from '../harness/turn-driver.ts';
@@ -25,8 +24,8 @@ import { createJournalWriter } from '../harness/session-journal.ts';
 import type { JournalWriter } from '../harness/session-journal.ts';
 import { sessionStateFrom } from '../projections/session.ts';
 import type { SessionState } from '../projections/session.ts';
-import { COORDINATOR_INSTRUCTIONS } from './instructions.ts';
-import { getCoordinatorFunctionDefinitions, dispatchCoordinatorFunction, deliverCoordinatorText } from './functions.ts';
+import { coordinatorPort } from './port.ts';
+import { deliverCoordinatorText } from './functions.ts';
 
 // Raw snapshot window, taken with a margin: the transcript builder selects
 // from it by char budget, so the effective depth per event class differs.
@@ -56,11 +55,8 @@ export type CoordinatorRun = {
   accept: (event: Event) => void;
 };
 
-// Test seams: the function definitions, the OpenAI driver's client, the
-// journal writer and the first retry delay of a lost state write — the real
-// ones by default.
+// Tests can substitute the Responses client, journal writer and first retry delay.
 export type CoordinatorRunDeps = {
-  functionDefinitions?: (workspaceId: string) => Promise<FunctionDefinition[]>;
   client?: TurnClient;
   journal?: JournalWriter;
   stateRetryMs?: number;
@@ -163,7 +159,6 @@ export function buildStatusText(children: Thread[], projects: ProjectModel[], wo
 }
 
 export function createCoordinatorRun({ threadId, workspaceId }: { threadId: string; workspaceId: string }, deps: CoordinatorRunDeps = {}): CoordinatorRun {
-  const functionDefinitions = deps.functionDefinitions ?? getCoordinatorFunctionDefinitions;
   const journal = deps.journal ?? createJournalWriter();
   const driver = getTurnDriver();
   let wakePending = false;
@@ -264,11 +259,11 @@ export function createCoordinatorRun({ threadId, workspaceId }: { threadId: stri
     }
 
     try {
-      const tools = await functionDefinitions(workspaceId);
+      const { instructions, tools, grantKey } = await coordinatorPort(workspaceId, threadId);
       // No status: the ping refreshes the frozen prefix and nothing after
       // it — the status would ride behind the last breakpoint at the
       // uncached rate for no one to read.
-      const prompt = buildKeepalivePrompt({ threadId, model: config.mainModel, instructions: COORDINATOR_INSTRUCTIONS, tools });
+      const prompt = buildKeepalivePrompt({ threadId, model: config.mainModel, instructions, tools, grantKey });
 
       // Nothing to keep warm: the state was reset, the head changed or the
       // prefix already went cold — the keep-alive ends here.
@@ -278,7 +273,7 @@ export function createCoordinatorRun({ threadId, workspaceId }: { threadId: stri
 
       lastResponseId = await driver.prewarmPrompt({
         model: config.mainModel,
-        instructions: COORDINATOR_INSTRUCTIONS,
+        instructions,
         tools,
         prompt,
         metrics: {
@@ -308,7 +303,7 @@ export function createCoordinatorRun({ threadId, workspaceId }: { threadId: stri
     }
 
     const lastSeq = events.at(-1)!.seq;
-    const tools = await functionDefinitions(workspaceId);
+    const { instructions, tools, grantKey, dispatch } = await coordinatorPort(workspaceId, threadId);
     const children = await listThreads(workspaceId, { status: 'active', parentId: threadId });
     const projects = await listProjects(workspaceId, { archived: false });
 
@@ -316,9 +311,10 @@ export function createCoordinatorRun({ threadId, workspaceId }: { threadId: stri
       threadId,
       events,
       lastSeq,
+      grantKey,
       snapshotFull: events.length >= HISTORY_LIMIT,
       model: config.mainModel,
-      instructions: COORDINATOR_INSTRUCTIONS,
+      instructions,
       tools,
       statusText: buildStatusText(children, projects, workspaceId, await readRemoteChildStates(children)),
     });
@@ -335,7 +331,7 @@ export function createCoordinatorRun({ threadId, workspaceId }: { threadId: stri
 
     const outcome = await driver.runTurn({
       model: config.mainModel,
-      instructions: COORDINATOR_INSTRUCTIONS,
+      instructions,
       tools,
       prompt,
       metrics: {
@@ -345,7 +341,7 @@ export function createCoordinatorRun({ threadId, workspaceId }: { threadId: stri
         requestedModel: config.mainModel,
         purpose: 'turn',
       },
-      dispatch: call => dispatchCoordinatorFunction(call, { workspaceId, threadId }),
+      dispatch,
       deliverText: text => deliverCoordinatorText(text, { workspaceId, threadId }),
       cacheComparisonResponseId: lastResponseId,
       ...(deps.client ? { deps: { client: deps.client } } : {}),

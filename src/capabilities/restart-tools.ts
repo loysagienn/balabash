@@ -58,9 +58,10 @@ async function requestRestartTool(args: JsonObject, ctx: BuiltinServerCallContex
   }
 
   const thread = await getThread(ctx.threadId);
+  if (!thread) throw new Error('The requesting thread does not exist');
   const staleWarning = await getStaleBuildWarning();
 
-  await requestRestart({ workspaceId: ctx.workspaceId, threadId: ctx.threadId, reason, requestedBy: thread?.agent ?? null });
+  await requestRestart({ workspaceId: ctx.workspaceId, threadId: ctx.threadId, reason, author: { actor: 'agent', agentName: thread.agent } });
 
   const lines = [
     'Restart is pending. End your turn so the restart can proceed once all turns and background work have finished and the log has been quiet for 20 seconds.',

@@ -7,8 +7,7 @@
 // written again — at the next wake, or by the run's own retry without one. A
 // `run` left behind by a dead process is settled by the boot sweep
 // (settleMainThreadStates), not by a wake. The model is a scripted client
-// (the seam of createCoordinatorRun), the function definitions are empty —
-// no tool server is connected.
+// (the seam of createCoordinatorRun) over the real catalog port.
 //
 // Cold against warm: the prompt builder's memory is the process's
 // (resetPromptState stands for a restart) — on cold memory the first wake
@@ -225,7 +224,7 @@ describe('the course of the main thread', () => {
   let run: CoordinatorRun;
 
   before(() => {
-    run = createCoordinatorRun({ threadId: stand.mainThreadId, workspaceId: stand.workspaceId }, { client: model.client, functionDefinitions: async () => [] });
+    run = createCoordinatorRun({ threadId: stand.mainThreadId, workspaceId: stand.workspaceId }, { client: model.client });
   });
 
   test('a turn is `run` in the log before the model is asked and `wait` once the loop is done, by the coordinator', async () => {
@@ -269,7 +268,7 @@ describe('the course of the main thread', () => {
 describe('a fresh run on warm memory', () => {
   test('knows no state: its first loop writes `wait` even without a turn', async () => {
     const model = scriptedClient();
-    const fresh = createCoordinatorRun({ threadId: stand.mainThreadId, workspaceId: stand.workspaceId }, { client: model.client, functionDefinitions: async () => [] });
+    const fresh = createCoordinatorRun({ threadId: stand.mainThreadId, workspaceId: stand.workspaceId }, { client: model.client });
     const from = await headSeq();
 
     // The prompt builder's memory is the process's, warm from the turns
@@ -287,7 +286,7 @@ describe('a fresh run on warm memory', () => {
 describe('a fresh run on cold memory — a new process', () => {
   test('re-renders the transcript: the first wake is a turn, `run` then `wait`', async () => {
     const model = scriptedClient();
-    const fresh = createCoordinatorRun({ threadId: stand.mainThreadId, workspaceId: stand.workspaceId }, { client: model.client, functionDefinitions: async () => [] });
+    const fresh = createCoordinatorRun({ threadId: stand.mainThreadId, workspaceId: stand.workspaceId }, { client: model.client });
     const from = await headSeq();
 
     // A restart drops the builder's memory of the thread — the same wake
@@ -309,7 +308,7 @@ describe('a lost state write', () => {
     // The retry is far away: the wake is what recovers here.
     const run = createCoordinatorRun(
       { threadId: stand.mainThreadId, workspaceId: stand.workspaceId },
-      { client: model.client, functionDefinitions: async () => [], journal: flaky.journal, stateRetryMs: 60_000 },
+      { client: model.client, journal: flaky.journal, stateRetryMs: 60_000 },
     );
     const from = await headSeq();
 
@@ -335,7 +334,7 @@ describe('a lost state write', () => {
     const flaky = flakyJournal();
     const run = createCoordinatorRun(
       { threadId: stand.mainThreadId, workspaceId: stand.workspaceId },
-      { client: model.client, functionDefinitions: async () => [], journal: flaky.journal, stateRetryMs: 50 },
+      { client: model.client, journal: flaky.journal, stateRetryMs: 50 },
     );
     const from = await headSeq();
 
@@ -352,7 +351,7 @@ describe('a lost state write', () => {
     const flaky = flakyJournal();
     const run = createCoordinatorRun(
       { threadId: stand.mainThreadId, workspaceId: stand.workspaceId },
-      { client: model.client, functionDefinitions: async () => [], journal: flaky.journal, stateRetryMs: 60_000 },
+      { client: model.client, journal: flaky.journal, stateRetryMs: 60_000 },
     );
     const from = await headSeq();
 
@@ -369,7 +368,7 @@ describe('a lost state write', () => {
 describe('a failed turn', () => {
   test('ends in `wait` after its system.exception', async () => {
     const model = scriptedClient();
-    const run = createCoordinatorRun({ threadId: stand.mainThreadId, workspaceId: stand.workspaceId }, { client: model.client, functionDefinitions: async () => [] });
+    const run = createCoordinatorRun({ threadId: stand.mainThreadId, workspaceId: stand.workspaceId }, { client: model.client });
     const from = await headSeq();
 
     model.fail(true);
@@ -381,4 +380,104 @@ describe('a failed turn', () => {
     assert.equal(events[2]!.payload.scope, 'coordinator-turn');
     assert.deepEqual(model.seen, ['run']);
   });
+});
+
+test('OpenAI opens a granted function, spawns through it and replays its definition between frozen chunks', async () => {
+  const { loadAgents } = await import('../capabilities/agent-catalog.ts');
+  loadAgents();
+  resetPromptState(stand.mainThreadId);
+  const calls = [
+    ['describe', { name: 'spawn_agent' }],
+    ['spawn_agent', { agent: 'manager', title: 'Catalog test', prompt: 'Read the project.' }],
+    ['run_program', { code: "console.log('lookup'); return (await describe('projects')).name" }],
+    ['do_nothing', {}],
+    ['do_nothing', {}],
+    ['do_nothing', {}],
+  ] as const;
+  const requests: import('openai/resources/responses/responses').ResponseCreateParamsNonStreaming[] = [];
+  const run = createCoordinatorRun({ workspaceId: stand.workspaceId, threadId: stand.mainThreadId }, {
+    client: { responses: { create: async request => {
+      const index = requests.length;
+      requests.push(request);
+      const [name, args] = calls[index]!;
+      return { id: 'response-' + index, output: [{ type: 'function_call', name, arguments: JSON.stringify(args), call_id: 'catalog-' + index }] } as Response;
+    } } },
+  });
+  async function wake() {
+    const from = await headSeq();
+    run.accept(await said('next'));
+    await settled(from);
+  }
+
+  await wake();
+  assert.equal(requests.length, 4);
+  const first = requests[0]!;
+  assert.deepEqual(first.tools?.map(tool => 'name' in tool && tool.name), ['describe', 'run_program', 'do_nothing']);
+  assert.match(first.instructions!, /"name":"manager".*"modes":.*"defaultMode":"user"/);
+  assert.doesNotMatch(first.instructions!, /workspace_export_file|remote_fetch_file|get_job_run/);
+  const items = (index: number) => {
+    const input = requests[index]!.input;
+    assert.ok(Array.isArray(input));
+    return input;
+  };
+  const addition = items(1)[1];
+  assert.equal(addition?.type, 'additional_tools');
+  assert.match(JSON.stringify(addition), /"name":"spawn_agent"/);
+  assert.doesNotMatch(JSON.stringify(addition), /#\/types\//);
+  const output = items(2)[0];
+  assert.ok(output?.type === 'function_call_output' && typeof output.output === 'string');
+  const { threadId, headless } = JSON.parse(output.output);
+  assert.equal(headless, false);
+  assert.equal((await prisma.thread.findUniqueOrThrow({ where: { id: threadId } })).parentId, stand.mainThreadId);
+  const runEnd = await prisma.event.findFirstOrThrow({ where: { type: 'tool.call.completed', payload: { path: ['callId'], equals: 'catalog-2' } } });
+  const record = runEnd.payload as { value: string; run: { id: string; console: string } };
+  assert.equal(record.value, 'projects');
+  assert.match(record.run.console, /lookup/);
+  assert.equal(await prisma.event.count({ where: { type: 'tool.call.completed', agentName: 'coordinator', AND: [
+    { payload: { path: ['runId'], equals: record.run.id } },
+    { payload: { path: ['functionName'], equals: 'describe' } },
+  ] } }), 1);
+
+  await wake();
+  assert.deepEqual(items(4)[2], addition);
+  assert.equal(items(4).length, 5); // first chunk, describe text, definition, new chunk, status
+  assert.deepEqual(requests[4]!.tools, first.tools);
+  resetPromptState(stand.mainThreadId);
+  await wake();
+  assert.ok(items(5).every(item => item.type !== 'additional_tools'));
+});
+
+test('catalog output keeps file bytes, program internals and previews on their own side of the journal', async () => {
+  const { coordinatorPort } = await import('./port.ts');
+  const { ingestFile } = await import('../files/index.ts');
+  const { buildTranscript } = await import('../harness/openai/transcript.ts');
+  const { getTranscript } = await import('../core/events.ts');
+  const { dispatch } = await coordinatorPort(stand.workspaceId, stand.mainThreadId);
+  const from = await headSeq();
+  const file = await ingestFile({
+    body: Buffer.from('file-content-only'), contentType: 'text/plain', originalFilename: 'sample.txt', workspaceId: stand.workspaceId,
+  });
+  const view = await dispatch({ name: 'view_file', callId: 'view', arguments: JSON.stringify({ file: file.id }) });
+  assert.equal(view.kind, 'catalog');
+  assert.match(view.text, /\nfile-content-only$/);
+  const failure = await dispatch({ name: 'end_thread', callId: 'denied', arguments: '{}' });
+  assert.equal(failure.kind, 'catalog');
+  assert.equal(JSON.parse(failure.text).kind, 'unknown_capability');
+
+  const large = await dispatch({ name: 'run_program', callId: 'large', arguments: JSON.stringify({
+    code: "await describe('projects'); console.log('log-' + 'only'); return 'a'.repeat(20000) + 'end'",
+  }) });
+  assert.equal(large.kind, 'catalog');
+  assert.match(large.text, /Preview/);
+  const seq = Number(/seq: (\d+)/.exec(large.text)?.[1]);
+  const part = await dispatch({ name: 'run_program', callId: 'slice', arguments: JSON.stringify({
+    code: 'return (await call("get_event", {seq:' + seq + '})).payload.value.slice(-3)',
+  }) });
+  assert.deepEqual(part, { kind: 'catalog', text: '"end"' });
+  const events = (await getTranscript(stand.mainThreadId, { last: 60 })).filter(event => event.seq > from);
+  const reference = events.find(event => event.type === 'tool.call.completed' && event.payload.callId === 'view');
+  assert.equal((reference?.payload.value as { id: string }).id, file.id);
+  assert.doesNotMatch(JSON.stringify(reference?.payload), /file-content-only/);
+  const transcript = buildTranscript(events).text;
+  assert.doesNotMatch(transcript, /log-only|"functionName":"get_event"|file-content-only/);
 });

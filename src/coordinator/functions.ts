@@ -1,15 +1,6 @@
-// The coordinator's function catalog: talking to the user, the
-// agent spawn functions derived from the dynamic catalog plus cancel_thread,
-// and — from stage 4 — the tool servers' functions (including the builtin
-// 'storage'/'events' pull-tool servers). Definitions are part of the prompt-cache head: static with
-// respect to RUN state (spawns do not change them; a catalog (re)load or a
-// tool server (dis)connecting does, which legitimately resets the head).
-// Synchronous calls are journaled as tool.call.* events in the coordinator's
-// thread; spawns and cancels are async dispatches acknowledged with
-// 'accepted' — their consequences arrive as events. do_nothing ends the
-// turn on the backends whose turn contract has no other end (the Responses
-// API drivers run with forced tool calls); the Anthropic driver's turn ends
-// when the model stops calling tools, and the function is not offered there.
+// The tool bundle used by the secretary on Anthropic and openai-compatible.
+// Agent spawns and one-hop commands acknowledge dispatch immediately. Server
+// tools return their MCP result and write tool.call.* in the main thread.
 
 import type { ContentBlock, JsonObject, JsonSchema, RemoteAgentDeclaration } from '../core/contract.ts';
 import { THREAD_NAMING_NOTE } from '../../agents/world/index.ts';
@@ -36,6 +27,7 @@ import {
   type ToolBundle,
 } from '../capabilities/tool-manager.ts';
 import type { DispatchResult, FunctionCall, FunctionDefinition } from '../harness/turn-contract.ts';
+import { END_TURN_FUNCTION } from './instructions.ts';
 import { getLlmBackend } from '../harness/openai/backend.ts';
 
 const bundle: ToolBundle = { declared: legacyServers(coordinator.name) };
@@ -63,20 +55,7 @@ const STATIC_FUNCTION_DEFINITIONS: FunctionDefinition[] = [
       additionalProperties: false,
     },
   },
-  {
-    type: 'function',
-    name: 'do_nothing',
-    description:
-      'End your turn: nothing more to do for the newest events. Call it as the last call, once every other ' +
-      'call of this turn has returned — or right away when the newest events need no action at all.',
-    strict: true,
-    parameters: {
-      type: 'object',
-      properties: {},
-      required: [],
-      additionalProperties: false,
-    },
-  },
+  END_TURN_FUNCTION,
   {
     type: 'function',
     name: 'send_to_thread',

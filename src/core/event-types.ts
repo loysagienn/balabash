@@ -33,6 +33,11 @@ export type SessionTaskUsage = { totalTokens: number; toolUses: number; duration
 // One item of the session's live plan (TodoWrite / todo list).
 export type SessionPlanItem = { content: string; status: string; activeForm?: string };
 
+type ProgramRunDetails = {
+  id: string; startedAt: string; endedAt: string; durationMs: number;
+  outcome: 'ok' | 'failed' | 'timeout' | 'aborted'; console: string; consoleTruncated: boolean;
+};
+
 export type EventPayloads = {
   // Lifecycle. thread.started identifies the new thread
   // (threadId) and is addressed to its parent (targetThreadId); the spawn-time
@@ -102,10 +107,12 @@ export type EventPayloads = {
   'agent.ask': { askId: string; kind: 'approval' | 'credential' | 'other'; text: string; link?: string; options: string[]; expiresAt?: string };
   'agent.ask.resolved': { askId: string; outcome: string; by?: { identity?: UserIdentity; source?: string } };
 
-  // Journaled tool calls of the bundle (src/capabilities/tool-journal.ts).
-  'tool.call.started': { callId: string; functionName: string; input: JsonObject };
-  'tool.call.completed': { callId: string; functionName: string; serverName: string; toolName: string; result: ToolResult };
-  'tool.call.failed': { callId: string; functionName: string; error: string };
+  // Catalog calls keep the value or structured error. Bundle calls keep the MCP result.
+  'tool.call.started': { callId: string; functionName: string; input: JsonValue; runId?: string };
+  'tool.call.completed': { callId: string; functionName: string } & (
+    { serverName: string; toolName: string; result: ToolResult } | { value: JsonValue; runId?: string; run?: ProgramRunDetails }
+  );
+  'tool.call.failed': { callId: string; functionName: string; error: string | { kind: string; message: string; details?: JsonValue }; runId?: string; run?: ProgramRunDetails };
 
   // Schedule and system.
   // A note task carries its note; a program task the id of its run and the
@@ -135,6 +142,7 @@ export type EventPayloads = {
     status?: string;
     exitCode?: number;
   };
+  // Historical requests from main identify the requester in the payload.
   'system.restart.requested': { reason: string; requestedBy?: string };
   'system.restart.completed': {
     reason: string;

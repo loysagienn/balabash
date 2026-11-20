@@ -42,6 +42,7 @@ import {
   type ProgramRun,
   type ProgramStart,
 } from '../catalog/index.ts';
+import { journalProgramCall } from '../tree/call-journal.ts';
 import { appendEvent, storablePayload } from '../core/append.ts';
 import type { JsonObject, Thread } from '../core/contract.ts';
 import { SYSTEM_EXCEPTION } from '../core/envelope.ts';
@@ -128,7 +129,7 @@ async function runUnderMainThread(task: ScheduledTaskModel, main: Thread, start:
     return await executeProgram(
       grant,
       { code, timeoutMs: task.timeoutMs ?? PROGRAM_TIMEOUT_DEFAULT_MS, start, task: task.slug },
-      { connections: host.connections },
+      { connections: host.connections, traceCall: journalProgramCall },
     );
   } catch (error) {
     return neverBegan(start, code, error);

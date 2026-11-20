@@ -290,7 +290,7 @@ describe('the restart in the way, as this workspace may see it', () => {
       // The workspace's own request, blocked by the other workspace's thread
       // and by a child of its own: its words, its thread named, the other's counted.
       const ownChild = await startThread({ workspaceId: stand.workspaceId, parentThreadId: stand.mainThreadId, agent: 'engineer', title: 'own thread', actor: 'system' });
-      const own = await appendEvent({ type: 'system.restart.requested', actor: 'system', workspaceId: stand.workspaceId, threadId: stand.mainThreadId, payload: { reason: 'my build', requestedBy: 'engineer' } });
+      const own = await appendEvent({ type: 'system.restart.requested', actor: 'task', task: { slug: 'maintenance', runId: 'run-1' }, workspaceId: stand.workspaceId, threadId: stand.mainThreadId, payload: { reason: 'my build' } });
 
       assert.ok(own.written);
       const mine = await until(async () => {
@@ -302,7 +302,7 @@ describe('the restart in the way, as this workspace may see it', () => {
 
       assert.deepEqual(
         { own: mine.own, reason: mine.reason, requestedBy: mine.requestedBy, threadId: mine.threadId, threads: mine.waiting?.threads, otherThreads: mine.waiting?.otherThreads },
-        { own: true, reason: 'my build', requestedBy: 'engineer', threadId: stand.mainThreadId, threads: [{ id: ownChild.id, title: 'own thread', agent: 'engineer' }], otherThreads: 1 },
+        { own: true, reason: 'my build', requestedBy: 'task maintenance', threadId: stand.mainThreadId, threads: [{ id: ownChild.id, title: 'own thread', agent: 'engineer' }], otherThreads: 1 },
       );
     } finally {
       restarts.stop();

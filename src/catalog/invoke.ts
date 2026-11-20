@@ -13,8 +13,7 @@
 //   6. the outcome is a value of the output type or a CapabilityError —
 //      whatever failed on the way, the connections layer included.
 //
-// The trace of a call (the journal record) joins this path when its form is
-// designed.
+// The host journals the input and outcome around this path.
 
 import { ACTIONS } from './actions.ts';
 import { ACCOUNT_FIELD, accountConnectionOf, connectionOf } from './catalog.ts';

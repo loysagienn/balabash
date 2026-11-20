@@ -7,6 +7,7 @@
 // Restarts card shows. Pure, tested.
 
 import type { MachineView, PendingRestartView, ProcessVersionView, ProcessView, SystemResponse } from '../../../api/contract.ts';
+import { restartRequester } from '../../../utils/restart-requester.ts';
 import type { Event } from '../../../core/contract.ts';
 import { byteLabel, byteShareLabel, countOf, dateTimeLabel, durationLabel, plural, timeOfDay } from '../../lib/format/index.ts';
 import type { IconName } from '../../ui/Icon/icons.ts';
@@ -236,7 +237,7 @@ export function restartNote(request: RestartSource, waiting: PendingRestartView[
 // The request event of the store as the note's input.
 export function requestOf(event: Event): RestartSource {
   return {
-    requestedBy: typeof event.payload.requestedBy === 'string' ? event.payload.requestedBy : null,
+    requestedBy: restartRequester(event),
     requestedAt: event.createdAt,
     own: true,
   };
@@ -357,7 +358,7 @@ export function logRows(log: readonly Event[]): LogRow[] {
 
     if (event.type === 'system.restart.requested') {
       const pending = completed === null || event.seq > completed;
-      const who = text(event.payload.requestedBy) ?? 'the operator';
+      const who = restartRequester(event) ?? 'the operator';
 
       rows.push({
         ...base,
@@ -376,7 +377,7 @@ export function logRows(log: readonly Event[]): LogRow[] {
       const request = typeof event.payload.requestSeq === 'number' ? requests.get(event.payload.requestSeq) : undefined;
       const rolledBack = event.payload.rolledBack === true;
       const failed = list(event.payload.migrationsFailed);
-      const who = request ? (text(request.payload.requestedBy) ?? 'the operator') : null;
+      const who = request ? (restartRequester(request) ?? 'the operator') : null;
       const parts = [who ? `requested by ${who}` : null, rolledBack ? `rolled back to the last good bundle${text(event.payload.rollbackReason) ? ` (${event.payload.rollbackReason})` : ''}` : null, failed.length ? `migrations failed: ${clip(failed.join(', '), 120)}` : null].filter((part): part is string => part !== null);
 
       rows.push({

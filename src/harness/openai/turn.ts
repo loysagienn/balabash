@@ -34,29 +34,26 @@ import type { DispatchResult, FunctionCall, PrewarmPrompt, RequestHead, TurnOutc
 import { getLlmBackend } from './backend.ts';
 import type { LlmBackend } from './backend.ts';
 import { getOpenaiClient } from './client.ts';
+import { rememberOpening } from './prompt-builder.ts';
 import { toolResultToModelOutput } from './content.ts';
-import type { ModelOutput } from './content.ts';
 import type { startLlmRequestMetrics } from './llm-metrics.ts';
 
 // The contract types, re-exported for the readers that knew them here.
 export { MAX_TURN_ITERATIONS } from '../turn-contract.ts';
 export type { DispatchResult, FunctionCall, FunctionDefinition, TurnOutcome } from '../turn-contract.ts';
 
-type FunctionCallOutputItem = {
-  type: 'function_call_output';
-  call_id: string;
-  output: ModelOutput;
-};
-
 // The prompt in Responses API shape: each frozen chunk a user message, the
 // volatile status a developer message after them. A prewarm prompt has no
 // status: the request ends with the frozen prefix.
-function toInput({ chunks, statusText }: PrewarmPrompt & { statusText?: string }): ResponseInput {
+function toInput({ chunks, openings = [], statusText }: PrewarmPrompt & { statusText?: string }): ResponseInput {
   return [
-    ...chunks.map(text => ({
-      role: 'user' as const,
-      content: [{ type: 'input_text' as const, text }],
-    })),
+    ...chunks.flatMap((text, index): ResponseInputItem[] => [
+      { role: 'user', content: [{ type: 'input_text', text }] },
+      ...openings.filter(opening => opening.afterChunk === index + 1).flatMap((opening): ResponseInputItem[] => [
+        { role: 'user', content: [{ type: 'input_text', text: opening.text }] },
+        { type: 'additional_tools', role: 'developer', tools: [opening.definition] },
+      ]),
+    ]),
     ...(statusText === undefined
       ? []
       : [
@@ -108,11 +105,11 @@ export type TurnClient = {
 // own history, see the header.
 type Continuation = { input: ResponseInput; previousResponseId?: string };
 
-function continueStateful(response: Response, outputs: FunctionCallOutputItem[]): Continuation {
+function continueStateful(response: Response, outputs: ResponseInputItem[]): Continuation {
   return { input: outputs, previousResponseId: response.id };
 }
 
-function continueStateless(input: ResponseInput, response: Response, outputs: FunctionCallOutputItem[]): Continuation {
+function continueStateless(input: ResponseInput, response: Response, outputs: ResponseInputItem[]): Continuation {
   const history = typeof input === 'string' ? [{ role: 'user' as const, content: input }] : input;
 
   return { input: [...history, ...(response.output as ResponseInputItem[]), ...outputs] };
@@ -133,6 +130,7 @@ export async function runTurn({
   const explicitCache = backend.promptCache === 'explicit';
 
   let input: ResponseInput = toInput(prompt);
+  const loaded = new Set(prompt.openings?.map(opening => opening.definition.name));
   let previousResponseId: string | undefined;
   let firstResponseId: string | undefined;
 
@@ -160,7 +158,7 @@ export async function runTurn({
       throw new Error(`OpenAI response ${response.id} contains no function calls`);
     }
 
-    const outputs: FunctionCallOutputItem[] = [];
+    const outputs: ResponseInputItem[] = [];
     let ended = false;
 
     for (const functionCall of functionCalls) {
@@ -171,6 +169,23 @@ export async function runTurn({
       });
 
       switch (outcome.kind) {
+        case 'catalog':
+          outputs.push({
+            type: 'function_call_output', call_id: functionCall.call_id,
+            output: outcome.attachment ? [
+              { type: 'input_text', text: outcome.text },
+              outcome.attachment.kind === 'image'
+                ? { type: 'input_image', image_url: outcome.attachment.url, detail: 'auto' }
+                : { type: 'input_file', file_url: outcome.attachment.url },
+            ] : outcome.text,
+          });
+          if (outcome.definition && !loaded.has(outcome.definition.name)) {
+            loaded.add(outcome.definition.name);
+            outputs.push({ type: 'additional_tools', role: 'developer', tools: [outcome.definition] });
+            rememberOpening(prompt.cacheKey, outcome.definition, outcome.text);
+          }
+          break;
+
         case 'sync':
           outputs.push({
             type: 'function_call_output',

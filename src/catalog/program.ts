@@ -34,7 +34,7 @@ import os from 'node:os';
 import vm from 'node:vm';
 import { recordProcessGroup } from '../runtime/process-groups.ts';
 import { ACTIONS } from './actions.ts';
-import type { ProgramScope } from './definition.ts';
+import type { Caller, ProgramScope } from './definition.ts';
 import { describe } from './describe.ts';
 import { CapabilityError, ERROR_KINDS, toCapabilityError, type CapabilityErrorValue, type ErrorKind } from './errors.ts';
 import type { ConnectionsPort, Grant } from './grant.ts';
@@ -79,6 +79,7 @@ export type ProgramStart = {
 };
 
 export type ProgramEnv = {
+  traceCall?: (caller: Caller, program: ProgramScope, name: string, input: JsonValue, invoke: () => Promise<JsonValue>) => Promise<JsonValue>;
   connections: ConnectionsPort;
   // Aborting it stops the run: the launcher no longer waits for it.
   signal?: AbortSignal;
@@ -267,6 +268,7 @@ export function executeProgram(grant: Grant, launch: ProgramLaunch, env: Program
   const startedAt = launch.start?.startedAt ?? new Date();
   const ended = new AbortController();
   const scope: ProgramScope = { runId: id, task: launch.task ?? null, ended: ended.signal };
+  const programGrant: Grant = { ...grant, actions: new Set(['describe', 'call']) };
   const output = tail(CONSOLE_TAIL_BYTES);
   const stderr = tail(STDERR_TAIL_BYTES);
 
@@ -366,14 +368,14 @@ export function executeProgram(grant: Grant, launch: ProgramLaunch, env: Program
       inFlight.set(request.id, request.kind === 'describe' ? 'describe' : String(request.name));
       callsInFlight += 1;
 
-      const outcome: Promise<JsonValue> =
-        request.kind === 'describe'
-          ? describe(grant, request.name === null ? {} : { name: request.name }, env)
-          : invokeCapability(grant, String(request.name), request.input === null ? undefined : JSON.parse(request.input), {
-              connections: env.connections,
-              ...(env.signal ? { signal: env.signal } : {}),
-              program: scope,
-            });
+      const name = request.kind === 'describe' ? 'describe' : String(request.name);
+      const input = request.kind === 'describe'
+        ? (request.name === null ? {} : { name: request.name })
+        : (request.input === null ? {} : JSON.parse(request.input));
+      const invoke = () => request.kind === 'describe'
+        ? describe(programGrant, input, env)
+        : invokeCapability(programGrant, name, input, { ...env, program: scope });
+      const outcome = env.traceCall ? env.traceCall(grant.caller, scope, name, input, invoke) : invoke();
 
       outcome.then(
         value => answer(request, { ok: true, value }),
