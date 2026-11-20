@@ -32,7 +32,7 @@ import {
   OAUTH_CLIENT_PROVISIONED,
 } from '../../core/envelope.ts';
 import { config } from '../../config/index.ts';
-import { getAccountService, type AccountService } from './services.ts';
+import { accountCatalogChanged, getAccountService, type AccountService } from './services.ts';
 import { AuthorizationLostError, connectionAccessToken, createInteractiveAuthProvider } from './oauth-provider.ts';
 import { ProbeRefusedError, getAccessToken, identityData, identityLabel, probeIdentity } from './identity.ts';
 import type { ProbedIdentity } from './identity.ts';
@@ -275,7 +275,7 @@ export async function renameConnection(
   return { accountKey: row.accountKey, previousName: row.displayName, name: trimmed, connection: renamed };
 }
 
-// Disconnects one account: the row dies, its live client is dropped, the
+// Disconnects one account: the row dies and the
 // slug becomes free. Tokens go with the row; access at the provider side is
 // revoked by the user in the provider's own UI.
 export async function disconnectConnection(
@@ -294,6 +294,7 @@ export async function disconnectConnection(
     return row;
   });
 
+  await accountCatalogChanged(row.server, workspaceId, 'disconnected');
   await journalConnectionEvent(CONNECTION_DISCONNECTED, { ...row, threadId: threadId ?? row.threadId }, {
     connectionId: row.id,
     server: row.server,
@@ -679,6 +680,7 @@ export async function handleOauthCallback(query: Record<string, unknown>): Promi
   }
 
   const journal = async (type: string, payload: JsonObject) => {
+    if (type === CONNECTION_COMPLETED) await accountCatalogChanged(row.server, row.workspaceId, 'connected');
     await appendEvent({
       type,
       actor: 'system',
@@ -927,6 +929,7 @@ export async function markReauthorizationRequired(connectionId: string, error: s
   }
 
   await prisma.connection.update({ where: { id: row.id }, data: { status: 'reauthorization_required' } });
+  await accountCatalogChanged(row.server, row.workspaceId, 'reauthorization_required');
   await appendEvent({
     type: CONNECTION_REAUTHORIZATION_REQUIRED,
     actor: 'system',

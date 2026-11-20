@@ -200,9 +200,10 @@ Use `"clientRegistration": "manual"` for an operator-provisioned client.
 Optional `scope`, `authorizationParams` and `identityProbe` configure sign-in.
 The platform lists tools as each connected account in the workspace and
 publishes capabilities with matching names, texts and schemas across
-those accounts. It checks account membership during the minute refresh.
+those accounts. Sign-in, disconnect and loss of authorization refresh that workspace.
+Accounts whose listing fails are retried in the background.
 Each call takes the workspace account address in `account`. That name is
-reserved in the provider’s input schema. The provider receives its own
+reserved in the provider’s input schema. System lists omitted tools. The provider receives its own
 arguments and the selected account’s bearer token.
 
 System shows configuration and discovery failures under `mcp-servers`,

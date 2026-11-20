@@ -48,6 +48,22 @@ export function listAccountServices(): AccountService[] {
   return [...services.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
+// Configured OAuth nodes discover their contract with workspace credentials.
+type AccountChange = 'connected' | 'disconnected' | 'reauthorization_required';
+type RefreshAccountCatalog = (workspaceId: string, change: AccountChange) => Promise<void>;
+const accountCatalogs = new Map<string, RefreshAccountCatalog>();
+
+export function registerAccountCatalog(name: string, refresh: RefreshAccountCatalog): void {
+  accountCatalogs.set(name, refresh);
+}
+
+export async function accountCatalogChanged(name: string, workspaceId: string, change: AccountChange): Promise<void> {
+  // Discovery cannot undo a committed account change or suppress its event.
+  await accountCatalogs.get(name)?.(workspaceId, change).catch(error => {
+    console.error(`[mcp-servers] ${name} refresh failed:`, error);
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Installation services
 
