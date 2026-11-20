@@ -23,8 +23,12 @@
 //   server;
 // - gmail.ts — the node `gmail` over the Gmail API, on the access of the
 //   user's account; gmail-mail.ts — a mail as a value and as the raw
-//   message the API takes; google-api.ts — a request to an API of Google on
-//   the access of an account;
+//   message the API takes;
+// - drive.ts — the node `drive` over the Drive API, on the same kind of
+//   access; drive-file.ts — a file of Drive as a value and the export
+//   formats of Google documents;
+// - google-api.ts — a request to an API of Google on the access of an
+//   account, and a list Google pages itself;
 // - connections.ts — the node `connections`; services.ts — the services the
 //   nodes declare, told to the app's connections layer, and the connections
 //   port of the catalog over that layer;
@@ -46,6 +50,7 @@ import {
 } from '../catalog/index.ts';
 import { refreshSecretServices } from '../capabilities/connections/services.ts';
 import { connections } from './connections.ts';
+import { drive } from './drive.ts';
 import { getEvent } from './events.ts';
 import { fileCapabilities } from './files.ts';
 import { gmail } from './gmail.ts';
@@ -111,6 +116,7 @@ export const root: RootDefinition = {
     workspace,
     web,
     gmail,
+    drive,
     connections,
     system,
   ],

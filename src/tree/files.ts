@@ -4,6 +4,7 @@
 // the path in the workspace file area is the local form of a file, and the
 // two capabilities of the bridge turn one into the other.
 
+import { createReadStream, type ReadStream } from 'node:fs';
 import fs from 'node:fs/promises';
 import { Readable } from 'node:stream';
 import { z } from 'zod';
@@ -68,8 +69,51 @@ export async function storedFile(caller: Caller, fileId: string): Promise<Stored
   }
 }
 
+// Bytes that arrive from outside become a stored file of the workspace. They
+// are received beside the storage — a temp file — and enter it whole: an
+// arrival that fails on the way leaves nothing behind. `named` says what the
+// file is called once its size is known, and may refuse it by throwing.
+// `signal` covers the way into storage too: bytes still on their way there
+// when it fires are dropped, and the failure of the storage is thrown as it
+// is — what it means is the caller's to say. A file whose bytes storage has
+// taken is stored.
+export async function storeArrival(
+  workspaceId: string,
+  source: NodeJS.ReadableStream,
+  named: (sizeBytes: number) => { name: string; contentType: string; scope: string },
+  signal?: AbortSignal | null,
+): Promise<StoredFile> {
+  const temp = await receiveUpload(workspaceId, source);
+  let content: ReadStream | null = null;
+
+  try {
+    const { size } = await fs.stat(temp);
+    const file = named(size);
+
+    content = createReadStream(temp);
+
+    return await ingestFile({
+      body: content,
+      workspaceId,
+      originalFilename: file.name,
+      contentType: file.contentType,
+      sizeBytes: size,
+      scope: file.scope,
+      signal: signal ?? undefined,
+    });
+  } finally {
+    // An upload that was cut may not have closed what it was reading.
+    content?.destroy();
+    // A copy that could not be removed is not the caller's failure: the
+    // outcome of the call stands.
+    await fs.rm(temp, { force: true }).catch((error: unknown) => {
+      console.warn(`[files] the temporary copy of arriving bytes stays behind (${temp}):`, error);
+    });
+  }
+}
+
 // An optional text field that is given carries a value.
-function given(field: string, value: string | undefined): string | undefined {
+export function given(field: string, value: string | undefined): string | undefined {
   if (value !== undefined && !value.trim()) {
     throw new CapabilityError('invalid_input', `${field} is blank: pass a value or leave the field out.`);
   }

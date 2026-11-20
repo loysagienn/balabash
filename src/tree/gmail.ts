@@ -31,6 +31,8 @@ import {
   googleClient,
   googleOAuth,
   orAbsent,
+  page,
+  pageToken,
   type GoogleApi,
   type GoogleClient,
 } from './google-api.ts';
@@ -62,30 +64,6 @@ const noSuchId = (refusal: GoogleRefusal) =>
   refusal.status === 404 || (refusal.status === 400 && /invalid id value/i.test(refusal.said));
 
 const mailbox = (ctx: CallContext) => `the mailbox of the account "${ctx.account?.account ?? ''}"`;
-
-// A page of a list Gmail pages itself: its page token is the cursor, and a
-// token it does not take is a cursor this list did not give.
-async function page<T>(outcome: Promise<T>, cursor: string | undefined): Promise<T> {
-  try {
-    return await outcome;
-  } catch (error) {
-    if (cursor !== undefined && error instanceof GoogleRefusal && error.status === 400 && /page ?token/i.test(error.said)) {
-      throw new CapabilityError('invalid_input', 'cursor is not a nextCursor of this list: pass the value as a result gave it.');
-    }
-
-    throw error;
-  }
-}
-
-function pageToken(params: URLSearchParams, cursor: string | undefined): void {
-  if (cursor === '') {
-    throw new CapabilityError('invalid_input', 'cursor is empty: pass nextCursor of a result, or leave the field out.');
-  }
-
-  if (cursor !== undefined) {
-    params.set('pageToken', cursor);
-  }
-}
 
 // The most requests of one call out at once: a mailbox that is asked too
 // much at a time refuses the requests.

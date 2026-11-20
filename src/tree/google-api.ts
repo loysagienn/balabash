@@ -49,8 +49,11 @@ export type GoogleRequest = {
   contentType?: string;
   headers?: Record<string, string>;
   accept?: string;
-  // The longest the API may take to answer this request.
+  // The longest the API may take over this request, its body included.
   timeoutMs?: number;
+  // Statuses besides 2xx that answer this request rather than refuse it: a
+  // session of an upload says 308 for "so much is taken, go on".
+  answers?: number[];
 };
 
 // The longest an API may take to answer one request, unless the request
@@ -87,30 +90,39 @@ const SETUP_REASONS = new Set(['accessNotConfigured', 'SERVICE_DISABLED', 'insuf
 type GoogleError = {
   status?: string;
   message?: string;
-  errors?: Array<{ reason?: unknown }>;
+  errors?: Array<{ reason?: unknown; location?: unknown }>;
   details?: Array<{ reason?: unknown }>;
 };
+
+const word = (value: unknown): string | null => (typeof value === 'string' && value !== '' ? value : null);
 
 // Google's own diagnostics of a refused request, out of its error body: a
 // bare status has no way to say which of a dozen reasons it stands for.
 // `reasons` are its machine words for the refusal (accessNotConfigured,
-// userRateLimitExceeded), `said` — the whole of it as text.
+// userRateLimitExceeded), `said` — the whole of it as text: the message,
+// the reasons and, where Google names it, the parameter each is about
+// ("Invalid Value (invalid in q)").
 function diagnostics(text: string): { said: string; reasons: string[] } {
   try {
     const parsed = JSON.parse(text) as { error?: GoogleError | string; error_description?: string };
 
     if (parsed?.error && typeof parsed.error === 'object' && parsed.error.message) {
       const { status, message, errors, details } = parsed.error;
-      const reasons = [
+      const given = [...(Array.isArray(errors) ? errors : []), ...(Array.isArray(details) ? details : [])] as Array<{
+        reason?: unknown;
+        location?: unknown;
+      }>;
+      const reasons = [...new Set(given.map(item => word(item?.reason)).filter(item => item !== null))];
+      const told = [
         ...new Set(
-          [...(Array.isArray(errors) ? errors : []), ...(Array.isArray(details) ? details : [])]
-            .map(item => item?.reason)
-            .filter((item): item is string => typeof item === 'string' && item !== ''),
+          given
+            .filter(item => word(item?.reason))
+            .map(item => `${item.reason as string}${word(item.location) ? ` in ${item.location as string}` : ''}`),
         ),
       ];
 
       return {
-        said: `${status ? `${status}: ` : ''}${message}${reasons.length ? ` (${reasons.join(', ')})` : ''}`,
+        said: `${status ? `${status}: ` : ''}${message}${told.length ? ` (${told.join(', ')})` : ''}`,
         reasons,
       };
     }
@@ -125,11 +137,28 @@ function diagnostics(text: string): { said: string; reasons: string[] } {
   return { said: text.slice(0, 1_000).trim() || '(no message)', reasons: [] };
 }
 
+// The answer of the API to a request. Its body is read once, the way the
+// caller needs it; a body that breaks off on the way — the connection, the
+// time of the request, the cancellation of the call — is `unavailable`,
+// like an answer that never came.
+export type GoogleAnswer = {
+  status: number;
+  headers: Headers;
+  // The bytes as they arrive: for a body too large to hold.
+  chunks(): AsyncGenerator<Buffer>;
+  // The body whole, as UTF-8 text.
+  text(): Promise<string>;
+  // A JSON object; {} for an empty body.
+  json(): Promise<JsonObject>;
+  // Lets the body go unread.
+  drop(): Promise<void>;
+};
+
 export type GoogleClient = {
-  // The answer of the API to a request, checked: anything but 2xx is thrown.
-  // The caller reads the body as it needs.
-  request(url: string, init?: GoogleRequest): Promise<Response>;
-  // A request the API answers with a JSON object; {} for an empty body.
+  // The answer of the API to a request, checked: anything but 2xx — and the
+  // statuses the request itself takes for an answer — is thrown.
+  request(url: string, init?: GoogleRequest): Promise<GoogleAnswer>;
+  // A request the API answers with a JSON object.
   json(url: string, init?: GoogleRequest): Promise<JsonObject>;
 };
 
@@ -151,13 +180,29 @@ export function googleClient(api: GoogleApi, ctx: CallContext): GoogleClient {
   // token: there is no second renewal.
   const renewed = (rejected: string) => (renewal ??= authority.accessToken(rejected));
 
-  async function send(url: string, init: GoogleRequest, accessToken: string): Promise<Response> {
+  // One exchange with the API: the answer as it came, and what a failure of
+  // the exchange — before the answer or inside its body — is told as.
+  type Exchange = { response: Response; lost(error: unknown, arriving?: boolean): CapabilityError };
+
+  async function send(url: string, init: GoogleRequest, accessToken: string): Promise<Exchange> {
     const method = init.method ?? 'GET';
     const timeoutMs = init.timeoutMs ?? REQUEST_TIMEOUT_MS;
     const time = AbortSignal.timeout(timeoutMs);
 
+    // No answer, or not the whole of it (`arriving`): whether a write took
+    // effect is not known.
+    const lost = (error: unknown, arriving = false) =>
+      new CapabilityError(
+        'unavailable',
+        ctx.signal?.aborted
+          ? `The call to ${api.title} was cancelled ${arriving ? 'while its answer was arriving' : 'before it answered'}.`
+          : time.aborted
+            ? `${api.title} did not ${arriving ? 'finish its answer' : 'answer'} within ${Math.round(timeoutMs / 1000)} seconds.`
+            : `${api.title} ${arriving ? 'broke off its answer' : 'did not answer'}: ${reason(error)}`,
+      );
+
     try {
-      return await fetch(url, {
+      const response = await fetch(url, {
         method,
         headers: {
           authorization: `Bearer ${accessToken}`,
@@ -172,34 +217,96 @@ export function googleClient(api: GoogleApi, ctx: CallContext): GoogleClient {
         body: init.json !== undefined ? JSON.stringify(init.json) : init.body,
         signal: ctx.signal ? AbortSignal.any([ctx.signal, time]) : time,
       });
+
+      return { response, lost };
     } catch (error) {
-      // No answer: whether a write took effect is not known.
-      throw new CapabilityError(
-        'unavailable',
-        ctx.signal?.aborted
-          ? `The call to ${api.title} was cancelled before it answered.`
-          : time.aborted
-            ? `${api.title} did not answer within ${Math.round(timeoutMs / 1000)} seconds.`
-            : `${api.title} did not answer: ${reason(error)}`,
-      );
+      throw lost(error);
     }
   }
 
-  async function request(url: string, init: GoogleRequest = {}): Promise<Response> {
-    const sent = await token();
-    let response = await send(url, init, sent);
+  function answer({ response, lost }: Exchange): GoogleAnswer {
+    async function* chunks(): AsyncGenerator<Buffer> {
+      if (!response.body) {
+        return;
+      }
 
-    if (response.status === 401) {
-      const newer = await renewed(sent);
+      const reader = response.body.getReader();
 
-      if (newer !== sent) {
-        await response.body?.cancel().catch(() => {});
-        response = await send(url, init, newer);
+      try {
+        for (;;) {
+          const { done, value } = await reader.read().catch((error: unknown) => {
+            throw lost(error, true);
+          });
+
+          if (done) {
+            return;
+          }
+
+          yield Buffer.from(value.buffer, value.byteOffset, value.byteLength);
+        }
+      } finally {
+        // A reader that stopped early leaves nothing arriving behind it.
+        await reader.cancel().catch(() => {});
       }
     }
 
-    if (response.ok) {
-      return response;
+    async function text(): Promise<string> {
+      const parts: Buffer[] = [];
+
+      for await (const chunk of chunks()) {
+        parts.push(chunk);
+      }
+
+      return Buffer.concat(parts).toString('utf8');
+    }
+
+    return {
+      status: response.status,
+      headers: response.headers,
+      chunks,
+      text,
+      async json() {
+        const body = await text();
+
+        if (!body) {
+          return {};
+        }
+
+        try {
+          const parsed: unknown = JSON.parse(body);
+
+          if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+            return parsed as JsonObject;
+          }
+        } catch {
+          // Told below.
+        }
+
+        throw new CapabilityError('external_error', `${api.title} answered with something that is not a JSON object.`);
+      },
+      async drop() {
+        await response.body?.cancel().catch(() => {});
+      },
+    };
+  }
+
+  async function request(url: string, init: GoogleRequest = {}): Promise<GoogleAnswer> {
+    const sent = await token();
+    let exchange = await send(url, init, sent);
+
+    if (exchange.response.status === 401) {
+      const newer = await renewed(sent);
+
+      if (newer !== sent) {
+        await exchange.response.body?.cancel().catch(() => {});
+        exchange = await send(url, init, newer);
+      }
+    }
+
+    const { response } = exchange;
+
+    if (response.ok || init.answers?.includes(response.status)) {
+      return answer(exchange);
     }
 
     const { said, reasons } = diagnostics(await response.text().catch(() => ''));
@@ -221,35 +328,7 @@ export function googleClient(api: GoogleApi, ctx: CallContext): GoogleClient {
     );
   }
 
-  return {
-    request,
-    async json(url, init) {
-      const response = await request(url, init);
-      let text: string;
-
-      try {
-        text = await response.text();
-      } catch (error) {
-        throw new CapabilityError('unavailable', `${api.title} broke off its answer: ${reason(error)}`);
-      }
-
-      if (!text) {
-        return {};
-      }
-
-      try {
-        const parsed: unknown = JSON.parse(text);
-
-        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-          return parsed as JsonObject;
-        }
-      } catch {
-        // Told below.
-      }
-
-      throw new CapabilityError('external_error', `${api.title} answered with something that is not a JSON object.`);
-    },
-  };
+  return { request, json: async (url, init) => (await request(url, init)).json() };
 }
 
 // The outcome of a request, with a refusal that means "there is no such
@@ -264,6 +343,33 @@ export async function orAbsent<T>(
   } catch (error) {
     if (error instanceof GoogleRefusal && absent(error)) {
       throw new CapabilityError('not_found', message);
+    }
+
+    throw error;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// A list Google pages itself: its page token is the cursor.
+
+export function pageToken(params: URLSearchParams, cursor: string | undefined): void {
+  if (cursor === '') {
+    throw new CapabilityError('invalid_input', 'cursor is empty: pass nextCursor of a result, or leave the field out.');
+  }
+
+  if (cursor !== undefined) {
+    params.set('pageToken', cursor);
+  }
+}
+
+// A page of such a list: a token Google does not take is a cursor this list
+// did not give.
+export async function page<T>(outcome: Promise<T>, cursor: string | undefined): Promise<T> {
+  try {
+    return await outcome;
+  } catch (error) {
+    if (cursor !== undefined && error instanceof GoogleRefusal && error.status === 400 && /page ?token/i.test(error.said)) {
+      throw new CapabilityError('invalid_input', 'cursor is not a nextCursor of this list: pass the value as a result gave it.');
     }
 
     throw error;

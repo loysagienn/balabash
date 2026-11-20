@@ -3,14 +3,11 @@
 // addresses it reaches and how long it may take is web-request.ts; here is
 // what each capability makes of the answer.
 
-import { createReadStream, type ReadStream } from 'node:fs';
-import fs from 'node:fs/promises';
 import { Readable } from 'node:stream';
 import { z } from 'zod';
 import { CapabilityError, FileRef, capability, node, type Node } from '../catalog/index.ts';
-import { ingestFile } from '../files/index.ts';
-import { guessContentType, receiveUpload } from '../workspace/files.ts';
-import { fileRefValue, isTextType } from './files.ts';
+import { guessContentType } from '../workspace/files.ts';
+import { fileRefValue, isTextType, storeArrival } from './files.ts';
 import { callTime, internet, openPublicUrl, type Net, type WebAnswer } from './web-request.ts';
 import { perplexityNode } from './web-perplexity.ts';
 
@@ -301,8 +298,6 @@ function download(net: Net) {
       // The file is stored as the server keeps it, so no content coding is
       // asked for; one the server applies anyway is taken off.
       const answer = await openPublicUrl(input.url, { net, time, acceptEncoding: 'identity' });
-      let temp: string | null = null;
-      let content: ReadStream | null = null;
 
       try {
         if (answer.status < 200 || answer.status > 299) {
@@ -328,34 +323,24 @@ function download(net: Net) {
           throw tooLarge(declared, input.maxFileBytes);
         }
 
-        // The bytes arrive beside the storage and enter it whole: a
-        // download that fails on the way leaves nothing behind.
-        temp = await receiveUpload(caller.workspaceId, Readable.from(withinLimit(answer, input.maxFileBytes)));
-
-        const { size } = await fs.stat(temp);
-
-        if (size === 0) {
-          throw new CapabilityError('external_error', `${answer.finalUrl.href} answered with an empty body: nothing was stored.`);
-        }
-
-        const { type } = contentTypeOf(answer.headers['content-type']);
-        const name = downloadName(answer, type);
         // The time of the call covers the way into storage too: bytes
-        // still on their way there when it runs out are dropped. A file
-        // whose bytes storage has taken is stored, and the call answers
-        // with it.
-        content = createReadStream(temp);
+        // still on their way there when it runs out are dropped.
+        const stored = await storeArrival(
+          caller.workspaceId,
+          Readable.from(withinLimit(answer, input.maxFileBytes)),
+          size => {
+            if (size === 0) {
+              throw new CapabilityError('external_error', `${answer.finalUrl.href} answered with an empty body: nothing was stored.`);
+            }
 
-        const stored = await ingestFile({
-          body: content,
-          workspaceId: caller.workspaceId,
-          originalFilename: name,
-          contentType: type ?? guessContentType(name),
-          sizeBytes: size,
-          scope: DOWNLOAD_SCOPE,
-          signal: time.signal,
-        }).catch((error: unknown) => {
-          if (!time.signal.aborted) {
+            const { type } = contentTypeOf(answer.headers['content-type']);
+            const name = downloadName(answer, type);
+
+            return { name, contentType: type ?? guessContentType(name), scope: DOWNLOAD_SCOPE };
+          },
+          time.signal,
+        ).catch((error: unknown) => {
+          if (error instanceof CapabilityError || !time.signal.aborted) {
             throw error;
           }
 
@@ -370,16 +355,6 @@ function download(net: Net) {
         return fileRefValue(stored);
       } finally {
         answer.close();
-        // An upload that was cut may not have closed what it was reading.
-        content?.destroy();
-
-        if (temp !== null) {
-          // A copy that could not be removed is not the caller's failure:
-          // the outcome of the call stands.
-          await fs.rm(temp, { force: true }).catch((error: unknown) => {
-            console.warn(`[web] the temporary copy of a download stays behind (${temp}):`, error);
-          });
-        }
       }
     },
   });
