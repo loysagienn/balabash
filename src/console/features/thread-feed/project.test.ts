@@ -588,6 +588,18 @@ describe('projectFeed — actions', () => {
     assert.equal(output(rows[1]!), 'thread not found\n{\n  "threadId": "nope"\n}');
   });
 
+  it('shows catalog strings as text and preserves the JSON shape of other values', () => {
+    const values = ['first\nsecond', [{ text: 'data', count: 1 }], null];
+    const items = projectFeed(values.map((value, i) =>
+      own('tool.call.completed', { callId: String(i), functionName: 'web_perplexity_ask', value }),
+    ), ctx);
+    const rows = (items[0] as ActionsItem).items;
+    assert.deepEqual(rows.map(row => row.detail?.kind === 'io' && row.detail.output), [
+      'first\nsecond', JSON.stringify(values[1], null, 2), 'null',
+    ]);
+    assert.equal(rows[0]!.label.icon, 'search');
+  });
+
   it('keeps the refusal of a failed file change next to the requested diff', () => {
     resetSeq(37n);
 

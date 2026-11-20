@@ -234,20 +234,21 @@ const BRIDGE_ICONS: Record<string, IconName> = {
   send_to_thread: 'message-square-reply',
   cancel_thread: 'circle-stop',
   end_thread: 'check',
-  request_restart: 'refresh-cw',
+  system_request_restart: 'refresh-cw',
   get_event: 'file-text',
-  get_thread: 'file-text',
-  get_thread_events: 'file-text',
-  list_threads: 'messages-square',
-  data_query: 'database',
-  http_get: 'globe',
-  create_task: 'calendar-clock',
-  run_task: 'play',
-  list_tasks: 'calendar-clock',
-  cancel_task: 'calendar-clock',
-  send_file: 'paperclip',
-  workspace_export_file: 'upload',
-  workspace_import_file: 'download',
+  threads_get: 'file-text',
+  threads_get_events: 'file-text',
+  threads_get_transcript: 'file-text',
+  threads_list: 'messages-square',
+  workspace_query: 'database',
+  web_get: 'globe',
+  schedule_create_task: 'calendar-clock',
+  schedule_run_task: 'play',
+  schedule_list_tasks: 'calendar-clock',
+  schedule_cancel_task: 'calendar-clock',
+  view_file: 'paperclip',
+  export_file: 'upload',
+  import_file: 'download',
 };
 
 // A function of the Balabash bridge (tool.call.*): the function by name,
@@ -255,7 +256,7 @@ const BRIDGE_ICONS: Record<string, IconName> = {
 export function bridgeAction(functionName: string, input: JsonValue): { label: ActionLabel; input: string } {
   const fields = input && typeof input === 'object' && !Array.isArray(input) ? input : {};
   const arg = firstString(fields) ?? Object.values(fields).map(v => String(v)).join(', ');
-  const icon = BRIDGE_ICONS[functionName] ?? (functionName.startsWith('gmail_') ? 'inbox' : functionName.startsWith('notion') ? 'file-text' : functionName.startsWith('perplexity') ? 'search' : 'wrench');
+  const icon = BRIDGE_ICONS[functionName] ?? (functionName.startsWith('gmail_') ? 'inbox' : functionName.startsWith('notion_') ? 'file-text' : functionName.startsWith('web_perplexity_') ? 'search' : 'wrench');
 
   return { label: { icon, tool: functionName, ...(arg ? { arg: clipLine(arg) } : {}) }, input: JSON.stringify(input, null, 2) };
 }

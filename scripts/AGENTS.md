@@ -132,11 +132,15 @@ restored database. The --database argument must match current_database() on that
 
     npm run migrate-agent-tools -- --database NAME --workspaces /path/to/data/workspace
 
-For the actual switch, keep writers and the scheduler offline in the maintenance window,
-preserve the compatible branch and backup, deploy its schema, then run the same command
-against the intended database before starting the scheduler. The migration reads workspace
-task files and writes only PostgreSQL. It prints changed-row counts after commit. Running it
-again should give zeros. On failure every change rolls back.
+Use `--dry-run` on the restored copy to run the same translation and report the counts after
+rolling the transaction back. Both modes require the application and scheduler to stay offline
+for the target database. The script refuses other client connections with its login, including
+idle ones, and locks the affected tables against concurrent writes. Stop writers before the
+maintenance window and keep them stopped until verification is complete.
+
+The migration reads workspace task files and writes only PostgreSQL. Without `--dry-run` it
+prints changed-row counts after commit. Running it again should give zeros. On failure every
+change rolls back.
 
 Command tasks are translated directly. The bundled Gmail program recognizes the original
 module by its digest and takes its initial memory from that workspace's last five deliveries.

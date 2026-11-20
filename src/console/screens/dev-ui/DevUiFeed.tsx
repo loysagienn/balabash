@@ -47,7 +47,7 @@ Let the user publish an app at \`/p/<slug>\` and unpublish it.
 - unpublishing frees the slug;
 - \`npm run types\` and \`npm run build\` must pass.
 
-Agree on the URL scheme with the architect. Restart only through \`request_restart\`.
+Agree on the URL scheme with the architect. Restart only through \`system_request_restart\`.
 
 Follow-ups, so this message is long enough to fold:
 

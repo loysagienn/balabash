@@ -3,8 +3,6 @@
 import type { Prisma } from '../../prisma-generated/client.ts';
 
 const names = {
-  send_file: 'send_message',
-  send_images: 'send_message',
   workspace_export_file: 'export_file',
   workspace_import_file: 'import_file',
   remote_fetch_file: 'fetch_thread_file',
@@ -47,19 +45,6 @@ const names = {
   disconnect_connection: 'connections_disconnect',
 };
 
-const spawnFunctions = [
-  'architect',
-  'auth',
-  'browser',
-  'codex',
-  'designer',
-  'engineer',
-  'gardener',
-  'image_generator',
-  'manager',
-  'scheduler',
-];
-
 export async function migrateCalls(tx: Prisma.TransactionClient) {
   // A start has the same shape in both versions. Exclude pairs already
   // written by the new writer (including names belonging to remote tools).
@@ -72,8 +57,6 @@ export async function migrateCalls(tx: Prisma.TransactionClient) {
       SELECT e.seq, e.payload->>'functionName' AS old_name, CASE
         WHEN e.payload->>'functionName' = 'storage_get_file'
           THEN CASE WHEN e.agent_name = 'coordinator' THEN 'view_file' ELSE 'get_file_url' END
-        WHEN e.agent_name = 'browser' AND e.payload->>'functionName' = 'finish' THEN 'end_thread'
-        WHEN e.agent_name = 'coordinator' AND ${JSON.stringify(spawnFunctions)}::jsonb ? (e.payload->>'functionName') THEN 'spawn_agent'
         ELSE ${JSON.stringify(names)}::jsonb ->> (e.payload->>'functionName') END AS new_name
       FROM events e
       WHERE (e.type = 'tool.call.completed' AND e.payload ? 'result')

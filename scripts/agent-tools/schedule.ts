@@ -53,19 +53,25 @@ async function seedGmail(tx: Tx, task: ScheduledTaskModel) {
     ORDER BY seq DESC LIMIT 5`;
 }
 
+async function optionalSource(file: string) {
+  try {
+    return await fs.readFile(file);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    return undefined;
+  }
+}
+
 async function replacement(task: ScheduledTaskModel, workspaces: string, programs?: string) {
   // An installation may have different code under the same slug.
   if (programs) {
-    try {
-      return await fs.readFile(path.join(programs, task.workspaceId, task.slug + '.js'), 'utf8');
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-    }
+    const program = await optionalSource(path.join(programs, task.workspaceId, task.slug + '.js'));
+    if (program) return program.toString('utf8');
   }
   if (task.slug === 'gmail-new-mail') {
-    const source = await fs.readFile(path.join(workspaces, task.workspaceId, 'tasks', task.slug + '.ts'));
+    const source = await optionalSource(path.join(workspaces, task.workspaceId, 'tasks', task.slug + '.ts'));
     if (
-      createHash('sha256').update(source).digest('hex') ===
+      source && createHash('sha256').update(source).digest('hex') ===
       '16fcbd40b77222d33516ab70dd684412e9789359c9ba0ebb009aab1f5bc39d27'
     ) {
       return gmailNewMail;

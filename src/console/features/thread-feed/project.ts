@@ -1059,7 +1059,9 @@ class Builder {
       const failed = is(event, 'tool.call.failed');
       const output = failed
         ? (typeof event.payload.error === 'string' ? event.payload.error : JSON.stringify(event.payload.error, null, 2))
-        : ('value' in event.payload ? JSON.stringify(event.payload.value, null, 2) : bridgeOutput(event.payload.result));
+        : 'value' in event.payload
+          ? (typeof event.payload.value === 'string' ? event.payload.value : JSON.stringify(event.payload.value, null, 2))
+          : bridgeOutput(event.payload.result);
       const isError = failed || (!('value' in event.payload) && event.payload.result?.isError === true);
 
       if (item) {
