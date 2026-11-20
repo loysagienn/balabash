@@ -141,6 +141,7 @@ describe('the restart in the way', () => {
   it('is the facts’ pending unless the log completed it, else the log’s newest request after its newest completion', () => {
     resetSeq();
 
+    // Older journal entries can carry force; they follow the same pending-request rules.
     const requested = (seq: bigint) => event({ seq, type: 'system.restart.requested', actor: 'system', threadId: 't1', createdAt: request.requestedAt, payload: { reason: 'a build', requestedBy: 'engineer', force: true } });
     const completed = (seq: bigint, requestSeq: number) => event({ seq, type: 'system.restart.completed', actor: 'system', targetThreadId: 'main', payload: { reason: 'a build', requestSeq } });
     const pending = { seq: 7, own: true, reason: 'a build', requestedAt: request.requestedAt, requestedBy: 'engineer', threadId: 't1', waiting };

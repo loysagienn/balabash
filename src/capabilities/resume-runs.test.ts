@@ -33,10 +33,10 @@ before(async () => {
 
 after(() => stand.stop());
 
-async function startChild(agent: string, parent: string = stand.mainThreadId): Promise<string> {
+async function startChild(agent: string, parent: string = stand.mainThreadId, policy: JsonObject = {}): Promise<string> {
   const id = randomUUID();
 
-  await appendEvent({ type: 'thread.started', actor: 'system', workspaceId: stand.workspaceId, threadId: id, targetThreadId: parent, payload: { agent, input: 'go' } });
+  await appendEvent({ type: 'thread.started', actor: 'system', workspaceId: stand.workspaceId, threadId: id, targetThreadId: parent, payload: { agent, input: 'go', ...policy } });
 
   return id;
 }
@@ -66,20 +66,26 @@ describe('savedSessionOf', () => {
 });
 
 describe('the boot sweep and the resume', () => {
-  test('cancel only the run threads without a saved session; the cascade takes a saved child of an unsaved parent', async t => {
+  test('cancel local runs without a saved session and count only direct cancellations', async t => {
     const saved = await startChild('engineer');
     t.after(() => appendEvent({ type: 'thread.cancelled', actor: 'system', workspaceId: stand.workspaceId, threadId: saved, payload: { reason: 'test cleanup' } }));
     const unsaved = await startChild('manager');
     const savedChildOfUnsaved = await startChild('browser', unsaved);
+    const unsavedChild = await startChild('engineer', unsaved);
+    const remote = await startChild('fake_agent', stand.mainThreadId, { remote: true });
+    const remoteChild = await startChild('fake_agent', unsaved, { remote: true });
 
     await journal(saved, 'engineer', 'session.sdk', { sdk: 'claude', sdkSessionId: 's1' });
     await journal(savedChildOfUnsaved, 'browser', 'session.sdk', { sdk: 'claude', sdkSessionId: 's2' });
 
-    await resume.tombstoneUnresumableThreads();
+    assert.equal(await resume.tombstoneUnresumableThreads(), 1);
 
     assert.equal((await threads.getThread(saved))?.status, 'active');
     assert.equal((await threads.getThread(unsaved))?.status, 'cancelled');
     assert.equal((await threads.getThread(savedChildOfUnsaved))?.status, 'cancelled');
+    assert.equal((await threads.getThread(unsavedChild))?.status, 'cancelled');
+    assert.equal((await threads.getThread(remoteChild))?.status, 'cancelled');
+    assert.equal((await threads.getThread(remote))?.status, 'active');
     assert.equal((await events.getLastThreadEvent(unsaved, 'thread.cancelled'))?.payload.reason, 'process_restart');
   });
 

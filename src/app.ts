@@ -297,8 +297,7 @@ consumers.push(
     // of programs with the calls and commands they started, a scheduled run
     // from the moment its task is taken until its outcome is journaled and
     // told, and the former workspace jobs. The safe window waits for them.
-    // What is still running
-    // when the process is told to stop is stopped by the shutdown below.
+    // On shutdown we stop any work that is still running.
     hasActiveJobs: () => isAnyJobRunning() || hasRunningWork() || hasUnsettledRuns(),
     // The remote engine's verbs in flight (its state is durable; a verb
     // half-way through is better finished than replayed).

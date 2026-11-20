@@ -10,8 +10,7 @@ import type { DbClient } from '../db/client.ts';
 import type { JsonObject, JsonValue, Thread, ThreadCounts, ThreadStatus, ThreadSummary } from './contract.ts';
 import type { ThreadModel as ThreadRow } from '../../prisma-generated/models.ts';
 import { appendEvent, completionProjectionData } from './append.ts';
-import type { AppendResult } from './append.ts';
-import { AppendError, TERMINAL_TYPES, THREAD_CANCELLED, THREAD_STARTED, toEvent } from './envelope.ts';
+import { AppendError, TERMINAL_TYPES, THREAD_STARTED, toEvent } from './envelope.ts';
 import { config } from '../config/index.ts';
 import type { ProgramOrigin } from './event-types.ts';
 import { threadStartFields } from '../projections/thread.ts';
@@ -430,35 +429,6 @@ export async function startThread(options: StartThreadInput): Promise<Thread> {
   });
 
   return (await getThread(threadId))!;
-}
-
-// ---------------------------------------------------------------------------
-// On boot, cancel local run threads without a session to resume. Cancelling
-// a parent cascades to its descendants, including remote or resumable ones.
-export async function tombstoneActiveThreads(spare: (thread: Thread) => Promise<boolean>): Promise<number> {
-  const rows = await listActiveChildThreads();
-
-  let cancelled = 0;
-
-  for (const row of rows) {
-    if (await spare(row)) {
-      continue;
-    }
-
-    const result: AppendResult = await appendEvent({
-      type: THREAD_CANCELLED,
-      actor: 'system',
-      workspaceId: row.workspaceId,
-      threadId: row.id,
-      payload: { reason: 'process_restart' },
-    });
-
-    if (result.written) {
-      cancelled += 1;
-    }
-  }
-
-  return cancelled;
 }
 
 // ---------------------------------------------------------------------------
