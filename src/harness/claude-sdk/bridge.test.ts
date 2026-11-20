@@ -32,7 +32,7 @@ test('Claude opens granted leaves, refreshes its list and journals the catalog v
   const { agent } = await import('../../../agents/engineer.ts');
   (await import('../../capabilities/agent-catalog.ts')).loadAgents();
   await (await import('../../tree/index.ts')).startTree();
-  const { createClaudeBridge } = await import('./bridge.ts');
+  const { createClaudeBridge, createClaudePort } = await import('./bridge.ts');
   const { prisma } = await import('../../db/client.ts');
   const { workspaceId, mainThreadId } = stand;
   const { id: threadId } = await (await import('../../core/threads.ts')).startThread({
@@ -75,7 +75,12 @@ test('Claude opens granted leaves, refreshes its list and journals the catalog v
   await prisma.connection.create({ data: { workspaceId, server: 'gmail', accountKey: 'home', displayName: 'Home', status: 'pending' } });
   assert.equal(await bridge.refresh('another account'), 'another account');
   const name = 'gmail_send_email';
+  const samplePort = await createClaudePort(passport, workspaceId, threadId);
+  const beforeSamples = await prisma.event.count();
+  const samples = await Array.fromAsync(samplePort.sampleOpenings());
+  assert.equal(await prisma.event.count(), beforeSamples);
   const leaf = await call('describe', { name });
+  assert.deepEqual(samples.find(sample => sample.name === name)?.result, JSON.parse(leaf.text));
   const value = JSON.parse(leaf.text);
   assert.equal(value.parent, 'gmail');
   assert.deepEqual(value.accounts.map((a: { account: string }) => a.account).sort(), ['home', 'work']);

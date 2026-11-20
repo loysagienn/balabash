@@ -1,7 +1,7 @@
 // The catalog view for a port that assembles the model's context.
-import { catalogContext, catalogInstructions, grantKey, grantedCapabilities, guideForLeaf, portActions, vertexLine } from './catalog-context.ts';
+import { catalogContext, catalogInstructions, grantKey, grantedCapabilities, guideForLeaf, portActions, sampleOpenings, vertexLine } from './catalog-context.ts';
 import {
-  ACTION_NAMES, describe, FileRef, portSchema, grantedVertex, ruleText, toCapabilityError, returnTypeText,
+  ACTION_NAMES, FileRef, portSchema, grantedVertex, ruleText, toCapabilityError, returnTypeText,
   type DescribeValue, type Catalog, type CatalogAction, type CatalogCapability, type FileRefValue, type Grant, type JsonValue,
 } from '../catalog/index.ts';
 import type { AgentPassport } from '../core/contract.ts';
@@ -55,15 +55,6 @@ export async function createCatalogPort(agent: AgentPassport, workspaceId: strin
     return { kind: 'catalog', text, definition: definition(tree, vertex) };
   }
 
-  // Independent first openings for the offline showcase. No call dispatcher,
-  // journal or live opening state is involved.
-  async function* sampleOpenings() {
-    for (const name of grant.vertices) {
-      const opened = await describe(grant, name ? { name } : {}, { connections });
-      yield { name, result: renderOpening(opened, new Set()) };
-    }
-  }
-
   async function dispatch(call: FunctionCall, openings: CatalogOpeningContext): Promise<CatalogResult> {
     let input: JsonValue;
     try {
@@ -77,11 +68,11 @@ export async function createCatalogPort(agent: AgentPassport, workspaceId: strin
       if ('error' in result) return { kind: 'catalog', isError: true, text: preview(grant, result.error, result.seq, 'error') };
       const { value, seq, opened } = result;
       if (opened) {
-        const result = renderOpening(opened, openings.seenNodes);
-        if (result.definition && !openings.introduce(call.callId, result.definition, result.text)) {
-          return { kind: 'catalog', text: result.text };
+        const rendered = renderOpening(opened, openings.seenNodes);
+        if (rendered.definition && !openings.introduce(call.callId, rendered.definition, rendered.text)) {
+          return { kind: 'catalog', text: rendered.text };
         }
-        return result;
+        return rendered;
       }
       const text = preview(grant, value, seq, 'value');
       return result.name === 'view_file' ? showFile(text, FileRef.parse(value)) : { kind: 'catalog', text };
@@ -96,7 +87,9 @@ export async function createCatalogPort(agent: AgentPassport, workspaceId: strin
   const instructions = catalogInstructions(grant,
     opening === 'signature' ? 'Use the signature in the transcript. If it is missing or truncated, describe the capability again.' :
     'Use describe to add a capability to the available functions. If its name appears only in the transcript, describe it again. Call the function by its catalog name.');
-  return { instructions, tools, capabilityDefinitions, sampleOpenings, dispatch, grantKey: grantKey(grant) };
+  return { instructions, tools, capabilityDefinitions, dispatch, grantKey: grantKey(grant),
+    sampleOpenings: () => sampleOpenings(grant, connections, opened => renderOpening(opened, new Set())),
+  };
 }
 
 async function showFile(text: string, file: FileRefValue): Promise<CatalogResult> {

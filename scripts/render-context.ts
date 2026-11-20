@@ -106,6 +106,11 @@ async function renderAgent(declaration: AgentDeclaration, workspaceId: string): 
     JSON.stringify({ inputSchema: tool.inputSchema, outputSchema: tool.outputSchema, _meta: tool._meta }, null, 2), '\`\`\`',
   ].join('\n'));
   sections.push(renderSection(declaration.sdk === 'codex' ? 'Catalog functions in exec (ALL_TOOLS)' : 'MCP catalog (alwaysLoad actions and deferred capabilities)', definitions.join('\n\n')));
+  const samples: string[] = [];
+  for await (const { name, result } of port.sampleOpenings()) {
+    samples.push([`### ${name || '(root)'}`, '```json', JSON.stringify(result, null, 2), '```'].join('\n'));
+  }
+  sections.push(renderSection('First opening of each granted vertex', samples.join('\n\n')));
   return `${sections.join('\n\n')}\n`;
 }
 

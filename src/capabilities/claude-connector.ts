@@ -16,11 +16,12 @@ const CLAUDE_CONNECTOR_BETA_HEADER = 'mcp-servers-2025-12-04';
 function authError(serverName: string, credentials: OperatorCredentials, detail?: string | null): CapabilityError {
   const ttl = tokenTtlMs(credentials);
   const state = ttl !== null && ttl <= 0 ? 'has expired' : 'was rejected by the proxy';
-  const recovery = credentials.source === 'env'
-    ? 'Replace CLAUDE_CODE_OAUTH_TOKEN in the service environment.'
-    : 'Ask the operator to run a Claude Code turn on this host to refresh the CLI login. If prompted, sign in again.';
+  const envToken = credentials.source === 'env';
+  const recovery = envToken
+    ? 'Ask the operator to replace CLAUDE_CODE_OAUTH_TOKEN in the service environment.'
+    : 'Ask the operator to send a message to a Claude agent in Balabash or run `claude` on this host, and to sign in again if the CLI asks.';
   return new CapabilityError('auth_required',
-    `Claude connector "${serverName}": the operator’s Claude CLI login ${state}. ${detail ? detail + '. ' : ''}${recovery}`);
+    `Claude connector "${serverName}": the operator’s ${envToken ? 'Claude token' : 'Claude CLI login'} ${state}. ${detail ? detail + '. ' : ''}${recovery}`);
 }
 
 // The proxy's 401 body is an Anthropic API error envelope; its message is the
@@ -49,7 +50,7 @@ function createClaudeConnectorFetch(serverName: string): FetchLike {
 
   return async (url, init) => {
     const credentials = await resolveOperatorCredentials().catch(() => {
-      throw new CapabilityError('auth_required', 'Ask the operator to sign in with the Claude CLI on this host.');
+      throw new CapabilityError('auth_required', `Claude connector "${serverName}" could not read the operator’s Claude CLI login. Ask the operator to run \`claude\` on this host and sign in.`);
     });
     const ttl = tokenTtlMs(credentials);
 

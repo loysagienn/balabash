@@ -1,5 +1,5 @@
 import { agentGrantPolicy, isRemoteAgent, startable } from '../capabilities/agent-catalog.ts';
-import { computeGrant, grantedChildren, grantedGuide, type ActionName, type CatalogNode, type Grant } from '../catalog/index.ts';
+import { computeGrant, describe, grantedChildren, grantedGuide, type ActionName, type CatalogNode, type ConnectionsPort, type DescribeValue, type Grant } from '../catalog/index.ts';
 import type { AgentPassport } from '../core/contract.ts';
 import { catalog } from '../tree/index.ts';
 import { connectionsPort } from '../tree/services.ts';
@@ -11,6 +11,15 @@ export async function catalogContext(agent: AgentPassport, workspaceId: string, 
   const caller = { workspaceId, threadId, agentName: agent.name };
   const grant = await computeGrant(catalog(), agentGrantPolicy(agent, actions), { caller, connections });
   return { grant, connections };
+}
+
+// Each showcase entry is a first opening, independent of its neighbours.
+// The same port formatter handles live describe results; sampling never dispatches a call.
+export async function* sampleOpenings<T>(grant: Grant, connections: ConnectionsPort, render: (opened: DescribeValue) => T) {
+  for (const name of grant.vertices) {
+    const opened = await describe(grant, name ? { name } : {}, { connections });
+    yield { name, result: render(opened) };
+  }
 }
 
 export function grantKey(grant: Grant): string {

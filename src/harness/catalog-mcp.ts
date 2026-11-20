@@ -19,7 +19,7 @@ export async function mcpCatalog(agent: AgentPassport, workspaceId: string, thre
     entry, action,
   }));
   return {
-    grant, entries,
+    grant, connections, entries,
     call: (name: string, input: JsonValue) => dispatchCatalogCall(grant, connections, { name, input, callId: randomUUID() }),
   };
 }

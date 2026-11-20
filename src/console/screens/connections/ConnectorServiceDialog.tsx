@@ -23,7 +23,7 @@ export function ConnectorServiceDialog({ service, onClose }: { service: Connecto
         ) : service.state === 'token_expired' ? (
           <Note state="act" icon="clock-alert">
             The operator’s Claude CLI login expired{service.tokenExpiresAt ? ` ${startedLabel(service.tokenExpiresAt, now)}` : ''}.
-            {' '}Run a Claude Code turn on this host to refresh it. If prompted, sign in again.
+            {' '}Send a message to a Claude agent in Balabash or run <code>claude</code> on this host. Sign in again if the CLI asks.
           </Note>
         ) : (
           <Note state="err" icon="triangle-alert">

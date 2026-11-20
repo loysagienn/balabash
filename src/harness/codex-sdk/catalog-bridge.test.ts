@@ -1,6 +1,8 @@
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { AgentDeclaration, RunContext, ThreadSummary } from '../../core/contract.ts';
@@ -14,6 +16,27 @@ before(async () => {
   await (await import('../../tree/index.ts')).startTree();
 });
 after(() => stand.stop());
+
+test('Codex samples preserve the first-opening guide and match structured MCP results', async t => {
+  const { agent } = await import('../../../agents/codex.ts');
+  const { createCodexPort } = await import('./catalog-bridge.ts');
+  const { prisma } = await import('../../db/client.ts');
+  const port = await createCodexPort(agent, stand.workspaceId, stand.mainThreadId);
+  const client = new Client({ name: 'showcase-test', version: '1' });
+  const [local, remote] = InMemoryTransport.createLinkedPair();
+  await port.createServer().connect(local);
+  await client.connect(remote);
+  t.after(() => client.close());
+  const count = await prisma.event.count();
+  const samples = await Array.fromAsync(port.sampleOpenings());
+  assert.equal(await prisma.event.count(), count);
+  for (const name of ['projects_get', 'projects']) {
+    const sample = samples.find(entry => entry.name === name);
+    assert.ok(sample);
+    const answer = await client.callTool({ name: 'describe', arguments: { name } });
+    assert.deepEqual(sample.result, answer.structuredContent);
+  }
+});
 
 // Drive the session runner and the real SDK subprocess/HTTP boundary. Only
 // the CLI's conversation and the runner's outer message sink are scripted.

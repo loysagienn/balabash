@@ -161,7 +161,7 @@ test('a connector discovers paged contracts, grants by recipient, journals calls
     const denied = await send();
     assert.ok('error' in denied);
     assert.equal(denied.error.kind, 'auth_required');
-    assert.match(denied.error.message, /CLAUDE_CODE_OAUTH_TOKEN/);
+    assert.match(denied.error.message, /Claude token was rejected[\s\S]+Ask the operator to replace CLAUDE_CODE_OAUTH_TOKEN/);
     assert.equal(requests.filter(r => r.name === 'slack_send_message').length, sent + 2);
     assert.equal((await connectorStatuses())[0].state, 'failed');
     assert.equal(grantKey((await context()).grant), grantKey(first.grant));
@@ -243,11 +243,17 @@ test('a connector discovers paged contracts, grants by recipient, journals calls
     assert.equal('error' in expiredCall && expiredCall.error.kind, 'auth_required');
     assert.ok('error' in expiredCall);
     assert.match(expiredCall.error.message, /operator’s Claude CLI login has expired/);
-    assert.match(expiredCall.error.message, /operator to run a Claude Code turn on this host/);
+    assert.match(expiredCall.error.message, /Ask the operator to send a message to a Claude agent in Balabash or run `claude` on this host/);
     assert.equal(requests.length, beforeExpiry);
     expiresAt = Date.now() + 60_000;
     await connectorStatuses();
     assert.ok((await context()).grant.vertices.has('slack'));
     assert.equal(requests.at(-1)?.token, 'Bearer test-file');
+    fakeStore.mock.mockImplementation(async (...args: Parameters<typeof readFile>) =>
+      args[0] === credentialsFile ? '{}' : readFile(...args));
+    const unreadable = await send();
+    assert.ok('error' in unreadable);
+    assert.equal(unreadable.error.kind, 'auth_required');
+    assert.match(unreadable.error.message, /Claude connector "slack" could not read the operator’s Claude CLI login/);
   });
 });

@@ -3,9 +3,9 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
-import { grantedGuide, grantedVertex, ruleText, returnTypeText, type JsonValue } from '../../catalog/index.ts';
+import { grantedGuide, grantedVertex, ruleText, returnTypeText, type DescribeValue, type JsonValue } from '../../catalog/index.ts';
 import type { AgentPassport, JsonObject, SessionEnvironmentTool } from '../../core/contract.ts';
-import { catalogInstructions, grantKey } from '../catalog-context.ts';
+import { catalogInstructions, grantKey, sampleOpenings } from '../catalog-context.ts';
 import { mcpCatalog, mcpError, registerCatalogHandlers } from '../catalog-mcp.ts';
 import { BRIDGE_SERVER } from '../sdk-mcp-config.ts';
 
@@ -18,8 +18,19 @@ export async function createClaudePort(agent: AgentPassport, workspaceId: string
   const { grant } = catalog;
   const tools: Tool[] = catalog.entries.map(({ tool, action }) =>
     action ? { ...tool, _meta: { 'anthropic/alwaysLoad': true } } : tool);
+  function openingValue(opened: DescribeValue) {
+    if (opened.kind === 'node') return opened;
+    const leaf = grantedVertex(grant, opened.name);
+    if (leaf?.kind !== 'capability') throw new Error('Missing described capability');
+    // The CLI hook reads this companion data from the MCP result.
+    return {
+      ...opened, parent: leaf.parent.fullName, guide: leaf.parent.fullName ? grantedGuide(grant, leaf.parent) : [],
+      returns: returnTypeText(leaf), rules: leaf.inputRules.map(ruleText),
+    };
+  }
   return {
     tools,
+    sampleOpenings: () => sampleOpenings(grant, catalog.connections, openingValue),
     grantKey: grantKey(grant),
     instructions: catalogInstructions(grant, RULE),
     async call(name: string, input: JsonValue) {
@@ -27,18 +38,7 @@ export async function createClaudePort(agent: AgentPassport, workspaceId: string
       if ('error' in answer) {
         return mcpError(answer.error);
       }
-      const { opened } = answer;
-      let value = answer.value;
-      if (opened?.kind === 'capability') {
-        const leaf = grantedVertex(grant, opened.name);
-        if (leaf?.kind !== 'capability') throw new Error('Missing described capability');
-        // Text doubles as the usable result if the CLI skips the mod. A
-        // successful hook replaces it with a reference and just the companion.
-        value = {
-          ...opened, parent: leaf.parent.fullName, guide: leaf.parent.fullName ? grantedGuide(grant, leaf.parent) : [],
-          returns: returnTypeText(leaf), rules: leaf.inputRules.map(ruleText),
-        };
-      }
+      const value = answer.opened ? openingValue(answer.opened) : answer.value;
       return { content: [{ type: 'text' as const, text: JSON.stringify(value) }] };
     },
   };
