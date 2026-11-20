@@ -58,14 +58,14 @@ describe('the grant', () => {
     );
   });
 
-  it('cuts a node whose account connection has no connected account', async () => {
+  it('cuts a node whose account connection has no accounts', async () => {
     const none = await grantOf(everything, testConnections({ secrets: ['search'] }));
     const expired = await grantOf(everything, testConnections({ accounts: { mail: [OLD] }, secrets: ['search'] }));
     const one = await grantOf(everything, testConnections({ accounts: { mail: [OLD, WORK] }, secrets: ['search'] }));
 
     assert.equal(none.vertices.has('mail'), false);
     assert.equal(none.vertices.has('mail_labels_list'), false);
-    assert.equal(expired.vertices.has('mail'), false);
+    assert.equal(expired.vertices.has('mail_send'), true);
     assert.equal(one.vertices.has('mail_send'), true);
   });
 

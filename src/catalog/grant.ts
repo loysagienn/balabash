@@ -6,7 +6,7 @@
 // - The capabilities of the root are cut one by one. Below the root a leaf is
 //   never cut alone: the capabilities of a node come together.
 // - A node whose connection is not in place is cut whatever the policy says:
-//   an account connection needs a connected account in the workspace, a
+//   an account connection needs an account of any status in the workspace, a
 //   secret connection needs the installation's secrets.
 // - A recipe of a guide is shown only when the caller has everything it
 //   requires.
@@ -69,9 +69,9 @@ async function connectionInPlace(
     return connections.secretsReady(node.connection.service);
   }
 
-  return (await connections.accounts(workspaceId, node.connection.service)).some(
-    account => account.status === 'connected',
-  );
+  const accounts = await connections.accounts(workspaceId, node.connection.service);
+
+  return accounts.length > 0;
 }
 
 export async function computeGrant(

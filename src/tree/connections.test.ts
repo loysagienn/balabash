@@ -24,6 +24,7 @@ import {
   buildCatalog,
   capability,
   computeGrant,
+  describe as describeVertex,
   invokeCapability,
   node,
 } from '../catalog/index.ts';
@@ -305,6 +306,11 @@ describe('connections: the accounts of a service', () => {
     assert.match(first.url, /^https:\/\/console\.test\/connect\/mailbox\?nonce=/);
     assert.ok(Date.parse(first.expiresAt) > Date.now());
     assert.deepEqual(first.account, { account: 'default', name: 'mailbox', identity: null, status: 'pending' });
+
+    const mailbox = await describeVertex(await grantNow(), { name: 'mailbox' }, { connections: port });
+    assert.ok(mailbox.kind === 'node');
+    assert.deepEqual(mailbox.accounts, [first.account]);
+    await refuses(invoke('mailbox_token', { account: 'default' }), 'auth_required', /is not connected \(pending\)/);
 
     // The only account is the one a link without an address is for.
     assert.equal((await invoke('connections_authorize', { service: 'mailbox' })).account.account, 'default');

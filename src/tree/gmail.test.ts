@@ -127,7 +127,7 @@ function seed(): void {
 
   messages.set(
     'm1',
-    message('m1', 't1', { From: 'Anna <anna@example.com>', To: 'me@example.com', Cc: 'boss@example.com', Subject: 'The report', 'Message-ID': '<m1@mail.example.com>', References: '<m0@mail.example.com>' }, [
+    message('m1', 't1', { From: 'Anna <anna@example.com>', To: 'me@example.com', Cc: 'boss@example.com', Bcc: 'incoming@example.com', Subject: 'The report', 'Message-ID': '<m1@mail.example.com>', References: '<m0@mail.example.com>' }, [
       {
         mimeType: 'multipart/alternative',
         parts: [
@@ -516,7 +516,8 @@ describe('gmail: the access of the account', () => {
     await account('default', { access_token: 'revoked-access', refresh_token: 'dead-refresh' });
     await refuses(gmail('get_message', { messageId: 'm3' }), 'auth_required', /^The account "default" of "gmail" can no longer act: the provider no longer honors the refresh token/);
     assert.equal((await rowOf('default'))?.status, 'reauthorization_required');
-    assert.equal((await grantNow()).vertices.has('gmail'), false);
+    assert.equal((await grantNow()).vertices.has('gmail'), true);
+    await refuses(gmail('get_message', { messageId: 'm3' }), 'auth_required', /is not connected \(reauthorization_required\)/);
 
     await account('default', { access_token: 'access-1', refresh_token: 'good-refresh' });
   });
@@ -622,6 +623,7 @@ describe('gmail: reading', () => {
         from: 'Anna <anna@example.com>',
         to: 'me@example.com',
         cc: 'boss@example.com',
+        bcc: null,
         subject: 'The report',
         rfc822MessageId: '<m1@mail.example.com>',
         body: '',
@@ -642,6 +644,17 @@ describe('gmail: reading', () => {
       to: null,
       attachments: [],
     });
+  });
+
+  test('a draft and a sent message expose their Bcc header when present', async () => {
+    for (const label of ['DRAFT', 'SENT']) {
+      const id = label.toLowerCase();
+
+      outsideState.messages.set(id, message(id, 'bcc', { Bcc: 'archive@example.com' }, [], { labelIds: [label] }));
+      assert.equal((await gmail('get_message', { messageId: id })).bcc, 'archive@example.com');
+      outsideState.messages.set(id, message(id, 'bcc', {}, [], { labelIds: [label] }));
+      assert.equal((await gmail('get_message', { messageId: id })).bcc, null);
+    }
   });
 
   test('a part of the body Gmail gives by reference is read: the body is whole, or the call fails', async () => {

@@ -54,6 +54,7 @@ export const GmailMessage = namedType(
     from: z.string().nullable(),
     to: z.string().nullable(),
     cc: z.string().nullable(),
+    bcc: z.string().nullable().describe('Bcc header of a draft or sent message; null for incoming mail.'),
     subject: z.string().nullable(),
     rfc822MessageId: z.string().nullable().describe('The Message-ID header, not the Gmail id.'),
     body: z
@@ -183,15 +184,17 @@ function partText(part: MailPart): string {
 export function messageValue(message: MailResource): GmailMessageValue {
   const { parts, html } = bodyParts(message.payload);
   const body = parts.map(partText).join('\n');
+  const labelIds = message.labelIds ?? [];
 
   return {
     messageId: idOf(message.id, 'a message'),
     threadId: idOf(message.threadId, 'the conversation of a message'),
-    labelIds: message.labelIds ?? [],
+    labelIds,
     date: dateOf(message),
     from: header(message.payload, 'From'),
     to: header(message.payload, 'To'),
     cc: header(message.payload, 'Cc'),
+    bcc: labelIds.includes('DRAFT') || labelIds.includes('SENT') ? header(message.payload, 'Bcc') : null,
     subject: header(message.payload, 'Subject'),
     rfc822MessageId: header(message.payload, 'Message-ID'),
     body: html ? htmlToText(body) : body,

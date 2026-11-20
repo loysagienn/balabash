@@ -150,6 +150,26 @@ describe('the registry of tasks', () => {
     assert.equal((created?.payload as JsonObject).wake, false);
   });
 
+  test('the first pass after downtime delivers and consumes an overdue one-shot', async () => {
+    const slug = 'overdue';
+    await invoke('schedule_create_task', {
+      slug, name: 'Overdue', kind: 'note', note: 'Call today', at: '2020-01-01T00:00:00Z',
+    });
+
+    const { startScheduleHeart } = await import('../schedule/heart.ts');
+    const heart = startScheduleHeart();
+
+    try {
+      const fired = await until(async () => (await eventsOf('schedule.fired', slug))[0], 'the overdue note');
+
+      assert.equal(fired.targetThreadId, stand.mainThreadId);
+      assert.equal((fired.payload as JsonObject).note, 'Call today');
+      assert.equal(await prisma.scheduledTask.count({ where: { workspaceId: stand.workspaceId, slug } }), 0);
+    } finally {
+      heart.stop();
+    }
+  });
+
   test('registers a program with its code, its limit of time and a cron resolved to the next moment', async () => {
     const task = await invoke('schedule_create_task', {
       slug: 'digest',

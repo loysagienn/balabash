@@ -333,7 +333,7 @@ const spawnAgent = capability({
       .optional(),
     headless: z
       .boolean()
-      .describe("true: the child talks only to you; false: to the user. Default: the agent's own mode.")
+      .describe("A headless child talks to its operator. Tasks and child threads default to headless when available. The secretary uses the agent's default.")
       .optional(),
     files: z.array(FileId).describe('Attached to the first message. Not with adopt.').optional(),
     project: z.string().describe('Slug of the project the work concerns.').optional(),
@@ -390,7 +390,7 @@ const spawnAgent = capability({
 
     // An agent of the repository runs in the one mode it declares; a remote
     // agent in either, by default the one its spawner implies.
-    const own = remote ? parent.parentId !== null : agent.headless === true;
+    const own = remote ? parent.parentId !== null || ctx.program?.task != null : agent.headless === true;
     const headless = input.headless ?? own;
 
     if (!remote && headless !== own) {

@@ -602,8 +602,8 @@ describe('a program', () => {
       'let ending;',
       "try { await call('end_thread', { title: 'T', description: 'D', summary: 'S' }); } catch (error) { ending = error.kind; }",
       "const remote = await call('spawn_agent', { agent: 'fake_agent', title: 'Remote', prompt: 'Work.' });",
-      "const relayed = await call('spawn_agent', { agent: 'fake_agent', title: 'Relayed', prompt: 'Work.', headless: true });",
-      'return { child: child.threadId, ending, modes: [remote.headless, relayed.headless] };',
+      "const surfaced = await call('spawn_agent', { agent: 'fake_agent', title: 'Talk to user', prompt: 'Work.', headless: false });",
+      'return { child: child.threadId, ending, modes: [remote.headless, surfaced.headless] };',
     ].join('\n');
 
     await invoke('schedule_create_task', { slug: 'digest', name: 'Digest', kind: 'program', code });
@@ -631,11 +631,15 @@ describe('a program', () => {
     const word = (await written(stand.mainThreadId, 'thread.message')).find(event => event.targetThreadId === run.value.child)!;
 
     assert.deepEqual([word.payload.text, word.payload.program], ['Start with the top.', origin]);
-    // A remote child of a task runs in the mode of a child of the main
-    // thread unless the task says otherwise: it talks to the user, and what
-    // it asks is asked in its own thread; `headless: true` brings its
-    // questions to the secretary.
-    assert.deepEqual(run.value.modes, [false, true]);
+    assert.deepEqual(run.value.modes, [true, false]);
+  });
+
+  test('run in place by the secretary uses the same child mode as a direct call', async () => {
+    const { runProgram } = await import('../catalog/index.ts');
+    const code = "const child = await call('spawn_agent', { agent: 'fake_agent', title: 'Remote', prompt: 'Work.' }); return child.headless;";
+    const result = await runProgram(main, { code }, { connections: services.connectionsPort() });
+
+    assert.equal(result, false);
   });
 
   test('run in place by a thread leaves the id of its run', async () => {

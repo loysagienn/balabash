@@ -107,7 +107,7 @@ const createTaskCapability = capability({
   name: 'create_task',
   summary: 'Register a scheduled task: a note or a program, with or without a trigger',
   description:
-    'Register a scheduled task; nothing runs at the call. Kinds: note — a text delivered to the main thread at the trigger, for the secretary to act on; program — code run at the trigger the way `run_program` runs it. Without `cron` or `at` the task runs only by hand. A one-shot task is consumed by firing. A moment missed while the app was down, or while the previous run is still going, is skipped.',
+    'Register a task for later execution. A note sends text to the main thread for the secretary to act on. A program runs code as `run_program` does. Without `cron` or `at`, the task runs only by hand. A one-shot fires at or after `at` and is consumed. If overdue at startup, it fires then. Missed cron times and triggers during a previous run are skipped.',
   inputRules: [{ atMostOne: ['cron', 'at'] }],
   input: z.strictObject({
     slug: z.string().max(SLUG_MAX_LENGTH).regex(SLUG_PATTERN).describe('Unique across the installation.'),
@@ -341,7 +341,7 @@ export const schedule = node({
       text: 'What a scheduled program returns is delivered to the main thread as a schedule.fired event; returning null is silence. An exception or a timeout always lands there as a system.exception event.',
     },
     {
-      text: 'A scheduled program acts as the main thread of the workspace: `send_message` reaches the user, `spawn_agent` starts a child of the main thread, which reports to the secretary.',
+      text: 'A scheduled program works in the main thread: `send_message` reaches the user. A child started with `spawn_agent` is headless when available and sends questions to the secretary. Set headless to false for questions to reach the user in the child thread.',
       requires: ['send_message', 'spawn_agent'],
     },
     {
