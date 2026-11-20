@@ -1,6 +1,7 @@
-// Any connected account can discover the server's contract. Calls always
-// resolve the workspace account selected by their caller.
+// Discovery authority is workspace-local. Publish only the contracts shared
+// by the connected accounts there; calls always resolve the selected account.
 import { isDeepStrictEqual } from 'node:util';
+import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 import { accountAuthority, CapabilityError, type AccountConnection, type Node } from '../catalog/index.ts';
 import { registerAccountCatalog } from '../capabilities/connections/services.ts';
 import { withAccountBearer } from '../capabilities/account-mcp.ts';
@@ -14,10 +15,10 @@ import { connectionsPort } from './services.ts';
 type Config = Extract<ExternalServerConfig, { transport: 'http' }>;
 type Snapshot = {
   members: string[];
-  source: string | null;
+  publishedBy: string[];
   failedAccounts: Set<string>;
   publishFailed: boolean;
-  reservedInputs: string[];
+  excluded: string[];
   discoverAfter: number;
 };
 
@@ -62,53 +63,65 @@ export function configureAccountServer(name: string, config: Config, publish: (n
       return;
     }
     const state: Snapshot = states.get(workspaceId) ?? {
-      members: [], source: null, failedAccounts: new Set(), publishFailed: false, reservedInputs: [], discoverAfter: 0,
+      members: [], publishedBy: [], failedAccounts: new Set(), publishFailed: false, excluded: [], discoverAfter: 0,
     };
     states.set(workspaceId, state);
     const connected = accounts.filter(row => row.status === 'connected');
     const members = connected.map(row => row.id);
     if (!force && isDeepStrictEqual(state.members, members) && Date.now() < state.discoverAfter) return;
     state.members = members;
+    // A known contract remains describable through reauthorization. An
+    // entirely new set of accounts must earn its own contract.
+    const eligible = connected.length ? connected : accounts;
+    if (state.publishedBy.length && !eligible.some(row => state.publishedBy.includes(row.id))) {
+      publish(empty, workspaceId);
+      state.publishedBy = [];
+      state.excluded = [];
+    }
     for (const id of state.failedAccounts) if (!members.includes(id)) state.failedAccounts.delete(id);
     if (!connected.length) return;
 
     const issue = (message: string) => reportExtensionFailure('mcp-servers', name + '.json', message, report, workspaceId);
-    // Prefer the last account that supplied the contract. A new login does
-    // not require comparing tool lists or replacing a usable snapshot.
-    connected.sort((a, b) => Number(b.id === state.source) - Number(a.id === state.source));
-    state.discoverAfter = Date.now() + 60_000;
-    for (const row of connected) {
-      let tools;
+    const results = await Promise.all(connected.map(async row => {
       try {
         const authority = await connectionsPort().accountAuthority(workspaceId, name, row.accountKey);
-        tools = await withAccountBearer(name, row.accountKey, authority, null, token => listServerTools(bearer(token)));
+        const tools = await withAccountBearer(name, row.accountKey, authority, null, token => listServerTools(bearer(token)));
         state.failedAccounts.delete(row.id);
+        return { id: row.id, tools };
       } catch (error) {
         if (!state.failedAccounts.has(row.id)) {
           state.failedAccounts.add(row.id);
           await issue(`Account "${row.accountKey}": ${error instanceof Error ? error.message : String(error)}`);
         }
-        continue;
+        return null;
       }
+    }));
+    const opened = results.filter(result => result !== null);
+    state.discoverAfter = Date.now() + (state.failedAccounts.size ? 60_000 : 3_600_000);
+    if (!opened.length) return;
 
-      const allowed = tools.filter(tool => !Object.hasOwn(tool.inputSchema.properties ?? {}, 'account'));
-      const reserved = tools.filter(tool => Object.hasOwn(tool.inputSchema.properties ?? {}, 'account')).map(tool => tool.name).sort();
-      try {
-        publish(discoveredNode(settings, allowed, invoke, () => {
-          state.discoverAfter = Math.min(state.discoverAfter, Date.now() + 60_000);
-        }), workspaceId);
-        state.source = row.id;
-        state.discoverAfter = Date.now() + 3_600_000;
-        state.publishFailed = false;
-        if (reserved.length && !isDeepStrictEqual(state.reservedInputs, reserved)) {
-          await issue(`Tools omitted because their input declares the reserved field "account": ${reserved.join(', ')}`);
-        }
-        state.reservedInputs = reserved;
-      } catch (error) {
-        if (!state.publishFailed) await issue(error instanceof Error ? error.message : String(error));
-        state.publishFailed = true;
+    // Stable row order chooses the visible description when providers
+    // personalize titles or prose. The call contract is the name and schemas.
+    const [first, ...others] = opened;
+    const tools = first.tools.filter(tool => !Object.hasOwn(tool.inputSchema.properties ?? {}, 'account') &&
+      others.every(list => list.tools.some(candidate => sameContract(candidate, tool))));
+    const included = new Set(tools.map(tool => tool.name));
+    const excluded = [...new Set(opened.flatMap(list => list.tools.map(tool => tool.name)))].filter(tool => !included.has(tool)).sort();
+    try {
+      const node = discoveredNode(settings, tools, invoke, () => {
+        state.discoverAfter = Math.min(state.discoverAfter, Date.now() + 60_000);
+      });
+      publish(node, workspaceId);
+      state.publishedBy = opened.map(list => list.id);
+      state.publishFailed = false;
+      if (excluded.length && !isDeepStrictEqual(state.excluded, excluded)) {
+        await issue(`Tools omitted (account-specific contract or reserved input "account"): ${excluded.join(', ')}`);
       }
-      return;
+      state.excluded = excluded;
+    } catch (error) {
+      if (!state.publishFailed) await issue(error instanceof Error ? error.message : String(error));
+      state.publishFailed = true;
+      state.discoverAfter = Date.now() + 60_000;
     }
   }
 
@@ -137,4 +150,8 @@ export function configureAccountServer(name: string, config: Config, publish: (n
     const workspaces = new Set([...states.keys(), ...rows.map(row => row.workspaceId)]);
     await Promise.all([...workspaces].map(workspaceId => enqueue(workspaceId, false)));
   };
+}
+
+function sameContract(a: Tool, b: Tool): boolean {
+  return a.name === b.name && isDeepStrictEqual(a.inputSchema, b.inputSchema) && isDeepStrictEqual(a.outputSchema, b.outputSchema);
 }

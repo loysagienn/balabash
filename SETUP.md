@@ -198,11 +198,14 @@ For workspace OAuth, use HTTP with `"auth": "user"`, a `description` and
 the provider’s MCP URL. Dynamic client registration is the default.
 Use `"clientRegistration": "manual"` for an operator-provisioned client.
 Optional `scope`, `authorizationParams` and `identityProbe` configure sign-in.
-The server has one tool contract for its accounts. Sign-in, disconnect and
-loss of authorization refresh the workspace's snapshot. Discovery uses one
-connected account and can try another if the first cannot list tools.
+Sign-in, disconnect and loss of authorization refresh that workspace's
+contract. Balabash publishes tools whose names and input/output schemas
+match across the accounts that returned a list. A personalized title or
+description comes from the first of those accounts in stable row order.
+If no listing succeeds, the last valid contract stays available while an
+account that supplied it remains. System names tools omitted from the snapshot.
 Each call takes the workspace account address in `account`. That name is
-reserved in the provider’s input schema. System lists omitted tools. The provider receives its own
+reserved in the provider’s input schema. The provider receives its own
 arguments and the selected account’s bearer token.
 
 System shows configuration and discovery failures under `mcp-servers`,

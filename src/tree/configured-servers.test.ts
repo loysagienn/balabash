@@ -67,8 +67,10 @@ test('configured MCP servers publish the contract discovered with the authority 
       res.setHeader('mcp-session-id', 'test-session');
       result = { protocolVersion: params.protocolVersion, capabilities: { tools: {} }, serverInfo: { name: 'demo', version: '1' } };
     } else if (method === 'tools/list') {
-      result = params.cursor ? { tools: [{ name: 'edit', inputSchema }] }
-        : { tools: path === '/wiki' ? [common, {
+      result = params.cursor ? { tools: [{ name: key === 'Bearer A' ? 'edit' : 'lookup', inputSchema }] }
+        : { tools: path === '/wiki' ? [{
+          ...common, description: 'Read as ' + key?.slice(-1), title: 'Read for ' + key?.slice(-1),
+        }, {
           name: 'conflict', inputSchema: { ...inputSchema, properties: { account: { type: 'string' } } },
         }] : [common], ...(path === '/wiki' && { nextCursor: 'more' }) };
     } else {
@@ -196,7 +198,8 @@ test('configured MCP servers publish the contract discovered with the authority 
     assert.ok(first.grant.vertices.has('wiki_edit'));
     assert.ok(!first.grant.vertices.has('wiki_lookup'));
     const theirs = await context(foreign);
-    assert.ok(theirs.grant.vertices.has('wiki_edit'));
+    assert.ok(theirs.grant.vertices.has('wiki_lookup'));
+    assert.ok(!theirs.grant.vertices.has('wiki_edit'));
     const invalid = await call(first, 'wiki_read', { account: 'work', extra: 1 });
     assert.ok('error' in invalid && invalid.error.kind === 'invalid_input');
     const noAccount = await call(first, 'wiki_read');
@@ -214,19 +217,22 @@ test('configured MCP servers publish the contract discovered with the authority 
     const issues = await prisma.event.findMany({ where: { type: 'system.exception', workspaceId } });
     const messages = issues.map(row => JSON.stringify(row.payload)).join('\n');
     assert.match(messages, /Tools omitted.*conflict/);
-    failingToken = 'Bearer A';
     await markReauthorizationRequired(second.id, 'Renew sign-in');
+    failingToken = null;
     await prisma.connection.update({ where: { id: second.id }, data: { status: 'connected' } });
     await refreshSecretServices();
     const both = await context();
-    assert.ok(both.grant.vertices.has('wiki_edit'), 'a fallback account supplies the server contract');
-    assert.equal(grantKey(first.grant), grantKey(both.grant));
-    assert.ok(logs.some(r => r.path === '/wiki' && r.method === 'tools/list' && r.key === 'Bearer B'));
+    assert.ok(both.grant.vertices.has('wiki_read'), 'personalized titles and descriptions still share the same call contract');
+    assert.ok(!both.grant.vertices.has('wiki_edit') && !both.grant.vertices.has('wiki_lookup'));
+    assert.notEqual(grantKey(first.grant), grantKey(both.grant));
     const failures = await prisma.event.findMany({ where: {
       type: 'system.exception', workspaceId, payload: { path: ['error'], string_contains: 'Discovery failed' },
     } });
-    assert.equal(failures.length, 1, 'repeated errors with a different request number are one discovery outage');
-    failingToken = null;
+    assert.equal(failures.length, 1);
+    const omissions = await prisma.event.findMany({ where: {
+      type: 'system.exception', workspaceId, payload: { path: ['error'], string_contains: 'Tools omitted' },
+    } });
+    assert.ok(omissions.some(row => /edit, lookup/.test(JSON.stringify(row.payload))));
     const port = await (await import('../harness/codex-sdk/catalog-bridge.ts')).createCodexPort(coordinator, workspaceId, mainThreadId);
     const definition = port.tools.find(tool => tool.name === 'wiki_read')!;
     assert.deepEqual(definition.inputSchema.required, ['account']);

@@ -64,11 +64,11 @@ test('written installation modules join the published tree and its consumers', a
 
   await t.test('rejects collisions and invalid authored text before publishing services or types', () => {
     const messages = errors.mock.calls.map(call => call.arguments.join(' ')).join('\n');
-    assert.match(messages, /alpha\.ts skipped:[\s\S]*two vertices share this full name/);
-    assert.match(messages, /bad_service\.ts skipped:[\s\S]*already declared/);
-    assert.match(messages, /bad_config\.ts skipped:.*wiki.*already configured/);
-    assert.match(messages, /bad_text\.ts skipped:[\s\S]*carries an example/);
-    assert.match(messages, /threads\.ts skipped:[\s\S]*two vertices share this full name/);
+    assert.match(messages, /alpha\.ts:[\s\S]*two vertices share this full name/);
+    assert.match(messages, /bad_service\.ts:[\s\S]*already declared/);
+    assert.match(messages, /bad_config\.ts:.*wiki.*already configured/);
+    assert.match(messages, /bad_text\.ts:[\s\S]*carries an example/);
+    assert.match(messages, /threads\.ts:[\s\S]*two vertices share this full name/);
     const notices = warnings.mock.calls.map(call => call.arguments.join(' ')).join('\n');
     assert.match(notices, /nightly\.ts has no agent recipients/);
     assert.match(notices, /meter\.ts names unknown recipient "meter_reader"/);
