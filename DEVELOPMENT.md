@@ -31,7 +31,7 @@ confidential from them.
   with its guide and its own capabilities, and the nodes written so far —
   each action takes its data from the app's own layers; at its start the
   app tells the services these nodes declare to the connections layer.
-  Installation nodes come from authored modules and MCP connector discovery),
+  Installation nodes come from authored modules and MCP discovery (HTTP, stdio and claude.ai)),
   `coordinator/` (the secretary: instructions and function definitions),
   `harness/` (the model backends: `claude-sdk/`, `codex-sdk/`, `openai/`,
   `anthropic/`), `adapters/` (surfaces: `telegram/`, `ccr/`), `api/` (the

@@ -73,7 +73,7 @@ export function discoveredNode(
 ) {
   const { name, description, recipients } = settings;
   const sorted = [...tools].sort((a, b) => a.name.localeCompare(b.name));
-  const summary = sentence(description || `Use the ${name} service`, 175);
+  const summary = sentence(description?.trim() || `Use the ${name} service`, 175);
   const guide = settings.guide ? [{ text: settings.guide }] : [];
   if (sorted.some(tool => !tool.outputSchema)) guide.push({
     text: 'A capability returning JsonValue gives the server’s structured JSON when supplied. Otherwise it gives text, stored file references or resource links in response order: a single item directly, zero or several as an array.',

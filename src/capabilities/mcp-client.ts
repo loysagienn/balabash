@@ -94,10 +94,11 @@ function textOf(content: unknown): string {
 async function withServer<T>(
   server: ExternalServer,
   options: { signal: AbortSignal | null; timeoutMs?: number },
-  exchange: (client: Client, signal: AbortSignal | undefined, timeout: number) => Promise<T>,
+  exchange: (client: Client, signal: AbortSignal, timeout: number) => Promise<T>,
 ): Promise<T> {
   const timeout = options.timeoutMs ?? EXTERNAL_CALL_TIMEOUT_MS;
-  const signal = options.signal ?? undefined;
+  const deadline = AbortSignal.timeout(timeout);
+  const signal = options.signal ? AbortSignal.any([options.signal, deadline]) : deadline;
   const client = new Client(CLIENT_INFO);
   // Client.connect's timeout covers initialize, but the SDK then sends an
   // initialized notification without request options. Bound its HTTP POST too.
@@ -107,20 +108,20 @@ async function withServer<T>(
   const transport = 'command' in server
     ? new StdioClientTransport({ command: server.command, args: server.args, env: server.env, stderr: 'ignore' })
     : new StreamableHTTPClientTransport(new URL(server.url), {
-    requestInit: { headers: server.headers },
-    fetch: (url, init) => {
-      const signals: AbortSignal[] = [];
-      // DELETE has no timeout option in the SDK. Give cleanup its own budget,
-      // including when the caller has cancelled the original request.
-      if (init?.method === 'DELETE') signals.push(AbortSignal.timeout(5_000));
-      else {
-        if (init?.signal) signals.push(init.signal);
-        if (signal) signals.push(signal);
-        if (connecting && init?.method === 'POST') signals.push(handshake);
-      }
-      return (server.fetch ?? fetch)(url, { ...init, signal: AbortSignal.any(signals) });
-    },
-  });
+      requestInit: { headers: server.headers },
+      fetch: (url, init) => {
+        const signals: AbortSignal[] = [];
+        // DELETE has no timeout option in the SDK. Give cleanup its own budget,
+        // including when the caller has cancelled the original request.
+        if (init?.method === 'DELETE') signals.push(AbortSignal.timeout(5_000));
+        else {
+          if (init?.signal) signals.push(init.signal);
+          signals.push(signal);
+          if (connecting && init?.method === 'POST') signals.push(handshake);
+        }
+        return (server.fetch ?? fetch)(url, { ...init, signal: AbortSignal.any(signals) });
+      },
+    });
 
   try {
     await client.connect(transport, { signal, timeout: connectTime });
@@ -140,7 +141,7 @@ async function withServer<T>(
 }
 
 export function listServerTools(server: ExternalServer): Promise<Tool[]> {
-  return withServer(server, { signal: AbortSignal.timeout(CONNECT_TIMEOUT_MS), timeoutMs: CONNECT_TIMEOUT_MS }, async (client, signal, timeout) => {
+  return withServer(server, { signal: null, timeoutMs: CONNECT_TIMEOUT_MS }, async (client, signal, timeout) => {
     const tools: Tool[] = [];
     let cursor: string | undefined;
     do {

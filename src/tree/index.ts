@@ -173,7 +173,7 @@ const installed = new Map<string, Node>();
 const workspaceTrees = new Map<string, { nodes: Map<string, Node>; catalog: Catalog }>();
 
 function buildTree(shared: Map<string, Node>, scoped?: Map<string, Node>) {
-  const nodes = [...new Map([...shared, ...scoped ?? []]).values()].sort((a, b) => a.name.localeCompare(b.name));
+  const nodes = [...new Map([...shared, ...(scoped ?? [])]).values()].sort((a, b) => a.name.localeCompare(b.name));
   return buildCatalog({ ...root, children: [...root.children, ...nodes] }).catalog;
 }
 
@@ -232,9 +232,9 @@ export function catalog(workspaceId?: string): Catalog {
 // From then on they can be connected, and `connectionsPort()` (./services.ts)
 // answers for them. The catalog owns definitions of its nodes' services. The schedule gets what its programs run against:
 // this catalog and these connections.
-export async function startTree(report?: ReportExtensionFailure): Promise<void> {
+export async function startTree(report?: ReportExtensionFailure, reportMcp = report): Promise<void> {
   registerServices(catalog().root);
-  const configs = await readExternalServerConfigs(report);
+  const configs = await readExternalServerConfigs(reportMcp);
   const names = new Set(Object.keys(configs));
   const remoteServices = new Set(getLoadedRemoteKinds().filter(remote => remote.secrets?.length).map(remote => remote.name));
   for (const name of remoteServices) names.add(name);
@@ -242,7 +242,7 @@ export async function startTree(report?: ReportExtensionFailure): Promise<void> 
   const servers: Parameters<typeof configureServers>[0] = [];
   for (const [name, config] of Object.entries(configs)) {
     if (catalog().vertices.has(name) || getAccountService(name) || getSecretService(name) || remoteServices.has(name)) {
-      await reportSkippedExtension('mcp-servers', name + '.json', 'Name already belongs to a catalog vertex or service', report);
+      await reportSkippedExtension('mcp-servers', name + '.json', 'Name already belongs to a catalog vertex or service', reportMcp);
       continue;
     }
     configuredRecipients.set(name, config.recipients ?? []);
@@ -250,8 +250,8 @@ export async function startTree(report?: ReportExtensionFailure): Promise<void> 
     else servers.push([name, config]);
   }
   await loadAuthoredNodes(publishNode, names, report);
-  await configureServers(servers, publishNode, report);
-  await startConnectors(connectors, publishNode);
+  await configureServers(servers, publishNode, reportMcp);
+  await startConnectors(connectors, publishNode, reportMcp);
   setProgramHost({ catalog, connections: connectionsPort(), traceCall: journalProgramCall });
   await refreshSecretServices();
 }

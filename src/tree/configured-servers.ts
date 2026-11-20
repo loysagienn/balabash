@@ -88,10 +88,10 @@ export async function configureServers(configs: [string, Config][], publish: (no
   // A refresh after credential provisioning must observe the committed rows,
   // even when a probe of the previous values is still running.
   let pending = Promise.resolve();
+  const update = async () => {
+    await Promise.all([...services.map(refresh), ...accountRefresh.map(run => run())]);
+  };
   const refreshAll = () => {
-    const update = async () => {
-      await Promise.all([...services.map(refresh), ...accountRefresh.map(run => run())]);
-    };
     pending = pending.then(update, update);
     return pending;
   };

@@ -2,11 +2,12 @@
 // health of the login and proxy independently of the catalog snapshot.
 import { createHash } from 'node:crypto';
 import { resolveOperatorCredentials, tokenTtlMs } from '../adapters/ccr/token.ts';
+import { reportSkippedExtension, type ReportExtensionFailure } from '../capabilities/extensions.ts';
 import { connectorServer } from '../capabilities/claude-connector.ts';
 import { warnRecipients } from '../capabilities/agent-catalog.ts';
 import type { ExternalServerConfig } from '../capabilities/server-config.ts';
 import { CapabilityError, type JsonObject, type Node } from '../catalog/index.ts';
-import { callServerResult, EXTERNAL_CALL_TIMEOUT_MS, listServerTools } from '../capabilities/mcp-client.ts';
+import { callServerResult, listServerTools } from '../capabilities/mcp-client.ts';
 import { discoverAndPublish } from './discovered-node.ts';
 
 type Config = Extract<ExternalServerConfig, { transport: 'claude-connector' }>;
@@ -25,10 +26,12 @@ const MINUTE = 60_000;
 const CONTRACT_TTL = 60 * MINUTE;
 const connectors: Connector[] = [];
 let publish: (node: Node) => void;
+let reportFailure: ReportExtensionFailure | undefined;
 
-export async function startConnectors(configs: [string, Config][], install: typeof publish): Promise<void> {
+export async function startConnectors(configs: [string, Config][], install: typeof publish, report?: ReportExtensionFailure): Promise<void> {
   if (!configs.length) return;
   publish = install;
+  reportFailure = report;
   for (const [name, config] of configs) {
     const recipients = config.recipients ?? [];
     warnRecipients(`[connectors] ${name}`, recipients);
@@ -40,26 +43,26 @@ export async function startConnectors(configs: [string, Config][], install: type
   setInterval(refreshConnectors, MINUTE).unref();
 }
 
-function failed(connector: Connector, error: unknown): void {
+async function failed(connector: Connector, error: unknown): Promise<void> {
   const message = error instanceof Error ? error.message : String(error);
-  if (connector.error !== message) console.warn(`[connectors] ${connector.name}: ${message}`);
+  const changed = connector.error !== message;
   if (connector.state !== 'failed') connector.discoverAfter = Date.now() + MINUTE;
   connector.state = 'failed';
   connector.error = message;
   connector.tokenExpiresAt = null;
+  if (changed) await reportSkippedExtension('mcp-servers', connector.name + '.json', message, reportFailure);
 }
 
 async function invoke(connector: Connector, name: string, args: JsonObject, signal: AbortSignal | null) {
   const generation = connector.generation;
   const server = connectorServer(connector.name, connector.config.serverId);
-  const deadline = AbortSignal.timeout(EXTERNAL_CALL_TIMEOUT_MS);
   try {
-    return await callServerResult(server, name, args, { signal: signal ? AbortSignal.any([signal, deadline]) : deadline });
+    return await callServerResult(server, name, args, { signal });
   } catch (error) {
     // An old call still gets its error, but cannot overwrite a newer login's status.
     if (generation === connector.generation && connector.state !== 'token_expired' && error instanceof CapabilityError &&
         (error.kind === 'auth_required' || (error.kind === 'unavailable' && !signal?.aborted))) {
-      failed(connector, error);
+      await failed(connector, error);
     }
     throw error;
   }
@@ -70,7 +73,7 @@ async function refresh(): Promise<void> {
   try {
     credentials = await resolveOperatorCredentials();
   } catch (error) {
-    for (const connector of connectors) failed(connector, error);
+    await Promise.all(connectors.map(connector => failed(connector, error)));
     return;
   }
 
@@ -105,7 +108,7 @@ async function refresh(): Promise<void> {
       connector.tokenExpiresAt = null;
       connector.discoverAfter = Date.now() + CONTRACT_TTL;
     } catch (error) {
-      failed(connector, error);
+      await failed(connector, error);
       connector.discoverAfter = Date.now() + MINUTE;
     }
   }

@@ -15,11 +15,9 @@ import { extensionFilesApi } from './files/index.ts';
 import { loadAgents, repositoryAgentNames } from './capabilities/agent-catalog.ts';
 import { spawnAgentRun } from './capabilities/agent-runtime.ts';
 import { resumeThreadRuns, tombstoneUnresumableThreads } from './capabilities/resume-runs.ts';
-import type { ReportExtensionFailure } from './capabilities/extensions.ts';
+import { journalExtensionFailure } from './runtime/extension-journal.ts';
 import { loadRemoteAgents } from './capabilities/remote-agent-source.ts';
 import { createRemoteDriverContext, refreshRemoteSecretTargets, registerRemoteSecretTargets } from './capabilities/remote-agent-secrets.ts';
-import { appendEvent } from './core/append.ts';
-import { SYSTEM_EXCEPTION } from './core/envelope.ts';
 import { startReauthDetector } from './capabilities/reauth-detector.ts';
 import { hasRunningWork, startTree, stopRunningWork } from './tree/index.ts';
 import { startScheduleHeart } from './schedule/heart.ts';
@@ -94,15 +92,6 @@ if (tombstoned > 0) {
 // before the web, resumed threads or schedule can start new runs.
 await sweepAbortedRuns();
 
-function journalExtensionFailure(scope: string): ReportExtensionFailure {
-  return async ({ file, error }) => {
-    await appendEvent({
-      type: SYSTEM_EXCEPTION, actor: 'system', workspaceId: null,
-      payload: { scope, error: `${file}: ${error}` },
-    });
-  };
-}
-
 // The catalog: the repository's agents, then the installation's remote agent
 // kinds (data/remote-agents) — a kind that fails to load is skipped loudly,
 // not fatal (remote-agent-source.ts).
@@ -118,7 +107,7 @@ await refreshRemoteSecretTargets();
 
 // The tree of the capability catalog: its services join the connections
 // layer before the web surface and the schedule can ask for one.
-await startTree(journalExtensionFailure('nodes'));
+await startTree(journalExtensionFailure('nodes'), journalExtensionFailure('mcp-servers'));
 
 startWebServer();
 

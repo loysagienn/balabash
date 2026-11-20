@@ -12,7 +12,7 @@ import { discoverAndPublish, discoveredNode } from './discovered-node.ts';
 import { connectionsPort } from './services.ts';
 
 type Config = Extract<ExternalServerConfig, { transport: 'http' }>;
-type Snapshot = { members: string; discoverAfter: number; error: string | null };
+type Snapshot = { members: string[]; discoverAfter: number; error: string | null };
 
 export function configureAccountServer(name: string, config: Config, publish: (node: Node, workspaceId?: string) => void,
   report?: ReportExtensionFailure) {
@@ -53,11 +53,18 @@ export function configureAccountServer(name: string, config: Config, publish: (n
     }
     for (const [workspaceId, accounts] of groups) {
       const connected = accounts.filter(row => row.status === 'connected');
-      const members = JSON.stringify(connected.map(row => row.id));
-      const state = states.get(workspaceId) ?? { members: '', discoverAfter: 0, error: null };
+      const members = connected.map(row => row.id);
+      const state = states.get(workspaceId) ?? { members: [], discoverAfter: 0, error: null };
       states.set(workspaceId, state);
-      if (state.members === members && Date.now() < state.discoverAfter) continue;
-      if (state.members !== members) publish(empty, workspaceId);
+      // Keep a known contract available to describe while its accounts need
+      // to sign in again. A replaced account cannot inherit the old contract.
+      if (!connected.length && state.members.some(id => accounts.some(row => row.id === id))) {
+        state.discoverAfter = 0;
+        continue;
+      }
+      const sameMembers = isDeepStrictEqual(state.members, members);
+      if (sameMembers && Date.now() < state.discoverAfter) continue;
+      if (!sameMembers) publish(empty, workspaceId);
       state.members = members;
 
       try {
@@ -72,7 +79,7 @@ export function configureAccountServer(name: string, config: Config, publish: (n
         state.error = null;
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        if (state.error !== message) await reportSkippedExtension('mcp-servers', name + '.json', `Workspace ${workspaceId}: ${message}`, report);
+        if (state.error !== message) await reportSkippedExtension('mcp-servers', name + '.json', message, report, workspaceId);
         state.error = message;
         state.discoverAfter = Date.now() + 60_000;
       }

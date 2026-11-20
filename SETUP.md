@@ -118,7 +118,7 @@ from the bot's `/auth_code`. A Telegram group becomes a workspace with
 
 ## Extension points of an installation
 
-At boot, Connections loads external service settings from
+At boot, the catalog loads installation MCP servers from
 `data/mcp-servers/<name>.json`. Node.js loads remote agent drivers directly from
 `data/remote-agents/<name>.ts`. Drivers can import packages and repository types
 with `import type`. They receive platform services through `ctx`.
@@ -158,6 +158,51 @@ An unknown recipient produces a startup warning. A broken module or collision sk
 The System screen shows its filename and error under `nodes`.
 Keep full names and service keys distinct from repository vertices, other installed
 nodes and configured services. Restart Balabash to load changes.
+
+### HTTP and stdio MCP servers
+
+Place one JSON config per service in `data/mcp-servers/<name>.json`. Use a
+unique snake_case name. The catalog reads every page of `tools/list` and
+publishes the node under that name. Add agent or profile names to
+`recipients` to grant the node. Scheduled programs use their workspace’s
+full tree, including configured nodes with no agent recipients.
+
+```json
+{
+  "transport": "http",
+  "url": "https://provider.example/mcp",
+  "headers": { "Authorization": "Bearer ${secret:API_KEY}" },
+  "description": "Search the installation’s document index.",
+  "recipients": ["general"]
+}
+```
+
+For stdio, set `"transport": "stdio"`, `command` and optional string
+`args` and `env`. The MCP SDK runs the executable directly, with its default
+inherited environment and the configured variables. Each discovery or call
+starts its own process and closes it after the exchange. Use an executable
+available to the service account from the application directory.
+Enter referenced installation secrets in Connections. A service without
+secret references can publish at startup. Discovery runs on credential
+changes and retries failures in the background. A failed refresh keeps the
+last valid contract. Removing a key cuts the node from new grants and
+refuses calls using an old grant.
+
+For workspace OAuth, use HTTP with `"auth": "user"`, a `description` and
+the provider’s MCP URL. Dynamic client registration is the default.
+Use `"clientRegistration": "manual"` for an operator-provisioned client.
+Optional `scope`, `authorizationParams` and `identityProbe` configure sign-in.
+The platform lists tools as each connected account in the workspace and
+publishes capabilities with matching names, texts and schemas across
+those accounts. It checks account membership during the minute refresh.
+Each call takes the workspace account address in `account`. That name is
+reserved in the provider’s input schema. The provider receives its own
+arguments and the selected account’s bearer token.
+
+System shows configuration and discovery failures under `mcp-servers`,
+with the JSON filename. OAuth discovery failures appear in the affected
+workspace. Connections shows installation credential status. Restart to
+reload edited files.
 
 ### claude.ai connectors
 

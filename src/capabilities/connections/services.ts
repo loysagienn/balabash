@@ -2,7 +2,7 @@
 // layer owns both registries and reads nothing else about a service; whoever
 // defines a service tells it here — the tree of the capability catalog for a
 // node with a connection (src/tree/services.ts), the kinds of remote agents
-// for their secrets, external-services.ts for installation MCP configs. A name has one
+// for their secrets, tree/configured-servers.ts for installation MCP configs. A name has one
 // definition: named again, it is replaced.
 //
 // - account services: what a user connects their own account to, and how

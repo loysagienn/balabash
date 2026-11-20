@@ -95,6 +95,10 @@ function validateExternalServerConfig(raw: unknown, source: string): ExternalSer
     throw new Error(`${source}: secret references belong in transport settings`);
   }
 
+  if (raw.auth !== undefined && raw.transport !== 'http') {
+    throw new Error(`${source}: "auth" requires the HTTP transport`);
+  }
+
   if (raw.transport === 'stdio') {
     if (typeof raw.command !== 'string' || !raw.command) {
       throw new Error(`${source}: "command" must be a non-empty string`);
