@@ -198,8 +198,12 @@ export async function invokeCapability(grant: Grant, name: string, input: unknow
 
 // The action `call`: a call by full name for a port that cannot make an open
 // capability callable directly, and for the programs of the platform.
+export function parseCallTarget(grant: Grant, input: unknown): { name: string; input?: JsonObject } {
+  return parseActionInput(grant, ACTIONS.call, input) as { name: string; input?: JsonObject };
+}
+
 export async function call(grant: Grant, input: unknown, env: InvokeEnv): Promise<JsonValue> {
-  const args = parseActionInput(grant, ACTIONS.call, input) as { name: string; input?: JsonObject };
+  const args = parseCallTarget(grant, input);
 
   return invokeCapability(grant, args.name, args.input, env);
 }

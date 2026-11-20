@@ -123,12 +123,19 @@ export function spawnHeadless(agent: CatalogAgent, preferHeadless: boolean, requ
   return headless;
 }
 
+// The declaration and its named profile describe the same nodes to the
+// catalog policy and the console, independently of connected accounts.
+export function declaredNodes(agent: AgentPassport): string[] {
+  const { profile, nodes } = agent.access;
+  return [...new Set([...(profile ? accessProfiles[profile]?.nodes ?? [] : []), ...(nodes ?? [])])];
+}
+
 // The port supplies its actions. The catalog still applies the workspace's
 // connections and cuts each ungranted node together with all descendants.
 export function agentGrantPolicy(agent: AgentPassport | RemoteAgentDeclaration, actions: GrantPolicy['actions']): GrantPolicy {
   const access = 'access' in agent ? agent.access : {};
   const profile = access.profile ? accessProfiles[access.profile] : undefined;
-  const nodes = new Set([...(profile?.nodes ?? []), ...(access.nodes ?? [])]);
+  const nodes = new Set('access' in agent ? declaredNodes(agent) : []);
   const root = new Set(['send_message', 'end_thread']);
 
   if ('kind' in agent) {

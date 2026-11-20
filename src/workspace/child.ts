@@ -1,17 +1,5 @@
-// Child-process machinery of the workspace: heavy or untrusted work runs in
-// a spawned process — kill-on-timeout works and the synchronous DatabaseSync
-// never blocks the app's event loop. Extracted from the workbench tool
-// servers (tools/workspace_shared.ts / tools/workspace.ts) so the core can
-// reuse it: the apps data gateway (src/apps) executes manifest-declared
-// statements through the same runner as data_query — one SQL-in-a-child
-// implementation, not a copy.
-//
-// Two layers here:
-//   - runChild/childEnv — generic spawn-with-caps (also used by run_script);
-//   - the SQL child program + queryInChild/sqlInChild/statementInChild — the
-//     entry points into workspace.sqlite: free-form SQL (data_query; the
-//     capability workspace_query) and a single prepared statement with named
-//     binds (app endpoints).
+// Workspace child processes keep blocking SQL and shell commands off the app
+// event loop. The SQL runner serves workspace_query and mini-app endpoints.
 
 import { spawn } from 'node:child_process';
 import type { Writable } from 'node:stream';
@@ -214,11 +202,8 @@ export function runChild(command: string, args: string[], options: RunChildOptio
 }
 
 // ---------------------------------------------------------------------------
-// The SQL child program. One CommonJS source for `node -e`, three modes
+// The SQL child program. One CommonJS source for `node -e`, two modes
 // picked by the JSON payload in argv[1]:
-//   { mode: 'query', sql }            — data_query: any SQL; a row-returning
-//       statement streams rows up to the caps, anything else goes through
-//       exec() (multi-statement scripts work) and reports the change count.
 //   { mode: 'sql', sql }              — the capability workspace_query
 //       (src/tree/workspace.ts): one form of the answer whatever the
 //       statement — { rows, truncated, changes }, a blob as its size in
@@ -226,7 +211,7 @@ export function runChild(command: string, args: string[], options: RunChildOptio
 //       are prepared and run one after another on one connection, each
 //       cut where SQLite ends it: a statement may stand on what the one
 //       before it created, and a row-returning statement is seen where it
-//       stands. What the other mode passes in silence is refused here by
+//       stands. The following inputs are refused by
 //       name: SQL that holds no statement; a row-returning statement that
 //       is not the only one (its rows would be lost) — the refusal says
 //       what has already run; a script that leaves its transaction open
@@ -239,7 +224,7 @@ export function runChild(command: string, args: string[], options: RunChildOptio
 //       parameters (no SQL concatenation by construction); kind = run | all
 //       | get. readOnly opens the connection read-only (SQLITE_OPEN_READONLY):
 //       a write attempt is an SQL error, whatever the statement text says.
-// The payload of the third mode arrives on the standard input (argv[1] is
+// The payload of the sql mode arrives on the standard input (argv[1] is
 // "-"): an argument of a process holds about 128 KB, a script may be longer.
 // Caps arrive via env (SQL_MAX_ROWS / SQL_MAX_BYTES), the database path via
 // WORKSPACE_DB, the lock policy via SQL_BUSY_TIMEOUT_MS (src/workspace/
@@ -410,28 +395,16 @@ try {
       const { rows, truncated } = collectRows(stmt.iterate(payload.params));
       out = { rows, rowCount: rows.length, truncated };
     }
-  } else if (payload.mode === 'sql') {
-    out = runScript(db, payload.sql);
   } else {
-    const stmt = db.prepare(payload.sql);
-    if (stmt.columns().length > 0) {
-      const { rows, truncated } = collectRows(stmt.iterate());
-      out = { rows, rowCount: rows.length, truncated };
-      if (truncated) out.note = 'Result truncated (caps: ' + maxRows + ' rows / ~' + maxBytes + ' bytes). Narrow with WHERE/LIMIT/OFFSET or aggregate.';
-    } else {
-      const before = db.prepare('SELECT total_changes() AS c').get().c;
-      db.exec(payload.sql);
-      const after = db.prepare('SELECT total_changes() AS c').get().c;
-      out = { ok: true, changes: after - before };
-    }
+    out = runScript(db, payload.sql);
   }
   process.stdout.write(JSON.stringify(out));
 } catch (error) {
   let message = String((error && error.message) || error);
   // SQLite's busy family by its result code (5 SQLITE_BUSY, 6 SQLITE_LOCKED,
   // in the low byte), as isBusyError reads it; the words alone would take
-  // SQL that merely mentions them for a lock. The two older modes word
-  // their refusal by the words, as they always did.
+  // SQL that merely mentions them for a lock. The app endpoint words
+  // its refusal by the words.
   const code = error && error.errcode;
   const locked = typeof code === 'number'
     ? (code & 0xff) === 5 || (code & 0xff) === 6
@@ -452,7 +425,7 @@ export type SqlCaps = {
   timeoutMs: number;
 };
 
-// The neutral outcome: the edges own their error shapes (ToolError on the
+// The neutral outcome: the edges own their error shapes (CapabilityError on the
 // tools' wire, HTTP JSON on the apps gateway) — this layer only names what
 // happened.
 export type SqlChildResult =
@@ -514,11 +487,6 @@ async function runSql(
   }
 
   return { status: 'ok', result: parsed };
-}
-
-/** Free-form SQL (the data_query shape) against workspace.sqlite, in a child. */
-export function queryInChild(dbPath: string, cwd: string, sql: string, caps: SqlCaps): Promise<SqlChildResult> {
-  return runSql(dbPath, cwd, { mode: 'query', sql }, caps);
 }
 
 /**

@@ -1,6 +1,5 @@
 // The input of a new scheduled task, checked — one rule for every door of
-// the registry: the capability `schedule_create_task` (src/tree/schedule.ts),
-// the create_task tool of the agents (src/schedule/tools.ts) and the
+// the registry: the capability `schedule_create_task` (src/tree/schedule.ts) and the
 // console's POST /api/schedule/tasks (src/api/api.ts). Pure (no database): a
 // TaskInput is what the registry row will hold; a refusal is a
 // ScheduleError 'bad_request' whose message starts with the field at fault,

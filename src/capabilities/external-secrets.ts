@@ -11,7 +11,7 @@ import { prisma } from '../db/client.ts';
 import { appendEventIn, logTransaction } from '../core/append.ts';
 import { notifyAppended } from '../core/live.ts';
 import { SECRETS_PROVISIONED } from '../core/envelope.ts';
-import { getSecretService, refreshSecretServices, secretsForgotten, type SecretService } from './connections/services.ts';
+import { getSecretService, refreshSecretServices, type SecretService } from './connections/services.ts';
 import { openSecretRequest, secretRequestUrl } from './secret-requests.ts';
 
 const SECRET_KEY_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -88,9 +88,7 @@ export function isExternalSecretServer(serverName: string): boolean {
 }
 
 // The reverse of provisioning (auth agent):
-// the server's installation credentials are deleted and its live client
-// closed — the server returns to pending and its functions disappear from
-// every catalog. Returns the number of deleted secret rows.
+// delete the server's installation credentials and refresh its state. Returns the number of deleted secret rows.
 export async function forgetExternalServerSecrets(serverName: string): Promise<number> {
   const target = getSecretService(serverName);
 
@@ -100,9 +98,7 @@ export async function forgetExternalServerSecrets(serverName: string): Promise<n
 
   const { count } = await prisma.externalServerSecret.deleteMany({ where: { server: target.name } });
 
-  // Whoever keeps something alive on the secrets lets it go (a tool server
-  // leaves the catalog); every holder shows the values gone.
-  await secretsForgotten(target.name);
+  await refreshSecretServices();
 
   return count;
 }
@@ -115,8 +111,7 @@ export type ExternalServerSecretRequestView = {
 
 // The request as the web window may see it: field METADATA only, never
 // values. workspaceId comes from the session; a foreign or missing request is the
-// caller's 404. The live tool-manager is deliberately not consulted here —
-// the row itself is the source of truth until fulfilled.
+// caller's 404. The row is the source of truth until fulfilled.
 export async function getExternalServerSecretRequest(
   workspaceId: string,
   requestId: string,

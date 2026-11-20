@@ -5,11 +5,7 @@
 // instrument for any work on prompts and tool descriptions: run it before
 // and after a change and diff the output.
 //
-// It walks the same code paths as the live app (agent catalog, tool-manager
-// bundles, SDK catalog ports and the configured coordinator port), so the
-// output is the truth, not a retelling. Connecting per-user servers (gmail,
-// notion) may hit the network; a server that fails to connect is reported in
-// the output instead of failing the run.
+// The catalog ports build the same headers and definitions as a live turn.
 //
 // Usage: npm run build && npm run render-context [-- <workspaceId>]
 //   Output: data/showcase/<name>.md (overwritten on every run).
@@ -17,26 +13,17 @@
 //   script lists them and exits.
 //
 // Read-only by intent: it renders texts and never journals events, spawns
-// threads or calls tools. (Connecting user-auth servers may refresh their
-// OAuth tokens through the shared connections layer — same as any app turn.)
+// threads or calls capabilities.
 
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import type { AgentDeclaration, RemoteAgentDeclaration, ToolDefinition } from '../src/core/contract.ts';
+import type { AgentDeclaration, RemoteAgentDeclaration } from '../src/core/contract.ts';
+import type { FunctionDefinition } from '../src/harness/turn-contract.ts';
 import { prisma } from '../src/db/client.ts';
 import { getFile, getFileDownloadUrl, ingestFile, openFileContent } from '../src/files/index.ts';
 import { getAgents, isRemoteAgent, loadAgents, repositoryAgentNames, startable } from '../src/capabilities/agent-catalog.ts';
 import { loadRemoteAgents } from '../src/capabilities/remote-agent-source.ts';
 import { createRemoteDriverContext } from '../src/capabilities/remote-agent-secrets.ts';
-import { createEventsToolServer, createStorageToolServer } from '../src/capabilities/builtin-tools.ts';
-import { createRestartToolServer } from '../src/capabilities/restart-tools.ts';
-import { createRemoteToolServer } from '../src/capabilities/remote-tools.ts';
-import {
-  loadToolServers,
-  registerBuiltinToolServer,
-} from '../src/capabilities/tool-manager.ts';
-import { createScheduleToolServer } from '../src/schedule/tools.ts';
-import { createProjectsToolServer } from '../src/projects/tools.ts';
 import { buildStatusText } from '../src/coordinator/index.ts';
 import { createClaudePort } from '../src/harness/claude-sdk/bridge.ts';
 import { createCodexPort } from '../src/harness/codex-sdk/catalog-bridge.ts';
@@ -55,14 +42,14 @@ const SAMPLE_PROMPT = '<prompt>';
 // ---------------------------------------------------------------------------
 // Rendering
 
-function renderTool(tool: ToolDefinition & { serverName?: string }): string {
+function renderTool(tool: FunctionDefinition): string {
   return [
-    `### ${tool.name}${tool.serverName ? `  _(server: ${tool.serverName})_` : ''}`,
+    `### ${tool.name}`,
     '',
     tool.description,
     '',
     '```json',
-    JSON.stringify(tool.inputSchema, null, 2),
+    JSON.stringify(tool.parameters, null, 2),
     '```',
   ].join('\n');
 }
@@ -158,10 +145,7 @@ async function renderCoordinator(workspaceId: string): Promise<string> {
     ),
   ];
 
-  const functionsSection = tools.map(definition => renderTool({
-    name: definition.name, description: definition.description,
-    inputSchema: definition.parameters as ToolDefinition['inputSchema'],
-  })).join('\n\n');
+  const functionsSection = tools.map(renderTool).join('\n\n');
   sections.push(renderSection('Functions available at the start of the turn', functionsSection));
 
   return `${sections.join('\n\n')}\n`;
@@ -207,14 +191,6 @@ loadAgents(
   }),
 );
 
-registerBuiltinToolServer(createRestartToolServer());
-registerBuiltinToolServer(createStorageToolServer());
-registerBuiltinToolServer(createEventsToolServer());
-registerBuiltinToolServer(createScheduleToolServer());
-registerBuiltinToolServer(createProjectsToolServer());
-registerBuiltinToolServer(createRemoteToolServer());
-
-await loadToolServers({ filesApi });
 await startTree();
 
 await mkdir(OUT_DIR, { recursive: true });
@@ -236,6 +212,3 @@ for (const declaration of getAgents()) {
 console.log(`[render-context] workspace ${workspaceId}; written:\n${written.map(file => `  ${file}`).join('\n')}`);
 
 await prisma.$disconnect();
-
-// Local tool servers keep loopback HTTP servers alive; the render is done.
-process.exit(0);

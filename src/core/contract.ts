@@ -254,8 +254,7 @@ export type RemoteDriverContext = {
   files: RemoteDriverFilesApi;
 };
 
-// The same surface a local tool server gets (LocalToolFilesApi); the body
-// type is the storage layer's.
+// Storage access supplied to an installation remote driver.
 export type RemoteDriverFilesApi = {
   ingest(input: {
     body: StorageBody;
@@ -489,17 +488,11 @@ export type HarnessApi = {
   sdkSession(options: SdkSessionOptions): AgentSdkSession;
 };
 
-export type ToolDefinition = {
-  name: string;
-  description: string;
-  inputSchema: JsonSchema;
-};
-
 // The platform's one file reference: the File model's fields without
 // the storage internals (bucket/objectKey), dates as ISO 8601 strings — the
 // shape is JSON-ready and identical in every tool result of ours. `url` is
 // the only ephemeral field: a presigned, time-limited download URL a
-// producer adds deliberately (e.g. storage_get_file); the transcript strips it.
+// producer adds deliberately. The transcript strips it from historical MCP results.
 export type FileRef = {
   id: string;
   workspaceId: string | null;

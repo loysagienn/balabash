@@ -77,10 +77,7 @@ npm run build && npm run render-context [-- <workspaceId>]
 ```
 
 With one user in the database the workspaceId is inferred; with several the
-script lists them and exits. Connecting per-user servers (gmail, notion) may
-hit the network; a server that fails to connect is reported inside the
-output instead of failing the run. Safe to run next to the live app: it
-renders texts and never journals events or calls tools.
+script lists them and exits. The script computes grants from workspace connections and renders the catalog without invoking capabilities or journaling calls.
 
 ## measure-context (`scripts/measure-context.ts`)
 

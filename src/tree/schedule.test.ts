@@ -646,23 +646,3 @@ describe('the journal of runs', () => {
     await refuses(invoke('schedule_get_run', { runId: 'nothing' }), 'not_found', /no journaled run with the id "nothing"/);
   });
 });
-
-test('the session schedule tools register a program, start it and read its journal', async () => {
-  const { createScheduleToolServer } = await import('../schedule/tools.ts');
-  const tools = createScheduleToolServer();
-  const ctx = { workspaceId: stand.workspaceId, threadId: stand.mainThreadId };
-  const slug = 'session-program';
-  await tools.call('create_task', { slug, name: 'Session program', kind: 'program', code: 'return false', wake: false }, ctx);
-  const started = await tools.call('run_task', { slug }, ctx);
-  const runId = String(started).match(/runId ([\w-]+)/)?.[1];
-  assert.ok(runId);
-  await ended(runId);
-
-  const listed = JSON.parse(String(await tools.call('list_job_runs', { slug }, ctx)));
-  assert.equal(listed[0].id, runId);
-  const run = JSON.parse(String(await tools.call('get_job_run', { runId }, ctx)));
-  assert.equal(run.status, 'ok');
-  assert.equal(run.value, false);
-  const delivery = await until(async () => (await eventsOf('schedule.fired', slug))[0], 'program delivery');
-  assert.equal((delivery.payload as JsonObject).wake, false);
-});

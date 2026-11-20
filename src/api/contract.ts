@@ -865,7 +865,7 @@ export type TaskCommandRequest = {
 };
 
 // POST /schedule/tasks — a task registered from the console, by the rules of
-// the create_task tool (src/schedule/input.ts, one parser for both doors):
+// the schedule_create_task capability (src/schedule/input.ts, one parser for both doors):
 // the slug's shape, a name, at most one trigger — a cron expression
 // (evaluated in the schedule's time zone) or `at`, an ISO 8601 instant with
 // an explicit offset. A note has text and a program has code and an optional
@@ -1039,7 +1039,7 @@ export type InstallationSecretRequestResponse = { requestId: string };
 export type ForgetInstallationSecretsResponse = { server: string; forgotten: number };
 
 // A loaded agent or the main thread: its declared modes, the children it
-// can start, and the tools currently served by its bridge.
+// can start, and the catalog nodes in its declaration and access profile.
 export type AgentView = AgentModes & {
   name: string;
   description: string;
@@ -1047,8 +1047,8 @@ export type AgentView = AgentModes & {
   // 'remote' — a remote agent kind of the installation (src/remote): the
   // session runs in an external system; no tools, no model of ours.
   sdk: 'claude' | 'codex' | 'openai' | 'remote';
-  // Server names shown on the card: the SDK catalog bridge or the coordinator’s effective legacy bundle.
-  tools: string[];
+  // Catalog nodes named by the declaration and its access profile.
+  nodes: string[];
   agents: string[];
   notification: string | null;
   // The model the declaration names; null leaves the choice to the engine.

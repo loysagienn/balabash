@@ -14,25 +14,21 @@ confidential from them.
   static index `agents/index.ts` (a new agent is a module plus an entry
   there). An agent names catalog nodes, root overrides, spawnable repository
   agents and thread modes in its passport. `agents/access.ts` holds named access
-  profiles and the secretary's passport. The server list for the openai-compatible coordinator
-  lives in `src/capabilities/legacy-bundles.ts`. `agents/world/` is the world library: canonical prompt fragments,
+  profiles and the secretary's passport. `agents/world/` is the world library: canonical prompt fragments,
   one file per world fact, every prompt imports instead of retelling.
   `agents/roles/` holds a brief shared by agents that play one role on
   different backends; `agents/kit/` — pieces shared by agent modules (the
   Playwright MCP of the agents that carry a browser, the loopback static
   server an agent renders its workbench files from).
-- `tools/` — the repository's in-process tool servers (MCP over loopback
-  HTTP): the workbench (`workspace`, `workspace_files`), `gmail` and `drive`
-  over the shared Google plumbing, `http_get`, `apps`, … registered in
-  `tools/index.ts`. `mcp-servers/` — the JSON configs of external MCP servers
-  (Notion, Perplexity, Qase).
+- `mcp-servers/` — connection settings for external services displayed by
+  the console (Notion, Qase). Agent capabilities live in `src/tree/`.
 - `src/` — the app. `core/` (event log, envelopes, threads), `capabilities/`
-  (tool servers, the tool manager, the agent runtime and session runner,
+  (the agent runtime and session runner,
   agent validation, per-user connections and installation secrets),
   `catalog/` (the capability catalog of the new tool scheme: what an author
   writes, the build with the rules of the scheme, signatures, grants,
   `describe`, the one path of a call and the runner of programs used by the
-  secretary, Codex agents and scheduled tasks),
+  secretary, local agents and scheduled tasks),
   `tree/` (the real vertices of that catalog, one file per node: the root
   with its guide and its own capabilities, and the nodes written so far —
   each action takes its data from the app's own layers; at its start the

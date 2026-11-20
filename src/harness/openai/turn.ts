@@ -1,14 +1,6 @@
 // The inner loop of one model turn over the OpenAI Responses API (§8.1):
-// tool_choice: 'required', parallel calls. Every call's outcome returns to
-// the model in the same turn as function_call_output — synchronous tool
-// results as they are, async dispatches (messages, spawns) as 'accepted'
-// (their consequences arrive as later events), dispatch errors as
-// 'rejected: …' so the model can recover — and the model may call more.
-// The turn ends only when the model says so: an 'end' dispatch (the
-// coordinator's do_nothing). Before 2026-10-09 an all-async response ended
-// the turn by itself, which cut every step-by-step plan short: the model
-// (one call per response, the next after the result) notified a child and
-// never got to spawn the agent the user had asked for.
+// Every catalog result goes back to the model as a function_call_output.
+// do_nothing ends the turn after dispatching every call in that response.
 //
 // How one iteration continues into the next is the backend's business
 // (backend.ts): with stateful turns the next request carries
@@ -34,7 +26,6 @@ import type { DispatchResult, FunctionCall, PrewarmPrompt, RequestHead, TurnOutc
 import { getLlmBackend } from './backend.ts';
 import type { LlmBackend } from './backend.ts';
 import { getOpenaiClient } from './client.ts';
-import { toolResultToModelOutput } from './content.ts';
 import type { startLlmRequestMetrics } from './llm-metrics.ts';
 
 // The contract types, re-exported for the readers that knew them here.
@@ -180,32 +171,6 @@ export async function runTurn({
           if (outcome.definition) {
             outputs.push({ type: 'additional_tools', role: 'developer', tools: [outcome.definition] });
           }
-          break;
-
-        case 'sync':
-          outputs.push({
-            type: 'function_call_output',
-            call_id: functionCall.call_id,
-            output: await toolResultToModelOutput(outcome.result, functionCall.name),
-          });
-          break;
-
-        case 'async':
-          outputs.push({
-            type: 'function_call_output',
-            call_id: functionCall.call_id,
-            output: 'accepted',
-          });
-          break;
-
-        case 'rejected':
-          // The model must see the rejection and gets the chance to recover
-          // within the same turn.
-          outputs.push({
-            type: 'function_call_output',
-            call_id: functionCall.call_id,
-            output: `rejected: ${outcome.error}`,
-          });
           break;
 
         case 'end':

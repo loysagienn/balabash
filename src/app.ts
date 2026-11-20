@@ -1,5 +1,5 @@
 // Process entry. Start order (design doc): db → files → tombstone of
-// orphaned threads → agent catalog → tool servers → web → channel adapters
+// orphaned threads → agent catalog → services and capability tree → web → channel adapters
 // (telegram when configured) → router → consumers → restart module. The
 // process runs under supervisor.js: a clean exit with RESTART_EXIT_CODE
 // relaunches it, exit 0 stops the pair.
@@ -19,11 +19,8 @@ import { loadRemoteAgents } from './capabilities/remote-agent-source.ts';
 import { createRemoteDriverContext, refreshRemoteSecretTargets, registerRemoteSecretTargets } from './capabilities/remote-agent-secrets.ts';
 import { appendEvent } from './core/append.ts';
 import { SYSTEM_EXCEPTION } from './core/envelope.ts';
-import { createEventsToolServer, createStorageToolServer } from './capabilities/builtin-tools.ts';
-import { createRestartToolServer } from './capabilities/restart-tools.ts';
-import { createRemoteToolServer } from './capabilities/remote-tools.ts';
 import { startReauthDetector } from './capabilities/reauth-detector.ts';
-import { loadToolServers, registerBuiltinToolServer } from './capabilities/tool-manager.ts';
+import { loadExternalServices } from './capabilities/external-services.ts';
 import { hasRunningWork, startTree, stopRunningWork } from './tree/index.ts';
 import { startScheduleHeart } from './schedule/heart.ts';
 import { hasUnsettledRuns, sweepAbortedRuns } from './schedule/programs.ts';
@@ -32,8 +29,6 @@ import { startFileAreaTotals } from './workspace/totals.ts';
 import { sweepProcessGroups } from './runtime/process-groups.ts';
 import { startTelemetry } from './runtime/telemetry.ts';
 import { startSessionCleanup } from './capabilities/session-cleanup.ts';
-import { createScheduleToolServer } from './schedule/tools.ts';
-import { createProjectsToolServer } from './projects/tools.ts';
 import { createCoordinatorRun, hasActiveCoordinatorTurns, settleMainThreadStates } from './coordinator/index.ts';
 import { startWebServer } from './api/index.ts';
 import { startThreadRouter } from './runtime/router.ts';
@@ -99,9 +94,7 @@ if (tombstoned > 0) {
 // before the web, resumed threads or schedule can start new runs.
 await sweepAbortedRuns();
 
-// The files surface of the installation's extensions (local tool servers
-// and remote agent drivers): global — workspace scoping happens at the
-// calling run.
+// Storage access for installation remote drivers.
 const extensionFilesApi = {
   ingest: (input: Parameters<typeof ingestFile>[0]) => ingestFile(input),
   get: (fileId: string) => getFile(fileId),
@@ -129,34 +122,7 @@ loadAgents(
 registerRemoteSecretTargets();
 await refreshRemoteSecretTargets();
 
-// Dangerous-capability servers, granted only where deliberately listed: the
-// auth tools to the auth agent, the restart request to the coordinator and
-// the engineer.
-registerBuiltinToolServer(createRestartToolServer());
-
-// The workspace pull tools, split into two servers: 'storage'
-// (storage_get_file) and 'events' (the thread/event log). Agents opt in per
-// server in their tool lists.
-registerBuiltinToolServer(createStorageToolServer());
-registerBuiltinToolServer(createEventsToolServer());
-
-// The schedule registry tools: any agent listing the server may register,
-// list, cancel or manually run a scheduled task; the audit is the tool.call.*
-// journal in the calling agent's thread.
-registerBuiltinToolServer(createScheduleToolServer());
-
-// The project registry tools (passive libraries: identity in the db, the
-// knowledge in a workspace folder) — like schedule: any agent listing the
-// server may list, read and maintain projects; the audit is the tool.call.* journal.
-registerBuiltinToolServer(createProjectsToolServer());
-
-// The remote agents' server: a file out of a remote session, for the
-// thread's owner (the coordinator, the agents that may spawn remote kinds).
-registerBuiltinToolServer(createRemoteToolServer());
-
-// Local tool servers see the global files surface; workspace scoping happens
-// at the calling run.
-await loadToolServers({ filesApi: extensionFilesApi });
+await loadExternalServices();
 
 // The tree of the capability catalog: its services join the connections
 // layer before the web surface and the schedule can ask for one.

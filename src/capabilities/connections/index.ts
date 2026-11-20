@@ -32,15 +32,12 @@ import {
   OAUTH_CLIENT_PROVISIONED,
 } from '../../core/envelope.ts';
 import { config } from '../../config/index.ts';
-import { dropWorkspaceClient } from '../tool-manager.ts';
 import { getAccountService, type AccountService } from './services.ts';
 import { AuthorizationLostError, connectionAccessToken, createInteractiveAuthProvider } from './oauth-provider.ts';
 import { ProbeRefusedError, getAccessToken, identityData, identityLabel, probeIdentity } from './identity.ts';
 import type { ProbedIdentity } from './identity.ts';
 import type { IdentityProbeConfig } from '../server-config.ts';
 import { DEFAULT_ACCOUNT_KEY, deriveAccountKey } from './account-key.ts';
-
-export { createTransportAuthProvider } from './oauth-provider.ts';
 
 // A refusal of a connection command, for the two callers alike: the auth
 // tools answer the model with the message, the console's endpoints map the
@@ -297,7 +294,6 @@ export async function disconnectConnection(
     return row;
   });
 
-  dropWorkspaceClient(row.server, workspaceId, row.accountKey);
   await journalConnectionEvent(CONNECTION_DISCONNECTED, { ...row, threadId: threadId ?? row.threadId }, {
     connectionId: row.id,
     server: row.server,
@@ -748,10 +744,6 @@ export async function handleOauthCallback(query: Record<string, unknown>): Promi
     return fail(getErrorMessage(error));
   }
 
-  // A stale client may exist after re-authorization; the next turn reconnects
-  // with the fresh tokens.
-  dropWorkspaceClient(row.server, row.workspaceId, row.accountKey);
-
   if (server.identityProbe) {
     // The pre-flow snapshot (`row` was read before the token exchange) tells
     // whether this flow gave birth to the row, and holds the tokens/status to
@@ -783,10 +775,6 @@ export async function handleOauthCallback(query: Record<string, unknown>): Promi
     }
 
     if (outcome.kind === 'twin') {
-      // The consent landed on an already-connected provider account; its row
-      // took the fresh tokens, so its live client is stale too.
-      dropWorkspaceClient(row.server, row.workspaceId, outcome.twinAccountKey);
-
       if (bornHere) {
         // The newborn row died in establishIdentity: the registry lost it.
         await journal(CONNECTION_DISCONNECTED, {
@@ -992,7 +980,7 @@ export async function accountAccessToken(
 // other call of it (accountAccessToken).
 // Refuses to write a twin (two rows claiming one provider account) — that
 // conflict is surfaced to the caller, never resolved silently here.
-export async function backfillConnectionIdentity(
+async function backfillConnectionIdentity(
   service: { url: string; identityProbe: IdentityProbeConfig },
   connectionId: string,
 ): Promise<{ ok: true } | { ok: false; reason: string }> {

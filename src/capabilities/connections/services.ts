@@ -2,7 +2,7 @@
 // layer owns both registries and reads nothing else about a service; whoever
 // defines a service tells it here — the tree of the capability catalog for a
 // node with a connection (src/tree/services.ts), the kinds of remote agents
-// for their secrets, the tool manager for its tool servers. A name has one
+// for their secrets, external-services.ts for installation MCP configs. A name has one
 // definition: named again, it is replaced.
 //
 // - account services: what a user connects their own account to, and how
@@ -40,10 +40,6 @@ export function registerAccountService(service: AccountService): void {
   services.set(service.name, service);
 }
 
-export function unregisterAccountService(name: string): void {
-  services.delete(name);
-}
-
 export function getAccountService(name: string): AccountService | null {
   return services.get(name) ?? null;
 }
@@ -68,14 +64,10 @@ export type SecretService = {
   error: string | null;
 };
 
-// Who defines installation services lists them as they stand now. `refresh`
-// brings that state up to date; `forgotten` is told that the secrets of a
-// service were deleted — a source that keeps something alive on them lets
-// it go.
+// Sources publish the latest state after a shared refresh.
 export type SecretServiceSource = {
   list(): SecretService[];
   refresh(): Promise<void>;
-  forgotten?(name: string): Promise<void>;
 };
 
 const secretServiceSources: SecretServiceSource[] = [];
@@ -88,16 +80,6 @@ export async function refreshSecretServices(): Promise<void> {
   for (const source of secretServiceSources) {
     await source.refresh();
   }
-}
-
-// The secrets of the service were deleted: every source hears it, then the
-// state is read anew.
-export async function secretsForgotten(name: string): Promise<void> {
-  for (const source of secretServiceSources) {
-    await source.forgotten?.(name);
-  }
-
-  await refreshSecretServices();
 }
 
 // One entry per name, as of the last refresh: a service two sources name is

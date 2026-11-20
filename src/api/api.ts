@@ -39,8 +39,8 @@ import { FileNotFoundError, getFile, getWorkspaceFile, ingestFile, openFileConte
 import type { StorageBody } from '../files/storage.ts';
 import { verifyDownloadLink } from '../files/storage/local.ts';
 import { forgetExternalServerSecrets, getExternalServerSecretRequest, isExternalSecretServer, openExternalServerCredentialsRequest, provisionExternalServerSecrets } from '../capabilities/external-secrets.ts';
-import { listClaudeConnectorTargets, refreshExternalServers } from '../capabilities/tool-manager.ts';
-import { getAccountService, listSecretServices, type SecretService } from '../capabilities/connections/services.ts';
+import { listClaudeConnectorTargets } from '../capabilities/external-services.ts';
+import { getAccountService, refreshSecretServices, listSecretServices, type SecretService } from '../capabilities/connections/services.ts';
 import { resolveOperatorCredentials, tokenTtlMs } from '../adapters/ccr/token.ts';
 import { ConnectionError, disconnectConnection, getOauthClientRequest, getWorkspaceConnection, openOauthClientRequest, provisionOauthClient, reconnectConnection, renameConnection, startConnection, connectionView } from '../capabilities/connections/index.ts';
 import { AppManagementError, listApps, publishApp, unpublishApp } from '../apps/management.ts';
@@ -1511,7 +1511,7 @@ function sendScheduleError(ctx: Context, error: ScheduleError): void {
 }
 
 // A task registered by the operator: the input by the rules of the
-// create_task tool (one parser — src/schedule/input.ts), the row and its
+// schedule_create_task capability (one parser — src/schedule/input.ts), the row and its
 // schedule.task.created in one transaction, authored by the operator
 // (createdBy "operator"). The answer carries the created row.
 router.post('/schedule/tasks', requireSession, async ctx => {
@@ -1815,19 +1815,9 @@ router.post('/connections', requireSession, async ctx => {
 });
 
 // --------------------------------------------------------------------------
-// The services of the installation (the Connections screen's catalog beside
-// the per-user ones): external servers whose credentials are the
-// installation's — one set for every workspace. The list reads the states
-// after a reconnect attempt where one is due (secrets that just landed
-// connect here, as before a tool catalog); a request for the credentials
-// is the auth agent's own, addressed to the main thread (its
-// secrets.provisioned tells the secretary), and the console opens its form;
-// forgetting is the auth agent's too — no event, the server disconnects for
-// everyone. Any workspace may manage them (decision of the operator).
-// Beside them, read-only, the claude.ai connectors (transport
-// "claude-connector"): their authorization is the operator's claude.ai
-// account, their one local dependency the ambient Claude CLI token — its
-// expiry is looked at here, since a live connection outlives it.
+// Connections displays the latest state from each installation service.
+// The console opens the same credential form as the auth agent. Read-only
+// claude.ai connectors also show the expiry of the operator's CLI token.
 
 function installationServiceView(target: SecretService): InstallationServiceView {
   const state = target.connected ? 'connected' : target.error ? 'failed' : 'missing';
@@ -1870,7 +1860,7 @@ async function connectorServiceViews(): Promise<ConnectorServiceView[]> {
 }
 
 router.get('/installation-services', requireSession, async ctx => {
-  await refreshExternalServers();
+  await refreshSecretServices();
 
   const response: InstallationServicesResponse = { services: listSecretServices().map(installationServiceView), connectors: await connectorServiceViews() };
 

@@ -1,7 +1,7 @@
 // The catalog view for a port that assembles the model's context.
 import { catalogContext, catalogInstructions, grantKey, grantedCapabilities, guideForLeaf, portActions, vertexLine } from './catalog-context.ts';
 import {
-  FileRef, expandSchema, grantedVertex, ruleText, toCapabilityError, typeText,
+  ACTION_NAMES, FileRef, expandSchema, grantedVertex, ruleText, toCapabilityError, typeText,
   type Catalog, type CatalogCapability, type FileRefValue, type Grant, type JsonSchema, type JsonValue,
 } from '../catalog/index.ts';
 import type { AgentPassport } from '../core/contract.ts';
@@ -28,10 +28,11 @@ function capabilityDefinition(tree: Catalog, vertex: CatalogCapability): Functio
   return definition(tree, vertex.fullName, vertex.description, vertex.input);
 }
 
-export async function createCatalogPort(agent: AgentPassport, workspaceId: string, threadId: string) {
-  const { grant, connections } = await catalogContext(agent, workspaceId, threadId);
+export async function createCatalogPort(agent: AgentPassport, workspaceId: string, threadId: string, opening: 'function' | 'signature') {
+  const actions = opening === 'signature' ? ACTION_NAMES : portActions;
+  const { grant, connections } = await catalogContext(agent, workspaceId, threadId, actions);
   const tree = grant.catalog;
-  const tools = portActions.map(name => {
+  const tools = actions.map(name => {
     const action = tree.actions.get(name)!;
     return definition(tree, name, action.description, action.input);
   });
@@ -58,6 +59,9 @@ export async function createCatalogPort(agent: AgentPassport, workspaceId: strin
         const vertex = grantedVertex(grant, opened.name);
         if (vertex?.kind !== 'capability') throw new Error('Missing described capability');
         const guide = guideForLeaf(grant, vertex.parent, openings.seenNodes);
+        if (opening === 'signature') {
+          return { kind: 'catalog', text: [...guide, opened.description, opened.signature, ...opened.types, ...accounts].join('\n') };
+        }
         const text = [
           ...guide, 'Returns: ' + typeText(vertex.output, 0), ...vertex.inputRules.map(ruleText), ...opened.types, ...accounts,
         ].join('\n');
@@ -65,7 +69,7 @@ export async function createCatalogPort(agent: AgentPassport, workspaceId: strin
         return { kind: 'catalog', text, ...(openings.introduce(call.callId, tool, text) ? { definition: tool } : {}) };
       }
       const text = preview(grant, value, seq, 'value');
-      return call.name === 'view_file' ? showFile(text, FileRef.parse(value)) : { kind: 'catalog', text };
+      return result.name === 'view_file' ? showFile(text, FileRef.parse(value)) : { kind: 'catalog', text };
     } catch (error) {
       return { kind: 'catalog', isError: true, text: JSON.stringify(toCapabilityError(error).toValue()) };
     }
@@ -75,6 +79,7 @@ export async function createCatalogPort(agent: AgentPassport, workspaceId: strin
   }
 
   const instructions = catalogInstructions(grant,
+    opening === 'signature' ? 'If only the capability name remains in the transcript, describe it again to read its signature.' :
     'Use describe to add a capability to the available functions. If its name appears only in the transcript, describe it again. Call the function by its catalog name.');
   return { instructions, tools, capabilityDefinitions, dispatch, grantKey: grantKey(grant) };
 }

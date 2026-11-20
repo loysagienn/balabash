@@ -364,46 +364,6 @@ describe('a message with files', () => {
   });
 });
 
-describe('the coordinator hands files to a child', () => {
-  test('send_to_thread with fileIds: a thread.message with the references and their facts; a foreign file rejects the call and nothing is written', async () => {
-    const { startThread } = await import('../core/threads.ts');
-    const { dispatchCoordinatorFunction } = await import('../coordinator/functions.ts');
-    const { ingestFile } = await import('../files/index.ts');
-    const child = await startThread({ workspaceId: stand.workspaceId, parentThreadId: stand.mainThreadId, agent: 'engineer', title: 'with files', actor: 'system' });
-    const own = await ingestFile({ body: 'spec', workspaceId: stand.workspaceId, originalFilename: 'spec.md', contentType: 'text/markdown', scope: 'web' });
-    const ctx = { workspaceId: stand.workspaceId, threadId: stand.mainThreadId };
-    const sent = await dispatchCoordinatorFunction(
-      { name: 'send_to_thread', callId: 'c1', arguments: JSON.stringify({ threadId: child.id, text: 'Here is the spec', fileIds: [own.id] }) } as never,
-      ctx,
-    );
-
-    assert.deepEqual(sent, { kind: 'async' });
-
-    const message = await prisma.event.findFirst({ where: { type: 'thread.message', targetThreadId: child.id }, orderBy: { seq: 'desc' } });
-
-    assert.deepEqual(message?.payload, {
-      text: 'Here is the spec',
-      fileIds: [own.id],
-      files: [{ fileId: own.id, contentType: 'text/markdown', originalFilename: 'spec.md', sizeBytes: 4 }],
-    });
-
-    const other = await prisma.workspace.create({ data: {} });
-    const foreign = await ingestFile({ body: 'theirs', workspaceId: other.id, originalFilename: 'theirs.md', contentType: 'text/markdown', scope: 'web' });
-    const events = await eventCount();
-    const refused = await dispatchCoordinatorFunction(
-      { name: 'send_to_thread', callId: 'c2', arguments: JSON.stringify({ threadId: child.id, text: 'And this', fileIds: [foreign.id] }) } as never,
-      ctx,
-    );
-
-    assert.equal((refused as { kind: string }).kind, 'rejected');
-    assert.equal(await eventCount(), events);
-
-    const plain = await dispatchCoordinatorFunction({ name: 'send_to_thread', callId: 'c3', arguments: JSON.stringify({ threadId: child.id, text: 'No files', fileIds: null }) } as never, ctx);
-
-    assert.deepEqual(plain, { kind: 'async' });
-  });
-});
-
 describe('an import that never overwrites', () => {
   test('placeImport: a free name takes the file; the same bytes keep their path; other bytes land beside as "name (2).ext"', async () => {
     const { fileDigest, placeImport } = await import('../workspace/files.ts');

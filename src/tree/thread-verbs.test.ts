@@ -286,18 +286,14 @@ describe('agent passports', () => {
 
   test('a loaded remote kind is offered and callable only by its recipients', async () => {
     const { getAgent, startable } = await import('../capabilities/agent-catalog.ts');
-    const { dispatchCoordinatorFunction, getCoordinatorFunctionDefinitions } = await import('../coordinator/functions.ts');
     const names = (agent: string) => startable(agent).map(child => child.name);
     assert.ok(getAgent('unassigned'));
     assert.ok(names('engineer').includes('fake_agent')); // recipient by profile
     assert.ok(!names('gardener').includes('fake_agent')); // projects alone grants nothing
     assert.deepEqual(names('auth'), ['private_agent']);
-    const offered = await getCoordinatorFunctionDefinitions(stand.workspaceId);
-    assert.ok(offered.some(fn => fn.name === 'fake_agent'));
-    const ctx = { workspaceId: stand.workspaceId, threadId: stand.mainThreadId };
+    assert.ok(names('coordinator').includes('fake_agent'));
     for (const name of ['unassigned', 'private_agent']) {
-      assert.ok(!offered.some(fn => fn.name === name));
-      assert.equal((await dispatchCoordinatorFunction({ callId: 'probe', name, arguments: '{"prompt":"Work"}' }, ctx)).kind, 'rejected');
+      assert.ok(!names('coordinator').includes(name));
       await refuses(invoke('spawn_agent', { agent: name, title: 'Work', prompt: 'Work' }), 'invalid_input', /you can start/);
     }
 

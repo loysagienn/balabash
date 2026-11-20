@@ -1,10 +1,10 @@
 // The core of the workspace FILE AREA: the one place that owns the path
 // boundary, the content-type table and the primitives over
 // data/workspace/<workspaceId>/files. All consumers go through here — the
-// workbench tool servers (tools/workspace.ts, tools/workspace_files.ts) and
+// catalog capabilities and
 // the web API (/api/workspace/*) — so the boundary check exists exactly once.
 // The currency is a relative path inside the file area; the workspaceId comes from
-// the caller's identity (MCP _meta / web session), never from model- or
+// the caller's identity (catalog caller / web session), never from model- or
 // user-supplied parameters.
 //
 // Reads NEVER provision: no mkdir, and workspace.sqlite is only opened when
@@ -150,7 +150,7 @@ export type FileMeta = { title: string | null; description: string | null };
 // The tiny metadata operations run on short-lived in-process handles under
 // the platform's lock policy (src/workspace/sqlite.ts: short synchronous
 // busy slices, asynchronous retries — the event loop stays free while a
-// foreign writer holds the database). Bulk SQL (data_query) runs in a child
+// foreign writer holds the database). Bulk SQL (workspace_query) runs in a child
 // process instead — DatabaseSync is synchronous and must not block the
 // single app process on a heavy query.
 

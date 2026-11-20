@@ -165,8 +165,7 @@ export function catalog(): Catalog {
 // a service — the console, an OAuth callback, a task: the catalog is built,
 // and the services its nodes declare are told to the connections layer.
 // From then on they can be connected, and `connectionsPort()` (./services.ts)
-// answers for them. A service a tool server defined under the same name is
-// the tree's from here on. The schedule gets what its programs run against:
+// answers for them. The catalog owns definitions of its nodes' services. The schedule gets what its programs run against:
 // this catalog and these connections.
 export async function startTree(): Promise<void> {
   registerServices(catalog());

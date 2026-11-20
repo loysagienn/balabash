@@ -25,7 +25,7 @@ wait in the main thread for the secretary's next turn.
   Asia/Jerusalem): a moment missed while the app was down is skipped; the
   next one counts from "now". `at` means "not before this instant" and is
   consumed by firing — success or failure alike. No retries, no catch-up,
-  no pause/resume. A task without a trigger runs only via run_task.
+  no pause/resume. A task without a trigger runs only via schedule_run_task.
 - A trigger during a previous run of the same task is skipped. A manual run
   leaves the trigger untouched.
 - To schedule a workspace script, call `workspace_run_command` from a program.

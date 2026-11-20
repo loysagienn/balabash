@@ -1,6 +1,6 @@
 // The operator's and the agents' commands over the task registry — one
 // implementation for the node `schedule` of the catalog
-// (src/tree/schedule.ts), the schedule tool server (src/schedule/tools.ts)
+// (src/tree/schedule.ts)
 // and the console's endpoints (src/api/api.ts), the way
 // src/projects/mutations.ts serves every door for projects. Creating writes the row and journals
 // schedule.task.created in its transaction by whoever asked (RegistryAuthor:

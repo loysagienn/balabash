@@ -5,11 +5,9 @@
 // src/harness/anthropic/turn.ts (the Messages API); turn-driver.ts picks one
 // by the configured backend. Nothing here names a provider's wire shapes.
 
-import type { ToolResult } from '../core/contract.ts';
-
 // A tool the model may call: the one definition shape of the coordinator's
 // port, serialized per driver. Catalog functions allow omitted optional
-// fields and validate them when called. Legacy strict schemas require every key.
+// fields and validate them when called.
 export type FunctionDefinition = {
   type: 'function';
   name: string;
@@ -40,15 +38,7 @@ export type CatalogResult = {
 };
 
 export type DispatchResult =
-  // The result goes back to the model and the loop continues.
-  | { kind: 'sync'; result: ToolResult }
   | CatalogResult
-  // Accepted for asynchronous execution; consequences arrive as events.
-  // The legacy Responses driver acknowledges the call as 'accepted'.
-  | { kind: 'async' }
-  // Rejected at dispatch; the error goes back so the model can recover
-  // in the same turn.
-  | { kind: 'rejected'; error: string }
   // The model declares the turn over: nothing more to do for the newest
   // events. The other calls of the same response are still dispatched.
   | { kind: 'end' };

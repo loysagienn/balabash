@@ -1,6 +1,6 @@
 // The reauthorization reaction (§10): a consumer over
-// connection.reauthorization_required — detection itself happens in the tool
-// manager when a refresh or call dies with UnauthorizedError. The reaction
+// connection.reauthorization_required — the connections layer records when
+// an account needs fresh consent. The reaction
 // spawns an auth thread so the user gets walked through re-authorizing, and
 // raises a thread.notification (the attention plan is orthogonal to the
 // context plan — §5.2). One active auth thread per workspace is enough: a

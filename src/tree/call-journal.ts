@@ -12,7 +12,7 @@ import type {
   ProgramRun,
   ProgramScope,
 } from '../catalog/index.ts';
-import { CapabilityError, describe, invokeCapability, runProgram, toCapabilityError } from '../catalog/index.ts';
+import { CapabilityError, describe, invokeCapability, parseCallTarget, runProgram, toCapabilityError } from '../catalog/index.ts';
 import { appendEvent } from '../core/append.ts';
 import { callAuthor } from './call-author.ts';
 
@@ -99,7 +99,23 @@ export async function dispatchCatalogCall(
   connections: ConnectionsPort,
   call: Pick<Call, 'callId' | 'name' | 'input'>,
 ) {
-  const { name, input, callId } = call;
+  const caller = grant.caller;
+  const { callId } = call;
+  const byName = grant.actions.has('call');
+  if (byName && call.name === 'call') {
+    let target;
+    try {
+      target = parseCallTarget(grant, call.input);
+    } catch (error) {
+      // A malformed envelope has no capability invocation to attribute.
+      const result = await journalCall({ ...call, caller }, async () => { throw error; });
+      return { ...result, name: call.name, opened: undefined };
+    }
+    const { name, input = {} } = target;
+    const result = await journalCall({ caller, callId, name, input }, () => invokeCapability(grant, name, input, { connections }));
+    return { ...result, name, opened: undefined };
+  }
+  const { name, input } = call;
   let opened: DescribeValue | undefined;
   let run: JsonObject = {};
   const result = await journalCall({ ...call, caller: grant.caller }, async () => {
@@ -115,8 +131,9 @@ export async function dispatchCatalogCall(
         record: outcome => { run = runDetails(outcome); },
       });
     }
+    if (byName) throw new CapabilityError('unknown_capability', 'Use call with the full capability name and its input.');
     return invokeCapability(grant, name, input, { connections });
   }, () => run);
 
-  return { ...result, opened };
+  return { ...result, name, opened };
 }

@@ -1,5 +1,5 @@
 // The one SQLite policy of the platform for workspace.sqlite — the database
-// is SHARED with the user's own writers (run_script children, scheduled
+// is SHARED with the user's own writers (workspace command children, scheduled
 // jobs, project ETL) that may hold a write transaction for tens of seconds.
 // Every platform-side connection follows the same rule, written down here
 // exactly once:
@@ -9,11 +9,11 @@
 //     transaction of 25–40 s (the observed loaders) is inside the window; a
 //     writer stuck for minutes is a bug on its side and is reported, not
 //     waited for forever.
-//   - Child processes (data_query, app endpoints — src/workspace/child.ts)
+//   - Child processes (workspace_query, app endpoints — src/workspace/child.ts)
 //     wait synchronously through SQLite's busy handler: the child is its own
 //     process, blocking it costs nothing. Their kill timeout stays above the
 //     busy timeout so the wait ends in a clear SQL error, never in a kill.
-//   - In-process handles (the _files metadata, tools/workspace_files.ts and
+//   - In-process handles (the _files metadata, src/tree/workspace-files.ts and
 //     the indexer) run on the app's event loop, where DatabaseSync is
 //     synchronous: they wait in short busy_timeout slices (BUSY_SLICE_MS)
 //     with asynchronous sleeps in between, so the app stays responsive for

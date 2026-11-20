@@ -1,8 +1,4 @@
-// Tool-server configs: external MCP servers are mcp-servers/<name>.json
-// (stdio | http | claude-connector), validated hard; local in-process servers
-// ship inside the bundle (tools/index.ts) and reuse the same config
-// validation. Which agents see a server is decided by the agents' explicit
-// tool lists, not here.
+// MCP connection settings for the installation services shown in Connections.
 
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -14,23 +10,6 @@ import { getSecretReferenceNames } from './server-secrets.ts';
 // present in both is a loud error — an extension never shadows the repository.
 const externalServersDirectory = path.resolve('mcp-servers');
 const externalServersDirectories = [externalServersDirectory, INSTALLATION_SERVERS_DIR];
-
-// Per-tool adjustments applied on top of what the server advertises via
-// listTools(): replace a description (the server's own wording may steer the
-// model toward expensive tools) or hide a tool entirely. Keys are tool names
-// as the server reports them; unknown keys are ignored silently — servers may
-// change their tool set between connections.
-export type ToolOverride = {
-  description?: string;
-  disabled?: boolean;
-};
-
-// Positive tool selection: when present, only the named tools of the server
-// are exposed, everything else it advertises is dropped. Preferred over
-// per-tool "disabled" for servers with large, growing catalogs (a hosted
-// server adding tools must not silently widen the model's context). Names
-// missing from the server's current list are logged, not fatal.
-export type EnabledTools = string[];
 
 // Identity probe of a user-auth server: the provider's own answer to "who is
 // authorized here", fetched by the platform with a fresh access token right
@@ -49,27 +28,16 @@ export type IdentityProbeConfig = {
   authScheme?: 'Bearer' | 'OAuth';
 };
 
-// Tool names live in one flat function namespace shared by every server. A
-// server whose tool names carry no vendor prefix (a bare "ask" or "search")
-// collides with same-named tools of other servers; prefixTools renames its
-// functions to "<server>__<tool>" at listing time. Purely a namespace remap —
-// the MCP call still uses the server's own tool name.
-type NamespaceOptions = {
-  prefixTools?: boolean;
-};
-
 export type ExternalServerConfig =
-  | (NamespaceOptions & {
+  | {
       transport: 'stdio';
       command: string;
       args?: string[];
       env?: Record<string, string>;
       // What the service is, for the operator (the console's catalog).
       description?: string;
-      enabledTools?: EnabledTools;
-      toolOverrides?: Record<string, ToolOverride>;
-    })
-  | (NamespaceOptions & {
+    }
+  | {
       // A claude.ai account-level connector reused through Anthropic's MCP
       // proxy (mcp-proxy.anthropic.com), authenticated by the operator's
       // ambient Claude CLI login — the same read-only credentials store the
@@ -87,10 +55,8 @@ export type ExternalServerConfig =
       // and the "anthropic-beta: mcp-servers-2025-12-04" header.
       serverId: string;
       description?: string;
-      enabledTools?: EnabledTools;
-      toolOverrides?: Record<string, ToolOverride>;
-    })
-  | (NamespaceOptions & {
+    }
+  | {
       transport: 'http';
       url: string;
       // Static headers sent with every request, e.g. an Authorization header
@@ -99,9 +65,7 @@ export type ExternalServerConfig =
       headers?: Record<string, string>;
       // "user": the server is OAuth-protected per the MCP authorization spec.
       // It is registered without connecting; every user authorizes their own
-      // account (auth agent), and its tools are exposed per user.
-      // description is required in that mode — it is all the model sees
-      // before the first connection.
+      // account. Its description appears in the Connections screen.
       auth?: 'user';
       description?: string;
       // Providers without Dynamic Client Registration need an
@@ -115,65 +79,15 @@ export type ExternalServerConfig =
       // Identity probe — required for the service to hold more than one
       // connected account per user (the multiplicity gate).
       identityProbe?: IdentityProbeConfig;
-      enabledTools?: EnabledTools;
-      toolOverrides?: Record<string, ToolOverride>;
-    });
+    };
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
-
-export function validateExternalServerConfig(raw: unknown, source: string): ExternalServerConfig {
+function validateExternalServerConfig(raw: unknown, source: string): ExternalServerConfig {
   if (!isObject(raw)) {
     throw new Error(`${source} must contain a JSON object`);
-  }
-
-  if (raw.prefixTools !== undefined && typeof raw.prefixTools !== 'boolean') {
-    throw new Error(`${source}: "prefixTools" must be a boolean`);
-  }
-
-  if (raw.enabledTools !== undefined) {
-    if (
-      !Array.isArray(raw.enabledTools) ||
-      !raw.enabledTools.length ||
-      raw.enabledTools.some(name => typeof name !== 'string' || !name.trim())
-    ) {
-      throw new Error(`${source}: "enabledTools" must be a non-empty array of tool names`);
-    }
-
-    if (new Set(raw.enabledTools).size !== raw.enabledTools.length) {
-      throw new Error(`${source}: "enabledTools" must not repeat tool names`);
-    }
-  }
-
-  if (raw.toolOverrides !== undefined) {
-    if (!isObject(raw.toolOverrides)) {
-      throw new Error(`${source}: "toolOverrides" must be an object keyed by tool name`);
-    }
-
-    for (const [toolName, override] of Object.entries(raw.toolOverrides)) {
-      if (!isObject(override)) {
-        throw new Error(`${source}: "toolOverrides.${toolName}" must be an object`);
-      }
-
-      if (override.description !== undefined && (typeof override.description !== 'string' || !override.description.trim())) {
-        throw new Error(`${source}: "toolOverrides.${toolName}.description" must be a non-empty string`);
-      }
-
-      if (override.disabled !== undefined && typeof override.disabled !== 'boolean') {
-        throw new Error(`${source}: "toolOverrides.${toolName}.disabled" must be a boolean`);
-      }
-
-      const knownKeys = ['description', 'disabled'];
-      const unknownKeys = Object.keys(override).filter(key => !knownKeys.includes(key));
-
-      if (unknownKeys.length) {
-        throw new Error(
-          `${source}: "toolOverrides.${toolName}" has unknown keys: ${unknownKeys.map(key => `"${key}"`).join(', ')}`,
-        );
-      }
-    }
   }
 
   if (raw.transport === 'stdio') {
@@ -318,7 +232,7 @@ async function readExternalServerConfigFile(directory: string, serverName: strin
 // data/mcp-servers/<name>.json is NOT fail-fast — it lives outside the
 // bundle, so a boot failure could not be rolled back: a broken or clashing
 // file is logged and skipped, and the server does not exist until the file
-// is fixed and the app restarted (the same rule as data/tools).
+// is fixed and the app restarted.
 export async function readExternalServerConfigs(): Promise<Record<string, ExternalServerConfig>> {
   const configs: Record<string, ExternalServerConfig> = {};
   const origins = new Map<string, string>();
@@ -331,6 +245,7 @@ export async function readExternalServerConfigs(): Promise<Record<string, Extern
       const file = path.join(directory, filename);
 
       try {
+        if (!/^[a-z][a-z0-9_]*$/.test(serverName)) throw new Error(`Invalid MCP service name "${serverName}"`);
         const origin = origins.get(serverName);
 
         if (origin) {

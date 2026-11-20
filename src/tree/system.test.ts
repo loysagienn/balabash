@@ -128,24 +128,6 @@ describe('system_request_restart', () => {
   });
 });
 
-test('the built-in request_restart offers only the reason and records the request for its thread', async () => {
-  const { createRestartToolServer } = await import('../capabilities/restart-tools.ts');
-  const server = createRestartToolServer();
-  const [tool] = await server.getFunctions(stand.workspaceId);
-
-  assert.equal(tool?.functionName, 'request_restart');
-  assert.deepEqual(Object.keys(tool.inputSchema.properties as object), ['reason']);
-  assert.equal(tool.inputSchema.additionalProperties, false);
-
-  const reason = 'Activate the rebuilt app.';
-  const reply = await server.call('request_restart', { reason }, { workspaceId: stand.workspaceId, threadId: stand.mainThreadId });
-
-  assert.match(String(reply), /End your turn/);
-  assert.deepEqual((await requests()).at(-1), {
-    actor: 'agent', agentName: 'coordinator', workspaceId: stand.workspaceId, threadId: stand.mainThreadId, payload: { reason },
-  });
-});
-
 describe('the state of the bundle', () => {
   test('is read at the root it is asked about: missing, current, or stale by the newest file anywhere in the sources', async () => {
     const { bundleState } = await import('../runtime/bundle.ts');

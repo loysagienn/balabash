@@ -214,7 +214,7 @@ export function createSessionRun(
       ...(spec.imageGeneration ? { imageGeneration: true } : {}),
       ...(cwd ? { cwd } : {}),
       // Scripts run from the session reach the workspace database the same way
-      // run_script children do: via the WORKSPACE_DB env variable.
+      // workspace command children do: via the WORKSPACE_DB env variable.
       env: { WORKSPACE_DB: workspaceDbPath(ctx.workspaceId) },
       environmentTools: environment?.environmentTools,
     });

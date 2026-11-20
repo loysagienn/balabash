@@ -1,16 +1,11 @@
-// OAuthClientProvider implementations for the MCP SDK (§10). Two flavours:
-// the interactive provider drives a browser flow (consent URL capture, PKCE
-// verifier on the connection row), the transport provider serves stored
-// tokens to background MCP clients, refreshes them ahead of expiry and saves
-// refreshes, but refuses to start an interactive flow. Tokens and PKCE state
-// live only in the connections table — never in the log (§2 ставка 4).
+// Browser consent through the MCP SDK and access-token refresh for catalog
+// calls. Tokens and PKCE state live in the connections table.
 
 import crypto from 'node:crypto';
 import {
   discoverOAuthServerInfo,
   refreshAuthorization,
   selectResourceURL,
-  UnauthorizedError,
 } from '@modelcontextprotocol/sdk/client/auth.js';
 import type { OAuthClientProvider, OAuthServerInfo } from '@modelcontextprotocol/sdk/client/auth.js';
 import type {
@@ -451,90 +446,4 @@ export async function connectionAccessToken(
 
     throw error;
   }
-}
-
-// Used by background MCP transports. It serves stored tokens (refreshing
-// them ahead of expiry) and saves the SDK's own refreshes, but deliberately
-// refuses to start an interactive flow. Addressed by connection row id: one
-// provider serves exactly one account's tokens. serverUrl is the resource
-// server the tokens are for — the anchor of authorization server discovery.
-export function createTransportAuthProvider(
-  connection: { id: string; server: string },
-  serverUrl: string,
-): OAuthClientProvider {
-  const getConnection = () => prisma.connection.findUnique({ where: { id: connection.id } });
-
-  return {
-    get redirectUrl() {
-      return redirectUrl();
-    },
-    get clientMetadata() {
-      return clientMetadata();
-    },
-    state: () => crypto.randomBytes(24).toString('base64url'),
-    clientInformation: () => loadClientInformation(connection.server),
-    saveClientInformation: info => saveClientInformation(connection.server, info),
-    tokens: async () => {
-      const row = await getConnection();
-
-      if (!row || row.status !== 'connected' || !isObject(row.tokens)) {
-        return undefined;
-      }
-
-      const stored = row.tokens as StoredTokens;
-
-      if (!stored.refresh_token || !isExpiringSoon(stored)) {
-        return stored;
-      }
-
-      if (refreshFailedLately(connection.id)) {
-        return stored;
-      }
-
-      try {
-        const fresh = await exchangeRefreshToken(connection, serverUrl, stored.refresh_token);
-
-        console.log(`[oauth] refreshed "${connection.server}" tokens ahead of expiry (connection ${connection.id})`);
-
-        return fresh;
-      } catch (error) {
-        // The stored tokens go out as they are: the resource server's 401
-        // hands the SDK its own refresh attempt, and a refresh token the
-        // provider no longer honors ends in re-authorization there.
-        console.warn(
-          `[oauth] proactive refresh of "${connection.server}" tokens failed (connection ${connection.id}): ${error instanceof Error ? error.message : String(error)}`,
-        );
-
-        return stored;
-      }
-    },
-    saveTokens: async tokens => {
-      const row = await getConnection();
-
-      if (row) {
-        await prisma.connection.update({
-          where: { id: row.id },
-          data: { tokens: stampObtainedAt(tokens) as unknown as Prisma.InputJsonValue },
-        });
-      }
-    },
-    redirectToAuthorization: () => {
-      throw new UnauthorizedError('User authorization is required');
-    },
-    saveCodeVerifier: () => {},
-    codeVerifier: () => {
-      throw new Error('Background connection cannot run an authorization flow');
-    },
-    invalidateCredentials: async scope => {
-      if (scope !== 'all' && scope !== 'tokens') {
-        return;
-      }
-
-      const row = await getConnection();
-
-      if (row) {
-        await prisma.connection.update({ where: { id: row.id }, data: { tokens: Prisma.DbNull } });
-      }
-    },
-  };
 }

@@ -12,8 +12,7 @@ workspace commands require Linux with a readable `/proc` to identify their
 process groups. Boot order: sweep recorded groups in `data/process-groups/`
 → `prisma migrate deploy` → database check → tombstone of orphaned threads
 without a saved session → agent catalog (repository agents, then
-`data/remote-agents`) → tool servers (repository `tools/`, then `data/tools`
-and `data/mcp-servers`) → web server → channel adapters (Telegram and CCR
+`data/remote-agents`) → external service settings → capability catalog → web server → channel adapters (Telegram and CCR
 when configured) → resume of the surviving threads' runs → router, consumers,
 schedule heart, indexer → restart module. The process listens on one
 loopback port (`HTTP_PORT`); a TLS-terminating reverse proxy sends the whole
@@ -99,7 +98,7 @@ the next boot reports into the log.
   alone, live with the next page load.
 - `npm run types` — tsc over the core and, separately, over the console.
 - `npm test` — node's test runner over `src/**/*.test.ts` and
-  `tools/**/*.test.ts`; the global setup starts an embedded PostgreSQL 16,
+  `agents/**/*.test.ts`; the global setup starts an embedded PostgreSQL 16,
   deploys the migrations into a template and hands every test a copy; the
   live `DATABASE_URL` is taken away from the test children. Safe next to a
   running app.
@@ -121,8 +120,7 @@ from the bot's `/auth_code`. A Telegram group becomes a workspace with
 
 Code and configs of the installation live in `data/` and are picked up at
 boot without a build — Node runs `.ts` natively:
-`data/tools/<name>.ts` (an in-process tool server, `export start(ctx)`),
-`data/mcp-servers/<name>.json` (an external MCP server), `data/remote-agents/
+`data/mcp-servers/<name>.json` (external service settings for Connections), `data/remote-agents/
 <name>.ts` (a remote agent kind with its driver). Same contracts as their repository twins
 (`src/capabilities/extensions.ts`); names never shadow the repository's; no
 runtime imports from the repository tree — packages and `import type` only,

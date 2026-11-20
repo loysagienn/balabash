@@ -17,7 +17,7 @@
 import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { coordinatorServers } from '../capabilities/legacy-bundles.ts';
+import { accessProfiles, coordinator as secretary } from '../../agents/access.ts';
 import { STAND_HOST, startStand } from '../test-support/stand.ts';
 import type { Stand } from '../test-support/stand.ts';
 import type { JsonObject, Thread } from '../core/contract.ts';
@@ -176,7 +176,7 @@ describe('the agent catalog of the snapshot', () => {
     assert.equal(coordinator.name, 'coordinator');
     assert.equal(coordinator.sdk, 'openai');
     assert.equal(coordinator.model, MODEL);
-    assert.deepEqual(coordinator.tools, coordinatorServers);
+    assert.deepEqual(coordinator.nodes, secretary.access.nodes);
     assert.deepEqual(coordinator.agents, names);
     assert.deepEqual(coordinator.modes, ['user']);
     assert.equal(coordinator.defaultMode, 'user');
@@ -202,7 +202,8 @@ describe('the agent catalog of the snapshot', () => {
       assert.equal(agent.effort, decl.session.effort ?? null, agent.name);
       assert.equal(agent.model, decl.session.model ?? null, agent.name);
       assert.equal(agent.sdk, decl.sdk, agent.name);
-      assert.deepEqual(agent.tools, ['balabash']);
+      const profile = decl.access.profile ? accessProfiles[decl.access.profile] : undefined;
+      assert.deepEqual(agent.nodes, [...new Set([...(profile?.nodes ?? []), ...(decl.access.nodes ?? [])])]);
     }
   });
 

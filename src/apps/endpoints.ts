@@ -14,7 +14,7 @@ import { statementInChild, type SqlCaps, type SqlChildResult, type SqlParamValue
 import { workspaceDbPath, workspaceFilesDir } from '../workspace/layout.ts';
 import type { AppEndpoint } from './manifest.ts';
 
-// Endpoint caps: the same result window and timeout as data_query. The
+// Endpoint caps: the same result window and timeout as workspace_query. The
 // timeout is not a statement budget (an endpoint statement is instant) but
 // the lock window of src/workspace/sqlite.ts: a write endpoint must outwait
 // a foreign writer's transaction on the shared workspace.sqlite (tens of

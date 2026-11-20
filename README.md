@@ -50,7 +50,7 @@ Setup and operation: [SETUP.md](SETUP.md). Working on the code: [DEVELOPMENT.md]
 | 🖼️ **image_generator** | A headless sub-agent on Codex making raster images with its built-in image generation; results arrive as stored files. |
 
 Three model vendors run side by side behind one session contract. The secretary runs on
-the configured LLM backend — OpenAI's Responses API, any OpenAI-compatible server, or
+the configured LLM backend — OpenAI's Responses API, a compatible Responses API gateway, or
 Anthropic's Messages API; the other agents run on Claude (Claude Agent SDK, the host's
 Claude login) or on OpenAI Codex (Codex SDK, the host's ChatGPT login). An agent picks its
 backend with a one-line declaration.
@@ -67,21 +67,17 @@ the user. A system arrives as an installation driver, not as repository code.
 - **Google Drive** — search across My Drive and shared drives, folder listing, Docs/Sheets/
   Slides as text, download into and upload from file storage, replace a file's content;
   the same Google OAuth client as Gmail.
-- **Notion** — the official hosted MCP server; each user connects their own workspace.
 - **Perplexity** — search, ask, reason, deep research on the installation's key.
-- **Qase** — test management through the official MCP server on the operator's token.
 - **Claude Code Artifacts** — the harness's Artifact tools, on for the designer agent: design
   canvases, design systems and decks published to claude.ai under the host's Claude login.
 - **Web** — fetch pages and download files into storage, with SSRF protection (DNS/IP
   blocklists, redirect and size caps).
 - **Browser** — a persistent per-user Chromium profile for anything without an API.
-- **Any MCP server** (stdio or HTTP) added with a JSON file — the platform runs OAuth
-  (discovery, dynamic client registration, PKCE), per-user connections with several
-  accounts of one service, and `${secret:NAME}` installation credentials. In-process tool
-  servers are TypeScript modules; an installation adds its own next to the repository's.
+- **Connections** — per-user OAuth accounts and installation credentials. The Connections
+  screen also displays external MCP services configured by the installation.
 
 **A data workbench per workspace** — a private SQLite database, a scoped file area and a
-script runner (Python/Node), so bulk data moves disk-to-disk instead of through model
+shell command runner, so bulk data moves disk-to-disk instead of through model
 context. Data goes to tables and files; the model sees short summaries. A background indexer
 annotates every file with a title and a description.
 
@@ -150,7 +146,9 @@ each run owns a thread — its context and its visibility boundary.**
   remote agent's thread holds no run at all: its row is its whole state.
 - **Agents are declarations.** An agent module declares its SDK, prompt, tools and spawn
   rights; the platform supplies the session lifecycle, event-to-message rendering, live
-  tool delivery and thread completion. Codex and Claude receive their catalogs over MCP.
+  tool delivery and thread completion. The secretary opens catalog capabilities through its configured API. On a stateless
+  compatible Responses gateway it reads the signature with `describe` and uses `call`.
+  Codex and Claude receive their catalogs over MCP.
   A Claude Code mod opens deferred capabilities through describe. Catalog calls and calls inside programs use the same event journal. Prompts
   are assembled from a world library — one file per fact, every prompt imports instead of
   retelling.

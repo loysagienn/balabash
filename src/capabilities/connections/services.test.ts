@@ -10,7 +10,6 @@ import {
   listSecretServices,
   refreshSecretServices,
   registerSecretServiceSource,
-  secretsForgotten,
   type SecretService,
 } from './services.ts';
 
@@ -29,9 +28,6 @@ test('a service two sources name is listed once, as the source registered later 
   registerSecretServiceSource({
     list: () => [service('search', 'a tool server'), service('tracker', 'a tool server')],
     refresh: async () => {},
-    forgotten: async name => {
-      heard.push(`forgotten ${name}`);
-    },
   });
   registerSecretServiceSource({
     list: () => [service('search', 'a node of the tree', entered)],
@@ -53,8 +49,7 @@ test('a service two sources name is listed once, as the source registered later 
   assert.equal(getSecretService('search')?.connected, true);
   assert.equal(getSecretService('wiki'), null);
 
-  // Deleted secrets: every source hears it, then the state is read anew.
-  await secretsForgotten('search');
-  assert.deepEqual(heard, ['refresh', 'forgotten search', 'refresh']);
+  await refreshSecretServices();
+  assert.deepEqual(heard, ['refresh', 'refresh']);
   assert.equal(getSecretService('search')?.connected, false);
 });

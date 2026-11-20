@@ -23,13 +23,10 @@ import { listApps } from '../apps/management.ts';
 import { publicAppsBase } from '../apps/urls.ts';
 import { taskView } from '../schedule/view.ts';
 import { connectionView, listProvisionedOauthClients, listWorkspaceConnections } from '../capabilities/connections/index.ts';
-import { effectiveBundleServers } from '../capabilities/tool-manager.ts';
 import { listAccountServices } from '../capabilities/connections/services.ts';
 import { readOpenSecretRequests } from '../capabilities/secret-requests.ts';
-import { getAgents, isRemoteAgent, startable } from '../capabilities/agent-catalog.ts';
+import { declaredNodes, getAgents, isRemoteAgent, startable } from '../capabilities/agent-catalog.ts';
 import { coordinator } from '../../agents/access.ts';
-import { coordinatorServers } from '../capabilities/legacy-bundles.ts';
-import { BRIDGE_SERVER } from '../harness/sdk-mcp-config.ts';
 import { DEFAULT_EFFORT } from '../harness/default-effort.ts';
 import { config } from '../config/index.ts';
 import type { AgentDeclaration, RemoteAgentDeclaration } from '../core/contract.ts';
@@ -189,7 +186,7 @@ function remoteAgentView(agent: RemoteAgentDeclaration): AgentView {
     description: agent.description,
     icon: agent.icon ?? null,
     sdk: 'remote',
-    tools: [],
+    nodes: [],
     agents: startable(agent.name).map(child => child.name),
     modes: agent.modes,
     defaultMode: agent.defaultMode,
@@ -207,7 +204,7 @@ function agentView(agent: AgentDeclaration, lastModel: string | null): AgentView
     description: agent.description,
     icon: agent.icon ?? null,
     sdk: agent.sdk,
-    tools: [BRIDGE_SERVER],
+    nodes: declaredNodes(agent),
     agents: startable(agent.name).map(child => child.name),
     modes: agent.modes,
     defaultMode: agent.defaultMode,
@@ -228,7 +225,7 @@ function coordinatorView(): AgentView {
     description: coordinator.description,
     icon: null,
     sdk: 'openai',
-    tools: effectiveBundleServers(coordinatorServers),
+    nodes: declaredNodes(coordinator),
     agents: startable(coordinator.name).map(agent => agent.name),
     modes: coordinator.modes,
     defaultMode: coordinator.defaultMode,
