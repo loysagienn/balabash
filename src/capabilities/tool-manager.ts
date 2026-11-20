@@ -34,8 +34,8 @@ import {
 } from './server-config.ts';
 import { resolveExternalServerSecrets } from './server-secrets.ts';
 import { runToolHandler } from './tool-result.ts';
-import { listWorkspaceConnections, markReauthorizationRequired } from './connections/index.ts';
-import { backfillConnectionIdentity, identityLabel } from './connections/identity.ts';
+import { backfillConnectionIdentity, listWorkspaceConnections, markReauthorizationRequired } from './connections/index.ts';
+import { identityLabel } from './connections/identity.ts';
 import {
   refreshSecretServices,
   registerAccountService,

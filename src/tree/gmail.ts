@@ -14,12 +14,15 @@ import { fileRefValue } from './files.ts';
 import {
   GmailMessage,
   attachmentParts,
+  bodyParts,
   dateOf,
   header,
   idOf,
   messageValue,
   rawMail,
   recipients,
+  type GmailMessageValue,
+  type MailPart,
   type MailResource,
 } from './gmail-mail.ts';
 import {
@@ -40,7 +43,7 @@ const SCOPES = ['https://www.googleapis.com/auth/gmail.readonly', 'https://www.g
 
 const GMAIL: GoogleApi = {
   title: 'Gmail',
-  forbiddenHint:
+  setupHint:
     'Check that the Gmail API is enabled in the Google Cloud project of the OAuth client and that the granted scopes include gmail.readonly and gmail.compose.',
 };
 
@@ -84,22 +87,55 @@ function pageToken(params: URLSearchParams, cursor: string | undefined): void {
   }
 }
 
-// What each item of a list says when read on its own. An item that is gone
-// by the time it is read — deleted in between — is not in the list.
-async function present<T>(items: Array<Promise<T>>): Promise<T[]> {
-  const read = await Promise.all(
-    items.map(item =>
-      item.catch((error: unknown) => {
-        if (error instanceof GoogleRefusal && error.status === 404) {
-          return null;
-        }
+// The most requests of one call out at once: a mailbox that is asked too
+// much at a time refuses the requests.
+const SIDE_BY_SIDE = 8;
 
-        throw error;
-      }),
-    ),
+// What each item says when read on its own, in the order of the items, a few
+// at a time. After a failure no new request is started and the ones already
+// out are waited for: a call that has answered has nothing in flight.
+async function each<T, R>(items: T[], read: (item: T) => Promise<R>): Promise<R[]> {
+  const out = new Array<R>(items.length);
+  let next = 0;
+  const failures: unknown[] = [];
+
+  async function worker(): Promise<void> {
+    while (!failures.length && next < items.length) {
+      const index = next;
+
+      next += 1;
+
+      try {
+        out[index] = await read(items[index]);
+      } catch (error) {
+        failures.push(error);
+      }
+    }
+  }
+
+  await Promise.all(Array.from({ length: Math.min(SIDE_BY_SIDE, items.length) }, worker));
+
+  if (failures.length) {
+    throw failures[0];
+  }
+
+  return out;
+}
+
+// The same for the items of a list: an item that is gone by the time it is
+// read — deleted in between — is not in the list.
+async function present<T, R>(items: T[], read: (item: T) => Promise<R>): Promise<R[]> {
+  const found = await each(items, item =>
+    read(item).catch((error: unknown) => {
+      if (error instanceof GoogleRefusal && error.status === 404) {
+        return null;
+      }
+
+      throw error;
+    }),
   );
 
-  return read.filter(item => item !== null);
+  return found.filter(item => item !== null);
 }
 
 const listed = (value: unknown): Array<{ id?: unknown }> => (Array.isArray(value) ? (value as Array<{ id?: unknown }>) : []);
@@ -127,9 +163,20 @@ type MailInput = {
   replyToMessageId?: string;
 };
 
+// What two subjects have in common when one answers the other: the subject
+// without its "Re:", whatever the case and the spacing.
+const matter = (subject: string) =>
+  subject
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/^(re:\s*)+/i, '')
+    .toLowerCase();
+
 // The message resource of a draft or a send. A reply joins the conversation
 // of the mail it answers: the same thread, In-Reply-To and References of
-// the original, and — unless the call gives one — its subject.
+// the original, and its subject — Gmail keeps a mail in a conversation only
+// under the subject of that conversation, so a reply under another subject
+// is refused instead of landing somewhere else.
 async function outgoing(
   google: GoogleClient,
   at: GmailEndpoints,
@@ -166,7 +213,14 @@ async function outgoing(
     inReplyTo = header(original.payload, 'Message-ID');
     references = [header(original.payload, 'References'), inReplyTo].filter(Boolean).join(' ') || null;
 
-    if (subject === null && originalSubject) {
+    if (originalSubject) {
+      if (subject !== null && matter(subject) !== matter(originalSubject)) {
+        throw new CapabilityError(
+          'invalid_input',
+          `subject is not the subject of the conversation: the message "${input.replyToMessageId}" (replyToMessageId) has the subject ${JSON.stringify(originalSubject)}, and a reply under another subject leaves its conversation. Leave subject out for the reply to take it, or send a new mail without replyToMessageId.`,
+        );
+      }
+
       subject = /^re:/i.test(originalSubject) ? originalSubject : `Re: ${originalSubject}`;
     }
   }
@@ -246,12 +300,10 @@ export function gmailNode(
       pageToken(params, input.cursor);
 
       const list = await page(google.json(`${at.api}/messages?${params}`), input.cursor);
-      const messages = (await present(
-        listed(list.messages).map(item =>
-          google.json(
-            `${at.api}/messages/${id(idOf(item.id, 'a found message'))}?format=metadata` +
-              '&metadataHeaders=From&metadataHeaders=To&metadataHeaders=Subject',
-          ),
+      const messages = (await present(listed(list.messages), item =>
+        google.json(
+          `${at.api}/messages/${id(idOf(item.id, 'a found message'))}?format=metadata` +
+            '&metadataHeaders=From&metadataHeaders=To&metadataHeaders=Subject',
         ),
       )) as MailResource[];
 
@@ -280,6 +332,41 @@ export function gmailNode(
       noSuchId,
     )) as MailResource;
 
+  // The content of a part of a message, base64url: what came inside the
+  // message, or — for a part Gmail gives by reference — what its attachment
+  // id opens. The id lives as long as this reading of the message, so it is
+  // never part of a value.
+  async function partData(google: GoogleClient, messageId: string, part: MailPart, ctx: CallContext): Promise<string | null> {
+    if (part.body?.data || !part.body?.attachmentId) {
+      return part.body?.data ?? null;
+    }
+
+    const content = await orAbsent(
+      google.json(`${at.api}/messages/${id(messageId)}/attachments/${id(part.body.attachmentId)}`, { timeoutMs: 5 * 60_000 }),
+      `The message "${messageId}" is no longer in ${mailbox(ctx)}.`,
+    );
+
+    return text(content.data);
+  }
+
+  // A message read in full as the value, its body whole: a part of the body
+  // Gmail gave by reference is read first.
+  async function wholeMessage(google: GoogleClient, message: MailResource, ctx: CallContext): Promise<GmailMessageValue> {
+    const messageId = idOf(message.id, 'a message');
+
+    for (const part of bodyParts(message.payload).parts) {
+      const data = await partData(google, messageId, part, ctx);
+
+      if (data === null) {
+        throw new CapabilityError('external_error', `Gmail returned no content for a part of the body of the message "${messageId}".`);
+      }
+
+      part.body = { size: part.body?.size, data };
+    }
+
+    return messageValue(message);
+  }
+
   const getMessage = capability({
     name: 'get_message',
     summary: 'Read one message: headers, plain-text body and attachment list',
@@ -287,7 +374,11 @@ export function gmailNode(
       "Read one message: its headers, its body as plain text and the list of its attachments, without their content. A draft's message reads the same way.",
     input: z.strictObject({ messageId: z.string() }),
     output: GmailMessage,
-    run: async (input, ctx) => messageValue(await fullMessage(googleClient(GMAIL, ctx), input.messageId, ctx)),
+    async run(input, ctx) {
+      const google = googleClient(GMAIL, ctx);
+
+      return wholeMessage(google, await fullMessage(google, input.messageId, ctx), ctx);
+    },
   });
 
   const getThread = capability({
@@ -309,8 +400,9 @@ export function gmailNode(
       // Gmail gives a conversation whole, oldest message first; the page is
       // cut here. The cursor is the id of the oldest message already given:
       // the next page is what stands before it, whatever has arrived since.
+      const google = googleClient(GMAIL, ctx);
       const thread = await orAbsent(
-        googleClient(GMAIL, ctx).json(`${at.api}/threads/${id(input.threadId)}?format=full`),
+        google.json(`${at.api}/threads/${id(input.threadId)}?format=full`),
         `There is no conversation "${input.threadId}" in ${mailbox(ctx)}.`,
         noSuchId,
       );
@@ -328,7 +420,7 @@ export function gmailNode(
 
       return {
         messageCount: all.length,
-        messages: all.slice(start, end).map(messageValue),
+        messages: await each(all.slice(start, end), message => wholeMessage(google, message, ctx)),
         nextCursor: start > 0 ? idOf(all[start].id, 'a message') : null,
       };
     },
@@ -367,22 +459,10 @@ export function gmailNode(
         );
       }
 
-      const [part] = matches;
-      let data = part.body?.data ?? null;
-
       // A message read in full carries only small attachments inline; the
-      // bytes of the others come by their attachment id. The id lives as
-      // long as this reading of the message, so it is never part of a value.
-      if (!data && part.body?.attachmentId) {
-        const attachment = await orAbsent(
-          google.json(`${at.api}/messages/${id(input.messageId)}/attachments/${id(part.body.attachmentId)}`, {
-            timeoutMs: 5 * 60_000,
-          }),
-          `The message "${input.messageId}" is no longer in ${mailbox(ctx)}.`,
-        );
-
-        data = text(attachment.data);
-      }
+      // bytes of the others come by their attachment id.
+      const [part] = matches;
+      const data = await partData(google, input.messageId, part, ctx);
 
       if (!data) {
         throw new CapabilityError(
@@ -455,8 +535,8 @@ export function gmailNode(
       pageToken(params, input.cursor);
 
       const list = await page(google.json(`${at.api}/drafts?${params}`), input.cursor);
-      const drafts = await present(
-        listed(list.drafts).map(item => google.json(`${at.api}/drafts/${id(idOf(item.id, 'a draft'))}?format=metadata`)),
+      const drafts = await present(listed(list.drafts), item =>
+        google.json(`${at.api}/drafts/${id(idOf(item.id, 'a draft'))}?format=metadata`),
       );
 
       return {

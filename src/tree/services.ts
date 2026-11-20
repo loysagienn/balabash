@@ -19,13 +19,9 @@ import {
   type SecretAuthority,
   type SecretConnection,
 } from '../catalog/index.ts';
-import { listAccounts, markReauthorizationRequired } from '../capabilities/connections/index.ts';
+import { accountAccessToken, listAccounts } from '../capabilities/connections/index.ts';
 import { identityLabel } from '../capabilities/connections/identity.ts';
-import {
-  AuthorizationLostError,
-  OauthClientError,
-  connectionAccessToken,
-} from '../capabilities/connections/oauth-provider.ts';
+import { AuthorizationLostError, OauthClientError } from '../capabilities/connections/oauth-provider.ts';
 import {
   getAccountService,
   registerAccountService,
@@ -165,19 +161,17 @@ function reason(error: unknown): string {
 }
 
 // The access token of the account for one call of the provider. An account
-// whose authorization is gone is marked for re-authorization — the thread
-// that connected it gets the event — and the call answers auth_required.
+// whose authorization is gone answers auth_required; the layer has marked
+// it for re-authorization, and the thread that connected it got the event.
 async function accessToken(
   service: AccountService,
   row: { id: string; server: string; accountKey: string },
   rejected?: string,
 ): Promise<string> {
   try {
-    return await connectionAccessToken(row, service.url, rejected);
+    return await accountAccessToken(row, service.url, rejected);
   } catch (error) {
     if (error instanceof AuthorizationLostError) {
-      await markReauthorizationRequired(row.id, error.message);
-
       throw new CapabilityError(
         'auth_required',
         `The account "${row.accountKey}" of "${service.name}" can no longer act: ${error.message}. The user has to authorize it again.`,

@@ -140,16 +140,15 @@ export function attachmentParts(part: MailPart | undefined, out: MailPart[] = []
   return out;
 }
 
-function textParts(part: MailPart | undefined, out: { plain: string[]; html: string[] }): void {
+function textParts(part: MailPart | undefined, out: { plain: MailPart[]; html: MailPart[] }): void {
   if (!part) {
     return;
   }
 
-  if (!part.filename && part.body?.data) {
+  if (!part.filename && (part.body?.data || part.body?.attachmentId)) {
     const type = part.mimeType?.toLowerCase() ?? '';
-    const into = type.startsWith('text/plain') ? out.plain : type.startsWith('text/html') ? out.html : null;
 
-    into?.push(Buffer.from(part.body.data, 'base64url').toString('utf8'));
+    (type.startsWith('text/plain') ? out.plain : type.startsWith('text/html') ? out.html : null)?.push(part);
   }
 
   for (const child of part.parts ?? []) {
@@ -157,12 +156,33 @@ function textParts(part: MailPart | undefined, out: { plain: string[]; html: str
   }
 }
 
-// A message read in full (format=full) as the value: the whole body, never
-// cut.
-export function messageValue(message: MailResource): GmailMessageValue {
-  const texts = { plain: [] as string[], html: [] as string[] };
+// The parts the body of a message is read from, in the order of the
+// document: its text/plain parts, or — without any — its text/html ones.
+// Gmail gives the content of a part inside the message (body.data) or, for
+// a large one, by reference (body.attachmentId), the way it gives an
+// attachment: the node reads such a part before the message becomes a value.
+export function bodyParts(payload: MailPart | undefined): { parts: MailPart[]; html: boolean } {
+  const texts = { plain: [] as MailPart[], html: [] as MailPart[] };
 
-  textParts(message.payload, texts);
+  textParts(payload, texts);
+
+  return texts.plain.length ? { parts: texts.plain, html: false } : { parts: texts.html, html: true };
+}
+
+function partText(part: MailPart): string {
+  if (part.body?.data === undefined) {
+    // A body with a part left out would pass for the whole one.
+    throw new Error(`The part ${part.partId ?? '(no id)'} of the body of a message was not read.`);
+  }
+
+  return Buffer.from(part.body.data, 'base64url').toString('utf8');
+}
+
+// A message read in full (format=full), the parts of its body all read, as
+// the value: the whole body, never cut.
+export function messageValue(message: MailResource): GmailMessageValue {
+  const { parts, html } = bodyParts(message.payload);
+  const body = parts.map(partText).join('\n');
 
   return {
     messageId: idOf(message.id, 'a message'),
@@ -174,7 +194,7 @@ export function messageValue(message: MailResource): GmailMessageValue {
     cc: header(message.payload, 'Cc'),
     subject: header(message.payload, 'Subject'),
     rfc822MessageId: header(message.payload, 'Message-ID'),
-    body: texts.plain.length ? texts.plain.join('\n') : texts.html.length ? htmlToText(texts.html.join('\n')) : '',
+    body: html ? htmlToText(body) : body,
     attachments: attachmentParts(message.payload).map(part => ({
       filename: part.filename ?? '',
       partId: part.partId ?? null,

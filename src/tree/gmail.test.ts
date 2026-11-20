@@ -99,14 +99,21 @@ function message(id: string, threadId: string, values: Record<string, string>, p
 
 const LONG_BODY = `Hello Anna,\n${'A long line of the report. '.repeat(2000)}\nBye`;
 const PDF = Buffer.from('%PDF-1.7 the bytes of a report');
+const BODY_BY_REFERENCE = 'A body too long to come inside the message.';
 
 const outsideState = {
   // The access tokens the API lets in, and whose mailbox each opens.
   valid: new Map<string, string>([['access-1', 'me@example.com']]),
   refreshes: [] as string[],
   api: [] as Array<{ method: string; url: string; authorization: string | undefined; body: Value | null }>,
-  // How the API answers instead of its own way: a status, or no answer.
-  broken: null as null | ((path: string) => number | 'drop' | 'hang' | null),
+  // How the API answers instead of its own way: a status, a 403 for too
+  // many requests ('limit'), or no answer.
+  broken: null as null | ((path: string) => number | 'limit' | 'drop' | 'hang' | null),
+  // How long the API takes over one message, and how many requests it has
+  // open: now, and at the most.
+  slowMs: 0,
+  open: 0,
+  peak: 0,
   messages: new Map<string, Value>(),
   threads: new Map<string, string[]>(),
   drafts: new Map<string, Value>(),
@@ -145,6 +152,15 @@ function seed(): void {
     ]),
   );
   messages.set('m3', message('m3', 't3', { From: 'robot@example.com', 'Message-ID': '<m3@mail.example.com>' }, []));
+  // A body Gmail gives by reference, the way it gives an attachment.
+  messages.set(
+    'm4',
+    message('m4', 'refs', { Subject: 'A long read' }, [
+      { partId: '0', mimeType: 'text/plain; charset=utf-8', body: { size: BODY_BY_REFERENCE.length, attachmentId: 'att-body' } },
+      { partId: '1', mimeType: 'text/html', body: { size: 12, attachmentId: 'att-html' } },
+    ]),
+  );
+  messages.set('m5', message('m5', 'refs', { Subject: 'Re: A long read' }, [{ partId: '0', mimeType: 'text/html', body: { size: 30, attachmentId: 'att-lost' } }]));
 
   for (const n of [1, 2, 3, 4, 5]) {
     messages.set(`p${n}`, message(`p${n}`, 'long', { Subject: `Part ${n}` }, [{ mimeType: 'text/plain', body: { data: b64(`body ${n}`) } }]));
@@ -152,6 +168,7 @@ function seed(): void {
 
   threads.set('t1', ['m1', 'm2']);
   threads.set('long', ['p1', 'p2', 'p3', 'p4', 'p5']);
+  threads.set('refs', ['m4', 'm5']);
   found.set('', { ids: ['m1', 'gone', 'm2'], next: 'page-2' });
   found.set('page-2', { ids: ['m3'] });
 }
@@ -171,9 +188,10 @@ function json(response: http.ServerResponse, status: number, value: unknown): vo
   response.end(JSON.stringify(value));
 }
 
-// A refusal as Google words it.
-const refusal = (response: http.ServerResponse, code: number, status: string, text: string) =>
-  json(response, code, { error: { code, message: text, status } });
+// A refusal as Google words it: its status, its text and — where it gives
+// one — its machine reason.
+const refusal = (response: http.ServerResponse, code: number, status: string, text: string, reason?: string) =>
+  json(response, code, { error: { code, message: text, status, ...(reason ? { errors: [{ message: text, domain: 'usageLimits', reason }] } : {}) } });
 
 const notFound = (response: http.ServerResponse) => refusal(response, 404, 'NOT_FOUND', 'Requested entity was not found.');
 
@@ -192,6 +210,15 @@ async function serveGmail(request: http.IncomingMessage, response: http.ServerRe
   const { messages, threads, drafts, found } = outsideState;
 
   outsideState.api.push({ method, url: `${path}${url.search}`, authorization: request.headers.authorization, body });
+  outsideState.open += 1;
+  outsideState.peak = Math.max(outsideState.peak, outsideState.open);
+  response.once('close', () => {
+    outsideState.open -= 1;
+  });
+
+  if (outsideState.slowMs && /^\/messages\/[^/]+$/.test(path)) {
+    await new Promise(resolve => setTimeout(resolve, outsideState.slowMs));
+  }
 
   const broken = outsideState.broken?.(path) ?? null;
 
@@ -209,9 +236,13 @@ async function serveGmail(request: http.IncomingMessage, response: http.ServerRe
     return refusal(response, 401, 'UNAUTHENTICATED', 'Request had invalid authentication credentials.');
   }
 
+  if (broken === 'limit') {
+    return refusal(response, 403, 'RESOURCE_EXHAUSTED', 'User Rate Limit Exceeded', 'userRateLimitExceeded');
+  }
+
   if (broken !== null) {
     return broken === 403
-      ? refusal(response, 403, 'PERMISSION_DENIED', 'Gmail API has not been used in project 1 before or it is disabled.')
+      ? refusal(response, 403, 'PERMISSION_DENIED', 'Gmail API has not been used in project 1 before or it is disabled.', 'accessNotConfigured')
       : refusal(response, broken, 'INTERNAL', 'Backend Error');
   }
 
@@ -238,7 +269,13 @@ async function serveGmail(request: http.IncomingMessage, response: http.ServerRe
   const attachment = /^\/messages\/([^/]+)\/attachments\/([^/]+)$/.exec(path);
 
   if (attachment) {
-    return attachment[2] === 'att-1' ? json(response, 200, { size: PDF.length, data: b64(PDF) }) : json(response, 200, { size: 0 });
+    const content = new Map<string, string | Buffer>([
+      ['att-1', PDF],
+      ['att-body', BODY_BY_REFERENCE],
+      ['att-html', '<p>Unread</p>'],
+    ]).get(attachment[2]);
+
+    return content === undefined ? json(response, 200, { size: 0 }) : json(response, 200, { size: content.length, data: b64(content) });
   }
 
   const one = /^\/(messages|threads|drafts)\/([^/]+)$/.exec(path);
@@ -442,6 +479,31 @@ describe('gmail: the access of the account', () => {
     assert.ok(sent.slice(2).every(request => request.authorization === fresh));
   });
 
+  test('a call renews its token once: a request the renewed token does not open ends the call', async () => {
+    await account('default', { access_token: 'revoked-access', refresh_token: 'good-refresh' });
+
+    const refreshes = outsideState.refreshes.length;
+    const valid = new Map(outsideState.valid);
+
+    // The list is let in on the renewed token; by the time the found
+    // messages are read, Google takes no token of the account at all.
+    outsideState.broken = path => {
+      if (path.startsWith('/messages/')) {
+        outsideState.valid.clear();
+      }
+
+      return null;
+    };
+
+    await refuses(gmail('search_emails', { query: 'report' }), 'auth_required', /^Gmail refuses the access of the account "default", a renewed token included/);
+    assert.equal(outsideState.refreshes.length, refreshes + 1);
+    assert.equal(outsideState.open, 0);
+
+    outsideState.broken = null;
+    outsideState.valid = valid;
+    await account('default', { access_token: 'access-1', refresh_token: 'good-refresh' });
+  });
+
   test('a renewed token refused all the same, and an authorization that is gone, send the user to authorize again', async () => {
     await account('default', { access_token: 'revoked-access', refresh_token: 'stale-refresh' });
     await refuses(
@@ -470,10 +532,14 @@ describe('gmail: the access of the account', () => {
     const forbidden = await refuses(
       read('m3'),
       'external_error',
-      /^Gmail refused the request \(HTTP 403 on GET \/gmail\/messages\/m3\): PERMISSION_DENIED: Gmail API has not been used in project 1 before or it is disabled\. Check that the Gmail API is enabled .* gmail\.readonly and gmail\.compose\.$/,
+      /^Gmail refused the request \(HTTP 403 on GET \/gmail\/messages\/m3\): PERMISSION_DENIED: Gmail API has not been used in project 1 before or it is disabled\. \(accessNotConfigured\) Check that the Gmail API is enabled .* gmail\.readonly and gmail\.compose\.$/,
     );
 
     assert.deepEqual(forbidden.details, { status: 403 });
+
+    // A 403 of another kind is not answered with the setup of the client.
+    outsideState.broken = () => 'limit';
+    await refuses(read('m3'), 'external_error', /^Gmail refused the request \(HTTP 403 on GET \/gmail\/messages\/m3\): RESOURCE_EXHAUSTED: User Rate Limit Exceeded \(userRateLimitExceeded\)$/);
 
     outsideState.broken = () => 500;
     await refuses(read('m3'), 'external_error', /^Gmail refused the request \(HTTP 500 on GET \/gmail\/messages\/m3\): INTERNAL: Backend Error$/);
@@ -516,6 +582,31 @@ describe('gmail: reading', () => {
     await refuses(gmail('search_emails', { query: 'x', limit: 26 }), 'invalid_input', /limit/);
   });
 
+  test('the found are read a few at a time, and a call that failed has no request left in flight', async () => {
+    const { found } = outsideState;
+    const first = found.get('')!;
+
+    found.set('', { ids: Array.from({ length: 25 }, (_, n) => (n === 3 ? 'm2' : 'm1')) });
+    outsideState.slowMs = 20;
+    outsideState.peak = 0;
+
+    assert.equal((await gmail('search_emails', { query: 'report', limit: 25 })).messages.length, 25);
+    assert.equal(outsideState.peak, 8);
+
+    // One of the found cannot be read: the call fails once the requests it
+    // had out are answered, and asks for nothing more.
+    const from = outsideState.api.length;
+
+    outsideState.broken = path => (path === '/messages/m2' ? 500 : null);
+    await refuses(gmail('search_emails', { query: 'report', limit: 25 }), 'external_error', /^Gmail refused the request \(HTTP 500 on GET \/gmail\/messages\/m2\)/);
+    assert.equal(outsideState.open, 0);
+    assert.ok(requests(from).length < 20, `no new request after the failure: ${requests(from).length} were made`);
+
+    outsideState.broken = null;
+    outsideState.slowMs = 0;
+    found.set('', first);
+  });
+
   test('a message comes with its whole body and the list of its attachments; HTML is read as text', async () => {
     const read = await gmail('get_message', { messageId: 'm1' });
 
@@ -551,6 +642,29 @@ describe('gmail: reading', () => {
       to: null,
       attachments: [],
     });
+  });
+
+  test('a part of the body Gmail gives by reference is read: the body is whole, or the call fails', async () => {
+    const from = outsideState.api.length;
+    const read = await gmail('get_message', { messageId: 'm4' });
+
+    // The text/plain part is the body; the HTML next to it is not asked for.
+    assert.deepEqual([read.body, read.attachments], [BODY_BY_REFERENCE, []]);
+    assert.deepEqual(requests(from), ['GET /messages/m4?format=full', 'GET /messages/m4/attachments/att-body']);
+
+    await refuses(gmail('get_message', { messageId: 'm5' }), 'external_error', /^Gmail returned no content for a part of the body of the message "m5"\.$/);
+
+    // A conversation reads the parts of the messages of its page only.
+    const before = outsideState.api.length;
+    const page = await gmail('get_thread', { threadId: 'refs', limit: 1, cursor: 'm5' });
+
+    assert.deepEqual(page.messages.map((found: Value) => [found.messageId, found.body]), [['m4', BODY_BY_REFERENCE]]);
+    assert.deepEqual(requests(before), ['GET /threads/refs?format=full', 'GET /messages/m4/attachments/att-body']);
+    await refuses(gmail('get_thread', { threadId: 'refs' }), 'external_error', /^Gmail returned no content for a part of the body of the message "m5"\.$/);
+
+    outsideState.broken = path => (path.endsWith('/attachments/att-body') ? 500 : null);
+    await refuses(gmail('get_message', { messageId: 'm4' }), 'external_error', /^Gmail refused the request \(HTTP 500 on GET \/gmail\/messages\/m4\/attachments\/att-body\)/);
+    outsideState.broken = null;
   });
 
   test('a conversation is paged from its newest messages to older ones, each page in the order of the conversation', async () => {
@@ -665,12 +779,31 @@ describe('gmail: drafts and sending', () => {
       ['Re: The report', '<m1@mail.example.com>', '<m0@mail.example.com> <m1@mail.example.com>'],
     );
 
-    // A subject of the call's own stands; "Re:" is not put twice.
-    await gmail('update_draft', { draftId: 'd2', to: ['anna@example.com'], subject: 'Another matter', body: 'x', replyToMessageId: 'm2' });
-    assert.equal(mailOf(outsideState.api.at(-1)?.body?.message.raw).headers.Subject, 'Another matter');
+    // "Re:" is not put twice, and the subject of the conversation given by
+    // the call itself changes nothing.
     await gmail('update_draft', { draftId: 'd2', to: ['anna@example.com'], body: 'x', replyToMessageId: 'm2' });
     assert.equal(mailOf(outsideState.api.at(-1)?.body?.message.raw).headers.Subject, 'Re: The report');
     assert.deepEqual([outsideState.api.at(-1)?.method, outsideState.api.at(-1)?.url], ['PUT', '/drafts/d2']);
+    await gmail('update_draft', { draftId: 'd2', to: ['anna@example.com'], subject: 'RE:  the report', body: 'x', replyToMessageId: 'm1' });
+    assert.equal(mailOf(outsideState.api.at(-1)?.body?.message.raw).headers.Subject, 'Re: The report');
+
+    // A reply under another subject would leave the conversation: nothing
+    // is written.
+    const written = outsideState.api.filter(request => request.method !== 'GET').length;
+
+    for (const [name, input] of [
+      ['update_draft', { draftId: 'd2' }],
+      ['create_draft', {}],
+      ['send_email', {}],
+    ] as Array<[string, JsonObject]>) {
+      await refuses(
+        gmail(name, { ...input, to: ['anna@example.com'], subject: 'Another matter', body: 'x', replyToMessageId: 'm2' }),
+        'invalid_input',
+        /^subject is not the subject of the conversation: the message "m2" \(replyToMessageId\) has the subject "Re: The report", and a reply under another subject leaves its conversation\. Leave subject out for the reply to take it, or send a new mail without replyToMessageId\.$/,
+      );
+    }
+
+    assert.equal(outsideState.api.filter(request => request.method !== 'GET').length, written);
   });
 
   test('what the call gets wrong is refused before anything is written', async () => {
@@ -733,6 +866,13 @@ describe('gmail: one more account', () => {
       /^Cannot add another "gmail" account yet: the identity of account "default" is unknown \(identity probe answered 500\)\. Retry once the reason is gone, or re-authorize that account first\.$/,
     );
     outsideState.broken = null;
+
+    // An authorization that turns out to be gone is recorded like on a call
+    // of the account: it waits for the user, and the question is not asked.
+    await account('default', { access_token: 'old-access', refresh_token: 'dead-refresh', obtained_at: aged(7200) }, { identityId: null, identity: null });
+    await refuses(authorize(), 'conflict', /^Cannot add another "gmail" account yet: the identity of account "default" is unknown \(the provider no longer honors the refresh token/);
+    assert.equal((await rowOf('default'))?.status, 'reauthorization_required');
+    await refuses(authorize(), 'conflict', /the identity of account "default" is unknown \(the account is not connected\)/);
 
     // A token the provider no longer takes is renewed for the question too.
     await account('default', { access_token: 'revoked-access', refresh_token: 'good-refresh' }, { identityId: null, identity: null });

@@ -34,8 +34,8 @@ import {
 import { config } from '../../config/index.ts';
 import { dropWorkspaceClient } from '../tool-manager.ts';
 import { getAccountService, type AccountService } from './services.ts';
-import { createInteractiveAuthProvider } from './oauth-provider.ts';
-import { backfillConnectionIdentity, getAccessToken, identityData, identityLabel, probeIdentity } from './identity.ts';
+import { AuthorizationLostError, connectionAccessToken, createInteractiveAuthProvider } from './oauth-provider.ts';
+import { ProbeRefusedError, getAccessToken, identityData, identityLabel, probeIdentity } from './identity.ts';
 import type { ProbedIdentity } from './identity.ts';
 import type { IdentityProbeConfig } from '../server-config.ts';
 import { ACCOUNT_KEY_PATTERN, DEFAULT_ACCOUNT_KEY, deriveAccountKey } from './account-key.ts';
@@ -1016,4 +1016,97 @@ export async function markReauthorizationRequired(connectionId: string, error: s
   }).catch(appendError => {
     console.error(`[connections] failed to journal reauthorization for "${row.server}":`, appendError);
   });
+}
+
+// The access token of a connected account for a call made straight to the
+// provider (connectionAccessToken), with the one thing every such call owes
+// the account: an authorization that turns out to be gone — the provider no
+// longer honors the refresh token — is recorded on the row, and the thread
+// that connected the account gets the event. A client of the installation
+// the provider does not accept and an exchange that got no answer say
+// nothing about the account: its row stays as it is. The failure is thrown
+// on as it came; what it means to the caller is the caller's to say.
+export async function accountAccessToken(
+  connection: { id: string; server: string },
+  serverUrl: string,
+  rejected?: string,
+): Promise<string> {
+  try {
+    return await connectionAccessToken(connection, serverUrl, rejected);
+  } catch (error) {
+    if (error instanceof AuthorizationLostError) {
+      await markReauthorizationRequired(connection.id, error.message);
+    }
+
+    throw error;
+  }
+}
+
+// Backfill for a row without identity — one connected before the service
+// declared its probe, or one whose probe got no answer at the callback: ask
+// the provider who the account is and record the answer. The account is
+// asked the way a call of it acts: on its current access, renewed when it
+// has expired or the provider refuses it — a row that has not been used
+// since its token ran out is no reason to send the user to re-authorize. An
+// account whose authorization turns out to be gone is marked like on any
+// other call of it (accountAccessToken).
+// Refuses to write a twin (two rows claiming one provider account) — that
+// conflict is surfaced to the caller, never resolved silently here.
+export async function backfillConnectionIdentity(
+  service: { url: string; identityProbe: IdentityProbeConfig },
+  connectionId: string,
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  const row = await prisma.connection.findUnique({ where: { id: connectionId } });
+
+  if (!row) {
+    return { ok: false, reason: 'connection no longer exists' };
+  }
+
+  if (row.identityId) {
+    return { ok: true };
+  }
+
+  if (row.status !== 'connected') {
+    return { ok: false, reason: 'the account is not connected' };
+  }
+
+  let identity: ProbedIdentity;
+
+  try {
+    const accessToken = await accountAccessToken(row, service.url);
+
+    identity = await probeIdentity(service.identityProbe, accessToken).catch(async (error: unknown) => {
+      if (!(error instanceof ProbeRefusedError) || error.status !== 401) {
+        throw error;
+      }
+
+      return probeIdentity(service.identityProbe, await accountAccessToken(row, service.url, accessToken));
+    });
+  } catch (error) {
+    return { ok: false, reason: getErrorMessage(error) };
+  }
+
+  const twin = await prisma.connection.findFirst({
+    where: { workspaceId: row.workspaceId, server: row.server, identityId: identity.id, NOT: { id: row.id } },
+  });
+
+  if (twin) {
+    return {
+      ok: false,
+      reason: `provider account "${identity.label ?? identity.id}" is already connected as "${twin.accountKey}"`,
+    };
+  }
+
+  try {
+    await prisma.connection.update({
+      where: { id: row.id },
+      data: { identityId: identity.id, identity: identityData(identity) },
+    });
+  } catch (error) {
+    // A twin created concurrently lands here as a unique violation — surface
+    // it like the check above instead of throwing into the caller.
+    return { ok: false, reason: getErrorMessage(error) };
+  }
+
+  return { ok: true };
 }
