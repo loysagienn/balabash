@@ -30,6 +30,7 @@ import { getAgent, getAgents, isRemoteAgent, mayAgentSpawn, type CatalogAgent } 
 import { appendEvent, type AppendResult } from '../core/append.ts';
 import type { ContentBlock, FileRef as StoredFile, JsonObject as Json, RemoteAgentDeclaration, Thread } from '../core/contract.ts';
 import { AppendError, THREAD_CANCEL, THREAD_FINISH, THREAD_MESSAGE, type AppendInput } from '../core/envelope.ts';
+import type { ProgramOrigin } from '../core/event-types.ts';
 import { fileContentBlock, messageFile } from '../core/file-blocks.ts';
 import { leaveReport } from '../core/thread-end.ts';
 import { getThread, startThread } from '../core/threads.ts';
@@ -121,7 +122,7 @@ async function namedProject(caller: Caller, slug: string | undefined): Promise<{
 }
 
 // Where a call made from a program says so in what it writes.
-function programOf(ctx: CallContext): { runId: string; task?: string } | null {
+function programOf(ctx: CallContext): ProgramOrigin | null {
   return ctx.program ? { runId: ctx.program.runId, ...(ctx.program.task ? { task: ctx.program.task } : {}) } : null;
 }
 
@@ -377,6 +378,16 @@ const spawnAgent = capability({
       );
     }
 
+    // The launch parameters are what a session is opened with: one that
+    // exists already runs on its own, and the thread would only be labeled
+    // with parameters the session does not have.
+    if (adopt !== undefined && input.options !== undefined) {
+      throw new CapabilityError(
+        'invalid_input',
+        'An adopted session takes no options: it keeps the parameters it was started with. Leave options out.',
+      );
+    }
+
     // An agent of the repository runs in the one mode it declares; a remote
     // agent in either, by default the one its spawner implies.
     const own = remote ? parent.parentId !== null : agent.headless === true;
@@ -533,13 +544,19 @@ function fileRefusal(code: RemoteFileRefusal, threadId: string, path: string, sa
       return new CapabilityError('invalid_input', `The thread "${threadId}" is neither a child of this thread nor this thread itself.`);
     case 'cannot_fetch':
       return new CapabilityError('invalid_input', `The external system of the thread "${threadId}" cannot hand out files.`);
+    // The external system answers "nothing" alike for a path that is not
+    // there and for a session that sleeps: what is known is whether the
+    // thread is paused here, and the words say no more than that.
     case 'asleep':
       return new CapabilityError(
         'conflict',
-        `The session of the thread "${threadId}" is asleep: its files are out of reach until a message wakes it.`,
+        `The session of the thread "${threadId}" gave no file at "${path}", and the thread is paused: a session that is asleep hands out nothing. Wake it with a message and ask again.`,
       );
     case 'no_file':
-      return new CapabilityError('not_found', `There is no file at "${path}" in the session of the thread "${threadId}".`);
+      return new CapabilityError(
+        'not_found',
+        `The session of the thread "${threadId}" gave no file at "${path}": no such path there — or the session fell asleep on its side, and a message to the thread wakes it.`,
+      );
     case 'refused':
       return new CapabilityError('external_error', `The external system refused to hand out "${path}": ${said}`);
     case 'not_loaded':

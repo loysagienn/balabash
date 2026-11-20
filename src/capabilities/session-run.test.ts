@@ -8,7 +8,9 @@
 // The end of a thread: the report the thread left during a turn — through
 // the capability `end_thread` of the catalog or the run's own tool, the
 // place is one (src/core/thread-end.ts) — completes the thread when that
-// turn is over; a run that is over some other way leaves no report behind.
+// turn has run its course: not at a text said on the way, and not at a turn
+// the user stopped; a run that is over some other way leaves no report
+// behind.
 //
 // Run: npm test  (node:test, native type stripping — no build needed).
 
@@ -194,6 +196,13 @@ describe('createSessionRun ending', () => {
         turns.shift()!({ text });
         await tick();
       },
+      // What the session says besides the end of a turn that ran its
+      // course: a text on the way, the end of a turn that was cut.
+      says: async (turn: SdkTurn) => {
+        await tick();
+        turns.shift()!(turn);
+        await tick();
+      },
     };
   }
 
@@ -245,5 +254,43 @@ describe('createSessionRun ending', () => {
 
     assert.deepEqual(cancelled.completed, []);
     assert.equal(reportLeft('thread-ending-3'), null);
+  });
+
+  test('a text said on the way does not end the thread: the report waits for the end of the turn', async () => {
+    const { run, completed, told, says, endTurn } = ending('thread-ending-4', false);
+
+    await says({ text: 'Wrapping up.', ongoing: true });
+    leaveReport('thread-ending-4', { title: 'T', description: 'D', summary: { text: 'S' } });
+    // The session gives the words after `end_thread` while the turn still
+    // runs: they are delivered, the thread stays, the report stays in place.
+    await says({ text: 'All done, goodbye.', ongoing: true });
+
+    assert.deepEqual([told, completed], [['Wrapping up.', 'All done, goodbye.'], []]);
+    assert.notEqual(reportLeft('thread-ending-4'), null);
+
+    await endTurn('');
+    await run.finished;
+
+    assert.deepEqual(told, ['Wrapping up.', 'All done, goodbye.']);
+    assert.deepEqual(completed, [{ summary: { text: 'S' }, meta: { title: 'T', description: 'D' } }]);
+    assert.equal(reportLeft('thread-ending-4'), null);
+  });
+
+  test('a turn the user stopped leaves the thread open, and the report left in it is gone', async () => {
+    const { run, completed, told, says, endTurn, abort } = ending('thread-ending-5', false);
+
+    leaveReport('thread-ending-5', { title: 'T', description: 'D', summary: { text: 'S' } });
+    await says({ text: '', interrupted: true });
+
+    assert.deepEqual(completed, []);
+    assert.equal(reportLeft('thread-ending-5'), null);
+
+    // The next turn is an ordinary one: nothing of the stopped turn ends it.
+    await endTurn('Still here.');
+
+    assert.deepEqual([told, completed], [['Still here.'], []]);
+
+    abort();
+    await run.finished;
   });
 });

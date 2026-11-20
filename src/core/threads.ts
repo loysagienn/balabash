@@ -13,6 +13,7 @@ import { appendEvent, completionProjectionData } from './append.ts';
 import type { AppendResult } from './append.ts';
 import { AppendError, TERMINAL_TYPES, THREAD_CANCELLED, THREAD_STARTED, toEvent } from './envelope.ts';
 import { config } from '../config/index.ts';
+import type { ProgramOrigin } from './event-types.ts';
 import { threadStartFields } from '../projections/thread.ts';
 import { threadsWhere } from './thread-query.ts';
 import { messageFile } from './file-blocks.ts';
@@ -359,7 +360,7 @@ type StartThreadInput = {
   // The run of a program the thread was started from, when it was not
   // started by a turn of the spawner: the id of the run and, for a program
   // of the schedule, the slug of its task.
-  program?: { runId: string; task?: string };
+  program?: ProgramOrigin;
   actor: 'system' | 'agent';
   agentName?: string; // the SPAWNING agent, not the spawned one
 };

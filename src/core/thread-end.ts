@@ -2,8 +2,9 @@
 // the end of the turn it was left in. A thread does not close itself in the
 // middle of a turn: it leaves its report (`end_thread`), goes on to the end
 // of the turn — its last words are still to be delivered — and whoever runs
-// the turn completes the thread with the report once the turn is over
-// (src/capabilities/session-run.ts).
+// the turn completes the thread with the report once the turn has run its
+// course (src/capabilities/session-run.ts). A turn that is cut — stopped by
+// the user, failed, cancelled with its thread — takes its report with it.
 //
 // The report lives in memory, like the turn it belongs to: a turn does not
 // survive the process, and a restart waits for the turns in flight. A report
@@ -44,8 +45,8 @@ export function takeReport(threadId: string): ThreadReport | null {
   return report;
 }
 
-// The thread is over some other way (cancelled, failed): a report it left is
-// nobody's to take.
+// The turn the report was left in did not run its course (stopped, failed,
+// cancelled with its thread): the report is nobody's to take.
 export function dropReport(threadId: string): void {
   reports.delete(threadId);
 }

@@ -375,6 +375,11 @@ describe('spawn_agent', () => {
       'invalid_input',
       /adopted session takes no files/,
     );
+    await refuses(
+      invoke('spawn_agent', { agent: 'fake_agent', title: 'R', adopt: 'sess-1', options: { model: 'big' } }),
+      'invalid_input',
+      /adopted session takes no options/,
+    );
     await refuses(invoke('spawn_agent', { agent: 'fake_agent', title: 'R', prompt: 'W', adopt: 'sess-1' }), 'invalid_input', /prompt|adopt/);
     await refuses(invoke('spawn_agent', { agent: 'fake_agent', title: 'R' }), 'invalid_input', /prompt|adopt/);
     await refuses(invoke('spawn_agent', { agent: 'engineer', title: 'E', adopt: 'sess-1' }), 'invalid_input', /not a remote agent: it takes no adopt/);
@@ -596,7 +601,9 @@ describe('a program', () => {
       "await call('send_to_thread', { threadId: child.threadId, text: 'Start with the top.' });",
       'let ending;',
       "try { await call('end_thread', { title: 'T', description: 'D', summary: 'S' }); } catch (error) { ending = error.kind; }",
-      'return { child: child.threadId, ending };',
+      "const remote = await call('spawn_agent', { agent: 'fake_agent', title: 'Remote', prompt: 'Work.' });",
+      "const relayed = await call('spawn_agent', { agent: 'fake_agent', title: 'Relayed', prompt: 'Work.', headless: true });",
+      'return { child: child.threadId, ending, modes: [remote.headless, relayed.headless] };',
     ].join('\n');
 
     await invoke('schedule_create_task', { slug: 'digest', name: 'Digest', kind: 'program', code });
@@ -624,6 +631,11 @@ describe('a program', () => {
     const word = (await written(stand.mainThreadId, 'thread.message')).find(event => event.targetThreadId === run.value.child)!;
 
     assert.deepEqual([word.payload.text, word.payload.program], ['Start with the top.', origin]);
+    // A remote child of a task runs in the mode of a child of the main
+    // thread unless the task says otherwise: it talks to the user, and what
+    // it asks is asked in its own thread; `headless: true` brings its
+    // questions to the secretary.
+    assert.deepEqual(run.value.modes, [false, true]);
   });
 
   test('run in place by a thread leaves the id of its run', async () => {

@@ -492,10 +492,20 @@ export type SdkSessionOptions = {
   resume?: string;
 };
 
-// One completed session turn: the final text the inner model produced. A
-// failed turn ends the iteration with a thrown error.
+// What a session says through `turns`: a text of the inner model and where
+// its turn stands by it. An element is one of three — a text said on the way
+// (`ongoing`), the end of a turn that ran its course (neither flag; the text
+// is what the model closed the turn with, empty when it closed it with a
+// tool call or said it already), the end of a turn that was cut
+// (`interrupted`). A failed turn ends the iteration with a thrown error.
+// Only the end of a turn that ran its course is a boundary to act on: there
+// the one who runs the session closes the thread whose report was left in
+// the turn.
 export type SdkTurn = {
   text: string;
+  // The turn goes on after this text: a session whose harness gives every
+  // message of a turn as it is said (codex) hands it over at once.
+  ongoing?: true;
   // The turn was cut short by interrupt(); text is empty — whatever the
   // model produced before the stop already rode the live stream.
   interrupted?: true;
@@ -504,7 +514,8 @@ export type SdkTurn = {
 export type AgentSdkSession = {
   // Enqueue the next user message; throws after close().
   push(text: string): void;
-  // Completed turns, in order; ends after close(), throws on turn failure.
+  // The texts and the ends of the turns, in order; ends after close(),
+  // throws on turn failure.
   turns: AsyncIterable<SdkTurn>;
   // Re-diff the bridge against ctx.tools after a catalog change; never rejects.
   syncTools(): Promise<void>;

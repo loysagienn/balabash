@@ -233,7 +233,8 @@ export function createCodexSession(options: SdkSessionOptions, deps: CodexSessio
             }
 
             if (event.type === 'item.completed' && event.item.type === 'agent_message') {
-              yield { text: event.item.text.trim() };
+              // Said on the way: the turn is over only when its stream is.
+              yield { text: event.item.text.trim(), ongoing: true };
             } else if (event.type === 'turn.failed') {
               throw new Error(`Codex SDK session turn failed: ${event.error.message}`);
             } else if (event.type === 'error') {
@@ -241,9 +242,8 @@ export function createCodexSession(options: SdkSessionOptions, deps: CodexSessio
             }
           }
 
-          // A turn can end with a bridge-tool call (end_thread) and no trailing
-          // agent_message; consumers detect completion on yielded turns, so
-          // every turn closes with an empty boundary turn.
+          // The stream of the turn is read to its end: the turn ran its
+          // course. Its texts are handed over already, so the end is empty.
           yield { text: '' };
         } finally {
           if (activeTurn === turnController) {

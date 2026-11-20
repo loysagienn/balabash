@@ -697,13 +697,28 @@ export function createSessionRun(
           return;
         }
 
+        // A turn cut by Stop: the thread stays open for the next message,
+        // and a report left in the cut turn goes with the turn — a thread
+        // ends by a turn that ran its course.
+        if (turn.interrupted) {
+          dropReport(ctx.threadId);
+
+          continue;
+        }
+
         // The report the thread left in this turn — through its end_thread
         // tool or through the capability of the catalog, the place is one.
-        // The summary carries the report to the operator; the final text is
-        // the goodbye — meaningful in a user-facing thread (the user reads
-        // it), redundant in a headless thread (the parent gets the summary).
+        // The summary carries the report to the operator; the text said
+        // after it is the goodbye — meaningful in a user-facing thread (the
+        // user reads it), redundant in a headless thread (the parent gets
+        // the summary).
         if (turn.text && !(headless && reportLeft(ctx.threadId) !== null)) {
           await deliverTurnText(turn.text);
+        }
+
+        // A text said on the way: the turn goes on, and the thread with it.
+        if (turn.ongoing) {
+          continue;
         }
 
         const report = takeReport(ctx.threadId);
@@ -736,7 +751,8 @@ export function createSessionRun(
   return {
     // Soft stop (thread.interrupt — a surface's Stop button): cut the turn in
     // flight, keep the session open for the next message. The interrupted
-    // turn closes through `turns` with empty text, so nothing is delivered.
+    // turn closes through `turns` with empty text, so nothing is delivered,
+    // and a report left in it is dropped: the thread stays open.
     interrupt: () => {
       if (settled || !session?.interrupt) {
         return;
