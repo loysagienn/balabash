@@ -115,7 +115,7 @@ export function scheduleReducer(state: ScheduleState = initialSchedule, action: 
     case 'event/schedule.fired':
       return action.event.payload.runId ? { ...state, runsChanged: state.runsChanged + 1 } : state;
     case 'event/system.exception':
-      return (action.event.payload.scope === 'scheduled-program' || action.event.payload.scope === 'workspace-job') ? { ...state, runsChanged: state.runsChanged + 1 } : state;
+      return action.event.payload.scope === 'scheduled-program' ? { ...state, runsChanged: state.runsChanged + 1 } : state;
     case 'RUN_TASK':
       return ownCall(state.calls, action.slug) ? state : { ...state, calls: { ...state.calls, [action.slug]: { kind: 'run' } } };
     case 'DELETE_TASK':

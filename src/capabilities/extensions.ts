@@ -1,5 +1,4 @@
-// Extensions: code and configs that are part of the installation or of a
-// workspace rather than of the repository — loaded from `data/` (gitignored)
+// Extensions: installation code and configs loaded from `data/` (gitignored)
 // at runtime by dynamic import, next to the repository catalogs that ship
 // inside the bundle. Node runs .ts files natively (type stripping), and an
 // import() of a path computed at runtime is left alone by esbuild, so an
@@ -56,7 +55,7 @@ export async function listExtensionFiles(directory: string, extension: string): 
 /**
  * Imports an extension module fresh: the file's mtime rides in the URL, so
  * an edited file is a new module to the loader (the previous version stays
- * in memory until the process ends — negligible for task-sized modules).
+ * in memory until the process ends).
  */
 export async function importExtensionModule(file: string): Promise<Record<string, unknown>> {
   const stats = await stat(file);

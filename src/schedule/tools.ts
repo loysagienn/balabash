@@ -14,7 +14,7 @@ import { getRun, listRuns, RUN_STATUSES } from './journal.ts';
 import type { RunStatus } from './run-record.ts';
 import { cronNextRun } from './cron.ts';
 import { ScheduleError, createTask as createTaskCommand, deleteTask, runTask as runTaskCommand } from './commands.ts';
-import { SLUG_MAX_LENGTH, SLUG_PATTERN, parseTaskInput } from './input.ts';
+import { SLUG_MAX_LENGTH, SLUG_PATTERN, TASK_KINDS, parseTaskInput } from './input.ts';
 
 export const SCHEDULE_SERVER_NAME = 'schedule';
 
@@ -49,7 +49,7 @@ const FUNCTIONS: ToolFunction[] = [
         description: { type: ['string', 'null'], description: 'What the task is for, or null.' },
         kind: {
           type: 'string',
-          enum: ['note', 'program'],
+          enum: [...TASK_KINDS],
           description:
             'note = text interpreted by the secretary; program = JavaScript stored in the task.',
         },
@@ -230,7 +230,7 @@ async function createTask(args: JsonObject, ctx: BuiltinServerCallContext): Prom
 
 async function listTasks(ctx: BuiltinServerCallContext): Promise<string> {
   const tasks = await prisma.scheduledTask.findMany({
-    where: { workspaceId: ctx.workspaceId },
+    where: { workspaceId: ctx.workspaceId, kind: { in: [...TASK_KINDS] } },
     orderBy: { createdAt: 'asc' },
   });
 

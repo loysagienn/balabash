@@ -23,7 +23,7 @@ import { getThread } from '../core/threads.ts';
 import type { ScheduledTaskModel } from '../../prisma-generated/models.ts';
 import { fireTask } from './engine.ts';
 import { ScheduleError } from './errors.ts';
-import type { TaskInput } from './input.ts';
+import { isTaskKind, type TaskInput } from './input.ts';
 import { taskRecord } from './view.ts';
 
 export { ScheduleError } from './errors.ts';
@@ -126,6 +126,10 @@ export async function runTask(workspaceId: string, slug: string, expectId?: stri
   }
 
   assertExpected(task, expectId);
+
+  if (!isTaskKind(task.kind)) {
+    throw new ScheduleError('not_found', `no runnable task with slug "${slug}" in this workspace (registry kind: ${task.kind})`);
+  }
 
   const outcome = await fireTask(task, 'manual');
 

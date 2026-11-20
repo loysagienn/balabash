@@ -1,6 +1,6 @@
 // The schedule over the stand (src/test-support/stand.ts): the run journal
 // is read newest first by pages on a keyset cursor, one run comes whole with
-// its tails, the newest run of every task is one row each; a manual run
+// its console, the newest run of every task is one row each; a manual run
 // runs notes and programs and reads both generations of the run journal.
 
 import { test, describe, before, after } from 'node:test';
@@ -45,15 +45,21 @@ before(async () => {
   await task('rotate', { code: 'return null;', timeoutMs: 5_000 });
   await prisma.scheduledTask.create({ data: { slug: 'foreign-job', workspaceId: FOREIGN_USER, name: 'Foreign', kind: 'program', code: 'return null;' } });
 
+  const workspaceId = stand.workspaceId;
   const run = (id: string, slug: string, startedAt: Date, data: Record<string, unknown> = {}) =>
-    prisma.jobRun.create({ data: { id, workspaceId: stand.workspaceId, slug, command: 'df -h', trigger: 'cron', status: 'ok', exitCode: 0, startedAt, finishedAt: new Date(startedAt.getTime() + 1_500), durationMs: 1_500, ...data } });
+    prisma.scheduleRun.create({ data: { id, workspaceId, slug, code: 'return null;', trigger: 'cron', status: 'ok', startedAt, finishedAt: new Date(startedAt.getTime() + 1_500), durationMs: 1_500, ...data } });
 
-  await run(RUNS.oldest, 'disk-check', at(0), { status: 'failed', exitCode: 1, stderrTail: 'df: /mnt: No such file or directory\n', stdoutTail: 'Filesystem Size Used\n' });
+  // disk-check spans the cutover; echo-job has only its former run.
+  await prisma.jobRun.create({ data: {
+    id: RUNS.oldest, workspaceId, slug: 'disk-check', command: 'df -h', trigger: 'cron', status: 'failed',
+    exitCode: 1, stderrTail: 'df: /mnt: No such file or directory\n', stdoutTail: 'Filesystem Size Used\n', startedAt: at(0),
+  } });
+  await prisma.jobRun.create({ data: { id: RUNS.other, workspaceId, slug: 'echo-job', command: 'echo', trigger: 'cron', status: 'ok', exitCode: 0, startedAt: at(15) } });
+
   await run(RUNS.twinA, 'disk-check', at(10));
   await run(RUNS.twinB, 'disk-check', at(10), { trigger: 'manual' });
-  await run(RUNS.newest, 'disk-check', at(20), { status: 'timeout', exitCode: null, durationMs: 5_000, stdoutTail: 'x'.repeat(40), stdoutTruncated: true });
-  await run(RUNS.other, 'echo-job', at(15), { command: 'echo', durationMs: 20 });
-  await prisma.jobRun.create({ data: { id: RUNS.foreign, workspaceId: FOREIGN_USER, slug: 'foreign-job', command: 'true', trigger: 'cron', status: 'ok', exitCode: 0, startedAt: at(30) } });
+  await run(RUNS.newest, 'disk-check', at(20), { status: 'timeout', durationMs: 5_000, finishedAt: new Date(at(20).getTime() + 5_000) });
+  await run(RUNS.foreign, 'foreign-job', at(30), { workspaceId: FOREIGN_USER });
 });
 
 after(() => stand.stop());
@@ -64,7 +70,7 @@ async function scheduleEvents(): Promise<{ type: string; actor: string; threadId
   return rows.map(row => ({ type: row.type, actor: row.actor, threadId: row.threadId, targetThreadId: row.targetThreadId, payload: row.payload as Record<string, unknown> }));
 }
 
-// Waits for the detached job to settle its journal row.
+// Waits for the detached program to settle its journal row.
 async function settledRun(id: string): Promise<ScheduleRunResponse['run']> {
   for (let i = 0; i < 200; i += 1) {
     const reply = await stand.request('GET', `/api/schedule/runs/${id}`);
@@ -84,7 +90,7 @@ async function settledRun(id: string): Promise<ScheduleRunResponse['run']> {
 }
 
 describe('the run journal over the api', () => {
-  test('GET /schedule/runs lists the runs of the workspace newest first, without the tails', async () => {
+  test('GET /schedule/runs lists the runs of the workspace newest first, without the console', async () => {
     const reply = await stand.request('GET', '/api/schedule/runs');
 
     assert.equal(reply.status, 200, reply.text);
@@ -103,7 +109,7 @@ describe('the run journal over the api', () => {
       status: 'timeout',
       hasValue: false,
       startedAt: at(20),
-      finishedAt: new Date(at(20).getTime() + 1_500),
+      finishedAt: new Date(at(20).getTime() + 5_000),
       durationMs: 5_000,
     });
   });
@@ -245,12 +251,26 @@ describe('running and deleting a task over the api', () => {
     assert.equal(foreign.status, 404);
   });
 
+  test('manual run refuses a former row and leaves it available for the operator to delete', async () => {
+    const slug = 'former-command';
+    const { id } = await prisma.scheduledTask.create({ data: { workspaceId: stand.workspaceId, slug, name: 'Former', kind: 'command', command: 'true' } });
+    const reply = await stand.request('POST', `/api/schedule/tasks/${slug}/run`, { body: { taskId: id } });
+
+    assert.equal(reply.status, 404, reply.text);
+    assert.equal(reply.json<ErrorBody>().error.code, 'not_found');
+    const deleted = await stand.request('DELETE', `/api/schedule/tasks/${slug}?taskId=${id}`);
+
+    assert.equal(deleted.status, 200, deleted.text);
+    assert.equal(deleted.json<DeleteTaskResponse>().task.kind, 'command');
+  });
+
   test('a cross-site run is refused before anything fires', async () => {
+    const before = (await scheduleEvents()).length;
     const reply = await stand.request('POST', '/api/schedule/tasks/remind/run', { headers: { origin: 'https://evil.example' } });
 
     assert.equal(reply.status, 403);
     assert.equal(reply.json<ErrorBody>().error.code, 'cross_site');
-    assert.equal((await scheduleEvents()).length, 1);
+    assert.equal((await scheduleEvents()).length, before);
   });
 
   test('DELETE /schedule/tasks/:slug answers the row and journals schedule.task.cancelled by the operator; again — not found', async () => {
@@ -310,7 +330,7 @@ describe('running and deleting a task over the api', () => {
     assert.equal(del.status, 409, del.text);
     assert.equal(del.json<ErrorBody>().error.code, 'task_replaced');
     assert.ok(await prisma.scheduledTask.findUnique({ where: { id: after.id } }), 'the replacement stays');
-    assert.equal((await scheduleEvents()).filter(event => event.type === 'schedule.task.cancelled').length, 1, 'no cancellation journaled');
+    assert.equal((await scheduleEvents()).filter(event => event.type === 'schedule.task.cancelled' && event.payload.slug === 'rotate').length, 0, 'no cancellation journaled');
 
     // A taskId that is not a string is refused before the lookup.
     const bad = await stand.request('POST', '/api/schedule/tasks/rotate/run', { body: { taskId: 5 } });

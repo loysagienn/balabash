@@ -13,7 +13,7 @@ import { config } from '../config/index.ts';
 import type { RegistryAuthor } from '../core/registry-events.ts';
 import { prisma } from '../db/client.ts';
 import { ScheduleError, createTask, deleteTask, runTask, type ScheduleErrorCode } from '../schedule/commands.ts';
-import { DESCRIPTION_MAX_LENGTH, NAME_MAX_LENGTH, SLUG_MAX_LENGTH, SLUG_PATTERN, parseTaskInput } from '../schedule/input.ts';
+import { DESCRIPTION_MAX_LENGTH, NAME_MAX_LENGTH, SLUG_MAX_LENGTH, SLUG_PATTERN, TASK_KINDS, parseTaskInput } from '../schedule/input.ts';
 import { RUN_STATUSES, getRun, listRuns, type RunPosition } from '../schedule/journal.ts';
 import type { RunSummary } from '../schedule/run-record.ts';
 import { PROGRAM_TIMEOUT_DEFAULT_MS, PROGRAM_TIMEOUT_MAX_MS, PROGRAM_TIMEOUT_MIN_MS, isTaskRunning } from '../schedule/programs.ts';
@@ -27,7 +27,7 @@ export const ScheduledTask = namedType(
   { description: 'One scheduled task of the workspace, with its trigger resolved to the next moment.' },
   z.strictObject({
     slug: z.string().describe('Unique id of the task.'),
-    kind: z.enum(['note', 'program']),
+    kind: z.enum(TASK_KINDS),
     name: z.string(),
     description: z.string().nullable(),
     cron: z.string().nullable().describe('Evaluated in the schedule timezone; null when the task is not recurring.'),
@@ -107,7 +107,7 @@ const createTaskCapability = capability({
     slug: z.string().max(SLUG_MAX_LENGTH).regex(SLUG_PATTERN).describe('Unique across the installation.'),
     name: z.string().max(NAME_MAX_LENGTH),
     description: z.string().max(DESCRIPTION_MAX_LENGTH).optional(),
-    kind: z.enum(['note', 'program']),
+    kind: z.enum(TASK_KINDS),
     cron: z.string().describe('Evaluated in the schedule timezone.').optional(),
     at: z.string().describe('ISO 8601 with an explicit offset.').optional(),
     note: z.string().describe('Kind note: the text delivered at the trigger.').optional(),
@@ -154,7 +154,7 @@ const listTasks = capability({
   }),
   async run(_input, { caller }) {
     const rows = await prisma.scheduledTask.findMany({
-      where: { workspaceId: caller.workspaceId },
+      where: { workspaceId: caller.workspaceId, kind: { in: [...TASK_KINDS] } },
       orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
     });
     const now = new Date();

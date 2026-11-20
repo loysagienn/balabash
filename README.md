@@ -92,9 +92,9 @@ work on a project; the project is not tied to a thread.
 
 **Scheduling** — a durable registry of named tasks: recurring (cron with alarm-clock
 semantics), one-shot ("not before T", consumed by firing) or trigger-less. A task is a
-**note** fired into the main thread for the secretary to interpret, a **command** — a script
-in the workspace run as a job with its runs journaled, or **code** — a TypeScript body in the
-workspace, live without a build. Every agent can operate the registry.
+**note** delivered to the main thread or a **program** whose JavaScript is stored in the task.
+Every program run is journaled. A returned value reaches the secretary in the main thread,
+and returning `null` keeps a successful run silent.
 
 **Mini-apps** — a workspace folder with a manifest and `.tsx` sources, run in the browser at
 its own URL without a build step and bridged to the workspace SQLite through SQL endpoints

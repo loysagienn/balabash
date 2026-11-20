@@ -150,7 +150,15 @@ describe('the registry of tasks', () => {
     assert.equal((created?.payload as JsonObject).wake, false);
   });
 
-  test('the first pass after downtime delivers and consumes an overdue one-shot', async () => {
+  test('during cutover the heart delivers an overdue note and preserves former cron and one-shot rows', async t => {
+    const now = Date.parse('2026-11-20T12:00:00Z');
+    t.mock.timers.enable({ apis: ['Date'], now });
+    const workspaceId = stand.workspaceId;
+    await prisma.scheduledTask.createMany({ data: [
+      { workspaceId, slug: 'former-once', name: 'Once', kind: 'command', command: 'echo once', at: new Date(now) },
+      { workspaceId, slug: 'former-cron', name: 'Cron', kind: 'code', cron: '* * * * *' },
+    ] });
+
     const slug = 'overdue';
     await invoke('schedule_create_task', {
       slug, name: 'Overdue', kind: 'note', note: 'Call today', at: '2020-01-01T00:00:00Z',
@@ -159,7 +167,14 @@ describe('the registry of tasks', () => {
     const { createSchedulePass } = await import('../schedule/heart.ts');
     const pass = createSchedulePass();
     await pass();
+    t.mock.timers.setTime(now + 60_000);
     await pass();
+
+    for (const former of ['former-once', 'former-cron']) {
+      assert.ok(await prisma.scheduledTask.findUnique({ where: { slug: former } }));
+      assert.deepEqual(await eventsOf('schedule.task.cancelled', former), []);
+      assert.deepEqual(await eventsOf('schedule.fired', former), []);
+    }
 
     const fired = await eventsOf('schedule.fired', slug);
     assert.equal(fired.length, 1);
@@ -196,7 +211,7 @@ describe('the registry of tasks', () => {
     assert.equal(plain.nextRunAt, null);
   });
 
-  test('lists the tasks of the workspace oldest first with the timezone; a foreign task is absent', async () => {
+  test('lists the tasks of the workspace oldest first with the timezone, excluding foreign tasks and former kinds', async () => {
     await invoke('schedule_create_task', { slug: 'theirs', name: 'Theirs', kind: 'note', note: 'x' }, foreign.grant);
 
     const { timezone, tasks } = await invoke('schedule_list_tasks', {});

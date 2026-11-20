@@ -1513,8 +1513,7 @@ function sendScheduleError(ctx: Context, error: ScheduleError): void {
 // A task registered by the operator: the input by the rules of the
 // create_task tool (one parser — src/schedule/input.ts), the row and its
 // schedule.task.created in one transaction, authored by the operator
-// (createdBy "operator"). The answer carries the row and whether a code
-// task sleeps.
+// (createdBy "operator"). The answer carries the created row.
 router.post('/schedule/tasks', requireSession, async ctx => {
   const workspaceId = ctx.state.workspaceId as string;
   const body = await readJsonBody(ctx);

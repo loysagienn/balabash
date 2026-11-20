@@ -92,7 +92,7 @@ export const runTaskHandler: ActionHandler<'RUN_TASK'> =
       }
 
       dispatch(runTaskDone(action.slug, request, outcome));
-      dispatch(pushToast(runOutcomeWords(name, task?.kind ?? 'command', outcome)));
+      dispatch(pushToast(runOutcomeWords(name, outcome)));
     } catch (error) {
       if (ownCall(getState().schedule.calls, action.slug) !== request) {
         return;

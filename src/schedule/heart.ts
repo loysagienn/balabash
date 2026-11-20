@@ -1,7 +1,5 @@
-// The schedule heart (modeled on runtime/restart.ts's timer half; it lives in
-// src/schedule because executing tasks needs the tool layer, which the
-// runtime, knowing only core, must not import). One timer, one pass: read the
-// registry, arm cron triggers in memory, fire everything due. Time semantics:
+// The schedule heart reads the registry once per tick, arms cron triggers
+// in memory and fires the tasks that are due. Time semantics:
 // cron is an alarm clock — a missed moment (downtime, a long pass) is
 // skipped, the next one counts from "now"; a one-shot `at` means "not before
 // T" — a past T fires immediately, and firing consumes the row (failures
@@ -9,6 +7,7 @@
 
 import { prisma } from '../db/client.ts';
 import type { ScheduledTaskModel } from '../../prisma-generated/models.ts';
+import { TASK_KINDS } from './input.ts';
 import { fireTask } from './engine.ts';
 import { cronNextRun } from './cron.ts';
 import { registryMutation } from '../core/registry-events.ts';
@@ -23,7 +22,7 @@ export function createSchedulePass(): () => Promise<void> {
   const armed = new Map<string, Date>();
 
   const pass = async (): Promise<void> => {
-    const rows = await prisma.scheduledTask.findMany();
+    const rows = await prisma.scheduledTask.findMany({ where: { kind: { in: [...TASK_KINDS] } } });
     const now = new Date();
     const liveIds = new Set(rows.map(row => row.id));
 

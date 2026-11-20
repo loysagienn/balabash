@@ -301,7 +301,7 @@ export function lastRunTime(date: Date, now: Date): string {
 export type LastRunWords = { state: StateName; label: string };
 
 // The last run in a task's row: a success by its time, anything else by
-// what happened — "error · 16:30", "didn’t start · 04:00", "running".
+// what happened — "error · 16:30", "running".
 export function lastRunWords(run: ScheduleRunView, now: Date): LastRunWords {
   const outcome = runOutcome(run);
   const time = lastRunTime(run.startedAt, now);

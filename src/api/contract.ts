@@ -825,8 +825,9 @@ export type TaskView = {
 // ---------------------------------------------------------------------------
 // Telemetry outside the event log: the shared journal joins scheduled
 // program runs and the workspace's earlier job history.
-export type { RunSummary as ScheduleRunView, RunRecord as ScheduleRunDetailView } from '../schedule/run-record.ts';
 import type { RunSummary as ScheduleRunView, RunRecord as ScheduleRunDetailView } from '../schedule/run-record.ts';
+
+export type { ScheduleRunView, ScheduleRunDetailView };
 
 export type ScheduleRunsQuery = {
   // Only the runs of this task.

@@ -23,7 +23,12 @@ export const SLUG_MAX_LENGTH = 64;
 export const NAME_MAX_LENGTH = 200;
 export const DESCRIPTION_MAX_LENGTH = 2_000;
 
-export type TaskKind = 'note' | 'program';
+export const TASK_KINDS = ['note', 'program'] as const;
+export type TaskKind = (typeof TASK_KINDS)[number];
+
+export function isTaskKind(value: unknown): value is TaskKind {
+  return TASK_KINDS.some(kind => kind === value);
+}
 
 // The row to write: the trigger as the registry stores it (`at` an
 // instant), the note kept for kind "note" only, the code for kind "program"
@@ -96,7 +101,7 @@ export function parseTaskInput(raw: Record<string, unknown>, now = new Date()): 
 
   const kind = raw.kind;
 
-  if (kind !== 'note' && kind !== 'program') {
+  if (!isTaskKind(kind)) {
     refuse('kind must be "note" or "program"');
   }
 

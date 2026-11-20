@@ -2860,23 +2860,21 @@ describe('schedule commands', () => {
     assert.equal(store.getState().ui.toasts[3]!.desc, 'task "sync" was replaced');
   });
 
-  it('the journal stamp follows a job that reported through the log', async () => {
+  it('the journal stamp follows a program that reported through the log', async () => {
     resetSeq(400n);
 
     const store = await onSchedule();
     const stamp = selectRunsChanged(store.getState());
 
-    store.dispatch(eventAction(event({ type: 'schedule.fired', actor: 'system', targetThreadId: 'main', payload: { slug: 'backup', name: 'backup', runId: 'run-2', output: 'ok' } })));
+    store.dispatch(eventAction(event({ type: 'schedule.fired', actor: 'system', targetThreadId: 'main', payload: { slug: 'backup', name: 'backup', runId: 'run-2', value: 'ok' } })));
     assert.equal(selectRunsChanged(store.getState()), stamp + 1);
     // A note's fire names no run.
     store.dispatch(eventAction(event({ type: 'schedule.fired', actor: 'system', targetThreadId: 'main', payload: { slug: 'remind', name: 'remind', note: 'Call' } })));
     assert.equal(selectRunsChanged(store.getState()), stamp + 1);
-    store.dispatch(eventAction(event({ type: 'system.exception', actor: 'system', threadId: 'main', payload: { scope: 'workspace-job', slug: 'backup', runId: 'run-3', status: 'failed', exitCode: 1, error: 'Workspace job "backup" failed' } })));
-    assert.equal(selectRunsChanged(store.getState()), stamp + 2);
     store.dispatch(eventAction(event({ type: 'system.exception', actor: 'system', threadId: 'main', payload: { scope: 'scheduled-program', slug: 'backup', runId: 'run-4', status: 'failed', error: 'Program "backup" failed' } })));
-    assert.equal(selectRunsChanged(store.getState()), stamp + 3);
+    assert.equal(selectRunsChanged(store.getState()), stamp + 2);
     store.dispatch(eventAction(event({ type: 'system.exception', actor: 'system', threadId: 'main', payload: { scope: 'scheduled-task', slug: 'sync', error: 'failed' } })));
-    assert.equal(selectRunsChanged(store.getState()), stamp + 3);
+    assert.equal(selectRunsChanged(store.getState()), stamp + 2);
   });
 
   it('deletes a task: the row dropped from the answer, a toast, the detail of that task led back to the list; the tail finds nothing to do', async () => {
