@@ -241,6 +241,9 @@ test('a connector discovers paged contracts, grants by recipient, journals calls
       callId: crypto.randomUUID(), name: 'slack_send_message', input: { channel_id: 'c' },
     });
     assert.equal('error' in expiredCall && expiredCall.error.kind, 'auth_required');
+    assert.ok('error' in expiredCall);
+    assert.match(expiredCall.error.message, /operator’s Claude CLI login has expired/);
+    assert.match(expiredCall.error.message, /operator to run a Claude Code turn on this host/);
     assert.equal(requests.length, beforeExpiry);
     expiresAt = Date.now() + 60_000;
     await connectorStatuses();

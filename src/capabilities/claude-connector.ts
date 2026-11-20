@@ -18,9 +18,9 @@ function authError(serverName: string, credentials: OperatorCredentials, detail?
   const state = ttl !== null && ttl <= 0 ? 'has expired' : 'was rejected by the proxy';
   const recovery = credentials.source === 'env'
     ? 'Replace CLAUDE_CODE_OAUTH_TOKEN in the service environment.'
-    : 'A turn by any local Claude Code agent refreshes the CLI login. If none is running, tell the operator.';
+    : 'Ask the operator to run a Claude Code turn on this host to refresh the CLI login. If prompted, sign in again.';
   return new CapabilityError('auth_required',
-    `Claude connector "${serverName}": the operator’s Claude CLI token ${state}. ${detail ? detail + '. ' : ''}${recovery}`);
+    `Claude connector "${serverName}": the operator’s Claude CLI login ${state}. ${detail ? detail + '. ' : ''}${recovery}`);
 }
 
 // The proxy's 401 body is an Anthropic API error envelope; its message is the

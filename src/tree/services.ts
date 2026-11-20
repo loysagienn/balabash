@@ -14,7 +14,7 @@ import {
   CapabilityError,
   type AccountAuthority,
   type AccountValue,
-  type Catalog,
+  type CatalogNode,
   type ConnectionsPort,
   type SecretAuthority,
   type SecretConnection,
@@ -105,28 +105,29 @@ function secretServiceStates(): SecretService[] {
 }
 
 // Tells the connections layer about every service the catalog declares. The
-// catalog of the installation is registered once, when it is built; a
-// service registered again is replaced.
-export function registerServices(catalog: Catalog): void {
-  for (const vertex of catalog.vertices.values()) {
-    const connection = vertex.kind === 'node' ? vertex.connection : null;
+// root is registered at startup, each installation subtree when published.
+export function registerServices(node: CatalogNode): void {
+  const connection = node.connection;
 
-    if (connection?.type === 'account') {
-      registerAccountService({
-        name: connection.service,
-        url: connection.oauth.url,
-        description: connection.summary,
-        setup: connection.setup ?? null,
-        clientRegistration: connection.oauth.clientRegistration,
-        scope: connection.oauth.scope ?? null,
-        authorizationParams: connection.oauth.authorizationParams ?? null,
-        identityProbe: connection.oauth.identityProbe ?? null,
-      });
-    }
+  if (connection?.type === 'account') {
+    registerAccountService({
+      name: connection.service,
+      url: connection.oauth.url,
+      description: connection.summary,
+      setup: connection.setup ?? null,
+      clientRegistration: connection.oauth.clientRegistration,
+      scope: connection.oauth.scope ?? null,
+      authorizationParams: connection.oauth.authorizationParams ?? null,
+      identityProbe: connection.oauth.identityProbe ?? null,
+    });
+  }
 
-    if (connection?.type === 'secret') {
-      secretServices.set(connection.service, connection);
-    }
+  if (connection?.type === 'secret') {
+    secretServices.set(connection.service, connection);
+  }
+
+  for (const child of node.children) {
+    if (child.kind === 'node') registerServices(child);
   }
 
   if (secretServices.size && !sourceRegistered) {

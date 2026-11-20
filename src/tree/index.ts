@@ -23,6 +23,7 @@
 //   its time;
 //   web-perplexity.ts — its node `perplexity`, an external MCP server on
 //   the installation's key; capabilities/mcp-client.ts handles MCP exchanges;
+// - authored-nodes.ts — written installation nodes from data/nodes;
 // - connectors.ts and discovered-node.ts — installation nodes from MCP discovery;
 // - gmail.ts — the node `gmail` over the Gmail API, on the access of the
 //   user's account; gmail-mail.ts — a mail as a value and as the raw
@@ -56,8 +57,11 @@ import {
   type Node,
 } from '../catalog/index.ts';
 import { loadExternalServices } from '../capabilities/external-services.ts';
-import { startConnectors } from './connectors.ts';
-import { refreshSecretServices } from '../capabilities/connections/services.ts';
+import { authoredRevision, loadAuthoredNodes } from './authored-nodes.ts';
+import { addressedTo } from '../capabilities/agent-catalog.ts';
+import type { AgentPassport } from '../core/contract.ts';
+import { connectorNamesFor, startConnectors } from './connectors.ts';
+import { listSecretServices, refreshSecretServices } from '../capabilities/connections/services.ts';
 import { connections } from './connections.ts';
 import { drive } from './drive.ts';
 import { getEvent } from './events.ts';
@@ -161,16 +165,34 @@ let built: Catalog | null = null;
 
 const installed = new Map<string, Node>();
 
-function publishNode(node: Node): void {
+function publishNode(node: Node, reserved: ReadonlySet<string>): void {
   const { name } = node;
-  if (installed.get(name)?.installation?.revision === node.installation?.revision) return;
+  const installation = node.installation!;
+  const previous = installed.get(name)?.installation;
+  if (previous && previous.source !== installation.source) throw new Error(`Node "${name}" is already installed`);
+  if (previous && previous.revision === installation.revision) return;
   const next = new Map(installed);
   next.set(name, node);
   const nodes = [...next.values()].sort((a, b) => a.name.localeCompare(b.name));
   // Validate collisions before publishing anything. Existing turns keep their snapshot.
   const catalog = buildCatalog({ ...root, children: [...root.children, ...nodes] }).catalog;
+  const subtree = catalog.vertices.get(name)!;
+  if (subtree.kind !== 'node') throw new Error(`Expected node "${name}"`);
+  if (installation.source === 'authored') {
+    installation.revision = authoredRevision(subtree, catalog, reserved);
+  }
+  registerServices(subtree);
   installed.set(name, node);
   built = catalog;
+}
+
+// Agent cards show addressed nodes even before their credentials are in place.
+export function installationNamesFor(agent: AgentPassport): string[] {
+  const names = new Set(connectorNamesFor(agent));
+  for (const node of installed.values()) {
+    if (addressedTo(node.installation!.recipients, agent)) names.add(node.name);
+  }
+  return [...names].sort();
 }
 
 export function catalog(): Catalog {
@@ -185,8 +207,12 @@ export function catalog(): Catalog {
 // answers for them. The catalog owns definitions of its nodes' services. The schedule gets what its programs run against:
 // this catalog and these connections.
 export async function startTree(): Promise<void> {
-  await startConnectors(await loadExternalServices(), publishNode);
-  registerServices(catalog());
+  const { connectors, names } = await loadExternalServices();
+  for (const service of listSecretServices()) names.add(service.name);
+  registerServices(catalog().root);
+  const publish = (node: Node) => publishNode(node, names);
+  await loadAuthoredNodes(publish);
+  await startConnectors(connectors, publish);
   setProgramHost({ catalog, connections: connectionsPort(), traceCall: journalProgramCall });
   await refreshSecretServices();
 }

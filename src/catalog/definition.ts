@@ -157,8 +157,8 @@ export type NodeDefinition = {
   // them.
   external?: boolean;
   // Installation nodes address agents or profiles; revision identifies the
-  // discovered contract for ports that retain an opening across turns.
-  installation?: { recipients: string[]; revision: string };
+  // published contract for ports that retain an opening across turns.
+  installation?: { source: 'authored' | 'discovered'; recipients: string[]; revision: string };
   children: Vertex[];
 };
 

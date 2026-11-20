@@ -162,8 +162,11 @@ export function agentGrantPolicy(agent: AgentPassport | RemoteAgentDeclaration, 
 
   return {
     actions,
-    allows: vertex => vertex.kind === 'node' && vertex.installation
-      ? addressedTo(vertex.installation.recipients, agent)
-      : (vertex.kind === 'node' ? nodes : root).has(vertex.fullName),
+    allows: vertex => {
+      if (vertex.kind === 'capability') return root.has(vertex.fullName);
+      let top = vertex;
+      while (top.parent?.parent) top = top.parent;
+      return top.installation ? addressedTo(top.installation.recipients, agent) : nodes.has(vertex.fullName);
+    },
   };
 }

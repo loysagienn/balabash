@@ -44,7 +44,8 @@ function refreshServices(): Promise<void> {
 // Called by startTree before the first grants or Connections requests.
 export async function loadExternalServices() {
   const connectors: [string, Extract<ExternalServerConfig, { transport: 'claude-connector' }>][] = [];
-  for (const [name, config] of Object.entries(await readExternalServerConfigs())) {
+  const configs = await readExternalServerConfigs();
+  for (const [name, config] of Object.entries(configs)) {
     if (config.transport === 'claude-connector') {
       connectors.push([name, config]);
       continue;
@@ -73,5 +74,5 @@ export async function loadExternalServices() {
       .map(({ name, description, secretNames, connected, error }) => ({ name, description, secretNames, connected, error })),
     refresh: refreshServices,
   });
-  return connectors;
+  return { connectors, names: new Set(Object.keys(configs)) };
 }

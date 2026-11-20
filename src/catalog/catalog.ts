@@ -678,11 +678,11 @@ export function buildCatalog(root: RootDefinition): { catalog: Catalog; warnings
       problem(fullName, 'a node without a summary');
     }
 
-    if (!node.installation && refsIn(node.summary).length) {
+    if (node.installation?.source !== 'discovered' && refsIn(node.summary).length) {
       problem(fullName, 'a node summary names capabilities');
     }
 
-    if (!node.installation) checkText(node.summary, `${fullName} summary`);
+    if (node.installation?.source !== 'discovered') checkText(node.summary, `${fullName} summary`);
     budget(node.summary, BUDGET.nodeSummary, fullName, 'the node summary');
 
     // What a recipe may name without declaring it: the capabilities that are

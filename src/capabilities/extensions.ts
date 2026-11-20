@@ -1,10 +1,11 @@
 // Installation extensions shared by all workspaces: MCP connection settings
-// in data/mcp-servers and remote agent drivers in data/remote-agents.
+// in data/mcp-servers, catalog nodes in data/nodes and drivers in data/remote-agents.
 
 import { readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
+export const INSTALLATION_NODES_DIR = path.resolve('data', 'nodes');
 export const INSTALLATION_SERVERS_DIR = path.resolve('data', 'mcp-servers');
 export const INSTALLATION_REMOTE_AGENTS_DIR = path.resolve('data', 'remote-agents');
 

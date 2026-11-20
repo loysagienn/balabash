@@ -48,6 +48,22 @@ export function namedType<T extends z.ZodType>(
   return registered;
 }
 
+// Building an installation module is synchronous. Its types become visible to
+// the candidate catalog, and are released if that candidate fails validation.
+export function withNamedTypes(build: () => void): void {
+  const previous = new Set(namedTypes.keys());
+  try {
+    build();
+  } catch (error) {
+    for (const [name, type] of namedTypes) {
+      if (previous.has(name)) continue;
+      z.globalRegistry.remove(type.schema);
+      namedTypes.delete(name);
+    }
+    throw error;
+  }
+}
+
 export function getNamedType(name: string): NamedType | null {
   return namedTypes.get(name) ?? null;
 }

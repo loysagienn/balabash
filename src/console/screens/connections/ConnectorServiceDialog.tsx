@@ -22,8 +22,8 @@ export function ConnectorServiceDialog({ service, onClose }: { service: Connecto
           <Note icon="circle-check">Connected through claude.ai. Agent and profile recipients: {service.recipients.join(', ') || 'none'}.</Note>
         ) : service.state === 'token_expired' ? (
           <Note state="act" icon="clock-alert">
-            The Claude CLI token on this box expired{service.tokenExpiresAt ? ` ${startedLabel(service.tokenExpiresAt, now)}` : ''}: calls fail until a Claude Code session on the box
-            rotates it. Nothing needs re-authorizing.
+            The operator’s Claude CLI login expired{service.tokenExpiresAt ? ` ${startedLabel(service.tokenExpiresAt, now)}` : ''}.
+            {' '}Run a Claude Code turn on this host to refresh it. If prompted, sign in again.
           </Note>
         ) : (
           <Note state="err" icon="triangle-alert">

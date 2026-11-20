@@ -425,7 +425,7 @@ before(async () => {
     summary: 'The tree of the test.',
     children: [connections, gmailNode({ api: `${origin}/gmail`, authorizationServer: origin })],
   }).catalog;
-  services.registerServices(catalog);
+  services.registerServices(catalog.root);
   port = services.connectionsPort();
 
   // The OAuth client of the installation, as the operator entered it.

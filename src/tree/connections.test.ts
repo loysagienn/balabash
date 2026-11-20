@@ -242,7 +242,7 @@ before(async () => {
       webNode(undefined, perplexityNode(`${origin}/mcp`)),
     ],
   }).catalog;
-  services.registerServices(catalog);
+  services.registerServices(catalog.root);
   port = services.connectionsPort();
 });
 

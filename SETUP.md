@@ -123,6 +123,41 @@ At boot, Connections loads external service settings from
 `data/remote-agents/<name>.ts`. Drivers can import packages and repository types
 with `import type`. They receive platform services through `ctx`.
 
+### Written catalog nodes
+
+Place one TypeScript module per top-level node in `data/nodes/<name>.ts`.
+The filename supplies its snake_case name. Node loads the module at startup.
+Use a subdirectory for helpers. Export a synchronous `define` function. Import
+the contract as a **type** and use the catalog values passed by the running app:
+
+```ts
+import type { DefineInstallationNode } from '../../src/tree/authored-nodes.ts';
+
+export const define: DefineInstallationNode = ({ capability, z }) => ({
+  summary: 'Convert temperatures',
+  recipients: ['general'],
+  children: [capability({
+    name: 'fahrenheit',
+    summary: 'Convert Celsius to Fahrenheit',
+    description: 'Return the temperature in degrees Fahrenheit.',
+    input: z.strictObject({ celsius: z.number() }),
+    output: z.number(),
+    run: ({ celsius }) => celsius * 9 / 5 + 32,
+  })],
+});
+```
+
+Use `node` for nested groups, `namedType` for shared schemas and `CapabilityError`
+for typed failures. Each connection uses the same `account` or `secret` declaration
+as a repository node. The platform registers the service and supplies its authority
+to calls. Agent or profile recipients receive the subtree subject to the workspace's
+connections. An empty or omitted list leaves it available to scheduled programs only.
+A broken module or a collision is logged with its filename and skipped as a unit.
+Keep full names and service keys distinct from repository vertices, other installed
+nodes and configured services. Restart Balabash to load changes.
+
+### claude.ai connectors
+
 A claude.ai connector becomes a catalog node named after its file. Use a lower-case snake_case
 name matching `[a-z][a-z0-9_]*` before `.json`. For example,
 `data/mcp-servers/slack.json` can contain:
@@ -144,6 +179,8 @@ Connections shows the recipients and discovery or CLI login status. Claude
 Code refreshes its login on this host; an environment token override must
 be replaced by the operator. Change the provider account on claude.ai.
 Edit or remove the JSON file and restart Balabash to change the local configuration.
+
+### Remote agents
 
 Remote kinds declare `modes` (for example `['user', 'headless']`),
 `defaultMode` (one of those modes), and `recipients` (agent or access

@@ -611,7 +611,7 @@ before(async () => {
     // workspace reaches an upload.
     children: [fileCapabilities.exportFile, connections, driveNode({ api: `${origin}/drive`, upload: `${origin}/upload`, authorizationServer: origin })],
   }).catalog;
-  services.registerServices(catalog);
+  services.registerServices(catalog.root);
   port = services.connectionsPort();
 
   // The OAuth client of the installation, as the operator entered it.

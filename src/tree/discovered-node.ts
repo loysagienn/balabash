@@ -99,5 +99,5 @@ export function discoveredNode(
   });
   const contracts = children.map((leaf, index) => [sorted[index].name, leaf.name, leaf.summary, leaf.description, leaf.serverSchemas]);
   const revision = createHash('sha256').update(JSON.stringify([summary, guide, contracts])).digest('hex');
-  return node({ name, external: true, summary, guide, installation: { recipients, revision }, children });
+  return node({ name, external: true, summary, guide, installation: { source: 'discovered', recipients, revision }, children });
 }
