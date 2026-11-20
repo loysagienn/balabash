@@ -183,17 +183,10 @@ export function mirrorRead(read: RemoteRead, ctx: MirrorContext): MirrorResult {
         break;
       }
       case 'tool.finished': {
-        events.push({
-          type: 'tool.call.completed',
-          ...author(),
-          payload: {
-            callId: item.callId,
-            functionName: item.name,
-            serverName: kind,
-            toolName: item.name,
-            result: { content: [{ type: 'text', text: item.output }], ...(item.isError ? { isError: true } : {}) },
-          },
-        });
+        const ids = { callId: item.callId, functionName: item.name };
+        events.push(item.isError
+          ? { type: 'tool.call.failed', ...author(), payload: { ...ids, error: { kind: 'external_error', message: item.output } } }
+          : { type: 'tool.call.completed', ...author(), payload: { ...ids, value: item.output } });
 
         break;
       }

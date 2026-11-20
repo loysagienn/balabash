@@ -8,15 +8,20 @@
 import type { ToolResult } from '../core/contract.ts';
 
 // A tool the model may call: the one definition shape of the coordinator's
-// port, serialized per driver. `strict`
-// schemas carry additionalProperties: false and a full `required` list —
-// the requirement both providers share.
+// port, serialized per driver. Catalog functions allow omitted optional
+// fields and validate them when called. Legacy strict schemas require every key.
 export type FunctionDefinition = {
   type: 'function';
   name: string;
   description: string;
   strict: boolean;
   parameters: Record<string, unknown>;
+};
+
+// The catalog entries introduced under the current prompt prefix.
+export type CatalogOpeningContext = {
+  seenNodes: Set<string>;
+  introduce(definition: FunctionDefinition, text: string): boolean;
 };
 
 // One call the model made, arguments as the JSON text the dispatcher parses.

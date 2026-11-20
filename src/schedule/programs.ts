@@ -22,9 +22,9 @@
 // is journaled and told: for that long the task says it is running, a
 // restart waits (hasUnsettledRuns), and the boot sweep leaves the row alone.
 //
-// The catalog and the connections behind it are the tree's (src/tree), which
+// The catalog, its connections and its call journal are the tree's (src/tree), which
 // itself reaches the schedule from its node `schedule`; so the tree hands
-// both over when the app starts (setProgramHost), the way it tells its
+// these over when the app starts (setProgramHost), the way it tells its
 // services to the connections layer.
 
 import { randomUUID } from 'node:crypto';
@@ -40,9 +40,9 @@ import {
   type ConnectionsPort,
   type GrantPolicy,
   type ProgramRun,
+  type ProgramEnv,
   type ProgramStart,
 } from '../catalog/index.ts';
-import { journalProgramCall } from '../tree/call-journal.ts';
 import { appendEvent, storablePayload } from '../core/append.ts';
 import type { JsonObject, Thread } from '../core/contract.ts';
 import { SYSTEM_EXCEPTION } from '../core/envelope.ts';
@@ -59,6 +59,7 @@ export const PROGRAM_TIMEOUT_MAX_MS = 18_000_000;
 export type ProgramHost = {
   catalog: Catalog;
   connections: ConnectionsPort;
+  traceCall: NonNullable<ProgramEnv['traceCall']>;
 };
 
 let host: ProgramHost | null = null;
@@ -129,7 +130,7 @@ async function runUnderMainThread(task: ScheduledTaskModel, main: Thread, start:
     return await executeProgram(
       grant,
       { code, timeoutMs: task.timeoutMs ?? PROGRAM_TIMEOUT_DEFAULT_MS, start, task: task.slug },
-      { connections: host.connections, traceCall: journalProgramCall },
+      { connections: host.connections, traceCall: host.traceCall },
     );
   } catch (error) {
     return neverBegan(start, code, error);

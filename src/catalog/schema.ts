@@ -4,6 +4,7 @@
 // read this one form.
 
 import { z } from 'zod';
+import type { Catalog } from './catalog.ts';
 import type { JsonSchema } from './json.ts';
 import { getNamedType } from './types.ts';
 
@@ -24,6 +25,22 @@ export function typeRefName(schema: JsonSchema): string | null {
   return typeof schema.$ref === 'string' && schema.$ref.startsWith(TYPE_REF_PREFIX)
     ? schema.$ref.slice(TYPE_REF_PREFIX.length)
     : null;
+}
+
+// Providers receive standalone JSON Schema, including named types nested in
+// other types and field-specific annotations beside a reference.
+export function expandSchema(catalog: Catalog, schema: JsonSchema): JsonSchema {
+  function expand(value: unknown): unknown {
+    if (Array.isArray(value)) return value.map(expand);
+    if (!isObject(value)) return value;
+    const ref = typeRefName(value);
+    if (ref) {
+      const { $ref, ...fields } = value;
+      return expand({ ...catalog.types.get(ref)!.schema, ...fields });
+    }
+    return Object.fromEntries(Object.entries(value).map(([key, field]) => [key, expand(field)]));
+  }
+  return expand(schema) as JsonSchema;
 }
 
 // zod's own artifacts that say nothing a signature or a port needs: the

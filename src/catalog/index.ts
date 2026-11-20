@@ -94,7 +94,8 @@ export {
   type ProgramStart,
   type RunProgramEnv,
 } from './program.ts';
-export { declarationText, signatureText, typeDefinitionText } from './signature.ts';
+export { expandSchema } from './schema.ts';
+export { declarationText, ruleText, typeText, signatureText, typeDefinitionText } from './signature.ts';
 export {
   Account,
   CapabilityErrorType,

@@ -1,10 +1,6 @@
-import type { TaskAuthor } from '../core/contract.ts';
+import type { CallAuthor } from '../core/contract.ts';
 import type { RegistryAuthor } from '../core/registry-events.ts';
 import type { CallContext } from '../catalog/index.ts';
-
-export type CallAuthor =
-  | { actor: 'task'; task: TaskAuthor; agentName?: never }
-  | { actor: 'agent'; agentName: string; task?: never };
 
 export function callAuthor({ caller, program }: Pick<CallContext, 'caller' | 'program'>): CallAuthor {
   if (program?.task) {

@@ -27,6 +27,10 @@ export type EventActor = 'user' | 'system' | 'agent' | 'task';
 
 export type TaskAuthor = { slug: string; runId: string };
 
+export type CallAuthor =
+  | { actor: 'task'; task: TaskAuthor; agentName?: never }
+  | { actor: 'agent'; agentName: string; task?: never };
+
 export type Event = {
   seq: bigint;
   id: string; // stable reference (refs, delivery idempotency)

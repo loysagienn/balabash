@@ -115,6 +115,24 @@ describe('runTurn', () => {
     assert.match(String(outputs[1]!.output), /^rejected: unknown bogus/);
   });
 
+  it('attaches catalog images and PDFs to their respective call outputs', async () => {
+    const { client, requests } = makeClient([[{ name: 'image', callId: 'a' }, { name: 'pdf', callId: 'b' }], [{ name: 'do_nothing' }]]);
+    const { dispatch } = dispatcher({
+      image: { kind: 'catalog', text: 'image ref', attachment: { kind: 'image', url: 'https://files/image' } },
+      pdf: { kind: 'catalog', text: 'pdf ref', attachment: { kind: 'pdf', url: 'https://files/pdf' } },
+      do_nothing: { kind: 'end' },
+    });
+    await runTurn({ ...head, metrics, dispatch, deps: { client, backend: stateful } });
+    assert.deepEqual(requests[1]!.input, [
+      { type: 'function_call_output', call_id: 'a', output: [
+        { type: 'input_text', text: 'image ref' }, { type: 'input_image', image_url: 'https://files/image', detail: 'auto' },
+      ] },
+      { type: 'function_call_output', call_id: 'b', output: [
+        { type: 'input_text', text: 'pdf ref' }, { type: 'input_file', file_url: 'https://files/pdf' },
+      ] },
+    ]);
+  });
+
   it('stateless backend: resends the whole input with the response output echoed', async () => {
     const { client, requests } = makeClient([[{ name: 'send_message', callId: 'c1' }], [{ name: 'do_nothing' }]]);
     const { dispatch } = dispatcher({ send_message: { kind: 'async' }, do_nothing: { kind: 'end' } });

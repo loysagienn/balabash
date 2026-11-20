@@ -21,7 +21,7 @@
 // a request too), addressing the requester thread — the dead-target redirect
 // delivers it to the main thread when the requester already finished.
 
-import type { CallAuthor } from '../tree/call-author.ts';
+import type { CallAuthor } from '../core/contract.ts';
 import { restartRequester } from '../utils/restart-requester.ts';
 import { readFile, unlink } from 'node:fs/promises';
 import path from 'node:path';

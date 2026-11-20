@@ -1,0 +1,129 @@
+// The catalog view for a port that assembles the model's context.
+import { agentGrantPolicy, isRemoteAgent, startable } from '../capabilities/agent-catalog.ts';
+import {
+  FileRef, computeGrant, expandSchema, grantedChildren, grantedGuide, grantedVertex, ruleText, toCapabilityError, typeText,
+  type Catalog, type FileRefValue, type Grant, type JsonSchema, type JsonValue,
+} from '../catalog/index.ts';
+import type { AgentPassport } from '../core/contract.ts';
+import { getFileDownloadUrl, openFileContent } from '../files/index.ts';
+import { dispatchCatalogCall } from '../tree/call-journal.ts';
+import { viewKind, VIEW_TEXT_MAX_CHARS } from '../tree/files.ts';
+import { catalog } from '../tree/index.ts';
+import { connectionsPort } from '../tree/services.ts';
+import type { CatalogOpeningContext, DispatchResult, FunctionCall, FunctionDefinition } from './turn-contract.ts';
+
+const actions = ['describe', 'run_program'] as const;
+const PREVIEW_CHARS = 16_000;
+
+function preview(grant: Grant, value: JsonValue, seq: bigint, field: 'value' | 'error'): string {
+  const json = JSON.stringify(value);
+  if (json.length <= PREVIEW_CHARS) return json;
+  const path = `(await call("get_event", {seq: ${seq}})).payload.${field}`;
+  const hint = grant.vertices.has('get_event') ? ` Use run_program to select the part you need from ${path}.` : '';
+  return `${json.slice(0, PREVIEW_CHARS)}\n[Preview of event ${seq}.${hint}]`;
+}
+
+function definition(tree: Catalog, name: string, description: string, input: JsonSchema): FunctionDefinition {
+  return { type: 'function', name, description, parameters: expandSchema(tree, input), strict: false };
+}
+
+function vertexLine(kind: string, name: string, summary: string): string {
+  return `${kind} ${name} — ${summary}`;
+}
+
+function coreText(grant: Grant): string {
+  const root = grant.catalog.root;
+  const agents = startable(grant.caller.agentName).map(agent =>
+    JSON.stringify({
+      name: agent.name,
+      description: agent.description,
+      modes: agent.modes,
+      defaultMode: agent.defaultMode,
+      ...(isRemoteAgent(agent) ? { remote: true, options: agent.options ?? {} } : {}),
+    }),
+  );
+  return [
+    'Catalog guide',
+    ...grantedGuide(grant, root),
+    '\nCatalog entries',
+    ...grantedChildren(grant, root).map(child => vertexLine(child.kind, child.fullName, child.summary)),
+    '\nUse describe to add a capability to the available functions. If its name appears only in the transcript, describe it again. Call the function by its catalog name.',
+    ...(grant.vertices.has('spawn_agent') && agents.length ? ['\nAgents you can start:', ...agents] : []),
+  ].join('\n');
+}
+
+export async function createCatalogPort(agent: AgentPassport, workspaceId: string, threadId: string) {
+  const tree = catalog();
+  const connections = connectionsPort();
+  const caller = { workspaceId, threadId, agentName: agent.name };
+  const grant = await computeGrant(tree, agentGrantPolicy(agent, actions), { caller, connections });
+  const tools = actions.map(name => {
+    const action = tree.actions.get(name)!;
+    return definition(tree, name, action.description, action.input);
+  });
+
+  async function dispatch(call: FunctionCall, openings: CatalogOpeningContext): Promise<DispatchResult> {
+    let input: JsonValue;
+    try {
+      input = JSON.parse(call.arguments);
+    } catch {
+      input = call.arguments;
+    }
+
+    try {
+      const result = await dispatchCatalogCall(grant, connections, { callId: call.callId, name: call.name, input });
+      if ('error' in result) return { kind: 'catalog', text: preview(grant, result.error, result.seq, 'error') };
+      const { value, seq, opened } = result;
+      const accounts = opened?.accounts.length ? ['Accounts: ' + JSON.stringify(opened.accounts)] : [];
+      if (opened?.kind === 'node') {
+        openings.seenNodes.add(opened.name);
+        const children = opened.children.map(child => vertexLine(child.kind, child.name, child.summary));
+        return { kind: 'catalog', text: [opened.summary, ...opened.guide, ...children, ...accounts].join('\n') };
+      }
+      if (opened?.kind === 'capability') {
+        const vertex = grantedVertex(grant, opened.name);
+        if (vertex?.kind !== 'capability') throw new Error('Missing described capability');
+        const parent = vertex.parent;
+        const guide = openings.seenNodes.has(parent.fullName) ? [] : grantedGuide(grant, parent);
+        openings.seenNodes.add(parent.fullName);
+        const text = [
+          ...guide, 'Returns: ' + typeText(vertex.output, 0), ...vertex.inputRules.map(ruleText), ...opened.types, ...accounts,
+        ].join('\n');
+        const tool = definition(tree, vertex.fullName, vertex.description, vertex.input);
+        return { kind: 'catalog', text, ...(openings.introduce(tool, text) ? { definition: tool } : {}) };
+      }
+      const text = preview(grant, value, seq, 'value');
+      return call.name === 'view_file' ? showFile(text, FileRef.parse(value)) : { kind: 'catalog', text };
+    } catch (error) {
+      return { kind: 'catalog', text: JSON.stringify(toCapabilityError(error).toValue()) };
+    }
+  }
+  return { instructions: coreText(grant), tools, dispatch, grantKey: JSON.stringify([...grant.vertices]) };
+}
+
+async function showFile(text: string, file: FileRefValue): Promise<DispatchResult> {
+  try {
+    const kind = viewKind({ contentType: file.contentType, originalFilename: file.name });
+    if (kind === 'text') {
+      const reader = (await openFileContent(file.id)).getReader();
+      const decoder = new TextDecoder();
+      let content = '';
+      try {
+        while (content.length <= VIEW_TEXT_MAX_CHARS) {
+          const chunk = await reader.read();
+          content += decoder.decode(chunk.value, { stream: !chunk.done });
+          if (chunk.done) break;
+        }
+      } finally {
+        await reader.cancel();
+      }
+      const cutoff = content.length > VIEW_TEXT_MAX_CHARS ? `\n[First ${VIEW_TEXT_MAX_CHARS} characters shown.]` : '';
+      return { kind: 'catalog', text: text + '\n' + content.slice(0, VIEW_TEXT_MAX_CHARS) + cutoff };
+    }
+
+    const { url } = await getFileDownloadUrl(file.id);
+    return { kind: 'catalog', text, attachment: { kind: kind === 'image' ? 'image' : 'pdf', url } };
+  } catch (error) {
+    return { kind: 'catalog', text: text + '\nFile content unavailable: ' + toCapabilityError(error).message };
+  }
+}

@@ -23,7 +23,7 @@
 
 import crypto from 'node:crypto';
 import { config } from '../../config/index.ts';
-import type { FunctionDefinition, PrewarmPrompt, TurnPrompt } from '../turn-contract.ts';
+import type { CatalogOpeningContext, PrewarmPrompt, TurnPrompt } from '../turn-contract.ts';
 import { getLlmBackend } from './backend.ts';
 import { buildTranscript } from './transcript.ts';
 
@@ -49,6 +49,7 @@ const promptCacheTtlMs = () => getLlmBackend().promptCacheTtlMs;
 
 type PromptState = {
   headHash: string;
+  seenNodes: Set<string>;
   openings: NonNullable<TurnPrompt['openings']>;
   chunks: string[];
   totalChars: number;
@@ -165,6 +166,7 @@ export function buildTurnPrompt({
 
   states.set(threadId, {
     headHash,
+    seenNodes: new Set(['']),
     openings: [],
     chunks: [text],
     totalChars: text.length,
@@ -180,12 +182,18 @@ export function buildTurnPrompt({
 
 // A definition occupies the same position in subsequent turns and prewarms.
 // Resetting the prefix drops its openings along with the frozen chunks.
-export function rememberOpening(threadId: string, definition: FunctionDefinition, text: string): void {
+export function catalogOpenings(threadId: string): CatalogOpeningContext {
   const state = states.get(threadId);
-  if (state && !state.openings.some(opening => opening.definition.name === definition.name)) {
-    state.openings.push({ afterChunk: state.chunks.length, definition, text });
-    state.totalChars += JSON.stringify(definition).length + text.length;
-  }
+  const entries = state?.openings ?? [];
+  return {
+    seenNodes: state?.seenNodes ?? new Set(['']),
+    introduce(definition, text) {
+      if (entries.some(entry => entry.definition.name === definition.name)) return false;
+      entries.push({ afterChunk: state?.chunks.length ?? 0, definition, text });
+      if (state) state.totalChars += JSON.stringify(definition).length + text.length;
+      return true;
+    },
+  };
 }
 
 // A restart of the owning run drops its builder state explicitly (the next

@@ -3,13 +3,16 @@
 import { randomUUID } from 'node:crypto';
 import type {
   Caller,
+  ConnectionsPort,
+  DescribeValue,
+  Grant,
   CapabilityErrorValue,
   JsonObject,
   JsonValue,
   ProgramRun,
   ProgramScope,
 } from '../catalog/index.ts';
-import { CapabilityError, toCapabilityError } from '../catalog/index.ts';
+import { CapabilityError, describe, invokeCapability, runProgram, toCapabilityError } from '../catalog/index.ts';
 import { appendEvent } from '../core/append.ts';
 import { callAuthor } from './call-author.ts';
 
@@ -21,7 +24,7 @@ type Call = {
   program?: ProgramScope;
 };
 
-export async function journalCall<T extends JsonValue>(
+async function journalCall<T extends JsonValue>(
   call: Call,
   invoke: () => Promise<T>,
   runDetails?: () => JsonObject,
@@ -59,7 +62,7 @@ export async function journalCall<T extends JsonValue>(
 }
 
 // Code and outcome already live in the input and result of run_program.
-export function runDetails(run: ProgramRun): JsonObject {
+function runDetails(run: ProgramRun): JsonObject {
   return {
     run: {
       id: run.id,
@@ -86,4 +89,34 @@ export async function journalProgramCall(
     throw new CapabilityError(kind, message, details);
   }
   return result.value;
+}
+
+// The entry point for direct catalog calls from a port. The port supplies
+// decoded arguments; the catalog validates them, including a malformed
+// argument string passed through verbatim by a wire adapter.
+export async function dispatchCatalogCall(
+  grant: Grant,
+  connections: ConnectionsPort,
+  call: Pick<Call, 'callId' | 'name' | 'input'>,
+) {
+  const { name, input, callId } = call;
+  let opened: DescribeValue | undefined;
+  let run: JsonObject = {};
+  const result = await journalCall({ ...call, caller: grant.caller }, async () => {
+    if (name === 'describe') {
+      opened = await describe(grant, input, { connections });
+      return opened;
+    }
+    if (name === 'run_program') {
+      return runProgram(grant, input, {
+        connections,
+        start: { id: callId, startedAt: new Date() },
+        traceCall: journalProgramCall,
+        record: outcome => { run = runDetails(outcome); },
+      });
+    }
+    return invokeCapability(grant, name, input, { connections });
+  }, () => run);
+
+  return { ...result, opened };
 }

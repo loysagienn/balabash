@@ -438,8 +438,23 @@ test('OpenAI opens a granted function, spawns through it and replays its definit
     { payload: { path: ['functionName'], equals: 'describe' } },
   ] } }), 1);
 
+  // A scheduled program left more calls than the whole history window
+  // between wakes. Seed its journal in bulk, without hundreds of RPCs.
+  const task = { actor: 'task', taskSlug: 'nightly', taskRunId: 'nightly-run', workspaceId: stand.workspaceId, threadId: stand.mainThreadId };
+  await prisma.event.createMany({ data: Array.from({ length: 401 }, (_, i) => {
+    const call = { functionName: 'projects_list', callId: 'nightly-' + i, runId: task.taskRunId };
+    return [
+      { ...task, type: 'tool.call.started', payload: { ...call, input: {} } },
+      { ...task, type: 'tool.call.completed', payload: { ...call, value: [] } },
+    ];
+  }).flat() });
+  await prisma.event.create({ data: { ...task, type: 'schedule.fired', payload: { slug: task.taskSlug, runId: task.taskRunId, value: 'nightly result' } } });
   await wake();
+  assert.deepEqual(items(4)[0], items(0)[0]);
   assert.deepEqual(items(4)[2], addition);
+  assert.match(JSON.stringify(items(4)[3]), /nightly result/);
+  assert.match(JSON.stringify(items(4)[3]), /spawn_agent/);
+  assert.doesNotMatch(JSON.stringify(items(4)[3]), /projects_list/);
   assert.equal(items(4).length, 5); // first chunk, describe text, definition, new chunk, status
   assert.deepEqual(requests[4]!.tools, first.tools);
   resetPromptState(stand.mainThreadId);
@@ -447,12 +462,56 @@ test('OpenAI opens a granted function, spawns through it and replays its definit
   assert.ok(items(5).every(item => item.type !== 'additional_tools'));
 });
 
+test('a warm prefix keeps its node guides and tool definitions until the grant changes', async () => {
+  const { buildTurnPrompt, buildKeepalivePrompt, catalogOpenings } = await import('../harness/openai/prompt-builder.ts');
+  const { coordinatorPort } = await import('./port.ts');
+  const threadId = stand.mainThreadId;
+  const port = await coordinatorPort(stand.workspaceId, threadId);
+  const head = { threadId, instructions: port.instructions, tools: port.tools, model: 'model', grantKey: port.grantKey };
+  const event = await said('open the catalog');
+  const snapshot = { events: [event], lastSeq: event.seq, snapshotFull: false, statusText: '' };
+  resetPromptState(threadId);
+  assert.ok(buildTurnPrompt({ ...head, ...snapshot }));
+  const describe = (name: string) => port.dispatch(
+    { name: 'describe', arguments: JSON.stringify({ name }), callId: 'open-' + name }, catalogOpenings(threadId),
+  );
+  const list = await describe('projects_list');
+  assert.ok(list.kind === 'catalog' && list.definition);
+  assert.match(list.text, /Match a conversation to a project/);
+  assert.ok(!list.text.includes(list.definition.description));
+  const keepalive = buildKeepalivePrompt(head);
+  assert.ok(keepalive);
+  assert.deepEqual(keepalive.openings, [{ afterChunk: 1, definition: list.definition, text: list.text }]);
+
+  const next = await said('another entry');
+  const nextSnapshot = { ...snapshot, events: [event, next], lastSeq: next.seq };
+  assert.deepEqual(buildTurnPrompt({ ...head, ...nextSnapshot })?.openings, keepalive.openings);
+  const get = await describe('projects_get');
+  assert.ok(get.kind === 'catalog' && get.definition);
+  assert.doesNotMatch(get.text, /Match a conversation to a project/);
+  const again = await describe('projects_list');
+  assert.ok(again.kind === 'catalog' && !again.definition);
+
+  const changed = { ...head, grantKey: head.grantKey + '-changed' };
+  assert.equal(buildKeepalivePrompt(changed), null);
+  const rebuilt = buildTurnPrompt({ ...changed, ...nextSnapshot });
+  assert.ok(rebuilt);
+  assert.equal(rebuilt.chunks.length, 1);
+  assert.deepEqual(rebuilt.openings ?? [], []);
+  const reopened = await describe('projects_get');
+  assert.ok(reopened.kind === 'catalog' && reopened.definition);
+  assert.match(reopened.text, /Match a conversation to a project/);
+});
+
 test('catalog output keeps file bytes, program internals and previews on their own side of the journal', async () => {
   const { coordinatorPort } = await import('./port.ts');
   const { ingestFile } = await import('../files/index.ts');
   const { buildTranscript } = await import('../harness/openai/transcript.ts');
   const { getTranscript } = await import('../core/events.ts');
-  const { dispatch } = await coordinatorPort(stand.workspaceId, stand.mainThreadId);
+  const port = await coordinatorPort(stand.workspaceId, stand.mainThreadId);
+  const { catalogOpenings } = await import('../harness/openai/prompt-builder.ts');
+  const openings = catalogOpenings(stand.mainThreadId);
+  const dispatch = (call: Parameters<typeof port.dispatch>[0]) => port.dispatch(call, openings);
   const from = await headSeq();
   const file = await ingestFile({
     body: Buffer.from('file-content-only'), contentType: 'text/plain', originalFilename: 'sample.txt', workspaceId: stand.workspaceId,

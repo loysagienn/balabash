@@ -16,7 +16,7 @@ import { listProjects } from '../projects/store.ts';
 import type { ProjectModel } from '../projects/store.ts';
 import { getFailingConsumers } from '../core/consumers.ts';
 import { getPendingRestart } from '../runtime/restart.ts';
-import { buildTurnPrompt, buildKeepalivePrompt, markPromptStateWarm } from '../harness/openai/prompt-builder.ts';
+import { buildTurnPrompt, buildKeepalivePrompt, catalogOpenings, markPromptStateWarm } from '../harness/openai/prompt-builder.ts';
 import type { TurnClient } from '../harness/openai/turn.ts';
 import { getLlmBackend } from '../harness/openai/backend.ts';
 import { getTurnDriver } from '../harness/turn-driver.ts';
@@ -296,7 +296,7 @@ export function createCoordinatorRun({ threadId, workspaceId }: { threadId: stri
   };
 
   const turn = async (): Promise<void> => {
-    const events = await getTranscript(threadId, { last: HISTORY_LIMIT });
+    const events = await getTranscript(threadId, { last: HISTORY_LIMIT, omitProgramCalls: true });
 
     if (!events.length) {
       return;
@@ -329,6 +329,7 @@ export function createCoordinatorRun({ threadId, workspaceId }: { threadId: stri
     // written or given up on (the writer never throws into the turn).
     await setState('run');
 
+    const openings = catalogOpenings(threadId);
     const outcome = await driver.runTurn({
       model: config.mainModel,
       instructions,
@@ -341,7 +342,7 @@ export function createCoordinatorRun({ threadId, workspaceId }: { threadId: stri
         requestedModel: config.mainModel,
         purpose: 'turn',
       },
-      dispatch,
+      dispatch: async call => dispatch(call, openings),
       deliverText: text => deliverCoordinatorText(text, { workspaceId, threadId }),
       cacheComparisonResponseId: lastResponseId,
       ...(deps.client ? { deps: { client: deps.client } } : {}),

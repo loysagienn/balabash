@@ -49,11 +49,21 @@ describe('mirrorRead', () => {
       ],
     );
     assert.deepEqual(result.events[2].payload, { content: [{ type: 'text', text: 'done' }] });
-    assert.deepEqual((result.events[1].payload as { result: unknown }).result, { content: [{ type: 'text', text: 'a b' }] });
+    assert.deepEqual(result.events[1].payload, { callId: 'c1', functionName: 'bash', value: 'a b' });
     assert.equal(result.phase, 'idle');
     assert.equal(result.activity, true);
     assert.equal(result.finished, null);
     assert.equal(result.watch.lastTurnText, 'done');
+  });
+
+  test('a failed remote call keeps the driver output as its structured error', () => {
+    const { events } = mirrorRead(read([
+      { kind: 'tool.finished', turnId: 'turn-1', callId: 'c1', name: 'bash', output: 'permission denied', isError: true },
+    ]), ctx());
+    assert.equal(events[0]?.type, 'tool.call.failed');
+    assert.deepEqual(events[0]?.payload, {
+      callId: 'c1', functionName: 'bash', error: { kind: 'external_error', message: 'permission denied' },
+    });
   });
 
   test('a headless thread tells its parent; a foreign reply is a user.message from the other side', () => {

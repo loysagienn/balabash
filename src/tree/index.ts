@@ -60,6 +60,7 @@ import { getEvent } from './events.ts';
 import { fileCapabilities } from './files.ts';
 import { gmail } from './gmail.ts';
 import { projects } from './projects.ts';
+import { journalProgramCall } from './call-journal.ts';
 import { setProgramHost } from '../schedule/programs.ts';
 import { schedule } from './schedule.ts';
 import { connectionsPort, registerServices } from './services.ts';
@@ -169,7 +170,7 @@ export function catalog(): Catalog {
 // this catalog and these connections.
 export async function startTree(): Promise<void> {
   registerServices(catalog());
-  setProgramHost({ catalog: catalog(), connections: connectionsPort() });
+  setProgramHost({ catalog: catalog(), connections: connectionsPort(), traceCall: journalProgramCall });
   await refreshSecretServices();
 }
 

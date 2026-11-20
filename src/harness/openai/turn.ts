@@ -34,7 +34,6 @@ import type { DispatchResult, FunctionCall, PrewarmPrompt, RequestHead, TurnOutc
 import { getLlmBackend } from './backend.ts';
 import type { LlmBackend } from './backend.ts';
 import { getOpenaiClient } from './client.ts';
-import { rememberOpening } from './prompt-builder.ts';
 import { toolResultToModelOutput } from './content.ts';
 import type { startLlmRequestMetrics } from './llm-metrics.ts';
 
@@ -50,7 +49,7 @@ function toInput({ chunks, openings = [], statusText }: PrewarmPrompt & { status
     ...chunks.flatMap((text, index): ResponseInputItem[] => [
       { role: 'user', content: [{ type: 'input_text', text }] },
       ...openings.filter(opening => opening.afterChunk === index + 1).flatMap((opening): ResponseInputItem[] => [
-        { role: 'user', content: [{ type: 'input_text', text: opening.text }] },
+        { role: 'user', content: [{ type: 'input_text', text: `Opened: ${opening.definition.name}\n${opening.text}` }] },
         { type: 'additional_tools', role: 'developer', tools: [opening.definition] },
       ]),
     ]),
@@ -130,7 +129,6 @@ export async function runTurn({
   const explicitCache = backend.promptCache === 'explicit';
 
   let input: ResponseInput = toInput(prompt);
-  const loaded = new Set(prompt.openings?.map(opening => opening.definition.name));
   let previousResponseId: string | undefined;
   let firstResponseId: string | undefined;
 
@@ -179,10 +177,8 @@ export async function runTurn({
                 : { type: 'input_file', file_url: outcome.attachment.url },
             ] : outcome.text,
           });
-          if (outcome.definition && !loaded.has(outcome.definition.name)) {
-            loaded.add(outcome.definition.name);
+          if (outcome.definition) {
             outputs.push({ type: 'additional_tools', role: 'developer', tools: [outcome.definition] });
-            rememberOpening(prompt.cacheKey, outcome.definition, outcome.text);
           }
           break;
 
