@@ -198,10 +198,9 @@ For workspace OAuth, use HTTP with `"auth": "user"`, a `description` and
 the provider’s MCP URL. Dynamic client registration is the default.
 Use `"clientRegistration": "manual"` for an operator-provisioned client.
 Optional `scope`, `authorizationParams` and `identityProbe` configure sign-in.
-The platform lists tools as each connected account in the workspace and
-publishes capabilities with matching names, texts and schemas across
-those accounts. Sign-in, disconnect and loss of authorization refresh that workspace.
-Accounts whose listing fails are retried in the background.
+The server has one tool contract for its accounts. Sign-in, disconnect and
+loss of authorization refresh the workspace's snapshot. Discovery uses one
+connected account and can try another if the first cannot list tools.
 Each call takes the workspace account address in `account`. That name is
 reserved in the provider’s input schema. System lists omitted tools. The provider receives its own
 arguments and the selected account’s bearer token.

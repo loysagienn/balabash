@@ -23,10 +23,23 @@ test('configured MCP servers publish the contract discovered with the authority 
   const inputSchema = { type: 'object', properties: {}, additionalProperties: false };
   const common = { name: 'read', inputSchema };
   const logs: { path: string; key?: string; method: string; args?: object }[] = [];
+  const { handleOauthCallback, disconnectConnection, markReauthorizationRequired } = await import('../capabilities/connections/index.ts');
+  let failingToken: string | null = null;
   let refuse = false;
   const server = http.createServer(async (req, res) => {
     const path = req.url!;
     const key = req.headers.authorization;
+    if (path.startsWith('/.well-known/oauth-authorization-server')) {
+      res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({
+        issuer: url, authorization_endpoint: url + '/authorize', token_endpoint: url + '/token',
+        response_types_supported: ['code'], code_challenge_methods_supported: ['S256'],
+      }));
+      return;
+    }
+    if (path === '/token') {
+      res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ access_token: 'A', token_type: 'bearer' }));
+      return;
+    }
     if (req.method !== 'POST') {
       logs.push({ path, key, method: req.method! });
       res.writeHead(req.method === 'DELETE' ? 200 : 405).end();
@@ -40,6 +53,10 @@ test('configured MCP servers publish the contract discovered with the authority 
       res.writeHead(202).end();
       return;
     }
+    if (path === '/wiki' && method === 'tools/list' && key === failingToken) {
+      res.writeHead(500).end('Discovery failed, request ' + logs.length);
+      return;
+    }
     if (refuse && path === '/search') {
       res.writeHead(401).end('Rejected ' + key);
       return;
@@ -50,8 +67,10 @@ test('configured MCP servers publish the contract discovered with the authority 
       res.setHeader('mcp-session-id', 'test-session');
       result = { protocolVersion: params.protocolVersion, capabilities: { tools: {} }, serverInfo: { name: 'demo', version: '1' } };
     } else if (method === 'tools/list') {
-      result = params.cursor ? { tools: [{ name: key === 'Bearer A' ? 'edit' : 'lookup', inputSchema }] }
-        : { tools: [common], ...(path === '/wiki' && { nextCursor: 'more' }) };
+      result = params.cursor ? { tools: [{ name: 'edit', inputSchema }] }
+        : { tools: path === '/wiki' ? [common, {
+          name: 'conflict', inputSchema: { ...inputSchema, properties: { account: { type: 'string' } } },
+        }] : [common], ...(path === '/wiki' && { nextCursor: 'more' }) };
     } else {
       result = { content: [{ type: 'text', text: 'done' }] };
     }
@@ -63,6 +82,12 @@ test('configured MCP servers publish the contract discovered with the authority 
   const config = (name: string, fields: object) => fs.writeFile(`data/mcp-servers/${name}.json`, JSON.stringify(fields));
   await config('search', { transport: 'http', url: url + '/search', headers: { Authorization: 'Bearer ${secret:KEY}' }, recipients });
   await config('wiki', { transport: 'http', url: url + '/wiki', auth: 'user', description: 'Read documents', recipients });
+  await config('legacy', { transport: 'http', url: url + '/search', enabledTools: ['read'] });
+  await prisma.externalServerSecret.create({ data: { server: 'broken', key: 'TOKEN', value: 'private-marker' } });
+  await config('broken', {
+    transport: 'stdio', command: process.execPath, args: ['-e', 'console.error("Missing module", process.env.TOKEN, Date.now());process.exit(1)'],
+    env: { TOKEN: '${secret:TOKEN}' },
+  });
   await config('invalid', { transport: 'stdio', command: 'node', recipients: 'mistake' });
   await config('missing', { transport: 'stdio', command: './missing-fixture-server' });
   await config('gmail', { transport: 'http', url: url + '/collision', auth: 'user', description: 'Shadow' });
@@ -70,6 +95,7 @@ test('configured MCP servers publish the contract discovered with the authority 
     require('node:readline').createInterface({ input: process.stdin }).on('line', line => {
       const { id, method, params } = JSON.parse(line);
       if (id === undefined) return;
+      if (method === 'tools/call' && require('node:fs').existsSync('fail-call')) process.exit(1);
       const result = method === 'initialize'
         ? { protocolVersion: params.protocolVersion, capabilities: { tools: {} }, serverInfo: { name: 'stdio', version: '1' } }
         : method === 'tools/list' ? { tools: [{ name: 'read', inputSchema: { type: 'object' } }] }
@@ -94,12 +120,32 @@ test('configured MCP servers publish the contract discovered with the authority 
     assert.match(errors, /gmail.json.*already belongs/);
     assert.match(errors, /invalid.json.*recipients/);
     assert.match(errors, /missing.json.*ENOENT/);
+    assert.match(errors, /legacy.json.*enabledTools/);
+    assert.match(errors, /broken.json[\s\S]*stderr: Missing module \[redacted\]/);
+    assert.doesNotMatch(errors, /private-marker/);
     assert.equal(getSecretService('search')?.connected, false);
     const ctx = await context();
     assert.ok(!ctx.grant.vertices.has('wiki'));
     assert.ok(!ctx.grant.vertices.has('search'));
     const stdio = await call(ctx, 'local_read');
     assert.equal('value' in stdio && stdio.value, 'ready');
+  });
+
+  await t.test('a failed call stays in its own journal; discovery reports once per outage', async sub => {
+    const mcpErrors = () => prisma.event.count({ where: {
+      type: 'system.exception', payload: { path: ['scope'], equals: 'mcp-servers' },
+    } });
+    const before = await mcpErrors();
+    await fs.writeFile('fail-call', '');
+    const failed = await call(await context(), 'local_read');
+    assert.ok('error' in failed && failed.error.kind === 'unavailable');
+    assert.equal((await prisma.event.findUniqueOrThrow({ where: { seq: failed.seq } })).type, 'tool.call.failed');
+    assert.equal(await mcpErrors(), before);
+    await fs.unlink('fail-call');
+    const now = Date.now() + 61_000;
+    sub.mock.method(Date, 'now', () => now);
+    await refreshSecretServices();
+    assert.equal(await mcpErrors(), before, 'new diagnostic timestamp belongs to the same discovery outage');
   });
 
   await t.test('one probe publishes the secret-backed node and an old grant reads the current key', async () => {
@@ -133,15 +179,24 @@ test('configured MCP servers publish the contract discovered with the authority 
     const add = (ws: string, account: string, token: string) => prisma.connection.create({ data: {
       workspaceId: ws, server: 'wiki', status: 'connected', accountKey: account, displayName: account, tokens: { access_token: token },
     } });
-    await add(workspaceId, 'work', 'A');
+    await prisma.oauthClient.create({ data: { server: 'wiki', clientInformation: { client_id: 'fixture' } } });
+    const work = await prisma.connection.create({ data: {
+      workspaceId, server: 'wiki', accountKey: 'work', displayName: 'Work', status: 'pending',
+      pendingState: 'wiki-login', pending: { codeVerifier: 'fixture-verifier' },
+    } });
+    const login = await handleOauthCallback({ state: 'wiki-login', code: 'fixture-code' });
+    assert.ok(login.ok, login.error ?? 'OAuth callback failed');
+    const afterLogin = await context();
+    assert.ok(afterLogin.grant.vertices.has('wiki_read'), 'ready when the callback completes, without a periodic refresh');
+    assert.ok(!afterLogin.grant.vertices.has('wiki_conflict'));
+
     await add(foreign, 'other', 'B');
     await refreshSecretServices();
     const first = await context();
     assert.ok(first.grant.vertices.has('wiki_edit'));
     assert.ok(!first.grant.vertices.has('wiki_lookup'));
     const theirs = await context(foreign);
-    assert.ok(theirs.grant.vertices.has('wiki_lookup'));
-    assert.ok(!theirs.grant.vertices.has('wiki_edit'));
+    assert.ok(theirs.grant.vertices.has('wiki_edit'));
     const invalid = await call(first, 'wiki_read', { account: 'work', extra: 1 });
     assert.ok('error' in invalid && invalid.error.kind === 'invalid_input');
     const noAccount = await call(first, 'wiki_read');
@@ -149,11 +204,29 @@ test('configured MCP servers publish the contract discovered with the authority 
     const wrong = await call(first, 'wiki_read', { account: 'other' });
     assert.ok('error' in wrong && wrong.error.kind === 'not_found');
     assert.equal(logs.filter(r => r.path === '/wiki' && r.method === 'tools/call').length, 0);
+    failingToken = 'Bearer B';
     const second = await add(workspaceId, 'shared', 'B');
     await refreshSecretServices();
+    const partial = await context();
+    assert.equal(grantKey(first.grant), grantKey(partial.grant), 'a failed new listing leaves the existing contract usable');
+    const stillWorks = await call(partial, 'wiki_edit', { account: 'work' });
+    assert.equal('value' in stillWorks && stillWorks.value, 'done');
+    const issues = await prisma.event.findMany({ where: { type: 'system.exception', workspaceId } });
+    const messages = issues.map(row => JSON.stringify(row.payload)).join('\n');
+    assert.match(messages, /Tools omitted.*conflict/);
+    failingToken = 'Bearer A';
+    await markReauthorizationRequired(second.id, 'Renew sign-in');
+    await prisma.connection.update({ where: { id: second.id }, data: { status: 'connected' } });
+    await refreshSecretServices();
     const both = await context();
-    assert.ok(!both.grant.vertices.has('wiki_edit') && !both.grant.vertices.has('wiki_lookup'));
-    assert.notEqual(grantKey(first.grant), grantKey(both.grant));
+    assert.ok(both.grant.vertices.has('wiki_edit'), 'a fallback account supplies the server contract');
+    assert.equal(grantKey(first.grant), grantKey(both.grant));
+    assert.ok(logs.some(r => r.path === '/wiki' && r.method === 'tools/list' && r.key === 'Bearer B'));
+    const failures = await prisma.event.findMany({ where: {
+      type: 'system.exception', workspaceId, payload: { path: ['error'], string_contains: 'Discovery failed' },
+    } });
+    assert.equal(failures.length, 1, 'repeated errors with a different request number are one discovery outage');
+    failingToken = null;
     const port = await (await import('../harness/codex-sdk/catalog-bridge.ts')).createCodexPort(coordinator, workspaceId, mainThreadId);
     const definition = port.tools.find(tool => tool.name === 'wiki_read')!;
     assert.deepEqual(definition.inputSchema.required, ['account']);
@@ -162,8 +235,7 @@ test('configured MCP servers publish the contract discovered with the authority 
     assert.deepEqual(logs.findLast(r => r.method === 'tools/call'), { path: '/wiki', key: 'Bearer B', method: 'tools/call', args: {} });
     const event = await prisma.event.findUniqueOrThrow({ where: { seq: read.seq } });
     assert.equal(event.type, 'tool.call.completed');
-    await prisma.connection.delete({ where: { id: second.id } });
-    await refreshSecretServices();
+    await disconnectConnection(workspaceId, 'wiki', 'shared');
     assert.equal(grantKey(first.grant), grantKey((await context()).grant));
 
     const { invokeCapability } = await import('../catalog/index.ts');
@@ -184,8 +256,7 @@ test('configured MCP servers publish the contract discovered with the authority 
     assert.equal(status, 'ok');
     assert.equal((await prisma.scheduleRun.findUniqueOrThrow({ where: { id: run.runId } })).value, 'done');
 
-    await prisma.connection.updateMany({ where: { server: 'wiki', workspaceId }, data: { status: 'reauthorization_required' } });
-    await refreshSecretServices();
+    await markReauthorizationRequired(work.id, 'Renew sign-in');
     const inactive = await context();
     assert.equal(grantKey(first.grant), grantKey(inactive.grant));
     const denied = await call(inactive, 'wiki_edit', { account: 'work' });
