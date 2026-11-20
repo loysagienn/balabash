@@ -110,8 +110,8 @@ input tokens minus the known texts).
 
 By default the newest session of every repository agent found in the stores
 of this installation: the Claude project directories derived from the agents'
-cwds (`data/workspace/*/files`, `data/agent-state/*`, the repository root —
-the scheduler's cwd, shared with the operator's own sessions there) and the
+cwds (`data/workspace/*/files`, `data/agent-state/*`, the repository root
+for historical transcripts, shared with the operator's own sessions) and the
 Codex rollouts of `data/codex-home`. A session is attributed to its agent by
 the journal (`session.sdk` of its thread) when it knows it, else by the
 system prompt's head against the catalog's instructions (within the session's

@@ -180,7 +180,7 @@ export const agent = {
   modes: ['headless'],
   defaultMode: 'headless',
   workspaceDisk: true,
-  access: { nodes: ['workspace', 'workspace_files'], addRoot: ['get_file_url'] },
+  access: { nodes: ['workspace'], addRoot: ['get_file_url'] },
   notification: 'normal',
 
   run(prompt: string, ctx: RunContext): AgentRun {

@@ -9,6 +9,7 @@ import { prisma } from '../db/client.ts';
 import type { DbClient } from '../db/client.ts';
 import type { JsonObject, JsonValue, Thread, ThreadCounts, ThreadStatus, ThreadSummary } from './contract.ts';
 import type { ThreadModel as ThreadRow } from '../../prisma-generated/models.ts';
+import { COORDINATOR_AGENT } from './agent-names.ts';
 import { appendEvent, completionProjectionData } from './append.ts';
 import { AppendError, TERMINAL_TYPES, THREAD_STARTED, toEvent } from './envelope.ts';
 import { config } from '../config/index.ts';
@@ -19,7 +20,7 @@ import { messageFile } from './file-blocks.ts';
 import type { StoredFileFacts } from './file-blocks.ts';
 import type { ThreadFilters } from './thread-query.ts';
 
-export const COORDINATOR_AGENT = 'coordinator';
+export { COORDINATOR_AGENT } from './agent-names.ts';
 
 // A threads row as the reads below select it: the projection's columns
 // plus `headless` and `remote`, read from the thread's own thread.started.
@@ -327,11 +328,8 @@ type StartThreadInput = {
   title?: string;
   // The spawn prompt — every agent's input is one text prompt.
   input?: string;
-  // Spawn-time policy riding in the payload (§7.4, §11.3): the notification
-  // level of the thread and the narrowed tool bundle. The projection does not
-  // store them — consumers read them from the thread.started event.
+  // Consumers read the notification level from thread.started.
   notification?: string;
-  tools?: string[];
   // The spawned agent's thread icon (§11.2): adapters know only core, so the
   // surface hint travels in the event, not in the catalog.
   icon?: string;
@@ -376,10 +374,6 @@ export async function startThread(options: StartThreadInput): Promise<Thread> {
 
   if (options.notification !== undefined) {
     payload.notification = options.notification;
-  }
-
-  if (options.tools !== undefined) {
-    payload.tools = options.tools;
   }
 
   if (options.icon !== undefined) {

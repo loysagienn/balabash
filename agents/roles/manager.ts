@@ -1,8 +1,5 @@
-// The manager role: one brief and one passport shared by every agent that
-// plays the manager on a different backend (manager — Claude, codex — OpenAI
-// Codex). An agent module may export only `agent` (validate-agent), so the
-// shared parts live here; the agent modules import them instead of retelling
-// them, and the two declarations cannot drift apart.
+// The manager role shares its brief and list of child agents across
+// the Claude manager and OpenAI Codex.
 
 import path from 'node:path';
 import {

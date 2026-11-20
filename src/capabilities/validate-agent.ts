@@ -1,17 +1,12 @@
 import path from 'node:path';
 import { accessProfiles } from '../../agents/access.ts';
 import type { AgentDeclaration, AgentRun, RemoteAgentDeclaration } from '../core/contract.ts';
+import { RESERVED_AGENT_NAMES } from '../core/agent-names.ts';
 import { RESERVED_DOMAINS } from '../core/envelope.ts';
 
 const AGENT_NAME_PATTERN = /^[a-z][a-z0-9_]*$/;
 const EVENT_TYPE_PATTERN = /^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$/;
 const NOTIFICATION_LEVELS = new Set(['silent', 'normal', 'urgent']);
-
-// The coordinator implements the contract statically in src/ — a dynamic
-// agent must not shadow it in the catalog. 'secretary' is what prompts call
-// the coordinator ('coordinator' stays the internal identifier in code, the
-// event log and thread rows), so both names are off-limits.
-const RESERVED_AGENT_NAMES = new Set(['coordinator', 'secretary']);
 
 const ALLOWED_KEYS = new Set([
   'name',

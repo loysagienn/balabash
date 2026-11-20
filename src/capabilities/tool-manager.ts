@@ -123,12 +123,10 @@ export function registerBuiltinToolServer(server: BuiltinToolServer): void {
 // (data/tools, data/mcp-servers — never named in the repository, they differ
 // per installation) reach every bundle that names "projects": a passport
 // with the project registry is a working one, and the operator's own
-// servers come with it (the operator's rule). A spawner may narrow the
-// declared bundle but never widen it.
+// servers come with it (the operator's rule).
 
 export type ToolBundle = {
   declared: string[];
-  narrowed?: string[];
 };
 
 // The server whose presence in a list brings the extension servers along
@@ -143,10 +141,7 @@ export function listGrants(list: readonly string[], serverName: string, extensio
 }
 
 function isServerInBundle(bundle: ToolBundle, serverName: string): boolean {
-  const extensions = installationExtensionServers;
-
-  // Narrowing intersects — it only ever shrinks.
-  return listGrants(bundle.declared, serverName, extensions) && (!bundle.narrowed || listGrants(bundle.narrowed, serverName, extensions));
+  return listGrants(bundle.declared, serverName, installationExtensionServers);
 }
 
 // A passport's server list as it acts: the names it lists plus, when it

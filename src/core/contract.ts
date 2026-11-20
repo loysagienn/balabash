@@ -383,7 +383,6 @@ export type AgentRun = {
 
 export type SpawnOptions = {
   title?: string; // thread title — every user surface shows it (e.g. as the Telegram topic name)
-  tools?: string[]; // narrow the child's bundle; widening is not possible
   notification?: NotificationLevel;
   // The slug of the project the child works for: resolved against the
   // workspace registry at spawn (an unknown slug rejects the spawn) and

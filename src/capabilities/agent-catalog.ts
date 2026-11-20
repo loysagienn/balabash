@@ -53,6 +53,15 @@ export function loadAgents(remote: RemoteAgentDeclaration[] = []): void {
     loadedAgents.set(declaration.name, declaration);
   }
 
+  const recipients = new Set([coordinator.name, ...loadedAgents.keys(), ...Object.keys(accessProfiles)]);
+  for (const agent of remote) {
+    for (const name of agent.recipients ?? []) {
+      if (!recipients.has(name)) {
+        console.warn(`[remote-agents] ${agent.name} names unknown recipient "${name}"`);
+      }
+    }
+  }
+
   agents = loadedAgents;
 
   console.log(`[agents] loaded: ${[...agents.keys()].join(', ') || '(none)'}`);
@@ -74,21 +83,27 @@ export function getAgents(): CatalogAgent[] {
   return [...agents.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
+export function passport(name: string): AgentPassport | RemoteAgentDeclaration | null {
+  return name === coordinator.name ? coordinator : getAgent(name);
+}
+
+function addressedTo(recipients: readonly string[], agent: AgentPassport | RemoteAgentDeclaration): boolean {
+  return recipients.includes(agent.name) || ('access' in agent && !!agent.access.profile && recipients.includes(agent.access.profile));
+}
+
 // Both the list shown to the model and the spawn action use this set.
 export function startable(caller: string): CatalogAgent[] {
-  const passport = caller === coordinator.name ? coordinator : getAgent(caller);
-  if (!passport) {
+  const parent = passport(caller);
+  if (!parent) {
     return [];
   }
 
-  const local = 'access' in passport ? passport : null;
-
   return getAgents().filter(agent => {
     if (!isRemoteAgent(agent)) {
-      return local?.agents?.includes(agent.name);
+      return 'access' in parent && parent.agents?.includes(agent.name);
     }
 
-    return agent.recipients?.some(name => name === caller || name === local?.access.profile);
+    return addressedTo(agent.recipients ?? [], parent);
   });
 }
 
@@ -118,12 +133,9 @@ export function agentGrantPolicy(agent: AgentPassport | RemoteAgentDeclaration, 
 
   if ('kind' in agent) {
     root.add('get_file_url');
-  } else if (agent.workspaceDisk || agent.name === coordinator.name) {
+  } else if (agent.workspaceDisk) {
     root.add('export_file');
     root.add('import_file');
-  }
-  if (agent.name === coordinator.name) {
-    root.add('view_file');
   }
 
   if (startable(agent.name).length) {

@@ -1,4 +1,4 @@
-// Codex agent: the manager on OpenAI Codex. Same brief, same tool passport,
+// Codex agent: the manager on OpenAI Codex. Same brief, same access profile,
 // same browser sub-agent and the same workbench (the workspace file area as
 // cwd) as the manager agent — the role is shared through roles/manager; only
 // the backend differs: an OpenAI Codex session with its native tool set

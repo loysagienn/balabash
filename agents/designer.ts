@@ -180,7 +180,7 @@ export const agent = {
   modes: ['user'],
   defaultMode: 'user',
   workspaceDisk: true,
-  access: { nodes: ['threads', 'gmail', 'web', 'web_perplexity', 'notion', 'projects', 'schedule', 'workspace'], addRoot: ['get_event', 'fetch_thread_file', 'get_file_url'] },
+  access: { nodes: ['threads', 'gmail', 'web', 'web_perplexity', 'projects', 'schedule', 'workspace'], addRoot: ['get_event', 'fetch_thread_file', 'get_file_url'] },
   agents: ['image_generator'],
   notification: 'normal',
 

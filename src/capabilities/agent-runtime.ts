@@ -189,16 +189,7 @@ export async function spawnAgentRun(thread: Thread, startedEvent: Event, resume?
   const threadNotificationLevel =
     (startedEvent.payload.notification as NotificationLevel | undefined) ?? declaration.notification ?? 'normal';
 
-  // The existing bridge's server list, optionally
-  // narrowed by the spawner via thread.started payload. Narrowing cannot
-  // widen — resolution intersects.
-  const narrowedTools = Array.isArray(startedEvent.payload.tools)
-    ? startedEvent.payload.tools.filter((name): name is string => typeof name === 'string')
-    : undefined;
-  const bundle: ToolBundle = {
-    declared: legacyServers(agentName),
-    ...(narrowedTools ? { narrowed: narrowedTools } : {}),
-  };
+  const bundle: ToolBundle = { declared: legacyServers(agentName) };
 
   const abortController = new AbortController();
   const tools = createToolsApi({ workspaceId, threadId, agentName, bundle });
@@ -274,7 +265,6 @@ export async function spawnAgentRun(thread: Thread, startedEvent: Event, resume?
         title: options?.title,
         input: validateAgentInput(childAgentName, prompt),
         notification: options?.notification,
-        tools: options?.tools,
         icon: childDeclaration.icon,
         headless: spawnHeadless(childDeclaration, true),
         ...(remote ? { remote: true, options: options?.options ?? {}, adopt: options?.adopt === true } : {}),

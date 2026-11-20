@@ -50,7 +50,6 @@ export type EventPayloads = {
     headless?: boolean;
     icon?: string;
     notification?: NotificationLevel;
-    tools?: string[];
     projectId?: string;
     projectSlug?: string;
     // A remote agent's thread (src/remote): the launch options by the

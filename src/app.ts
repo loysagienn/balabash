@@ -132,7 +132,7 @@ await refreshRemoteSecretTargets();
 
 // Dangerous-capability servers, granted only where deliberately listed: the
 // auth tools to the auth agent, the restart request to the coordinator and
-// the engineer and scheduler agents.
+// the engineer.
 registerBuiltinToolServer(createAuthToolServer());
 registerBuiltinToolServer(createRestartToolServer());
 

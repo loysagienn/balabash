@@ -14,7 +14,7 @@ import { randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 import { CapabilityError, computeGrant, invokeCapability } from '../catalog/index.ts';
 import type { ErrorKind, Grant } from '../catalog/index.ts';
-import type { JsonObject, RemoteAgentDeclaration, RemoteDriver, RemoteDriverContext } from '../core/contract.ts';
+import type { CatalogAccess, JsonObject, RemoteAgentDeclaration, RemoteDriver, RemoteDriverContext } from '../core/contract.ts';
 import { startStand } from '../test-support/stand.ts';
 import type { Stand } from '../test-support/stand.ts';
 
@@ -220,11 +220,44 @@ after(async () => {
 });
 
 describe('agent passports', () => {
+  test('every profile and repository passport names tree nodes with their parents and capabilities of the root', async () => {
+    const { accessProfiles, coordinator } = await import('../../agents/access.ts');
+    const { getAgents, isRemoteAgent } = await import('../capabilities/agent-catalog.ts');
+    const catalog = tree.catalog();
+
+    function check(owner: string, access: CatalogAccess) {
+      const profile = access.profile;
+      if (profile !== undefined) {
+        assert.ok(Object.hasOwn(accessProfiles, profile), `${owner}: unknown profile "${profile}"`);
+      }
+      const nodes = new Set([...(profile ? accessProfiles[profile].nodes ?? [] : []), ...(access.nodes ?? [])]);
+      for (const name of nodes) {
+        const node = catalog.vertices.get(name);
+        assert.ok(node?.kind === 'node' && node.parent, `${owner}: "${name}" must name a node below the root`);
+        assert.ok(node.parent === catalog.root || nodes.has(node.parent.fullName), `${owner}: "${name}" needs parent "${node.parent.fullName}"`);
+      }
+      for (const name of [...(access.addRoot ?? []), ...(access.removeRoot ?? [])]) {
+        const vertex = catalog.vertices.get(name);
+        assert.ok(vertex?.kind === 'capability' && vertex.parent === catalog.root, `${owner}: "${name}" must name a root capability`);
+      }
+    }
+
+    for (const [name, profile] of Object.entries(accessProfiles)) {
+      check(`profile ${name}`, profile);
+    }
+    check(coordinator.name, coordinator.access);
+    for (const agent of getAgents()) {
+      if (!isRemoteAgent(agent)) {
+        check(agent.name, agent.access);
+      }
+    }
+  });
+
   test('the catalog grants named nodes, file and child verbs, and explicit root overrides', async () => {
     const { coordinator } = await import('../../agents/access.ts');
-    const { agentGrantPolicy, getAgent } = await import('../capabilities/agent-catalog.ts');
+    const { agentGrantPolicy, passport } = await import('../capabilities/agent-catalog.ts');
     const vertices = async (name: string) => {
-      const agent = name === coordinator.name ? coordinator : getAgent(name)!;
+      const agent = passport(name)!;
       const grant = await computeGrant(tree.catalog(), agentGrantPolicy(agent, ['describe', 'call']), {
         caller: { workspaceId: stand.workspaceId, threadId: stand.mainThreadId, agentName: name },
         connections: services.connectionsPort(),
@@ -236,7 +269,7 @@ describe('agent passports', () => {
 
     const secretary = await vertices('coordinator');
     assert.ok(['export_file', 'import_file', 'view_file', 'get_event', 'fetch_thread_file', 'spawn_agent', 'workspace_apps_list'].every(name => secretary.has(name)));
-    assert.ok(!secretary.has('get_file_url'));
+    assert.ok(!secretary.has('get_file_url') && !secretary.has('end_thread'));
 
     const engineer = await vertices('engineer');
     assert.ok(['get_event', 'fetch_thread_file', 'system_request_restart', 'get_file_url', 'workspace_query'].every(name => engineer.has(name)));

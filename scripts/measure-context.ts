@@ -687,8 +687,7 @@ function attribute(measure: Measure, journal: Map<string, { agent: string; threa
 }
 
 // Balabash's own Claude project directories: the agents' cwds under data/
-// and the repository root (the scheduler's cwd — shared with the operator's
-// own sessions there, hence the attribution by content).
+// and the repository root for historical sessions, attributed by content.
 async function claudeTranscripts(): Promise<string[]> {
   const prefixes = [
     `${claudeProjectDirName(path.resolve('data', 'workspace'))}-`,

@@ -5,7 +5,6 @@ const general = [
   'current_datetime', 'events', 'drive', 'gmail', 'http_get', 'notion', 'perplexity', 'projects',
   'remote', 'schedule', 'storage', 'storage_download_file', 'workspace',
 ];
-const maintenance = [...general, 'restart'];
 
 const servers: Record<string, string[]> = {
   architect: general,
@@ -17,11 +16,10 @@ const servers: Record<string, string[]> = {
     'schedule', 'storage', 'storage_download_file', 'workspace', 'workspace_files', 'restart',
   ],
   designer: general.filter(server => server !== 'drive'),
-  engineer: maintenance,
+  engineer: [...general, 'restart'],
   gardener: ['current_datetime', 'projects', 'remote', 'storage', 'storage_download_file', 'workspace'],
   image_generator: ['storage'],
   manager: general,
-  scheduler: maintenance,
 };
 
 export function legacyServers(agent: string): string[] {
