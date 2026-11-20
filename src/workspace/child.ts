@@ -55,16 +55,13 @@ export type RunChildOptions = {
   capMode?: 'head' | 'tail';
   // Called once after a successful spawn with the child's pid (equal to the
   // process-group id — children run detached in their own group). Lets the
-  // caller register the group for an external kill (shutdown sweep).
+  // former task runner stop its active jobs during shutdown.
   onSpawn?: (pid: number) => void;
   // Aborting it kills the child's whole group, as the timeout does: the
   // outcome then carries exitCode null and timedOut false.
   signal?: AbortSignal;
-  // Register the group for cleanup after an app crash. What the child
-  // left running in it once its own process has gone and its output is
-  // closed (a background job with its output sent elsewhere) is killed
-  // before the outcome is given. Without it such a process outlives the
-  // call, out of reach of the timeout and of the signal.
+  // Register before the workspace command can run. Kill remaining group
+  // members on close, or at the next boot if the app exits first.
   ownsGroup?: boolean;
   // Text for the child's standard input, closed after it. Without it the
   // child has no input at all.
@@ -203,12 +200,7 @@ export function runChild(command: string, args: string[], options: RunChildOptio
       clearTimeout(timer);
       options.signal?.removeEventListener('abort', abort);
 
-      try {
-        releaseGroup?.();
-      } catch (error) {
-        reject(error);
-        return;
-      }
+      releaseGroup?.();
 
       if (decoders) {
         // Bytes of a character the stream ended inside.

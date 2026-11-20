@@ -283,11 +283,7 @@ export function executeProgram(grant: Grant, launch: ProgramLaunch, env: Program
       }
 
       closed = true;
-      try {
-        releaseGroup?.();
-      } catch (error) {
-        verdict = { outcome: 'failed', error: toCapabilityError(error) };
-      }
+      releaseGroup?.();
       runningPrograms.delete(stop);
       env.signal?.removeEventListener('abort', cancel);
 

@@ -8,7 +8,6 @@
 import fs from 'node:fs/promises';
 import { z } from 'zod';
 import { CapabilityError, WorkspacePath, capability, node, type JsonObject } from '../catalog/index.ts';
-import { ProcessGroupCleanupError } from '../runtime/process-groups.ts';
 import { childEnv, runChild, sqlInChild, type ChildOutcome } from '../workspace/child.ts';
 import { absolutePath, areaPath, provideWorkbench } from './file-area.ts';
 import { workspaceApps } from './workspace-apps.ts';
@@ -177,7 +176,6 @@ async function runInArea(
       wholeCharacters: true,
     });
   } catch (error) {
-    if (error instanceof ProcessGroupCleanupError) throw error;
     throw new CapabilityError(
       'external_error',
       `The command could not be started: ${error instanceof Error ? error.message : String(error)}`,

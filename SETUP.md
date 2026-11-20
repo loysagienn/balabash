@@ -7,8 +7,10 @@ for working on the code.
 ## The process
 
 One Node.js process (`dist/app.js`), started from the repository root — every
-runtime path (`data/`, `dist/`, `files/`) resolves from the cwd. Boot order:
-`prisma migrate deploy` → database check → tombstone of orphaned threads
+runtime path (`data/`, `dist/`, `files/`) resolves from the cwd. Programs and
+workspace commands require Linux with a readable `/proc` to identify their
+process groups. Boot order: sweep recorded groups in `data/process-groups/`
+→ `prisma migrate deploy` → database check → tombstone of orphaned threads
 without a saved session → agent catalog (repository agents, then
 `data/remote-agents`) → tool servers (repository `tools/`, then `data/tools`
 and `data/mcp-servers`) → web server → channel adapters (Telegram and CCR

@@ -75,6 +75,7 @@ confidential from them.
 - `data/` — runtime state and installation extensions (gitignored):
   `workspace/<workspaceId>/` (the workbench: `workspace.sqlite`, `files/`,
   `tmp/`, `tasks/`), `agent-state/`, `codex-home/`, `supervisor/`,
+  `process-groups/` (program and workspace command groups checked at boot),
   `showcase/` (render-context output), and the extensions below.
 - `.env` — the installation's configuration; `.env.example` documents every
   variable (`SETUP.md`).

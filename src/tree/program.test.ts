@@ -144,16 +144,39 @@ describe('a program over the tree', () => {
     await fs.rm(dir, { recursive: true, force: true });
     await fs.writeFile(dir, 'occupied');
     try {
+      sweepProcessGroups(); // ENOTDIR at boot is recoverable.
       const command = { command: 'touch unregistered' };
-      await assert.rejects(invokeCapability(grant, 'workspace_run_command', command, env), /process-groups/);
+      await assert.rejects(invokeCapability(grant, 'workspace_run_command', command, env), /Could not register the process group/);
       const run = await executeProgram(grant, { code: "return 'executed';", timeoutMs: 5_000 }, env);
       assert.equal(run.outcome, 'failed');
-      assert.match(run.error!.message, /process-groups/);
+      assert.match(run.error!.message, /Could not register the process group/);
       await assert.rejects(fs.stat(path.join(area, 'unregistered')), { code: 'ENOENT' });
     } finally {
       await fs.unlink(dir);
       await fs.mkdir(dir);
     }
+  });
+
+  test('a refused cleanup signal preserves both outcomes and leaves the records for another boot', async t => {
+    const kill = process.kill.bind(process);
+    const denied = t.mock.method(process, 'kill', (pid: number, signal?: NodeJS.Signals | number) => {
+      if (pid < 0 && signal === 'SIGKILL') throw Object.assign(new Error('signal denied'), { code: 'EPERM' });
+      return kill(pid, signal);
+    });
+
+    const value = await runProgram(grant, {
+      code: "return (await call('workspace_run_command', { command: 'echo done' })).stdout;",
+    }, env);
+    assert.equal(value, 'done\n');
+    const dir = 'data/process-groups';
+    const records = await fs.readdir(dir);
+    assert.equal(records.length, 2);
+
+    sweepProcessGroups();
+    assert.deepEqual(await fs.readdir(dir), records);
+    denied.mock.restore();
+    sweepProcessGroups();
+    assert.deepEqual(await fs.readdir(dir), []);
   });
 
   test('a stale record for a live group with another boot or start time leaves it running', async () => {
@@ -195,6 +218,7 @@ describe('a program over the tree', () => {
       owner.kill('SIGKILL');
       await exited;
       assert.ok(alive(program) && alive(sleep));
+      await fs.writeFile(path.join(registry, '.gitkeep'), '');
       sweepProcessGroups();
 
       // An orphan may still be a zombie until the host reaps it.
@@ -206,7 +230,8 @@ describe('a program over the tree', () => {
         },
       );
       assert.ok(await until(async () => await stopped(program) && await stopped(sleep), 3_000));
-      assert.deepEqual(await fs.readdir(registry), []);
+      assert.deepEqual(await fs.readdir(registry), ['.gitkeep']);
+      await fs.unlink(path.join(registry, '.gitkeep'));
       sweepProcessGroups();
     } finally {
       owner.kill('SIGKILL');
