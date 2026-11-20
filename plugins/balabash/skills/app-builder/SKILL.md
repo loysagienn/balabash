@@ -114,12 +114,12 @@ app's own router reads the rest of the path. Rules:
 
 ## Your duties as the author (do these every time)
 
-1. **Create the app's tables yourself** via `data_query` when you create or change the
+1. **Create the app's tables yourself** via `workspace_query` when you create or change the
    app — the platform executes NO DDL, ever. An endpoint over a missing table fails at
    runtime with "no such table". Apps may also read/write existing workspace tables —
    through declared statements only.
 2. **Verify the endpoints** after writing them: call each statement once through
-   `data_query` (or exercise the app) to catch typos before the user does.
+   `workspace_query` (or exercise the app) to catch typos before the user does.
 3. **Validate the manifest** before handing the app over — run (from the app folder's
    parent or anywhere):
 

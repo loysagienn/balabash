@@ -27,7 +27,7 @@
 // once it listens, so it reaches the prompt as the environment's addendum
 // (SessionEnvironment.instructions), where the static prompt says to look.
 //
-// Screenshots: the inner model must look at them, and bridge tools carry no
+// Screenshots: the inner model must look at them, and environment tools carry no
 // bytes — so every screenshot is written to a known path in the run's
 // disposable output directory (the model reads it with its native Read tool)
 // and ingested into file storage (a fileId for send_message and the report).
@@ -40,7 +40,7 @@ import path from 'node:path';
 import { chromium } from 'playwright';
 import type { AgentDeclaration, RunContext, SessionEnvironment } from '../src/core/contract.ts';
 import { workspaceFilesDir } from '../src/workspace/layout.ts';
-import { connectPlaywrightMcp, createPlaywrightBridgeTools, imageExtension } from './kit/playwright.ts';
+import { connectPlaywrightMcp, createPlaywrightTools, imageExtension } from './kit/playwright.ts';
 import type { PlaywrightImageSink, PlaywrightMcp } from './kit/playwright.ts';
 import { startStaticServer } from './kit/static-server.ts';
 import type { StaticServer } from './kit/static-server.ts';
@@ -151,12 +151,12 @@ async function createEnvironment(ctx: RunContext, cwd: string): Promise<SessionE
       unrestrictedFileAccess: true,
     });
 
-    const extraTools = await createPlaywrightBridgeTools(playwright.client, createScreenshotSink(ctx, outputDir));
+    const environmentTools = await createPlaywrightTools(playwright.client, createScreenshotSink(ctx, outputDir));
 
     // The session's cwd is the workbench root — the files the agent authors.
     server = await startStaticServer({ root: cwd });
 
-    return { extraTools, instructions: renderServerNote(server), dispose };
+    return { environmentTools, instructions: renderServerNote(server), dispose };
   } catch (error) {
     await dispose();
     throw error;

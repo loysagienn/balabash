@@ -16,7 +16,6 @@ import type {
   AgentSdkSession,
   Event,
   RunContext,
-  SessionAgentSpec,
   SessionEnvironment,
 } from '../core/contract.ts';
 
@@ -93,8 +92,7 @@ function describeUserMessage(payload: Record<string, unknown>): string {
 
 // The spawn prompt with the attachments of thread.started (payload.files)
 // read like a message's: the spawner — the operator of the thread — attached
-// them. One rendering for the session runner and imperative run() agents
-// alike (the runtime applies it before either sees the prompt).
+// them. The runtime supplies this text as the spawn prompt.
 export function withSpawnFiles(prompt: string, files: unknown): string {
   return [prompt, ...describeFiles(Array.isArray(files) ? files : [], 'the operator attached')].join('\n');
 }
@@ -136,10 +134,10 @@ function describeEvent(event: Event): string {
 // ---------------------------------------------------------------------------
 export function createSessionRun(
   declaration: AgentDeclaration,
-  spec: SessionAgentSpec,
   prompt: string,
   ctx: RunContext,
 ): AgentRun {
+  const spec = declaration.session;
   const headless = ctx.headless;
   let settled = false;
   let resolveFinished: () => void;
@@ -161,7 +159,7 @@ export function createSessionRun(
   }
 
   // The session exists only after the declaration's environment (if any) is
-  // up: its bridge tools are part of the session's tool set. Text routed in
+  // up: its tools are part of the session's tool set. Text routed in
   // before that is queued and flushed into the session once it exists.
   let session: AgentSdkSession | null = null;
   const preSessionInbox: string[] = [];
@@ -218,7 +216,7 @@ export function createSessionRun(
       // Scripts run from the session reach the workspace database the same way
       // run_script children do: via the WORKSPACE_DB env variable.
       env: { WORKSPACE_DB: workspaceDbPath(ctx.workspaceId) },
-      extraTools: environment?.extraTools,
+      environmentTools: environment?.environmentTools,
     });
 
   const stop = (error?: unknown) => {

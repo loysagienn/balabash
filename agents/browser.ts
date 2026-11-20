@@ -31,7 +31,7 @@ import path from 'node:path';
 import { chromium } from 'playwright';
 import type { BrowserContext } from 'playwright';
 import type { AgentDeclaration, RunContext, SessionEnvironment } from '../src/core/contract.ts';
-import { connectPlaywrightMcp, createPlaywrightBridgeTools, imageExtension } from './kit/playwright.ts';
+import { connectPlaywrightMcp, createPlaywrightTools, imageExtension } from './kit/playwright.ts';
 import type { PlaywrightImageSink, PlaywrightMcp } from './kit/playwright.ts';
 import { workspaceFilesDir } from '../src/workspace/layout.ts';
 import { BLOCKED_PATH_NOTE, BROWSER_RELAUNCHED_NOTE } from './world/index.ts';
@@ -171,8 +171,8 @@ async function createEnvironment(ctx: RunContext, cwd: string): Promise<SessionE
     playwright = await connectPlaywrightMcp({
       outputDir, cwd, clientName: 'balabash-browser', context: async () => browserContext,
     });
-    const extraTools = await createPlaywrightBridgeTools(playwright.client, createScreenshotSink(ctx));
-    return { extraTools, ...(ctx.resume ? { instructions: BROWSER_RELAUNCHED_NOTE } : {}), dispose };
+    const environmentTools = await createPlaywrightTools(playwright.client, createScreenshotSink(ctx));
+    return { environmentTools, ...(ctx.resume ? { instructions: BROWSER_RELAUNCHED_NOTE } : {}), dispose };
   } catch (error) {
     await dispose();
     throw error;

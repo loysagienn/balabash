@@ -79,9 +79,9 @@ async function renderAgent(declaration: AgentDeclaration, workspaceId: string): 
     `- sdk: ${declaration.sdk}`,
     ...(children.length ? [`- spawnable sub-agents: ${children.join(', ')}`] : []),
     ...(declaration.defaultMode === 'headless' ? ['- headless: no user-facing thread, talks only to its operator'] : []),
-    ...(declaration.session?.model ? [`- model: ${declaration.session.model}`] : []),
-    ...(declaration.session?.effort ? [`- effort: ${declaration.session.effort}`] : []),
-    ...(declaration.session?.preset ? [`- preset: ${declaration.session.preset}`] : []),
+    ...(declaration.session.model ? [`- model: ${declaration.session.model}`] : []),
+    ...(declaration.session.effort ? [`- effort: ${declaration.session.effort}`] : []),
+    ...(declaration.session.preset ? [`- preset: ${declaration.session.preset}`] : []),
   ].join('\n');
 
   const spawnSurface = renderSection(
@@ -93,36 +93,25 @@ async function renderAgent(declaration: AgentDeclaration, workspaceId: string): 
 
   const makePort = declaration.sdk === 'codex' ? createCodexPort : createClaudePort;
   const port = await makePort(declaration, workspaceId, 'showcase');
-  if (declaration.session) {
-    sections.push(renderSection('System prompt', declaration.session.instructions + '\n\n' + port.instructions));
+  sections.push(renderSection('System prompt', declaration.session.instructions + '\n\n' + port.instructions));
 
-    if (declaration.session.environment) {
-      sections.push(
-        renderSection(
-          'Environment addendum',
-          `(the declaration's environment starts per run — a browser, a server — and may append the facts that exist only ` +
-            `then (an address, a path) to the prompt above; see agents/${declaration.name}.ts)`,
-        ),
-      );
-    }
-
+  if (declaration.session.environment) {
     sections.push(
       renderSection(
-        `Initial message (${declaration.session.initialMessage ? 'declaration template' : 'platform default: the prompt verbatim'}, rendered with a placeholder prompt)`,
-        declaration.session.initialMessage ? declaration.session.initialMessage(SAMPLE_PROMPT) : SAMPLE_PROMPT,
-      ),
-    );
-  } else {
-    sections.push(
-      renderSection(
-        'System prompt',
-        `(imperative run() agent — its instructions are assembled at run start inside agents/${declaration.name}.ts ` +
-          'and are not renderable offline; in-run tools like the Playwright surface come from live connections)',
+        'Environment addendum',
+        `(the declaration's environment starts per run — a browser, a server — and may append the facts that exist only ` +
+          `then (an address, a path) to the prompt above; see agents/${declaration.name}.ts)`,
       ),
     );
   }
 
-  if (!declaration.session) sections.push(renderSection('Catalog instructions', port.instructions));
+  sections.push(
+    renderSection(
+      `Initial message (${declaration.session.initialMessage ? 'declaration template' : 'platform default: the prompt verbatim'}, rendered with a placeholder prompt)`,
+      declaration.session.initialMessage ? declaration.session.initialMessage(SAMPLE_PROMPT) : SAMPLE_PROMPT,
+    ),
+  );
+
   const definitions = port.tools.map(tool => [
     `### ${tool.name}`, tool.description, '\`\`\`json',
     JSON.stringify({ inputSchema: tool.inputSchema, outputSchema: tool.outputSchema, _meta: tool._meta }, null, 2), '\`\`\`',

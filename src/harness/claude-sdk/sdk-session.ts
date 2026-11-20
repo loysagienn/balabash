@@ -17,7 +17,7 @@ import type { AgentSdkSession, SdkSessionOptions, SdkTurn, AgentPassport } from 
 import { startClaudeSession } from './session.ts';
 import type { ClaudeSession } from './session.ts';
 import { createClaudeBridge, environmentServer } from './bridge.ts';
-import { BRIDGE_SERVER, CATALOG_CALL_TIMEOUT_SECONDS } from '../sdk-mcp-config.ts';
+import { BRIDGE_SERVER } from '../sdk-mcp-config.ts';
 import { mergeEnv } from '../env.ts';
 import { emitSdkMessage, emitSdkSessionEnd } from './stream-tap.ts';
 import { registerContextUsageProvider } from './context-usage.ts';
@@ -165,12 +165,12 @@ export function createClaudeSession(options: SdkSessionOptions, deps: SdkSession
       })),
       strictMcpConfig: true,
       mcpServers: {
-        [BRIDGE_SERVER]: { type: 'sdk', name: BRIDGE_SERVER, instance: bridge.server, timeout: CATALOG_CALL_TIMEOUT_SECONDS * 1000 },
-        ...(options.extraTools?.length ? {
-          environment: { type: 'sdk', name: 'environment', instance: environmentServer(options.extraTools) },
+        [BRIDGE_SERVER]: { type: 'sdk', name: BRIDGE_SERVER, instance: bridge.server },
+        ...(options.environmentTools?.length ? {
+          environment: { type: 'sdk', name: 'environment', instance: environmentServer(options.environmentTools) },
         } : {}),
       },
-    }, bridge.refresh);
+    }, bridge);
 
     // close() may have won the race while the session was starting.
     if (closed) {

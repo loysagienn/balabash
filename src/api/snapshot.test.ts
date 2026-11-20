@@ -199,8 +199,8 @@ describe('the agent catalog of the snapshot', () => {
       }
 
       assert.equal(agent.defaultEffort, 'high', agent.name);
-      assert.equal(agent.effort, decl.session?.effort ?? null, agent.name);
-      assert.equal(agent.model, decl.session?.model ?? null, agent.name);
+      assert.equal(agent.effort, decl.session.effort ?? null, agent.name);
+      assert.equal(agent.model, decl.session.model ?? null, agent.name);
       assert.equal(agent.sdk, decl.sdk, agent.name);
       assert.deepEqual(agent.tools, ['balabash']);
     }

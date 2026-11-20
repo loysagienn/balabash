@@ -1,5 +1,5 @@
 // The catalog view for a port that assembles the model's context.
-import { catalogContext, catalogInstructions, grantedCapabilities, guideForLeaf, portActions, vertexLine } from './catalog-context.ts';
+import { catalogContext, catalogInstructions, grantKey, grantedCapabilities, guideForLeaf, portActions, vertexLine } from './catalog-context.ts';
 import {
   FileRef, expandSchema, grantedVertex, ruleText, toCapabilityError, typeText,
   type Catalog, type CatalogCapability, type FileRefValue, type Grant, type JsonSchema, type JsonValue,
@@ -76,7 +76,7 @@ export async function createCatalogPort(agent: AgentPassport, workspaceId: strin
 
   const instructions = catalogInstructions(grant,
     'Use describe to add a capability to the available functions. If its name appears only in the transcript, describe it again. Call the function by its catalog name.');
-  return { instructions, tools, capabilityDefinitions, dispatch, grantKey: JSON.stringify([...grant.vertices]) };
+  return { instructions, tools, capabilityDefinitions, dispatch, grantKey: grantKey(grant) };
 }
 
 async function showFile(text: string, file: FileRefValue): Promise<CatalogResult> {

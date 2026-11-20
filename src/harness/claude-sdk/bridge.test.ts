@@ -3,7 +3,26 @@ import { test } from 'node:test';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { ToolListChangedNotificationSchema } from '@modelcontextprotocol/sdk/types.js';
+import { sessionInputs } from './session.ts';
 import { startStand } from '../../test-support/stand.ts';
+
+test('the Claude input stream shares the opening grant and refreshes queued messages in order', async () => {
+  async function* queued() {
+    yield 'spawn';
+    yield 'user message';
+    yield 'child reply';
+  }
+  const refreshed: string[] = [];
+  const sent: unknown[] = [];
+  for await (const input of sessionInputs(queued(), async text => {
+    refreshed.push(text);
+    return 'checked: ' + text;
+  })) {
+    sent.push(input.message.content);
+  }
+  assert.deepEqual(refreshed, ['user message', 'child reply']);
+  assert.deepEqual(sent, ['spawn', 'checked: user message', 'checked: child reply']);
+});
 
 // Exercise the SDK's MCP instance over a real protocol connection, and feed
 // its wire results to the same hook module the CLI loads in the plugin.
@@ -19,7 +38,8 @@ test('Claude opens granted leaves, refreshes its list and journals the catalog v
   const { id: threadId } = await (await import('../../core/threads.ts')).startThread({
     workspaceId, parentThreadId: mainThreadId, agent: agent.name, headless: false, actor: 'system',
   });
-  const bridge = await createClaudeBridge(agent, workspaceId, threadId);
+  const passport = { ...agent, get access() { return agent.access; } };
+  const bridge = await createClaudeBridge(passport, workspaceId, threadId);
   const client = new Client({ name: 'claude-port-test', version: '1' });
   const [local, remote] = InMemoryTransport.createLinkedPair();
   await bridge.server.connect(local);
@@ -36,11 +56,20 @@ test('Claude opens granted leaves, refreshes its list and journals the catalog v
     return { text: (result.content as { text: string }[])[0].text, isError: result.isError };
   };
   assert.equal(await bridge.refresh('same grant'), 'same grant');
+  bridge.onCompact();
+  assert.equal(await bridge.refresh('same system catalog'), 'same system catalog');
   const changed = Promise.withResolvers<void>();
   client.setNotificationHandler(ToolListChangedNotificationSchema, () => { changed.resolve(); });
   await prisma.connection.create({ data: { workspaceId, server: 'gmail', accountKey: 'work', displayName: 'Work', status: 'pending' } });
+  // Fail one grant lookup before the new port exists.
+  t.mock.getter(passport, 'access', () => { throw new Error('lookup failed'); }, { times: 1 });
+  assert.equal(await bridge.refresh('during lookup failure'), 'during lookup failure');
+  assert.ok(!(await list()).some(tool => tool.name === 'gmail_send_email'));
   assert.match(await bridge.refresh('next input'), /node gmail —[\s\S]+next input$/);
   await changed.promise;
+  bridge.onCompact();
+  assert.match(await bridge.refresh('after compact'), /node gmail —[\s\S]+after compact$/);
+  assert.equal(await bridge.refresh('next'), 'next');
   assert.ok((await list()).some(tool => tool.name === 'gmail_send_email'));
 
   await prisma.connection.create({ data: { workspaceId, server: 'gmail', accountKey: 'home', displayName: 'Home', status: 'pending' } });
@@ -80,9 +109,17 @@ test('Claude opens granted leaves, refreshes its list and journals the catalog v
   assert.equal(delta.text, 'Deferred tools:\nRead\nmcp__environment__browser_navigate');
 
   await prisma.connection.deleteMany({ where: { workspaceId, server: 'gmail' } });
-  assert.doesNotMatch(await bridge.refresh('removed'), /node gmail —/);
+  const notice = t.mock.method(bridge.server.server, 'sendToolListChanged');
+  notice.mock.mockImplementationOnce(async () => { throw new Error('notification failed'); });
+  const removed = await bridge.refresh('removed');
+  assert.match(removed, /replaces the catalog section[\s\S]+removed$/);
+  assert.doesNotMatch(removed, /node gmail —/);
   assert.ok(!(await list()).some(tool => tool.name === name));
   assert.equal((await call(name, {})).isError, true);
+  assert.equal(await bridge.refresh('retry notification'), 'retry notification');
+  assert.equal(notice.mock.callCount(), 2);
+  bridge.onCompact();
+  assert.equal(await bridge.refresh('back to system catalog'), 'back to system catalog');
   const refusal = await call('projects_get', { slug: 123 });
   assert.equal(JSON.parse(refusal.text).kind, 'invalid_input');
   const program = await call('run_program', { code: 'return (await call("projects_list", {})).projects.length;' });

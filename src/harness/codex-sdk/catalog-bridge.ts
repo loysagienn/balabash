@@ -4,7 +4,7 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import type { CallToolResult, Tool } from '@modelcontextprotocol/sdk/types.js';
 import { expandSchema, grantedVertex, type JsonSchema, type JsonValue } from '../../catalog/index.ts';
 import type { AgentPassport } from '../../core/contract.ts';
-import { mcpCatalog, registerCatalogHandlers } from '../catalog-mcp.ts';
+import { mcpCatalog, mcpError, registerCatalogHandlers } from '../catalog-mcp.ts';
 import { BRIDGE_SERVER } from '../sdk-mcp-config.ts';
 import { catalogInstructions, guideForLeaf } from '../catalog-context.ts';
 
@@ -26,7 +26,7 @@ export async function createCodexPort(agent: AgentPassport, workspaceId: string,
   const seenNodes = new Set(['']);
   async function call(name: string, input: JsonValue): Promise<CallToolResult> {
     const result = await catalog.call(name, input);
-    if ('error' in result) return { isError: true, content: [{ type: 'text', text: JSON.stringify(result.error) }] };
+    if ('error' in result) return mcpError(result.error);
     let guide: string[] | undefined;
     if (result.opened?.kind === 'node') seenNodes.add(result.opened.name);
     if (result.opened?.kind === 'capability') {

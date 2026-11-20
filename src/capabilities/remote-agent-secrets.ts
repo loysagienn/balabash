@@ -3,7 +3,7 @@
 // rows with server = the kind's name) and the files surface — and the kinds
 // with secrets as installation services. Like an external MCP server with
 // ${secret:NAME} values, such a kind appears on the console's Connections
-// page and in the auth agent's request_external_server_credentials through
+// page and in the auth agent's connections_request_secret through
 // the source registered with the connections layer (connections/services.ts),
 // and the secrets form stores the values under the kind's name.
 

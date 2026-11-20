@@ -1,9 +1,9 @@
 // Playwright MCP inside an agent's run: the official Playwright MCP server
 // connected in-process over an in-memory transport, its tools re-exposed to
-// the inner model as bridge tools. Shared by the agents that carry a browser
+// the inner model as environment tools. Shared by the agents that carry a browser
 // (browser, designer) — one conversion of results, not a clone per agent.
 //
-// Bridge tools carry text, never bytes (SdkBridgeTool), so an image in a
+// Environment tools carry text, never bytes (SessionEnvironmentTool), so an image in a
 // Playwright result (a screenshot) goes to the agent's sink, which decides
 // where the pixels live and returns the line the model reads instead.
 //
@@ -33,7 +33,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { ListRootsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import type { BrowserContext } from 'playwright';
-import type { JsonObject, SdkBridgeTool } from '../../src/core/contract.ts';
+import type { JsonObject, SessionEnvironmentTool } from '../../src/core/contract.ts';
 
 const PLAYWRIGHT_CALL_TIMEOUT_MS = 5 * 60_000;
 
@@ -150,7 +150,7 @@ function sanitizeToolSchema(toolName: string, schema: Record<string, unknown>): 
   return { ...schema, properties, ...(required ? { required } : {}) };
 }
 
-export async function createPlaywrightBridgeTools(client: Client, sink: PlaywrightImageSink): Promise<SdkBridgeTool[]> {
+export async function createPlaywrightTools(client: Client, sink: PlaywrightImageSink): Promise<SessionEnvironmentTool[]> {
   const { tools } = await client.listTools();
 
   return tools.map(tool => ({

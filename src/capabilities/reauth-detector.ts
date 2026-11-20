@@ -4,8 +4,8 @@
 // spawns an auth thread so the user gets walked through re-authorizing, and
 // raises a thread.notification (the attention plan is orthogonal to the
 // context plan — §5.2). One active auth thread per workspace is enough: a
-// second detection while it works is a no-op, the auth agent sees the fresh
-// statuses in its tool descriptions anyway.
+// second detection while it works is a no-op, the auth agent reads current
+// statuses with connections_list.
 
 import { appendEvent } from '../core/append.ts';
 import { startConsumer, type Consumer } from '../core/consumers.ts';

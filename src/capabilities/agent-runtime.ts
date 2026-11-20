@@ -9,19 +9,13 @@ import type {
   Event,
   FilesApi,
   JsonObject,
-  NotificationLevel,
   RunContext,
   RunResume,
   Thread,
 } from '../core/contract.ts';
 import { deliverThreadMessage } from '../tree/thread-verbs.ts';
 import { appendEvent } from '../core/append.ts';
-import {
-  THREAD_COMPLETED,
-  THREAD_FAILED,
-  THREAD_NOTIFICATION,
-  THREAD_PROGRESS,
-} from '../core/envelope.ts';
+import { THREAD_COMPLETED, THREAD_FAILED } from '../core/envelope.ts';
 import { ingestFile } from '../files/index.ts';
 import type { StorageBody } from '../files/storage.ts';
 import { createClaudeSession } from '../harness/claude-sdk/sdk-session.ts';
@@ -29,7 +23,6 @@ import { createCodexSession } from '../harness/codex-sdk/sdk-session.ts';
 import type { RoutedRun } from '../runtime/router.ts';
 import { getAgent, isRemoteAgent } from './agent-catalog.ts';
 import { createSessionRun, withSpawnFiles } from './session-run.ts';
-import { validateAgentRun } from './validate-agent.ts';
 
 const AGENT_STATE_ROOT = path.resolve('data', 'agent-state');
 
@@ -43,15 +36,8 @@ function validateAgentInput(declarationName: string, input: unknown): string {
   return input.trim();
 }
 
-const NOTIFICATION_RANK: Record<NotificationLevel, number> = { silent: 0, normal: 1, urgent: 2 };
-
 function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-// An event's level must not exceed the thread's level.
-function clampNotificationLevel(requested: NotificationLevel, threadLevel: NotificationLevel): NotificationLevel {
-  return NOTIFICATION_RANK[requested] > NOTIFICATION_RANK[threadLevel] ? threadLevel : requested;
 }
 
 function createFilesApi(workspaceId: string, agentName: string): FilesApi {
@@ -108,26 +94,12 @@ export async function spawnAgentRun(thread: Thread, startedEvent: Event, resume?
   const { workspaceId } = thread;
   const threadId = thread.id;
   const agentName = declaration.name;
-  const threadNotificationLevel =
-    (startedEvent.payload.notification as NotificationLevel | undefined) ?? declaration.notification ?? 'normal';
-
   const abortController = new AbortController();
   const files = createFilesApi(workspaceId, agentName);
 
   const stateDir = path.join(AGENT_STATE_ROOT, agentName, workspaceId);
 
   await mkdir(stateDir, { recursive: true });
-
-  const pushEvent = async (type: string, payload: JsonObject) => {
-    await appendEvent({
-      type,
-      actor: 'agent',
-      agentName,
-      workspaceId,
-      threadId,
-      payload,
-    });
-  };
 
   const ctx: RunContext = {
     headless: thread.headless,
@@ -136,25 +108,19 @@ export async function spawnAgentRun(thread: Thread, startedEvent: Event, resume?
     workspaceId,
     signal: abortController.signal,
 
-    pushEvent,
-
-    progress: async text => {
-      await pushEvent(THREAD_PROGRESS, { text });
-    },
-
     complete: async (summary, meta) => {
-      await pushEvent(THREAD_COMPLETED, {
-        summary: summary as unknown as JsonObject,
-        ...(meta?.title ? { title: meta.title } : {}),
-        ...(meta?.description ? { description: meta.description } : {}),
-        ...(meta?.project ? { projectId: meta.project.id, projectSlug: meta.project.slug } : {}),
-      });
-    },
-
-    notify: async (level, text) => {
-      await pushEvent(THREAD_NOTIFICATION, {
-        level: clampNotificationLevel(level, threadNotificationLevel),
-        text,
+      await appendEvent({
+        type: THREAD_COMPLETED,
+        actor: 'agent',
+        agentName,
+        workspaceId,
+        threadId,
+        payload: {
+          summary: summary as unknown as JsonObject,
+          ...(meta?.title ? { title: meta.title } : {}),
+          ...(meta?.description ? { description: meta.description } : {}),
+          ...(meta?.project ? { projectId: meta.project.id, projectSlug: meta.project.slug } : {}),
+        },
       });
     },
 
@@ -181,15 +147,7 @@ export async function spawnAgentRun(thread: Thread, startedEvent: Event, resume?
     // The attachments of the spawn prompt are read like a message's: a line
     // per file and the hint how to reach them — the bytes stay in storage.
     const prompt = withSpawnFiles(validateAgentInput(agentName, startedEvent.payload.input), startedEvent.payload.files);
-
-    // The declarative form is run by the platform's session runner; run() is
-    // the imperative escape hatch (validate-agent guarantees exactly one).
-    run = validateAgentRun(
-      declaration.session
-        ? createSessionRun(declaration, declaration.session, prompt, ctx)
-        : declaration.run!(prompt, ctx),
-      agentName,
-    );
+    run = createSessionRun(declaration, prompt, ctx);
   } catch (error) {
     await failThread(getErrorMessage(error));
 
@@ -221,12 +179,6 @@ export async function spawnAgentRun(thread: Thread, startedEvent: Event, resume?
     },
 
     interrupt: () => {
-      if (!run.interrupt) {
-        console.log(`[agent-run:${threadId}] interrupt ignored: agent "${agentName}" has no interruptible turn`);
-
-        return;
-      }
-
       try {
         run.interrupt();
       } catch (error) {

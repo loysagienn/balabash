@@ -154,7 +154,7 @@ export function startCcrDelivery({ mux, isThreadBusy, bindThread, releaseThread 
     if (created) {
       // The declared effort of the session agent, platform default 'high'
       // (mirrors createClaudeSession).
-      mux.write(event.threadId, systemInitFrame(process.cwd(), agent.session?.effort ?? 'high'));
+      mux.write(event.threadId, systemInitFrame(process.cwd(), agent.session.effort ?? 'high'));
     }
 
     // A fresh spawn is working already: open the app's working indicator.

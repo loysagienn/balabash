@@ -67,7 +67,7 @@ const fmt = (n: number): string => n.toLocaleString('en-US');
 
 loadAgents();
 
-const sessionAgents = getAgents().filter((agent): agent is AgentDeclaration => !isRemoteAgent(agent) && Boolean(agent.session));
+const sessionAgents = getAgents().filter((agent): agent is AgentDeclaration => !isRemoteAgent(agent));
 const normalize = (text: string) => text.replace(/\s+/g, ' ').trim();
 
 function agentByPrompt(prompt: string, sdk: 'claude' | 'codex'): AgentDeclaration | null {
@@ -77,7 +77,7 @@ function agentByPrompt(prompt: string, sdk: 'claude' | 'codex'): AgentDeclaratio
   let best: { agent: AgentDeclaration; length: number } | null = null;
 
   for (const agent of sessionAgents.filter(agent => agent.sdk === sdk)) {
-    const instructions = normalize(agent.session!.instructions);
+    const instructions = normalize(agent.session.instructions);
     const probe = instructions.slice(0, Math.min(instructions.length, 160));
 
     if (probe.length >= 40 && text.startsWith(probe) && (!best || probe.length > best.length)) {
@@ -1021,9 +1021,7 @@ if (sessionArg) {
 
   console.log(`[measure-context] ${candidates.length} sessions in the stores (${stats.length} Claude transcripts, ${rollouts.length} Codex rollouts); ${selected.length} newest per agent measured, ${skipped} skipped (older, unattributed or without a recorded first request)`);
 
-  // Every repository agent, run()-based ones included: their sessions are
-  // attributed by the journal or by their agent-state directory.
-  const missing = getAgents().filter(agent => !isRemoteAgent(agent)).map(agent => agent.name).filter(name => !selected.some(entry => entry.agent === name));
+  const missing = sessionAgents.map(agent => agent.name).filter(name => !selected.some(entry => entry.agent === name));
 
   if (missing.length) {
     console.log(`[measure-context] no session found for: ${missing.join(', ')}`);

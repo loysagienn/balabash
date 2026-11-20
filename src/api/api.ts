@@ -1902,7 +1902,7 @@ router.post('/installation-services/:name/secret-request', requireSession, async
 // The installation OAuth client of a per-user service with a manual one
 // (gmail, drive): the Connect dialog's "Provide OAuth client" / "Replace
 // OAuth client" — the request the secrets form fulfils, as the auth agent's
-// request_oauth_client_credentials opens it.
+// connections_request_oauth_client opens it.
 router.post('/services/:name/oauth-client-request', requireSession, async ctx => {
   const workspaceId = ctx.state.workspaceId as string;
   const { name } = ctx.params;

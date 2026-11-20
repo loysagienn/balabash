@@ -139,22 +139,13 @@ export type ToolResult = {
 // backend unchanged. 'high' is the platform default.
 export type EffortLevel = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
-// Machine-readable domain event declared by an agent: types '<agent>.*',
-// the first segment must equal the agent's name.
-export type AgentEventDecl = {
-  type: string;
-  description: string;
-  payloadSchema: JsonSchema;
-};
-
-// The declarative session agent (the preferred form): the whole lifecycle —
+// The local session agent: the whole lifecycle —
 // spawn-prompt validation, the SDK session, rendering of incoming events,
 // channel binding (user-facing thread vs headless parent dialogue by `headless`),
 // the end-of-turn report and abort — is run by the platform.
 // The agent supplies only data — plus, when the session needs machinery next
 // to it (the designer's browser), an `environment` the platform builds and
-// disposes around the session. An agent writes run() only when the lifecycle
-// itself differs.
+// disposes around the session.
 export type SessionAgentSpec = {
   instructions: string; // the inner session's system prompt
   // Renders the spawn prompt into the session-opening message. Optional: the
@@ -184,7 +175,7 @@ export type SessionAgentSpec = {
 };
 
 export type SessionEnvironment = {
-  extraTools?: SdkBridgeTool[]; // tools offered by this Claude environment
+  environmentTools?: SessionEnvironmentTool[]; // tools offered by this Claude environment
   // Facts that exist only once the environment is up (an address, a path),
   // appended to the declaration's instructions for this run; the static
   // prompt names the fact and where it stands.
@@ -220,18 +211,14 @@ export type AgentPassport = AgentModes & {
 export type AgentDeclaration = AgentPassport & {
   icon?: string;
   sdk: 'claude' | 'codex';
-  events?: AgentEventDecl[];
   notification?: NotificationLevel; // policy default
   resumable?: boolean; // reserved: thread resume after restart
-  // Exactly one of `session` (declarative, preferred) and `run` (imperative).
-  session?: SessionAgentSpec;
-  run?(prompt: string, ctx: RunContext): AgentRun;
+  session: SessionAgentSpec;
 };
 
 // ---------------------------------------------------------------------------
-// Remote agents: the third form of a catalog agent — its session runs in an
-// external system; the thread in Balabash is a mirror of
-// that session, kept by the remote engine (src/remote) through a driver that
+// A remote agent runs in an external system. The remote engine (src/remote)
+// mirrors its session in a Balabash thread through a driver that
 // translates the external system into the neutral dialogue vocabulary below.
 // Only installation extensions declare them (data/remote-agents/<name>.ts,
 // export start(ctx) → RemoteAgentDeclaration); the repository ships none.
@@ -382,9 +369,8 @@ export type RemoteDriver = {
 export type AgentRun = {
   accept(event: Event): void;
   // Soft stop (thread.interrupt): abort the current turn, keep the run alive
-  // and wait for the next message. Optional — an imperative run without an
-  // interruptible turn may omit it. Never throws; a no-op when idle.
-  interrupt?(): void;
+  // and wait for the next message. A no-op when idle.
+  interrupt(): void;
   finished: Promise<void>;
 };
 
@@ -395,16 +381,12 @@ export type RunContext = {
   workspaceId: string;
   signal: AbortSignal;
 
-  // Canonical events on the run's behalf + declared domain events.
-  pushEvent(type: string, payload: JsonObject): Promise<void>;
-  progress(text: string): Promise<void>; // thread.progress → parent
   // thread.completed → parent. The optional retrospective self-description
   // (title: 2–5 words naming the work; description: ~300 chars) rides the
   // terminal payload and updates the thread row; `project` — the project the
   // work concerned, when the thread names one at its end — replaces the one
   // set at start.
   complete(summary: ThreadSummary, meta?: { title?: string; description?: string; project?: { id: string; slug: string } }): Promise<void>;
-  notify(level: NotificationLevel, text: string): Promise<void>; // thread.notification, gated by policy
 
   // Deliver the final text to the thread's ordinary interlocutor.
   deliverTurnText(text: string): Promise<void>;
@@ -430,7 +412,7 @@ export type RunResume = {
 // Injected APIs of a local agent session.
 
 // A tool supplied by the Claude session environment (e.g. Playwright).
-export type SdkBridgeTool = {
+export type SessionEnvironmentTool = {
   name: string;
   description: string;
   inputSchema: JsonSchema;
@@ -443,7 +425,7 @@ export type SdkSessionOptions = {
   initialMessage: string; // the first user message opening the session
   model?: string; // agent-level choice; omit for the SDK default
   effort?: EffortLevel; // reasoning effort; default 'high'
-  extraTools?: SdkBridgeTool[]; // tools offered by this Claude environment
+  environmentTools?: SessionEnvironmentTool[]; // tools offered by this Claude environment
   // 'bridge-only' (default): catalog access with ToolSearch. 'full' unlocks the provider's native tool preset for host
   // work; interpretation is SDK-specific (claude: the claude_code preset plus
   // project settings from cwd; codex sessions are full by construction —

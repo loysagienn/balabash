@@ -212,8 +212,8 @@ function agentView(agent: AgentDeclaration, lastModel: string | null): AgentView
     modes: agent.modes,
     defaultMode: agent.defaultMode,
     notification: agent.notification ?? null,
-    model: agent.session?.model ?? null,
-    effort: agent.session?.effort ?? null,
+    model: agent.session.model ?? null,
+    effort: agent.session.effort ?? null,
     // Both SDK sessions run with the platform default when the declaration
     // names no effort (src/harness/default-effort.ts).
     defaultEffort: DEFAULT_EFFORT,

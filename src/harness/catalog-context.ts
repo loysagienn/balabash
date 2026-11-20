@@ -13,6 +13,10 @@ export async function catalogContext(agent: AgentPassport, workspaceId: string, 
   return { grant, connections };
 }
 
+export function grantKey(grant: Grant): string {
+  return JSON.stringify([...grant.vertices]);
+}
+
 export function* grantedCapabilities(grant: Grant) {
   for (const name of grant.vertices) {
     const vertex = grant.catalog.vertices.get(name)!;

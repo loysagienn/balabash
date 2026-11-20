@@ -3,7 +3,7 @@
 import { randomUUID } from 'node:crypto';
 import type { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { CallToolRequestSchema, ListToolsRequestSchema, type CallToolResult, type Tool } from '@modelcontextprotocol/sdk/types.js';
-import { expandSchema, type JsonValue } from '../catalog/index.ts';
+import { expandSchema, type CapabilityErrorValue, type JsonValue } from '../catalog/index.ts';
 import type { AgentPassport } from '../core/contract.ts';
 import { dispatchCatalogCall } from '../tree/call-journal.ts';
 import { catalogContext, grantedCapabilities, portActions } from './catalog-context.ts';
@@ -22,6 +22,10 @@ export async function mcpCatalog(agent: AgentPassport, workspaceId: string, thre
     grant, entries,
     call: (name: string, input: JsonValue) => dispatchCatalogCall(grant, connections, { name, input, callId: randomUUID() }),
   };
+}
+
+export function mcpError(error: CapabilityErrorValue): CallToolResult {
+  return { isError: true, content: [{ type: 'text', text: JSON.stringify(error) }] };
 }
 
 export function registerCatalogHandlers(server: Server, current: () => {

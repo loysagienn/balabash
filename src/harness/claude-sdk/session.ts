@@ -101,25 +101,34 @@ function createMessageQueue(initialMessage: string) {
   return { iterable, push, end };
 }
 
-export function startClaudeSession(initialText: string, options: ClaudeSessionOptions, refresh: (text: string) => Promise<string>): ClaudeSession {
-  const queue = createMessageQueue(initialText);
-  async function* inputs() {
-    let first = true;
-    for await (const input of queue.iterable) {
-      // The opening and its system prompt already share one grant. Check
-      // later inputs in arrival order, including messages queued at startup.
-      yield createUserMessage(first ? input : await refresh(input));
-      first = false;
-    }
+export async function* sessionInputs(messages: AsyncIterable<string>, refresh: (text: string) => Promise<string>) {
+  let first = true;
+  for await (const text of messages) {
+    // The opening and its system prompt already share one grant.
+    yield createUserMessage(first ? text : await refresh(text));
+    first = false;
   }
+}
+
+export function startClaudeSession(
+  initialText: string,
+  options: ClaudeSessionOptions,
+  catalog: { refresh(text: string): Promise<string>; onCompact(): void },
+): ClaudeSession {
+  const queue = createMessageQueue(initialText);
   const session = query({
-    prompt: inputs(),
+    prompt: sessionInputs(queue.iterable, catalog.refresh),
     options,
   });
   let closed = false;
 
   return {
-    messages: session,
+    messages: (async function* () {
+      for await (const message of session) {
+        if (message.type === 'system' && message.subtype === 'compact_boundary') catalog.onCompact();
+        yield message;
+      }
+    })(),
     push: queue.push,
     interrupt: async () => {
       if (closed) {

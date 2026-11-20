@@ -32,7 +32,7 @@ async function start(agent: AgentDeclaration, onText: (text: string) => Promise<
     deliverTurnText: onText,
     complete: async summary => { reports.push(summary); },
   } satisfies Partial<RunContext>;
-  const run = createSessionRun(agent, agent.session!, 'Begin', ctx as RunContext);
+  const run = createSessionRun(agent, 'Begin', ctx as RunContext);
   return { run, reports, threadId, abort: () => controller.abort() };
 }
 
