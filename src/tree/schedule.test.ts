@@ -331,7 +331,16 @@ describe('a manual run', () => {
 
     assert.equal(run.status, 'failed');
     assert.equal(run.value, null);
-    assert.match(run.error, /^external_error: /);
+    // The error is whole: how the command failed is in its details.
+    assert.match(run.error, /^external_error: The command exited with code 7\. .*\nDetails: \{/s);
+    assert.deepEqual(JSON.parse(run.error.slice(run.error.indexOf('\nDetails: ') + 10)), {
+      exitCode: 7,
+      timedOut: false,
+      stdout: '',
+      stdoutTruncated: false,
+      stderr: 'no\n',
+      stderrTruncated: false,
+    });
     assert.equal(run.console, 'before\n');
 
     const [exception] = await until(async () => {
@@ -414,18 +423,78 @@ describe('a manual run', () => {
     assert.deepEqual(await eventsOf('system.exception', slug), []);
     assert.deepEqual(await eventsOf('schedule.fired', slug), []);
     // The task is free again.
-    assert.equal((await invoke('schedule_list_tasks', {})).tasks.find((task: Value) => task.slug === slug).running, false);
+    await until(async () => !(await invoke('schedule_list_tasks', {})).tasks.find((task: Value) => task.slug === slug).running, 'the task to be free');
+  });
+
+  test('the task stays taken until the value of its run is with the main thread', async () => {
+    const slug = await program('return 1;');
+    const { runId } = await invoke('schedule_run_task', { slug });
+
+    // Whoever sees the task free — to run it again, to read its last value
+    // from the journal — finds the run settled and its value told.
+    await until(async () => !(await invoke('schedule_list_tasks', {})).tasks.find((task: Value) => task.slug === slug).running, 'the task to be free');
+    assert.equal((await invoke('schedule_get_run', { runId })).status, 'ok');
+    assert.equal((await eventsOf('schedule.fired', slug)).length, 1);
+    assert.deepEqual(
+      (await invoke('schedule_list_runs', { slug, hasValue: true })).runs.map((run: Value) => run.runId),
+      [runId],
+    );
+  });
+});
+
+describe('what the main thread is told is what the journal holds', () => {
+  test('a character the database does not hold is replaced in the journal as in the event', async () => {
+    const slug = await program("console.log('a\\u0000b');\nreturn { text: 'c\\u0000d' };");
+    const run = await ended((await invoke('schedule_run_task', { slug })).runId);
+
+    assert.equal(run.status, 'ok');
+    assert.equal(run.console, 'a\uFFFDb\n');
+    assert.deepEqual(run.value, { text: 'c\uFFFDd' });
+
+    const [fired] = await until(async () => {
+      const events = await eventsOf('schedule.fired', slug);
+
+      return events.length ? events : null;
+    }, 'the value in the main thread');
+
+    assert.deepEqual((fired?.payload as JsonObject).value, run.value);
+    assert.deepEqual(await eventsOf('system.exception', slug), []);
+  });
+
+  test('a value the journal does not take is a failed run there and a failure in the main thread, never a value', async () => {
+    // Half of a surrogate pair: jsonb refuses it.
+    const slug = await program("console.log('said');\nreturn { text: 'cut \\ud83d' };");
+    const run = await ended((await invoke('schedule_run_task', { slug })).runId);
+
+    assert.equal(run.status, 'failed');
+    assert.equal(run.value, null);
+    assert.match(run.error, /^internal: The run ended as ok, but the journal did not take its outcome: /);
+
+    const [exception] = await until(async () => {
+      const events = await eventsOf('system.exception', slug);
+
+      return events.length ? events : null;
+    }, 'the failure in the main thread');
+    const payload = exception?.payload as JsonObject;
+
+    assert.equal(payload.runId, run.runId);
+    assert.equal(payload.status, 'failed');
+    assert.match(String(payload.error), new RegExp(`^Scheduled task "${slug}" failed — internal: The run ended as ok, but the journal did not take its outcome`));
+    await until(async () => !(await invoke('schedule_list_tasks', {})).tasks.find((task: Value) => task.slug === slug).running, 'the task to be free');
+    assert.deepEqual(await eventsOf('schedule.fired', slug), []);
   });
 });
 
 describe('the journal of runs', () => {
-  test('a row left running by a dead process is settled as aborted at boot', async () => {
+  test('a row left running by a dead process is settled as aborted at boot; a run of this process is not', async () => {
     const id = randomUUID();
 
     await prisma.scheduleRun.create({
       data: { id, workspaceId: stand.workspaceId, slug: 'orphan', trigger: 'cron', code: 'return 1;', status: 'running', startedAt: new Date('2026-01-01T00:00:00Z') },
     });
 
+    const slug = await program("await call('workspace_run_command', { command: 'sleep 2' });\nreturn 'lived';");
+    const live = await invoke('schedule_run_task', { slug });
     const { sweepAbortedRuns } = await import('../schedule/programs.ts');
 
     await sweepAbortedRuns();
@@ -435,6 +504,9 @@ describe('the journal of runs', () => {
     assert.equal(run.status, 'aborted');
     assert.ok(run.finishedAt);
     assert.equal(run.durationMs, null);
+    // The run in flight was left alone: a reader never sees it end twice.
+    assert.equal((await invoke('schedule_get_run', { runId: live.runId })).status, 'running');
+    assert.equal((await ended(live.runId)).value, 'lived');
   });
 
   test('is one history with the runs of the former workspace jobs, paged newest first', async () => {
@@ -521,6 +593,17 @@ describe('the journal of runs', () => {
     assert.equal(failed.console, 'disk ok\nboom\n');
     assert.equal(failed.consoleTruncated, true);
     assert.match((await invoke('schedule_get_run', { runId: ids.j3 })).error, /could not be started: spawn bash ENOENT/);
+
+    // The two ends of a job's output together keep to the limit of a console.
+    const long = '10000000-0000-4000-8000-000000000007';
+
+    await jobRun(long, at(0), { stdoutTail: `${'o'.repeat(11_999)}\n`, stderrTail: 'e'.repeat(12_000) });
+
+    const capped = await invoke('schedule_get_run', { runId: long });
+
+    assert.equal(Buffer.byteLength(capped.console), 16 * 1024);
+    assert.ok(capped.console.endsWith('e'.repeat(12_000)));
+    assert.equal(capped.consoleTruncated, true);
     assert.match((await invoke('schedule_get_run', { runId: ids.j4 })).error, /ran longer than its limit/);
 
     const withValue = await invoke('schedule_get_run', { runId: ids.p1 });

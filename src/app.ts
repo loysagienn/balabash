@@ -26,9 +26,9 @@ import { createRemoteToolServer } from './capabilities/remote-tools.ts';
 import { startReauthDetector } from './capabilities/reauth-detector.ts';
 import { loadToolServers, registerBuiltinToolServer } from './capabilities/tool-manager.ts';
 import { hasRunningWork, startTree, stopRunningWork } from './tree/index.ts';
-import { isAnyJobRunning, killRunningJobs } from './schedule/former-kinds.ts';
+import { isAnyJobRunning, killRunningJobs, sweepAbortedJobRuns } from './schedule/former-kinds.ts';
 import { startScheduleHeart } from './schedule/heart.ts';
-import { hasUnsettledRuns } from './schedule/programs.ts';
+import { hasUnsettledRuns, sweepAbortedRuns } from './schedule/programs.ts';
 import { startWorkspaceIndexer } from './workspace/indexer.ts';
 import { startFileAreaTotals } from './workspace/totals.ts';
 import { startTelemetry } from './runtime/telemetry.ts';
@@ -91,6 +91,14 @@ const tombstoned = await tombstoneUnresumableThreads();
 if (tombstoned > 0) {
   console.log(`[app] tombstoned ${tombstoned} orphaned threads without a saved session`);
 }
+
+// A scheduled run does not survive the app either: the rows the previous
+// process left 'running' — of programs and of the former jobs — are settled
+// as 'aborted' here, before anything a run starts from is open (the web
+// surface, a resumed thread, the schedule heart), so that the sweep meets
+// no run of this process.
+await sweepAbortedRuns();
+await sweepAbortedJobRuns();
 
 // The files surface of the installation's extensions (local tool servers
 // and remote agent drivers): global — workspace scoping happens at the
@@ -246,7 +254,7 @@ if (ccr) {
 
 consumers.push(startReauthDetector());
 
-// The schedule heart: boot sweep of sleeping code tasks, then the timer that
+// The schedule heart: the word on sleeping code tasks, then the timer that
 // fires due triggers. Not a log consumer, but it stops like one.
 consumers.push(startScheduleHeart());
 
@@ -285,9 +293,10 @@ consumers.push(
     isBusy: hasActiveCoordinatorTurns,
     // What runs outside any agent turn does not survive a restart — the runs
     // of programs with the calls and commands they started, a scheduled run
-    // until its outcome is journaled and told, and the former workspace
-    // jobs: the safe window waits for them (force skips the wait; the
-    // shutdown sweep then stops the processes).
+    // from the moment its task is taken until its outcome is journaled and
+    // told, and the former workspace jobs: the safe window waits for them,
+    // under force too (force cuts agent turns only). What is still running
+    // when the process is told to stop is stopped by the shutdown below.
     hasActiveJobs: () => isAnyJobRunning() || hasRunningWork() || hasUnsettledRuns(),
     // The remote engine's verbs in flight (its state is durable; a verb
     // half-way through is better finished than replayed).

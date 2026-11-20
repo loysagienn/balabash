@@ -82,7 +82,7 @@ Three kinds share the registry; only 'code' has a body here:
 - `ctx.prisma` — the app's database client (src/db/client.ts).
 - `ctx.tools` — the workspace tool surface for the task's workspace: the
   repository servers of the task bundle (TASK_REPOSITORY_SERVERS in
-  src/schedule/engine.ts) plus, since the bundle names `projects`, every
+  src/schedule/former-kinds.ts) plus, since the bundle names `projects`, every
   extension server of the installation (data/tools, data/mcp-servers — see
   src/capabilities/extensions.ts); `list()` and `call(name, args)`. These calls are NOT journaled as tool.call.* (a task
   has no thread).

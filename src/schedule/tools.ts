@@ -14,7 +14,7 @@ import type { ScheduledTaskModel } from '../../prisma-generated/models.ts';
 import { workspaceTaskFile } from './catalog.ts';
 import { JOB_TIMEOUT_DEFAULT_MS, JOB_TIMEOUT_MAX_MS, JOB_TIMEOUT_MIN_MS } from './former-kinds.ts';
 import { isTaskRunning } from './running.ts';
-import { cronNextRun } from './heart.ts';
+import { cronNextRun } from './cron.ts';
 import { ScheduleError, createTask as createTaskCommand, deleteTask, isSleeping, runTask as runTaskCommand } from './commands.ts';
 import { SLUG_MAX_LENGTH, SLUG_PATTERN, parseTaskInput } from './input.ts';
 

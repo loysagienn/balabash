@@ -13,6 +13,7 @@
 
 import type { JobRunModel, ScheduleRunModel } from '../../prisma-generated/models.ts';
 import type { Prisma } from '../../prisma-generated/client.ts';
+import { consoleTail } from '../catalog/index.ts';
 import type { JsonValue } from '../core/contract.ts';
 import { prisma } from '../db/client.ts';
 import type { RunTrigger } from './engine.ts';
@@ -38,7 +39,8 @@ export type RunSummary = {
 export type RunRecord = RunSummary & {
   code: string;
   value: JsonValue | null;
-  // What ended a failed or timed-out run.
+  // What ended a failed or timed-out run: the kind of the error and its
+  // message, then its details when it has any.
   error: string | null;
   console: string;
   consoleTruncated: boolean;
@@ -74,14 +76,24 @@ function summary(row: SummaryRow, hasValue: boolean): RunSummary {
   };
 }
 
+// The error of a run as its reader gets it. The details are a part of it: a
+// command that failed says how in its details (the exit code, the output),
+// and a program that did not catch the error wrote none of that anywhere
+// else.
+function errorText(error: { kind?: unknown; message?: unknown; details?: unknown }): string {
+  const said = `${String(error.kind)}: ${String(error.message)}`;
+
+  return error.details === undefined || error.details === null ? said : `${said}\nDetails: ${JSON.stringify(error.details)}`;
+}
+
 function programRun(row: ScheduleRunModel): RunRecord {
-  const error = row.error as { kind?: unknown; message?: unknown } | null;
+  const error = row.error as { kind?: unknown; message?: unknown; details?: unknown } | null;
 
   return {
     ...summary(row, row.hasValue),
     code: row.code,
     value: row.hasValue ? (row.value as JsonValue) : null,
-    error: (row.status === 'failed' || row.status === 'timeout') && error ? `${String(error.kind)}: ${String(error.message)}` : null,
+    error: (row.status === 'failed' || row.status === 'timeout') && error ? errorText(error) : null,
     console: row.console,
     consoleTruncated: row.consoleTruncated,
   };
@@ -111,17 +123,20 @@ function formerError(row: JobRunModel): string | null {
   }
 }
 
+// The console of a job is the ends of its two streams, one after the other,
+// kept by the limit of a run's console like any other.
 function formerRun(row: JobRunModel): RunRecord {
   const input = { command: row.command, ...(row.cwd ? { cwd: row.cwd } : {}) };
   const between = row.stdoutTail && row.stderrTail && !row.stdoutTail.endsWith('\n') ? '\n' : '';
+  const output = consoleTail(`${row.stdoutTail}${between}${row.stderrTail}`);
 
   return {
     ...formerSummary(row),
     code: `await call('workspace_run_command', ${JSON.stringify(input)});\nreturn null;`,
     value: null,
     error: formerError(row),
-    console: `${row.stdoutTail}${between}${row.stderrTail}`,
-    consoleTruncated: row.stdoutTruncated || row.stderrTruncated,
+    console: output.text,
+    consoleTruncated: output.truncated || row.stdoutTruncated || row.stderrTruncated,
   };
 }
 

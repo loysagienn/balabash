@@ -13,9 +13,14 @@
 //   launches; the same row is settled when the run ends. No row — no run;
 // - who gets the value: the main thread, as a schedule.fired event; null is
 //   silence. A run that failed or ran out of time is a system.exception
-//   there. A run stopped with the app ('aborted') leaves its row and no
-//   event: the restart was the actor, not the task. A restart waits until
-//   the outcome of every run is journaled and told (hasUnsettledRuns).
+//   there. The main thread is told what the journal holds of the run, not
+//   what the runner gave: an outcome the journal did not take is a failure
+//   there and a failure here. A run stopped with the app ('aborted') leaves
+//   its row and no event: the restart was the actor, not the task.
+//
+// A launch is in flight from the moment its task is taken until the outcome
+// is journaled and told: for that long the task says it is running, a
+// restart waits (hasUnsettledRuns), and the boot sweep leaves the row alone.
 //
 // The catalog and the connections behind it are the tree's (src/tree), which
 // itself reaches the schedule from its node `schedule`; so the tree hands
@@ -37,7 +42,7 @@ import {
   type ProgramRun,
   type ProgramStart,
 } from '../catalog/index.ts';
-import { appendEvent } from '../core/append.ts';
+import { appendEvent, storablePayload } from '../core/append.ts';
 import type { JsonObject, Thread } from '../core/contract.ts';
 import { SYSTEM_EXCEPTION } from '../core/envelope.ts';
 import { prisma } from '../db/client.ts';
@@ -63,14 +68,17 @@ export function setProgramHost(next: ProgramHost): void {
   host = next;
 }
 
-// The launches whose outcome is not yet in the journal and with the main
-// thread. The process of a run may be gone while its row is still being
-// settled and its value is on the way into the log: a restart that did not
-// wait for that would leave a finished run 'aborted' and its value untold.
-let unsettled = 0;
+// The launches of this process in flight, by the id of the run: from the
+// moment a task is taken — before its row is written — until its outcome is
+// in the journal and with the main thread. The process of a run may not be
+// there yet, or be gone already, while the row is being written and the
+// value is on the way into the log: a restart that did not wait for that
+// would leave a taken moment without a run, or a finished run 'aborted' and
+// its value untold.
+const inFlight = new Set<string>();
 
 export function hasUnsettledRuns(): boolean {
-  return unsettled > 0;
+  return inFlight.size > 0;
 }
 
 // What a scheduled program is cut off from, whatever else the tree holds.
@@ -123,11 +131,18 @@ async function runUnderMainThread(task: ScheduledTaskModel, main: Thread, start:
   }
 }
 
-// Settles the row of the run. An outcome the database does not take (a NUL
-// character in the console or in the value) still closes the row: the run
-// is not left 'running' behind a process that is gone.
-async function settle(run: ProgramRun): Promise<void> {
+// Settles the row of the run and gives the run as the journal now holds it —
+// what `schedule_get_run` will say, and so what the main thread is told.
+// The row takes strings the way the event log does (U+0000 replaced: neither
+// text nor jsonb holds it), so the value in the journal and the value in the
+// event are one. An outcome the database still does not take closes the row
+// all the same — the run is not left 'running' behind a process that is
+// gone: as 'failed' with an internal error and nothing of what the run left
+// (a run stopped with the app stays 'aborted'). null: the row could not be
+// closed at all.
+async function settle(run: ProgramRun): Promise<ProgramRun | null> {
   const ended = { finishedAt: run.endedAt, durationMs: run.durationMs };
+  const left = storablePayload({ console: run.console, value: run.value, error: run.error });
 
   try {
     await prisma.scheduleRun.update({
@@ -135,33 +150,109 @@ async function settle(run: ProgramRun): Promise<void> {
       data: {
         ...ended,
         status: run.outcome,
-        console: run.console,
+        console: left.console as string,
         consoleTruncated: run.consoleTruncated,
         ...(run.outcome === 'ok'
           ? run.value === null
             ? {}
-            : { value: run.value as Prisma.InputJsonValue, hasValue: true }
-          : { error: run.error as Prisma.InputJsonValue }),
+            : { value: left.value as Prisma.InputJsonValue, hasValue: true }
+          : { error: left.error as Prisma.InputJsonValue }),
       },
     });
+
+    return run;
   } catch (error) {
     console.error(`[schedule] run ${run.id}: failed to journal the outcome:`, error);
 
-    const message = `The run ended as ${run.outcome}, but its outcome could not be journaled: ${error instanceof Error ? error.message : String(error)}`;
+    const nothing = { console: '', consoleTruncated: false };
+    const closed: ProgramRun =
+      run.outcome === 'aborted'
+        ? { ...run, ...nothing }
+        : {
+            ...run,
+            ...nothing,
+            outcome: 'failed',
+            value: null,
+            error: {
+              kind: 'internal',
+              message: `The run ended as ${run.outcome}, but the journal did not take its outcome: ${error instanceof Error ? error.message : String(error)}`,
+            },
+          };
 
-    await prisma.scheduleRun
-      .update({ where: { id: run.id }, data: { ...ended, status: 'failed', error: { kind: 'internal', message } } })
-      .catch(again => {
-        console.error(`[schedule] run ${run.id}: failed to close the journal row:`, again);
+    try {
+      await prisma.scheduleRun.update({
+        where: { id: run.id },
+        data: { ...ended, status: closed.outcome, ...(closed.outcome === 'aborted' ? {} : { error: closed.error as Prisma.InputJsonValue }) },
       });
+
+      return closed;
+    } catch (again) {
+      console.error(`[schedule] run ${run.id}: failed to close the journal row:`, again);
+
+      return null;
+    }
   }
 }
 
 function failureText(slug: string, run: ProgramRun & { error: CapabilityErrorValue }): string {
   return (
     `Scheduled task "${slug}" ${run.outcome === 'timeout' ? 'ran out of time' : 'failed'} — ${run.error.kind}: ${run.error.message} ` +
-    `Run ${run.id}: \`schedule_get_run\` gives its code and its console output.`
+    `Run ${run.id}: \`schedule_get_run\` gives the error with its details, the code and the console output.`
   );
+}
+
+// Tells the main thread how a run ended, by what the journal holds of it.
+async function tell(task: ScheduledTaskModel, main: Thread, run: ProgramRun, pushFired: (payload: JsonObject) => Promise<void>): Promise<void> {
+  const kept = await settle(run);
+
+  // A run stopped with the app tells nobody, whatever became of its row: a
+  // row left open is closed by the boot sweep of the next process.
+  if (run.outcome === 'aborted') {
+    return;
+  }
+
+  const exception = (status: string, error: string) =>
+    appendEvent({
+      type: SYSTEM_EXCEPTION,
+      actor: 'system',
+      workspaceId: task.workspaceId,
+      threadId: main.id,
+      payload: { scope: 'scheduled-program', slug: task.slug, runId: run.id, status, error },
+    }).catch(appendError => {
+      console.error(`[schedule] task "${task.slug}" (run ${run.id}): failed to journal the failure:`, appendError);
+    });
+
+  if (!kept) {
+    await exception(
+      run.outcome,
+      `Scheduled task "${task.slug}": its run ${run.id} ended as ${run.outcome}, but the journal of runs could not be written and nothing the run left is kept. ` +
+        `The journal shows the run as running until the next start of the app closes it as aborted.`,
+    );
+
+    return;
+  }
+
+  if (kept.outcome !== 'ok') {
+    console.error(`[schedule] task "${task.slug}" (run ${run.id}) ${kept.outcome}: ${kept.error.message}`);
+    await exception(kept.outcome, failureText(task.slug, kept));
+
+    return;
+  }
+
+  if (kept.value === null) {
+    return;
+  }
+
+  try {
+    await pushFired({ runId: run.id, value: kept.value as JsonObject[string] });
+  } catch (error) {
+    console.error(`[schedule] task "${task.slug}" (run ${run.id}): failed to deliver the value:`, error);
+    await exception(
+      'ok',
+      `Scheduled task "${task.slug}" returned a value that could not be delivered to the main thread: ${error instanceof Error ? error.message : String(error)}. ` +
+        `Run ${run.id}: \`schedule_get_run\` gives the value.`,
+    );
+  }
 }
 
 // Runs the program of a task. The answer comes as soon as the run has its
@@ -183,72 +274,44 @@ export async function fireProgramTask(
   const start: ProgramStart = { id: randomUUID(), startedAt: new Date() };
   const code = task.code ?? '';
 
+  // In flight from here, before the first wait; over when the outcome is
+  // journaled and told — only then is the task free for its next run: a
+  // program that reads its previous value from the journal finds it there.
+  inFlight.add(start.id);
+
+  const over = () => {
+    inFlight.delete(start.id);
+    releaseTask(task.slug);
+  };
+
   try {
     await prisma.scheduleRun.create({
       data: { id: start.id, workspaceId: task.workspaceId, slug: task.slug, trigger, code, status: 'running', startedAt: start.startedAt },
     });
   } catch (error) {
-    releaseTask(task.slug);
+    over();
 
     throw error;
   }
 
-  unsettled += 1;
-
-  void (async () => {
-    const run = await runUnderMainThread(task, main, start, code).finally(() => releaseTask(task.slug));
-
-    await settle(run);
-
-    if (run.outcome === 'aborted') {
-      return;
-    }
-
-    const exception = (status: string, error: string) =>
-      appendEvent({
-        type: SYSTEM_EXCEPTION,
-        actor: 'system',
-        workspaceId: task.workspaceId,
-        threadId: main.id,
-        payload: { scope: 'scheduled-program', slug: task.slug, runId: run.id, status, error },
-      }).catch(appendError => {
-        console.error(`[schedule] task "${task.slug}" (run ${run.id}): failed to journal the failure:`, appendError);
-      });
-
-    if (run.outcome !== 'ok') {
-      console.error(`[schedule] task "${task.slug}" (run ${run.id}) ${run.outcome}: ${run.error.message}`);
-      await exception(run.outcome, failureText(task.slug, run));
-
-      return;
-    }
-
-    if (run.value === null) {
-      return;
-    }
-
-    try {
-      await pushFired({ runId: run.id, value: run.value as JsonObject[string] });
-    } catch (error) {
-      console.error(`[schedule] task "${task.slug}" (run ${run.id}): failed to deliver the value:`, error);
-      await exception(
-        'ok',
-        `Scheduled task "${task.slug}" returned a value that could not be delivered to the main thread: ${error instanceof Error ? error.message : String(error)}. ` +
-          `Run ${run.id}: \`schedule_get_run\` gives the value.`,
-      );
-    }
-  })().finally(() => {
-    unsettled -= 1;
-  });
+  void runUnderMainThread(task, main, start, code)
+    .then(run => tell(task, main, run, pushFired))
+    .catch(error => {
+      console.error(`[schedule] task "${task.slug}" (run ${start.id}): the run was not seen to its end:`, error);
+    })
+    .finally(over);
 
   return { kind: 'fired', runId: start.id };
 }
 
 // Boot sweep: a run does not survive the app. A row left 'running' by the
 // previous process — stopped by force or dead — is settled as 'aborted'.
+// The launches of this process are not its business; the app sweeps before
+// it opens anything a run can start from (src/app.ts).
 export async function sweepAbortedRuns(): Promise<void> {
   try {
     const { count } = await prisma.scheduleRun.updateMany({
-      where: { status: 'running' },
+      where: { status: 'running', id: { notIn: [...inFlight] } },
       data: { status: 'aborted', finishedAt: new Date() },
     });
 

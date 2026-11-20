@@ -246,7 +246,7 @@ type RestartModuleHooks = {
   // programs with the calls and commands they started, the former workspace
   // jobs — injected likewise (the runtime does not know the schedule or the
   // catalog). None of it survives a restart, so the safe window waits for
-  // it; force skips the wait and the shutdown sweep stops the processes.
+  // it, under force too: force cuts agent turns, not this work.
   hasActiveJobs(): boolean;
   // In-memory truth about the remote engine (src/remote): a verb of a
   // driver in flight or an inbound wake not yet served. Its state is

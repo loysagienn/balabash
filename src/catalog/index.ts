@@ -80,6 +80,7 @@ export {
 export { accountAuthority, call, invokeCapability, secretAuthority, type InvokeEnv } from './invoke.ts';
 export type { JsonSchema } from './json.ts';
 export {
+  consoleTail,
   countProgramCalls,
   countRunningPrograms,
   executeProgram,

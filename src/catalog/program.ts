@@ -158,6 +158,16 @@ function tail(maxBytes: number) {
   };
 }
 
+// The end of a console output already at hand, cut the way a run keeps its
+// own: for a record of a run written by someone other than the runner.
+export function consoleTail(text: string): { text: string; truncated: boolean } {
+  const kept = tail(CONSOLE_TAIL_BYTES);
+
+  kept.write(Buffer.from(text, 'utf8'));
+
+  return { text: kept.text, truncated: kept.truncated };
+}
+
 const TOOK_EFFECT = 'The calls it had completed took effect.';
 
 const AsyncFunction = (async () => {}).constructor as new (code: string) => unknown;
