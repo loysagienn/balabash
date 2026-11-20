@@ -1,23 +1,14 @@
 // The schedule over the stand (src/test-support/stand.ts): the run journal
 // is read newest first by pages on a keyset cursor, one run comes whole with
 // its tails, the newest run of every task is one row each; a manual run
-// fires a note into the main thread's log and a command job into the
-// journal (a real bash on the stand), a sleeping code task is refused; a
-// delete answers the row and journals schedule.task.cancelled by the
-// operator; a task is registered by the operator through the rules of the
-// create_task tool (the row and its schedule.task.created together, the
-// author "operator", a code task without a body sleeps); another
-// workspace's tasks and runs are not found, not forbidden.
-//
-// Run: npm test  (node:test, native type stripping — no build needed).
+// runs notes and programs and reads both generations of the run journal.
 
 import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { startStand } from '../test-support/stand.ts';
 import type { Stand } from '../test-support/stand.ts';
-import type { CreateTaskResponse, DeleteTaskResponse, JobRunResponse, JobRunsResponse, LatestJobRunsResponse, RunTaskResponse } from './contract.ts';
+import type { CreateTaskResponse, DeleteTaskResponse, ScheduleRunResponse, ScheduleRunsResponse, LatestScheduleRunsResponse, RunTaskResponse } from './contract.ts';
 
 type ErrorBody = { error: { code: string; message: string } };
 
@@ -43,18 +34,16 @@ before(async () => {
   stand = await startStand();
   ({ prisma } = await import('../db/client.ts'));
 
-  const { workspaceFilesDir } = await import('../workspace/layout.ts');
+  const { startTree } = await import('../tree/index.ts');
+  await startTree();
 
-  await fs.mkdir(workspaceFilesDir(stand.workspaceId), { recursive: true });
-
-  const task = (slug: string, data: Record<string, unknown>) => prisma.scheduledTask.create({ data: { slug, workspaceId: stand.workspaceId, name: slug, kind: 'command', ...data } });
+  const task = (slug: string, data: Record<string, unknown>) => prisma.scheduledTask.create({ data: { slug, workspaceId: stand.workspaceId, name: slug, kind: 'program', ...data } });
 
   await task('remind', { kind: 'note', note: 'Call the electrician', at: at(60), createdBy: 'coordinator' });
-  await task('echo-job', { command: "printf 'hello\\n'; printf 'warn\\n' >&2", timeoutMs: 5_000, createdBy: 'engineer' });
-  await task('disk-check', { command: 'df -h', cron: '0 */6 * * *' });
-  await task('sleeper', { kind: 'code', cron: '0 9 * * *' });
-  await task('rotate', { command: 'true', timeoutMs: 5_000 });
-  await prisma.scheduledTask.create({ data: { slug: 'foreign-job', workspaceId: FOREIGN_USER, name: 'Foreign', kind: 'command', command: 'true' } });
+  await task('echo-job', { code: 'console.log("hello"); return null;', timeoutMs: 5_000, createdBy: 'engineer' });
+  await task('disk-check', { code: 'return null;', cron: '0 */6 * * *' });
+  await task('rotate', { code: 'return null;', timeoutMs: 5_000 });
+  await prisma.scheduledTask.create({ data: { slug: 'foreign-job', workspaceId: FOREIGN_USER, name: 'Foreign', kind: 'program', code: 'return null;' } });
 
   const run = (id: string, slug: string, startedAt: Date, data: Record<string, unknown> = {}) =>
     prisma.jobRun.create({ data: { id, workspaceId: stand.workspaceId, slug, command: 'df -h', trigger: 'cron', status: 'ok', exitCode: 0, startedAt, finishedAt: new Date(startedAt.getTime() + 1_500), durationMs: 1_500, ...data } });
@@ -76,13 +65,13 @@ async function scheduleEvents(): Promise<{ type: string; actor: string; threadId
 }
 
 // Waits for the detached job to settle its journal row.
-async function settledRun(id: string): Promise<JobRunResponse['run']> {
+async function settledRun(id: string): Promise<ScheduleRunResponse['run']> {
   for (let i = 0; i < 200; i += 1) {
     const reply = await stand.request('GET', `/api/schedule/runs/${id}`);
 
     assert.equal(reply.status, 200, reply.text);
 
-    const { run } = reply.json<JobRunResponse>();
+    const { run } = reply.json<ScheduleRunResponse>();
 
     if (run.status !== 'running') {
       return run;
@@ -100,7 +89,7 @@ describe('the run journal over the api', () => {
 
     assert.equal(reply.status, 200, reply.text);
 
-    const { runs, nextCursor } = reply.json<JobRunsResponse>();
+    const { runs, nextCursor } = reply.json<ScheduleRunsResponse>();
 
     assert.deepEqual(
       runs.map(run => run.id),
@@ -112,12 +101,10 @@ describe('the run journal over the api', () => {
       slug: 'disk-check',
       trigger: 'cron',
       status: 'timeout',
-      exitCode: null,
+      hasValue: false,
       startedAt: at(20),
       finishedAt: new Date(at(20).getTime() + 1_500),
       durationMs: 5_000,
-      stdoutTruncated: true,
-      stderrTruncated: false,
     });
   });
 
@@ -126,26 +113,26 @@ describe('the run journal over the api', () => {
 
     assert.equal(first.status, 200, first.text);
 
-    const page1 = first.json<JobRunsResponse>();
+    const page1 = first.json<ScheduleRunsResponse>();
 
     assert.deepEqual(page1.runs.map(run => run.id), [RUNS.newest, RUNS.other]);
     assert.equal(page1.nextCursor, RUNS.other);
 
     const second = await stand.request('GET', `/api/schedule/runs?limit=2&before=${page1.nextCursor}`);
-    const page2 = second.json<JobRunsResponse>();
+    const page2 = second.json<ScheduleRunsResponse>();
 
     assert.deepEqual(page2.runs.map(run => run.id), [RUNS.twinB, RUNS.twinA]);
     assert.equal(page2.nextCursor, RUNS.twinA);
 
     const third = await stand.request('GET', `/api/schedule/runs?limit=2&before=${page2.nextCursor}`);
-    const page3 = third.json<JobRunsResponse>();
+    const page3 = third.json<ScheduleRunsResponse>();
 
     assert.deepEqual(page3.runs.map(run => run.id), [RUNS.oldest]);
     assert.equal(page3.nextCursor, null);
 
     const nowhere = await stand.request('GET', `/api/schedule/runs?before=${RUNS.foreign}`);
 
-    assert.deepEqual(nowhere.json<JobRunsResponse>(), { runs: [], nextCursor: null });
+    assert.deepEqual(nowhere.json<ScheduleRunsResponse>(), { runs: [], nextCursor: null });
 
     const bad = await stand.request('GET', '/api/schedule/runs?limit=0');
 
@@ -156,11 +143,11 @@ describe('the run journal over the api', () => {
   test('slug narrows the page to one task', async () => {
     const reply = await stand.request('GET', '/api/schedule/runs?slug=echo-job');
 
-    assert.deepEqual(reply.json<JobRunsResponse>().runs.map(run => run.id), [RUNS.other]);
+    assert.deepEqual(reply.json<ScheduleRunsResponse>().runs.map(run => run.id), [RUNS.other]);
 
     const none = await stand.request('GET', '/api/schedule/runs?slug=foreign-job');
 
-    assert.deepEqual(none.json<JobRunsResponse>().runs, []);
+    assert.deepEqual(none.json<ScheduleRunsResponse>().runs, []);
   });
 
   test('GET /schedule/runs/latest answers the newest run of every task, newest first', async () => {
@@ -168,7 +155,7 @@ describe('the run journal over the api', () => {
 
     assert.equal(reply.status, 200, reply.text);
     assert.deepEqual(
-      reply.json<LatestJobRunsResponse>().runs.map(run => [run.slug, run.id]),
+      reply.json<LatestScheduleRunsResponse>().runs.map(run => [run.slug, run.id]),
       [
         ['disk-check', RUNS.newest],
         ['echo-job', RUNS.other],
@@ -181,14 +168,12 @@ describe('the run journal over the api', () => {
 
     assert.equal(reply.status, 200, reply.text);
 
-    const { run } = reply.json<JobRunResponse>();
+    const { run } = reply.json<ScheduleRunResponse>();
 
-    assert.equal(run.command, 'df -h');
-    assert.equal(run.cwd, null);
-    assert.equal(run.stdoutTail, 'Filesystem Size Used\n');
-    assert.equal(run.stderrTail, 'df: /mnt: No such file or directory\n');
+    assert.match(run.code, /workspace_run_command.*df -h/);
+    assert.equal(run.console, 'Filesystem Size Used\ndf: /mnt: No such file or directory\n');
     assert.equal(run.status, 'failed');
-    assert.equal(run.exitCode, 1);
+    assert.match(run.error ?? '', /exited with code 1/);
 
     const foreign = await stand.request('GET', `/api/schedule/runs/${RUNS.foreign}`);
 
@@ -221,7 +206,7 @@ describe('running and deleting a task over the api', () => {
     assert.ok(await prisma.scheduledTask.findUnique({ where: { slug: 'remind' } }), 'a manual run does not consume the one-shot');
   });
 
-  test('a command task fired by hand runs in the file area and settles its journal row with both tails', async () => {
+  test('a program fired by hand settles its journal row with its code, value and console', async () => {
     const reply = await stand.request('POST', '/api/schedule/tasks/echo-job/run');
 
     assert.equal(reply.status, 200, reply.text);
@@ -234,29 +219,22 @@ describe('running and deleting a task over the api', () => {
     const run = await settledRun(runId);
 
     assert.equal(run.status, 'ok', JSON.stringify(run));
-    assert.equal(run.exitCode, 0);
+    assert.equal(run.value, null);
     assert.equal(run.trigger, 'manual');
     assert.equal(run.slug, 'echo-job');
-    assert.equal(run.stdoutTail, 'hello\n');
-    assert.equal(run.stderrTail, 'warn\n');
-    assert.equal(run.command, "printf 'hello\\n'; printf 'warn\\n' >&2");
+    assert.match(run.console, /hello/);
+    assert.equal(run.code, 'console.log("hello"); return null;');
     assert.ok(run.finishedAt instanceof Date && run.durationMs !== null);
 
     const latest = await stand.request('GET', '/api/schedule/runs/latest');
 
-    assert.equal(latest.json<LatestJobRunsResponse>().runs[0]?.id, runId, 'the manual run is the newest of its task');
+    assert.equal(latest.json<LatestScheduleRunsResponse>().runs[0]?.id, runId, 'the manual run is the newest of its task');
 
     // A silent success writes no event: the journal alone knows it.
     assert.equal((await scheduleEvents()).length, 1);
   });
 
-  test('a sleeping code task, an unknown slug and a task of another workspace are refused', async () => {
-    const sleeping = await stand.request('POST', '/api/schedule/tasks/sleeper/run');
-
-    assert.equal(sleeping.status, 409);
-    assert.equal(sleeping.json<ErrorBody>().error.code, 'task_sleeping');
-    assert.match(sleeping.json<ErrorBody>().error.message, /is sleeping/);
-
+  test('an unknown slug and a task of another workspace are refused', async () => {
     const unknown = await stand.request('POST', '/api/schedule/tasks/no-such-task/run');
 
     assert.equal(unknown.status, 404);
@@ -283,7 +261,7 @@ describe('running and deleting a task over the api', () => {
     const { task } = reply.json<DeleteTaskResponse>();
 
     assert.equal(task.slug, 'disk-check');
-    assert.equal(task.kind, 'command');
+    assert.equal(task.kind, 'program');
     assert.equal(task.cron, '0 */6 * * *');
     assert.ok(task.nextRunAt instanceof Date);
     assert.equal(await prisma.scheduledTask.findUnique({ where: { slug: 'disk-check' } }), null);
@@ -301,7 +279,7 @@ describe('running and deleting a task over the api', () => {
     // The journal of the deleted task stays readable.
     const runs = await stand.request('GET', '/api/schedule/runs?slug=disk-check');
 
-    assert.equal(runs.json<JobRunsResponse>().runs.length, 4);
+    assert.equal(runs.json<ScheduleRunsResponse>().runs.length, 4);
 
     const again = await stand.request('DELETE', '/api/schedule/tasks/disk-check');
 
@@ -316,7 +294,7 @@ describe('running and deleting a task over the api', () => {
     // Another hand edits the task the way the tools do: cancel and create again under the same slug.
     await prisma.scheduledTask.delete({ where: { id: before.id } });
 
-    const after = await prisma.scheduledTask.create({ data: { slug: 'rotate', workspaceId: stand.workspaceId, name: 'rotate (edited)', kind: 'command', command: 'exit 3', timeoutMs: 5_000 } });
+    const after = await prisma.scheduledTask.create({ data: { slug: 'rotate', workspaceId: stand.workspaceId, name: 'rotate (edited)', kind: 'program', code: 'return 3', timeoutMs: 5_000 } });
 
     assert.notEqual(after.id, before.id);
 
@@ -325,7 +303,7 @@ describe('running and deleting a task over the api', () => {
     assert.equal(run.status, 409, run.text);
     assert.equal(run.json<ErrorBody>().error.code, 'task_replaced');
     assert.match(run.json<ErrorBody>().error.message, /replaced/);
-    assert.equal(await prisma.jobRun.count({ where: { slug: 'rotate' } }), 0, 'the replacement did not run');
+    assert.equal(await prisma.scheduleRun.count({ where: { slug: 'rotate' } }), 0, 'the replacement did not run');
 
     const del = await stand.request('DELETE', `/api/schedule/tasks/rotate?taskId=${before.id}`);
 
@@ -348,7 +326,7 @@ describe('running and deleting a task over the api', () => {
     const { runId } = runNow.json<RunTaskResponse>();
 
     assert.ok(runId);
-    assert.equal((await settledRun(runId)).exitCode, 3, 'the row named ran, with its own command');
+    assert.equal((await settledRun(runId)).value, 3, 'the row named ran, with its own code');
 
     const delNow = await stand.request('DELETE', `/api/schedule/tasks/rotate?taskId=${after.id}`);
 
@@ -368,27 +346,26 @@ describe('running and deleting a task over the api', () => {
 describe('creating a task over the api', () => {
   const created = async () => (await scheduleEvents()).filter(event => event.type === 'schedule.task.created');
 
-  test('POST /schedule/tasks registers a command job by the operator: the row, its event in the same transaction, the answer the snapshot’s row', async () => {
+  test('POST /schedule/tasks registers a program by the operator: the row, its event in the same transaction, the answer the snapshot’s row', async () => {
     const reply = await stand.request('POST', '/api/schedule/tasks', {
-      body: { slug: 'console-job', name: 'Console job', description: 'Registered from the console', kind: 'command', cron: '30 4 * * *', command: "printf 'hi\\n'", cwd: null, timeoutMs: 5_000, reportOnSuccess: true },
+      body: { slug: 'console-job', name: 'Console job', description: 'Registered from the console', kind: 'program', cron: '30 4 * * *', code: 'return "hi"', timeoutMs: 5_000, wake: false },
     });
 
     assert.equal(reply.status, 200, reply.text);
 
-    const { task, sleeping } = reply.json<CreateTaskResponse>();
+    const { task } = reply.json<CreateTaskResponse>();
 
-    assert.equal(sleeping, false);
     assert.ok(task.nextRunAt instanceof Date && task.nextRunAt.getTime() > Date.now());
     assert.deepEqual(
       { ...task, id: typeof task.id, createdAt: task.createdAt instanceof Date, nextRunAt: 'date' },
-      { id: 'string', slug: 'console-job', name: 'Console job', description: 'Registered from the console', kind: 'command', cron: '30 4 * * *', at: null, note: null, code: null, timeoutMs: 5_000, wake: true, command: "printf 'hi\\n'", cwd: null, reportOnSuccess: true, createdBy: 'operator', createdAt: true, nextRunAt: 'date' },
+      { id: 'string', slug: 'console-job', name: 'Console job', description: 'Registered from the console', kind: 'program', cron: '30 4 * * *', at: null, note: null, code: 'return "hi"', timeoutMs: 5_000, wake: false, createdBy: 'operator', createdAt: true, nextRunAt: 'date' },
     );
 
     const row = await prisma.scheduledTask.findUniqueOrThrow({ where: { slug: 'console-job' } });
 
     assert.equal(row.workspaceId, stand.workspaceId);
     assert.equal(row.id, task.id);
-    assert.equal(row.cwd, null);
+    assert.equal(row.wake, false);
 
     const events = await created();
     const event = events[events.length - 1]!;
@@ -408,24 +385,23 @@ describe('creating a task over the api', () => {
     const settled = await settledRun(run.json<RunTaskResponse>().runId!);
 
     assert.equal(settled.status, 'ok');
-    assert.equal(settled.stdoutTail, 'hi\n');
+    assert.equal(settled.value, 'hi');
   });
 
-  test('a reminder with a one-shot instant and a code task without a body (it sleeps)', async () => {
+  test('a reminder with a one-shot instant and refusal of former task kinds', async () => {
     const note = await stand.request('POST', '/api/schedule/tasks', { body: { slug: 'console-note', name: 'Call', kind: 'note', note: 'Call the electrician', at: '2030-01-01T09:00:00+03:00' } });
 
     assert.equal(note.status, 200, note.text);
     assert.deepEqual(
-      { at: note.json<CreateTaskResponse>().task.at, nextRunAt: note.json<CreateTaskResponse>().task.nextRunAt, note: note.json<CreateTaskResponse>().task.note, sleeping: note.json<CreateTaskResponse>().sleeping },
-      { at: new Date('2030-01-01T06:00:00Z'), nextRunAt: new Date('2030-01-01T06:00:00Z'), note: 'Call the electrician', sleeping: false },
+      { at: note.json<CreateTaskResponse>().task.at, nextRunAt: note.json<CreateTaskResponse>().task.nextRunAt, note: note.json<CreateTaskResponse>().task.note },
+      { at: new Date('2030-01-01T06:00:00Z'), nextRunAt: new Date('2030-01-01T06:00:00Z'), note: 'Call the electrician' },
     );
 
     const code = await stand.request('POST', '/api/schedule/tasks', { body: { slug: 'console-code', name: 'Digest', kind: 'code' } });
 
-    assert.equal(code.status, 200, code.text);
-    assert.equal(code.json<CreateTaskResponse>().sleeping, true);
-    assert.equal(code.json<CreateTaskResponse>().task.nextRunAt, null);
-    assert.equal((await created()).length, 3);
+    assert.equal(code.status, 400, code.text);
+    assert.match(code.json<ErrorBody>().error.message, /^kind/);
+    assert.equal((await created()).length, 2);
   });
 
   test('refusals: a taken slug (of any workspace) is a conflict, a bad input a bad request naming its field, a cross-site call refused — nothing written', async () => {
@@ -445,9 +421,9 @@ describe('creating a task over the api', () => {
     for (const [body, field] of [
       [{ slug: 'x', kind: 'note', note: 'n' }, /^name is required/],
       [{ slug: 'Bad', name: 'n', kind: 'note', note: 'n' }, /^slug must match/],
-      [{ slug: 'x', name: 'n', kind: 'command' }, /^command is required/],
-      [{ slug: 'x', name: 'n', kind: 'command', command: 'true', cwd: '../up' }, /^cwd: /],
-      [{ slug: 'x', name: 'n', kind: 'command', command: 'true', timeoutMs: 10 }, /^timeoutMs must be/],
+      [{ slug: 'x', name: 'n', kind: 'command' }, /^kind must be/],
+      [{ slug: 'x', name: 'n', kind: 'program' }, /^code is required/],
+      [{ slug: 'x', name: 'n', kind: 'program', code: 'return null', timeoutMs: 10 }, /^timeoutMs must be/],
       [{ slug: 'x', name: 'n', kind: 'note', note: 'n', cron: 'nope' }, /^cron expression "nope" is invalid/],
       [{ slug: 'x', name: 'n', kind: 'note', note: 'n', at: '2030-01-01T09:00' }, /^at must be an ISO 8601 instant/],
       [{ slug: 'x', name: 'n', kind: 'note' }, /^note is required/],

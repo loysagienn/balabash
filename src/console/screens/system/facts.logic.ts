@@ -134,10 +134,10 @@ export function processUptimeWords(startedAt: Date, now: Date): string {
   return `${durationLabel(now.getTime() - startedAt.getTime())} · since ${dateTimeLabel(startedAt, now)}`;
 }
 
-// "4 live · 1 workspace job" — the runs alive in the process, every
+// "4 live · 1 program" — the runs alive in the process, every
 // workspace's (the sidebar counts this workspace's active threads instead).
-export function sessionsWords(process: Pick<ProcessView, 'liveSessions' | 'workspaceJobs'>): string {
-  return `${process.liveSessions} live · ${countOf(process.workspaceJobs, 'workspace job')}`;
+export function sessionsWords(process: Pick<ProcessView, 'liveSessions' | 'runningPrograms'>): string {
+  return `${process.liveSessions} live · ${countOf(process.runningPrograms, 'program')}`;
 }
 
 export type VersionWords = {
@@ -195,8 +195,11 @@ function waitWords(waiting: NonNullable<PendingRestartView['waiting']>): string 
   if (waiting.secretaryTurn) {
     reasons.push('a secretary turn to end');
   }
-  if (waiting.workspaceJob) {
-    reasons.push('a workspace job to end');
+  if (waiting.programWork) {
+    reasons.push('programs and commands to finish');
+  }
+  if (waiting.remoteWork) {
+    reasons.push('the remote engine to finish pending work');
   }
   if (!waiting.logQuiet) {
     reasons.push('the log to go quiet');

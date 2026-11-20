@@ -4,18 +4,16 @@
 // inside the bundle. Node runs .ts files natively (type stripping), and an
 // import() of a path computed at runtime is left alone by esbuild, so an
 // extension needs no build: a tool or a server config is picked up at the
-// next boot, a task body at its next fire.
+// next boot.
 //
 //   data/tools/<name>.ts                      in-process tool server, export start(ctx)
 //   data/mcp-servers/<name>.json              external MCP server config
 //   data/remote-agents/<name>.ts              remote agent kind: export start(ctx) →
 //                                             RemoteAgentDeclaration (remote-agent-source.ts,
 //                                             the driver contract in src/core/contract.ts)
-//   data/workspace/<workspaceId>/tasks/<slug>.ts   scheduled task body, export run(ctx)
 //
 // Tools, server configs and remote agent kinds are installation-wide (shared
-// by every workspace, like the repository's tools/ and mcp-servers/); a task
-// is a workspace notion and lives with the workspace. Names never shadow the repository's:
+// by every workspace, like the repository's tools/ and mcp-servers/). Names never shadow the repository's:
 // a clash is a loud error. The contract of an extension module is the same
 // as its repository twin's, with one rule: no runtime imports from the
 // repository tree — packages from node_modules and `import type` only;

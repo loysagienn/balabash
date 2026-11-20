@@ -43,7 +43,7 @@ Setup and operation: [SETUP.md](SETUP.md). Working on the code: [DEVELOPMENT.md]
 | 🤖 **codex** | The manager on OpenAI Codex: the same brief, tools and workbench, run as a Codex session. |
 | 🛠 **engineer** | Software engineering on the host with the native toolset (shell, files, web, git) in whatever repository a task or a project points to — Balabash's own included, where it builds and requests a restart of itself. |
 | 📐 **architect** | Architectural reasoning and audits at maximum reasoning effort; advises, never implements. |
-| ⏰ **scheduler** | Engineers scheduled tasks that need code: workspace jobs and `run(ctx)` bodies. |
+| ⏰ **scheduler** | Engineers scheduled tasks that need code: programs and the workspace scripts they call. |
 | 🎨 **designer** | Design work in Claude Design on claude.ai (Artifacts): design canvases of UI screens, landing pages and option boards, design systems, decks; verifies its renders in its own browser with a fresh-eyes verifier. |
 | 🌿 **gardener** | One care pass over a project library: drains the inbox into the settled files and the journal, consolidates, reports every removal. |
 | 🔑 **auth** | Connects, re-authorizes and provisions integrations. Sends links only — credential values never pass through it. |

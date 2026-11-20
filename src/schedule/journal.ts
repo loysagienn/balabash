@@ -16,35 +16,9 @@ import type { Prisma } from '../../prisma-generated/client.ts';
 import { consoleTail } from '../catalog/index.ts';
 import type { JsonValue } from '../core/contract.ts';
 import { prisma } from '../db/client.ts';
-import type { RunTrigger } from './engine.ts';
-
-export type RunStatus = 'running' | 'ok' | 'failed' | 'timeout' | 'aborted';
+import type { RunRecord, RunStatus, RunSummary, RunTrigger } from './run-record.ts';
 
 export const RUN_STATUSES: readonly RunStatus[] = ['running', 'ok', 'failed', 'timeout', 'aborted'];
-
-// A run as a list carries it: without its code, its value and its console.
-export type RunSummary = {
-  id: string;
-  // The slug of the task as it was at fire time.
-  slug: string;
-  trigger: RunTrigger;
-  status: RunStatus;
-  startedAt: Date;
-  finishedAt: Date | null;
-  durationMs: number | null;
-  // The run returned a value other than null.
-  hasValue: boolean;
-};
-
-export type RunRecord = RunSummary & {
-  code: string;
-  value: JsonValue | null;
-  // What ended a failed or timed-out run: the kind of the error and its
-  // message, then its details when it has any.
-  error: string | null;
-  console: string;
-  consoleTruncated: boolean;
-};
 
 // Where a page ends and the next one starts: the journal is ordered by the
 // start of a run, the id tells apart two runs started in one millisecond.
@@ -211,4 +185,30 @@ export async function getRun(workspaceId: string, id: string): Promise<RunRecord
   const former = await prisma.jobRun.findFirst({ where: { id, workspaceId } });
 
   return former ? formerRun(former) : null;
+}
+
+// The console's page cursor is a run id. Look up its position without
+// loading the program or its output.
+export async function findRunPosition(workspaceId: string, id: string): Promise<RunPosition | null> {
+  const query = { where: { workspaceId, id }, select: { id: true, startedAt: true } };
+  return (await prisma.scheduleRun.findFirst(query)) ?? prisma.jobRun.findFirst(query);
+}
+
+// The task list needs one summary per slug, including tasks whose most
+// recent run is in the former journal. Keep the reduction in the database.
+export async function latestRuns(workspaceId: string): Promise<RunSummary[]> {
+  const rows = await prisma.$queryRaw<(SummaryRow & { hasValue: boolean })[]>`
+    SELECT DISTINCT ON (slug) id, slug, trigger, status, started_at AS "startedAt",
+      finished_at AS "finishedAt", duration_ms AS "durationMs", has_value AS "hasValue"
+    FROM (
+      SELECT id, slug, trigger, status, started_at, finished_at, duration_ms, has_value
+      FROM schedule_runs WHERE workspace_id = ${workspaceId}
+      UNION ALL
+      SELECT id, slug, trigger, status, started_at, finished_at, duration_ms, false
+      FROM job_runs WHERE workspace_id = ${workspaceId}
+    ) AS history
+    ORDER BY slug, started_at DESC, id DESC
+  `;
+
+  return rows.map(row => summary({ ...row, status: formerStatus(row.status) }, row.hasValue)).sort(newestFirst);
 }

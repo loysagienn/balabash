@@ -26,7 +26,6 @@ import { createRemoteToolServer } from './capabilities/remote-tools.ts';
 import { startReauthDetector } from './capabilities/reauth-detector.ts';
 import { loadToolServers, registerBuiltinToolServer } from './capabilities/tool-manager.ts';
 import { hasRunningWork, startTree, stopRunningWork } from './tree/index.ts';
-import { isAnyJobRunning, killRunningJobs, sweepAbortedJobRuns } from './schedule/former-kinds.ts';
 import { startScheduleHeart } from './schedule/heart.ts';
 import { hasUnsettledRuns, sweepAbortedRuns } from './schedule/programs.ts';
 import { startWorkspaceIndexer } from './workspace/indexer.ts';
@@ -97,10 +96,9 @@ if (tombstoned > 0) {
   console.log(`[app] tombstoned ${tombstoned} orphaned threads without a saved session`);
 }
 
-// Settle the previous process's running programs and former jobs as aborted
+// Settle the previous process's running programs as aborted
 // before the web, resumed threads or schedule can start new runs.
 await sweepAbortedRuns();
-await sweepAbortedJobRuns();
 
 // The files surface of the installation's extensions (local tool servers
 // and remote agent drivers): global — workspace scoping happens at the
@@ -256,8 +254,7 @@ if (ccr) {
 
 consumers.push(startReauthDetector());
 
-// The schedule heart: the word on sleeping code tasks, then the timer that
-// fires due triggers. Not a log consumer, but it stops like one.
+// The schedule heart fires due triggers. Not a log consumer, but it stops like one.
 consumers.push(startScheduleHeart());
 
 // The remote engine's heart: the remote threads' sessions read on their
@@ -296,9 +293,9 @@ consumers.push(
     // What runs outside any agent turn does not survive a restart — the runs
     // of programs with the calls and commands they started, a scheduled run
     // from the moment its task is taken until its outcome is journaled and
-    // told, and the former workspace jobs. The safe window waits for them.
+    // told. The safe window waits for them.
     // On shutdown we stop any work that is still running.
-    hasActiveJobs: () => isAnyJobRunning() || hasRunningWork() || hasUnsettledRuns(),
+    hasProgramWork: () => hasRunningWork() || hasUnsettledRuns(),
     // The remote engine's verbs in flight (its state is durable; a verb
     // half-way through is better finished than replayed).
     hasRemoteWork: isRemoteEngineBusy,
@@ -343,12 +340,8 @@ async function shutdown(code: number): Promise<void> {
     }
   }
 
-  // Runs do not survive a restart: the programs and the commands of the
-  // tree are stopped, the process groups of the former workspace jobs are
-  // killed (the in-flight completions journal 'aborted'; anything missed is
-  // settled by the boot sweep of the next process).
+  // Stop programs and commands. The next boot settles unfinished run records.
   stopRunningWork();
-  killRunningJobs();
 
   await prisma.$disconnect().catch(() => {});
 

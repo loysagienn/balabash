@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { ZONE_PENDING, atHint, changeTaskForm, cronFacts, cronFieldHint, cronHint, cwdError, fieldOfTaskFailure, initialTaskForm, instantInZone, parseTimeout, slugFromName, taskRequest, validateTaskForm, zoneNoteWords } from './taskForm.logic.ts';
+import { ZONE_PENDING, atHint, changeTaskForm, cronFacts, cronFieldHint, cronHint, fieldOfTaskFailure, initialTaskForm, instantInZone, parseTimeout, slugFromName, taskRequest, validateTaskForm, zoneNoteWords } from './taskForm.logic.ts';
 import type { TaskFormValues } from './taskForm.logic.ts';
 
 const NOW = new Date('2026-10-11T12:00:00Z');
 const ZONE = 'Europe/Moscow';
 
-const values = (patch: Partial<TaskFormValues> = {}): TaskFormValues => ({ ...initialTaskForm, name: 'DB backup', slug: 'db-backup', cron: '0 4 * * *', command: 'pg_dump', ...patch });
+const values = (patch: Partial<TaskFormValues> = {}): TaskFormValues => ({ ...initialTaskForm, name: 'DB backup', slug: 'db-backup', cron: '0 4 * * *', code: 'return null;', ...patch });
 
 describe('the slug follows the name', () => {
   it('slugFromName', () => {
@@ -23,7 +23,7 @@ describe('the slug follows the name', () => {
     form = changeTaskForm(form, 'slug', 'backup');
     form = changeTaskForm(form, 'name', 'DB backup nightly');
     assert.equal(form.slug, 'backup');
-    assert.equal(changeTaskForm(form, 'reportOnSuccess', true).reportOnSuccess, true);
+    assert.equal(changeTaskForm(form, 'wake', false).wake, false);
   });
 });
 
@@ -84,18 +84,17 @@ describe('the schedule spelled out', () => {
 });
 
 describe('the checks before the call', () => {
-  it('a command job on a schedule passes; every missing or broken field names itself', () => {
+  it('a program on a schedule passes; every missing or broken field names itself', () => {
     assert.deepEqual(validateTaskForm(values(), NOW, ZONE), {});
-    assert.deepEqual(validateTaskForm(values({ name: ' ', slug: '', cron: '', command: '' }), NOW, ZONE), {
+    assert.deepEqual(validateTaskForm(values({ name: ' ', slug: '', cron: '', code: '' }), NOW, ZONE), {
       name: 'A name is required.',
       slug: 'A slug is required.',
       cron: 'A cron expression is required: minute, hour, day of month, month, day of week.',
-      command: 'A command is required — it is what the trigger runs (bash -c).',
+      code: 'Program code is required.',
     });
-    assert.deepEqual(validateTaskForm(values({ slug: 'Bad Slug', cron: 'nope', cwd: '../up', timeout: '90' }), NOW, ZONE), {
+    assert.deepEqual(validateTaskForm(values({ slug: 'Bad Slug', cron: 'nope', timeout: '90' }), NOW, ZONE), {
       slug: 'Lowercase letters, digits, dashes and underscores, starting with a letter.',
       cron: 'Not a cron expression croner reads, or one with no future moment.',
-      cwd: 'No “..”, “.” or empty parts in the path.',
       timeout: 'Write it with units: 10m, 1h 30m, 45s.',
     });
     assert.deepEqual(validateTaskForm(values({ name: 'n'.repeat(201), slug: 'a'.repeat(65), description: 'd'.repeat(2001) }), NOW, ZONE), {
@@ -110,40 +109,30 @@ describe('the checks before the call', () => {
     assert.deepEqual(validateTaskForm(values({ when: 'at', at: '2026-10-13' }), NOW, ZONE), { at: 'A date and a time of day.' });
     assert.deepEqual(validateTaskForm(values({ when: 'at', at: '2026-10-13T10:00' }), NOW, ZONE), {});
     assert.deepEqual(validateTaskForm(values({ when: 'manual', cron: '' }), NOW, ZONE), {});
-    assert.deepEqual(validateTaskForm(values({ kind: 'note', command: '', note: '' }), NOW, ZONE), { note: 'A note is required — it is what the secretary acts on.' });
-    assert.deepEqual(validateTaskForm(values({ kind: 'code', command: '', cwd: '/abs', timeout: 'x' }), NOW, ZONE), {}, 'the command fields are not checked for another kind');
+    assert.deepEqual(validateTaskForm(values({ kind: 'note', code: '', note: '' }), NOW, ZONE), { note: 'A note is required — it is what the secretary acts on.' });
+    assert.deepEqual(validateTaskForm(values({ kind: 'note', note: 'Call', code: '', timeout: 'x' }), NOW, ZONE), {}, 'the program fields are not checked for another kind');
   });
 
-  it('cwdError', () => {
-    assert.equal(cwdError(''), null);
-    assert.equal(cwdError('ops/'), null);
-    assert.equal(cwdError('./'), null);
-    assert.equal(cwdError('./ops'), null);
-    assert.equal(cwdError('/srv'), 'A folder of the file area, relative to its root.');
-    assert.equal(cwdError('C:\\x'), 'A folder of the file area, relative to its root.');
-    assert.equal(cwdError('a//b'), 'No “..”, “.” or empty parts in the path.');
-  });
 });
 
 describe('the request the form sends', () => {
-  it('a command job: trimmed, the timeout in milliseconds, the folder without "./"', () => {
-    assert.deepEqual(taskRequest(values({ name: ' DB backup ', description: ' nightly ', cwd: './ops/', timeout: '10m', reportOnSuccess: true }), ZONE), {
+  it('a program: trimmed name and description, timeout in milliseconds', () => {
+    assert.deepEqual(taskRequest(values({ name: ' DB backup ', description: ' nightly ', timeout: '10m', wake: true }), ZONE), {
       slug: 'db-backup',
       name: 'DB backup',
       description: 'nightly',
-      kind: 'command',
+      kind: 'program',
       cron: '0 4 * * *',
       at: null,
       note: null,
-      command: 'pg_dump',
-      cwd: 'ops',
+      code: 'return null;',
       timeoutMs: 600_000,
-      reportOnSuccess: true,
+      wake: true,
     });
   });
 
-  it('a reminder once: the moment as an instant of the zone, the command fields null', () => {
-    assert.deepEqual(taskRequest(values({ kind: 'note', when: 'at', at: '2026-10-13T10:00', note: ' Call ', command: 'x', cwd: 'y', timeout: '1h', reportOnSuccess: true }), ZONE), {
+  it('a reminder once: the moment as an instant of the zone, the program fields null', () => {
+    assert.deepEqual(taskRequest(values({ kind: 'note', when: 'at', at: '2026-10-13T10:00', note: ' Call ', code: 'x', timeout: '1h', wake: true }), ZONE), {
       slug: 'db-backup',
       name: 'DB backup',
       description: null,
@@ -151,19 +140,18 @@ describe('the request the form sends', () => {
       cron: null,
       at: '2026-10-13T07:00:00.000Z',
       note: 'Call',
-      command: null,
-      cwd: null,
+      code: null,
       timeoutMs: null,
-      reportOnSuccess: false,
+      wake: true,
     });
   });
 
-  it('a code task, manual only', () => {
-    const request = taskRequest(values({ kind: 'code', when: 'manual' }), ZONE);
+  it('a program, manual only', () => {
+    const request = taskRequest(values({ kind: 'program', when: 'manual' }), ZONE);
 
     assert.equal(request.cron, null);
     assert.equal(request.at, null);
-    assert.equal(request.command, null);
+    assert.equal(request.code, 'return null;');
     assert.equal(request.timeoutMs, null);
   });
 });
@@ -175,12 +163,10 @@ describe('the field a server refusal belongs to', () => {
     assert.equal(fieldOfTaskFailure('name is required'), 'name');
     assert.equal(fieldOfTaskFailure('cron expression "x" is invalid: …'), 'cron');
     assert.equal(fieldOfTaskFailure('at must be an ISO 8601 instant with an explicit offset'), 'at');
-    assert.equal(fieldOfTaskFailure('cwd: The cwd must not contain ".."'), 'cwd');
     assert.equal(fieldOfTaskFailure('timeoutMs must be an integer between 1000 and 18000000'), 'timeout');
     assert.equal(fieldOfTaskFailure('note is required for kind "note"'), 'note');
-    assert.equal(fieldOfTaskFailure('command is required for kind "command"'), 'command');
-    assert.equal(fieldOfTaskFailure('command, cwd, timeoutMs and reportOnSuccess apply only to kind "command"'), 'command');
-    assert.equal(fieldOfTaskFailure('kind must be "note", "code" or "command"'), null);
+    assert.equal(fieldOfTaskFailure('code does not parse at line 2'), 'code');
+    assert.equal(fieldOfTaskFailure('kind must be "note" or "program"'), null);
     assert.equal(fieldOfTaskFailure('No such endpoint'), null);
   });
 });

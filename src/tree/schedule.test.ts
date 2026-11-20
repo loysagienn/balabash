@@ -156,18 +156,16 @@ describe('the registry of tasks', () => {
       slug, name: 'Overdue', kind: 'note', note: 'Call today', at: '2020-01-01T00:00:00Z',
     });
 
-    const { startScheduleHeart } = await import('../schedule/heart.ts');
-    const heart = startScheduleHeart();
+    const { createSchedulePass } = await import('../schedule/heart.ts');
+    const pass = createSchedulePass();
+    await pass();
+    await pass();
 
-    try {
-      const fired = await until(async () => (await eventsOf('schedule.fired', slug))[0], 'the overdue note');
-
-      assert.equal(fired.targetThreadId, stand.mainThreadId);
-      assert.equal((fired.payload as JsonObject).note, 'Call today');
-      assert.equal(await prisma.scheduledTask.count({ where: { workspaceId: stand.workspaceId, slug } }), 0);
-    } finally {
-      heart.stop();
-    }
+    const fired = await eventsOf('schedule.fired', slug);
+    assert.equal(fired.length, 1);
+    assert.equal(fired[0]?.targetThreadId, stand.mainThreadId);
+    assert.equal((fired[0]?.payload as JsonObject).note, 'Call today');
+    assert.equal(await prisma.scheduledTask.count({ where: { workspaceId: stand.workspaceId, slug } }), 0);
   });
 
   test('registers a program with its code, its limit of time and a cron resolved to the next moment', async () => {
@@ -198,8 +196,7 @@ describe('the registry of tasks', () => {
     assert.equal(plain.nextRunAt, null);
   });
 
-  test('lists the tasks of the workspace oldest first with the timezone; a row of a former kind and a foreign task are not there', async () => {
-    await prisma.scheduledTask.create({ data: { slug: 'old-job', workspaceId: stand.workspaceId, name: 'Old job', kind: 'command', command: 'true' } });
+  test('lists the tasks of the workspace oldest first with the timezone; a foreign task is absent', async () => {
     await invoke('schedule_create_task', { slug: 'theirs', name: 'Theirs', kind: 'note', note: 'x' }, foreign.grant);
 
     const { timezone, tasks } = await invoke('schedule_list_tasks', {});
@@ -633,4 +630,24 @@ describe('the journal of runs', () => {
     await refuses(invoke('schedule_get_run', { runId: ids.p1 }, foreign.grant), 'not_found', /no journaled run/);
     await refuses(invoke('schedule_get_run', { runId: 'nothing' }), 'not_found', /no journaled run with the id "nothing"/);
   });
+});
+
+test('the session schedule tools register a program, start it and read its journal', async () => {
+  const { createScheduleToolServer } = await import('../schedule/tools.ts');
+  const tools = createScheduleToolServer();
+  const ctx = { workspaceId: stand.workspaceId, threadId: stand.mainThreadId };
+  const slug = 'session-program';
+  await tools.call('create_task', { slug, name: 'Session program', kind: 'program', code: 'return false', wake: false }, ctx);
+  const started = await tools.call('run_task', { slug }, ctx);
+  const runId = String(started).match(/runId ([\w-]+)/)?.[1];
+  assert.ok(runId);
+  await ended(runId);
+
+  const listed = JSON.parse(String(await tools.call('list_job_runs', { slug }, ctx)));
+  assert.equal(listed[0].id, runId);
+  const run = JSON.parse(String(await tools.call('get_job_run', { runId }, ctx)));
+  assert.equal(run.status, 'ok');
+  assert.equal(run.value, false);
+  const delivery = await until(async () => (await eventsOf('schedule.fired', slug))[0], 'program delivery');
+  assert.equal((delivery.payload as JsonObject).wake, false);
 });

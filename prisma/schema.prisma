@@ -422,21 +422,14 @@ model LlmRequest {
 // at (one-shot, "not before T" — fired once and the row is deleted); a task
 // with neither is a stored procedure started manually via run_task. kind
 // 'note' carries data that fires as a schedule.fired event into the main
-// thread; kind 'code' names a run(ctx) body in the static tasks/ catalog (a
-// row without a body in the current process sleeps until a rebuild+restart);
-// kind 'command' is a workspace job — a shell command run in the workspace
-// file area, armed from the moment the row exists (no build, no restart, no
-// sleeping). note/code runs leave no rows behind — a task's only memory is
-// the events it pushes; command runs are journaled in JobRun.
+// thread; kind 'program' runs its code and journals every run in ScheduleRun.
 model ScheduledTask {
   id              String    @id @default(uuid())
   slug            String    @unique
   workspaceId     String    @map("workspace_id")
   name            String
   description     String?
-  // 'note' | 'program'. A row of a former kind ('code' | 'command') is run
-  // by the former executor (src/schedule/former-kinds.ts) until the registry
-  // is moved to programs.
+  // 'note' | 'program'.
   kind            String
   cron            String? // cron expression, evaluated in config.scheduleTimezone
   at              DateTime? // one-shot "not before T"; consumed on fire
@@ -499,17 +492,8 @@ model ScheduleRun {
   @@map("schedule_runs")
 }
 
-// Run journal of workspace jobs (the former kind 'command' of scheduled tasks;
-// read next to schedule_runs, src/schedule/journal.ts) — operational
-// telemetry in the platform database, deliberately NOT in workspace.sqlite
-// (fate-sharing: a job that corrupts or locks the workspace database must not
-// take the record of that very run down with it) and deliberately outside the
-// event log (the LlmRequest pattern: machinery telemetry, not domain
-// history). Rows are written fire-and-forget — a failed insert/update never
-// affects the run; the id is generated before the insert so run_task can
-// return it regardless. command/cwd are snapshots of the registry row at fire
-// time: a one-shot task's row is deleted before the run, and a recreated slug
-// may carry a different command — the journal keeps what actually executed.
+// Historical command runs. The shared journal reads their command, exit and
+// output snapshots alongside program runs until the data migration.
 model JobRun {
   id          String @id
   workspaceId String @map("workspace_id")

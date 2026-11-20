@@ -1,8 +1,8 @@
-// The run journal (job_runs, read by place under the keys of
+// The run journal (read by place under the keys of
 // screens/schedule/queries.ts) against the store: the journal is telemetry
 // outside the log, so no event carries a run — but the store does learn
-// when it moved (schedule.runsChanged: a manual run of a command job
-// accepted, a job that reported through the log — store/schedule/reducer.ts),
+// when it moved (schedule.runsChanged: a manual run of a scheduled program
+// accepted, a run that reported through the log — store/schedule/reducer.ts),
 // and this process invalidates every journal query on it: a mounted list
 // refetches at once and shows the new row, one left in the cache refetches
 // on its next mount. Lives for the tab, only invalidates — a process, not
@@ -18,7 +18,7 @@ export type InvalidatingQueryClient = Pick<QueryClient, 'invalidateQueries'>;
 // The prefix of every query of the journal (screens/schedule/queries.ts
 // builds its keys on it) — the process invalidates by it. Kept here, out of
 // the .tsx graph, so the rule is testable under node:test.
-export const JOB_RUNS_KEY = ['job-runs'] as const;
+export const SCHEDULE_RUNS_KEY = ['schedule-runs'] as const;
 
 export function connectQueryClientToSchedule(store: Store<State, Action>, queryClient: InvalidatingQueryClient): () => void {
   let known = store.getState().schedule.runsChanged;
@@ -31,6 +31,6 @@ export function connectQueryClientToSchedule(store: Store<State, Action>, queryC
     }
 
     known = now;
-    void queryClient.invalidateQueries({ queryKey: JOB_RUNS_KEY });
+    void queryClient.invalidateQueries({ queryKey: SCHEDULE_RUNS_KEY });
   });
 }

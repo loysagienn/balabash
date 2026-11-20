@@ -46,8 +46,8 @@ import { appendEvent, storablePayload } from '../core/append.ts';
 import type { JsonObject, Thread } from '../core/contract.ts';
 import { SYSTEM_EXCEPTION } from '../core/envelope.ts';
 import { prisma } from '../db/client.ts';
-import type { FireOutcome, RunTrigger } from './engine.ts';
-import { claimTask, releaseTask } from './running.ts';
+import type { FireOutcome } from './engine.ts';
+import type { RunTrigger } from './run-record.ts';
 
 // The limit of time of one run, in the registry row's milliseconds: what a
 // task may ask for, and what it gets when it asked for nothing.
@@ -68,17 +68,21 @@ export function setProgramHost(next: ProgramHost): void {
   host = next;
 }
 
-// The launches of this process in flight, by the id of the run: from the
+// The launches of this process in flight, by task slug and run id: from the
 // moment a task is taken — before its row is written — until its outcome is
 // in the journal and with the main thread. The process of a run may not be
 // there yet, or be gone already, while the row is being written and the
 // value is on the way into the log: a restart that did not wait for that
 // would leave a taken moment without a run, or a finished run 'aborted' and
 // its value untold.
-const inFlight = new Set<string>();
+const runsBySlug = new Map<string, string>();
+
+export function isTaskRunning(slug: string): boolean {
+  return runsBySlug.has(slug);
+}
 
 export function hasUnsettledRuns(): boolean {
-  return inFlight.size > 0;
+  return runsBySlug.size > 0;
 }
 
 // What a scheduled program is cut off from, whatever else the tree holds.
@@ -265,7 +269,7 @@ export async function fireProgramTask(
   main: Thread,
   pushFired: (payload: JsonObject) => Promise<void>,
 ): Promise<FireOutcome> {
-  if (!claimTask(task.slug)) {
+  if (isTaskRunning(task.slug)) {
     return { kind: 'already_running' };
   }
 
@@ -277,11 +281,10 @@ export async function fireProgramTask(
   // In flight from here, before the first wait; over when the outcome is
   // journaled and told — only then is the task free for its next run: a
   // program that reads its previous value from the journal finds it there.
-  inFlight.add(start.id);
+  runsBySlug.set(task.slug, start.id);
 
   const over = () => {
-    inFlight.delete(start.id);
-    releaseTask(task.slug);
+    runsBySlug.delete(task.slug);
   };
 
   try {
@@ -311,7 +314,7 @@ export async function fireProgramTask(
 export async function sweepAbortedRuns(): Promise<void> {
   try {
     const { count } = await prisma.scheduleRun.updateMany({
-      where: { status: 'running', id: { notIn: [...inFlight] } },
+      where: { status: 'running', id: { notIn: [...runsBySlug.values()] } },
       data: { status: 'aborted', finishedAt: new Date() },
     });
 

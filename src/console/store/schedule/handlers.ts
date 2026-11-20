@@ -8,11 +8,8 @@
 // the form state for the form to show. One call per task at a time (schedule.calls[slug]), the
 // outcome applied by the identity of that call — an answer that outlived
 // its session (a sign-out, the next sign-in) touches nothing. A run's
-// outcome is told by a toast in the task's own words — a command job's run
-// started (its journal row is read by place), a note landed in the main
-// thread, a code task runs on its own, a run still going burns this one —
-// and so is a refusal (a sleeping code task, a missing task, a slug held
-// by another row than the card showed). A delete
+// outcome is told by a toast: program started, note delivered, run skipped
+// or refusal from the registry. A delete
 // drops the row and, when the operator is looking at that very task, leads
 // back to the list: the detail of a deleted task has nothing to show.
 

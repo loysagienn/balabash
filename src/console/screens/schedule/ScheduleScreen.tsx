@@ -5,7 +5,7 @@
 // on the phone (the task is a detail screen there); the selection, the
 // tab and the search are the route. Each row: the kind, the schedule
 // spelled out with its expression, the last run (the newest run of every
-// command job, read by place — a reminder or a code task has no journal)
+// program task, read by place — a reminder has no journal)
 // and the next run, recomputed in the schedule's time zone (next-run.ts;
 // the zone comes with the Settings facts). A failed read of the latest
 // runs is told over the list (the rows then claim nothing about a last
@@ -14,7 +14,7 @@
 // phone too, where the named task hides the list.
 
 import type { MouseEvent } from 'react';
-import type { JobRunView, TaskView } from '../../../api/contract.ts';
+import type { ScheduleRunView, TaskView } from '../../../api/contract.ts';
 import type { ScheduleRoute } from '../../lib/router/routes.ts';
 import { useLinkTargets } from '../../lib/router/Link.tsx';
 import { useNow } from '../../lib/format/useNow.ts';
@@ -45,7 +45,7 @@ import { RunLog } from './RunLog.tsx';
 import { TaskDetail } from './TaskDetail.tsx';
 import { kindWords, lastRunWords, newTaskRoute, orderTasks, scheduleDetail, scheduleShell, taskMatches, triggerWords, whenLabel, withScheduleFilters } from './ScheduleScreen.logic.ts';
 import { nextRunOf } from './next-run.ts';
-import { useLatestJobRuns } from './queries.ts';
+import { useLatestScheduleRuns } from './queries.ts';
 import './ScheduleScreen.css';
 
 const SKELETON = [[55, 70], [40, 62], [48, 75], [36, 58]];
@@ -59,7 +59,7 @@ export function ScheduleScreen({ route }: { route: ScheduleRoute }) {
   const stage = snapshotStage(stream);
   const facts = useSettingsFacts();
   const timezone = facts.data?.scheduleTimezone ?? null;
-  const latest = useLatestJobRuns(stage === 'ready');
+  const latest = useLatestScheduleRuns(stage === 'ready');
   // The last run of a task: a row of the latest runs, null when the journal
   // knows none, undefined while the journal has not answered (nothing is
   // claimed then — "not run yet" would be a guess).
@@ -114,13 +114,13 @@ export function ScheduleScreen({ route }: { route: ScheduleRoute }) {
   } else if (tasks.length === 0) {
     list = (
       <Empty icon="calendar-clock" title="No tasks yet" action="Create a task" actionIcon="plus" onAction={create}>
-        A reminder, a script or a command on a schedule — create one here or ask an agent; it shows up with its next run.
+        A reminder or a program on a schedule — create one here or ask an agent; it shows up with its next run.
       </Empty>
     );
   } else if (visible.length === 0) {
     list = (
       <Empty icon="calendar-clock" title="No tasks match" action="Clear search" onAction={() => go({ q: undefined })}>
-        No task is named, described or commanded like “{route.q}”.
+        No task matches “{route.q}”.
       </Empty>
     );
   } else {
@@ -214,7 +214,7 @@ export function ScheduleScreen({ route }: { route: ScheduleRoute }) {
   );
 }
 
-function TaskRow({ task, nextRunAt, lastRun, current, now, href, onClick }: { task: TaskView; nextRunAt: Date | null; lastRun: JobRunView | null | undefined; current: boolean; now: Date; href: string; onClick: (event: MouseEvent<HTMLElement>) => void }) {
+function TaskRow({ task, nextRunAt, lastRun, current, now, href, onClick }: { task: TaskView; nextRunAt: Date | null; lastRun: ScheduleRunView | null | undefined; current: boolean; now: Date; href: string; onClick: (event: MouseEvent<HTMLElement>) => void }) {
   const kind = kindWords(task.kind);
   const trigger = triggerWords(task, now);
   const last = lastRun ? lastRunWords(lastRun, now) : null;
@@ -239,7 +239,7 @@ function TaskRow({ task, nextRunAt, lastRun, current, now, href, onClick }: { ta
       }
       end={
         <>
-          {last ? <Status state={last.state} label={last.label} /> : lastRun === null && task.kind === 'command' ? <Quiet>not run yet</Quiet> : null}
+          {last ? <Status state={last.state} label={last.label} /> : lastRun === null && task.kind === 'program' ? <Quiet>not run yet</Quiet> : null}
           {nextRunAt ? (
             <span className="row-time">
               {whenLabel(nextRunAt, now)}

@@ -1,13 +1,12 @@
 // One run as an expandable row (design: Xp in the Schedule's runs and
 // log): the state icon, the words of the run, and — opened — its output:
-// the command it ran, the stdout tail, the stderr tail in red, an honest
-// notice where a tail lost its beginning. The output is read when the row
+// the code, the console tail, the return value or error. The output is read when the row
 // opens (Xp mounts its body only then) — one run whole from the journal
-// (useJobRun); a run still going has no output yet and says so — it is
+// (useScheduleRun); a run still going has no output yet and says so — it is
 // read again while it goes, and a failed re-read is told over the output
 // read before (the words "still running" may be old by then).
 
-import type { JobRunDetailView, JobRunView } from '../../../api/contract.ts';
+import type { ScheduleRunDetailView, ScheduleRunView } from '../../../api/contract.ts';
 import { Btn } from '../../ui/Btn/Btn.tsx';
 import { Note } from '../../ui/Note/Note.tsx';
 import { Skel, SkelStack } from '../../ui/Skel/Skel.tsx';
@@ -15,9 +14,9 @@ import { Terminal, TermErr, TermLine, Trunc } from '../../ui/Terminal/Terminal.t
 import { Xp } from '../../ui/Xp/Xp.tsx';
 import { ErrorLine } from '../../ui/atoms/atoms.tsx';
 import type { RunRowWords } from './ScheduleScreen.logic.ts';
-import { useJobRun } from './queries.ts';
+import { useScheduleRun } from './queries.ts';
 
-export function RunRow({ run, words }: { run: JobRunView; words: RunRowWords }) {
+export function RunRow({ run, words }: { run: ScheduleRunView; words: RunRowWords }) {
   return (
     <Xp state={words.state} icon={words.icon} tool={words.tool} arg={words.arg} end={words.end} endState={words.endState}>
       <RunOutput id={run.id} />
@@ -27,31 +26,23 @@ export function RunRow({ run, words }: { run: JobRunView; words: RunRowWords }) 
 
 const lines = (text: string) => text.replace(/\n$/, '').split('\n');
 
-export function RunOutputBody({ run }: { run: JobRunDetailView }) {
-  const stdout = run.stdoutTail ? lines(run.stdoutTail) : [];
-  const stderr = run.stderrTail ? lines(run.stderrTail) : [];
-
+export function RunOutputBody({ run }: { run: ScheduleRunDetailView }) {
   return (
     <>
-      {run.stdoutTruncated || run.stderrTruncated ? <Trunc>{run.stdoutTruncated && run.stderrTruncated ? 'both streams were cut' : run.stdoutTruncated ? 'stdout was cut' : 'stderr was cut'} — the last 16 KiB are kept</Trunc> : null}
       <Terminal>
-        <TermLine dim>$ {run.command}</TermLine>
-        {stdout.map((line, i) => (
-          <TermLine key={`o${i}`}>{line}</TermLine>
-        ))}
-        {stderr.map((line, i) => (
-          <TermLine key={`e${i}`}>
-            <TermErr>{line}</TermErr>
-          </TermLine>
-        ))}
-        {stdout.length === 0 && stderr.length === 0 ? <TermLine dim>{run.status === 'running' ? 'still running — the output arrives when the run ends' : '(no output)'}</TermLine> : null}
+        <TermLine dim>{run.code}</TermLine>
+        {run.consoleTruncated ? <Trunc>Console truncated — last 16 KiB shown</Trunc> : null}
+        {run.console ? lines(run.console).map((line, i) => <TermLine key={i}>{line}</TermLine>) : null}
+        {run.error ? <TermLine><TermErr>{run.error}</TermErr></TermLine> : null}
+        {run.status === 'ok' ? <TermLine>Returned {JSON.stringify(run.value)}</TermLine> : null}
+        {run.status === 'running' ? <TermLine dim>Still running</TermLine> : null}
       </Terminal>
     </>
   );
 }
 
 function RunOutput({ id }: { id: string }) {
-  const query = useJobRun(id);
+  const query = useScheduleRun(id);
 
   if (query.data) {
     return (

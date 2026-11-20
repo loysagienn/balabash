@@ -29,8 +29,8 @@ accumulated before this existed are removed once with
 `npm run cleanup-sessions` (`scripts/AGENTS.md`).
 
 Code changes go live only through a restart. A requested restart waits for a
-safe window — no agent or secretary turn in flight, no running workspace job,
-20 s of log quiet; threads between turns keep their SDK sessions and resume
+safe window — no agent or secretary turn in flight, no running program or command,
+a settled remote engine and 20 s of log quiet; threads between turns keep their SDK sessions and resume
 after it. In production the process runs
 under `supervisor.js`, which reads exit codes alone: `42` — a restart was
 requested and the safe window reached, relaunch at once; `0` — stop; anything
@@ -120,11 +120,10 @@ from the bot's `/auth_code`. A Telegram group becomes a workspace with
 ## Extension points of an installation
 
 Code and configs of the installation live in `data/` and are picked up at
-boot (a task body at its fire) without a build — Node runs `.ts` natively:
+boot without a build — Node runs `.ts` natively:
 `data/tools/<name>.ts` (an in-process tool server, `export start(ctx)`),
 `data/mcp-servers/<name>.json` (an external MCP server), `data/remote-agents/
-<name>.ts` (a remote agent kind with its driver), `data/workspace/<id>/tasks/
-<slug>.ts` (a scheduled task body). Same contracts as their repository twins
+<name>.ts` (a remote agent kind with its driver). Same contracts as their repository twins
 (`src/capabilities/extensions.ts`); names never shadow the repository's; no
 runtime imports from the repository tree — packages and `import type` only,
 everything else arrives through `ctx`.

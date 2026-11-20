@@ -41,7 +41,7 @@ export function DeleteTaskDialog({ task, onClose }: { task: TaskView; onClose: (
       }}
       onClose={onClose}
     >
-      {task.kind === 'command' ? 'The task will no longer run. Its run log stays.' : 'The task will no longer run; its trigger is disarmed at once.'}
+      {task.kind === 'program' ? 'The task will no longer run. Its run log stays.' : 'The task will no longer run; its trigger is disarmed at once.'}
     </Confirm>
   );
 }

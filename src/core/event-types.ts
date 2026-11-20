@@ -381,9 +381,6 @@ export type TaskRecord = {
   code: string | null;
   timeoutMs: number | null;
   wake: boolean;
-  command: string | null;
-  cwd: string | null;
-  reportOnSuccess: boolean;
   createdBy: string | null;
   createdAt: string;
   nextRunAt: string | null;

@@ -9,15 +9,11 @@
 // yields a future moment, or an ISO 8601 instant with an explicit offset —
 // a naive timestamp is ambiguous), a note for kind "note", code that parses
 // for kind "program" with its limit of time in range; a field of another
-// kind is a confusion, not ignored. The former kinds keep their rules: a
-// command for kind "command" with its folder inside the file area and its
-// timeout in range. A wrong type is a refusal, never "not given".
+// kind is a confusion, not ignored. A wrong type is a refusal.
 
-import { WorkspacePathError, sanitizeRelPath } from '../workspace/files.ts';
 import { assertValidCron, cronNextRun } from './cron.ts';
 import { ScheduleError } from './errors.ts';
 import { programSyntaxProblem } from '../catalog/index.ts';
-import { JOB_TIMEOUT_DEFAULT_MS, JOB_TIMEOUT_MAX_MS, JOB_TIMEOUT_MIN_MS } from './former-kinds.ts';
 import { PROGRAM_TIMEOUT_DEFAULT_MS, PROGRAM_TIMEOUT_MAX_MS, PROGRAM_TIMEOUT_MIN_MS } from './programs.ts';
 
 export const SLUG_PATTERN = /^[a-z][a-z0-9_-]*$/;
@@ -27,13 +23,11 @@ export const SLUG_MAX_LENGTH = 64;
 export const NAME_MAX_LENGTH = 200;
 export const DESCRIPTION_MAX_LENGTH = 2_000;
 
-// 'note' and 'program' are the kinds of the scheme; 'code' and 'command' are
-// the former ones (former-kinds.ts).
-export type TaskKind = 'note' | 'program' | 'code' | 'command';
+export type TaskKind = 'note' | 'program';
 
 // The row to write: the trigger as the registry stores it (`at` an
 // instant), the note kept for kind "note" only, the code for kind "program"
-// only, the command fields null for the other kinds.
+// only.
 export type TaskInput = {
   slug: string;
   name: string;
@@ -45,9 +39,6 @@ export type TaskInput = {
   code: string | null;
   timeoutMs: number | null;
   wake: boolean;
-  command: string | null;
-  cwd: string | null;
-  reportOnSuccess: boolean;
 };
 
 // An ISO-8601 instant must carry an explicit offset (Z or ±hh:mm): a naive
@@ -105,7 +96,7 @@ export function parseTaskInput(raw: Record<string, unknown>, now = new Date()): 
 
   const kind = raw.kind;
 
-  if (kind !== 'note' && kind !== 'program' && kind !== 'code' && kind !== 'command') {
+  if (kind !== 'note' && kind !== 'program') {
     refuse('kind must be "note" or "program"');
   }
 
@@ -155,62 +146,19 @@ export function parseTaskInput(raw: Record<string, unknown>, now = new Date()): 
 
   const wake = raw.wake !== false;
 
-  // The fields of the former kind "command": validated and stored only for
-  // it; for other kinds a supplied value is rejected as confusion. The limit
-  // of time is a program's as well.
-  const command = text('command', raw.command);
-  const cwdRaw = text('cwd', raw.cwd);
   const timeoutRaw = raw.timeoutMs;
 
   if (timeoutRaw !== undefined && timeoutRaw !== null && typeof timeoutRaw !== 'number') {
     refuse('timeoutMs must be a number of milliseconds, or null for the default');
   }
 
-  if (raw.reportOnSuccess !== undefined && raw.reportOnSuccess !== null && typeof raw.reportOnSuccess !== 'boolean') {
-    refuse('reportOnSuccess must be a boolean');
-  }
-
-  const reportOnSuccess = raw.reportOnSuccess === true;
-  const timeoutGiven = typeof timeoutRaw === 'number';
-
-  if (kind === 'program' && (command || cwdRaw || reportOnSuccess)) {
-    refuse('command, cwd and reportOnSuccess do not apply to kind "program" — it has code and timeoutMs');
-  }
-
-  if (kind !== 'command' && kind !== 'program' && (command || cwdRaw || timeoutGiven || reportOnSuccess)) {
-    refuse(`command, cwd, timeoutMs and reportOnSuccess apply only to kind "command" — null them for kind "${kind}"`);
-  }
-
-  let cwd: string | null = null;
   let timeoutMs: number | null = null;
 
-  if (kind === 'command') {
-    if (!command) {
-      refuse('command is required for kind "command" — it is what the trigger executes (bash -c)');
+  if (typeof timeoutRaw === 'number') {
+    if (kind !== 'program') {
+      refuse('timeoutMs applies only to kind "program"');
     }
 
-    if (cwdRaw) {
-      try {
-        cwd = sanitizeRelPath(cwdRaw, 'cwd');
-      } catch (error) {
-        if (error instanceof WorkspacePathError) {
-          refuse(`cwd: ${error.message}`);
-        }
-
-        throw error;
-      }
-    }
-
-    if (timeoutGiven) {
-      if (!Number.isInteger(timeoutRaw) || timeoutRaw < JOB_TIMEOUT_MIN_MS || timeoutRaw > JOB_TIMEOUT_MAX_MS) {
-        refuse(`timeoutMs must be an integer between ${JOB_TIMEOUT_MIN_MS} and ${JOB_TIMEOUT_MAX_MS} (milliseconds), or null for the default ${JOB_TIMEOUT_DEFAULT_MS}`);
-      }
-
-      timeoutMs = timeoutRaw;
-    }
-  }
-
-  if (kind === 'program' && timeoutGiven) {
     if (!Number.isInteger(timeoutRaw) || timeoutRaw < PROGRAM_TIMEOUT_MIN_MS || timeoutRaw > PROGRAM_TIMEOUT_MAX_MS) {
       refuse(`timeoutMs must be an integer between ${PROGRAM_TIMEOUT_MIN_MS} and ${PROGRAM_TIMEOUT_MAX_MS} (milliseconds), or null for the default ${PROGRAM_TIMEOUT_DEFAULT_MS}`);
     }
@@ -251,14 +199,9 @@ export function parseTaskInput(raw: Record<string, unknown>, now = new Date()): 
     kind,
     cron,
     at,
-    // note is meaningless for a code body or a command — the registry does
-    // not keep it there.
-    note: kind === 'note' ? note : null,
+    note,
     code,
     timeoutMs,
     wake,
-    command: kind === 'command' ? command : null,
-    cwd,
-    reportOnSuccess,
   };
 }

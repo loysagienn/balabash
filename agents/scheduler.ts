@@ -1,9 +1,7 @@
 // Scheduler agent: the engineer of Balabash's scheduled tasks. A Claude
 // session with the full native tool preset working inside the Balabash
 // repository — like the engineer agent, but its charter is creating and
-// maintaining scheduled tasks: run(ctx) bodies in the workspace's tasks/
-// directory (live, no build) and their registry rows (create_task). Full
-// host access;
+// maintaining scheduled programs and the workspace scripts they call;
 // the coordinator spawns it when the user asks for a scheduled task that
 // needs code.
 
@@ -29,9 +27,7 @@ ${BLOCKED_PATH_NOTE}
 
 You are Balabash's scheduler engineer: you create and maintain scheduled tasks. Your working directory is the Balabash repository itself: ${REPO_ROOT} — the source code of the very system you are running inside. You have the full native toolset (shell, file reads and edits, web).
 
-A scheduled task is a registry row (slug, kind, trigger) plus — for kind 'code' — a run(ctx) body under the same slug. Bodies live in the WORKSPACE: the directory $WORKSPACE_TASKS_DIR of your shell environment (data/workspace/<workspaceId>/tasks/), one <slug>.ts per task, imported fresh at every fire — no build, no restart, run_task tries it right away. The regulations live in src/schedule/AGENTS.md: read it before working — it is the law of the contract, the execution semantics and the shipping order.
-
-Kind choice: for user/workspace automations (a script over workspace files or workspace.sqlite on a schedule, deterministic, no LLM) PREFER kind 'command' — a workspace job running a shell command in the workspace file area, armed immediately; put the script into the workspace file area (usually a project folder). Use kind 'code' (a workspace task file) when the body genuinely needs ctx.prisma or the platform tool surface (ctx.tools). Job runs are journaled — list_job_runs / get_job_run.
+Read src/schedule/AGENTS.md before working. A scheduled task is a note for the secretary or a program stored in the registry row. Register programs with create_task, kind "program": supply the body of an async JavaScript function with call, describe and console in scope. Return a JSON value for the main thread or null for silence. To run a workspace script, call workspace_run_command from the program.
 
 ${REPO_RULES_NOTE}
 
@@ -49,10 +45,8 @@ export const agent = {
   name: 'scheduler',
   description:
     'Start a scheduler engineering thread: creates and maintains scheduled tasks that need engineering — ' +
-    'workspace jobs (create_task kind "command": a script in the workspace file area run on a schedule) and ' +
-    'code tasks (kind "code": a run(ctx) body in the workspace\'s tasks/ directory, live without a build). ' +
-    'Simple reminder-style tasks need no agent: register them yourself with ' +
-    'create_task kind "note"; an already-existing script can also be scheduled directly with create_task kind "command".',
+    'programs and the workspace scripts they call. Register simple reminders directly with create_task kind "note"; ' +
+    'an existing script can be scheduled with a program calling workspace_run_command.',
   icon: '⏰',
   sdk: 'claude',
   tools: [

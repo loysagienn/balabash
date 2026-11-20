@@ -21,7 +21,7 @@ const REQUEST_RESTART_FUNCTION: ToolFunction = {
   toolName: REQUEST_RESTART_FUNCTION_NAME,
   description:
     'Request an app restart using the existing build. End your turn after the call. The restart waits for ' +
-    'all agent turns (including yours and the secretary’s), workspace jobs, programs, commands and remote ' +
+    'all agent turns (including yours and the secretary’s), programs, commands and remote ' +
     'engine work to finish, and for 20 seconds of log quiet. After the restart, system.restart.completed ' +
     'is delivered to this thread, or to the main thread if this one has ended.',
   inputSchema: {

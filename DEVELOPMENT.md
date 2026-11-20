@@ -44,8 +44,7 @@ confidential from them.
   per-workspace workbench: layout, sqlite, child processes, the annotation
   indexer), `projects/` (the project registry), `schedule/` (scheduled
   tasks — notes and programs — and the journal of their runs;
-  `schedule/AGENTS.md` — the kinds of a task and the contract of the former
-  task bodies, which live in the workspace, not in the repository), `remote/` (remote agents: an
+  `schedule/AGENTS.md` — the execution contract for scheduled notes and programs), `remote/` (remote agents: an
   external system's session mirrored as a thread; `remote/AGENTS.md` — the
   pieces and the invariants; the drivers live in the installation's
   `data/remote-agents/`, not in the repository), `apps/` (the mini-app
@@ -74,7 +73,7 @@ confidential from them.
   under; dependency-free, changed by hand only.
 - `data/` — runtime state and installation extensions (gitignored):
   `workspace/<workspaceId>/` (the workbench: `workspace.sqlite`, `files/`,
-  `tmp/`, `tasks/`), `agent-state/`, `codex-home/`, `supervisor/`,
+  `tmp/`), `agent-state/`, `codex-home/`, `supervisor/`,
   `process-groups/` (program and workspace command groups checked at boot),
   `showcase/` (render-context output), and the extensions below.
 - `.env` — the installation's configuration; `.env.example` documents every

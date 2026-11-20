@@ -69,7 +69,7 @@ describe('GET /api/system', () => {
     assert.ok(body.process.startedAt instanceof Date);
     assert.ok(body.process.uptimeSeconds > 0);
     assert.ok(body.process.rssBytes > 0);
-    assert.deepEqual({ sessions: body.process.liveSessions, jobs: body.process.workspaceJobs }, { sessions: 0, jobs: 0 });
+    assert.deepEqual({ sessions: body.process.liveSessions, jobs: body.process.runningPrograms }, { sessions: 0, jobs: 0 });
     assert.equal(body.database.available, true);
     assert.ok((body.database.sizeBytes ?? 0) > 0);
     assert.equal(body.database.error, null);
@@ -225,6 +225,35 @@ describe('the restart in the way, as this workspace may see it', () => {
     }
   };
 
+  test('only pending remote work keeps a quiet process from restarting', async () => {
+    let remoteWork = true;
+    let opened = false;
+    const restarts = startRestartModule({
+      isBusy: () => false,
+      hasProgramWork: () => false,
+      hasRemoteWork: () => remoteWork,
+      onRestartWindow: async () => { opened = true; },
+      pollIntervalMs: 50,
+    });
+
+    try {
+      const request = await appendEvent({ type: 'system.restart.requested', actor: 'system', workspaceId: stand.workspaceId, threadId: stand.mainThreadId, payload: { reason: 'remote work' } });
+      assert.ok(request.written);
+      // Place the stand's events outside the quiet window.
+      await prisma.event.updateMany({ data: { createdAt: new Date(Date.now() - 60_000) } });
+      const waiting = await until(async () => {
+        const { pending } = (await stand.request('GET', '/api/system')).json<SystemResponse>().restart;
+        return pending?.seq === Number(request.event.seq) && pending.waiting?.logQuiet ? pending.waiting : null;
+      });
+      assert.deepEqual(waiting, { threads: [], otherThreads: 0, secretaryTurn: false, programWork: false, remoteWork: true, logQuiet: true });
+      assert.equal(opened, false);
+      remoteWork = false;
+      await until(async () => opened || null);
+    } finally {
+      restarts.stop();
+    }
+  });
+
   test('another workspace’s request is a bare fact — no reason, no requester, no thread — and its threads in the way a count; an own request names its own', async () => {
     const other = await prisma.workspace.create({ data: {} });
     const otherMain = await ensureMainThread(other.id);
@@ -232,7 +261,8 @@ describe('the restart in the way, as this workspace may see it', () => {
     // The safe window never opens: a secretary turn is always in flight.
     const restarts = startRestartModule({
       isBusy: () => true,
-      hasActiveJobs: () => false,
+      hasProgramWork: () => false,
+      hasRemoteWork: () => false,
       onRestartWindow: () => assert.fail('the window must not open'),
       pollIntervalMs: 50,
     });

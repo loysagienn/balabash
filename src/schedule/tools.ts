@@ -1,9 +1,7 @@
 // The schedule tool server — a builtin server every agent bundle lists, so
 // any agent (and the coordinator) can register, list,
 // cancel and manually run scheduled tasks. Pure registry operations:
-// create_task never spawns anything — orchestrating a code task's body is the
-// scheduler agent's job. The audit of who registered what is free: these
-// calls are journaled as tool.call.* in the calling agent's thread.
+// create_task registers a note or program. These calls are journaled as tool.call.* in the calling agent's thread.
 
 import type { JsonObject } from '../core/contract.ts';
 import { prisma } from '../db/client.ts';
@@ -11,11 +9,11 @@ import { config } from '../config/index.ts';
 import type { ToolFunction } from '../capabilities/mcp-client.ts';
 import type { BuiltinServerCallContext, BuiltinToolServer } from '../capabilities/tool-manager.ts';
 import type { ScheduledTaskModel } from '../../prisma-generated/models.ts';
-import { workspaceTaskFile } from './catalog.ts';
-import { JOB_TIMEOUT_DEFAULT_MS, JOB_TIMEOUT_MAX_MS, JOB_TIMEOUT_MIN_MS } from './former-kinds.ts';
-import { isTaskRunning } from './running.ts';
+import { PROGRAM_TIMEOUT_DEFAULT_MS, PROGRAM_TIMEOUT_MAX_MS, PROGRAM_TIMEOUT_MIN_MS, isTaskRunning } from './programs.ts';
+import { getRun, listRuns, RUN_STATUSES } from './journal.ts';
+import type { RunStatus } from './run-record.ts';
 import { cronNextRun } from './cron.ts';
-import { ScheduleError, createTask as createTaskCommand, deleteTask, isSleeping, runTask as runTaskCommand } from './commands.ts';
+import { ScheduleError, createTask as createTaskCommand, deleteTask, runTask as runTaskCommand } from './commands.ts';
 import { SLUG_MAX_LENGTH, SLUG_PATTERN, parseTaskInput } from './input.ts';
 
 export const SCHEDULE_SERVER_NAME = 'schedule';
@@ -31,14 +29,9 @@ const FUNCTIONS: ToolFunction[] = [
     description:
       'Register a named scheduled task. kind "note": at the trigger moment the note falls into the main ' +
       'thread as a schedule.fired event and the secretary interprets it — use this for reminders and ' +
-      'recurring instructions. kind "code": the trigger runs the run(ctx) body under the same slug — the ' +
-      'workspace task file data/workspace/<workspaceId>/tasks/<slug>.ts (live at the next fire, no build); the ' +
-      'scheduler agent writes bodies; until the file exists the task SLEEPS — no errors, no runs. kind ' +
-      '"command": a workspace job — the ' +
-      'trigger runs the given shell command (bash -c) inside the workspace file area, with WORKSPACE_DB in ' +
-      'the environment; armed immediately, no build or restart needed. Exit code 0 = success (silent unless ' +
-      'report_on_success), anything else (or a timeout) = failure surfaced as a system.exception; every run ' +
-      'is journaled — see list_job_runs / get_job_run. note is IGNORED for kinds code and command. ' +
+      'recurring instructions. kind "program": run an async JavaScript function body with call, describe ' +
+      'and console. Return a JSON value for the main thread or null for silence. Errors and timeouts surface ' +
+      'as system.exception. Every program run is journaled (list_job_runs / get_job_run). ' +
       'The trigger is optional: cron (recurring; evaluated in the ' +
       `"${config.scheduleTimezone}" timezone; alarm-clock semantics — a moment missed while the app was ` +
       'down is skipped) or at (one-shot, "not before this instant"; a past instant fires immediately; ' +
@@ -56,9 +49,9 @@ const FUNCTIONS: ToolFunction[] = [
         description: { type: ['string', 'null'], description: 'What the task is for, or null.' },
         kind: {
           type: 'string',
-          enum: ['note', 'code', 'command'],
+          enum: ['note', 'program'],
           description:
-            'note = data interpreted by the secretary; code = run(ctx) body (a file in the workspace tasks/ directory); command = a shell command run in the workspace file area.',
+            'note = text interpreted by the secretary; program = JavaScript stored in the task.',
         },
         cron: {
           type: ['string', 'null'],
@@ -70,34 +63,16 @@ const FUNCTIONS: ToolFunction[] = [
         },
         note: {
           type: ['string', 'null'],
-          description: 'The note delivered when the task fires — required for kind "note", IGNORED for kinds "code" and "command" (null it there).',
+          description: 'The note delivered when the task fires — required for kind "note", null for kind "program".',
         },
-        command: {
-          type: ['string', 'null'],
-          description:
-            'kind "command" only (null otherwise): the shell command, executed verbatim via bash -c in the job\'s ' +
-            'working directory. The environment is minimal (PATH, HOME, locale, TZ) plus WORKSPACE_DB = the ' +
-            'workspace SQLite path; a project\'s own venv/node_modules are reachable by path, e.g. "./venv/bin/python collect.py".',
-        },
-        cwd: {
-          type: ['string', 'null'],
-          description:
-            'kind "command" only: working directory as a path relative to the workspace file area, usually a ' +
-            'project folder (e.g. "my-project"). Null = the file-area root.',
-        },
+        code: { type: ['string', 'null'], description: 'Kind program: body of an async function. Null for a note.' },
         timeout_ms: {
           type: ['number', 'null'],
-          description: `kind "command" only: kill timeout in milliseconds, ${JOB_TIMEOUT_MIN_MS}-${JOB_TIMEOUT_MAX_MS} (up to 5 hours). Null = default ${JOB_TIMEOUT_DEFAULT_MS} (10 minutes). On expiry the whole process group is killed and the run is journaled as "timeout".`,
+          description: `Kind program: time limit in milliseconds, ${PROGRAM_TIMEOUT_MIN_MS}-${PROGRAM_TIMEOUT_MAX_MS}. Null = default ${PROGRAM_TIMEOUT_DEFAULT_MS}.`,
         },
-        report_on_success: {
-          type: ['boolean', 'null'],
-          description:
-            'kind "command" only: when true, a successful run pushes a schedule.fired event with the stdout ' +
-            'tail to the main thread (the script "speaks by printing"). Null/false = a success is silent — ' +
-            'only the journal records it. Failures ALWAYS surface regardless of this flag.',
-        },
+        wake: { type: ['boolean', 'null'], description: "Whether schedule.fired starts a secretary turn immediately. False leaves it for the next turn. Default true." },
       },
-      required: ['slug', 'name', 'description', 'kind', 'cron', 'at', 'note', 'command', 'cwd', 'timeout_ms', 'report_on_success'],
+      required: ['slug', 'name', 'description', 'kind', 'cron', 'at', 'note', 'code', 'timeout_ms', 'wake'],
       additionalProperties: false,
     },
   },
@@ -106,9 +81,7 @@ const FUNCTIONS: ToolFunction[] = [
     serverName: SCHEDULE_SERVER_NAME,
     toolName: 'list_tasks',
     description:
-      'List the scheduled tasks of this workspace: slug, kind, name, trigger, the next cron fire time, ' +
-      'whether a code task is sleeping (registered but without its body file), and for ' +
-      'command tasks the command, working directory, timeout and report flag.',
+      'List the scheduled tasks of this workspace: slug, kind, name, trigger, the next cron fire time, note or program code, and wake flag.',
     inputSchema: {
       type: 'object',
       properties: {},
@@ -121,8 +94,7 @@ const FUNCTIONS: ToolFunction[] = [
     serverName: SCHEDULE_SERVER_NAME,
     toolName: 'cancel_task',
     description:
-      'Delete a scheduled task from the registry by slug. The trigger is disarmed immediately; a code ' +
-      "task's body file in the workspace is untouched (it just stops being scheduled).",
+      'Delete a scheduled task from the registry by slug. The trigger is disarmed immediately.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -140,8 +112,7 @@ const FUNCTIONS: ToolFunction[] = [
       'Run a scheduled task manually, right now — works for any task, with or without a trigger. The ' +
       'action executes exactly as on a trigger fire, but the schedule is untouched: a one-shot task is ' +
       'NOT consumed, a cron task keeps its next moment. The run is asynchronous — this call only starts ' +
-      'it; a code task reports through the events it pushes (or a system.exception on failure); a command ' +
-      'task returns its runId immediately — follow the outcome via get_job_run.',
+      'it. A program returns its runId immediately — follow the outcome via get_job_run.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -156,17 +127,14 @@ const FUNCTIONS: ToolFunction[] = [
     serverName: SCHEDULE_SERVER_NAME,
     toolName: 'list_job_runs',
     description:
-      'List journaled runs of workspace jobs (kind "command" scheduled tasks), newest first: runId, slug, ' +
-      'trigger, status (running | ok | failed | timeout | spawn_error | aborted), exit code, start time, ' +
-      'duration. The journal keeps every run — a silent success is visible here even though it produced no ' +
-      'events. Full output tails are behind get_job_run.',
+      'List journaled runs of scheduled programs, newest first. Full results and console output are behind get_job_run.',
     inputSchema: {
       type: 'object',
       properties: {
         slug: { type: ['string', 'null'], description: 'Only runs of this task slug, or null for all.' },
         status: {
           type: ['string', 'null'],
-          enum: ['running', 'ok', 'failed', 'timeout', 'spawn_error', 'aborted', null],
+          enum: [...RUN_STATUSES, null],
           description: 'Only runs with this status, or null for all.',
         },
         limit: {
@@ -183,9 +151,7 @@ const FUNCTIONS: ToolFunction[] = [
     serverName: SCHEDULE_SERVER_NAME,
     toolName: 'get_job_run',
     description:
-      'Get one journaled workspace-job run by its runId: the executed command and working directory as they ' +
-      'were at fire time, trigger, status, exit code, timing, and the stdout/stderr tails (last 16 KiB of ' +
-      'each stream, with truncation flags).',
+      'Get one scheduled program run by runId: its code, trigger, status, timing, return value, error and console output.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -224,14 +190,14 @@ function describeTrigger(task: ScheduledTaskModel): string {
 // A refusal of the shared parser names the contract's fields; the tool's
 // arguments are snake_case.
 function toolWords(message: string): string {
-  return message.replace(/\btimeoutMs\b/g, 'timeout_ms').replace(/\breportOnSuccess\b/g, 'report_on_success');
+  return message.replace(/\btimeoutMs\b/g, 'timeout_ms');
 }
 
 // The input rule is the registry's one (input.ts, shared with the console's
 // POST /api/schedule/tasks); the tool's snake_case arguments are mapped onto
 // the contract's names, a refusal reads as the tool's error in its words.
 async function createTask(args: JsonObject, ctx: BuiltinServerCallContext): Promise<string> {
-  let outcome;
+  let task;
 
   try {
     const input = parseTaskInput({
@@ -242,50 +208,21 @@ async function createTask(args: JsonObject, ctx: BuiltinServerCallContext): Prom
       cron: args.cron,
       at: args.at,
       note: args.note,
-      command: args.command,
-      cwd: args.cwd,
+      code: args.code,
       timeoutMs: args.timeout_ms,
-      reportOnSuccess: args.report_on_success,
+      wake: args.wake,
     });
 
-    outcome = await createTaskCommand(ctx.workspaceId, input, { kind: 'thread', workspaceId: ctx.workspaceId, threadId: ctx.threadId });
+    task = await createTaskCommand(ctx.workspaceId, input, { kind: 'thread', workspaceId: ctx.workspaceId, threadId: ctx.threadId });
   } catch (error) {
     throw error instanceof ScheduleError ? new Error(toolWords(error.message)) : error;
   }
 
-  const { task } = outcome;
-  const { slug, kind, at, cwd, timeoutMs, reportOnSuccess } = task;
-  const note = typeof args.note === 'string' && args.note.trim() ? args.note.trim() : null;
-
+  const { slug, kind, at } = task;
   const lines = [`Task "${slug}" (${kind}) registered. Trigger: ${describeTrigger(task)}.`];
 
   if (at && at.getTime() <= Date.now()) {
     lines.push('The moment is already in the past — the task fires on the next heart pass and is consumed.');
-  }
-
-  if (kind === 'code') {
-    if (outcome.sleeping) {
-      lines.push(
-        `The task SLEEPS: no run(ctx) body under slug "${slug}". It comes alive the moment ` +
-          `${workspaceTaskFile(task.workspaceId, slug)} exists (no build or restart).`,
-      );
-    }
-
-    if (note) {
-      lines.push('Note: the "note" field is ignored for kind "code" and was not stored.');
-    }
-  }
-
-  if (kind === 'command') {
-    lines.push(
-      `The job is armed immediately — no build or restart needed. It runs "bash -c" in "${cwd ?? '<file-area root>'}" ` +
-        `with a ${timeoutMs ?? JOB_TIMEOUT_DEFAULT_MS} ms timeout; every run is journaled (list_job_runs / get_job_run), ` +
-        `failures surface as system.exception${reportOnSuccess ? ', successes push a schedule.fired event' : ', successes are silent'}.`,
-    );
-
-    if (note) {
-      lines.push('Note: the "note" field is ignored for kind "command" and was not stored.');
-    }
   }
 
   return lines.join('\n');
@@ -301,31 +238,14 @@ async function listTasks(ctx: BuiltinServerCallContext): Promise<string> {
     return 'No scheduled tasks registered.';
   }
 
-  const sleeping = new Set<string>();
-
-  for (const task of tasks) {
-    if (await isSleeping(task)) {
-      sleeping.add(task.id);
-    }
-  }
-
   const lines = tasks.map(task => {
-    const flags = [
-      ...(sleeping.has(task.id) ? ['SLEEPING — no run(ctx) body file in the workspace tasks/'] : []),
-      ...(isTaskRunning(task.slug) ? ['running right now'] : []),
-    ];
-
     return [
       `- ${task.slug} (${task.kind}): ${task.name}`,
-      `  trigger: ${describeTrigger(task)}${flags.length ? ` [${flags.join('; ')}]` : ''}`,
+      `  trigger: ${describeTrigger(task)}${isTaskRunning(task.slug) ? ' [running right now]' : ''}`,
       ...(task.description ? [`  description: ${task.description}`] : []),
       ...(task.note ? [`  note: ${task.note}`] : []),
-      ...(task.kind === 'command'
-        ? [
-            `  command: ${task.command}`,
-            `  cwd: ${task.cwd ?? '<file-area root>'}, timeout ${task.timeoutMs ?? JOB_TIMEOUT_DEFAULT_MS} ms, ${task.reportOnSuccess ? 'reports on success' : 'silent on success'}`,
-          ]
-        : []),
+      ...(task.kind === 'program' ? [`  code: ${task.code}`, `  timeout: ${task.timeoutMs ?? PROGRAM_TIMEOUT_DEFAULT_MS} ms`] : []),
+      `  wake: ${task.wake}`,
       `  created ${task.createdAt.toISOString()}${task.createdBy ? ` by ${task.createdBy}` : ''}`,
     ].join('\n');
   });
@@ -366,41 +286,10 @@ async function runTask(args: JsonObject, ctx: BuiltinServerCallContext): Promise
         return `Task "${slug}" fired — the note landed in the main thread.`;
       }
 
-      if (task.kind === 'command') {
-        return (
-          `Job "${slug}" started, runId ${outcome.runId}. It runs asynchronously — check the outcome with ` +
-          `get_job_run {runId} (or list_job_runs); a failure also surfaces as a system.exception. The schedule is untouched.`
-        );
-      }
-
-      return `Task "${slug}" started. It runs asynchronously; it reports only through the events it pushes (or a system.exception on failure). The schedule is untouched.`;
+      return `Program "${slug}" started, runId ${outcome.runId}. Check the outcome with get_job_run. The schedule is untouched.`;
     case 'already_running':
       return `Task "${slug}" is already running — this manual run is skipped.`;
   }
-}
-
-// One journal row as a compact line: the answer to "when did it last run and
-// how did it go" without the output tails.
-function describeJobRun(run: {
-  id: string;
-  slug: string;
-  trigger: string;
-  status: string;
-  exitCode: number | null;
-  startedAt: Date;
-  durationMs: number | null;
-  stdoutTruncated: boolean;
-  stderrTruncated: boolean;
-}): string {
-  const parts = [
-    `${run.startedAt.toISOString()} ${run.slug}: ${run.status}`,
-    ...(run.exitCode !== null && run.status !== 'ok' ? [`exit ${run.exitCode}`] : []),
-    ...(run.durationMs !== null ? [`${run.durationMs} ms`] : []),
-    `trigger ${run.trigger}`,
-    ...(run.stdoutTruncated || run.stderrTruncated ? ['output truncated'] : []),
-  ];
-
-  return `- ${parts.join(', ')}\n  runId ${run.id}`;
 }
 
 async function listJobRuns(args: JsonObject, ctx: BuiltinServerCallContext): Promise<string> {
@@ -411,21 +300,16 @@ async function listJobRuns(args: JsonObject, ctx: BuiltinServerCallContext): Pro
       ? Math.min(Math.max(Math.floor(args.limit), 1), JOB_RUNS_MAX_LIMIT)
       : JOB_RUNS_DEFAULT_LIMIT;
 
-  const runs = await prisma.jobRun.findMany({
-    where: {
-      workspaceId: ctx.workspaceId,
-      ...(slug ? { slug } : {}),
-      ...(status ? { status } : {}),
-    },
-    orderBy: { startedAt: 'desc' },
-    take: limit,
-  });
+  if (status && !RUN_STATUSES.includes(status as RunStatus)) {
+    throw new Error('Unknown run status');
+  }
+  const { runs } = await listRuns(ctx.workspaceId, { limit, ...(slug ? { slug } : {}), ...(status ? { status: status as RunStatus } : {}) });
 
   if (!runs.length) {
     return `No journaled job runs${slug ? ` for slug "${slug}"` : ''}${status ? ` with status "${status}"` : ''}.`;
   }
 
-  return runs.map(describeJobRun).join('\n');
+  return JSON.stringify(runs);
 }
 
 async function getJobRun(args: JsonObject, ctx: BuiltinServerCallContext): Promise<string> {
@@ -435,22 +319,13 @@ async function getJobRun(args: JsonObject, ctx: BuiltinServerCallContext): Promi
     throw new Error('a non-empty runId is required');
   }
 
-  const run = await prisma.jobRun.findFirst({ where: { id: runId, workspaceId: ctx.workspaceId } });
+  const run = await getRun(ctx.workspaceId, runId);
 
   if (!run) {
     throw new Error(`no job run "${runId}" in this workspace`);
   }
 
-  return [
-    `Run ${run.id} of job "${run.slug}" (trigger ${run.trigger}): ${run.status}`,
-    `command: ${run.command}`,
-    `cwd: ${run.cwd ?? '<file-area root>'}`,
-    `started ${run.startedAt.toISOString()}${run.finishedAt ? `, finished ${run.finishedAt.toISOString()}` : ''}${run.durationMs !== null ? `, ${run.durationMs} ms` : ''}${run.exitCode !== null ? `, exit code ${run.exitCode}` : ''}`,
-    `--- stdout${run.stdoutTruncated ? ' (tail, truncated)' : ''} ---`,
-    run.stdoutTail || '<empty>',
-    `--- stderr${run.stderrTruncated ? ' (tail, truncated)' : ''} ---`,
-    run.stderrTail || '<empty>',
-  ].join('\n');
+  return JSON.stringify(run);
 }
 
 export function createScheduleToolServer(): BuiltinToolServer {

@@ -1,10 +1,10 @@
 // The run log (design: the "Run log" tab of the Schedule): every run of
-// every command job in a row, newest first under day dividers, each named
+// every scheduled program in a row, newest first under day dividers, each named
 // by its task; earlier pages on demand. Narrowed to one task from its
 // details ("Full log") — a banner names the task and leads back to all.
 // A run still going keeps the list polling (queries.ts).
 
-import type { JobRunView, TaskView } from '../../../api/contract.ts';
+import type { ScheduleRunView, TaskView } from '../../../api/contract.ts';
 import { Btn } from '../../ui/Btn/Btn.tsx';
 import { Card } from '../../ui/Card/Card.tsx';
 import { Empty } from '../../ui/Empty/Empty.tsx';
@@ -14,13 +14,13 @@ import { SkelRow } from '../../ui/Skel/Skel.tsx';
 import { ActGroup } from '../../ui/Xp/Xp.tsx';
 import { RunRow } from './RunRow.tsx';
 import { groupRunsByDay, logRunWords } from './ScheduleScreen.logic.ts';
-import { useJobRuns } from './queries.ts';
+import { useScheduleRuns } from './queries.ts';
 
 export const LOG_PAGE = 50;
 
 export function RunLog({ task, tasks, now, onAll }: { task: string | undefined; tasks: TaskView[]; now: Date; onAll: () => void }) {
-  const query = useJobRuns(task, LOG_PAGE);
-  const runs: JobRunView[] = query.data?.pages.flatMap(page => page.runs) ?? [];
+  const query = useScheduleRuns(task, LOG_PAGE);
+  const runs: ScheduleRunView[] = query.data?.pages.flatMap(page => page.runs) ?? [];
   const named = task ? (tasks.find(item => item.slug === task)?.name ?? task) : null;
   const nameOf = (slug: string) => tasks.find(item => item.slug === slug)?.name ?? slug;
 
@@ -30,7 +30,7 @@ export function RunLog({ task, tasks, now, onAll }: { task: string | undefined; 
     if (runs.length === 0) {
       body = (
         <Empty icon="square-terminal" title={task ? `No runs of “${named}” yet` : 'No runs yet'}>
-          Every run of a command task lands here with its exit code and output.
+          Every program run lands here with its result and console output.
         </Empty>
       );
     } else {

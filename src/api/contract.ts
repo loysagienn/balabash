@@ -805,7 +805,7 @@ export type TaskView = {
   slug: string;
   name: string;
   description: string | null;
-  kind: string; // 'note' | 'program'; the former kinds: 'code' | 'command'
+  kind: string; // 'note' | 'program'
   cron: string | null;
   at: Date | null;
   note: string | null;
@@ -815,9 +815,6 @@ export type TaskView = {
   // false: the task's schedule.fired waits in the main thread for the
   // secretary's next turn instead of starting one.
   wake: boolean;
-  command: string | null;
-  cwd: string | null;
-  reportOnSuccess: boolean;
   createdBy: string | null;
   createdAt: Date;
   // The next cron moment after now (config.scheduleTimezone), or the one-shot
@@ -826,42 +823,12 @@ export type TaskView = {
 };
 
 // ---------------------------------------------------------------------------
-// The schedule's run journal and the operator's commands over a task (the
-// Schedule screen). A run is a row of job_runs — the journal of workspace
-// jobs (kind 'command'): every run of one is written, a success as well as
-// a failure; a note task leaves a schedule.fired event instead, a code task
-// only what it pushes. The journal is telemetry outside the event log (the
-// llm_requests pattern), so the console reads it by place.
+// Telemetry outside the event log: the shared journal joins scheduled
+// program runs and the workspace's earlier job history.
+export type { RunSummary as ScheduleRunView, RunRecord as ScheduleRunDetailView } from '../schedule/run-record.ts';
+import type { RunSummary as ScheduleRunView, RunRecord as ScheduleRunDetailView } from '../schedule/run-record.ts';
 
-export type JobRunStatus = 'running' | 'ok' | 'failed' | 'timeout' | 'spawn_error' | 'aborted';
-export type JobTrigger = 'cron' | 'at' | 'manual';
-
-// One run as the lists show it: the outcome and the timing, without the
-// output tails (a page of runs stays small).
-export type JobRunView = {
-  id: string;
-  slug: string;
-  trigger: JobTrigger;
-  status: JobRunStatus;
-  exitCode: number | null;
-  startedAt: Date;
-  finishedAt: Date | null;
-  durationMs: number | null;
-  // Whether the kept tail of a stream lost its beginning (16 KiB kept).
-  stdoutTruncated: boolean;
-  stderrTruncated: boolean;
-};
-
-// One run in full: the command and working directory as they were at fire
-// time (the task may be gone or changed since) and the tails of both streams.
-export type JobRunDetailView = JobRunView & {
-  command: string;
-  cwd: string | null;
-  stdoutTail: string;
-  stderrTail: string;
-};
-
-export type JobRunsQuery = {
+export type ScheduleRunsQuery = {
   // Only the runs of this task.
   slug?: string;
   // Cursor: the id of the oldest run of the previous page — the next page
@@ -872,19 +839,19 @@ export type JobRunsQuery = {
 
 // Newest first; nextCursor — the id to ask `before` for the next page, null
 // at the end.
-export type JobRunsResponse = {
-  runs: JobRunView[];
+export type ScheduleRunsResponse = {
+  runs: ScheduleRunView[];
   nextCursor: string | null;
 };
 
 // The newest run of every task that has one (by slug): the "last run" of
 // the task rows.
-export type LatestJobRunsResponse = {
-  runs: JobRunView[];
+export type LatestScheduleRunsResponse = {
+  runs: ScheduleRunView[];
 };
 
-export type JobRunResponse = {
-  run: JobRunDetailView;
+export type ScheduleRunResponse = {
+  run: ScheduleRunDetailView;
 };
 
 // The row a command over a task means — the task the operator saw and
@@ -900,37 +867,30 @@ export type TaskCommandRequest = {
 // the create_task tool (src/schedule/input.ts, one parser for both doors):
 // the slug's shape, a name, at most one trigger — a cron expression
 // (evaluated in the schedule's time zone) or `at`, an ISO 8601 instant with
-// an explicit offset — a note for kind 'note', the command fields for kind
-// 'command' only (cwd relative to the file area, timeoutMs 1 s – 5 h, null
-// for the default 10 min). null and absent are one "not given". The
-// answer is the row as the snapshot has it (the same row arrives as
-// schedule.task.created of the tail, folded idempotently) and whether a
-// code task sleeps (no run(ctx) body yet). Refusals: 400 bad_request (the
+// an explicit offset. A note has text and a program has code and an optional
+// timeout. The response holds the created row. Refusals: 400 bad_request (the
 // message starts with the field at fault), 409 task_conflict (the slug is
 // taken — by any workspace: slugs are global to the registry).
 export type CreateTaskRequest = {
   slug: string;
   name: string;
   description?: string | null;
-  kind: 'note' | 'code' | 'command';
+  kind: 'note' | 'program';
   cron?: string | null;
   at?: string | null;
   note?: string | null;
-  command?: string | null;
-  cwd?: string | null;
+  code?: string | null;
   timeoutMs?: number | null;
-  reportOnSuccess?: boolean | null;
+  wake?: boolean | null;
 };
 
 export type CreateTaskResponse = {
   task: TaskView;
-  sleeping: boolean;
 };
 
 // POST /schedule/tasks/:slug/run — the task fired by hand, the schedule
-// untouched: `fired` with the runId of a command job (null for a note or a
-// code task — they leave no journal row), or `already_running` when a run of
-// the same task is still going and this one burns.
+// untouched: `fired` with a program runId (null for a note), or
+// `already_running` when a run of the same task is still going and this one burns.
 export type RunTaskResponse = {
   outcome: 'fired' | 'already_running';
   runId: string | null;
@@ -1161,11 +1121,9 @@ export type ProcessView = ProcessVersionView & {
   uptimeSeconds: number;
   rssBytes: number;
   heapUsedBytes: number;
-  // The runs alive in the process — the live agent sessions of every
-  // workspace, the coordinator's among them — and the workspace jobs of
-  // the schedule in flight.
+  // Live agent sessions and running programs across all workspaces.
   liveSessions: number;
-  workspaceJobs: number;
+  runningPrograms: number;
 };
 
 export type DatabaseView = {
@@ -1225,7 +1183,8 @@ export type PendingRestartView = {
     // Threads of other workspaces with a turn in flight — a count, not names.
     otherThreads: number;
     secretaryTurn: boolean;
-    workspaceJob: boolean;
+    programWork: boolean;
+    remoteWork: boolean;
     logQuiet: boolean;
   } | null;
 };

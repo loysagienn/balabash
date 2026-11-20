@@ -2,13 +2,13 @@
 // and kind, "Run now" and the "⋯" menu with the delete; a banner when the
 // last run went wrong; the facts — description, schedule spelled out with
 // its expression, the next run in the schedule's time zone, the note of a
-// reminder, the command, folder, timeout and "on success" of a command
-// job, who created it; then its runs with output (a command job's journal,
+// reminder, a program’s code and timeout, the wake flag, who created it;
+// then its runs with output (the journal,
 // newest first, the newest few — the full log is a link away) or a line on
 // what the kind leaves behind instead.
 
 import { useState } from 'react';
-import type { JobRunView, TaskView } from '../../../api/contract.ts';
+import type { ScheduleRunView, TaskView } from '../../../api/contract.ts';
 import { Link } from '../../lib/router/Link.tsx';
 import { useAppDispatch, useAppSelector } from '../../store/hooks.ts';
 import { runTask } from '../../store/schedule/actions.ts';
@@ -29,7 +29,7 @@ import { Code, Quiet } from '../../ui/atoms/atoms.tsx';
 import { DeleteTaskDialog } from './DeleteTaskDialog.tsx';
 import { RunRow } from './RunRow.tsx';
 import { createdWords, kindWords, lastRunNote, noJournalWords, taskRunWords, timeoutWords, triggerWords, whenLabel, whenLabelIn } from './ScheduleScreen.logic.ts';
-import { useJobRuns } from './queries.ts';
+import { useScheduleRuns } from './queries.ts';
 
 // The runs shown under the task; the log has the rest.
 export const TASK_RUNS = 8;
@@ -68,8 +68,8 @@ function TaskMenu({ task }: { task: TaskView }) {
 // list included: "No runs yet" after a failed re-read is an old answer,
 // and the note says so.
 function TaskRuns({ task, now }: { task: TaskView; now: Date }) {
-  const query = useJobRuns(task.slug, TASK_RUNS);
-  const runs: JobRunView[] = query.data?.pages[0]?.runs ?? [];
+  const query = useScheduleRuns(task.slug, TASK_RUNS);
+  const runs: ScheduleRunView[] = query.data?.pages[0]?.runs ?? [];
 
   if (query.data) {
     const stale = query.error ? (
@@ -83,7 +83,7 @@ function TaskRuns({ task, now }: { task: TaskView; now: Date }) {
         <>
           {stale}
           <Empty icon="square-terminal" title="No runs yet">
-            Every run of the command lands here with its exit code and output — the scheduled ones and the manual ones alike.
+            Every run of the program lands here with its result and console output — the scheduled ones and the manual ones alike.
           </Empty>
         </>
       );
@@ -117,7 +117,7 @@ function TaskRuns({ task, now }: { task: TaskView; now: Date }) {
   );
 }
 
-export function TaskDetail({ task, nextRunAt, timezone, lastRun, now }: { task: TaskView; nextRunAt: Date | null; timezone: string | null; lastRun: JobRunView | null; now: Date }) {
+export function TaskDetail({ task, nextRunAt, timezone, lastRun, now }: { task: TaskView; nextRunAt: Date | null; timezone: string | null; lastRun: ScheduleRunView | null; now: Date }) {
   const dispatch = useAppDispatch();
   const call = useAppSelector(s => selectTaskCall(s, task.slug));
   const kind = kindWords(task.kind);
@@ -156,14 +156,13 @@ export function TaskDetail({ task, nextRunAt, timezone, lastRun, now }: { task: 
         ]
       : []),
     ...(task.kind === 'note' && task.note ? [{ key: 'note', value: task.note }] : []),
-    ...(task.kind === 'command'
+    ...(task.kind === 'program'
       ? [
-          { key: 'command', value: <Code wrap>{task.command ?? ''}</Code> },
-          { key: 'workspace folder', value: task.cwd ? <Code>{task.cwd}</Code> : <Quiet>the file area root</Quiet> },
+          { key: 'code', value: <Code wrap>{task.code ?? ''}</Code> },
           { key: 'timeout', value: timeoutWords(task.timeoutMs) },
-          { key: 'on success', value: task.reportOnSuccess ? 'notify the main thread' : 'don’t notify' },
         ]
       : []),
+    { key: 'on delivery', value: task.wake ? 'wake the secretary' : 'wait for the next turn' },
     { key: 'created by', value: createdWords(task, now) },
   ];
 
@@ -184,7 +183,7 @@ export function TaskDetail({ task, nextRunAt, timezone, lastRun, now }: { task: 
       <DetailSection
         title="Runs"
         end={
-          task.kind === 'command' ? (
+          task.kind === 'program' ? (
             <Link className="link" route={{ key: 'schedule', tab: 'log', task: task.slug }}>
               Full log
               <Icon name="chevron-right" />

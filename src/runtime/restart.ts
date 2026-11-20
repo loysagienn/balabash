@@ -12,7 +12,7 @@
 // - no coordinator turn in flight (injected — the in-memory truth; a pure
 //   "quiet log" heuristic would kill a turn mid-inference and lose the
 //   reply, because the lazy rise cannot replay it),
-// - workspace jobs, programs, commands and remote engine work have settled,
+// - programs, commands and remote engine work have settled,
 // - 20s of log quiet as a buffer against updates already inside an adapter
 //   but not yet appended.
 //
@@ -60,7 +60,8 @@ type PendingRestart = {
   waiting: {
     threads: { id: string; title: string | null; agent: string; workspaceId: string }[];
     secretaryTurn: boolean;
-    workspaceJob: boolean;
+    programWork: boolean;
+    remoteWork: boolean;
     logQuiet: boolean;
   } | null;
 };
@@ -92,7 +93,8 @@ export function getPendingRestart(workspaceId: string): PendingRestartView | nul
           threads: waiting.threads.filter(thread => thread.workspaceId === workspaceId).map(({ id, title, agent }) => ({ id, title, agent })),
           otherThreads: waiting.threads.filter(thread => thread.workspaceId !== workspaceId).length,
           secretaryTurn: waiting.secretaryTurn,
-          workspaceJob: waiting.workspaceJob,
+          programWork: waiting.programWork,
+          remoteWork: waiting.remoteWork,
           logQuiet: waiting.logQuiet,
         }
       : null,
@@ -211,24 +213,20 @@ type RestartModuleHooks = {
   // In-memory truth about coordinator turns in flight — injected by the
   // composition root (the runtime does not know the coordinator, §3).
   isBusy(): boolean;
-  // In-memory truth about what runs outside any agent turn — the runs of
-  // programs with the calls and commands they started, the former workspace
-  // jobs — injected likewise (the runtime does not know the schedule or the
-  // catalog). None of it survives a restart, so the safe window waits for
-  // it to settle.
-  hasActiveJobs(): boolean;
+  // Runs of programs, their calls and commands, and settlement of scheduled runs.
+  hasProgramWork(): boolean;
   // In-memory truth about the remote engine (src/remote): a verb of a
   // driver in flight or an inbound wake not yet served. Its state is
   // durable and a replay after the restart is safe, but a verb half-way
   // through is better finished than repeated; the safe window waits.
-  hasRemoteWork?(): boolean;
+  hasRemoteWork(): boolean;
   // Graceful shutdown ending in process.exit(RESTART_EXIT_CODE).
   onRestartWindow(): Promise<void>;
   // How often the safe window is polled; the tests shorten it.
   pollIntervalMs?: number;
 };
 
-export function startRestartModule({ isBusy, hasActiveJobs, hasRemoteWork, onRestartWindow, pollIntervalMs = POLL_INTERVAL_MS }: RestartModuleHooks): Consumer {
+export function startRestartModule({ isBusy, hasProgramWork, hasRemoteWork, onRestartWindow, pollIntervalMs = POLL_INTERVAL_MS }: RestartModuleHooks): Consumer {
   let exiting = false;
 
   const notifyLongPending = async (current: PendingRestart, blockedBy: string[]): Promise<void> => {
@@ -281,14 +279,16 @@ export function startRestartModule({ isBusy, hasActiveJobs, hasRemoteWork, onRes
       blockedBy.push('a secretary turn in flight');
     }
 
-    const workspaceJob = hasActiveJobs();
+    const programWork = hasProgramWork();
 
-    if (workspaceJob) {
-      blockedBy.push('a workspace job still running');
+    if (programWork) {
+      blockedBy.push('programs and commands to finish');
     }
 
-    if (hasRemoteWork?.()) {
-      blockedBy.push('a remote thread’s command in flight');
+    const remoteWork = hasRemoteWork();
+
+    if (remoteWork) {
+      blockedBy.push('the remote engine to finish pending work');
     }
 
     const quietSeconds = await getLogQuietSeconds();
@@ -301,7 +301,8 @@ export function startRestartModule({ isBusy, hasActiveJobs, hasRemoteWork, onRes
     current.waiting = {
       threads: busyThreads.map(thread => ({ id: thread.id, title: thread.title, agent: thread.agent, workspaceId: thread.workspaceId })),
       secretaryTurn,
-      workspaceJob,
+      programWork,
+      remoteWork,
       logQuiet,
     };
 

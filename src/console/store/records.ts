@@ -60,10 +60,7 @@ export function taskFromRecord(record: Partial<TaskRecord>): TaskView | null {
     code: str(record.code),
     // A record written before the flag existed is of a task that wakes.
     wake: record.wake ?? true,
-    command: str(record.command),
-    cwd: str(record.cwd),
     timeoutMs: typeof record.timeoutMs === 'number' ? record.timeoutMs : null,
-    reportOnSuccess: record.reportOnSuccess ?? false,
     createdBy: str(record.createdBy),
     createdAt,
     nextRunAt: date(record.nextRunAt),

@@ -23,7 +23,7 @@ export const TIMEOUT_MIN_MS = 1_000;
 export const TIMEOUT_MAX_MS = 18_000_000;
 export const TIMEOUT_DEFAULT_MS = 600_000;
 
-export type TaskKind = 'note' | 'code' | 'command';
+export type TaskKind = CreateTaskRequest['kind'];
 // On schedule (cron) · Once (a moment) · Manual only (no trigger — a
 // stored procedure run by "Run now" or an agent).
 export type TaskWhen = 'cron' | 'at' | 'manual';
@@ -39,19 +39,18 @@ export type TaskFormValues = {
   // gives it: "YYYY-MM-DDTHH:mm".
   at: string;
   note: string;
-  command: string;
-  cwd: string;
+  code: string;
   timeout: string;
-  reportOnSuccess: boolean;
+  wake: boolean;
 };
 
-export type TaskFormField = Exclude<keyof TaskFormValues, 'reportOnSuccess'>;
+export type TaskFormField = Exclude<keyof TaskFormValues, 'wake'>;
 export type TaskFormErrors = Partial<Record<TaskFormField, string>>;
 
-// The design opens on a command job on a schedule.
-export const initialTaskForm: TaskFormValues = { name: '', slug: '', description: '', kind: 'command', when: 'cron', cron: '', at: '', note: '', command: '', cwd: '', timeout: '', reportOnSuccess: false };
+// The design opens on a program on a schedule.
+export const initialTaskForm: TaskFormValues = { name: '', slug: '', description: '', kind: 'program', when: 'cron', cron: '', at: '', note: '', code: '', timeout: '', wake: true };
 
-export const KIND_LABELS: Record<TaskKind, string> = { note: 'Reminder', code: 'Code', command: 'Command' };
+export const KIND_LABELS: Record<TaskKind, string> = { note: 'Reminder', program: 'Program' };
 export const WHEN_LABELS: Record<TaskWhen, string> = { cron: 'On schedule', at: 'Once', manual: 'Manual only' };
 
 // "DB backup" → "db-backup", "Напомнить про воду" → "napomnit-pro-vodu": a
@@ -62,9 +61,9 @@ export function slugFromName(name: string): string {
 
 // One change of the form: the slug follows the name until the operator
 // typed a slug of their own.
-export function changeTaskForm(values: TaskFormValues, field: TaskFormField | 'reportOnSuccess', value: string | boolean): TaskFormValues {
-  if (field === 'reportOnSuccess') {
-    return { ...values, reportOnSuccess: value === true };
+export function changeTaskForm(values: TaskFormValues, field: TaskFormField | 'wake', value: string | boolean): TaskFormValues {
+  if (field === 'wake') {
+    return { ...values, wake: value === true };
   }
 
   if (field === 'name' && typeof value === 'string' && values.slug === slugFromName(values.name)) {
@@ -216,38 +215,6 @@ export function atHint(instant: Date | null, now: Date, zone: string | null): st
   return `Fires ${whenLabelIn(instant, now, zone)} (${zone}), then the task is consumed.`;
 }
 
-// What a code task is: a body an agent writes, named by the slug.
-export function codeHint(slug: string): string {
-  return `A run(ctx) body written by the scheduler agent — tasks/${slug.trim() || '<slug>'}.ts in the workspace or the repository. Until it exists the task sleeps.`;
-}
-
-// The folder as the form sends it: trimmed, "/" separators, without a
-// leading "./" or a trailing "/" (the server reads an empty last segment
-// as a fault); empty — the file-area root.
-export function normalizeCwd(cwd: string): string {
-  return cwd.trim().replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/+$/, '');
-}
-
-// A folder of the file area: relative, no "..", no absolute path (the
-// server's sanitizeRelPath, before the call).
-export function cwdError(cwd: string): string | null {
-  const value = normalizeCwd(cwd);
-
-  if (!value) {
-    return null;
-  }
-
-  if (value.startsWith('/') || /^[A-Za-z]:/.test(value)) {
-    return 'A folder of the file area, relative to its root.';
-  }
-
-  if (value.split('/').some(segment => !segment || segment === '.' || segment === '..')) {
-    return 'No “..”, “.” or empty parts in the path.';
-  }
-
-  return null;
-}
-
 // What the form shows under its fields before the call — the same rules as
 // the server's parser, in the form's words; a schedule or a moment while
 // the zone is unknown (null) is not sent.
@@ -296,15 +263,9 @@ export function validateTaskForm(values: TaskFormValues, now: Date, zone: string
     errors.note = 'A note is required — it is what the secretary acts on.';
   }
 
-  if (values.kind === 'command') {
-    if (!values.command.trim()) {
-      errors.command = 'A command is required — it is what the trigger runs (bash -c).';
-    }
-
-    const cwd = cwdError(values.cwd);
-
-    if (cwd) {
-      errors.cwd = cwd;
+  if (values.kind === 'program') {
+    if (!values.code.trim()) {
+      errors.code = 'Program code is required.';
     }
 
     const timeout = parseTimeout(values.timeout);
@@ -321,7 +282,7 @@ export function validateTaskForm(values: TaskFormValues, now: Date, zone: string
 // moment as an instant with an explicit offset (the server's rule). Only
 // for values that passed validateTaskForm.
 export function taskRequest(values: TaskFormValues, zone: string | null): CreateTaskRequest {
-  const command = values.kind === 'command';
+  const program = values.kind === 'program';
 
   return {
     slug: values.slug.trim(),
@@ -331,10 +292,9 @@ export function taskRequest(values: TaskFormValues, zone: string | null): Create
     cron: values.when === 'cron' ? values.cron.trim() : null,
     at: values.when === 'at' && zone ? (instantInZone(values.at, zone)?.toISOString() ?? null) : null,
     note: values.kind === 'note' ? values.note.trim() : null,
-    command: command ? values.command.trim() : null,
-    cwd: command ? normalizeCwd(values.cwd) || null : null,
-    timeoutMs: command ? (parseTimeout(values.timeout).ms ?? null) : null,
-    reportOnSuccess: command ? values.reportOnSuccess : false,
+    code: program ? values.code : null,
+    timeoutMs: program ? (parseTimeout(values.timeout).ms ?? null) : null,
+    wake: values.wake,
   };
 }
 
@@ -348,8 +308,7 @@ export function fieldOfTaskFailure(message: string): TaskFormField | null {
     [/^name\b/, 'name'],
     [/^description\b/, 'description'],
     [/^note\b/, 'note'],
-    [/^command\b/, 'command'],
-    [/^cwd\b/, 'cwd'],
+    [/^code\b/, 'code'],
     [/^timeoutms\b/, 'timeout'],
     [/^cron\b/, 'cron'],
     [/^at\b/, 'at'],

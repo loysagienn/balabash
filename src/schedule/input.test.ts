@@ -24,29 +24,17 @@ function refusal(raw: Record<string, unknown>): string {
 }
 
 describe('parseTaskInput', () => {
-  it('a command job: the fields trimmed, the folder normalized, the note dropped', () => {
-    const input = parseTaskInput({ slug: ' backup ', name: ' DB backup ', description: '  ', kind: 'command', cron: '0 4 * * *', command: ' pg_dump ', cwd: './ops', timeoutMs: 600_000, reportOnSuccess: true, note: 'ignored' }, NOW);
-
-    assert.deepEqual(input, { slug: 'backup', name: 'DB backup', description: null, kind: 'command', cron: '0 4 * * *', at: null, note: null, code: null, timeoutMs: 600_000, wake: true, command: 'pg_dump', cwd: 'ops', reportOnSuccess: true });
-  });
-
   it('a reminder: the note kept, a one-shot instant parsed; absent and null fields are one "not given"', () => {
-    const input = parseTaskInput({ slug: 'call', name: 'Call', kind: 'note', note: 'Call the electrician', at: '2026-10-12T09:00:00+03:00', cron: null, command: null }, NOW);
+    const input = parseTaskInput({ slug: 'call', name: 'Call', kind: 'note', note: 'Call the electrician', at: '2026-10-12T09:00:00+03:00', cron: null }, NOW);
 
-    assert.deepEqual(input, { slug: 'call', name: 'Call', description: null, kind: 'note', cron: null, at: new Date('2026-10-12T06:00:00Z'), note: 'Call the electrician', code: null, timeoutMs: null, wake: true, command: null, cwd: null, reportOnSuccess: false });
-  });
-
-  it('a code task without a trigger — a stored procedure', () => {
-    const input = parseTaskInput({ slug: 'digest', name: 'Digest', kind: 'code', description: 'd' }, NOW);
-
-    assert.deepEqual(input, { slug: 'digest', name: 'Digest', description: 'd', kind: 'code', cron: null, at: null, note: null, code: null, timeoutMs: null, wake: true, command: null, cwd: null, reportOnSuccess: false });
+    assert.deepEqual(input, { slug: 'call', name: 'Call', description: null, kind: 'note', cron: null, at: new Date('2026-10-12T06:00:00Z'), note: 'Call the electrician', code: null, timeoutMs: null, wake: true });
   });
 
   it('a program: the code kept as written, its limit of time and its flag; without a flag a task wakes', () => {
     const code = '\n  const mail = await call("gmail_search_emails", {});\n  return mail.length || null;\n';
     const input = parseTaskInput({ slug: 'mail', name: 'Mail', kind: 'program', code, cron: '*/10 * * * *', timeoutMs: 90_000, wake: false }, NOW);
 
-    assert.deepEqual(input, { slug: 'mail', name: 'Mail', description: null, kind: 'program', cron: '*/10 * * * *', at: null, note: null, code, timeoutMs: 90_000, wake: false, command: null, cwd: null, reportOnSuccess: false });
+    assert.deepEqual(input, { slug: 'mail', name: 'Mail', description: null, kind: 'program', cron: '*/10 * * * *', at: null, note: null, code, timeoutMs: 90_000, wake: false });
     assert.equal(parseTaskInput({ slug: 'mail', name: 'Mail', kind: 'program', code: 'return null' }, NOW).timeoutMs, null);
     assert.equal(parseTaskInput({ slug: 'call', name: 'Call', kind: 'note', note: 'n', wake: null }, NOW).wake, true);
   });
@@ -59,7 +47,6 @@ describe('parseTaskInput', () => {
     assert.match(refusal({ ...program, code: 42 }), /^code must be a string/);
     assert.match(refusal({ ...program, code: 'return 1;\nreturn );' }), /^code does not parse at line 2: SyntaxError: .*body of an async function/);
     assert.match(refusal({ ...program, code: 'return 1', note: 'n' }), /^note applies only to kind "note"/);
-    assert.match(refusal({ ...program, code: 'return 1', command: 'true' }), /^command, cwd and reportOnSuccess do not apply to kind "program"/);
     assert.match(refusal({ ...program, code: 'return 1', timeoutMs: 999 }), /^timeoutMs must be an integer between 1000 and 18000000/);
     assert.match(refusal({ ...program, code: 'return 1', wake: 'no' }), /^wake must be a boolean/);
     assert.match(refusal({ slug: 'x', name: 'n', kind: 'note', note: 'n', code: 'return 1' }), /^code applies only to kind "program"/);
@@ -74,13 +61,6 @@ describe('parseTaskInput', () => {
     assert.match(refusal({ slug: 'x', name: 'n', kind: 'note', note: 'n', description: 'd'.repeat(2001) }), /^description must be at most 2000/);
     assert.match(refusal({ slug: 'x', name: 'n', kind: 'job' }), /^kind must be/);
     assert.match(refusal({ slug: 'x', name: 'n', kind: 'note' }), /^note is required for kind "note"/);
-    assert.match(refusal({ slug: 'x', name: 'n', kind: 'command' }), /^command is required/);
-    assert.match(refusal({ slug: 'x', name: 'n', kind: 'command', command: 'true', cwd: '../out' }), /^cwd: /);
-    assert.match(refusal({ slug: 'x', name: 'n', kind: 'command', command: 'true', cwd: '/abs' }), /^cwd: /);
-    assert.match(refusal({ slug: 'x', name: 'n', kind: 'command', command: 'true', timeoutMs: 500 }), /^timeoutMs must be an integer between 1000 and 18000000/);
-    assert.match(refusal({ slug: 'x', name: 'n', kind: 'command', command: 'true', timeoutMs: 1.5 }), /^timeoutMs must be an integer/);
-    assert.match(refusal({ slug: 'x', name: 'n', kind: 'command', command: 'true', timeoutMs: '5000' }), /^timeoutMs must be a number/);
-    assert.match(refusal({ slug: 'x', name: 'n', kind: 'command', command: 'true', reportOnSuccess: 'yes' }), /^reportOnSuccess must be a boolean/);
     assert.match(refusal({ slug: 'x', name: 'n', kind: 'note', note: 'n', cron: '0 9 * * *', at: '2026-10-12T09:00:00Z' }), /^cron and at are mutually exclusive/);
     assert.match(refusal({ slug: 'x', name: 'n', kind: 'note', note: 'n', cron: 'every day' }), /^cron expression "every day" is invalid/);
     assert.match(refusal({ slug: 'x', name: 'n', kind: 'note', note: 'n', at: '2026-10-12T09:00:00' }), /^at must be an ISO 8601 instant with an explicit offset/);
@@ -88,11 +68,10 @@ describe('parseTaskInput', () => {
     assert.match(refusal({ slug: 'x', name: 42, kind: 'note', note: 'n' }), /^name must be a string/);
   });
 
-  it('the command fields of another kind are a confusion, not ignored', () => {
-    assert.match(refusal({ slug: 'x', name: 'n', kind: 'note', note: 'n', command: 'true' }), /apply only to kind "command" — null them for kind "note"/);
-    assert.match(refusal({ slug: 'x', name: 'n', kind: 'code', timeoutMs: 5_000 }), /apply only to kind "command"/);
-    assert.match(refusal({ slug: 'x', name: 'n', kind: 'code', reportOnSuccess: true }), /apply only to kind "command"/);
-    // false and null are "not given".
-    assert.equal(parseTaskInput({ slug: 'x', name: 'n', kind: 'code', reportOnSuccess: false, timeoutMs: null, cwd: '' }, NOW).kind, 'code');
+  it('accepts only notes and programs', () => {
+    for (const kind of ['code', 'command']) {
+      assert.match(refusal({ slug: 'x', name: 'n', kind }), /^kind must be "note" or "program"/);
+    }
+    assert.match(refusal({ slug: 'x', name: 'n', kind: 'note', note: 'hello', timeoutMs: 5000 }), /^timeoutMs applies only to kind "program"/);
   });
 });

@@ -51,12 +51,8 @@ export type RunChildOptions = {
   timeoutMs: number;
   maxOutputChars: number;
   // 'head' (default) keeps the first maxOutputChars of a stream, 'tail' the
-  // last — job journals want the end of a long log, not its beginning.
+  // last (the workspace command returns the end of each stream).
   capMode?: 'head' | 'tail';
-  // Called once after a successful spawn with the child's pid (equal to the
-  // process-group id — children run detached in their own group). Lets the
-  // former task runner stop its active jobs during shutdown.
-  onSpawn?: (pid: number) => void;
   // Aborting it kills the child's whole group, as the timeout does: the
   // outcome then carries exitCode null and timedOut false.
   signal?: AbortSignal;
@@ -125,10 +121,6 @@ export function runChild(command: string, args: string[], options: RunChildOptio
         child.kill('SIGKILL');
         reject(error);
       }
-    }
-
-    if (child.pid !== undefined) {
-      options.onSpawn?.(child.pid);
     }
 
     if (child.stdin) {

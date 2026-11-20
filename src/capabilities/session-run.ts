@@ -8,7 +8,7 @@
 
 import { mkdirSync } from 'node:fs';
 import { SESSION_RESUMED_IDLE_NOTE, SESSION_RESUMED_INTERRUPTED_NOTE, THREAD_NAMING_NOTE } from '../../agents/world/index.ts';
-import { workspaceDbPath, workspaceTasksDir } from '../workspace/layout.ts';
+import { workspaceDbPath } from '../workspace/layout.ts';
 import { fileContentBlock } from '../core/file-blocks.ts';
 import { dropReport, leaveReport, reportLeft, takeReport } from '../core/thread-end.ts';
 import {
@@ -613,9 +613,8 @@ export function createSessionRun(
       ...(spec.imageGeneration ? { imageGeneration: true } : {}),
       ...(cwd ? { cwd } : {}),
       // Scripts run from the session reach the workspace database the same way
-      // run_script children do: via the WORKSPACE_DB env variable; the
-      // workspace's task-body directory rides along for the scheduler.
-      env: { WORKSPACE_DB: workspaceDbPath(ctx.workspaceId), WORKSPACE_TASKS_DIR: workspaceTasksDir(ctx.workspaceId) },
+      // run_script children do: via the WORKSPACE_DB env variable.
+      env: { WORKSPACE_DB: workspaceDbPath(ctx.workspaceId) },
       extraTools: [
         createEndThreadTool(ctx),
         createSendFileTool(ctx, headless),

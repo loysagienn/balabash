@@ -2,12 +2,12 @@
 // registers a task over CREATE_TASK — a Modal over the list when the shell
 // is wide, a screen of its own on the phone (the route's `new`; the shell
 // draws "Back" and the title there). The same fields in both: the name and
-// the slug it derives (a code task's body is named by it), the kind, an
+// the slug it derives, the kind, an
 // optional description, the trigger — on a schedule with the expression
 // spelled out and its next run in the schedule's time zone, once at a
 // moment typed as that zone's clock, or manual only — and the fields of
-// the kind: the note of a reminder, the command, folder, timeout and
-// "notify on success" of a command job. The zone is a fact of the server:
+// the kind: the note of a reminder, the code and timeout of a program, and
+// the wake flag shared by both kinds. The zone is a fact of the server:
 // until it has come (or when its read failed — Retry), a schedule and a
 // moment are not read and not sent; "Manual only" is. The form's own
 // checks show under the fields after the first submit, then stay current
@@ -47,7 +47,6 @@ import {
   WHEN_LABELS,
   atHint,
   changeTaskForm,
-  codeHint,
   cronFieldHint,
   fieldOfTaskFailure,
   initialTaskForm,
@@ -59,7 +58,7 @@ import {
 import type { TaskFormErrors, TaskFormField, TaskFormValues, TaskKind, TaskWhen } from './taskForm.logic.ts';
 
 const FORM_ID = 'new-task';
-const KINDS: TaskKind[] = ['note', 'code', 'command'];
+const KINDS: TaskKind[] = ['note', 'program'];
 const WHENS: TaskWhen[] = ['cron', 'at', 'manual'];
 
 // The schedule's time zone as the form gets it: the zone, or not yet —
@@ -72,7 +71,7 @@ type Draft = {
   failure: string | null;
   // Submits so far: the form puts the focus on the first error of each.
   attempts: number;
-  change: (field: TaskFormField | 'reportOnSuccess', value: string | boolean) => void;
+  change: (field: TaskFormField | 'wake', value: string | boolean) => void;
   submit: (event: FormEvent) => void;
 };
 
@@ -178,7 +177,7 @@ function NewTaskForm({ draft, zone, now }: { draft: Draft; zone: FormZone; now: 
 
   const fid = (field: string) => `${FORM_ID}-${field}`;
   const at = values.when === 'at' && timezone ? instantInZone(values.at, timezone) : null;
-  const command = values.kind === 'command';
+  const program = values.kind === 'program';
 
   return (
     <form id={FORM_ID} className="form" ref={element} onSubmit={submit} noValidate>
@@ -190,10 +189,10 @@ function NewTaskForm({ draft, zone, now }: { draft: Draft; zone: FormZone; now: 
       <Field label="Name" fid={fid('name')} err={errors.name} required>
         <Input id={fid('name')} name="name" value={values.name} onChange={value => change('name', value)} maxLength={NAME_MAX_LENGTH} autoComplete="off" autoFocus invalid={Boolean(errors.name)} />
       </Field>
-      <Field label="Slug" fid={fid('slug')} hint="The task’s id, how agents and the log name it; a code task’s body file is named by it. Can’t be changed later." err={errors.slug} required>
+      <Field label="Slug" fid={fid('slug')} hint="The task’s id, how agents and the log name it. Can’t be changed later." err={errors.slug} required>
         <Input id={fid('slug')} name="slug" value={values.slug} onChange={value => change('slug', value)} mono maxLength={SLUG_MAX_LENGTH} autoComplete="off" autoCapitalize="off" spellCheck={false} invalid={Boolean(errors.slug)} />
       </Field>
-      <Field label="Kind" fid={fid('kind')} hint={values.kind === 'code' ? codeHint(values.slug) : values.kind === 'note' ? 'At its moment the note lands in the main thread and the secretary acts on it.' : 'A shell command run in the file area (bash -c); every run is journaled.'}>
+      <Field label="Kind" fid={fid('kind')} hint={values.kind === 'note' ? 'At its moment the note lands in the main thread and the secretary acts on it.' : 'A JavaScript program. Return a JSON value for the main thread or null for silence.'}>
         <Seg label="Kind">
           {KINDS.map(kind => (
             <SegItem key={kind} label={KIND_LABELS[kind]} sel={values.kind === kind} onClick={() => change('kind', kind)} />
@@ -236,20 +235,17 @@ function NewTaskForm({ draft, zone, now }: { draft: Draft; zone: FormZone; now: 
           <Input id={fid('at')} name="at" type="datetime-local" value={values.at} onChange={value => change('at', value)} mono invalid={Boolean(errors.at)} />
         </Field>
       ) : null}
-      {command ? (
+      {program ? (
         <>
-          <Field label="Command" fid={fid('command')} err={errors.command} required>
-            <Input as="textarea" id={fid('command')} name="command" value={values.command} onChange={value => change('command', value)} rows={2} mono spellCheck={false} placeholder="./venv/bin/python collect.py" invalid={Boolean(errors.command)} />
-          </Field>
-          <Field label="Workspace folder" fid={fid('cwd')} opt="optional" hint="Where the command runs, relative to the file area; empty — its root." err={errors.cwd}>
-            <Input id={fid('cwd')} name="cwd" value={values.cwd} onChange={value => change('cwd', value)} pre="~/" mono autoComplete="off" autoCapitalize="off" spellCheck={false} invalid={Boolean(errors.cwd)} />
+          <Field label="Code" fid={fid('code')} hint="Async function body with call, describe and console." err={errors.code} required>
+            <Input as="textarea" id={fid('code')} name="code" value={values.code} onChange={value => change('code', value)} rows={4} mono spellCheck={false} placeholder="return null;" invalid={Boolean(errors.code)} />
           </Field>
           <Field label="Timeout" fid={fid('timeout')} opt="optional" hint="1s to 5h; 10m when empty. The process group is killed on expiry." err={errors.timeout}>
             <Input id={fid('timeout')} name="timeout" value={values.timeout} onChange={value => change('timeout', value)} placeholder="10m" autoComplete="off" invalid={Boolean(errors.timeout)} />
           </Field>
-          <Check kind="switch" label="Notify on successful runs" checked={values.reportOnSuccess} onChange={checked => change('reportOnSuccess', checked)} />
         </>
       ) : null}
+      <Check kind="switch" label="Wake the secretary on delivery" checked={values.wake} onChange={checked => change('wake', checked)} />
     </form>
   );
 }

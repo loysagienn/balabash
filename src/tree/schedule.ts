@@ -14,10 +14,10 @@ import type { RegistryAuthor } from '../core/registry-events.ts';
 import { prisma } from '../db/client.ts';
 import { ScheduleError, createTask, deleteTask, runTask, type ScheduleErrorCode } from '../schedule/commands.ts';
 import { DESCRIPTION_MAX_LENGTH, NAME_MAX_LENGTH, SLUG_MAX_LENGTH, SLUG_PATTERN, parseTaskInput } from '../schedule/input.ts';
-import { RUN_STATUSES, getRun, listRuns, type RunPosition, type RunSummary } from '../schedule/journal.ts';
-import { PROGRAM_TIMEOUT_DEFAULT_MS, PROGRAM_TIMEOUT_MAX_MS, PROGRAM_TIMEOUT_MIN_MS } from '../schedule/programs.ts';
-import { isTaskRunning } from '../schedule/running.ts';
-import { taskView } from '../schedule/view.ts';
+import { RUN_STATUSES, getRun, listRuns, type RunPosition } from '../schedule/journal.ts';
+import type { RunSummary } from '../schedule/run-record.ts';
+import { PROGRAM_TIMEOUT_DEFAULT_MS, PROGRAM_TIMEOUT_MAX_MS, PROGRAM_TIMEOUT_MIN_MS, isTaskRunning } from '../schedule/programs.ts';
+import { nextRunAt } from '../schedule/view.ts';
 
 const wakeText =
   "true: the task's event starts the secretary's turn at once; false: it waits in the main thread for the next turn.";
@@ -45,29 +45,24 @@ export const ScheduledTask = namedType(
 
 type TaskValue = z.input<typeof ScheduledTask>;
 
-// The kinds of the scheme. A row of a former kind is not a task of this
-// node: its list does not show it.
-const KINDS = ['note', 'program'] as const;
-
 function taskValue(row: ScheduledTaskModel, now: Date): TaskValue {
-  const view = taskView(row, now);
   const program = row.kind === 'program';
 
   return {
-    slug: view.slug,
+    slug: row.slug,
     kind: program ? 'program' : 'note',
-    name: view.name,
-    description: view.description,
-    cron: view.cron,
-    at: view.at?.toISOString() ?? null,
-    nextRunAt: view.nextRunAt?.toISOString() ?? null,
-    note: program ? null : view.note,
-    code: program ? view.code : null,
-    timeoutSeconds: program ? Math.round((view.timeoutMs ?? PROGRAM_TIMEOUT_DEFAULT_MS) / 1000) : null,
-    wake: view.wake,
-    running: isTaskRunning(view.slug),
-    createdBy: view.createdBy,
-    createdAt: view.createdAt.toISOString(),
+    name: row.name,
+    description: row.description,
+    cron: row.cron,
+    at: row.at?.toISOString() ?? null,
+    nextRunAt: nextRunAt(row, now)?.toISOString() ?? null,
+    note: program ? null : row.note,
+    code: program ? row.code : null,
+    timeoutSeconds: program ? Math.round((row.timeoutMs ?? PROGRAM_TIMEOUT_DEFAULT_MS) / 1000) : null,
+    wake: row.wake,
+    running: isTaskRunning(row.slug),
+    createdBy: row.createdBy,
+    createdAt: row.createdAt.toISOString(),
   };
 }
 
@@ -81,7 +76,6 @@ const REFUSALS: Record<ScheduleErrorCode, ErrorKind> = {
   not_found: 'not_found',
   conflict: 'conflict',
   replaced: 'conflict',
-  sleeping: 'conflict',
   no_main_thread: 'conflict',
 };
 
@@ -113,7 +107,7 @@ const createTaskCapability = capability({
     slug: z.string().max(SLUG_MAX_LENGTH).regex(SLUG_PATTERN).describe('Unique across the installation.'),
     name: z.string().max(NAME_MAX_LENGTH),
     description: z.string().max(DESCRIPTION_MAX_LENGTH).optional(),
-    kind: z.enum(KINDS),
+    kind: z.enum(['note', 'program']),
     cron: z.string().describe('Evaluated in the schedule timezone.').optional(),
     at: z.string().describe('ISO 8601 with an explicit offset.').optional(),
     note: z.string().describe('Kind note: the text delivered at the trigger.').optional(),
@@ -132,7 +126,7 @@ const createTaskCapability = capability({
     const now = new Date();
 
     // The limit of time is a program's: a note has none to keep.
-    const { task } = await registry(
+    const task = await registry(
       async () =>
         createTask(
           caller.workspaceId,
@@ -160,7 +154,7 @@ const listTasks = capability({
   }),
   async run(_input, { caller }) {
     const rows = await prisma.scheduledTask.findMany({
-      where: { workspaceId: caller.workspaceId, kind: { in: [...KINDS] } },
+      where: { workspaceId: caller.workspaceId },
       orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
     });
     const now = new Date();

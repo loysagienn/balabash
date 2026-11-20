@@ -48,7 +48,7 @@ import { ProjectError, archiveProject, createProject, parseProjectInput, parsePr
 import { projectView } from '../projects/store.ts';
 import { ScheduleError, createTask, deleteTask, runTask } from '../schedule/commands.ts';
 import { parseTaskInput } from '../schedule/input.ts';
-import { JOB_RUNS_PAGE_DEFAULT, JOB_RUNS_PAGE_MAX, getJobRun, latestJobRuns, listJobRuns } from '../schedule/runs.ts';
+import { findRunPosition, getRun, latestRuns, listRuns } from '../schedule/journal.ts';
 import { taskView } from '../schedule/view.ts';
 import { publicAppsBase } from '../apps/urls.ts';
 import { consumeAuthCode, createAuthCode } from './auth-codes.ts';
@@ -78,9 +78,9 @@ import type {
   DraftResponse,
   DraftView,
   FileMetaResponse,
-  JobRunResponse,
-  JobRunsResponse,
-  LatestJobRunsResponse,
+  ScheduleRunResponse,
+  ScheduleRunsResponse,
+  LatestScheduleRunsResponse,
   RunTaskResponse,
   ProjectResponse,
   PublicationResponse,
@@ -1433,21 +1433,15 @@ router.post('/projects/:id/unarchive', requireSession, async ctx => {
 });
 
 // --------------------------------------------------------------------------
-// The schedule (the Schedule screen): the run journal of workspace jobs —
-// job_runs, telemetry outside the event log, read by place (a page newest
-// first with a keyset cursor, one run with its output tails, the newest run
-// of every task) — and the operator's two commands over a task, the same
-// implementation the schedule tools use (src/schedule/commands.ts): a
-// manual run (the schedule untouched; the outcome of a command job is in
-// the journal, of a note or a code task in the log) and a delete (the row
-// and its schedule.task.cancelled commit together, authored by the
-// operator). The tasks themselves are the snapshot's.
+// The Schedule screen reads the journal and operates the shared task registry.
 
 const SLUG_MAX = 64;
+const SCHEDULE_RUNS_PAGE_DEFAULT = 50;
+const SCHEDULE_RUNS_PAGE_MAX = 200;
 
 function parseRunsLimit(value: string | undefined): number | null {
   if (value === undefined) {
-    return JOB_RUNS_PAGE_DEFAULT;
+    return SCHEDULE_RUNS_PAGE_DEFAULT;
   }
 
   if (!/^\d+$/.test(value)) {
@@ -1456,7 +1450,7 @@ function parseRunsLimit(value: string | undefined): number | null {
 
   const limit = Number(value);
 
-  return limit >= 1 && limit <= JOB_RUNS_PAGE_MAX ? limit : null;
+  return limit >= 1 && limit <= SCHEDULE_RUNS_PAGE_MAX ? limit : null;
 }
 
 router.get('/schedule/runs', requireSession, async ctx => {
@@ -1466,7 +1460,7 @@ router.get('/schedule/runs', requireSession, async ctx => {
   const limit = parseRunsLimit(queryValue(ctx.query.limit));
 
   if (limit === null) {
-    sendError(ctx, 400, 'bad_request', `limit must be an integer between 1 and ${JOB_RUNS_PAGE_MAX}`);
+    sendError(ctx, 400, 'bad_request', `limit must be an integer between 1 and ${SCHEDULE_RUNS_PAGE_MAX}`);
 
     return;
   }
@@ -1477,19 +1471,23 @@ router.get('/schedule/runs', requireSession, async ctx => {
     return;
   }
 
-  const response: JobRunsResponse = await listJobRuns(workspaceId, { slug, before, limit });
+  const position = before === undefined ? null : await findRunPosition(workspaceId, before);
+  const page = before !== undefined && !position
+    ? { runs: [], next: null }
+    : await listRuns(workspaceId, { slug, limit, before: position ?? undefined });
+  const response: ScheduleRunsResponse = { runs: page.runs, nextCursor: page.next?.id ?? null };
 
   ctx.body = prepareObject(response);
 });
 
 router.get('/schedule/runs/latest', requireSession, async ctx => {
-  const response: LatestJobRunsResponse = { runs: await latestJobRuns(ctx.state.workspaceId as string) };
+  const response: LatestScheduleRunsResponse = { runs: await latestRuns(ctx.state.workspaceId as string) };
 
   ctx.body = prepareObject(response);
 });
 
 router.get('/schedule/runs/:id', requireSession, async ctx => {
-  const run = await getJobRun(ctx.state.workspaceId as string, ctx.params.id as string);
+  const run = await getRun(ctx.state.workspaceId as string, ctx.params.id as string);
 
   if (!run) {
     sendError(ctx, 404, 'not_found', 'No such run');
@@ -1497,15 +1495,15 @@ router.get('/schedule/runs/:id', requireSession, async ctx => {
     return;
   }
 
-  const response: JobRunResponse = { run };
+  const response: ScheduleRunResponse = { run };
 
   ctx.body = prepareObject(response);
 });
 
-const SCHEDULE_ERROR_STATUS: Record<ScheduleError['code'], number> = { bad_request: 400, conflict: 409, not_found: 404, replaced: 409, sleeping: 409, no_main_thread: 409 };
+const SCHEDULE_ERROR_STATUS: Record<ScheduleError['code'], number> = { bad_request: 400, conflict: 409, not_found: 404, replaced: 409, no_main_thread: 409 };
 
 // not_found and bad_request are the API's common codes; the rest name the
-// task (task_conflict, task_replaced, task_sleeping, task_no_main_thread).
+// task (task_conflict, task_replaced, task_no_main_thread).
 function sendScheduleError(ctx: Context, error: ScheduleError): void {
   const common = error.code === 'not_found' || error.code === 'bad_request';
 
@@ -1526,8 +1524,8 @@ router.post('/schedule/tasks', requireSession, async ctx => {
   }
 
   try {
-    const { task, sleeping } = await createTask(workspaceId, parseTaskInput(body), { kind: 'user', workspaceId });
-    const response: CreateTaskResponse = { task: taskView(task, new Date()), sleeping };
+    const task = await createTask(workspaceId, parseTaskInput(body), { kind: 'user', workspaceId });
+    const response: CreateTaskResponse = { task: taskView(task, new Date()) };
 
     ctx.body = prepareObject(response);
   } catch (error) {

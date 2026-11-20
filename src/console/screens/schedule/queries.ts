@@ -7,40 +7,40 @@
 // succeeds silently), once a minute otherwise, and on the tab's return;
 // the store's stamp of the journal (a manual run accepted, a job that
 // reported through the log) invalidates them all at once
-// (lib/query/schedule.ts, the JOB_RUNS_KEY prefix).
+// (lib/query/schedule.ts, the SCHEDULE_RUNS_KEY prefix).
 
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
-import type { JobRunsResponse } from '../../../api/contract.ts';
+import type { ScheduleRunsResponse } from '../../../api/contract.ts';
 import { useApi } from '../../lib/api/context.tsx';
 import { retryUnlessClient } from '../../lib/api/retry.ts';
-import { JOB_RUNS_KEY } from '../../lib/query/schedule.ts';
+import { SCHEDULE_RUNS_KEY } from '../../lib/query/schedule.ts';
 import { anyRunning } from './ScheduleScreen.logic.ts';
 
-export { JOB_RUNS_KEY };
+export { SCHEDULE_RUNS_KEY };
 
 export const RUNNING_POLL_MS = 5_000;
 export const IDLE_POLL_MS = 60_000;
 
 const pollEvery = (running: boolean) => (running ? RUNNING_POLL_MS : IDLE_POLL_MS);
 
-export function useJobRuns(slug: string | undefined, limit: number) {
+export function useScheduleRuns(slug: string | undefined, limit: number) {
   const api = useApi();
 
   return useInfiniteQuery({
-    queryKey: [...JOB_RUNS_KEY, 'list', slug ?? null, limit],
+    queryKey: [...SCHEDULE_RUNS_KEY, 'list', slug ?? null, limit],
     queryFn: ({ pageParam, signal }) => api.schedule.runs({ slug, before: pageParam ?? undefined, limit }, signal),
     initialPageParam: null as string | null,
-    getNextPageParam: (last: JobRunsResponse) => last.nextCursor,
+    getNextPageParam: (last: ScheduleRunsResponse) => last.nextCursor,
     retry: retryUnlessClient,
     refetchInterval: query => pollEvery(anyRunning(query.state.data?.pages[0]?.runs ?? [])),
   });
 }
 
-export function useLatestJobRuns(enabled = true) {
+export function useLatestScheduleRuns(enabled = true) {
   const api = useApi();
 
   return useQuery({
-    queryKey: [...JOB_RUNS_KEY, 'latest'],
+    queryKey: [...SCHEDULE_RUNS_KEY, 'latest'],
     queryFn: ({ signal }) => api.schedule.latestRuns(signal),
     select: response => response.runs,
     enabled,
@@ -51,11 +51,11 @@ export function useLatestJobRuns(enabled = true) {
 
 // One run whole: its output is written when the run ends, so a run still
 // going is read again every few seconds; a settled run never changes.
-export function useJobRun(id: string) {
+export function useScheduleRun(id: string) {
   const api = useApi();
 
   return useQuery({
-    queryKey: [...JOB_RUNS_KEY, 'run', id],
+    queryKey: [...SCHEDULE_RUNS_KEY, 'run', id],
     queryFn: ({ signal }) => api.schedule.run(id, signal),
     select: response => response.run,
     retry: retryUnlessClient,
