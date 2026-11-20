@@ -27,7 +27,8 @@ import { createRemoteDriverContext } from '../src/capabilities/remote-agent-secr
 import { buildStatusText } from '../src/coordinator/index.ts';
 import { createClaudePort } from '../src/harness/claude-sdk/bridge.ts';
 import { createCodexPort } from '../src/harness/codex-sdk/catalog-bridge.ts';
-import { catalogBlocks } from '../src/harness/anthropic/content.ts';
+import { deferredTool } from '../src/harness/anthropic/turn.ts';
+import { openingBlocks } from '../src/harness/anthropic/content.ts';
 import { coordinatorPort } from '../src/coordinator/port.ts';
 import { getMainThread } from '../src/core/threads.ts';
 import { startTree } from '../src/tree/index.ts';
@@ -151,11 +152,19 @@ async function renderCoordinator(workspaceId: string): Promise<string> {
 
   const samples: string[] = [];
   for await (const { name, result } of sampleOpenings()) {
-    const note = 'deferredTools' in head ? catalogBlocks('describe', result).note?.text : undefined;
-    samples.push([
-      `### ${name || '(root)'}`, note ?? result.text,
-      ...(result.definition ? [result.definition.description, '```json', JSON.stringify(result.definition.parameters, null, 2), '```'] : []),
-    ].join('\n\n'));
+    const anthropic = 'deferredTools' in head;
+    const parts = [`### ${name || '(root)'}`];
+    if (anthropic && result.definition) {
+      const { result: reference, note } = openingBlocks('describe', name, result.text);
+      parts.push(JSON.stringify(reference.content), note.text);
+    } else {
+      parts.push(result.text);
+    }
+    if (result.definition) {
+      const tool = anthropic ? deferredTool(result.definition) : result.definition;
+      parts.push('```json\n' + JSON.stringify(tool, null, 2) + '\n```');
+    }
+    samples.push(parts.join('\n\n'));
   }
   sections.push(renderSection('First opening of each granted vertex', samples.join('\n\n')));
 

@@ -61,7 +61,8 @@ import { authoredRevision, loadAuthoredNodes } from './authored-nodes.ts';
 import { addressedTo } from '../capabilities/agent-catalog.ts';
 import type { AgentPassport } from '../core/contract.ts';
 import { connectorNamesFor, startConnectors } from './connectors.ts';
-import { listSecretServices, refreshSecretServices } from '../capabilities/connections/services.ts';
+import { getLoadedRemoteKinds } from '../capabilities/remote-agent-source.ts';
+import { refreshSecretServices } from '../capabilities/connections/services.ts';
 import { connections } from './connections.ts';
 import { drive } from './drive.ts';
 import { getEvent } from './events.ts';
@@ -208,7 +209,9 @@ export function catalog(): Catalog {
 // this catalog and these connections.
 export async function startTree(): Promise<void> {
   const { connectors, names } = await loadExternalServices();
-  for (const service of listSecretServices()) names.add(service.name);
+  for (const remote of getLoadedRemoteKinds()) {
+    if (remote.secrets?.length) names.add(remote.name);
+  }
   registerServices(catalog().root);
   const publish = (node: Node) => publishNode(node, names);
   await loadAuthoredNodes(publish);

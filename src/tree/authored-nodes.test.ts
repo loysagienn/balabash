@@ -127,5 +127,9 @@ test('written installation modules join the published tree and its consumers', a
     const run = await prisma.scheduleRun.findUniqueOrThrow({ where: { id: fired.runId } });
     assert.equal(run.status, 'ok', JSON.stringify(run.error));
     assert.equal(run.value, 'ready');
+    const completed = await prisma.event.findFirstOrThrow({ where: {
+      type: 'tool.call.completed', actor: 'task', taskSlug: task.slug, taskRunId: run.id, threadId: mainThreadId,
+    } });
+    assert.equal((completed.payload as { functionName: string }).functionName, 'nightly_read');
   });
 });

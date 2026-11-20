@@ -56,6 +56,10 @@ function toTool(definition: FunctionDefinition): Anthropic.Tool {
   };
 }
 
+export function deferredTool(definition: FunctionDefinition): Anthropic.Tool {
+  return { ...toTool(definition), defer_loading: true };
+}
+
 // The turn snapshot contains only earlier openings. This turn's original
 // tool_use is echoed live and first replayed in a later turn or keepalive.
 function toMessages({ chunks, openings = [], statusText }: PrewarmPrompt & { statusText?: string }): Anthropic.MessageParam[] {
@@ -92,7 +96,7 @@ function baseRequest({ model, instructions, tools, deferredTools = [], effort }:
     model,
     max_tokens: MAX_OUTPUT_TOKENS,
     system: [{ type: 'text', text: instructions, cache_control: CACHE_BREAKPOINT }],
-    tools: [...tools.map(toTool), ...deferredTools.map(tool => ({ ...toTool(tool), defer_loading: true }))],
+    tools: [...tools.map(toTool), ...deferredTools.map(deferredTool)],
     tool_choice: { type: 'auto' },
     output_config: { effort },
     messages,
