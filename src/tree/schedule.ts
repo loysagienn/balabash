@@ -107,7 +107,7 @@ const createTaskCapability = capability({
   name: 'create_task',
   summary: 'Register a scheduled task: a note or a program, with or without a trigger',
   description:
-    'Register a task for later execution. A note sends text to the main thread for the secretary to act on. A program runs code as `run_program` does. Without `cron` or `at`, the task runs only by hand. A one-shot fires at or after `at` and is consumed. If overdue at startup, it fires then. Missed cron times and triggers during a previous run are skipped.',
+    'Register a task for later execution. A note sends text to the main thread for the secretary to act on. A program runs code as `run_program` does. Without `cron` or `at`, the task runs only by hand. A one-shot fires at or after `at` and is consumed. If overdue at startup, it fires then. Cron times missed while the app was down and triggers during a previous run are skipped.',
   inputRules: [{ atMostOne: ['cron', 'at'] }],
   input: z.strictObject({
     slug: z.string().max(SLUG_MAX_LENGTH).regex(SLUG_PATTERN).describe('Unique across the installation.'),

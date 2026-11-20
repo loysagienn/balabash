@@ -239,12 +239,12 @@ function jobFailureText(
   );
 }
 
-export function fireCommandTask(
+export async function fireCommandTask(
   task: ScheduledTaskModel,
   trigger: RunTrigger,
   mainThreadId: string,
   pushFired: (payload: JsonObject) => Promise<void>,
-): FireOutcome {
+): Promise<FireOutcome> {
   if (!claimTask(task.slug)) {
     return { kind: 'already_running' };
   }
@@ -257,9 +257,8 @@ export function fireCommandTask(
   const timeoutMs = clampJobTimeout(task.timeoutMs);
   const journalBase = { id: runId, workspaceId: task.workspaceId, slug: task.slug, command, cwd, trigger };
 
-  // Fire-and-forget for the caller, but kept as a settled promise so the
-  // completion write never races the start insert (an instant spawn error
-  // could otherwise overtake it).
+  // Both the caller reading the run id and the job writing its outcome
+  // can reach the journal as soon as the start insert settles.
   const startInsert = prisma.jobRun.create({ data: { ...journalBase, status: 'running' } }).catch(error => {
     console.error(`[schedule] job "${task.slug}" (run ${runId}): failed to journal the start:`, error);
   });
@@ -376,5 +375,6 @@ export function fireCommandTask(
     }
   })();
 
+  await startInsert;
   return { kind: 'fired', runId };
 }

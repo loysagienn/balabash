@@ -20,9 +20,9 @@
 // of grants says them itself: who a thread may start (the main thread — any
 // agent of the catalog; another thread — what the declaration of its agent
 // names) and the mode a child runs in (an agent of the repository — the one
-// mode it declares; a remote agent — either, by default the one the
-// spawner implies: a child of the main thread talks to the user, a child of
-// any other thread to its parent).
+// mode it declares; a remote agent — either). By default a remote child
+// talks to its parent when a task or a non-main thread starts it. A child
+// the secretary starts on its own turn talks to the user by default.
 
 import { z } from 'zod';
 import { CapabilityError, FileId, FileRef, JsonObject, capability, type CallContext, type Caller } from '../catalog/index.ts';
@@ -333,7 +333,7 @@ const spawnAgent = capability({
       .optional(),
     headless: z
       .boolean()
-      .describe("A headless child talks to its operator. Tasks and child threads default to headless when available. The secretary uses the agent's default.")
+      .describe("The child talks to its operator if true. A task or non-main thread defaults to true if the agent allows. Otherwise use the agent's default.")
       .optional(),
     files: z.array(FileId).describe('Attached to the first message. Not with adopt.').optional(),
     project: z.string().describe('Slug of the project the work concerns.').optional(),
