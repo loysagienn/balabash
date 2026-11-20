@@ -966,6 +966,7 @@ export type OpenSecretRequestView = {
   // predates the thread being kept or the thread is gone.
   threadId: string | null;
   agent: string | null;
+  taskSlug?: string; // the issuing task, when it opened the request
   // When the link was issued; a request issued again for the same server
   // replaces the open one and carries the new moment.
   requestedAt: Date;

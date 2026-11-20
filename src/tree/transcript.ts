@@ -65,6 +65,7 @@ function line(threadId: string, event: LogEvent): string {
     seq: Number(event.seq),
     type: event.type,
     actor: event.actor,
+    ...(event.task ? { task: event.task } : {}),
     ...(event.agentName !== null ? { agentName: event.agentName } : {}),
     ...(event.threadId !== null && event.threadId !== threadId ? { threadId: event.threadId } : {}),
     ...(event.targetThreadId !== null && event.targetThreadId !== threadId ? { targetThreadId: event.targetThreadId } : {}),

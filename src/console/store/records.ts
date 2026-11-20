@@ -93,7 +93,7 @@ export function connectionFromRecord(record: Partial<ConnectionRecord>): Connect
 // the kind is the event's type, the asking thread and agent are the
 // event's author (its threadId and agentName), the moment is the record's
 // (the row's) — the event's own when the record carries none.
-export function secretRequestFromRecord(kind: OpenSecretRequestView['kind'], record: Partial<SecretRequestRecord>, author: { threadId: string | null; agentName: string | null; createdAt: Date }): OpenSecretRequestView | null {
+export function secretRequestFromRecord(kind: OpenSecretRequestView['kind'], record: Partial<SecretRequestRecord>, author: { threadId: string | null; agentName: string | null; task?: { slug: string }; createdAt: Date }): OpenSecretRequestView | null {
   if (!record.requestId || !record.server) {
     return null;
   }
@@ -105,6 +105,7 @@ export function secretRequestFromRecord(kind: OpenSecretRequestView['kind'], rec
     fields: Array.isArray(record.fields) ? record.fields.filter((field): field is string => typeof field === 'string') : [],
     threadId: author.threadId,
     agent: author.agentName,
+    ...(author.task ? { taskSlug: author.task.slug } : {}),
     requestedAt: date(record.requestedAt) ?? author.createdAt,
   };
 }

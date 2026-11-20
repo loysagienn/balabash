@@ -108,6 +108,15 @@ describe('system_request_restart', () => {
     assert.deepEqual((await requests())[1]?.payload, { reason: 'Built before the last edit.', requestedBy: 'engineer' });
   });
 
+  test('a restart requested by a scheduled task records the task and run in the envelope', async () => {
+    await put('dist/app.js', 1);
+    const program = { task: 'maintenance', runId: 'restart-run', ended: new AbortController().signal };
+    await invokeCapability(grant, 'system_request_restart', { reason: 'Bundle rebuilt.' }, { connections: NO_CONNECTIONS, program });
+    const row = await prisma.event.findFirstOrThrow({ where: { type: 'system.restart.requested' }, orderBy: { seq: 'desc' } });
+    assert.deepEqual([row.actor, row.agentName, row.taskSlug, row.taskRunId], ['task', null, program.task, program.runId]);
+    assert.deepEqual(row.payload, { reason: 'Bundle rebuilt.', requestedBy: 'task maintenance' });
+  });
+
   test('accepts only a nonblank reason', async () => {
     const before = (await requests()).length;
 

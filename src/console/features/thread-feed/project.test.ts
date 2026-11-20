@@ -8,6 +8,22 @@ const ctx: FeedContext = { threadId: 't1', agent: 'engineer', parentAgent: 'coor
 
 const own = (type: string, payload: object, extra: object = {}) => event({ type, threadId: 't1', payload: payload as never, ...extra });
 
+it('keeps the task that spoke, started a child or addressed it on both sides of the feed', () => {
+  const author = { actor: 'task' as const, task: { slug: 'digest', runId: 'run-1' } };
+  const birth = event({ ...author, type: 'thread.started', threadId: 'c9', targetThreadId: 't1', payload: { agent: 'browser', input: 'Read it.' } });
+  const message = own('thread.message', { text: 'More.' }, { ...author, targetThreadId: 'c9' });
+  const [out, child, sent, finish] = projectFeed([
+    own('agent.message', { content: [{ type: 'text', text: 'Ready.' }] }, author), birth, message,
+    own('thread.finish', {}, { ...author, targetThreadId: 'c9' }),
+  ], ctx);
+  assert.equal(out?.kind === 'message' && out.from, 'task digest');
+  assert.equal(child?.kind === 'child' && child.startedByTask, 'digest');
+  assert.equal(sent?.kind === 'message' && sent.from, 'task digest');
+  assert.match(finish?.kind === 'sys' ? finish.text : '', /^task digest asked/);
+  const received = projectFeed([birth, message], { ...ctx, threadId: 'c9', agent: 'browser' });
+  assert.deepEqual(received.map(item => item.kind === 'message' && item.from), ['task digest', 'task digest']);
+});
+
 describe('projectFeed — a question for the user (agent.ask)', () => {
   it('is a card with the options while open, static with the outcome once resolved; a resolution without its card is a line', () => {
     resetSeq(1n);

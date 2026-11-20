@@ -16,8 +16,9 @@ export function event(partial: Partial<Event> & { type: string }): Event {
   return {
     seq,
     id: partial.id ?? `ev-${seq}`,
+    ...(partial.task ? { task: partial.task } : {}),
     actor: partial.actor ?? 'agent',
-    agentName: partial.agentName ?? (partial.actor === 'user' || partial.actor === 'system' ? null : 'engineer'),
+    agentName: partial.agentName ?? (partial.actor && partial.actor !== 'agent' ? null : 'engineer'),
     workspaceId: partial.workspaceId ?? 'u1',
     threadId: partial.threadId ?? null,
     targetThreadId: partial.targetThreadId ?? null,

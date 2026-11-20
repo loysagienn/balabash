@@ -8,8 +8,8 @@ it fires and WHAT it does. The scheme of capabilities knows two kinds
   thread as a `schedule.fired` event, and the secretary acts on it.
 - `program` — code kept in the row itself and run at the trigger by the
   catalog's runner (`programs.ts` over `src/catalog/program.ts`): a process
-  of its own per run, only `call`, `describe` and `console` in scope, on
-  behalf of the workspace's main thread with the whole tree but `end_thread`
+  of its own per run, only `call`, `describe` and `console` in scope, as
+  the task in the workspace's main thread with the whole tree but `end_thread`
   and `view_file`, for up to 5 hours. Every run is a row of the journal of
   scheduled runs (ScheduleRun; read by `journal.ts`); what the program
   returns comes to the main thread as `schedule.fired` (null is silence), a

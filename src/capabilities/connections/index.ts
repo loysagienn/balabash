@@ -16,7 +16,7 @@ import { auth, discoverOAuthServerInfo } from '@modelcontextprotocol/sdk/client/
 import { Prisma } from '../../../prisma-generated/client.ts';
 import type { ConnectionModel } from '../../../prisma-generated/models.ts';
 import { prisma } from '../../db/client.ts';
-import type { JsonObject } from '../../core/contract.ts';
+import type { JsonObject, TaskAuthor } from '../../core/contract.ts';
 import type { ConnectionView } from '../../api/contract.ts';
 import type { ConnectionRecord } from '../../core/event-types.ts';
 import { appendEvent, appendEventIn, logTransaction } from '../../core/append.ts';
@@ -569,8 +569,9 @@ export async function requestOauthClientCredentials(
   workspaceId: string,
   threadId: string,
   serverName: string,
+  task?: TaskAuthor,
 ): Promise<string> {
-  const row = await openOauthClientRequest(workspaceId, threadId, serverName);
+  const row = await openOauthClientRequest(workspaceId, threadId, serverName, task);
 
   return secretRequestUrl(row.id, workspaceId);
 }
@@ -582,6 +583,7 @@ export async function openOauthClientRequest(
   workspaceId: string,
   threadId: string,
   serverName: string,
+  task?: TaskAuthor,
 ): Promise<{ id: string }> {
   const server = getServer(serverName);
 
@@ -589,7 +591,7 @@ export async function openOauthClientRequest(
     throw new ConnectionError('not_found', `Integration "${server.name}" uses Dynamic Client Registration`);
   }
 
-  return openSecretRequest('oauth-client', { workspaceId, threadId, server: server.name });
+  return openSecretRequest('oauth-client', { workspaceId, threadId, task, server: server.name });
 }
 
 export type OauthClientRequestView = {

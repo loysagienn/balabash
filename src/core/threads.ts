@@ -7,13 +7,12 @@ import { randomUUID } from 'node:crypto';
 import { Prisma } from '../../prisma-generated/client.ts';
 import { prisma } from '../db/client.ts';
 import type { DbClient } from '../db/client.ts';
-import type { JsonObject, JsonValue, Thread, ThreadCounts, ThreadStatus, ThreadSummary } from './contract.ts';
+import type { JsonObject, JsonValue, TaskAuthor, Thread, ThreadCounts, ThreadStatus, ThreadSummary } from './contract.ts';
 import type { ThreadModel as ThreadRow } from '../../prisma-generated/models.ts';
 import { COORDINATOR_AGENT } from './agent-names.ts';
 import { appendEvent, completionProjectionData } from './append.ts';
 import { AppendError, TERMINAL_TYPES, THREAD_STARTED, toEvent } from './envelope.ts';
 import { config } from '../config/index.ts';
-import type { ProgramOrigin } from './event-types.ts';
 import { threadStartFields } from '../projections/thread.ts';
 import { threadsWhere } from './thread-query.ts';
 import { messageFile } from './file-blocks.ts';
@@ -352,11 +351,8 @@ type StartThreadInput = {
   // what the projection stores and the console filters on, the slug is the
   // human-readable address at spawn time.
   project?: { id: string; slug: string };
-  // The run of a program the thread was started from, when it was not
-  // started by a turn of the spawner: the id of the run and, for a program
-  // of the schedule, the slug of its task.
-  program?: ProgramOrigin;
-  actor: 'system' | 'agent';
+  actor: 'system' | 'agent' | 'task';
+  task?: TaskAuthor;
   agentName?: string; // the SPAWNING agent, not the spawned one
 };
 
@@ -406,13 +402,10 @@ export async function startThread(options: StartThreadInput): Promise<Thread> {
     payload.projectSlug = options.project.slug;
   }
 
-  if (options.program !== undefined) {
-    payload.program = options.program;
-  }
-
   await appendEvent({
     type: THREAD_STARTED,
     actor: options.actor,
+    task: options.task,
     agentName: options.agentName ?? null,
     workspaceId: options.workspaceId,
     threadId,

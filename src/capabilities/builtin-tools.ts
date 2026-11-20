@@ -140,6 +140,7 @@ function eventToJson(event: Event): JsonObject {
     id: event.id,
     type: event.type,
     actor: event.actor,
+    ...(event.task ? { task: event.task } : {}),
     agentName: event.agentName,
     threadId: event.threadId,
     targetThreadId: event.targetThreadId,

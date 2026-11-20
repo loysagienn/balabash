@@ -20,17 +20,29 @@ import { appendEventIn, logTransaction } from './append.ts';
 import type { Tx } from './append.ts';
 import { notifyAppended } from './live.ts';
 import type { EventPayloads, EventType } from './event-types.ts';
-import type { JsonObject } from './contract.ts';
+import type { JsonObject, TaskAuthor } from './contract.ts';
 
 export type RegistryEventType = Extract<EventType, `project.${string}` | `schedule.task.${string}` | `app.${string}` | 'settings.updated' | 'secrets.requested' | 'oauth_client.requested'>;
 
 // Who changed the registry: an agent through a tool call (the event is
-// authored by its thread), the operator from the console (actor user, no
+// authored by its thread), a task acting in the main thread, the operator (no
 // thread), or the core itself (the schedule heart consuming a one-shot).
 export type RegistryAuthor =
-  | { kind: 'thread'; workspaceId: string; threadId: string }
+  | { kind: 'thread'; workspaceId: string; threadId: string; task?: TaskAuthor }
   | { kind: 'user'; workspaceId: string }
   | { kind: 'system'; workspaceId: string };
+
+async function registryEnvelope(tx: Tx, by: RegistryAuthor) {
+  if (by.kind !== 'thread') {
+    return { actor: by.kind };
+  }
+  if (by.task) {
+    return { actor: 'task' as const, task: by.task, threadId: by.threadId };
+  }
+
+  const thread = await tx.thread.findUnique({ where: { id: by.threadId }, select: { id: true, agent: true } });
+  return thread ? { actor: 'agent' as const, agentName: thread.agent, threadId: thread.id } : { actor: 'system' as const };
+}
 
 // Answers the seq of the event written — a change that answers a client
 // can tell it where in the log its change stands (PATCH /settings does, so
@@ -48,11 +60,9 @@ export async function registryMutation<T>(change: (tx: Tx, journal: RegistryJour
 
   const result = await logTransaction(async tx => {
     const journal: RegistryJournal = async (type, payload, by) => {
-      const thread = by.kind === 'thread' ? await tx.thread.findUnique({ where: { id: by.threadId }, select: { id: true, agent: true } }) : null;
-
       const appendResult = await appendEventIn(tx, {
         type,
-        ...(thread ? { actor: 'agent', agentName: thread.agent, threadId: thread.id } : { actor: by.kind === 'user' ? 'user' : 'system', threadId: null }),
+        ...(await registryEnvelope(tx, by)),
         workspaceId: by.workspaceId,
         payload: payload as JsonObject,
       });

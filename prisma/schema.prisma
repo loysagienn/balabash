@@ -28,8 +28,10 @@ model Event {
   seq            BigInt  @id @default(autoincrement()) // global order + consumer cursor
   id             String  @unique @default(uuid()) // stable reference (refs, delivery idempotency)
   type           String // canonical type (§4.2) or agent domain type '<agent>.*'
-  actor          String // 'user' | 'system' | 'agent'
-  agentName      String? @map("agent_name") // agent name when actor='agent' (runId is a payload detail)
+  actor          String // 'user' | 'system' | 'agent' | 'task'
+  agentName      String? @map("agent_name") // agent name when actor='agent'
+  taskSlug       String? @map("task_slug")
+  taskRunId      String? @map("task_run_id")
   workspaceId    String? @map("workspace_id") // workspace; null = installation-level event
   threadId       String? @map("thread_id") // author's thread; null = event outside threads
   targetThreadId String? @map("target_thread_id") // addressee thread, one hop (§4.3)
@@ -330,6 +332,7 @@ model OauthClientRequest {
   id          String   @id @default(uuid())
   workspaceId String   @map("workspace_id")
   threadId    String?  @map("thread_id") // thread that issued the link; oauth_client.provisioned is addressed to it
+  taskSlug    String?  @map("task_slug")
   server      String
   nonce       String   @unique
   expiresAt   DateTime @map("expires_at")
@@ -359,6 +362,7 @@ model ExternalServerSecretRequest {
   id          String   @id @default(uuid())
   workspaceId String   @map("workspace_id")
   threadId    String?  @map("thread_id") // thread that issued the link; secrets.provisioned is addressed to it
+  taskSlug    String?  @map("task_slug")
   server      String
   nonce       String   @unique
   fields      Json

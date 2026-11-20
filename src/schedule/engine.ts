@@ -4,7 +4,7 @@
 // - note — a text for the secretary: firing appends a schedule.fired event
 //   with the note to the main thread of the workspace, and that event is the
 //   whole fact of the firing;
-// - program — code run by the catalog's runner on behalf of the main thread
+// - program — code run by the catalog's runner as its task in the main thread
 //   (programs.ts): every run is a row of the journal of scheduled runs, its
 //   value comes to the main thread as schedule.fired, its failure as
 //   system.exception.

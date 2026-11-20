@@ -33,15 +33,9 @@ export type SessionTaskUsage = { totalTokens: number; toolUses: number; duration
 // One item of the session's live plan (TodoWrite / todo list).
 export type SessionPlanItem = { content: string; status: string; activeForm?: string };
 
-// The run of a program an event comes from, when a verb called from a
-// program wrote it and not a turn of the author: the id of the run and, for
-// a program of the schedule, the slug of its task. Absent — the author's own
-// turn (and every event recorded before the field).
-export type ProgramOrigin = { runId: string; task?: string };
-
 export type EventPayloads = {
-  // Lifecycle. thread.started is authored by the new thread itself
-  // (threadId) and addressed to its parent (targetThreadId); the spawn-time
+  // Lifecycle. thread.started identifies the new thread
+  // (threadId) and is addressed to its parent (targetThreadId); the spawn-time
   // policy rides in the payload, the projection stores agent/title/project.
   'thread.started': {
     agent: string;
@@ -63,13 +57,12 @@ export type EventPayloads = {
     // remote agent's driver streams them into the session at open.
     fileIds?: string[];
     files?: InboundFile[];
-    program?: ProgramOrigin;
   };
   'thread.progress': { text: string };
   // fileIds — the references the model reads; files — the same files with
   // their facts for the reader, written together with fileIds (absent in
   // history recorded before them).
-  'thread.message': { text: string; fileIds?: string[]; files?: InboundFile[]; program?: ProgramOrigin };
+  'thread.message': { text: string; fileIds?: string[]; files?: InboundFile[] };
   'thread.notification': { text: string; level: NotificationLevel };
   // projectId, projectSlug — the project the thread names at its end: the
   // thread moves to it (absent — the one set at start stays).
@@ -78,11 +71,11 @@ export type EventPayloads = {
   // The commands from above (the parent authors them, one hop down): the
   // coordinator's cancel, a surface's Stop/Cancel button (identity and
   // source of the human behind it).
-  'thread.cancel': { reason: string; identity?: UserIdentity; source?: string; program?: ProgramOrigin };
+  'thread.cancel': { reason: string; identity?: UserIdentity; source?: string };
   'thread.cancelled': { reason: string; requestedBy?: string; cascadeFromThreadId?: string };
   'thread.interrupt': { reason?: string; identity?: UserIdentity; source?: string } & JsonObject;
   // The remote thread's commands (src/remote), authored like the two above.
-  'thread.finish': { reason?: string; identity?: UserIdentity; source?: string; program?: ProgramOrigin };
+  'thread.finish': { reason?: string; identity?: UserIdentity; source?: string };
   'thread.pause': { identity?: UserIdentity; source?: string };
   'thread.decide': { askId: string; decision: string; identity?: UserIdentity; source?: string };
 
@@ -99,7 +92,7 @@ export type EventPayloads = {
     files?: InboundFile[];
     blocks?: ContentBlock[];
   };
-  'agent.message': { content: ContentBlock[]; program?: ProgramOrigin };
+  'agent.message': { content: ContentBlock[] };
   // A question of the agent that needs a human's decision (src/remote: the
   // approvals and sign-ins of a remote session; the remote engine writes
   // them): the id to decide by, the kind, the words, a link into the

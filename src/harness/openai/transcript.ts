@@ -18,6 +18,7 @@ type TranscriptEvent = {
   seq: number | bigint;
   type: string;
   actor: string;
+  task?: { slug: string; runId: string };
   agentName: string | null;
   threadId: string | null;
   targetThreadId: string | null;
@@ -428,8 +429,9 @@ function renderEvent(event: TranscriptEvent): RenderedEvent | null {
   const envelope: JsonObject = {
     seq: Number(event.seq),
     type: event.type,
-    // The author is ambient (user messages carry identity, coordinator events
-    // are its own) — only foreign agents are annotated.
+    // The secretary's own actions are ambient. A task acts independently in
+    // the same thread; keep its identity even on a condensed message or birth.
+    ...(event.task ? { actor: 'task', task: event.task } : {}),
     ...(event.actor === 'agent' && event.agentName && event.agentName !== 'coordinator'
       ? { agent: event.agentName }
       : {}),

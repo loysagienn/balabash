@@ -23,7 +23,9 @@ export type JsonSchema = Record<string, unknown>;
 // ---------------------------------------------------------------------------
 // Event envelope
 
-export type EventActor = 'user' | 'system' | 'agent';
+export type EventActor = 'user' | 'system' | 'agent' | 'task';
+
+export type TaskAuthor = { slug: string; runId: string };
 
 export type Event = {
   seq: bigint;
@@ -31,6 +33,7 @@ export type Event = {
   type: string;
   actor: EventActor;
   agentName: string | null; // set iff actor === 'agent'
+  task?: TaskAuthor; // set iff actor === 'task'
   workspaceId: string | null; // workspace; null = installation-level
   threadId: string | null; // author's thread; null = outside threads
   targetThreadId: string | null; // addressee; strictly one hop

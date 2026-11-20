@@ -87,8 +87,8 @@ export function secretRequestTitle(request: Pick<OpenSecretRequestView, 'kind' |
   return request.kind === 'oauth-client' ? `${request.server} OAuth client needed` : `${request.server} keys needed`;
 }
 
-export function secretRequestDesc(request: Pick<OpenSecretRequestView, 'kind' | 'fields' | 'agent'>): string {
-  const who = request.agent ? `The “${request.agent}” agent` : 'An agent';
+export function secretRequestDesc(request: Pick<OpenSecretRequestView, 'kind' | 'fields' | 'agent' | 'taskSlug'>): string {
+  const who = request.taskSlug ? `Task “${request.taskSlug}”` : request.agent ? `The “${request.agent}” agent` : 'An agent';
   const what = request.kind === 'oauth-client' ? 'the client ID and secret' : request.fields.length ? listWords(request.fields) : 'the installation credentials';
 
   return `${who} asks for ${what}.`;

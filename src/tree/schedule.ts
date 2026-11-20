@@ -3,14 +3,14 @@
 // its rules and the launch of a task are the schedule's own (src/schedule —
 // one implementation for every door: this node, the console, the heart),
 // and a change of the registry is authored by the calling thread. A manual
-// run fires the task exactly as its trigger would: a program runs on behalf
-// of the main thread of the workspace, whoever asked for the run.
+// run fires the task exactly as its trigger would: a program acts as its task
+// in the main thread of the workspace, whoever asked for the run.
 
 import { z } from 'zod';
 import type { ScheduledTaskModel } from '../../prisma-generated/models.ts';
-import { CapabilityError, JsonValue, capability, namedType, node, type Caller, type ErrorKind } from '../catalog/index.ts';
+import { CapabilityError, JsonValue, capability, namedType, node, type ErrorKind } from '../catalog/index.ts';
 import { config } from '../config/index.ts';
-import type { RegistryAuthor } from '../core/registry-events.ts';
+import { registryAuthor } from './call-author.ts';
 import { prisma } from '../db/client.ts';
 import { ScheduleError, createTask, deleteTask, runTask, type ScheduleErrorCode } from '../schedule/commands.ts';
 import { DESCRIPTION_MAX_LENGTH, NAME_MAX_LENGTH, SLUG_MAX_LENGTH, SLUG_PATTERN, TASK_KINDS, parseTaskInput } from '../schedule/input.ts';
@@ -38,7 +38,7 @@ export const ScheduledTask = namedType(
     timeoutSeconds: z.int().nullable().describe('Kind program.'),
     wake: z.boolean().describe(wakeText),
     running: z.boolean().describe('A run is in flight.'),
-    createdBy: z.string().nullable().describe('Agent name, or "operator".'),
+    createdBy: z.string().nullable().describe('Agent name, "task <slug>", or "operator".'),
     createdAt: z.string().describe('ISO 8601.'),
   }),
 );
@@ -64,11 +64,6 @@ function taskValue(row: ScheduledTaskModel, now: Date): TaskValue {
     createdBy: row.createdBy,
     createdAt: row.createdAt.toISOString(),
   };
-}
-
-// A change of the registry is authored by the thread that asked for it.
-function author(caller: Caller): RegistryAuthor {
-  return { kind: 'thread', workspaceId: caller.workspaceId, threadId: caller.threadId };
 }
 
 const REFUSALS: Record<ScheduleErrorCode, ErrorKind> = {
@@ -121,7 +116,8 @@ const createTaskCapability = capability({
     wake: z.boolean().default(true).describe(wakeText),
   }),
   output: ScheduledTask,
-  async run(input, { caller }) {
+  async run(input, ctx) {
+    const { caller } = ctx;
     const { timeoutSeconds, ...fields } = input;
     const now = new Date();
 
@@ -131,7 +127,7 @@ const createTaskCapability = capability({
         createTask(
           caller.workspaceId,
           parseTaskInput({ ...fields, ...(input.kind === 'program' ? { timeoutMs: timeoutSeconds * 1000 } : {}) }, now),
-          author(caller),
+          registryAuthor(ctx),
         ),
       {
         conflict: `The slug "${input.slug}" is already taken by a task of the installation: cancel that task first with \`schedule_cancel_task\` if it is of this workspace, or pick another slug.`,
@@ -170,8 +166,9 @@ const cancelTask = capability({
     'Remove a scheduled task from the registry: its trigger is disarmed and the slug becomes free. A run already in flight is not stopped.',
   input: z.strictObject({ slug: slugOfTask }),
   output: z.null(),
-  async run({ slug }, { caller }) {
-    if (!(await deleteTask(caller.workspaceId, slug, author(caller)))) {
+  async run({ slug }, ctx) {
+    const { caller } = ctx;
+    if (!(await deleteTask(caller.workspaceId, slug, registryAuthor(ctx)))) {
       throw new CapabilityError('not_found', noTask(slug));
     }
 

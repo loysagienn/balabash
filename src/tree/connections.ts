@@ -7,6 +7,7 @@
 // forms, never through a call, and the outcome comes back as an event
 // addressed to the calling thread.
 
+import { callAuthor } from './call-author.ts';
 import { z } from 'zod';
 import { Account, CapabilityError, capability, node, type AccountValue } from '../catalog/index.ts';
 import {
@@ -231,7 +232,8 @@ const requestOauthClient = capability({
     replacing: z.boolean().describe('true: a provisioned client will be replaced.'),
     setup: z.string().describe('What the operator sets up at the provider first.'),
   }),
-  async run(input, { caller }) {
+  async run(input, ctx) {
+    const { caller } = ctx;
     const service = accountService(input.service);
 
     if (service.clientRegistration !== 'manual') {
@@ -245,7 +247,7 @@ const requestOauthClient = capability({
 
     try {
       return {
-        url: await requestOauthClientCredentials(caller.workspaceId, caller.threadId, service.name),
+        url: await requestOauthClientCredentials(caller.workspaceId, caller.threadId, service.name, callAuthor(ctx).task),
         replacing,
         setup: service.setup ?? service.description,
       };
@@ -262,10 +264,11 @@ const requestSecret = capability({
     'Issue a link to a form where the operator enters or replaces the installation secrets of a service. The values are never returned. A secrets.provisioned event arrives in this thread when they are saved.',
   input: z.strictObject({ service: z.string() }),
   output: z.strictObject({ url: z.string() }),
-  async run(input, { caller }) {
+  async run(input, ctx) {
+    const { caller } = ctx;
     await secretService(input.service);
 
-    return { url: await requestExternalServerCredentials(caller.workspaceId, caller.threadId, input.service) };
+    return { url: await requestExternalServerCredentials(caller.workspaceId, caller.threadId, input.service, callAuthor(ctx).task) };
   },
 });
 

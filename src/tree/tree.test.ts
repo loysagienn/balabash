@@ -213,10 +213,10 @@ describe('get_event', () => {
     const { seq, id } = await append('thread.progress', threadId, payload, { actor: 'agent', agentName: 'engineer', targetThreadId: stand.mainThreadId });
     const event = await invoke('get_event', { seq });
 
-    assert.deepEqual(Object.keys(event), ['seq', 'id', 'type', 'actor', 'agentName', 'threadId', 'targetThreadId', 'payload', 'createdAt']);
+    assert.deepEqual(Object.keys(event), ['seq', 'id', 'type', 'actor', 'agentName', 'task', 'threadId', 'targetThreadId', 'payload', 'createdAt']);
     assert.deepEqual(
       { ...event, createdAt: null },
-      { seq, id, type: 'thread.progress', actor: 'agent', agentName: 'engineer', threadId, targetThreadId: stand.mainThreadId, payload, createdAt: null },
+      { seq, id, type: 'thread.progress', actor: 'agent', agentName: 'engineer', task: null, threadId, targetThreadId: stand.mainThreadId, payload, createdAt: null },
     );
     assert.equal(new Date(event.createdAt).toISOString(), event.createdAt);
   });

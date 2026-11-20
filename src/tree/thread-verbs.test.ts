@@ -690,11 +690,14 @@ describe('fetch_thread_file', () => {
 });
 
 describe('a program', () => {
-  test('of the schedule acts as the main thread, and what it leaves names the task and the run', async () => {
+  test('of the schedule acts as the task in the main thread', async () => {
     const code = [
       "await call('send_message', { text: 'The morning digest is ready.' });",
       "const child = await call('spawn_agent', { agent: 'browser', title: 'Check the page', prompt: 'Open it.' });",
       "await call('send_to_thread', { threadId: child.threadId, text: 'Start with the top.' });",
+      "await call('finish_thread', { threadId: child.threadId });",
+      "await call('cancel_thread', { threadId: child.threadId, reason: 'Done.' });",
+      "await call('schedule_create_task', { slug: 'digest-note', name: 'Later', kind: 'note', note: 'Read.' });",
       'let ending;',
       "try { await call('end_thread', { title: 'T', description: 'D', summary: 'S' }); } catch (error) { ending = error.kind; }",
       "const remote = await call('spawn_agent', { agent: 'fake_agent', title: 'Remote', prompt: 'Work.' });",
@@ -715,19 +718,56 @@ describe('a program', () => {
     // The main thread never ends: a scheduled program has no such verb.
     assert.equal(run.value.ending, 'unknown_capability');
 
-    const origin = { runId, task: 'digest' };
     const message = (await written(stand.mainThreadId, 'agent.message')).find(event => event.payload.content[0]?.text === 'The morning digest is ready.')!;
-
-    assert.deepEqual([message.actor, message.agentName, message.payload.program], ['agent', 'coordinator', origin]);
-
     const birth = await started(run.value.child);
 
-    assert.deepEqual([birth.targetThreadId, birth.agentName, birth.payload.program], [stand.mainThreadId, 'coordinator', origin]);
+    assert.equal(birth.targetThreadId, stand.mainThreadId);
 
     const word = (await written(stand.mainThreadId, 'thread.message')).find(event => event.targetThreadId === run.value.child)!;
 
-    assert.deepEqual([word.payload.text, word.payload.program], ['Start with the top.', origin]);
+    assert.equal(word.payload.text, 'Start with the top.');
+
+    const finish = await lastWritten(stand.mainThreadId, 'thread.finish');
+    const cancel = await lastWritten(stand.mainThreadId, 'thread.cancel');
+    const note = await lastWritten(stand.mainThreadId, 'schedule.task.created');
+    assert.equal(note.payload.createdBy, 'task digest');
+
+    for (const event of [message, birth, word, finish, cancel, note]) {
+      assert.deepEqual([event.actor, event.agentName, event.taskSlug, event.taskRunId, event.payload.program], ['task', null, 'digest', runId, undefined]);
+    }
+    const childTranscript = await invoke('threads_get_transcript', { threadId: run.value.child });
+    const [spawn] = childTranscript.transcript.split('\n').map((line: string) => JSON.parse(line));
+    assert.deepEqual([spawn.actor, spawn.task, spawn.payload.agent], ['task', { slug: 'digest', runId }, 'browser']);
+
     assert.deepEqual(run.value.modes, [true, false]);
+  });
+
+  test('readers attribute old and new messages in one transcript', async () => {
+    const { buildTranscript } = await import('../harness/openai/transcript.ts');
+    const { getTranscript } = await import('../core/events.ts');
+    const threadId = stand.mainThreadId;
+    const base = { type: 'agent.message', workspaceId: stand.workspaceId, threadId };
+    const agent = { ...base, actor: 'agent', agentName: 'coordinator' };
+    const content = [{ type: 'text', text: 'Ready' }];
+    const task = { slug: 'digest', runId: 'from-schedule' };
+    const oldTask = { task: task.slug, runId: task.runId };
+
+    await prisma.event.createMany({ data: [
+      { ...agent, payload: { content } },
+      { ...agent, payload: { content, program: { runId: 'in-place' } } },
+      { ...agent, payload: { content, program: oldTask } },
+      { ...base, actor: 'task', taskSlug: task.slug, taskRunId: task.runId, payload: { content } },
+    ] });
+
+    const events = await getTranscript(threadId, { last: 4 });
+    const lines = buildTranscript(events).text.split('\n').filter(line => line.startsWith('{')).map(line => JSON.parse(line)).filter(line => line.type === 'agent.message');
+    assert.deepEqual(lines.map(line => [line.text, line.task]), [['Ready', undefined], ['Ready', undefined], ['Ready', task], ['Ready', task]]);
+
+    const page = await invoke('threads_get_transcript', { threadId, limit: 4 });
+    const authors = page.transcript.split('\n').map((line: string) => JSON.parse(line)).map((e: Value) => [e.actor, e.agentName, e.task]);
+    assert.deepEqual(authors, [['agent', 'coordinator', undefined], ['agent', 'coordinator', undefined], ['task', undefined, task], ['task', undefined, task]]);
+    const full = await invoke('get_event', { seq: Number(events[2]!.seq) });
+    assert.deepEqual([full.actor, full.task, full.payload.program], ['task', task, oldTask]);
   });
 
   test('run in place by the secretary uses the same child mode as a direct call', async () => {
@@ -738,7 +778,7 @@ describe('a program', () => {
     assert.equal(result, false);
   });
 
-  test('run in place by a thread leaves the id of its run', async () => {
+  test('run in place by a thread writes an ordinary event of its agent', async () => {
     const { threadId, grant } = await child('browser');
     const { runProgram } = await import('../catalog/index.ts');
 
@@ -747,7 +787,6 @@ describe('a program', () => {
     const message = await lastWritten(threadId, 'thread.message');
 
     assert.equal(message.payload.text, 'From a program.');
-    assert.deepEqual(Object.keys(message.payload.program), ['runId']);
-    assert.equal(typeof message.payload.program.runId, 'string');
+    assert.deepEqual([message.actor, message.agentName, message.taskSlug, message.taskRunId, message.payload.program], ['agent', 'browser', null, null, undefined]);
   });
 });

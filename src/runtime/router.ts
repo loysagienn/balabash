@@ -172,7 +172,7 @@ export function startThreadRouter({ createRun, spawnRun }: RouterHooks): Consume
           actor: 'system',
           workspaceId: event.workspaceId,
           threadId: event.targetThreadId,
-          payload: { reason, requestedBy: event.actor === 'agent' ? (event.agentName ?? 'agent') : event.actor },
+          payload: { reason, requestedBy: event.task ? `task ${event.task.slug}` : event.agentName ?? event.actor },
         });
 
         return;

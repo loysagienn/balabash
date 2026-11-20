@@ -146,7 +146,7 @@ function FeedChild({ item, now }: { item: ChildItem; now: Date }) {
   const link = useLinkProps({ key: 'thread', id: item.threadId });
   const state = item.state ?? live ?? 'wait';
   const sub = item.startedAt
-    ? `${item.agent} agent started · ${item.endedAt ? `${dateTimeLabel(item.startedAt, now)} → ${dateTimeLabel(item.endedAt, now)}` : dateTimeLabel(item.startedAt, now)}`
+    ? `${item.agent} agent started${item.startedByTask ? ` by task ${item.startedByTask}` : ''} · ${item.endedAt ? `${dateTimeLabel(item.startedAt, now)} → ${dateTimeLabel(item.endedAt, now)}` : dateTimeLabel(item.startedAt, now)}`
     : `${item.agent} agent · ended ${item.endedAt ? dateTimeLabel(item.endedAt, now) : ''}`;
 
   return (

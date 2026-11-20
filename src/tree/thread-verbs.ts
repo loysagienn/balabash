@@ -11,18 +11,13 @@
 // messages, the surfaces show a message to the user, the remote engine
 // speaks to an external session.
 //
-// A call made from a program leaves its origin in what it writes
-// (`program`: the id of the run and, for a program of the schedule, the
-// slug of the task): a message or a child thread of the main thread that no
-// turn of the secretary produced can be told from one that a turn did.
-//
 import { z } from 'zod';
-import { CapabilityError, FileId, FileRef, JsonObject, capability, type CallContext, type Caller } from '../catalog/index.ts';
+import { CapabilityError, FileId, FileRef, JsonObject, capability, type Caller } from '../catalog/index.ts';
 import { isRemoteAgent, spawnHeadless, startable } from '../capabilities/agent-catalog.ts';
 import { appendEvent, type AppendResult } from '../core/append.ts';
 import type { ContentBlock, FileRef as StoredFile, JsonObject as Json, RemoteAgentDeclaration, Thread } from '../core/contract.ts';
 import { AppendError, THREAD_CANCEL, THREAD_FINISH, THREAD_MESSAGE, type AppendInput } from '../core/envelope.ts';
-import type { ProgramOrigin } from '../core/event-types.ts';
+import { callAuthor } from './call-author.ts';
 import { fileContentBlock, messageFile } from '../core/file-blocks.ts';
 import { leaveReport } from '../core/thread-end.ts';
 import { getThread, startThread } from '../core/threads.ts';
@@ -113,17 +108,6 @@ async function namedProject(caller: Caller, slug: string | undefined): Promise<{
   return { id: project.id, slug: project.slug };
 }
 
-// Where a call made from a program says so in what it writes.
-function programOf(ctx: CallContext): ProgramOrigin | null {
-  return ctx.program ? { runId: ctx.program.runId, ...(ctx.program.task ? { task: ctx.program.task } : {}) } : null;
-}
-
-function withOrigin(payload: Json, ctx: CallContext): Json {
-  const program = programOf(ctx);
-
-  return program ? { ...payload, program } : payload;
-}
-
 // What the log's rules refuse, as the error of a call. The actions check
 // the same before they write; a refusal here is the same answer for a
 // thread that changed in between.
@@ -182,18 +166,14 @@ const sendMessage = capability({
     if (thread.headless && thread.parentId !== null) {
       await write({
         type: THREAD_MESSAGE,
-        actor: 'agent',
-        agentName: caller.agentName,
+        ...callAuthor(ctx),
         workspaceId: caller.workspaceId,
         threadId: thread.id,
         targetThreadId: thread.parentId,
-        payload: withOrigin(
-          {
-            text: text ?? files.map(file => `[file] ${file.originalFilename ?? file.id}`).join('\n'),
-            ...(files.length ? { fileIds: files.map(file => file.id), files: files.map(messageFile) } : {}),
-          },
-          ctx,
-        ),
+        payload: {
+          text: text ?? files.map(file => `[file] ${file.originalFilename ?? file.id}`).join('\n'),
+          ...(files.length ? { fileIds: files.map(file => file.id), files: files.map(messageFile) } : {}),
+        },
       });
 
       return null;
@@ -203,11 +183,10 @@ const sendMessage = capability({
 
     await write({
       type: 'agent.message',
-      actor: 'agent',
-      agentName: caller.agentName,
+      ...callAuthor(ctx),
       workspaceId: caller.workspaceId,
       threadId: thread.id,
-      payload: withOrigin({ content: content as unknown as Json[] }, ctx),
+      payload: { content: content as unknown as Json[] },
     });
 
     return null;
@@ -369,7 +348,8 @@ const spawnAgent = capability({
       );
     }
 
-    const headless = spawnHeadless(agent, parent.parentId !== null || ctx.program?.task != null, input.headless);
+    const author = callAuthor(ctx);
+    const headless = spawnHeadless(agent, parent.parentId !== null || author.actor === 'task', input.headless);
 
     if (remote && input.options !== undefined) {
       fitOptions(agent, input.options);
@@ -377,7 +357,6 @@ const spawnAgent = capability({
 
     const files = await storedFiles(caller, input.files);
     const project = await namedProject(caller, input.project);
-    const program = programOf(ctx);
     let child: Thread;
 
     try {
@@ -392,9 +371,7 @@ const spawnAgent = capability({
         ...(remote ? { remote: true, options: input.options ?? {}, adopt: adopt !== undefined } : {}),
         ...(files.length ? { files } : {}),
         ...(project ? { project } : {}),
-        ...(program ? { program } : {}),
-        actor: 'agent',
-        agentName: caller.agentName,
+        ...author,
       });
     } catch (error) {
       throw logRefusal(error);
@@ -422,15 +399,11 @@ const sendToThread = capability({
     const files = await storedFiles(caller, input.files);
     const result = await write({
       type: THREAD_MESSAGE,
-      actor: 'agent',
-      agentName: caller.agentName,
+      ...callAuthor(ctx),
       workspaceId: caller.workspaceId,
       threadId: caller.threadId,
       targetThreadId: child.id,
-      payload: withOrigin(
-        { text, ...(files.length ? { fileIds: files.map(file => file.id), files: files.map(messageFile) } : {}) },
-        ctx,
-      ),
+      payload: { text, ...(files.length ? { fileIds: files.map(file => file.id), files: files.map(messageFile) } : {}) },
     });
 
     // The child ended while the message was on its way: the log keeps the
@@ -466,12 +439,11 @@ const finishThread = capability({
     return taken(
       await write({
         type: THREAD_FINISH,
-        actor: 'agent',
-        agentName: caller.agentName,
+        ...callAuthor(ctx),
         workspaceId: caller.workspaceId,
         threadId: caller.threadId,
         targetThreadId: child.id,
-        payload: withOrigin({ reason: 'finished_by_parent' }, ctx),
+        payload: { reason: 'finished_by_parent' },
       }),
       child,
     );
@@ -492,12 +464,11 @@ const cancelThread = capability({
     return taken(
       await write({
         type: THREAD_CANCEL,
-        actor: 'agent',
-        agentName: caller.agentName,
+        ...callAuthor(ctx),
         workspaceId: caller.workspaceId,
         threadId: caller.threadId,
         targetThreadId: child.id,
-        payload: withOrigin({ reason: input.reason?.trim() || 'cancelled' }, ctx),
+        payload: { reason: input.reason?.trim() || 'cancelled' },
       }),
       child,
     );

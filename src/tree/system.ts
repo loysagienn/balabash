@@ -6,6 +6,7 @@
 
 import { z } from 'zod';
 import { CapabilityError, capability, node } from '../catalog/index.ts';
+import { callAuthor } from './call-author.ts';
 import { bundleState } from '../runtime/bundle.ts';
 import { requestRestart as recordRequest } from '../runtime/restart.ts';
 
@@ -22,7 +23,9 @@ const requestRestart = capability({
       .enum(['current', 'stale'])
       .describe('stale: the sources changed after the last build, so the restart boots the previous bundle.'),
   }),
-  async run(input, { caller }) {
+  async run(input, ctx) {
+    const { caller } = ctx;
+    const author = callAuthor(ctx);
     const reason = input.reason.trim();
 
     if (!reason) {
@@ -43,7 +46,8 @@ const requestRestart = capability({
       workspaceId: caller.workspaceId,
       threadId: caller.threadId,
       reason,
-      requestedBy: caller.agentName,
+      requestedBy: author.task ? `task ${author.task.slug}` : caller.agentName,
+      task: author.task,
     });
 
     return { build };

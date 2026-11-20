@@ -6,6 +6,7 @@
 // and a sanitized secrets.provisioned event addressed to the thread that
 // issued the link.
 
+import type { TaskAuthor } from '../core/contract.ts';
 import { prisma } from '../db/client.ts';
 import { appendEventIn, logTransaction } from '../core/append.ts';
 import { notifyAppended } from '../core/live.ts';
@@ -56,8 +57,9 @@ export async function requestExternalServerCredentials(
   workspaceId: string,
   threadId: string,
   serverName: string,
+  task?: TaskAuthor,
 ): Promise<string> {
-  const { id } = await openExternalServerCredentialsRequest(workspaceId, threadId, serverName);
+  const { id } = await openExternalServerCredentialsRequest(workspaceId, threadId, serverName, task);
 
   return secretRequestUrl(id, workspaceId);
 }
@@ -68,6 +70,7 @@ export async function openExternalServerCredentialsRequest(
   workspaceId: string,
   threadId: string,
   serverName: string,
+  task?: TaskAuthor,
 ): Promise<{ id: string }> {
   const target = getSecretService(serverName);
 
@@ -75,7 +78,7 @@ export async function openExternalServerCredentialsRequest(
     throw new Error(`External server "${serverName}" is not awaiting installation credentials`);
   }
 
-  return openSecretRequest('external-secrets', { workspaceId, threadId, server: target.name, fields: toFields(target) });
+  return openSecretRequest('external-secrets', { workspaceId, threadId, task, server: target.name, fields: toFields(target) });
 }
 
 // Whether the installation has a server with installation credentials

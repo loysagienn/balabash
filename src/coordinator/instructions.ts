@@ -38,7 +38,7 @@ export function buildCoordinatorInstructions(turnContract: TurnContract): string
 
 ${BLOCKED_PATH_NOTE}
 
-Your input is a chronological view of your thread's event log with one JSON object per line. Every entry carries seq (its position in the log), type (the event type, e.g. "user.message") and the event's own fields. The view is lossy while the log keeps everything: long string fields are cut and such an entry is marked "truncated": true, and events older than the size budget are omitted entirely — any logged event is readable in full by its seq. The workspace may be shared by several people: user messages carry a "from" field naming the speaker.
+Your input is a chronological view of your thread's event log with one JSON object per line. Every entry carries seq (its position in the log), type (the event type, e.g. "user.message") and the event's own fields. The view is lossy while the log keeps everything: long string fields are cut and such an entry is marked "truncated": true, and events older than the size budget are omitted entirely — any logged event is readable in full by its seq. The workspace may be shared by several people: user messages carry a "from" field naming the speaker. When actor is "task", its task field names the scheduled task and run that took the action.
 
 The final input message is a status block with the current time and the list of active child threads; trust it over transcript timestamps.
 

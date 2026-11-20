@@ -6,15 +6,11 @@
 // calling thread.
 
 import { z } from 'zod';
-import { CapabilityError, WorkspacePath, capability, node, type Caller, type ErrorKind } from '../catalog/index.ts';
+import { CapabilityError, WorkspacePath, capability, node, type ErrorKind } from '../catalog/index.ts';
 import { AppManagementError, listApps, publishApp, unpublishApp, type AppManagementErrorCode } from '../apps/management.ts';
 import { publicAppUrl } from '../apps/urls.ts';
-import type { RegistryAuthor } from '../core/registry-events.ts';
+import { registryAuthor } from './call-author.ts';
 import { areaPath } from './file-area.ts';
-
-function author(caller: Caller): RegistryAuthor {
-  return { kind: 'thread', workspaceId: caller.workspaceId, threadId: caller.threadId };
-}
 
 const REFUSALS: Record<AppManagementErrorCode, ErrorKind> = {
   bad_request: 'invalid_input',
@@ -84,9 +80,10 @@ const publish = capability({
       .describe('Globally unique; "apps", "auth" and "platform" are reserved.'),
   }),
   output: z.strictObject({ publicUrl: z.string() }),
-  async run(input, { caller }) {
+  async run(input, ctx) {
+    const { caller } = ctx;
     const appPath = areaPath(input.path);
-    const { slug } = await management(() => publishApp(caller.workspaceId, appPath, input.slug, author(caller)));
+    const { slug } = await management(() => publishApp(caller.workspaceId, appPath, input.slug, registryAuthor(ctx)));
 
     return { publicUrl: publicAppUrl(slug) };
   },
@@ -106,7 +103,8 @@ const unpublish = capability({
     path: WorkspacePath,
     slug: z.string(),
   }),
-  async run(input, { caller }) {
+  async run(input, ctx) {
+    const { caller } = ctx;
     const appPath = input.path === undefined ? undefined : areaPath(input.path);
 
     // A slug that is given is the address: a blank one names nothing.
@@ -114,7 +112,7 @@ const unpublish = capability({
       throw new CapabilityError('invalid_input', 'slug is blank: pass a value or leave the field out.');
     }
 
-    const { path, slug } = await management(() => unpublishApp(caller.workspaceId, appPath, input.slug, author(caller)));
+    const { path, slug } = await management(() => unpublishApp(caller.workspaceId, appPath, input.slug, registryAuthor(ctx)));
 
     return { path, slug };
   },

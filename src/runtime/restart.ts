@@ -21,6 +21,7 @@
 // a request too), addressing the requester thread — the dead-target redirect
 // delivers it to the main thread when the requester already finished.
 
+import type { TaskAuthor } from '../core/contract.ts';
 import { readFile, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import { appendEvent } from '../core/append.ts';
@@ -51,7 +52,7 @@ type PendingRestart = {
   workspaceId: string | null;
   threadId: string | null;
   reason: string;
-  // The agent of the requesting thread, as the request names it.
+  // Who requested the restart, as the request names it.
   requestedBy: string | null;
   requestedAt: Date;
   notified: boolean;
@@ -108,12 +109,14 @@ export async function requestRestart(request: {
   workspaceId: string;
   threadId: string;
   reason: string;
-  // The agent of the requesting thread.
+  // The agent or task that requested the restart.
   requestedBy: string | null;
+  task?: TaskAuthor;
 }): Promise<void> {
   await appendEvent({
     type: SYSTEM_RESTART_REQUESTED,
-    actor: 'system',
+    actor: request.task ? 'task' : 'system',
+    task: request.task,
     workspaceId: request.workspaceId,
     threadId: request.threadId,
     payload: {

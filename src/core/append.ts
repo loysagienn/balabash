@@ -118,6 +118,8 @@ async function createEvent(tx: Tx, input: AppendInput): Promise<Event> {
     data: {
       type: input.type,
       actor: input.actor,
+      taskSlug: input.task?.slug,
+      taskRunId: input.task?.runId,
       agentName: input.agentName ?? null,
       workspaceId: input.workspaceId,
       threadId: input.threadId ?? null,

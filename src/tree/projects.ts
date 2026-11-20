@@ -6,7 +6,7 @@
 
 import { z } from 'zod';
 import { CapabilityError, WorkspacePath, capability, namedType, node, type Caller, type ErrorKind } from '../catalog/index.ts';
-import type { RegistryAuthor } from '../core/registry-events.ts';
+import { registryAuthor } from './call-author.ts';
 import {
   DESCRIPTION_MAX_LENGTH,
   ProjectError,
@@ -70,11 +70,6 @@ async function workspaceProject(caller: Caller, projectSlug: string): Promise<Pr
   }
 
   return project;
-}
-
-// A change of the registry is authored by the thread that asked for it.
-function author(caller: Caller): RegistryAuthor {
-  return { kind: 'thread', workspaceId: caller.workspaceId, threadId: caller.threadId };
 }
 
 const REFUSALS: Record<ProjectErrorCode, ErrorKind> = {
@@ -142,9 +137,10 @@ const create = capability({
     project: Project,
     adopted: z.boolean().describe('true: the folder already existed.'),
   }),
-  async run(input, { caller }) {
+  async run(input, ctx) {
+    const { caller } = ctx;
     const { project, adopted } = await registry(() =>
-      createProject(caller.workspaceId, parseProjectInput(input), author(caller)),
+      createProject(caller.workspaceId, parseProjectInput(input), registryAuthor(ctx)),
     );
 
     return { project: projectValue(project), adopted };
@@ -167,7 +163,8 @@ const update = capability({
     project: Project,
     renamedFrom: WorkspacePath.nullable().describe('Previous path of the folder, when this call renamed it.'),
   }),
-  async run({ project: projectSlug, ...fields }, { caller }) {
+  async run({ project: projectSlug, ...fields }, ctx) {
+    const { caller } = ctx;
     // The registry reads a blank field as "keep"; here a field that is given
     // carries a value.
     for (const [field, value] of Object.entries(fields)) {
@@ -178,7 +175,7 @@ const update = capability({
 
     const current = await workspaceProject(caller, projectSlug);
     const { project, renamedFrom } = await registry(() =>
-      updateProject(caller.workspaceId, current.id, parseProjectPatch(fields), author(caller)),
+      updateProject(caller.workspaceId, current.id, parseProjectPatch(fields), registryAuthor(ctx)),
     );
 
     return { project: projectValue(project), renamedFrom };
@@ -194,9 +191,10 @@ const archive = capability({
     project: Project,
     changed: z.boolean().describe('false: it was already archived.'),
   }),
-  async run({ project: projectSlug }, { caller }) {
+  async run({ project: projectSlug }, ctx) {
+    const { caller } = ctx;
     const current = await workspaceProject(caller, projectSlug);
-    const { project, changed } = await registry(() => archiveProject(caller.workspaceId, current.id, author(caller)));
+    const { project, changed } = await registry(() => archiveProject(caller.workspaceId, current.id, registryAuthor(ctx)));
 
     return { project: projectValue(project), changed };
   },
@@ -211,9 +209,10 @@ const unarchive = capability({
     project: Project,
     changed: z.boolean().describe('false: it was not archived.'),
   }),
-  async run({ project: projectSlug }, { caller }) {
+  async run({ project: projectSlug }, ctx) {
+    const { caller } = ctx;
     const current = await workspaceProject(caller, projectSlug);
-    const { project, changed } = await registry(() => unarchiveProject(caller.workspaceId, current.id, author(caller)));
+    const { project, changed } = await registry(() => unarchiveProject(caller.workspaceId, current.id, registryAuthor(ctx)));
 
     return { project: projectValue(project), changed };
   },

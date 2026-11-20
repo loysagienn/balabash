@@ -4,8 +4,7 @@
 // and the console's endpoints (src/api/api.ts), the way
 // src/projects/mutations.ts serves every door for projects. Creating writes the row and journals
 // schedule.task.created in its transaction by whoever asked (RegistryAuthor:
-// an agent's thread names the agent as the row's author, the operator is
-// "operator"); the input is checked by one pure rule (input.ts). Deleting
+// an agent name, "task <slug>" or "operator"); the input is checked by one pure rule (input.ts). Deleting
 // journals schedule.task.cancelled in the row's transaction; running fires
 // the task exactly as a trigger would and leaves the schedule untouched. A
 // refusal is a ScheduleError (errors.ts) whose code the api maps to a
@@ -42,7 +41,7 @@ function isUniqueViolation(error: unknown): boolean {
 // to the registry) is a 'conflict': told ahead of the write, and the unique
 // index stays the last word — two creations of one slug at once leave one
 // row, the other is the same refusal (P2002), not a crash. The author
-// column: the agent of the asking thread, "operator" for the console, null
+// column: agent name or "task <slug>" for a call, "operator" for the console, null
 // for the system.
 export async function createTask(workspaceId: string, input: TaskInput, by: RegistryAuthor): Promise<ScheduledTaskModel> {
   const taken = () => new ScheduleError('conflict', `slug "${input.slug}" is already taken — cancel_task it first to recreate`);
@@ -52,7 +51,9 @@ export async function createTask(workspaceId: string, input: TaskInput, by: Regi
     throw taken();
   }
 
-  const createdBy = by.kind === 'thread' ? ((await getThread(by.threadId))?.agent ?? null) : by.kind === 'user' ? OPERATOR_AUTHOR : null;
+  const createdBy = by.kind === 'thread'
+    ? (by.task ? `task ${by.task.slug}` : (await getThread(by.threadId))?.agent ?? null)
+    : by.kind === 'user' ? OPERATOR_AUTHOR : null;
 
   try {
     return await registryMutation(async (tx, journal) => {

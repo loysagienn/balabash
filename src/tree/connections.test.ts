@@ -558,3 +558,16 @@ describe('the secrets of the installation and web_perplexity', () => {
     await refuses(invoke('connections_forget_secret', { service: 'qase' }), 'not_found', /^There is no installation service "qase"/);
   });
 });
+
+test('a credential request projects the issuing task into the snapshot and clears it on reissue by an agent', async () => {
+  const { readOpenSecretRequests } = await import('../capabilities/secret-requests.ts');
+  const input = { service: 'mailbox' };
+  const task = { task: 'setup', runId: 'setup-run', ended: new AbortController().signal };
+  await invokeCapability(await grantNow(), 'connections_request_oauth_client', input, { connections: port, program: task });
+  const [request] = (await readOpenSecretRequests(stand.workspaceId)).filter(row => row.server === 'mailbox');
+  const record = await prisma.event.findFirstOrThrow({ where: { type: 'oauth_client.requested' }, orderBy: { seq: 'desc' } });
+  assert.deepEqual([request?.taskSlug, request?.agent, record.actor, record.taskRunId], ['setup', null, 'task', task.runId]);
+  await invoke('connections_request_oauth_client', input);
+  const renewed = (await readOpenSecretRequests(stand.workspaceId)).find(row => row.id === request?.id);
+  assert.deepEqual([renewed?.taskSlug, renewed?.agent], [undefined, 'coordinator']);
+});
