@@ -1,4 +1,28 @@
-# Scheduled task bodies — the workspace's tasks/
+# Scheduled tasks
+
+A scheduled task is a registry row (the ScheduledTask table) that says WHEN
+it fires and WHAT it does. The scheme of capabilities knows two kinds
+(the node `schedule` of the catalog, `src/tree/schedule.ts`):
+
+- `note` — a text for the secretary: at the trigger it lands in the main
+  thread as a `schedule.fired` event, and the secretary acts on it.
+- `program` — code kept in the row itself and run at the trigger by the
+  catalog's runner (`programs.ts` over `src/catalog/program.ts`): a process
+  of its own per run, only `call`, `describe` and `console` in scope, on
+  behalf of the workspace's main thread with the whole tree but `end_thread`
+  and `view_file`, for up to 5 hours. Every run is a row of the journal of
+  scheduled runs (ScheduleRun; read by `journal.ts`); what the program
+  returns comes to the main thread as `schedule.fired` (null is silence), a
+  failure or a timeout as `system.exception`, a run stopped by a restart is
+  `aborted` and tells nobody.
+
+Every task carries the flag `wake`: `false` leaves its `schedule.fired` to
+wait in the main thread for the secretary's next turn.
+
+The registry also holds rows of two former kinds, `code` and `command`, run
+by `former-kinds.ts`. The rest of this file is their contract.
+
+## The former kinds: task bodies in the workspace's tasks/
 
 A `kind: 'code'` scheduled task is a registry row (the ScheduledTask table,
 operated via the `schedule` tool server: create_task / list_tasks /

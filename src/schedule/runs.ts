@@ -35,7 +35,7 @@ export function jobRunView(row: ViewRow): JobRunView {
   return {
     id: row.id,
     slug: row.slug,
-    // The engine writes these closed sets (src/schedule/engine.ts); the
+    // The executor writes these closed sets (src/schedule/former-kinds.ts); the
     // column is text, the view names the set.
     trigger: row.trigger as JobTrigger,
     status: row.status as JobRunStatus,

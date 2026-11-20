@@ -15,7 +15,9 @@ import { SYSTEM_EXCEPTION } from '../core/envelope.ts';
 import { getMainThread } from '../core/threads.ts';
 import type { ScheduledTaskModel } from '../../prisma-generated/models.ts';
 import { hasTaskBody, workspaceTaskFile } from './catalog.ts';
-import { fireTask, sweepAbortedJobRuns } from './engine.ts';
+import { fireTask } from './engine.ts';
+import { sweepAbortedJobRuns } from './former-kinds.ts';
+import { sweepAbortedRuns } from './programs.ts';
 import { cronNextRun } from './cron.ts';
 import { registryMutation } from '../core/registry-events.ts';
 import { taskRecord } from './view.ts';
@@ -167,8 +169,9 @@ export function startScheduleHeart(): { name: string; stop: () => void } {
   }, POLL_INTERVAL_MS);
 
   void sweepSleepingTasks();
-  // Workspace jobs do not survive a restart: rows left 'running' by the
-  // previous process are settled as 'aborted'.
+  // A run does not survive a restart: rows left 'running' by the previous
+  // process are settled as 'aborted' — of programs and of the former jobs.
+  void sweepAbortedRuns();
   void sweepAbortedJobRuns();
 
   console.log('[schedule] heart started');

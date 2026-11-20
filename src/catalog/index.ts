@@ -84,6 +84,7 @@ export {
   countRunningPrograms,
   executeProgram,
   killRunningPrograms,
+  programSyntaxProblem,
   runProgram,
   type ProgramEnv,
   type ProgramLaunch,

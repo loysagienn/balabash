@@ -25,9 +25,10 @@ import { createRestartToolServer } from './capabilities/restart-tools.ts';
 import { createRemoteToolServer } from './capabilities/remote-tools.ts';
 import { startReauthDetector } from './capabilities/reauth-detector.ts';
 import { loadToolServers, registerBuiltinToolServer } from './capabilities/tool-manager.ts';
-import { startTree } from './tree/index.ts';
-import { isAnyJobRunning, killRunningJobs } from './schedule/engine.ts';
+import { hasRunningWork, startTree, stopRunningWork } from './tree/index.ts';
+import { isAnyJobRunning, killRunningJobs } from './schedule/former-kinds.ts';
 import { startScheduleHeart } from './schedule/heart.ts';
+import { hasUnsettledRuns } from './schedule/programs.ts';
 import { startWorkspaceIndexer } from './workspace/indexer.ts';
 import { startFileAreaTotals } from './workspace/totals.ts';
 import { startTelemetry } from './runtime/telemetry.ts';
@@ -282,9 +283,12 @@ await completePendingRestarts({ migrationsError });
 consumers.push(
   startRestartModule({
     isBusy: hasActiveCoordinatorTurns,
-    // Workspace jobs do not survive a restart — the safe window waits for
-    // them (force skips the wait; the shutdown sweep then kills the groups).
-    hasActiveJobs: isAnyJobRunning,
+    // What runs outside any agent turn does not survive a restart — the runs
+    // of programs with the calls and commands they started, a scheduled run
+    // until its outcome is journaled and told, and the former workspace
+    // jobs: the safe window waits for them (force skips the wait; the
+    // shutdown sweep then stops the processes).
+    hasActiveJobs: () => isAnyJobRunning() || hasRunningWork() || hasUnsettledRuns(),
     // The remote engine's verbs in flight (its state is durable; a verb
     // half-way through is better finished than replayed).
     hasRemoteWork: isRemoteEngineBusy,
@@ -329,9 +333,11 @@ async function shutdown(code: number): Promise<void> {
     }
   }
 
-  // Workspace jobs do not survive a restart: kill their process groups (the
-  // in-flight completions journal 'aborted'; anything missed is settled by
-  // the boot sweep of the next process).
+  // Runs do not survive a restart: the programs and the commands of the
+  // tree are stopped, the process groups of the former workspace jobs are
+  // killed (the in-flight completions journal 'aborted'; anything missed is
+  // settled by the boot sweep of the next process).
+  stopRunningWork();
   killRunningJobs();
 
   await prisma.$disconnect().catch(() => {});

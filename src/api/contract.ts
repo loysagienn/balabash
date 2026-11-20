@@ -805,13 +805,18 @@ export type TaskView = {
   slug: string;
   name: string;
   description: string | null;
-  kind: string; // 'note' | 'code' | 'command'
+  kind: string; // 'note' | 'program'; the former kinds: 'code' | 'command'
   cron: string | null;
   at: Date | null;
   note: string | null;
+  // Kind 'program': the code the trigger runs.
+  code: string | null;
+  timeoutMs: number | null;
+  // false: the task's schedule.fired waits in the main thread for the
+  // secretary's next turn instead of starting one.
+  wake: boolean;
   command: string | null;
   cwd: string | null;
-  timeoutMs: number | null;
   reportOnSuccess: boolean;
   createdBy: string | null;
   createdAt: Date;

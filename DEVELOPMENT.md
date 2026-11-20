@@ -28,7 +28,8 @@ confidential from them.
   agent validation, per-user connections and installation secrets),
   `catalog/` (the capability catalog of the new tool scheme: what an author
   writes, the build with the rules of the scheme, signatures, grants,
-  `describe` and the one path of a call; no port is wired to it yet),
+  `describe`, the one path of a call and the runner of programs; no port is
+  wired to it yet — the schedule runs its program tasks against it),
   `tree/` (the real vertices of that catalog, one file per node: the root
   with its guide and its own capabilities, and the nodes written so far —
   each action takes its data from the app's own layers; at its start the
@@ -41,9 +42,10 @@ confidential from them.
   served by the core on `CONSOLE_DOMAIN` through `src/api/console.ts`),
   `users/` (users, identities, workspace membership), `workspace/` (the
   per-workspace workbench: layout, sqlite, child processes, the annotation
-  indexer), `projects/` (the project registry), `schedule/` (scheduled tasks
-  and jobs; `schedule/AGENTS.md` — the contract of task bodies, which live in
-  the workspace, not in the repository), `remote/` (remote agents: an
+  indexer), `projects/` (the project registry), `schedule/` (scheduled
+  tasks — notes and programs — and the journal of their runs;
+  `schedule/AGENTS.md` — the kinds of a task and the contract of the former
+  task bodies, which live in the workspace, not in the repository), `remote/` (remote agents: an
   external system's session mirrored as a thread; `remote/AGENTS.md` — the
   pieces and the invariants; the drivers live in the installation's
   `data/remote-agents/`, not in the repository), `apps/` (the mini-app

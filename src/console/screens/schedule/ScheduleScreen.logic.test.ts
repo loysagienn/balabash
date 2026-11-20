@@ -42,6 +42,8 @@ const task = (patch: Partial<TaskView> = {}): TaskView => ({
   cron: '0 4 * * *',
   at: null,
   note: null,
+  code: null,
+  wake: true,
   command: 'pg_dump -Fc balabash',
   cwd: null,
   timeoutMs: 600_000,

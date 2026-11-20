@@ -88,7 +88,8 @@ const ROUTED_TYPES = [
   // (redirected to main when the requester is gone) — wake the addressee.
   SYSTEM_RESTART_COMPLETED,
   // A scheduled task fired into the main thread — wake the coordinator so it
-  // interprets the note (or a code task's pushed payload) right away.
+  // acts on the note (or on what a program returned) right away, unless the
+  // task says its event can wait (`wake: false`).
   SCHEDULE_FIRED,
 ];
 
@@ -219,6 +220,12 @@ export function startThreadRouter({ createRun, spawnRun }: RouterHooks): Consume
           await deliver(event.targetThreadId, event);
         }
 
+        return;
+      }
+
+      // A task that does not wake: its event lies in the main thread and the
+      // secretary reads it in the transcript of the next turn.
+      if (event.type === SCHEDULE_FIRED && event.payload.wake === false) {
         return;
       }
 

@@ -107,11 +107,16 @@ export type EventPayloads = {
   'tool.call.failed': { callId: string; functionName: string; error: string };
 
   // Schedule and system.
+  // A note task carries its note; a program task the id of its run and the
+  // value the program returned. `wake: false` — the event waits in the main
+  // thread for the secretary's next turn (an event without the flag wakes).
   'schedule.fired': {
     slug: string;
     name: string;
+    wake?: boolean;
     note?: string;
     runId?: string;
+    value?: JsonObject[string];
     output?: string;
     count?: number;
     since?: string;
@@ -364,9 +369,11 @@ export type TaskRecord = {
   cron: string | null;
   at: string | null;
   note: string | null;
+  code: string | null;
+  timeoutMs: number | null;
+  wake: boolean;
   command: string | null;
   cwd: string | null;
-  timeoutMs: number | null;
   reportOnSuccess: boolean;
   createdBy: string | null;
   createdAt: string;

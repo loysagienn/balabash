@@ -394,10 +394,12 @@ const renderers: Record<string, Renderer> = {
     }),
 
   // A scheduled task firing (schedule heart → main thread): slug names the
-  // registered task, note is a note-task's data. A code task may push extra
-  // payload fields of its own — they ride along after the known ones.
+  // registered task, note is a note-task's data; a program task carries the
+  // id of its run and the value it returned, and a body of the former kind
+  // 'code' may push fields of its own — they ride along after the known
+  // ones. `wake` is the router's: it says whether the event started a turn.
   'schedule.fired': payload => {
-    const { slug, name, note, ...rest } = payload;
+    const { slug, name, note, wake: _wake, ...rest } = payload;
 
     return omitNullish({ slug, name, note, ...rest });
   },

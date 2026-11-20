@@ -216,7 +216,7 @@ describe('running and deleting a task over the api', () => {
     assert.equal(events[0]!.type, 'schedule.fired');
     assert.equal(events[0]!.actor, 'system');
     assert.equal(events[0]!.targetThreadId, stand.mainThreadId);
-    assert.deepEqual(events[0]!.payload, { slug: 'remind', name: 'remind', note: 'Call the electrician' });
+    assert.deepEqual(events[0]!.payload, { slug: 'remind', name: 'remind', note: 'Call the electrician', wake: true });
 
     assert.ok(await prisma.scheduledTask.findUnique({ where: { slug: 'remind' } }), 'a manual run does not consume the one-shot');
   });
@@ -381,7 +381,7 @@ describe('creating a task over the api', () => {
     assert.ok(task.nextRunAt instanceof Date && task.nextRunAt.getTime() > Date.now());
     assert.deepEqual(
       { ...task, id: typeof task.id, createdAt: task.createdAt instanceof Date, nextRunAt: 'date' },
-      { id: 'string', slug: 'console-job', name: 'Console job', description: 'Registered from the console', kind: 'command', cron: '30 4 * * *', at: null, note: null, command: "printf 'hi\\n'", cwd: null, timeoutMs: 5_000, reportOnSuccess: true, createdBy: 'operator', createdAt: true, nextRunAt: 'date' },
+      { id: 'string', slug: 'console-job', name: 'Console job', description: 'Registered from the console', kind: 'command', cron: '30 4 * * *', at: null, note: null, code: null, timeoutMs: 5_000, wake: true, command: "printf 'hi\\n'", cwd: null, reportOnSuccess: true, createdBy: 'operator', createdAt: true, nextRunAt: 'date' },
     );
 
     const row = await prisma.scheduledTask.findUniqueOrThrow({ where: { slug: 'console-job' } });

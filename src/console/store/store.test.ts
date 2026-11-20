@@ -219,7 +219,7 @@ function fakeApi(overrides: ApiOverrides = {}, calls: Calls = []): Api {
   };
 }
 
-const taskRow = (slug: string, patch: Partial<TaskView> = {}): TaskView => ({ id: `task-${slug}`, slug, name: slug, description: null, kind: 'command', cron: '0 3 * * *', at: null, note: null, command: 'pg_dump', cwd: null, timeoutMs: null, reportOnSuccess: false, createdBy: 'scheduler', createdAt: new Date(ISO_NOW), nextRunAt: new Date(ISO_NOW), ...patch });
+const taskRow = (slug: string, patch: Partial<TaskView> = {}): TaskView => ({ id: `task-${slug}`, slug, name: slug, description: null, kind: 'command', cron: '0 3 * * *', at: null, note: null, code: null, wake: true, command: 'pg_dump', cwd: null, timeoutMs: null, reportOnSuccess: false, createdBy: 'scheduler', createdAt: new Date(ISO_NOW), nextRunAt: new Date(ISO_NOW), ...patch });
 
 async function dispatched(store: AppStore, action: Action): Promise<void> {
   await (store.dispatch(action) as unknown as Promise<void> | void);

@@ -1,7 +1,8 @@
 // The operator's and the agents' commands over the task registry — one
-// implementation for the schedule tool server (src/schedule/tools.ts) and
-// the console's endpoints (src/api/api.ts), the way src/projects/mutations.ts
-// serves both for projects. Creating writes the row and journals
+// implementation for the node `schedule` of the catalog
+// (src/tree/schedule.ts), the schedule tool server (src/schedule/tools.ts)
+// and the console's endpoints (src/api/api.ts), the way
+// src/projects/mutations.ts serves every door for projects. Creating writes the row and journals
 // schedule.task.created in its transaction by whoever asked (RegistryAuthor:
 // an agent's thread names the agent as the row's author, the operator is
 // "operator"); the input is checked by one pure rule (input.ts). Deleting

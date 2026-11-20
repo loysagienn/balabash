@@ -32,6 +32,8 @@
 // - connections.ts — the node `connections`; services.ts — the services the
 //   nodes declare, told to the app's connections layer, and the connections
 //   port of the catalog over that layer;
+// - schedule.ts — the node `schedule`: the registry of scheduled tasks and
+//   the journal of their runs, over the app's schedule (src/schedule);
 // - system.ts — the node `system` with `request_restart`;
 // - cursor.ts — the cursor of a list paged along the log;
 // - transcript.ts — the course of a thread as text.
@@ -55,7 +57,9 @@ import { getEvent } from './events.ts';
 import { fileCapabilities } from './files.ts';
 import { gmail } from './gmail.ts';
 import { projects } from './projects.ts';
-import { registerServices } from './services.ts';
+import { setProgramHost } from '../schedule/programs.ts';
+import { schedule } from './schedule.ts';
+import { connectionsPort, registerServices } from './services.ts';
 import { system } from './system.ts';
 import { threads } from './threads.ts';
 import { web } from './web.ts';
@@ -113,6 +117,7 @@ export const root: RootDefinition = {
     getEvent,
     threads,
     projects,
+    schedule,
     workspace,
     web,
     gmail,
@@ -137,9 +142,11 @@ export function catalog(): Catalog {
 // and the services its nodes declare are told to the connections layer.
 // From then on they can be connected, and `connectionsPort()` (./services.ts)
 // answers for them. A service a tool server defined under the same name is
-// the tree's from here on.
+// the tree's from here on. The schedule gets what its programs run against:
+// this catalog and these connections.
 export async function startTree(): Promise<void> {
   registerServices(catalog());
+  setProgramHost({ catalog: catalog(), connections: connectionsPort() });
   await refreshSecretServices();
 }
 

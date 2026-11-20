@@ -14,7 +14,8 @@ import { prisma } from '../db/client.ts';
 import { getPendingRestart } from '../runtime/restart.ts';
 import { countRuns } from '../runtime/runs.ts';
 import { PROCESS_STARTED_AT, getVersion, readMachine } from '../runtime/telemetry.ts';
-import { countRunningJobs } from '../schedule/engine.ts';
+import { countRunningPrograms } from '../catalog/index.ts';
+import { countRunningJobs } from '../schedule/former-kinds.ts';
 import { getFileAreaTotals } from '../workspace/totals.ts';
 import type { DatabaseView, FileStorageView, ProcessView, SystemResponse } from './contract.ts';
 
@@ -75,7 +76,7 @@ function readProcess(): ProcessView {
     rssBytes: memory.rss,
     heapUsedBytes: memory.heapUsed,
     liveSessions: countRuns(),
-    workspaceJobs: countRunningJobs(),
+    workspaceJobs: countRunningJobs() + countRunningPrograms(),
   };
 }
 

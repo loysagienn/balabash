@@ -434,17 +434,23 @@ model ScheduledTask {
   workspaceId     String    @map("workspace_id")
   name            String
   description     String?
-  kind            String // 'note' | 'code' | 'command'
+  // 'note' | 'program'. A row of a former kind ('code' | 'command') is run
+  // by the former executor (src/schedule/former-kinds.ts) until the registry
+  // is moved to programs.
+  kind            String
   cron            String? // cron expression, evaluated in config.scheduleTimezone
   at              DateTime? // one-shot "not before T"; consumed on fire
-  note            String? // the payload of a 'note' task; ignored for 'code'/'command'
-  // kind 'command' only: the shell command (`bash -c`), its working
-  // directory (relative to the workspace file area; null = the root), the
-  // kill timeout and whether a successful run pushes a schedule.fired event
-  // (failures always surface as system.exception).
+  note            String? // kind 'note': the text delivered at the trigger
+  code            String? // kind 'program': the body of an async function, run at the trigger
+  // The limit of time of one run: kind 'program' (and the former 'command').
+  timeoutMs       Int?      @map("timeout_ms")
+  // true: the task's schedule.fired starts the secretary's turn at once;
+  // false: the event waits in the main thread for the next turn.
+  wake            Boolean   @default(true)
+  // The former kind 'command' only: the shell command, its working
+  // directory and whether a successful run pushes a schedule.fired event.
   command         String?
   cwd             String?
-  timeoutMs       Int?      @map("timeout_ms")
   reportOnSuccess Boolean   @default(false) @map("report_on_success")
   createdBy       String?   @map("created_by") // who registered the task: the agent, or "operator" from the console
   createdAt       DateTime  @default(now()) @map("created_at")
@@ -453,7 +459,48 @@ model ScheduledTask {
   @@map("scheduled_tasks")
 }
 
-// Run journal of workspace jobs (kind 'command' scheduled tasks) — operational
+// The journal of scheduled runs: one row per run of a program task, the
+// silent ones included — by the journal one sees that a task is alive, and a
+// task remembers through it. The schedule writes the row before the run
+// begins ('running') and settles the same row when it ends; a row left
+// 'running' by a dead process is settled as 'aborted' at boot. Operational
+// telemetry in the platform database, outside the event log and outside
+// workspace.sqlite (a program that locks the workspace database must not
+// take the record of that very run down with it). slug and code are
+// snapshots of the registry row at fire time: a one-shot task's row is
+// deleted before the run, and a recreated slug may carry other code.
+model ScheduleRun {
+  id          String @id
+  workspaceId String @map("workspace_id")
+  slug        String
+  trigger     String // 'cron' | 'at' | 'manual'
+  code        String
+
+  status String // 'running' | 'ok' | 'failed' | 'timeout' | 'aborted'
+
+  startedAt  DateTime  @map("started_at")
+  finishedAt DateTime? @map("finished_at")
+  durationMs Int?      @map("duration_ms")
+
+  // What the program returned, when it returned anything but null; a run
+  // without a value — silent, unfinished or failed — has none. hasValue
+  // says which, so that a list never loads the values.
+  value    Json?
+  hasValue Boolean @default(false) @map("has_value")
+  // The error that ended a run that is not ok: {kind, message, details?}.
+  error Json?
+
+  // The last 16 KiB of what the program wrote to console.
+  console          String  @default("")
+  consoleTruncated Boolean @default(false) @map("console_truncated")
+
+  @@index([workspaceId, startedAt])
+  @@index([slug, startedAt])
+  @@map("schedule_runs")
+}
+
+// Run journal of workspace jobs (the former kind 'command' of scheduled tasks;
+// read next to schedule_runs, src/schedule/journal.ts) — operational
 // telemetry in the platform database, deliberately NOT in workspace.sqlite
 // (fate-sharing: a job that corrupts or locks the workspace database must not
 // take the record of that very run down with it) and deliberately outside the

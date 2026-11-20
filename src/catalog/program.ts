@@ -31,6 +31,7 @@
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import os from 'node:os';
+import vm from 'node:vm';
 import { ACTIONS } from './actions.ts';
 import type { ProgramScope } from './definition.ts';
 import { describe } from './describe.ts';
@@ -39,7 +40,7 @@ import type { ConnectionsPort, Grant } from './grant.ts';
 import { parseActionInput } from './input.ts';
 import { invokeCapability } from './invoke.ts';
 import type { JsonValue } from './json.ts';
-import { PROGRAM_PROCESS } from './program-process.ts';
+import { PROGRAM_FILE, PROGRAM_PROCESS } from './program-process.ts';
 
 // The end of the console output kept with a run, in bytes of UTF-8: the
 // 16 KiB the journal of runs gives.
@@ -159,6 +160,8 @@ function tail(maxBytes: number) {
 
 const TOOK_EFFECT = 'The calls it had completed took effect.';
 
+const AsyncFunction = (async () => {}).constructor as new (code: string) => unknown;
+
 function isErrorKind(value: unknown): value is ErrorKind {
   return typeof value === 'string' && (ERROR_KINDS as readonly string[]).includes(value);
 }
@@ -206,6 +209,35 @@ function verdictOf(reportText: string): Verdict {
     default:
       throw new Error(`The process of the program gave a report of an unknown form: ${reportText.slice(0, 200)}`);
   }
+}
+
+// Whether a text is code the runner would begin to run, told without running
+// it: the text is compiled the way the process of a run compiles it
+// (program-process.ts) — as the body of an async function with `call`,
+// `describe` and `console` — and nothing of it is executed. Null when it
+// parses; otherwise what the compiler said and the line of the program it
+// said it about. The one who keeps code for later (a scheduled task) asks
+// this before keeping it.
+export function programSyntaxProblem(code: string): { text: string; line: number | null } | null {
+  try {
+    new vm.Script(`(async function (call, describe, console) {\n${code}\n})`, { filename: PROGRAM_FILE, lineOffset: -1 });
+  } catch (error) {
+    // A SyntaxError of a compiled script carries its place in the first
+    // line of the stack: "<file>:<line>".
+    const head = String((error as Error | null)?.stack).split('\n')[0] ?? '';
+    const at = head.startsWith(`${PROGRAM_FILE}:`) ? Number(head.slice(PROGRAM_FILE.length + 1)) : NaN;
+
+    return { text: error instanceof Error ? `${error.name}: ${error.message}` : String(error), line: Number.isInteger(at) ? at : null };
+  }
+
+  try {
+    // Nothing in the body ends the function it is put into.
+    new AsyncFunction(code);
+  } catch {
+    return { text: 'SyntaxError: the code closes the function it is the body of', line: null };
+  }
+
+  return null;
 }
 
 function seconds(ms: number): string {

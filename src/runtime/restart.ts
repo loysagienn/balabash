@@ -242,11 +242,11 @@ type RestartModuleHooks = {
   // In-memory truth about coordinator turns in flight — injected by the
   // composition root (the runtime does not know the coordinator, §3).
   isBusy(): boolean;
-  // In-memory truth about workspace jobs (kind 'command' scheduled tasks) in
-  // flight — injected likewise (the runtime does not know the schedule
-  // module). Jobs do not survive a restart, so the safe window waits for
-  // them; force skips the wait and the shutdown sweep kills their process
-  // groups.
+  // In-memory truth about what runs outside any agent turn — the runs of
+  // programs with the calls and commands they started, the former workspace
+  // jobs — injected likewise (the runtime does not know the schedule or the
+  // catalog). None of it survives a restart, so the safe window waits for
+  // it; force skips the wait and the shutdown sweep stops the processes.
   hasActiveJobs(): boolean;
   // In-memory truth about the remote engine (src/remote): a verb of a
   // driver in flight or an inbound wake not yet served. Its state is

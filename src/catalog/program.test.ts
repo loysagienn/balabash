@@ -10,7 +10,7 @@ import { buildCatalog } from './catalog.ts';
 import { capability } from './definition.ts';
 import { CapabilityError } from './errors.ts';
 import { computeGrant, type GrantPolicy } from './grant.ts';
-import { countProgramCalls, countRunningPrograms, executeProgram, killRunningPrograms, runProgram, type ProgramRun } from './program.ts';
+import { countProgramCalls, countRunningPrograms, executeProgram, killRunningPrograms, programSyntaxProblem, runProgram, type ProgramRun } from './program.ts';
 import { CALLER, WORK, testConnections, testRoot, type Calls } from './test-tree.ts';
 
 const calls: Calls = [];
@@ -311,6 +311,16 @@ describe('a program that fails', () => {
 
     assert.equal(escape.error?.kind, 'invalid_input');
     assert.match(escape.error?.message ?? '', /does not parse/);
+  });
+
+  it('tells whether a text is code it would begin to run, without running it', () => {
+    assert.equal(programSyntaxProblem(`const list = await call('notes_list');\nreturn list.length;`), null);
+    assert.equal(programSyntaxProblem(''), null);
+    assert.equal(programSyntaxProblem(`throw new Error('at run time')`), null);
+    // The same answers the process of a run gives.
+    assert.deepEqual(programSyntaxProblem(`await call('notes_list');\nconst broken = ;\nreturn 1;`), { text: "SyntaxError: Unexpected token ';'", line: 2 });
+    assert.deepEqual(programSyntaxProblem(`}); (async function () { return 1;`), { text: 'SyntaxError: the code closes the function it is the body of', line: null });
+    assert.match(programSyntaxProblem(`import fs from 'node:fs';`)?.text ?? '', /^SyntaxError/);
   });
 
   it('answers invalid_input when what it returned is not JSON', async () => {
