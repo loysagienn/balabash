@@ -190,7 +190,7 @@ test('a connector discovers paged contracts, grants by recipient, journals calls
     const unavailable = await send();
     offline = false;
     assert.equal('error' in unavailable && unavailable.error.kind, 'unavailable');
-    assert.equal((await connectorStatuses())[0].state, 'failed');
+    assert.equal((await connectorStatuses())[0].state, 'connected');
     assert.equal(grantKey((await context()).grant), grantKey(current));
 
     let now = Date.now() + 61_000;

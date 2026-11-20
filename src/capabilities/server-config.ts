@@ -1,8 +1,8 @@
-// MCP connection settings for the installation services shown in Connections.
+// Installation MCP nodes: discovery transport, credentials, description and recipients.
 
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { INSTALLATION_SERVERS_DIR, listExtensionFiles, reportSkippedExtension, type ReportExtensionFailure } from './extensions.ts';
+import { INSTALLATION_SERVERS_DIR, listExtensionFiles, reportExtensionFailure, type ReportExtensionFailure } from './extensions.ts';
 import { getSecretReferenceNames } from './server-secrets.ts';
 
 // Identity probe of a user-auth server: the provider's own answer to "who is
@@ -29,7 +29,7 @@ export type ExternalServerConfig =
       command: string;
       args?: string[];
       env?: Record<string, string>;
-      // What the service is, for the operator (the console's catalog).
+      // The first sentence describes the node to its recipients.
       description?: string;
     }
   | {
@@ -85,6 +85,10 @@ function isObject(value: unknown): value is Record<string, unknown> {
 function validateExternalServerConfig(raw: unknown, source: string): ExternalServerConfig {
   if (!isObject(raw)) {
     throw new Error(`${source} must contain a JSON object`);
+  }
+
+  for (const field of ['enabledTools', 'toolOverrides']) {
+    if (field in raw) throw new Error(`${source}: "${field}" is unsupported. Review the tools exposed by the server before removing this field.`);
   }
 
   if (raw.recipients !== undefined && (!Array.isArray(raw.recipients) ||
@@ -239,7 +243,7 @@ export async function readExternalServerConfigs(report?: ReportExtensionFailure)
       if (!/^[a-z][a-z0-9_]*$/.test(name)) throw new Error(`Invalid MCP service name "${name}"`);
       configs[name] = validateExternalServerConfig(JSON.parse(await readFile(file, 'utf8')), file);
     } catch (error) {
-      await reportSkippedExtension('mcp-servers', filename, error instanceof SyntaxError ? 'Invalid JSON' : error, report);
+      await reportExtensionFailure('mcp-servers', filename, error instanceof SyntaxError ? 'Invalid JSON' : error, report);
     }
   }
   return configs;

@@ -99,7 +99,7 @@ loadAgents(
   await loadRemoteAgents({
     context: kind => createRemoteDriverContext(kind, extensionFilesApi),
     repositoryAgents: repositoryAgentNames(),
-    report: journalExtensionFailure('remote-agents'),
+    report: journalExtensionFailure,
   }),
 );
 registerRemoteSecretTargets();
@@ -107,7 +107,7 @@ await refreshRemoteSecretTargets();
 
 // The tree of the capability catalog: its services join the connections
 // layer before the web surface and the schedule can ask for one.
-await startTree(journalExtensionFailure('nodes'), journalExtensionFailure('mcp-servers'));
+await startTree(journalExtensionFailure);
 
 startWebServer();
 

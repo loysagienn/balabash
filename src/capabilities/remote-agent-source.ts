@@ -16,7 +16,7 @@
 
 import path from 'node:path';
 import type { RemoteAgentDeclaration, RemoteDriverContext } from '../core/contract.ts';
-import { INSTALLATION_REMOTE_AGENTS_DIR, importExtensionModule, listExtensionFiles, reportSkippedExtension, type ReportExtensionFailure } from './extensions.ts';
+import { INSTALLATION_REMOTE_AGENTS_DIR, importExtensionModule, listExtensionFiles, reportExtensionFailure, type ReportExtensionFailure } from './extensions.ts';
 import { validateRemoteAgent } from './validate-agent.ts';
 
 export type LoadRemoteAgentsInput = {
@@ -78,7 +78,7 @@ export async function loadRemoteAgents({
       declarations.push(declaration);
       loadedKinds.set(declaration.name, { declaration, context: ctx });
     } catch (error) {
-      await reportSkippedExtension('remote-agents', file, error, report);
+      await reportExtensionFailure('remote-agents', file, error, report);
     }
   }
 

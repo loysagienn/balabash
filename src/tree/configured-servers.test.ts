@@ -78,7 +78,7 @@ test('configured MCP servers publish the contract discovered with the authority 
     });
   `);
   await config('local', { transport: 'stdio', command: process.execPath, args: ['fixture.cjs'], env: { FIXTURE: 'ready' }, recipients });
-  await startTree(undefined, journalExtensionFailure('mcp-servers'));
+  await startTree(journalExtensionFailure);
   const context = (ws = workspaceId) => catalogContext(coordinator, ws, mainThreadId);
   const call = async (ctx: Awaited<ReturnType<typeof context>>, name: string, input = {}) =>
     dispatchCatalogCall(ctx.grant, ctx.connections, { name, input, callId: crypto.randomUUID() });

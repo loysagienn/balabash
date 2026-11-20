@@ -24,7 +24,8 @@
 //   web-perplexity.ts — its node `perplexity`, an external MCP server on
 //   the installation's key; capabilities/mcp-client.ts handles MCP exchanges;
 // - authored-nodes.ts — written installation nodes from data/nodes;
-// - connectors.ts and discovered-node.ts — installation nodes from MCP discovery;
+// - discovered-node.ts — MCP tools as catalog leaves; configured-servers.ts,
+//   account-server.ts and connectors.ts supply the transport and discovery authority;
 // - gmail.ts — the node `gmail` over the Gmail API, on the access of the
 //   user's account; gmail-mail.ts — a mail as a value and as the raw
 //   message the API takes;
@@ -58,7 +59,7 @@ import {
 } from '../catalog/index.ts';
 import { configureServers } from './configured-servers.ts';
 import { readExternalServerConfigs, type ExternalServerConfig } from '../capabilities/server-config.ts';
-import { reportSkippedExtension } from '../capabilities/extensions.ts';
+import { reportExtensionFailure } from '../capabilities/extensions.ts';
 import { getAccountService, getSecretService } from '../capabilities/connections/services.ts';
 import type { ReportExtensionFailure } from '../capabilities/extensions.ts';
 import { loadAuthoredNodes } from './authored-nodes.ts';
@@ -200,6 +201,8 @@ function publishNode(node: Node, workspaceId?: string): void {
   const replacements = [...workspaceTrees.values()].map(tree => ({ tree, catalog: buildTree(next, tree.nodes) }));
   const subtree = catalog.vertices.get(name)!;
   if (subtree.kind !== 'node') throw new Error(`Expected node "${name}"`);
+  // Configured secret services report credential and discovery status in
+  // Connections even before the first valid node can be published.
   if (installation.source === 'authored' || subtree.connection?.type === 'account') registerServices(subtree);
   installed.set(name, node);
   built = catalog;
@@ -232,9 +235,9 @@ export function catalog(workspaceId?: string): Catalog {
 // From then on they can be connected, and `connectionsPort()` (./services.ts)
 // answers for them. The catalog owns definitions of its nodes' services. The schedule gets what its programs run against:
 // this catalog and these connections.
-export async function startTree(report?: ReportExtensionFailure, reportMcp = report): Promise<void> {
+export async function startTree(report?: ReportExtensionFailure): Promise<void> {
   registerServices(catalog().root);
-  const configs = await readExternalServerConfigs(reportMcp);
+  const configs = await readExternalServerConfigs(report);
   const names = new Set(Object.keys(configs));
   const remoteServices = new Set(getLoadedRemoteKinds().filter(remote => remote.secrets?.length).map(remote => remote.name));
   for (const name of remoteServices) names.add(name);
@@ -242,7 +245,7 @@ export async function startTree(report?: ReportExtensionFailure, reportMcp = rep
   const servers: Parameters<typeof configureServers>[0] = [];
   for (const [name, config] of Object.entries(configs)) {
     if (catalog().vertices.has(name) || getAccountService(name) || getSecretService(name) || remoteServices.has(name)) {
-      await reportSkippedExtension('mcp-servers', name + '.json', 'Name already belongs to a catalog vertex or service', reportMcp);
+      await reportExtensionFailure('mcp-servers', name + '.json', 'Name already belongs to a catalog vertex or service', report);
       continue;
     }
     configuredRecipients.set(name, config.recipients ?? []);
@@ -250,8 +253,8 @@ export async function startTree(report?: ReportExtensionFailure, reportMcp = rep
     else servers.push([name, config]);
   }
   await loadAuthoredNodes(publishNode, names, report);
-  await configureServers(servers, publishNode, reportMcp);
-  await startConnectors(connectors, publishNode, reportMcp);
+  await configureServers(servers, publishNode, report);
+  await startConnectors(connectors, publishNode, report);
   setProgramHost({ catalog, connections: connectionsPort(), traceCall: journalProgramCall });
   await refreshSecretServices();
 }

@@ -4,7 +4,7 @@ import { isDeepStrictEqual } from 'node:util';
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 import { accountAuthority, type AccountConnection, type Node, type AccountAuthority } from '../catalog/index.ts';
 import { withAccountBearer } from '../capabilities/account-mcp.ts';
-import { reportSkippedExtension, type ReportExtensionFailure } from '../capabilities/extensions.ts';
+import { reportExtensionFailure, type ReportExtensionFailure } from '../capabilities/extensions.ts';
 import { callServerResult, listServerTools } from '../capabilities/mcp-client.ts';
 import type { ExternalServerConfig } from '../capabilities/server-config.ts';
 import { prisma } from '../db/client.ts';
@@ -79,7 +79,7 @@ export function configureAccountServer(name: string, config: Config, publish: (n
         state.error = null;
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        if (state.error !== message) await reportSkippedExtension('mcp-servers', name + '.json', message, report, workspaceId);
+        if (state.error !== message) await reportExtensionFailure('mcp-servers', name + '.json', message, report, workspaceId);
         state.error = message;
         state.discoverAfter = Date.now() + 60_000;
       }

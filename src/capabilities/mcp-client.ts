@@ -15,7 +15,7 @@ import { CapabilityError, type JsonObject } from '../catalog/index.ts';
 const CLIENT_INFO = { name: 'balabash', version: '2.0.0' };
 
 // The longest a server may take to answer one call.
-export const EXTERNAL_CALL_TIMEOUT_MS = 10 * 60_000;
+const EXTERNAL_CALL_TIMEOUT_MS = 10 * 60_000;
 const CONNECT_TIMEOUT_MS = 30_000;
 
 type HttpServer = {
@@ -93,7 +93,7 @@ function textOf(content: unknown): string {
 
 async function withServer<T>(
   server: ExternalServer,
-  options: { signal: AbortSignal | null; timeoutMs?: number },
+  options: { signal: AbortSignal | null; timeoutMs?: number; discovery?: boolean },
   exchange: (client: Client, signal: AbortSignal, timeout: number) => Promise<T>,
 ): Promise<T> {
   const timeout = options.timeoutMs ?? EXTERNAL_CALL_TIMEOUT_MS;
@@ -106,7 +106,7 @@ async function withServer<T>(
   const handshake = AbortSignal.timeout(connectTime);
   let connecting = true;
   const transport = 'command' in server
-    ? new StdioClientTransport({ command: server.command, args: server.args, env: server.env, stderr: 'ignore' })
+    ? new StdioClientTransport({ command: server.command, args: server.args, env: server.env, stderr: options.discovery ? 'pipe' : 'ignore' })
     : new StreamableHTTPClientTransport(new URL(server.url), {
       requestInit: { headers: server.headers },
       fetch: (url, init) => {
@@ -123,13 +123,28 @@ async function withServer<T>(
       },
     });
 
+  // Discovery errors reach the operator. Drain the pipe from before spawn,
+  // retaining only a bounded tail, for redaction by the credential owner.
+  let stderr = Buffer.alloc(0);
+  let truncated = false;
+  if (transport instanceof StdioClientTransport && transport.stderr) {
+    transport.stderr.on('data', (chunk: Buffer) => {
+      truncated ||= stderr.length + chunk.length > 4096;
+      stderr = Buffer.concat([stderr, chunk.subarray(-4096)]).subarray(-4096);
+    });
+  }
+
   try {
     await client.connect(transport, { signal, timeout: connectTime });
     connecting = false;
 
     return await exchange(client, signal, timeout);
   } catch (error) {
-    throw error instanceof CapabilityError ? error : failure(server, error, options.signal);
+    const problem = error instanceof CapabilityError ? error : failure(server, error, options.signal);
+    const diagnostic = stderr.toString('utf8');
+    const tail = (truncated ? diagnostic.replace(/^[^\n]*(?:\n|$)/, '') : diagnostic).trim();
+    if (tail) problem.message += `\nstderr: ${tail}`;
+    throw problem;
   } finally {
     // A failed DELETE cannot change the outcome of a completed write or
     // trigger an auth retry. Stateless transports have no session to delete.
@@ -141,7 +156,7 @@ async function withServer<T>(
 }
 
 export function listServerTools(server: ExternalServer): Promise<Tool[]> {
-  return withServer(server, { signal: null, timeoutMs: CONNECT_TIMEOUT_MS }, async (client, signal, timeout) => {
+  return withServer(server, { signal: null, timeoutMs: CONNECT_TIMEOUT_MS, discovery: true }, async (client, signal, timeout) => {
     const tools: Tool[] = [];
     let cursor: string | undefined;
     do {

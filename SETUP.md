@@ -165,7 +165,10 @@ Place one JSON config per service in `data/mcp-servers/<name>.json`. Use a
 unique snake_case name. The catalog reads every page of `tools/list` and
 publishes the node under that name. Add agent or profile names to
 `recipients` to grant the node. Scheduled programs use their workspace’s
-full tree, including configured nodes with no agent recipients.
+full tree, including configured nodes with no agent recipients. The first
+sentence of `description` (up to 175 characters) tells an agent when to
+open the node. Configs containing `enabledTools` or `toolOverrides` are
+rejected. Review the provider’s exposed tools before removing these fields.
 
 ```json
 {
@@ -181,7 +184,10 @@ For stdio, set `"transport": "stdio"`, `command` and optional string
 `args` and `env`. The MCP SDK runs the executable directly, with its default
 inherited environment and the configured variables. Each discovery or call
 starts its own process and closes it after the exchange. Use an executable
-available to the service account from the application directory.
+available to the service account from the application directory. A server
+that needs a browser, session or other in-process state across calls is
+incompatible with this transport lifecycle. The process should exit when
+stdin closes to avoid a shutdown delay on every exchange.
 Enter referenced installation secrets in Connections. A service without
 secret references can publish at startup. Discovery runs on credential
 changes and retries failures in the background. A failed refresh keeps the

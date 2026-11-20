@@ -45,15 +45,15 @@ export async function importExtensionModule(file: string): Promise<Record<string
   return (await import(url)) as Record<string, unknown>;
 }
 
-export type ExtensionFailure = { file: string; error: string; workspaceId?: string };
+export type ExtensionFailure = { scope: string; file: string; error: string; workspaceId?: string };
 export type ReportExtensionFailure = (failure: ExtensionFailure) => Promise<void>;
 
-export async function reportSkippedExtension(scope: string, file: string, cause: unknown, report?: ReportExtensionFailure, workspaceId?: string) {
+export async function reportExtensionFailure(scope: string, file: string, cause: unknown, report?: ReportExtensionFailure, workspaceId?: string) {
   const error = cause instanceof Error ? cause.message : String(cause);
-  console.error(`[${scope}] ${file} skipped: ${error}`);
+  console.error(`[${scope}] ${file}: ${error}`);
   try {
-    await report?.({ file, error, ...(workspaceId && { workspaceId }) });
+    await report?.({ scope, file, error, ...(workspaceId && { workspaceId }) });
   } catch (journalError) {
-    console.error(`[${scope}] failed to journal the skip of ${file}:`, journalError);
+    console.error(`[${scope}] failed to journal ${file}:`, journalError);
   }
 }

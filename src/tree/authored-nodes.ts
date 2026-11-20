@@ -11,7 +11,7 @@ import {
 import { extensionFilesApi } from '../files/index.ts';
 import { fileRefValue, storedFile } from './files.ts';
 import { warnRecipients } from '../capabilities/agent-catalog.ts';
-import { INSTALLATION_NODES_DIR, importExtensionModule, listExtensionFiles, reportSkippedExtension, type ReportExtensionFailure } from '../capabilities/extensions.ts';
+import { INSTALLATION_NODES_DIR, importExtensionModule, listExtensionFiles, reportExtensionFailure, type ReportExtensionFailure } from '../capabilities/extensions.ts';
 
 const api = {
   z, node, capability, namedType, CapabilityError, accountAuthority, secretAuthority,
@@ -69,7 +69,7 @@ export async function loadAuthoredNodes(publish: (node: Node) => void, services:
         warnRecipients(`[nodes] ${file}`, recipients);
       });
     } catch (error) {
-      await reportSkippedExtension('nodes', file, error, report);
+      await reportExtensionFailure('nodes', file, error, report);
     }
   }
 }

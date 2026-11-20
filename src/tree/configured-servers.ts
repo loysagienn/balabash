@@ -1,7 +1,7 @@
 // Installation MCP servers. Discovery is a background/Connections operation.
 // A turn uses the published contract and resolves the call's own authority.
 import { CapabilityError, secretAuthority, type CallContext, type JsonObject, type Node } from '../catalog/index.ts';
-import { reportSkippedExtension, type ReportExtensionFailure } from '../capabilities/extensions.ts';
+import { reportExtensionFailure, type ReportExtensionFailure } from '../capabilities/extensions.ts';
 import { callServerResult, CredentialsRefusedError, listServerTools } from '../capabilities/mcp-client.ts';
 import type { ExternalServerConfig } from '../capabilities/server-config.ts';
 import { getSecretReferenceNames, resolveExternalServerSecrets, resolveSecretReferences } from '../capabilities/server-secrets.ts';
@@ -11,7 +11,7 @@ import { configureAccountServer } from './account-server.ts';
 import { discoverAndPublish } from './discovered-node.ts';
 
 type Config = Exclude<ExternalServerConfig, { transport: 'claude-connector' }>;
-type Service = SecretService & { config: Config; version: string | null; discoverAfter: number };
+type Service = SecretService & { config: Config; version: string | null; discoveryFailed: boolean; discoverAfter: number };
 const MINUTE = 60_000;
 
 function server(name: string, config: Config) {
@@ -27,20 +27,20 @@ export async function configureServers(configs: [string, Config][], publish: (no
       try {
         accountRefresh.push(configureAccountServer(name, config, publish, report));
       } catch (error) {
-        await reportSkippedExtension('mcp-servers', name + '.json', error, report);
+        await reportExtensionFailure('mcp-servers', name + '.json', error, report);
       }
       continue;
     }
     services.push({
       name, config, description: config.description ?? null, secretNames: getSecretReferenceNames(config),
-      version: null, connected: false, error: null, discoverAfter: 0,
+      version: null, discoveryFailed: false, connected: false, error: null, discoverAfter: 0,
     });
   }
 
   async function failed(service: Service, message: string) {
-    const changed = service.error !== message;
-    Object.assign(service, { connected: false, error: message, discoverAfter: Date.now() + MINUTE });
-    if (changed) await reportSkippedExtension('mcp-servers', service.name + '.json', message, report);
+    const changed = !service.discoveryFailed;
+    Object.assign(service, { connected: false, discoveryFailed: true, error: message, discoverAfter: Date.now() + MINUTE });
+    if (changed) await reportExtensionFailure('mcp-servers', service.name + '.json', message, report);
   }
 
   async function invoke(service: Service, tool: string, args: JsonObject, ctx: CallContext) {
@@ -53,10 +53,16 @@ export async function configureServers(configs: [string, Config][], publish: (no
       const error = safeError(cause, secrets);
       if (cause instanceof CredentialsRefusedError && service.secretNames.length) {
         const message = `${service.name} refused the installation credentials (HTTP 401). Ask the operator to replace them in Connections.`;
-        if (version === service.version) await failed(service, message);
+        if (version === service.version) {
+          service.connected = false;
+          service.error = message;
+          service.discoverAfter = Math.min(service.discoverAfter, Date.now() + MINUTE);
+        }
         throw new CapabilityError('auth_required', message);
       }
-      if (version === service.version && error.kind === 'unavailable' && !ctx.signal?.aborted) await failed(service, error.message);
+      if (version === service.version && error.kind === 'unavailable' && !ctx.signal?.aborted) {
+        service.discoverAfter = Math.min(service.discoverAfter, Date.now() + MINUTE);
+      }
       throw error;
     }
   }
@@ -65,7 +71,7 @@ export async function configureServers(configs: [string, Config][], publish: (no
     try {
       const { secrets, secretVersion } = await resolveExternalServerSecrets(service.name, service.secretNames);
       if (!secrets) {
-        Object.assign(service, { version: null, connected: false, error: null, discoverAfter: 0 });
+        Object.assign(service, { version: null, discoveryFailed: false, connected: false, error: null, discoverAfter: 0 });
         return;
       }
       if (service.version === secretVersion && Date.now() < service.discoverAfter) return;
@@ -74,11 +80,12 @@ export async function configureServers(configs: [string, Config][], publish: (no
       const endpoint = server(name, resolveSecretReferences(config, secrets));
       await discoverAndPublish({
         name, description: config.description, recipients: config.recipients ?? [],
+        guide: secretNames.length ? "Every call uses the installation’s credentials at the provider, whoever asks." : undefined,
         connection: secretNames.length ? { type: 'secret', service: name, secrets: secretNames, summary: config.description ?? name } : undefined,
       }, () => listServerTools(endpoint).catch(error => { throw safeError(error, secrets); }),
       (tool, args, ctx) => invoke(service, tool, args, ctx),
       () => { service.discoverAfter = Math.min(service.discoverAfter, Date.now() + MINUTE); }, publish);
-      Object.assign(service, { connected: true, error: null, discoverAfter: Date.now() + 60 * MINUTE });
+      Object.assign(service, { connected: true, discoveryFailed: false, error: null, discoverAfter: Date.now() + 60 * MINUTE });
     } catch (error) {
       await failed(service, error instanceof Error ? error.message : String(error));
     }
