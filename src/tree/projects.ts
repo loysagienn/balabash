@@ -231,6 +231,10 @@ export const projects = node({
       text: 'The registry record is identity, not a log: change it only when it stopped matching reality. The description says what the project is, top level only, in about 300 characters; details, the course of work and status live in the folder.',
     },
     { text: 'Nothing is ever deleted. Archive a project, or change its slug, only on an explicit request of the user.' },
+    {
+      text: 'When work that concerns a project goes to a child thread, name the project in `spawn_agent`.',
+      requires: ['spawn_agent'],
+    },
   ],
   children: [list, get, create, update, archive, unarchive],
 });

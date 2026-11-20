@@ -341,6 +341,10 @@ export const schedule = node({
       text: 'What a scheduled program returns is delivered to the main thread as a schedule.fired event; returning null is silence. An exception or a timeout always lands there as a system.exception event.',
     },
     {
+      text: 'A scheduled program acts as the main thread of the workspace: `send_message` reaches the user, `spawn_agent` starts a child of the main thread, which reports to the secretary.',
+      requires: ['send_message', 'spawn_agent'],
+    },
+    {
       text: 'To run a script of the workspace on a schedule, call `workspace_run_command` from the program.',
       requires: ['workspace_run_command'],
     },

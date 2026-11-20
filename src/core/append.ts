@@ -377,13 +377,15 @@ export function completionProjectionData(payload: JsonObject): {
   summary?: Prisma.InputJsonValue;
   title?: string;
   description?: string;
+  projectId?: string;
 } {
-  const { summary, title, description } = threadCompletionFields(payload);
+  const { summary, title, description, projectId } = threadCompletionFields(payload);
 
   return {
     ...(summary !== undefined ? { summary: summary as unknown as Prisma.InputJsonValue } : {}),
     ...(title !== undefined ? { title } : {}),
     ...(description !== undefined ? { description } : {}),
+    ...(projectId !== undefined ? { projectId } : {}),
   };
 }
 

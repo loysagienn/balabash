@@ -93,6 +93,9 @@ export type ProgramLaunch = {
   // after — the calls of the run and its outcome carry the same id. The
   // runner names the run itself otherwise.
   start?: ProgramStart;
+  // The slug of the scheduled task, when the schedule launches the run: the
+  // calls of the run carry it (`ProgramScope.task`).
+  task?: string;
   // The heap of the process, when not the usual one.
   heapMb?: number;
 };
@@ -262,7 +265,7 @@ export function executeProgram(grant: Grant, launch: ProgramLaunch, env: Program
   const id = launch.start?.id ?? randomUUID();
   const startedAt = launch.start?.startedAt ?? new Date();
   const ended = new AbortController();
-  const scope: ProgramScope = { runId: id, ended: ended.signal };
+  const scope: ProgramScope = { runId: id, task: launch.task ?? null, ended: ended.signal };
   const output = tail(CONSOLE_TAIL_BYTES);
   const stderr = tail(STDERR_TAIL_BYTES);
 

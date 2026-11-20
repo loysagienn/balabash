@@ -35,4 +35,13 @@ describe('threadCompletionFields', () => {
     assert.deepEqual(threadCompletionFields({}), {});
     assert.deepEqual(threadCompletionFields({ summary: 'not an object' }), {});
   });
+
+  it('carries the project the thread names at its end, and nothing when it names none', () => {
+    assert.deepEqual(threadCompletionFields({ summary: { text: 'done' }, projectId: 'p-2', projectSlug: 'second' }), {
+      summary: { text: 'done' },
+      projectId: 'p-2',
+    });
+    assert.deepEqual(threadCompletionFields({ projectId: '' }), {});
+    assert.deepEqual(threadCompletionFields({ projectId: 7 }), {});
+  });
 });

@@ -356,6 +356,10 @@ type StartThreadInput = {
   // what the projection stores and the console filters on, the slug is the
   // human-readable address at spawn time.
   project?: { id: string; slug: string };
+  // The run of a program the thread was started from, when it was not
+  // started by a turn of the spawner: the id of the run and, for a program
+  // of the schedule, the slug of its task.
+  program?: { runId: string; task?: string };
   actor: 'system' | 'agent';
   agentName?: string; // the SPAWNING agent, not the spawned one
 };
@@ -408,6 +412,10 @@ export async function startThread(options: StartThreadInput): Promise<Thread> {
   if (options.project !== undefined) {
     payload.projectId = options.project.id;
     payload.projectSlug = options.project.slug;
+  }
+
+  if (options.program !== undefined) {
+    payload.program = options.program;
   }
 
   await appendEvent({

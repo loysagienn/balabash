@@ -10,6 +10,9 @@
 // - projects.ts — the node `projects` and the type Project;
 // - files.ts — a stored file as a FileRef and the file capabilities of the
 //   root: `export_file`, `import_file`, `get_file_url`, `view_file`;
+// - thread-verbs.ts — the verbs of a thread: `send_message`, `end_thread`,
+//   `spawn_agent`, `send_to_thread`, `finish_thread`, `cancel_thread`,
+//   `fetch_thread_file`;
 // - workspace.ts — the node `workspace` with `query` and `run_command`;
 //   workspace-files.ts and workspace-apps.ts — its nodes `files` (with the
 //   type WorkspaceFile) and `apps`;
@@ -61,6 +64,7 @@ import { setProgramHost } from '../schedule/programs.ts';
 import { schedule } from './schedule.ts';
 import { connectionsPort, registerServices } from './services.ts';
 import { system } from './system.ts';
+import { threadVerbs } from './thread-verbs.ts';
 import { threads } from './threads.ts';
 import { web } from './web.ts';
 import { countRunningCommands, killRunningCommands, workspace } from './workspace.ts';
@@ -92,6 +96,10 @@ export const root: RootDefinition = {
       text: 'A file in a result is a reference, never content. Where an input asks for a file, pass the id of the reference.',
     },
     {
+      text: 'To give a file to whoever you talk to, pass its id in the files of `send_message`.',
+      requires: ['send_message'],
+    },
+    {
       text: 'To work with the content of a stored file, put it into the workspace file area with `import_file`.',
       requires: ['import_file'],
     },
@@ -105,6 +113,14 @@ export const root: RootDefinition = {
       requires: ['get_file_url'],
     },
     {
+      text: 'Drive a child thread with `send_to_thread`. When its work is done, `finish_thread` asks for its report; `cancel_thread` stops it at once without one.',
+      requires: ['send_to_thread', 'finish_thread', 'cancel_thread'],
+    },
+    {
+      text: 'A remote agent has no access to Balabash storage. A file reaches it only as an attachment of `spawn_agent` or `send_to_thread`; a file it produced comes back only through `fetch_thread_file`.',
+      requires: ['spawn_agent', 'send_to_thread', 'fetch_thread_file'],
+    },
+    {
       text: "A reference handed to you names a thread and an event seq: read the event with `get_event` first. A thread's final report is its thread.completed event.",
       requires: ['get_event'],
     },
@@ -114,6 +130,13 @@ export const root: RootDefinition = {
     fileCapabilities.importFile,
     fileCapabilities.getFileUrl,
     fileCapabilities.viewFile,
+    threadVerbs.sendMessage,
+    threadVerbs.endThread,
+    threadVerbs.spawnAgent,
+    threadVerbs.sendToThread,
+    threadVerbs.finishThread,
+    threadVerbs.cancelThread,
+    threadVerbs.fetchThreadFile,
     getEvent,
     threads,
     projects,

@@ -123,7 +123,7 @@ async function runUnderMainThread(task: ScheduledTaskModel, main: Thread, start:
 
     return await executeProgram(
       grant,
-      { code, timeoutMs: task.timeoutMs ?? PROGRAM_TIMEOUT_DEFAULT_MS, start },
+      { code, timeoutMs: task.timeoutMs ?? PROGRAM_TIMEOUT_DEFAULT_MS, start, task: task.slug },
       { connections: host.connections },
     );
   } catch (error) {

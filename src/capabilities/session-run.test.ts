@@ -5,12 +5,18 @@
 // front of it; a dormant resumed run cancelled before anything woke it never
 // opens a session.
 //
+// The end of a thread: the report the thread left during a turn — through
+// the capability `end_thread` of the catalog or the run's own tool, the
+// place is one (src/core/thread-end.ts) — completes the thread when that
+// turn is over; a run that is over some other way leaves no report behind.
+//
 // Run: npm test  (node:test, native type stripping — no build needed).
 
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { SESSION_RESUMED_IDLE_NOTE, SESSION_RESUMED_INTERRUPTED_NOTE } from '../../agents/world/index.ts';
 import type { AgentDeclaration, AgentSdkSession, Event, RunContext, RunResume, SdkSessionOptions, SdkTurn } from '../core/contract.ts';
+import { leaveReport, reportLeft } from '../core/thread-end.ts';
 import { createSessionRun } from './session-run.ts';
 
 const declaration = { name: 'probe', description: 'probe', sdk: 'claude', tools: [], headless: true } as unknown as AgentDeclaration;
@@ -139,5 +145,105 @@ describe('createSessionRun opening', () => {
     await tick();
 
     assert.equal(opened.length, 0);
+  });
+});
+
+describe('createSessionRun ending', () => {
+  // A run over a session whose turns the test ends one by one; what the run
+  // tells the log is recorded.
+  function ending(threadId: string, headless: boolean) {
+    const turns: Array<(turn: SdkTurn) => void> = [];
+    const completed: unknown[] = [];
+    const told: string[] = [];
+    const controller = new AbortController();
+    const session: AgentSdkSession = {
+      push: () => {},
+      turns: (async function* (): AsyncGenerator<SdkTurn> {
+        for (;;) {
+          yield await new Promise<SdkTurn>(resolve => turns.push(resolve));
+        }
+      })(),
+      syncTools: async () => {},
+      close: () => {},
+    };
+    const ctx = {
+      threadId,
+      workspaceId: 'workspace-1',
+      signal: controller.signal,
+      harness: { sdkSession: () => session },
+      stateDir: '/tmp',
+      pushEvent: async (_type: string, payload: { content: Array<{ text: string }> }) => {
+        told.push(payload.content[0]!.text);
+      },
+      sendToParent: async (text: string) => {
+        told.push(text);
+      },
+      complete: async (summary: unknown, meta: unknown) => {
+        completed.push({ summary, meta });
+      },
+    } as unknown as RunContext;
+    const run = createSessionRun({ ...declaration, headless } as AgentDeclaration, spec, 'Do the task', ctx);
+
+    return {
+      run,
+      completed,
+      told,
+      abort: () => controller.abort(),
+      endTurn: async (text: string) => {
+        await tick();
+        turns.shift()!({ text });
+        await tick();
+      },
+    };
+  }
+
+  test('a turn without a report goes on; the report left in a turn completes the thread when the turn is over', async () => {
+    const { run, completed, told, endTurn } = ending('thread-ending-1', false);
+
+    await endTurn('Working on it.');
+    assert.deepEqual([told, completed], [['Working on it.'], []]);
+
+    // What `end_thread` does in the middle of a turn.
+    leaveReport('thread-ending-1', {
+      title: 'Thing built',
+      description: 'Built the thing.',
+      summary: { text: 'It is built.', fileIds: ['file-1'] },
+      project: { id: 'project-1', slug: 'things' },
+    });
+    await endTurn('All done, goodbye.');
+    await run.finished;
+
+    // A thread that talks to the user says its last words; the report goes
+    // with the terminal, the project named at the end with it.
+    assert.deepEqual(told, ['Working on it.', 'All done, goodbye.']);
+    assert.deepEqual(completed, [
+      {
+        summary: { text: 'It is built.', fileIds: ['file-1'] },
+        meta: { title: 'Thing built', description: 'Built the thing.', project: { id: 'project-1', slug: 'things' } },
+      },
+    ]);
+    assert.equal(reportLeft('thread-ending-1'), null);
+  });
+
+  test('a headless thread ends with its report alone, and a run cancelled first leaves no report behind', async () => {
+    const headless = ending('thread-ending-2', true);
+
+    leaveReport('thread-ending-2', { title: 'Looked', description: 'Looked at the page.', summary: { text: 'Nothing there.' } });
+    await headless.endTurn('Bye.');
+    await headless.run.finished;
+
+    // The parent gets the summary; the goodbye would only repeat it.
+    assert.deepEqual(headless.told, []);
+    assert.deepEqual(headless.completed, [{ summary: { text: 'Nothing there.' }, meta: { title: 'Looked', description: 'Looked at the page.' } }]);
+
+    const cancelled = ending('thread-ending-3', false);
+
+    await tick();
+    leaveReport('thread-ending-3', { title: 'T', description: 'D', summary: { text: 'S' } });
+    cancelled.abort();
+    await cancelled.run.finished;
+
+    assert.deepEqual(cancelled.completed, []);
+    assert.equal(reportLeft('thread-ending-3'), null);
   });
 });

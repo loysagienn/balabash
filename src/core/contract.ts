@@ -401,8 +401,10 @@ export type RunContext = {
   progress(text: string): Promise<void>; // thread.progress → parent
   // thread.completed → parent. The optional retrospective self-description
   // (title: 2–5 words naming the work; description: ~300 chars) rides the
-  // terminal payload and updates the thread row.
-  complete(summary: ThreadSummary, meta?: { title?: string; description?: string }): Promise<void>;
+  // terminal payload and updates the thread row; `project` — the project the
+  // work concerned, when the thread names one at its end — replaces the one
+  // set at start.
+  complete(summary: ThreadSummary, meta?: { title?: string; description?: string; project?: { id: string; slug: string } }): Promise<void>;
   notify(level: NotificationLevel, text: string): Promise<void>; // thread.notification, gated by policy
 
   spawn(agentName: string, prompt: string, options?: SpawnOptions): Promise<{ threadId: string }>;

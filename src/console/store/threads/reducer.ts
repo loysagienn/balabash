@@ -177,6 +177,7 @@ export function threadsReducer(state: ThreadsState = initialThreads, action: Act
         ...(completion.summary !== undefined ? { summary: completion.summary } : {}),
         ...(completion.title !== undefined ? { title: completion.title } : {}),
         ...(completion.description !== undefined ? { description: completion.description } : {}),
+        ...(completion.projectId !== undefined ? { projectId: completion.projectId } : {}),
       };
 
       return { ...state, byId: { ...state.byId, [known.id]: ended }, list: countEnded(state.list, known, ended, event.seq) };

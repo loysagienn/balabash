@@ -10,6 +10,7 @@ import { mkdirSync } from 'node:fs';
 import { SESSION_RESUMED_IDLE_NOTE, SESSION_RESUMED_INTERRUPTED_NOTE, THREAD_NAMING_NOTE } from '../../agents/world/index.ts';
 import { workspaceDbPath, workspaceTasksDir } from '../workspace/layout.ts';
 import { fileContentBlock } from '../core/file-blocks.ts';
+import { dropReport, leaveReport, reportLeft, takeReport } from '../core/thread-end.ts';
 import {
   CANCEL_REASON_PARAM_DESCRIPTION,
   CANCEL_THREAD_DESCRIPTION,
@@ -30,7 +31,6 @@ import type {
   SdkBridgeTool,
   SessionAgentSpec,
   SessionEnvironment,
-  ThreadSummary,
   ToolDefinition,
 } from '../core/contract.ts';
 
@@ -165,16 +165,10 @@ export function describeEvent(event: Event): string {
 // moment): title — the one-time correction of the start-time guess;
 // description — "is this the thread I'm looking for" without the full report;
 // summary — the full handoff. Optional at the envelope, required here: the
-// strictness lives at the edge, where the author is the thread itself.
-type EndResult = {
-  title: string;
-  description: string;
-  summary: ThreadSummary;
-};
-
-type EndState = { result: EndResult | null };
-
-function createEndThreadTool(ctx: RunContext, end: EndState): SdkBridgeTool {
+// strictness lives at the edge, where the author is the thread itself. The
+// report is left with the thread (src/core/thread-end.ts) and the run
+// completes the thread with it when the turn is over.
+function createEndThreadTool(ctx: RunContext): SdkBridgeTool {
   return {
     name: 'end_thread',
     description:
@@ -231,11 +225,11 @@ function createEndThreadTool(ctx: RunContext, end: EndState): SdkBridgeTool {
         await ctx.files.getInfo(fileId);
       }
 
-      end.result = {
+      leaveReport(ctx.threadId, {
         title,
         description,
         summary: { text: summary, ...(fileIds.length ? { fileIds } : {}) },
-      };
+      });
 
       return 'accepted — finish this turn with a short final text';
     },
@@ -521,7 +515,7 @@ export function describeSessionBridgeTools(declaration: AgentDeclaration): ToolD
   const inertCtx = null as unknown as RunContext;
 
   const tools: SdkBridgeTool[] = [
-    createEndThreadTool(inertCtx, { result: null }),
+    createEndThreadTool(inertCtx),
     createSendFileTool(inertCtx, headless),
     ...(hasChildTools(declaration) ? createChildTools(inertCtx, declaration, new Set()) : []),
   ];
@@ -544,7 +538,6 @@ export function createSessionRun(
   // the dialogue (a thread.message whose author is not the parent).
   const childThreadIds = new Set<string>(ctx.resume?.childThreadIds ?? []);
 
-  const end: EndState = { result: null };
   let settled = false;
   let resolveFinished: () => void;
   let rejectFinished: (error: unknown) => void;
@@ -624,7 +617,7 @@ export function createSessionRun(
       // workspace's task-body directory rides along for the scheduler.
       env: { WORKSPACE_DB: workspaceDbPath(ctx.workspaceId), WORKSPACE_TASKS_DIR: workspaceTasksDir(ctx.workspaceId) },
       extraTools: [
-        createEndThreadTool(ctx, end),
+        createEndThreadTool(ctx),
         createSendFileTool(ctx, headless),
         ...(hasChildTools(declaration) ? createChildTools(ctx, declaration, childThreadIds) : []),
         ...(environment?.extraTools ?? []),
@@ -637,6 +630,9 @@ export function createSessionRun(
     }
 
     settled = true;
+    // A report the thread left and nobody took — the run is over some other
+    // way — is nobody's to take any more.
+    dropReport(ctx.threadId);
     session?.close();
     // A dormant resumed run cancelled before anything woke it: release the
     // start sequence waiting on its opening.
@@ -701,17 +697,22 @@ export function createSessionRun(
           return;
         }
 
-        // On end_thread the summary carries the report to the operator; the
-        // final text is the goodbye — meaningful in a user-facing thread (the user reads
+        // The report the thread left in this turn — through its end_thread
+        // tool or through the capability of the catalog, the place is one.
+        // The summary carries the report to the operator; the final text is
+        // the goodbye — meaningful in a user-facing thread (the user reads
         // it), redundant in a headless thread (the parent gets the summary).
-        if (turn.text && !(headless && end.result !== null)) {
+        if (turn.text && !(headless && reportLeft(ctx.threadId) !== null)) {
           await deliverTurnText(turn.text);
         }
 
-        if (end.result !== null) {
-          await ctx.complete(end.result.summary, {
-            title: end.result.title,
-            description: end.result.description,
+        const report = takeReport(ctx.threadId);
+
+        if (report !== null) {
+          await ctx.complete(report.summary, {
+            title: report.title,
+            description: report.description,
+            ...(report.project ? { project: report.project } : {}),
           });
           stop();
 

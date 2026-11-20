@@ -234,6 +234,7 @@ export async function spawnAgentRun(thread: Thread, startedEvent: Event, resume?
         summary: summary as unknown as JsonObject,
         ...(meta?.title ? { title: meta.title } : {}),
         ...(meta?.description ? { description: meta.description } : {}),
+        ...(meta?.project ? { projectId: meta.project.id, projectSlug: meta.project.slug } : {}),
       });
     },
 
