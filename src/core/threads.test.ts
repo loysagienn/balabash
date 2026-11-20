@@ -345,7 +345,7 @@ describe('the rows of threads', () => {
     assert.ok(activeIds.includes(local) && activeIds.includes(parent));
     assert.ok(!activeIds.includes(remote) && !activeIds.includes(remoteChild));
 
-    const cancelled = await threads.tombstoneActiveThreads('process_restart');
+    const cancelled = await threads.tombstoneActiveThreads(async () => false);
 
     assert.ok(cancelled >= 2);
     assert.equal((await threads.getThread(local))?.status, 'cancelled');

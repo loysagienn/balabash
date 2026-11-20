@@ -122,7 +122,7 @@ describe('the process', () => {
 });
 
 describe('the restart in the way', () => {
-  const request = { requestedBy: 'engineer', requestedAt: at(2026, 10, 11, 16, 5), force: false, own: true };
+  const request = { requestedBy: 'engineer', requestedAt: at(2026, 10, 11, 16, 5), own: true };
   const waiting = { threads: [], otherThreads: 0, secretaryTurn: false, workspaceJob: false, logQuiet: true };
 
   it('names who asked and what the window waits for, this workspace’s threads last as links', () => {
@@ -132,7 +132,7 @@ describe('the restart in the way', () => {
     assert.deepEqual(restartNote(request, { ...waiting, secretaryTurn: true, workspaceJob: true, logQuiet: false }, NOW).tail, ' · waiting for a secretary turn to end, a workspace job to end, the log to go quiet');
     assert.deepEqual(restartNote(request, { ...waiting, threads, otherThreads: 2, logQuiet: false }, NOW).tail, ' · waiting for the log to go quiet, 2 threads of other workspaces to finish a turn, 1 thread to finish a turn:');
     assert.deepEqual(restartNote(request, waiting, NOW).tail, ' · restarting now');
-    assert.deepEqual(restartNote({ ...request, requestedBy: null, force: true }, undefined, NOW), { lead: 'Requested by the operator at 16:05 · force', threads: [], tail: ' · checking the safe window' });
+    assert.deepEqual(restartNote({ ...request, requestedBy: null }, undefined, NOW), { lead: 'Requested by the operator at 16:05', threads: [], tail: ' · checking the safe window' });
     assert.equal(restartNote(request, null, NOW).tail, ' · checking the safe window');
     // Another workspace's request: no requester to name, its threads a count.
     assert.deepEqual(restartNote({ ...request, requestedBy: null, own: false }, { ...waiting, otherThreads: 1 }, NOW), { lead: 'Requested from another workspace at 16:05', threads: [], tail: ' · waiting for 1 thread of other workspaces to finish a turn' });
@@ -141,9 +141,9 @@ describe('the restart in the way', () => {
   it('is the facts’ pending unless the log completed it, else the log’s newest request after its newest completion', () => {
     resetSeq();
 
-    const requested = (seq: bigint) => event({ seq, type: 'system.restart.requested', actor: 'system', threadId: 't1', createdAt: request.requestedAt, payload: { reason: 'a build', requestedBy: 'engineer' } });
+    const requested = (seq: bigint) => event({ seq, type: 'system.restart.requested', actor: 'system', threadId: 't1', createdAt: request.requestedAt, payload: { reason: 'a build', requestedBy: 'engineer', force: true } });
     const completed = (seq: bigint, requestSeq: number) => event({ seq, type: 'system.restart.completed', actor: 'system', targetThreadId: 'main', payload: { reason: 'a build', requestSeq } });
-    const pending = { seq: 7, own: true, reason: 'a build', requestedAt: request.requestedAt, requestedBy: 'engineer', threadId: 't1', force: false, waiting };
+    const pending = { seq: 7, own: true, reason: 'a build', requestedAt: request.requestedAt, requestedBy: 'engineer', threadId: 't1', waiting };
 
     // The facts name the request the log holds: the facts, with the window.
     assert.deepEqual(pendingOf([requested(7n)], pending), { request, waiting });

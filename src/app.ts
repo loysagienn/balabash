@@ -296,8 +296,8 @@ consumers.push(
     // What runs outside any agent turn does not survive a restart — the runs
     // of programs with the calls and commands they started, a scheduled run
     // from the moment its task is taken until its outcome is journaled and
-    // told, and the former workspace jobs: the safe window waits for them,
-    // under force too (force cuts agent turns only). What is still running
+    // told, and the former workspace jobs. The safe window waits for them.
+    // What is still running
     // when the process is told to stop is stopped by the shutdown below.
     hasActiveJobs: () => isAnyJobRunning() || hasRunningWork() || hasUnsettledRuns(),
     // The remote engine's verbs in flight (its state is durable; a verb

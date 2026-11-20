@@ -238,7 +238,8 @@ describe('the restart in the way, as this workspace may see it', () => {
     });
 
     try {
-      const foreign = await appendEvent({ type: 'system.restart.requested', actor: 'system', workspaceId: other.id, threadId: foreignChild.id, payload: { reason: 'foreign confidential reason', requestedBy: 'engineer' } });
+      // Even a request from the former schema waits for the busy thread.
+      const foreign = await appendEvent({ type: 'system.restart.requested', actor: 'system', workspaceId: other.id, threadId: foreignChild.id, payload: { reason: 'foreign confidential reason', requestedBy: 'engineer', force: true } });
 
       assert.ok(foreign.written);
       const seen = await until(async () => {
@@ -249,9 +250,10 @@ describe('the restart in the way, as this workspace may see it', () => {
       });
 
       assert.deepEqual(
-        { own: seen.own, reason: seen.reason, requestedBy: seen.requestedBy, threadId: seen.threadId, force: seen.force, threads: seen.waiting?.threads, otherThreads: seen.waiting?.otherThreads, secretaryTurn: seen.waiting?.secretaryTurn },
-        { own: false, reason: null, requestedBy: null, threadId: null, force: false, threads: [], otherThreads: 1, secretaryTurn: true },
+        { own: seen.own, reason: seen.reason, requestedBy: seen.requestedBy, threadId: seen.threadId, threads: seen.waiting?.threads, otherThreads: seen.waiting?.otherThreads, secretaryTurn: seen.waiting?.secretaryTurn },
+        { own: false, reason: null, requestedBy: null, threadId: null, threads: [], otherThreads: 1, secretaryTurn: true },
       );
+      assert.ok(!('force' in seen));
       assert.ok(seen.requestedAt instanceof Date);
       assert.ok(!JSON.stringify(seen).includes('foreign confidential'));
 

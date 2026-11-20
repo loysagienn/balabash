@@ -184,10 +184,10 @@ export type RestartNote = {
   tail: string;
 };
 
-// The request as the note needs it: who asked and when, whether forced,
+// The request as the note needs it: who asked and when,
 // whether it is this workspace's own (another workspace's request has no
 // requester to name).
-export type RestartSource = { requestedBy: string | null; requestedAt: Date; force: boolean; own: boolean };
+export type RestartSource = { requestedBy: string | null; requestedAt: Date; own: boolean };
 
 function waitWords(waiting: NonNullable<PendingRestartView['waiting']>): string {
   const reasons: string[] = [];
@@ -221,7 +221,7 @@ function waitWords(waiting: NonNullable<PendingRestartView['waiting']>): string 
 // yet; null — no poll yet).
 export function restartNote(request: RestartSource, waiting: PendingRestartView['waiting'] | undefined, now: Date): RestartNote {
   const when = dateTimeLabel(request.requestedAt, now);
-  const lead = `${request.own ? `Requested by ${request.requestedBy ?? 'the operator'}` : 'Requested from another workspace'} at ${when}${request.force ? ' · force' : ''}`;
+  const lead = `${request.own ? `Requested by ${request.requestedBy ?? 'the operator'}` : 'Requested from another workspace'} at ${when}`;
 
   if (!waiting) {
     return { lead, threads: [], tail: ' · checking the safe window' };
@@ -235,7 +235,6 @@ export function requestOf(event: Event): RestartSource {
   return {
     requestedBy: typeof event.payload.requestedBy === 'string' ? event.payload.requestedBy : null,
     requestedAt: event.createdAt,
-    force: event.payload.force === true,
     own: true,
   };
 }
@@ -254,7 +253,7 @@ export function pendingOf(log: readonly Event[], pending: PendingRestartView | n
 
   if (pending && typeof pending.seq === 'number' && (completed === null || BigInt(pending.seq) > completed)) {
     return {
-      request: { requestedBy: pending.requestedBy, requestedAt: pending.requestedAt, force: pending.force, own: pending.own !== false },
+      request: { requestedBy: pending.requestedBy, requestedAt: pending.requestedAt, own: pending.own !== false },
       waiting: pending.waiting,
     };
   }

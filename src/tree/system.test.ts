@@ -95,7 +95,7 @@ describe('system_request_restart', () => {
   test('the request is an event of the log on behalf of the calling thread; the value says whether the bundle is as new as the sources', async () => {
     await put('dist/app.js', 30);
 
-    assert.deepEqual(await invoke('system_request_restart', { reason: '  A fix of the router.  ' }), { forced: false, build: 'current' });
+    assert.deepEqual(await invoke('system_request_restart', { reason: '  A fix of the router.  ' }), { build: 'current' });
     assert.deepEqual(await requests(), [
       { actor: 'system', workspaceId: stand.workspaceId, threadId: stand.mainThreadId, payload: { reason: 'A fix of the router.', requestedBy: 'engineer' } },
     ]);
@@ -104,27 +104,36 @@ describe('system_request_restart', () => {
     // same, and boots the bundle as it is.
     await put('agents/world/new.ts', 5);
 
-    assert.deepEqual(await invoke('system_request_restart', { reason: 'Built before the last edit.', force: true }), { forced: true, build: 'stale' });
-    assert.deepEqual((await requests())[1]?.payload, { reason: 'Built before the last edit.', force: true, requestedBy: 'engineer' });
-
-    // A forced restart stays forced whatever a later request asks, until
-    // it has happened.
-    await put('dist/app.js', 1);
-    assert.deepEqual(await invoke('system_request_restart', { reason: 'Rebuilt.' }), { forced: true, build: 'current' });
-
-    const { appendEvent } = await import('../core/append.ts');
-
-    await appendEvent({ type: 'system.restart.completed', actor: 'system', workspaceId: stand.workspaceId, threadId: null, targetThreadId: stand.mainThreadId, payload: { requestSeq: 0, reason: 'Rebuilt.' } });
-    assert.deepEqual(await invoke('system_request_restart', { reason: 'Once more.' }), { forced: false, build: 'current' });
+    assert.deepEqual(await invoke('system_request_restart', { reason: 'Built before the last edit.' }), { build: 'stale' });
+    assert.deepEqual((await requests())[1]?.payload, { reason: 'Built before the last edit.', requestedBy: 'engineer' });
   });
 
-  test('a reason is said in words', async () => {
+  test('accepts only a nonblank reason', async () => {
     const before = (await requests()).length;
 
     await refuses(invoke('system_request_restart', { reason: '   ' }), 'invalid_input', /^reason is blank/);
     await refuses(invoke('system_request_restart', { reason: '' }), 'invalid_input', /system_request_restart/);
     await refuses(invoke('system_request_restart', {}), 'invalid_input', /system_request_restart/);
+    await refuses(invoke('system_request_restart', { reason: 'Rebuilt.', force: true }), 'invalid_input', /system_request_restart/);
     assert.equal((await requests()).length, before);
+  });
+});
+
+test('the built-in request_restart offers only the reason and records the request for its thread', async () => {
+  const { createRestartToolServer } = await import('../capabilities/restart-tools.ts');
+  const server = createRestartToolServer();
+  const [tool] = await server.getFunctions(stand.workspaceId);
+
+  assert.equal(tool?.functionName, 'request_restart');
+  assert.deepEqual(Object.keys(tool.inputSchema.properties as object), ['reason']);
+  assert.equal(tool.inputSchema.additionalProperties, false);
+
+  const reason = 'Activate the rebuilt app.';
+  const reply = await server.call('request_restart', { reason }, { workspaceId: stand.workspaceId, threadId: stand.mainThreadId });
+
+  assert.match(String(reply), /End your turn/);
+  assert.deepEqual((await requests()).at(-1), {
+    actor: 'system', workspaceId: stand.workspaceId, threadId: stand.mainThreadId, payload: { reason, requestedBy: 'coordinator' },
   });
 });
 

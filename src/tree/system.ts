@@ -13,13 +13,11 @@ const requestRestart = capability({
   name: 'request_restart',
   summary: 'Request an app restart that makes the built bundle live',
   description:
-    'Request an app restart; it does not build the app. The restart waits until no agent turn, yours included, and no workspace job is running: end your turn after the call. Your thread continues after the restart and gets a system.restart.completed event. `force` cuts off the turns in flight.',
+    'Request an app restart using the existing build. End your turn after the call. The restart waits for all agent turns, including yours, and for background work to finish. After the restart, system.restart.completed is delivered to this thread, or to the main thread if this one has ended.',
   input: z.strictObject({
     reason: z.string().min(1).describe('What was changed and built.'),
-    force: z.boolean().default(false).describe('Only when the user explicitly wants it.'),
   }),
   output: z.strictObject({
-    forced: z.boolean(),
     build: z
       .enum(['current', 'stale'])
       .describe('stale: the sources changed after the last build, so the restart boots the previous bundle.'),
@@ -41,15 +39,14 @@ const requestRestart = capability({
       );
     }
 
-    const { forced } = await recordRequest({
+    await recordRequest({
       workspaceId: caller.workspaceId,
       threadId: caller.threadId,
       reason,
-      force: input.force,
       requestedBy: caller.agentName,
     });
 
-    return { forced, build };
+    return { build };
   },
 });
 

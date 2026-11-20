@@ -433,27 +433,15 @@ export async function startThread(options: StartThreadInput): Promise<Thread> {
 }
 
 // ---------------------------------------------------------------------------
-// Tombstone (§5.5): on process start every active non-main thread with a
-// run is cancelled — runs live only in memory and did not survive the
-// restart. Remote threads are left alone: their session lives on in the
-// external system and the remote engine resumes them from the row. The
-// forced restart uses the same sweep. Cancelling a thread cascades over its
-// subtree inside appendEvent, so descendants reached later in the loop are
-// already terminal no-ops (a remote child of a cancelled thread goes with
-// its parent — a thread does not outlive its parent, remote or not).
-
-//
-// `spare` keeps a thread alive through the boot sweep: one whose run resumes
-// its saved SDK session (src/capabilities/resume-runs.ts). A spared thread
-// still goes when an ancestor is cancelled — the cascade decides, not the
-// predicate.
-export async function tombstoneActiveThreads(reason: string, spare?: (thread: Thread) => Promise<boolean>): Promise<number> {
-  const rows = await readThreads(prisma, ACTIVE_RUN_THREADS, Prisma.sql`ORDER BY threads.created_seq`);
+// On boot, cancel local run threads without a session to resume. Cancelling
+// a parent cascades to its descendants, including remote or resumable ones.
+export async function tombstoneActiveThreads(spare: (thread: Thread) => Promise<boolean>): Promise<number> {
+  const rows = await listActiveChildThreads();
 
   let cancelled = 0;
 
   for (const row of rows) {
-    if (spare && (await spare(row))) {
+    if (await spare(row)) {
       continue;
     }
 
@@ -462,7 +450,7 @@ export async function tombstoneActiveThreads(reason: string, spare?: (thread: Th
       actor: 'system',
       workspaceId: row.workspaceId,
       threadId: row.id,
-      payload: { reason },
+      payload: { reason: 'process_restart' },
     });
 
     if (result.written) {

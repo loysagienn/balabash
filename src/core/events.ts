@@ -7,22 +7,17 @@ import { createLiveHub, installLiveHub } from './live.ts';
 import type { Event } from './contract.ts';
 import { SESSION_EVENT_PREFIX, toEvent } from './envelope.ts';
 
-// The client a read goes through: the pool, or the transaction of a caller
-// that reads and appends as one step under the log lock (logTransaction).
-type EventReader = Pick<typeof prisma, 'event'>;
-
 type GetEventsAfterOptions = {
   types?: string[];
   limit?: number;
-  reader?: EventReader;
 };
 
 // Cursor read for consumers: events strictly after `afterSeq`, oldest first.
 export async function getEventsAfter(
   afterSeq: bigint,
-  { types, limit = 100, reader = prisma }: GetEventsAfterOptions = {},
+  { types, limit = 100 }: GetEventsAfterOptions = {},
 ): Promise<Event[]> {
-  const rows = await reader.event.findMany({
+  const rows = await prisma.event.findMany({
     where: {
       seq: { gt: afterSeq },
       ...(types !== undefined ? { type: { in: types } } : {}),
@@ -36,8 +31,8 @@ export async function getEventsAfter(
 
 // The newest seq of one event type, log-wide; null when none was ever
 // written. Lets a consumer tell a stale fact from a live one (restart module).
-export async function getLastEventSeq(type: string, reader: EventReader = prisma): Promise<bigint | null> {
-  const row = await reader.event.findFirst({
+export async function getLastEventSeq(type: string): Promise<bigint | null> {
+  const row = await prisma.event.findFirst({
     where: { type },
     orderBy: { seq: 'desc' },
     select: { seq: true },

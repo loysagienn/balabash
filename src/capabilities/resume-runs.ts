@@ -41,7 +41,7 @@ export async function savedSessionOf(threadId: string): Promise<SavedSession | n
 // Boot, phase one: tombstone the active run threads that have no saved
 // session to resume. Returns how many were cancelled (cascades excluded).
 export async function tombstoneUnresumableThreads(): Promise<number> {
-  return tombstoneActiveThreads('process_restart', async thread => (await savedSessionOf(thread.id)) !== null);
+  return tombstoneActiveThreads(async thread => (await savedSessionOf(thread.id)) !== null);
 }
 
 async function cancel(thread: Thread, reason: string): Promise<void> {

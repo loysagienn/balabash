@@ -46,9 +46,10 @@ async function journal(threadId: string, agent: string, type: string, payload: J
 }
 
 describe('savedSessionOf', () => {
-  test('null without a named session; the newest session.sdk otherwise, interrupted by a last session.state run', async () => {
+  test('null without a named session; the newest session.sdk otherwise, interrupted by a last session.state run', async t => {
     const thread = await startChild('engineer');
 
+    t.after(() => appendEvent({ type: 'thread.cancelled', actor: 'system', workspaceId: stand.workspaceId, threadId: thread, payload: { reason: 'test cleanup' } }));
     assert.equal(await resume.savedSessionOf(thread), null);
 
     await journal(thread, 'engineer', 'session.sdk', { sdk: 'claude', sdkSessionId: 'old' });
@@ -65,8 +66,9 @@ describe('savedSessionOf', () => {
 });
 
 describe('the boot sweep and the resume', () => {
-  test('cancel only the run threads without a saved session; the cascade takes a saved child of an unsaved parent', async () => {
+  test('cancel only the run threads without a saved session; the cascade takes a saved child of an unsaved parent', async t => {
     const saved = await startChild('engineer');
+    t.after(() => appendEvent({ type: 'thread.cancelled', actor: 'system', workspaceId: stand.workspaceId, threadId: saved, payload: { reason: 'test cleanup' } }));
     const unsaved = await startChild('manager');
     const savedChildOfUnsaved = await startChild('browser', unsaved);
 
@@ -79,10 +81,6 @@ describe('the boot sweep and the resume', () => {
     assert.equal((await threads.getThread(unsaved))?.status, 'cancelled');
     assert.equal((await threads.getThread(savedChildOfUnsaved))?.status, 'cancelled');
     assert.equal((await events.getLastThreadEvent(unsaved, 'thread.cancelled'))?.payload.reason, 'process_restart');
-
-    // The forced restart's sweep (no spare) still takes everything.
-    await threads.tombstoneActiveThreads('restart_requested');
-    assert.equal((await threads.getThread(saved))?.status, 'cancelled');
   });
 
   test('a surviving thread whose agent the catalog does not know is journaled as resumed and then fails the ordinary way', async () => {

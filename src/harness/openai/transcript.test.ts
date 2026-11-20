@@ -34,3 +34,10 @@ describe('buildTranscript — the one-hop commands', () => {
     );
   });
 });
+
+test('a restart request from the former schema reads like a current request', () => {
+  const request = { seq: 1, type: 'system.restart.requested', actor: 'system', agentName: null, threadId: 'main', targetThreadId: null, createdAt: at };
+  const payload = { reason: 'Rebuilt the app.', requestedBy: 'engineer' };
+
+  assert.deepEqual(buildTranscript([{ ...request, payload: { ...payload, force: true } }]), buildTranscript([{ ...request, payload }]));
+});

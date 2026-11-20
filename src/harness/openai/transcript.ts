@@ -389,7 +389,6 @@ const renderers: Record<string, Renderer> = {
   'system.restart.requested': payload =>
     omitNullish({
       reason: payload.reason,
-      force: payload.force,
       requestedBy: payload.requestedBy,
     }),
 

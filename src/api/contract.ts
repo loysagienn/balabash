@@ -1207,11 +1207,8 @@ export type FileAreaTotalsView = {
 
 // The restart in the way, as this workspace may see it: the request's own
 // words (reason, requester, thread) only when the request came from this
-// workspace (`own`); another workspace's request is a bare fact — that a
-// restart is pending since when, and whether it is forced (a forced
-// restart cuts every workspace's agent turns in flight). What it waits for
-// names the threads of this workspace with a turn in flight and counts the
-// others.
+// workspace (`own`). Other workspaces see when the restart was requested.
+// Each workspace sees its own busy threads and a count of the others.
 export type PendingRestartView = {
   // The seq of the system.restart.requested event — a completion of the log
   // with a greater seq means this view is stale.
@@ -1221,7 +1218,6 @@ export type PendingRestartView = {
   requestedAt: Date;
   requestedBy: string | null;
   threadId: string | null;
-  force: boolean;
   // What the newest poll of the safe window found in the way; null before
   // the first poll.
   waiting: {

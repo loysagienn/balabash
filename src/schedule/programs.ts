@@ -305,7 +305,7 @@ export async function fireProgramTask(
 }
 
 // Boot sweep: a run does not survive the app. A row left 'running' by the
-// previous process — stopped by force or dead — is settled as 'aborted'.
+// previous process is settled as 'aborted'.
 // The launches of this process are not its business; the app sweeps before
 // it opens anything a run can start from (src/app.ts).
 export async function sweepAbortedRuns(): Promise<void> {
