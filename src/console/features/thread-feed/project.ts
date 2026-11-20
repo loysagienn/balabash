@@ -15,6 +15,7 @@
 
 import type { Event, JsonObject } from '../../../core/contract.ts';
 import type { EventOf, EventPayloads, EventType, InboundFile, SessionPlanItem, UserIdentity } from '../../../core/event-types.ts';
+import { taskAuthorLabel } from '../../../utils/task-author.ts';
 import { dateTimeLabel } from '../../lib/format/index.ts';
 import { formatTokensK } from '../../ui/Ring/Ring.logic.ts';
 import type { IconName } from '../../ui/Icon/Icon.tsx';
@@ -242,7 +243,7 @@ function otherUser(event: Event, ctx: FeedContext): string | null {
 }
 
 function taskName(event: Event): string | undefined {
-  return event.task ? `task ${event.task.slug}` : undefined;
+  return event.task ? taskAuthorLabel(event.task.slug) : undefined;
 }
 
 // The party an event speaks for: "you" for a user's (the Message block and

@@ -15,6 +15,7 @@
 // touches nothing; a tool names only the slug and means whatever row holds
 // it.
 
+import { taskAuthorLabel } from '../utils/task-author.ts';
 import { prisma } from '../db/client.ts';
 import { registryMutation } from '../core/registry-events.ts';
 import type { RegistryAuthor } from '../core/registry-events.ts';
@@ -52,7 +53,7 @@ export async function createTask(workspaceId: string, input: TaskInput, by: Regi
   }
 
   const createdBy = by.kind === 'thread'
-    ? (by.task ? `task ${by.task.slug}` : (await getThread(by.threadId))?.agent ?? null)
+    ? (by.task ? taskAuthorLabel(by.task.slug) : (await getThread(by.threadId))?.agent ?? null)
     : by.kind === 'user' ? OPERATOR_AUTHOR : null;
 
   try {

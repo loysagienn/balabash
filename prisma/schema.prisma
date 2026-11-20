@@ -30,8 +30,8 @@ model Event {
   type           String // canonical type (§4.2) or agent domain type '<agent>.*'
   actor          String // 'user' | 'system' | 'agent' | 'task'
   agentName      String? @map("agent_name") // agent name when actor='agent'
-  taskSlug       String? @map("task_slug")
-  taskRunId      String? @map("task_run_id")
+  taskSlug       String? @map("task_slug") // scheduled task when actor='task'
+  taskRunId      String? @map("task_run_id") // ScheduleRun.id of the authoring run
   workspaceId    String? @map("workspace_id") // workspace; null = installation-level event
   threadId       String? @map("thread_id") // author's thread; null = event outside threads
   targetThreadId String? @map("target_thread_id") // addressee thread, one hop (§4.3)

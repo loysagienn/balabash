@@ -233,21 +233,12 @@ const LIFECYCLE_PAYLOAD_SCHEMAS: Record<string, z.ZodType> = {
 // Database-free validation. Thread existence, one-hop and terminal rules need
 // the projection and live in append.ts.
 
-const THREAD_VERB_EVENTS: ReadonlySet<string> = new Set(['agent.message', THREAD_MESSAGE, THREAD_STARTED, THREAD_FINISH, THREAD_CANCEL]);
-
-const TASK_EVENTS = new Set([
-  ...THREAD_VERB_EVENTS,
-  'project.created', 'project.updated', 'project.archived', 'project.unarchived',
-  'schedule.task.created', 'schedule.task.cancelled', 'app.published', 'app.unpublished',
-  OAUTH_CLIENT_REQUESTED, SECRETS_REQUESTED, SYSTEM_RESTART_REQUESTED,
-]);
-
 export function validateEnvelope(input: AppendInput): void {
   const { type, actor, agentName, workspaceId, threadId } = input;
 
   if (actor === 'task') {
-    if (!TASK_EVENTS.has(type) || !input.task?.slug || !input.task.runId) {
-      throw new AppendError('actor_mismatch', `Task author requires a task slug, run id and a supported event type (type "${type}")`);
+    if (!input.task?.slug || !input.task.runId) {
+      throw new AppendError('actor_mismatch', `Task author requires a task slug and run id (type "${type}")`);
     }
   } else if (input.task) {
     throw new AppendError('actor_mismatch', "Only actor 'task' carries a task author");
@@ -320,6 +311,10 @@ function validateCanonicalActor(input: AppendInput): void {
   // The session journal is authored by the thread whose session it is.
   const isSessionEvent = type.startsWith(SESSION_EVENT_PREFIX);
 
+  if (isSessionEvent && actor === 'task') {
+    throw new AppendError('actor_mismatch', `A task cannot author a session event (type "${type}")`);
+  }
+
   if (
     (actor === 'task' ||
       requiresThread.includes(type) ||
@@ -346,35 +341,16 @@ function validateCanonicalActor(input: AppendInput): void {
 
 // ---------------------------------------------------------------------------
 
-// Before task authors, the five thread verbs put the program origin in the
-// payload. Only a scheduled run named a task. Keep the recorded payload
-// available verbatim, including the run id of an old in-place call.
-function recordedTask(row: EventRow): TaskAuthor | undefined {
-  if (row.actor === 'task' && row.taskSlug && row.taskRunId) {
-    return { slug: row.taskSlug, runId: row.taskRunId };
-  }
-
-  if (row.actor === 'agent' && THREAD_VERB_EVENTS.has(row.type)) {
-    const program = (row.payload as JsonObject)?.program;
-
-    if (program && typeof program === 'object' && !Array.isArray(program) && typeof program.task === 'string' && typeof program.runId === 'string') {
-      return { slug: program.task, runId: program.runId };
-    }
-  }
-
-  return undefined;
-}
-
 export function toEvent(row: EventRow): Event {
-  const task = recordedTask(row);
-
   return {
     seq: row.seq,
     id: row.id,
     type: row.type,
-    actor: task ? 'task' : (row.actor as EventActor),
-    agentName: task ? null : row.agentName,
-    ...(task ? { task } : {}),
+    actor: row.actor as EventActor,
+    agentName: row.agentName,
+    ...(row.actor === 'task' && row.taskSlug && row.taskRunId
+      ? { task: { slug: row.taskSlug, runId: row.taskRunId } }
+      : {}),
     workspaceId: row.workspaceId,
     threadId: row.threadId,
     targetThreadId: row.targetThreadId,

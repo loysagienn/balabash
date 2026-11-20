@@ -324,7 +324,6 @@ describe('send_message', () => {
       [['text', 'Here **it** is.'], ['file', note], ['image', picture]],
     );
     assert.equal(message.payload.content[1].name, 'note.txt');
-    assert.equal(message.payload.program, undefined);
 
     // Files alone are a message too.
     await invoke('send_message', { files: [note] });
@@ -392,7 +391,6 @@ describe('spawn_agent', () => {
     assert.equal(event.payload.input, 'Build it.');
     assert.deepEqual(event.payload.fileIds, [brief]);
     assert.equal(event.payload.projectSlug, 'verbs');
-    assert.equal(event.payload.program, undefined);
 
     // The start of a thread of a project is work on the project.
     assert.ok((await invoke('projects_get', { project: 'verbs' })).updatedAt > project.updatedAt);
@@ -733,7 +731,7 @@ describe('a program', () => {
     assert.equal(note.payload.createdBy, 'task digest');
 
     for (const event of [message, birth, word, finish, cancel, note]) {
-      assert.deepEqual([event.actor, event.agentName, event.taskSlug, event.taskRunId, event.payload.program], ['task', null, 'digest', runId, undefined]);
+      assert.deepEqual([event.actor, event.agentName, event.taskSlug, event.taskRunId], ['task', null, 'digest', runId]);
     }
     const childTranscript = await invoke('threads_get_transcript', { threadId: run.value.child });
     const [spawn] = childTranscript.transcript.split('\n').map((line: string) => JSON.parse(line));
@@ -742,7 +740,7 @@ describe('a program', () => {
     assert.deepEqual(run.value.modes, [true, false]);
   });
 
-  test('readers attribute old and new messages in one transcript', async () => {
+  test('readers distinguish a recorded agent message and a scheduled task message in the same thread', async () => {
     const { buildTranscript } = await import('../harness/openai/transcript.ts');
     const { getTranscript } = await import('../core/events.ts');
     const threadId = stand.mainThreadId;
@@ -750,24 +748,21 @@ describe('a program', () => {
     const agent = { ...base, actor: 'agent', agentName: 'coordinator' };
     const content = [{ type: 'text', text: 'Ready' }];
     const task = { slug: 'digest', runId: 'from-schedule' };
-    const oldTask = { task: task.slug, runId: task.runId };
 
     await prisma.event.createMany({ data: [
       { ...agent, payload: { content } },
-      { ...agent, payload: { content, program: { runId: 'in-place' } } },
-      { ...agent, payload: { content, program: oldTask } },
       { ...base, actor: 'task', taskSlug: task.slug, taskRunId: task.runId, payload: { content } },
     ] });
 
-    const events = await getTranscript(threadId, { last: 4 });
+    const events = await getTranscript(threadId, { last: 2 });
     const lines = buildTranscript(events).text.split('\n').filter(line => line.startsWith('{')).map(line => JSON.parse(line)).filter(line => line.type === 'agent.message');
-    assert.deepEqual(lines.map(line => [line.text, line.task]), [['Ready', undefined], ['Ready', undefined], ['Ready', task], ['Ready', task]]);
+    assert.deepEqual(lines.map(line => [line.text, line.task]), [['Ready', undefined], ['Ready', task]]);
 
-    const page = await invoke('threads_get_transcript', { threadId, limit: 4 });
+    const page = await invoke('threads_get_transcript', { threadId, limit: 2 });
     const authors = page.transcript.split('\n').map((line: string) => JSON.parse(line)).map((e: Value) => [e.actor, e.agentName, e.task]);
-    assert.deepEqual(authors, [['agent', 'coordinator', undefined], ['agent', 'coordinator', undefined], ['task', undefined, task], ['task', undefined, task]]);
-    const full = await invoke('get_event', { seq: Number(events[2]!.seq) });
-    assert.deepEqual([full.actor, full.task, full.payload.program], ['task', task, oldTask]);
+    assert.deepEqual(authors, [['agent', 'coordinator', undefined], ['task', undefined, task]]);
+    const full = await invoke('get_event', { seq: Number(events[1]!.seq) });
+    assert.deepEqual([full.actor, full.task], ['task', task]);
   });
 
   test('run in place by the secretary uses the same child mode as a direct call', async () => {
@@ -787,6 +782,6 @@ describe('a program', () => {
     const message = await lastWritten(threadId, 'thread.message');
 
     assert.equal(message.payload.text, 'From a program.');
-    assert.deepEqual([message.actor, message.agentName, message.taskSlug, message.taskRunId, message.payload.program], ['agent', 'browser', null, null, undefined]);
+    assert.deepEqual([message.actor, message.agentName, message.taskSlug, message.taskRunId], ['agent', 'browser', null, null]);
   });
 });

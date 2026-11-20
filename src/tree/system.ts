@@ -6,6 +6,7 @@
 
 import { z } from 'zod';
 import { CapabilityError, capability, node } from '../catalog/index.ts';
+import { taskAuthorLabel } from '../utils/task-author.ts';
 import { callAuthor } from './call-author.ts';
 import { bundleState } from '../runtime/bundle.ts';
 import { requestRestart as recordRequest } from '../runtime/restart.ts';
@@ -46,7 +47,7 @@ const requestRestart = capability({
       workspaceId: caller.workspaceId,
       threadId: caller.threadId,
       reason,
-      requestedBy: author.task ? `task ${author.task.slug}` : caller.agentName,
+      requestedBy: author.task ? taskAuthorLabel(author.task.slug) : caller.agentName,
       task: author.task,
     });
 

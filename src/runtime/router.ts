@@ -23,6 +23,7 @@
 // the remote engine's facade — a remote thread has no run, its "run" is a
 // stateless facade over the engine, risen on demand — plug in from above).
 
+import { taskAuthorLabel } from '../utils/task-author.ts';
 import type { Event, Thread } from '../core/contract.ts';
 import { appendEvent } from '../core/append.ts';
 import { startConsumer } from '../core/consumers.ts';
@@ -172,7 +173,7 @@ export function startThreadRouter({ createRun, spawnRun }: RouterHooks): Consume
           actor: 'system',
           workspaceId: event.workspaceId,
           threadId: event.targetThreadId,
-          payload: { reason, requestedBy: event.task ? `task ${event.task.slug}` : event.agentName ?? event.actor },
+          payload: { reason, requestedBy: event.task ? taskAuthorLabel(event.task.slug) : event.agentName ?? event.actor },
         });
 
         return;

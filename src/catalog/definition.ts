@@ -35,9 +35,7 @@ export type CallContext = {
 export type ProgramScope = {
   // The id of the run: the trace of the call carries it.
   runId: string;
-  // The scheduled task the run is a run of; null for a program run in place.
-  // What a call leaves on behalf of the caller — a message, a child thread —
-  // can say it came from the task and not from a turn of the caller.
+  // Calls act as this scheduled task. In-place runs act as the calling agent.
   task: string | null;
   // Fires when the run is over, however it ended. A call goes on to its own
   // end all the same; only what belongs to the run and must not outlive it —
