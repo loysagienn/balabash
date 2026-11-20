@@ -1,4 +1,4 @@
-// The tool bundle used by the secretary on Anthropic and openai-compatible.
+// The tool bundle used by the secretary on openai-compatible.
 // Agent spawns and one-hop commands acknowledge dispatch immediately. Server
 // tools return their MCP result and write tool.call.* in the main thread.
 
@@ -28,7 +28,6 @@ import {
 } from '../capabilities/tool-manager.ts';
 import type { DispatchResult, FunctionCall, FunctionDefinition } from '../harness/turn-contract.ts';
 import { END_TURN_FUNCTION } from './instructions.ts';
-import { getLlmBackend } from '../harness/openai/backend.ts';
 
 const bundle: ToolBundle = { declared: legacyServers(coordinator.name) };
 
@@ -343,10 +342,8 @@ async function getServerFunctionDefinitions(workspaceId: string): Promise<Functi
 }
 
 export async function getCoordinatorFunctionDefinitions(workspaceId: string): Promise<FunctionDefinition[]> {
-  const endsByCall = getLlmBackend().kind !== 'anthropic';
-
   return [
-    ...STATIC_FUNCTION_DEFINITIONS.filter(definition => endsByCall || definition.name !== 'do_nothing'),
+    ...STATIC_FUNCTION_DEFINITIONS,
     ...getAgentFunctionDefinitions(),
     ...(await getServerFunctionDefinitions(workspaceId)),
   ];

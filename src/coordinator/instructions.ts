@@ -25,7 +25,7 @@ const TURN_CONTRACTS = {
   'function-calls':
     'Use function calls for every response. Send user-facing text in the user’s language through send_message. After each result, continue with any calls the newest events require. Call do_nothing when you have handled them, including when they require no action.',
   'text-and-tools':
-    'Your turn is a loop of tool calls: every call returns its result (an asynchronous one returns "accepted") and you may call more — do everything the newest events require, in as many steps as needed. The turn ends when you answer without tool calls. Plain text you write is delivered to the user as your message, exactly like send_message — so say each thing once: either as text or through send_message, never both. Use send_message when a message must reach the user before further calls of the same turn, or carries files (fileIds); otherwise answer in plain text. When the newest events require no action, end the turn with no text and no calls.',
+    'Use tool calls until you have handled the newest events. Any plain text you write is sent to the user immediately, including text alongside tool calls. Reply in the user’s language. Use send_message for files. End your turn with no tool calls. If nothing needs saying, end without text.',
 } as const;
 
 export type TurnContract = keyof typeof TURN_CONTRACTS;

@@ -467,7 +467,7 @@ test('a warm prefix keeps its node guides and tool definitions until the grant c
   const { coordinatorPort } = await import('./port.ts');
   const threadId = stand.mainThreadId;
   const port = await coordinatorPort(stand.workspaceId, threadId);
-  const head = { threadId, instructions: port.instructions, tools: port.tools, model: 'model', grantKey: port.grantKey };
+  const head = { threadId, ...port.head, model: 'model', grantKey: port.grantKey };
   const event = await said('open the catalog');
   const snapshot = { events: [event], lastSeq: event.seq, snapshotFull: false, statusText: '' };
   resetPromptState(threadId);
@@ -481,7 +481,7 @@ test('a warm prefix keeps its node guides and tool definitions until the grant c
   assert.ok(!list.text.includes(list.definition.description));
   const keepalive = buildKeepalivePrompt(head);
   assert.ok(keepalive);
-  assert.deepEqual(keepalive.openings, [{ afterChunk: 1, definition: list.definition, text: list.text }]);
+  assert.deepEqual(keepalive.openings, [{ afterChunk: 1, callId: 'open-projects_list', definition: list.definition, text: list.text }]);
 
   const next = await said('another entry');
   const nextSnapshot = { ...snapshot, events: [event, next], lastSeq: next.seq };

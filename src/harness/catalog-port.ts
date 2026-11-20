@@ -2,7 +2,7 @@
 import { agentGrantPolicy, isRemoteAgent, startable } from '../capabilities/agent-catalog.ts';
 import {
   FileRef, computeGrant, expandSchema, grantedChildren, grantedGuide, grantedVertex, ruleText, toCapabilityError, typeText,
-  type Catalog, type FileRefValue, type Grant, type JsonSchema, type JsonValue,
+  type Catalog, type CatalogCapability, type FileRefValue, type Grant, type JsonSchema, type JsonValue,
 } from '../catalog/index.ts';
 import type { AgentPassport } from '../core/contract.ts';
 import { getFileDownloadUrl, openFileContent } from '../files/index.ts';
@@ -10,7 +10,7 @@ import { dispatchCatalogCall } from '../tree/call-journal.ts';
 import { viewKind, VIEW_TEXT_MAX_CHARS } from '../tree/files.ts';
 import { catalog } from '../tree/index.ts';
 import { connectionsPort } from '../tree/services.ts';
-import type { CatalogOpeningContext, DispatchResult, FunctionCall, FunctionDefinition } from './turn-contract.ts';
+import type { CatalogOpeningContext, CatalogResult, FunctionCall, FunctionDefinition } from './turn-contract.ts';
 
 const actions = ['describe', 'run_program'] as const;
 const PREVIEW_CHARS = 16_000;
@@ -25,6 +25,10 @@ function preview(grant: Grant, value: JsonValue, seq: bigint, field: 'value' | '
 
 function definition(tree: Catalog, name: string, description: string, input: JsonSchema): FunctionDefinition {
   return { type: 'function', name, description, parameters: expandSchema(tree, input), strict: false };
+}
+
+function capabilityDefinition(tree: Catalog, vertex: CatalogCapability): FunctionDefinition {
+  return definition(tree, vertex.fullName, vertex.description, vertex.input);
 }
 
 function vertexLine(kind: string, name: string, summary: string): string {
@@ -62,7 +66,7 @@ export async function createCatalogPort(agent: AgentPassport, workspaceId: strin
     return definition(tree, name, action.description, action.input);
   });
 
-  async function dispatch(call: FunctionCall, openings: CatalogOpeningContext): Promise<DispatchResult> {
+  async function dispatch(call: FunctionCall, openings: CatalogOpeningContext): Promise<CatalogResult> {
     let input: JsonValue;
     try {
       input = JSON.parse(call.arguments);
@@ -72,7 +76,7 @@ export async function createCatalogPort(agent: AgentPassport, workspaceId: strin
 
     try {
       const result = await dispatchCatalogCall(grant, connections, { callId: call.callId, name: call.name, input });
-      if ('error' in result) return { kind: 'catalog', text: preview(grant, result.error, result.seq, 'error') };
+      if ('error' in result) return { kind: 'catalog', isError: true, text: preview(grant, result.error, result.seq, 'error') };
       const { value, seq, opened } = result;
       const accounts = opened?.accounts.length ? ['Accounts: ' + JSON.stringify(opened.accounts)] : [];
       if (opened?.kind === 'node') {
@@ -89,19 +93,28 @@ export async function createCatalogPort(agent: AgentPassport, workspaceId: strin
         const text = [
           ...guide, 'Returns: ' + typeText(vertex.output, 0), ...vertex.inputRules.map(ruleText), ...opened.types, ...accounts,
         ].join('\n');
-        const tool = definition(tree, vertex.fullName, vertex.description, vertex.input);
-        return { kind: 'catalog', text, ...(openings.introduce(tool, text) ? { definition: tool } : {}) };
+        const tool = capabilityDefinition(tree, vertex);
+        return { kind: 'catalog', text, ...(openings.introduce(call.callId, tool, text) ? { definition: tool } : {}) };
       }
       const text = preview(grant, value, seq, 'value');
       return call.name === 'view_file' ? showFile(text, FileRef.parse(value)) : { kind: 'catalog', text };
     } catch (error) {
-      return { kind: 'catalog', text: JSON.stringify(toCapabilityError(error).toValue()) };
+      return { kind: 'catalog', isError: true, text: JSON.stringify(toCapabilityError(error).toValue()) };
     }
   }
-  return { instructions: coreText(grant), tools, dispatch, grantKey: JSON.stringify([...grant.vertices]) };
+  function capabilityDefinitions(): FunctionDefinition[] {
+    const definitions: FunctionDefinition[] = [];
+    for (const name of grant.vertices) {
+      const vertex = tree.vertices.get(name)!;
+      if (vertex.kind === 'capability') definitions.push(capabilityDefinition(tree, vertex));
+    }
+    return definitions;
+  }
+
+  return { instructions: coreText(grant), tools, capabilityDefinitions, dispatch, grantKey: JSON.stringify([...grant.vertices]) };
 }
 
-async function showFile(text: string, file: FileRefValue): Promise<DispatchResult> {
+async function showFile(text: string, file: FileRefValue): Promise<CatalogResult> {
   try {
     const kind = viewKind({ contentType: file.contentType, originalFilename: file.name });
     if (kind === 'text') {

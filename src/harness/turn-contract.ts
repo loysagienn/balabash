@@ -21,7 +21,7 @@ export type FunctionDefinition = {
 // The catalog entries introduced under the current prompt prefix.
 export type CatalogOpeningContext = {
   seenNodes: Set<string>;
-  introduce(definition: FunctionDefinition, text: string): boolean;
+  introduce(callId: string, definition: FunctionDefinition, text: string): boolean;
 };
 
 // One call the model made, arguments as the JSON text the dispatcher parses.
@@ -31,10 +31,18 @@ export type FunctionCall = {
   arguments: string;
 };
 
+export type CatalogResult = {
+  kind: 'catalog';
+  text: string;
+  isError?: true;
+  definition?: FunctionDefinition;
+  attachment?: { kind: 'image' | 'pdf'; url: string };
+};
+
 export type DispatchResult =
   // The result goes back to the model and the loop continues.
   | { kind: 'sync'; result: ToolResult }
-  | { kind: 'catalog'; text: string; definition?: FunctionDefinition; attachment?: { kind: 'image' | 'pdf'; url: string } }
+  | CatalogResult
   // Accepted for asynchronous execution; consequences arrive as events.
   // Acknowledged to the model as 'accepted' and the loop continues.
   | { kind: 'async' }
@@ -53,7 +61,7 @@ export type DispatchResult =
 export type TurnPrompt = {
   chunks: string[];
   // Definitions introduced after each frozen transcript chunk, in opening order.
-  openings?: { afterChunk: number; definition: FunctionDefinition; text: string }[];
+  openings?: { afterChunk: number; callId: string; definition: FunctionDefinition; text: string }[];
   statusText: string;
   // Stable per thread: routes requests to the machine holding the cache
   // where the provider supports such routing (OpenAI's prompt_cache_key).
@@ -72,6 +80,8 @@ export type RequestHead = {
   model: string;
   instructions: string;
   tools: FunctionDefinition[];
+  // Declared in the request but loaded into context only by a reference.
+  deferredTools?: FunctionDefinition[];
 };
 
 // The telemetry context of a turn's requests (llm_requests rows).

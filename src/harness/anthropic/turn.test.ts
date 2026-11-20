@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import type Anthropic from '@anthropic-ai/sdk';
 import { MAX_TURN_ITERATIONS } from '../turn-contract.ts';
-import type { DispatchResult, FunctionCall } from '../turn-contract.ts';
+import type { CatalogResult, FunctionCall, FunctionDefinition, RequestHead, TurnPrompt } from '../turn-contract.ts';
+import { startStand } from '../../test-support/stand.ts';
 import { prewarmPrompt, runTurn } from './turn.ts';
 import type { AnthropicTurnClient } from './turn.ts';
 
@@ -57,28 +58,22 @@ function makeClient(script: Scripted[]) {
 }
 
 const metrics = { measure: <T>(fn: () => Promise<T>) => fn() } as unknown as Parameters<typeof runTurn>[0]['metrics'];
-const head: Pick<Parameters<typeof runTurn>[0], 'model' | 'instructions' | 'tools' | 'prompt'> = {
+const schema = { type: 'object', properties: {} };
+const leaf: FunctionDefinition = { type: 'function', name: 'projects_list', description: 'List projects', strict: false, parameters: schema };
+const head: RequestHead & { prompt: TurnPrompt } = {
   model: 'm',
   instructions: 'i',
-  tools: [
-    { type: 'function', name: 'send_to_thread', description: 'd', strict: true, parameters: { type: 'object', properties: {}, required: [], additionalProperties: false } },
-    {
-      type: 'function',
-      name: 'nullable',
-      description: 'n',
-      strict: true,
-      parameters: { type: 'object', properties: { fileIds: { type: ['array', 'null'], items: { type: 'string' } } }, required: ['fileIds'], additionalProperties: false },
-    },
-  ],
+  tools: [{ type: 'function', name: 'describe', description: 'Open an entry', strict: false, parameters: schema }],
+  deferredTools: [leaf],
   prompt: { chunks: ['older', 'newest'], statusText: 'status', cacheKey: 'k' },
 };
 
-function dispatcher(kinds: Record<string, DispatchResult>) {
+function dispatcher(kinds: Record<string, CatalogResult>) {
   const dispatched: FunctionCall[] = [];
-  const dispatch = async (call: FunctionCall): Promise<DispatchResult> => {
+  const dispatch = async (call: FunctionCall): Promise<CatalogResult> => {
     dispatched.push(call);
 
-    return kinds[call.name] ?? { kind: 'rejected', error: `unknown ${call.name}` };
+    return kinds[call.name] ?? { kind: 'catalog', isError: true, text: `unknown ${call.name}` };
   };
 
   return { dispatch, dispatched };
@@ -103,10 +98,9 @@ describe('anthropic runTurn', () => {
     assert.deepEqual(request.system, [{ type: 'text', text: 'i', cache_control: { type: 'ephemeral', ttl: '1h' } }]);
     assert.deepEqual(request.tool_choice, { type: 'auto' });
     assert.deepEqual(request.output_config, { effort: 'medium' });
-    // Strict only without union types: the API caps those per request.
     assert.deepEqual(request.tools, [
-      { name: 'send_to_thread', description: 'd', strict: true, input_schema: head.tools[0]!.parameters },
-      { name: 'nullable', description: 'n', strict: false, input_schema: head.tools[1]!.parameters },
+      { name: 'describe', description: 'Open an entry', input_schema: schema },
+      { name: 'projects_list', description: 'List projects', input_schema: schema, defer_loading: true },
     ]);
     assert.deepEqual(request.messages, [
       { role: 'user', content: [{ type: 'text', text: 'older' }] },
@@ -144,66 +138,55 @@ describe('anthropic runTurn', () => {
     assert.equal(outcome.firstResponseId, 'msg-1');
   });
 
-  it('continues after tool calls with the response echoed and the results in one user message', async () => {
+  it('puts all results before labeled opening notes and echoes thinking and tool uses', async () => {
     const { client, requests } = makeClient([
-      { text: 'On it', calls: [{ name: 'send_to_thread', id: 'a', input: { threadId: 't' } }, { name: 'bogus', id: 'b' }] },
-      { calls: [{ name: 'get_event', id: 'c' }] },
+      { text: 'On it', calls: [{ name: 'describe', id: 'a', input: { name: leaf.name } }, { name: 'bogus', id: 'b' }] },
+      { calls: [{ name: leaf.name, id: 'c' }] },
       {},
     ]);
     const { dispatch, dispatched } = dispatcher({
-      send_to_thread: { kind: 'async' },
-      get_event: { kind: 'sync', result: { content: [{ type: 'text', text: 'the event' }] } as Extract<DispatchResult, { kind: 'sync' }>['result'] },
+      describe: { kind: 'catalog', text: 'Returns: Project[]', definition: leaf },
+      [leaf.name]: { kind: 'catalog', text: '[]' },
     });
     const { delivered, deliverText } = collector();
 
     await runTurn({ ...head, metrics, dispatch, deliverText, deps: { client } });
 
     assert.deepEqual(delivered, ['On it']);
-    assert.deepEqual(
-      dispatched.map(call => [call.name, call.callId, call.arguments]),
-      [
-        ['send_to_thread', 'a', '{"threadId":"t"}'],
-        ['bogus', 'b', '{}'],
-        ['get_event', 'c', '{}'],
-      ],
-    );
-    assert.equal(requests.length, 3);
-
+    assert.deepEqual(dispatched.map(call => call.callId), ['a', 'b', 'c']);
+    assert.deepEqual(requests[1]!.tools, requests[0]!.tools);
     const second = requests[1]!.messages;
-
-    // chunks + status, then the echoed assistant content (thinking included)
-    // and all results of the response in one user message.
-    assert.equal(second.length, 5);
     assert.equal(second[3]!.role, 'assistant');
     assert.equal((second[3]!.content as Anthropic.ContentBlock[])[0]!.type, 'thinking');
-    assert.deepEqual(second[4], {
-      role: 'user',
-      content: [
-        { type: 'tool_result', tool_use_id: 'a', content: 'accepted' },
-        { type: 'tool_result', tool_use_id: 'b', content: 'rejected: unknown bogus', is_error: true },
-      ],
-    });
-
-    const third = requests[2]!.messages;
-
-    assert.equal(third.length, 7);
-    assert.deepEqual(third[6], { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'c', content: 'the event' }] });
+    assert.deepEqual(second[4], { role: 'user', content: [
+      { type: 'tool_result', tool_use_id: 'a', content: [{ type: 'tool_reference', tool_name: leaf.name }] },
+      { type: 'tool_result', tool_use_id: 'b', content: 'unknown bogus', is_error: true },
+      { type: 'text', text: 'Opened: projects_list\nReturns: Project[]' },
+    ] });
+    assert.deepEqual(requests[2]!.messages.at(-1), { role: 'user', content: [
+      { type: 'tool_result', tool_use_id: 'c', content: '[]' },
+    ] });
   });
 
-  it('an end dispatch ends the turn without another request', async () => {
-    const { client, requests } = makeClient([{ calls: [{ name: 'do_nothing' }] }]);
-    const { dispatch } = dispatcher({ do_nothing: { kind: 'end' } });
-    const { deliverText } = collector();
-
-    await runTurn({ ...head, metrics, dispatch, deliverText, deps: { client } });
-
-    assert.equal(requests.length, 1);
+  it('attaches the image or PDF to the direct view_file result', async () => {
+    for (const kind of ['image', 'pdf'] as const) {
+      const url = 'https://files.test/' + kind;
+      const { client, requests } = makeClient([{ calls: [{ name: 'view_file', id: 'v' }] }, {}]);
+      const { dispatch } = dispatcher({ view_file: { kind: 'catalog', text: 'file ref', attachment: { kind, url } } });
+      await runTurn({ ...head, metrics, dispatch, ...collector(), deps: { client } });
+      assert.deepEqual(requests[1]!.messages.at(-1), { role: 'user', content: [
+        { type: 'tool_result', tool_use_id: 'v', content: [
+          { type: 'text', text: 'file ref' },
+          { type: kind === 'image' ? 'image' : 'document', source: { type: 'url', url } },
+        ] },
+      ] });
+    }
   });
 
   it('fails loudly when the model never stops calling tools', async () => {
     const script = Array.from({ length: MAX_TURN_ITERATIONS + 1 }, () => ({ calls: [{ name: 'send_to_thread' }] }));
     const { client, requests } = makeClient(script);
-    const { dispatch } = dispatcher({ send_to_thread: { kind: 'async' } });
+    const { dispatch } = dispatcher({ send_to_thread: { kind: 'catalog', text: 'null' } });
     const { deliverText } = collector();
 
     await assert.rejects(runTurn({ ...head, metrics, dispatch, deliverText, deps: { client } }), /did not end within 16 iterations/);
@@ -223,4 +206,81 @@ describe('anthropic runTurn', () => {
     await assert.rejects(runTurn({ ...head, metrics, dispatch, deliverText, deps: { client: refusing } }), /stopped: refusal \(cyber: no\)/);
     assert.equal(delivered.length, 0);
   });
+});
+
+it('replays a journaled opening at its chunk boundary in the Anthropic secretary turn and keepalive', async t => {
+  const stand = await startStand();
+  t.after(() => stand.stop());
+  process.env.LLM_BACKEND = 'anthropic';
+  t.after(() => { delete process.env.LLM_BACKEND; });
+
+  const { coordinatorPort } = await import('../../coordinator/port.ts');
+  const { buildTurnPrompt, buildKeepalivePrompt, catalogOpenings } = await import('../openai/prompt-builder.ts');
+  const { getTranscript } = await import('../../core/events.ts');
+  const { mainThreadId: threadId, workspaceId } = stand;
+  const port = await coordinatorPort(workspaceId, threadId);
+  const request = { ...port.head, model: 'm' };
+  assert.deepEqual(request.tools.map(fn => fn.name), ['describe', 'run_program']);
+  assert.match(request.instructions, /plain text you write is sent to the user/);
+  assert.doesNotMatch(request.instructions, /do_nothing|storage_get_file/);
+  assert.ok('deferredTools' in request && request.deferredTools);
+  const deferred = request.deferredTools.map(fn => fn.name);
+  assert.ok(deferred.includes('projects_list'));
+  assert.ok(!deferred.includes('end_thread') && !deferred.includes('projects') && !deferred.includes('gmail_get_thread'));
+
+  const prefix = { ...request, threadId, grantKey: port.grantKey };
+  const snapshot = async () => {
+    const events = await getTranscript(threadId, { last: 400, omitProgramCalls: true });
+    return { ...prefix, events, lastSeq: events.at(-1)!.seq, snapshotFull: false, statusText: 'status' };
+  };
+  const prompt = buildTurnPrompt(await snapshot());
+  assert.ok(prompt);
+  const { client, requests } = makeClient([
+    { calls: [{ name: 'describe', id: 'open-list', input: { name: 'projects_list' } }] },
+    { calls: [{ name: 'projects_list', id: 'list', input: {} }] },
+    { text: 'Done' },
+  ]);
+  const openings = catalogOpenings(threadId);
+  const dispatch = async (call: FunctionCall) => port.dispatch(call, openings);
+  const { delivered, deliverText } = collector();
+  await runTurn({ ...request, prompt, metrics, dispatch, deliverText, deps: { client } });
+  assert.deepEqual(delivered, ['Done']);
+  assert.deepEqual(requests[1]!.tools, requests[0]!.tools);
+  const events = (await snapshot()).events;
+  const completed = events.filter(event => event.type === 'tool.call.completed');
+  assert.deepEqual(completed.map(event => event.payload.callId), ['open-list', 'list']);
+  assert.equal((completed[0]!.payload.value as { name: string }).name, 'projects_list');
+  assert.doesNotMatch(JSON.stringify(completed[0]!.payload), /tool_reference|defer_loading/);
+
+  const warm = buildKeepalivePrompt(prefix);
+  assert.ok(warm);
+  const ping = async (frozen: typeof warm) => {
+    await prewarmPrompt({ ...request, prompt: frozen, metrics, deps: { client } });
+    return requests.at(-1)!;
+  };
+  const firstPing = await ping(warm);
+  assert.equal(firstPing.max_tokens, 0);
+  const pair = firstPing.messages.slice(1);
+  assert.deepEqual(pair[0], { role: 'assistant', content: [
+    { type: 'tool_use', id: 'open-list', name: 'describe', input: { name: 'projects_list' } },
+  ] });
+  const live = requests[1]!.messages.at(-1)!.content as [Anthropic.ToolResultBlockParam, Anthropic.TextBlockParam];
+  assert.deepEqual(live[0].content, [{ type: 'tool_reference', tool_name: 'projects_list' }]);
+  assert.match(live[1].text, /Returns:/);
+  assert.deepEqual(pair[1], { role: 'user', content: [live[0], { ...live[1], cache_control: { type: 'ephemeral', ttl: '1h' } }] });
+
+  const next = buildTurnPrompt(await snapshot());
+  assert.ok(next);
+  await runTurn({ ...request, prompt: next, metrics, dispatch, deliverText, deps: { client } });
+  const secondTurn = requests.at(-1)!;
+  assert.deepEqual(secondTurn.messages[1], pair[0]);
+  assert.deepEqual(secondTurn.messages[2], { role: 'user', content: live });
+  assert.match(JSON.stringify(secondTurn.messages[3]), /projects_list/);
+  assert.deepEqual((await ping(buildKeepalivePrompt(prefix)!)).messages, secondTurn.messages.slice(0, -1));
+
+  const reduced = { ...prefix, deferredTools: request.deferredTools.filter(fn => fn.name !== 'projects_list') };
+  assert.equal(buildKeepalivePrompt(reduced), null);
+  const rebuilt = buildTurnPrompt({ ...await snapshot(), ...reduced });
+  assert.ok(rebuilt);
+  assert.deepEqual(rebuilt.openings ?? [], []);
 });

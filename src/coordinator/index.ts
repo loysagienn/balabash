@@ -259,11 +259,12 @@ export function createCoordinatorRun({ threadId, workspaceId }: { threadId: stri
     }
 
     try {
-      const { instructions, tools, grantKey } = await coordinatorPort(workspaceId, threadId);
+      const port = await coordinatorPort(workspaceId, threadId);
+      const head = { model: config.mainModel, ...port.head };
       // No status: the ping refreshes the frozen prefix and nothing after
       // it — the status would ride behind the last breakpoint at the
       // uncached rate for no one to read.
-      const prompt = buildKeepalivePrompt({ threadId, model: config.mainModel, instructions, tools, grantKey });
+      const prompt = buildKeepalivePrompt({ threadId, ...head, grantKey: port.grantKey });
 
       // Nothing to keep warm: the state was reset, the head changed or the
       // prefix already went cold — the keep-alive ends here.
@@ -272,9 +273,7 @@ export function createCoordinatorRun({ threadId, workspaceId }: { threadId: stri
       }
 
       lastResponseId = await driver.prewarmPrompt({
-        model: config.mainModel,
-        instructions,
-        tools,
+        ...head,
         prompt,
         metrics: {
           workspaceId,
@@ -303,19 +302,18 @@ export function createCoordinatorRun({ threadId, workspaceId }: { threadId: stri
     }
 
     const lastSeq = events.at(-1)!.seq;
-    const { instructions, tools, grantKey, dispatch } = await coordinatorPort(workspaceId, threadId);
+    const port = await coordinatorPort(workspaceId, threadId);
     const children = await listThreads(workspaceId, { status: 'active', parentId: threadId });
     const projects = await listProjects(workspaceId, { archived: false });
 
+    const head = { model: config.mainModel, ...port.head };
     const prompt = buildTurnPrompt({
       threadId,
       events,
       lastSeq,
-      grantKey,
+      grantKey: port.grantKey,
       snapshotFull: events.length >= HISTORY_LIMIT,
-      model: config.mainModel,
-      instructions,
-      tools,
+      ...head,
       statusText: buildStatusText(children, projects, workspaceId, await readRemoteChildStates(children)),
     });
 
@@ -331,9 +329,7 @@ export function createCoordinatorRun({ threadId, workspaceId }: { threadId: stri
 
     const openings = catalogOpenings(threadId);
     const outcome = await driver.runTurn({
-      model: config.mainModel,
-      instructions,
-      tools,
+      ...head,
       prompt,
       metrics: {
         workspaceId,
@@ -342,7 +338,7 @@ export function createCoordinatorRun({ threadId, workspaceId }: { threadId: stri
         requestedModel: config.mainModel,
         purpose: 'turn',
       },
-      dispatch: async call => dispatch(call, openings),
+      dispatch: async call => port.dispatch(call, openings),
       deliverText: text => deliverCoordinatorText(text, { workspaceId, threadId }),
       cacheComparisonResponseId: lastResponseId,
       ...(deps.client ? { deps: { client: deps.client } } : {}),

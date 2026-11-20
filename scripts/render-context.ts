@@ -194,7 +194,7 @@ function renderRemoteAgent(declaration: RemoteAgentDeclaration): string {
 async function renderCoordinator(workspaceId: string): Promise<string> {
   const main = await getMainThread(workspaceId);
   if (!main) throw new Error('The workspace has no main thread');
-  const { instructions, tools } = await coordinatorPort(workspaceId, main.id);
+  const { head: { instructions, tools } } = await coordinatorPort(workspaceId, main.id);
   const sections = [
     '# Coordinator (the secretary)',
     renderSection('Instructions (prompt-cache head)', instructions),
