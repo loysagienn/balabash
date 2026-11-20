@@ -103,13 +103,18 @@ export function formerRunData(row: JobRunModel): ScheduleRunModel {
   const input = { command: row.command, ...(row.cwd ? { cwd: row.cwd } : {}) };
   const between = row.stdoutTail && row.stderrTail && !row.stdoutTail.endsWith('\n') ? '\n' : '';
   const output = consoleTail(`${row.stdoutTail}${between}${row.stderrTail}`);
-
   const message = formerErrorMessage(row);
 
   return {
-    id: row.id, workspaceId: row.workspaceId, slug: row.slug, trigger: row.trigger,
-    startedAt: row.startedAt, finishedAt: row.finishedAt, durationMs: row.durationMs,
-    status: formerStatus(row.status), hasValue: false,
+    id: row.id,
+    workspaceId: row.workspaceId,
+    slug: row.slug,
+    trigger: row.trigger,
+    startedAt: row.startedAt,
+    finishedAt: row.finishedAt,
+    durationMs: row.durationMs,
+    status: formerStatus(row.status),
+    hasValue: false,
     code: `await call('workspace_run_command', ${JSON.stringify(input)});\nreturn null;`,
     value: null,
     error: message ? { kind: 'external_error', message } : null,

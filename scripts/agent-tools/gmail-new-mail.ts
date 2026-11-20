@@ -10,8 +10,13 @@ const seen = new Set();
 let watermark = until - 60 * 60 * 1000;
 for (const [index, run] of history.runs.entries()) {
   const { value } = await call('schedule_get_run', { runId: run.runId });
-  if (index === 0) watermark = Math.max(watermark, Date.parse(value.until || run.startedAt));
-  for (const message of value.newMessages) seen.add(message.messageId);
+  if (index === 0) {
+    const stamp = Date.parse(value.until);
+    watermark = Math.max(watermark, Number.isFinite(stamp) ? stamp : Date.parse(run.startedAt));
+  }
+  if (Array.isArray(value.newMessages)) {
+    for (const message of value.newMessages) seen.add(message.messageId);
+  }
 }
 
 const since = watermark - 5 * 60 * 1000;

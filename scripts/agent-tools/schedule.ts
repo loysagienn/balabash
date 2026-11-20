@@ -28,7 +28,11 @@ export async function moveJobRuns(tx: Tx) {
 
 function commandProgram(task: ScheduledTaskModel, timeoutMs: number) {
   if (!task.command) throw new Error('Missing command for ' + task.slug);
-  const args = { command: task.command, ...(task.cwd ? { cwd: task.cwd } : {}), timeoutSeconds: Math.ceil(timeoutMs / 1000) };
+  const args = {
+    command: task.command,
+    ...(task.cwd ? { cwd: task.cwd } : {}),
+    timeoutSeconds: Math.ceil(timeoutMs / 1000),
+  };
   return [
     "const result = await call('workspace_run_command', " + JSON.stringify(args) + ');',
     'if (result.stdout) console.log(result.stdout);',
@@ -60,26 +64,42 @@ async function replacement(task: ScheduledTaskModel, workspaces: string, program
   }
   if (task.slug === 'gmail-new-mail') {
     const source = await fs.readFile(path.join(workspaces, task.workspaceId, 'tasks', task.slug + '.ts'));
-    if (createHash('sha256').update(source).digest('hex') === '16fcbd40b77222d33516ab70dd684412e9789359c9ba0ebb009aab1f5bc39d27') {
+    if (
+      createHash('sha256').update(source).digest('hex') ===
+      '16fcbd40b77222d33516ab70dd684412e9789359c9ba0ebb009aab1f5bc39d27'
+    ) {
       return gmailNewMail;
     }
   }
-  throw new Error('Supply the translated program with --programs DIR: ' + path.join(task.workspaceId, task.slug + '.js'));
+  throw new Error(
+    'Supply the translated program with --programs DIR: ' + path.join(task.workspaceId, task.slug + '.js'),
+  );
 }
 
 export async function migrateTasks(tx: Tx, workspaces: string, programs?: string) {
   const tasks = await tx.scheduledTask.findMany({ where: { kind: { notIn: ['note', 'program'] } } });
   let seeds = 0;
   for (const task of tasks) {
-    if (!['command', 'code'].includes(task.kind)) throw new Error('Unknown task kind ' + task.kind + ' of ' + task.slug);
+    if (!['command', 'code'].includes(task.kind))
+      throw new Error('Unknown task kind ' + task.kind + ' of ' + task.slug);
     const timeoutMs = task.timeoutMs ?? PROGRAM_TIMEOUT_DEFAULT_MS;
-    const code = task.kind === 'command' ? commandProgram(task, timeoutMs) : await replacement(task, workspaces, programs);
+    const code =
+      task.kind === 'command' ? commandProgram(task, timeoutMs) : await replacement(task, workspaces, programs);
     const problem = programSyntaxProblem(code);
-    if (!code.trim() || problem) throw new Error('Invalid program for ' + task.slug + ': ' + (problem?.text ?? 'empty body'));
+    if (!code.trim() || problem)
+      throw new Error('Invalid program for ' + task.slug + ': ' + (problem?.text ?? 'empty body'));
     if (task.slug === 'gmail-new-mail' && code === gmailNewMail) seeds += await seedGmail(tx, task);
-    await tx.scheduledTask.update({ where: { id: task.id }, data: {
-      kind: 'program', code, timeoutMs, command: null, cwd: null, reportOnSuccess: false,
-    } });
+    await tx.scheduledTask.update({
+      where: { id: task.id },
+      data: {
+        kind: 'program',
+        code,
+        timeoutMs,
+        command: null,
+        cwd: null,
+        reportOnSuccess: false,
+      },
+    });
   }
   return { tasks: tasks.length, seeds };
 }
