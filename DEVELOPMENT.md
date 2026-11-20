@@ -20,7 +20,6 @@ confidential from them.
   different backends; `agents/kit/` — pieces shared by agent modules (the
   Playwright MCP of the agents that carry a browser, the loopback static
   server an agent renders its workbench files from).
-- `src/tree/notion.ts` — Notion capabilities and OAuth settings for workspace accounts.
 - `src/` — the app. `core/` (event log, envelopes, threads), `capabilities/`
   (the agent runtime and session runner,
   agent validation, per-user connections and installation secrets),

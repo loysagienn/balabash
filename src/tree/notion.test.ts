@@ -154,7 +154,7 @@ test('a 401 retries with the rejected token, ends both sessions and journals the
   const { dispatchCatalogCall } = await import('./call-journal.ts');
   const { prisma } = await import('../db/client.ts');
   const page = { title: 'Notes', metadata: { type: 'page' }, text: '# Notes', url: 'https://notion.test/p' };
-  answer({ ...page, truncated: true, unknown_block_ids: ['child'] });
+  answer({ ...page, metadata: { ...page.metadata, version: 2 }, truncated: true, unknown_block_ids: ['child'] });
   rejectToken = 'Bearer first';
   const input = { id: 'p', account: 'work' };
   const value = { ...page, attributes: { truncated: true, unknown_block_ids: ['child'] } };
@@ -193,7 +193,7 @@ test('search retains plan notices and private pages normalize the final cursor',
   answer(users);
   assert.deepEqual(await call('search', { query: 'name', query_type: 'user' }), { ...users, notices: [] });
   for (const cursor of ['second', null]) {
-    answer({ results: [item], ...(cursor ? { nextCursor: cursor } : {}) });
+    answer({ results: [{ ...item, extra: true }], ...(cursor ? { nextCursor: cursor } : {}) });
     assert.deepEqual(await call('list_private_pages', cursor ? { limit: 1 } : { cursor: 'second' }), {
       results: [item],
       nextCursor: cursor,
@@ -204,7 +204,7 @@ test('search retains plan notices and private pages normalize the final cursor',
 
 test('create and update request synchronous writes, preserve edit warnings and distinguish a queued update', async () => {
   const pages = [{ id: 'p', url: 'url', properties: { title: 'P' } }];
-  answer({ pages });
+  answer({ pages: pages.map(page => ({ ...page, extra: true })) });
   const draft = { pages: [{ properties: { title: 'P' } }], creation_mode: 'draft' };
   await assert.rejects(call('create_pages', { ...draft, parent: { page_id: 'p' } }), { kind: 'invalid_input' });
   assert.deepEqual(await call('create_pages', draft), { pages });
@@ -215,11 +215,30 @@ test('create and update request synchronous writes, preserve edit warnings and d
   });
   const edit = { page_id: 'p', command: 'update_content', content_updates: [{ old_str: 'before', new_str: 'after' }] };
   answer({ page_id: 'p', warnings: ['One match skipped'] });
-  assert.deepEqual(await call('update_page', edit), { pageId: 'p', warnings: ['One match skipped'] });
+  assert.deepEqual(await call('update_page', edit), { pageId: 'p', warnings: ['One match skipped'], asyncTask: null });
   assert.deepEqual(toolsCalled[1]?.input, { ...edit, allow_async: false });
   const task = { type: 'async_task', id: 't' };
   answer(task);
-  assert.deepEqual(await call('update_page', edit), { asyncTask: task });
+  assert.deepEqual(await call('update_page', edit), { pageId: null, warnings: [], asyncTask: task });
+});
+
+test('a malformed create result keeps the provider IDs in the error and the journal after a single write', async () => {
+  const { dispatchCatalogCall } = await import('./call-journal.ts');
+  const { prisma } = await import('../db/client.ts');
+  const data = { pages: [{ id: 'created', url: 'url' }] };
+  answer(data);
+  const callId = 'malformed-notion-create';
+  const name = 'notion_create_pages';
+  const input = { pages: [{ content: 'Test' }], creation_mode: 'draft', account: 'work' };
+  const outcome = await dispatchCatalogCall(grant, connections, { callId, name, input });
+  assert.ok('error' in outcome);
+  assert.equal(outcome.error.kind, 'external_error');
+  assert.match(outcome.error.message, /pages\.0\.properties/);
+  assert.deepEqual(outcome.error.details, data);
+  const event = await prisma.event.findUniqueOrThrow({ where: { seq: outcome.seq } });
+  assert.equal(event.type, 'tool.call.failed');
+  assert.deepEqual(event.payload, { callId, functionName: name, error: outcome.error });
+  assert.equal(toolsCalled.length, 1);
 });
 
 test('a second 401 needs sign-in, a malformed answer or tool refusal is external, a failed DELETE never replays a write', async () => {
@@ -236,16 +255,18 @@ test('a second 401 needs sign-in, a malformed answer or tool refusal is external
     kind: 'external_error',
     message: /protected child page/,
   });
-  answer({ unknown: true });
+  answer({ page_id: null });
   await assert.rejects(call('update_page', { page_id: 'p', command: 'update_properties', icon: 'none' }), {
     kind: 'external_error',
     message: /check whether the change took effect/i,
+    details: { page_id: null },
   });
   deleteStatus = 401;
   answer({ page_id: 'p' });
   assert.deepEqual(await call('update_page', { page_id: 'p', command: 'update_properties', icon: 'none' }), {
     pageId: 'p',
     warnings: [],
+    asyncTask: null,
   });
   assert.equal(toolsCalled.length, 7);
   assert.deepEqual(ended, opened);

@@ -118,14 +118,10 @@ from the bot's `/auth_code`. A Telegram group becomes a workspace with
 
 ## Extension points of an installation
 
-Code and configs of the installation live in `data/` and are picked up at
-boot without a build — Node runs `.ts` natively:
-`data/mcp-servers/<name>.json` (external service settings for Connections), `data/remote-agents/
-<name>.ts` (a remote agent kind with its driver). Same contracts as their repository twins
-(`src/capabilities/extensions.ts`); names never shadow the repository's; no
-runtime imports from the repository tree — packages and `import type` only,
-everything else arrives through `ctx`.
-
+At boot, Connections loads external service settings from
+`data/mcp-servers/<name>.json`. Node loads remote agent drivers directly from
+`data/remote-agents/<name>.ts`. Drivers can import packages and repository types
+with `import type`. They receive platform services through `ctx`.
 
 Remote kinds declare `modes` (for example `['user', 'headless']`),
 `defaultMode` (one of those modes), and `recipients` (agent or access

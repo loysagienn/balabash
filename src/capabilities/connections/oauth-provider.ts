@@ -184,7 +184,11 @@ export function createInteractiveAuthProvider(
       return info;
     },
     invalidateCredentials: async scope => {
-      if (offered && (scope === 'all' || scope === 'client') && getAccountService(connection.server)?.clientRegistration === 'dynamic') {
+      if (
+        offered &&
+        (scope === 'all' || scope === 'client') &&
+        getAccountService(connection.server)?.clientRegistration === 'dynamic'
+      ) {
         await forgetRefusedClient(connection.server, offered);
       }
     },
@@ -350,7 +354,10 @@ async function refreshStoredTokens(
   let tokens: OAuthTokens;
   try {
     tokens = await refreshAuthorization(info.authorizationServerUrl, {
-      metadata: info.authorizationServerMetadata, clientInformation, refreshToken, resource,
+      metadata: info.authorizationServerMetadata,
+      clientInformation,
+      refreshToken,
+      resource,
     });
   } catch (error) {
     if (dynamic && refreshFailure(error) instanceof OauthClientError) {

@@ -1007,7 +1007,7 @@ export type InstallationServiceView = {
 };
 
 // A claude.ai connector of the installation (transport "claude-connector"
-// in mcp-servers): the provider's authorization lives in the operator's
+// in data/mcp-servers): the provider's authorization lives in the operator's
 // claude.ai account, the proxy takes the operator's ambient Claude CLI
 // token — nothing to provide or forget here, the catalog shows it
 // read-only. state: connected; token_expired — connected, but the ambient
