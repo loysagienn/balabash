@@ -762,7 +762,7 @@ export class RemoteFileError extends Error {
 }
 
 // A file of the session by path, on an explicit ask of the thread's owner
-// (`fetch_thread_file`, the remote_fetch_file tool): the driver fetches it,
+// (`fetch_thread_file`): the driver fetches it,
 // the file is stored in the workspace and shown in the thread — to the user
 // as an attachment, to the parent as a thread.message with it. The caller
 // must be the thread's owner: its parent, or the thread itself. A refusal is

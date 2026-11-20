@@ -9,7 +9,7 @@
 // instructions (send_to_thread), the browser executes and
 // replies with its turn's final text. All the Playwright
 // machinery stays in this thread, out of the operator's context; screenshots
-// are ingested into workspace files at capture time and referenced by fileId.
+// are temporary workbench files until the operator needs an exported copy.
 //
 // The Chromium profile is persistent per user (ctx.stateDir/profile): cookies
 // and sessions survive between runs. The inner session itself is a full-preset
@@ -31,8 +31,8 @@ import path from 'node:path';
 import { chromium } from 'playwright';
 import type { BrowserContext } from 'playwright';
 import type { AgentDeclaration, RunContext, SessionEnvironment } from '../src/core/contract.ts';
-import { connectPlaywrightMcp, createPlaywrightTools, imageExtension } from './kit/playwright.ts';
-import type { PlaywrightImageSink, PlaywrightMcp } from './kit/playwright.ts';
+import { connectPlaywrightMcp, createPlaywrightTools, sessionScreenshots } from './kit/playwright.ts';
+import type { PlaywrightMcp } from './kit/playwright.ts';
 import { workspaceFilesDir } from '../src/workspace/layout.ts';
 import { BLOCKED_PATH_NOTE, BROWSER_RELAUNCHED_NOTE } from './world/index.ts';
 
@@ -113,7 +113,7 @@ function buildInstructions(): string {
     '- The final text of each of your turns IS your reply to the operator. Make it a concise, factual report of the outcome and the current page state (what is visible, what actions are available). Never narrate low-level machinery: snapshots, selectors, click coordinates, retries, DOM details stay in this thread.',
     '- Completing an instruction NEVER ends the run: reply and wait for the next instruction, keeping the browser open. This is a multi-step collaboration, not request-response.',
     `- If a page requires login, CAPTCHA, 2FA, a passkey, or any other human verification: do NOT try to solve or bypass it yourself and do not ask for codes or passwords. Reply to the operator that manual intervention is required in the live browser at ${NOVNC_URL}, and continue only after the operator confirms the step is done.`,
-    '- Take a screenshot only when the operator asks for one. Its result reports a stored fileId — include that exact fileId in your reply so the operator can use the file.',
+    '- Take a screenshot only when the operator asks for one. The result is a workbench-relative path. Call export_file with that path and include the returned id in your reply. Attach the ids of the requested screenshots in end_thread.files when you finish.',
     '- When an instruction asks you to collect structured data from pages (listings, tables, many items), never dump it into your reply: extract it in batches (page evaluation returning limited chunks), store it into the workspace database — into the table the operator named, or a sensibly named new one — and reply with row counts plus a small sample. The workspace data tools are shared with the operator and other agents.',
     "- Your working directory is the operator's workspace file area — the workbench shared with the operator and other agents. Your native tools (shell, file reads and edits) work there: `./x` for them is the same file as `x` for the workspace bridge tools. Use them for what the browser tools cannot do well — post-processing extracted data, saving page content or downloads as files. The host beyond the workbench is not yours to explore.",
     '- End the session only when the operator explicitly instructs you to finish: close the browser, then call end_thread with the result of the whole session. Never finish on your own initiative.',
@@ -125,34 +125,17 @@ function buildInitialMessage(prompt: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Screenshots: the inner model works from the textual page snapshots — it
-// does not see the pixels. Images are ingested into workspace files at
-// capture time and referenced by fileId, for the operator.
-
-function createScreenshotSink(ctx: RunContext): PlaywrightImageSink {
-  return async ({ data, mimeType }) => {
-    const stored = await ctx.files.ingest({
-      body: data,
-      filename: `screenshot-${new Date().toISOString().replace(/[:.]/g, '-')}.${imageExtension(mimeType)}`,
-      contentType: mimeType,
-      sizeBytes: data.length,
-    });
-
-    return `[image stored as fileId=${stored.id}]`;
-  };
-}
-
-// ---------------------------------------------------------------------------
-
 async function createEnvironment(ctx: RunContext, cwd: string): Promise<SessionEnvironment> {
   const release = await acquireProfileLock(ctx.stateDir, ctx.signal);
   const profileDir = path.join(ctx.stateDir, 'profile');
   const outputDir = path.join(ctx.stateDir, 'runs', ctx.threadId);
+  const screenshots = sessionScreenshots(cwd, ctx.threadId);
   let context: BrowserContext | undefined;
   let playwright: PlaywrightMcp | undefined;
   const dispose = async () => {
     await playwright?.close().catch(() => {});
     await context?.close().catch(() => {}); // Closing a persistent context also closes Chromium.
+    await screenshots.dispose().catch(() => {});
     await rm(outputDir, { recursive: true, force: true }).catch(() => {});
     release();
   };
@@ -171,7 +154,7 @@ async function createEnvironment(ctx: RunContext, cwd: string): Promise<SessionE
     playwright = await connectPlaywrightMcp({
       outputDir, cwd, clientName: 'balabash-browser', context: async () => browserContext,
     });
-    const environmentTools = await createPlaywrightTools(playwright.client, createScreenshotSink(ctx));
+    const environmentTools = await createPlaywrightTools(playwright.client, screenshots.save);
     return { environmentTools, ...(ctx.resume ? { instructions: BROWSER_RELAUNCHED_NOTE } : {}), dispose };
   } catch (error) {
     await dispose();

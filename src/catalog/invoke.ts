@@ -15,7 +15,7 @@
 //
 // The host journals the input and outcome around this path.
 
-import { ACTIONS } from './actions.ts';
+import { ACTIONS, isActionName } from './actions.ts';
 import { ACCOUNT_FIELD, accountConnectionOf, connectionOf } from './catalog.ts';
 import type {
   AccountAuthority,
@@ -196,14 +196,11 @@ export async function invokeCapability(grant: Grant, name: string, input: unknow
   }
 }
 
-// The action `call`: a call by full name for a port that cannot make an open
-// capability callable directly, and for the programs of the platform.
+// Validate the envelope before the journal attributes the call to its target.
 export function parseCallTarget(grant: Grant, input: unknown): { name: string; input?: JsonObject } {
-  return parseActionInput(grant, ACTIONS.call, input) as { name: string; input?: JsonObject };
-}
-
-export async function call(grant: Grant, input: unknown, env: InvokeEnv): Promise<JsonValue> {
-  const args = parseCallTarget(grant, input);
-
-  return invokeCapability(grant, args.name, args.input, env);
+  const target = parseActionInput(grant, ACTIONS.call, input) as { name: string; input?: JsonObject };
+  if (isActionName(target.name) && grant.actions.has(target.name)) {
+    throw new CapabilityError('invalid_input', `Call the function ${target.name} directly.`);
+  }
+  return target;
 }

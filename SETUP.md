@@ -81,7 +81,7 @@ the next boot reports into the log.
   Notion) runs through the platform with one redirect URI,
   `https://<CONSOLE_DOMAIN>/oauth/callback`, registered at each provider;
   installation OAuth clients (Google) and installation credentials
-  (`${secret:NAME}` — Perplexity, Qase) are entered through one-time forms
+  (such as the Perplexity API key) are entered through one-time forms
   from the console's Connections page or the auth agent.
 
 ## Modes

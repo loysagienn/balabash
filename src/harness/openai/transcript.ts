@@ -30,7 +30,7 @@ type JsonObject = Record<string, unknown>;
 
 // Fields of one specific event type; null — the event stays out of the
 // transcript.
-type Renderer = (payload: JsonObject, event: TranscriptEvent) => JsonObject | null;
+type Renderer = (payload: JsonObject, event: TranscriptEvent, options: TranscriptOptions) => JsonObject | null;
 
 function asObject(value: unknown): JsonObject {
   return value && typeof value === 'object' && !Array.isArray(value) ? (value as JsonObject) : {};
@@ -249,11 +249,15 @@ const renderers: Record<string, Renderer> = {
   // strict reading rule (§9): structuredContent is primary — when present
   // the content blocks are not read at all; without it the raw MCP blocks
   // are compacted. FileRef urls are stripped by the general projection rule.
-  'tool.call.completed': payload => {
+  'tool.call.completed': (payload, _event, options) => {
     if ('value' in payload) {
       const { value, functionName } = payload;
       if (functionName === 'describe' && asObject(value).kind === 'capability') {
-        return omitNullish({ functionName, described: asObject(value).name, accounts: asObject(value).accounts });
+        const { name, accounts, description, signature, types } = asObject(value);
+        return omitNullish({
+          functionName, described: name, accounts,
+          ...(options.includeSignatures ? { description, signature, types } : {}),
+        });
       }
       // Large arrays of short items would evade the per-string limit.
       const json = JSON.stringify(value);
@@ -289,7 +293,7 @@ const renderers: Record<string, Renderer> = {
 
   // Thread lifecycle (§5.1) as seen from a parent's transcript: the child's
   // threadId comes from the envelope — the model needs it for cancel_thread
-  // and get_thread. Inputs and summaries stay whole; the decay/truncation
+  // and threads_get. Inputs and summaries stay whole; the decay/truncation
   // machinery bounds them like everything else.
   'thread.started': (payload, event) =>
     omitNullish({
@@ -435,7 +439,7 @@ type RenderedEvent = {
 // Builds the envelope and the event fields without truncation; null — the
 // event stays out of the transcript. Truncation is applied separately, once
 // the event's position among the included ones is known.
-function renderEvent(event: TranscriptEvent): RenderedEvent | null {
+function renderEvent(event: TranscriptEvent, options: TranscriptOptions): RenderedEvent | null {
   // A program's intermediate inputs and values are available by seq in the
   // journal. Only its outer result and the domain events belong in the prompt.
   if (event.type.startsWith('tool.call.') && asObject(event.payload).runId) return null;
@@ -454,7 +458,7 @@ function renderEvent(event: TranscriptEvent): RenderedEvent | null {
   let fields: JsonObject | null;
 
   if (renderer) {
-    fields = renderer(asObject(event.payload), event);
+    fields = renderer(asObject(event.payload), event, options);
   } else {
     // A type without a renderer (thread lifecycle of future children, domain
     // events of dynamic agents): the whole payload spills into the envelope.
@@ -544,13 +548,15 @@ export type Transcript = {
 };
 
 export type TranscriptOptions = {
+  // The compatible port reads opened signatures from history across turns.
+  includeSignatures?: boolean;
   // Overrides TRANSCRIPT_CHAR_LIMIT (the coordinator's budget is configured).
   charLimit?: number;
 };
 
 export function buildTranscript(events: TranscriptEvent[], options: TranscriptOptions = {}): Transcript {
   const charLimit = options.charLimit ?? TRANSCRIPT_CHAR_LIMIT;
-  const rendered = events.map(event => renderEvent(event)).filter(item => item !== null);
+  const rendered = events.map(event => renderEvent(event, options)).filter(item => item !== null);
 
   const lines = rendered.map((item, index) => ({
     at: item.at,

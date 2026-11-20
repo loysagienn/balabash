@@ -45,7 +45,7 @@ function isUniqueViolation(error: unknown): boolean {
 // column: agent name or "task <slug>" for a call, "operator" for the console, null
 // for the system.
 export async function createTask(workspaceId: string, input: TaskInput, by: RegistryAuthor): Promise<ScheduledTaskModel> {
-  const taken = () => new ScheduleError('conflict', `slug "${input.slug}" is already taken — cancel_task it first to recreate`);
+  const taken = () => new ScheduleError('conflict', `slug "${input.slug}" is already taken — use schedule_cancel_task before recreating it`);
   const existing = await prisma.scheduledTask.findUnique({ where: { slug: input.slug } });
 
   if (existing) {

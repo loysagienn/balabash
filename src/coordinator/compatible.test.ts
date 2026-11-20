@@ -23,7 +23,7 @@ test('compatible Responses opens signatures and journals the actual capability u
     ['call', { name: 'run_program' }], // an action is not a capability
     ['call', { input: {} }], // malformed envelope
     ['do_nothing', {}],
-    ['describe', { name: 'projects_list' }],
+    ['call', { name: 'projects_list' }],
     ['do_nothing', {}],
   ] as const;
   const requests: ResponseCreateParamsNonStreaming[] = [];
@@ -63,12 +63,17 @@ test('compatible Responses opens signatures and journals the actual capability u
   }
   assert.match(output(1), /Match a conversation to a project/); // guide precedes the signature
   assert.match(output(1), /projects_list\(input:.*Project/s);
-  assert.deepEqual(output(8), output(1)); // fresh context gets the guide again
+  assert.deepEqual(output(8), output(2)); // call again on the second turn
   assert.match(output(3), /file content only on this turn/);
   assert.equal(JSON.parse(output(4)).kind, 'unknown_capability');
-  assert.equal(JSON.parse(output(5)).kind, 'unknown_capability');
+  assert.equal(JSON.parse(output(5)).kind, 'invalid_input');
+  assert.match(JSON.parse(output(5)).message, /run_program directly/);
   assert.equal(JSON.parse(output(6)).kind, 'invalid_input');
-  assert.doesNotMatch(JSON.stringify(requests[7]!.input), /file content only on this turn|projects_list\(input:/);
+  const nextInput = JSON.stringify(requests[7]!.input);
+  assert.doesNotMatch(nextInput, /file content only on this turn/);
+  assert.match(nextInput, /most recently worked on/);
+  assert.match(nextInput, /type Project =/);
+  assert.match(nextInput, /projects_list\(input:/);
   const events = await getTranscript(threadId, { last: 100 });
   const trace = events.filter(event => event.type.startsWith('tool.call.'));
   const entries = (id: string) => trace.filter(event => event.payload.callId === id);
@@ -79,7 +84,7 @@ test('compatible Responses opens signatures and journals the actual capability u
   assert.deepEqual(JSON.parse(output(2)), entries('c1')[1]!.payload.value);
   assert.deepEqual(entries('c2')[0]!.payload.input, { file: file.id });
   assert.doesNotMatch(JSON.stringify(entries('c2')[1]!.payload), /file content only/);
-  for (const [id, name] of [['c3', 'end_thread'], ['c4', 'run_program'], ['c5', 'call']]) {
+  for (const [id, name] of [['c3', 'end_thread'], ['c4', 'call'], ['c5', 'call']]) {
     assert.deepEqual(entries(id).map(event => [event.type, event.payload.functionName]), [
       ['tool.call.started', name], ['tool.call.failed', name],
     ]);

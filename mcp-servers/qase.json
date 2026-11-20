@@ -1,9 +1,0 @@
-{
-  "transport": "stdio",
-  "command": "node",
-  "args": ["node_modules/@qase/mcp-server/build/index.js"],
-  "env": {
-    "QASE_API_TOKEN": "${secret:QASE_API_TOKEN}"
-  },
-  "description": "Qase test management. The installation connects its MCP server with the operator’s Qase API token."
-}

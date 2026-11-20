@@ -391,7 +391,6 @@ export type RunContext = {
   deliverTurnText(text: string): Promise<void>;
 
   harness: HarnessApi; // injected core behaviour — instead of base classes
-  files: FilesApi;
   stateDir: string; // persistent per-agent/per-workspace directory
   // Set when the run continues the thread's session after an app restart
   // (src/capabilities/resume-runs.ts) instead of opening a new one.
@@ -507,17 +506,4 @@ export type FileRef = {
   createdAt: string;
   updatedAt: string;
   url?: string;
-};
-
-export type IngestFileInput = {
-  body: NodeJS.ReadableStream | Uint8Array | string;
-  filename?: string | null;
-  contentType?: string | null;
-  sizeBytes?: number | null;
-};
-
-export type FilesApi = {
-  // Store new content in the run's workspace (the file's workspaceId is the run's
-  // workspace). The storage scope is the agent's name.
-  ingest(input: IngestFileInput): Promise<FileRef>;
 };

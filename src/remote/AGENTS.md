@@ -74,7 +74,7 @@ system.
 - **Bytes cross only through the driver**: an attachment of the owner's
   message — or of the spawn prompt (`thread.started` files) — is streamed
   into the session; a file of the session is fetched by path on an explicit
-  ask (`remote_fetch_file`) and stored here.
+  ask (`fetch_thread_file`) and stored here.
 
 ## Working here
 

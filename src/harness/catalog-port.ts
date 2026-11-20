@@ -79,7 +79,7 @@ export async function createCatalogPort(agent: AgentPassport, workspaceId: strin
   }
 
   const instructions = catalogInstructions(grant,
-    opening === 'signature' ? 'If only the capability name remains in the transcript, describe it again to read its signature.' :
+    opening === 'signature' ? 'Use the signature in the transcript. If it is missing or truncated, describe the capability again.' :
     'Use describe to add a capability to the available functions. If its name appears only in the transcript, describe it again. Call the function by its catalog name.');
   return { instructions, tools, capabilityDefinitions, dispatch, grantKey: grantKey(grant) };
 }

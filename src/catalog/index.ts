@@ -77,7 +77,7 @@ export {
   type Grant,
   type GrantPolicy,
 } from './grant.ts';
-export { accountAuthority, call, parseCallTarget, invokeCapability, secretAuthority, type InvokeEnv } from './invoke.ts';
+export { accountAuthority, parseCallTarget, invokeCapability, secretAuthority, type InvokeEnv } from './invoke.ts';
 export type { JsonSchema } from './json.ts';
 export {
   consoleTail,

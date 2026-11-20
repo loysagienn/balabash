@@ -7,7 +7,6 @@ import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import type {
   Event,
-  FilesApi,
   JsonObject,
   RunContext,
   RunResume,
@@ -16,8 +15,6 @@ import type {
 import { deliverThreadMessage } from '../tree/thread-verbs.ts';
 import { appendEvent } from '../core/append.ts';
 import { THREAD_COMPLETED, THREAD_FAILED } from '../core/envelope.ts';
-import { ingestFile } from '../files/index.ts';
-import type { StorageBody } from '../files/storage.ts';
 import { createClaudeSession } from '../harness/claude-sdk/sdk-session.ts';
 import { createCodexSession } from '../harness/codex-sdk/sdk-session.ts';
 import type { RoutedRun } from '../runtime/router.ts';
@@ -38,22 +35,6 @@ function validateAgentInput(declarationName: string, input: unknown): string {
 
 function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-function createFilesApi(workspaceId: string, agentName: string): FilesApi {
-  return {
-    ingest: async input =>
-      ingestFile({
-        // The contract's NodeJS.ReadableStream is a stream.Readable at
-        // runtime; the storage layer types are narrower than the interface.
-        body: input.body as StorageBody,
-        originalFilename: input.filename ?? null,
-        contentType: input.contentType ?? null,
-        sizeBytes: input.sizeBytes ?? null,
-        scope: agentName,
-        workspaceId,
-      }),
-  };
 }
 
 // Spawns the run for a freshly started child thread (router hook). Returns
@@ -95,7 +76,6 @@ export async function spawnAgentRun(thread: Thread, startedEvent: Event, resume?
   const threadId = thread.id;
   const agentName = declaration.name;
   const abortController = new AbortController();
-  const files = createFilesApi(workspaceId, agentName);
 
   const stateDir = path.join(AGENT_STATE_ROOT, agentName, workspaceId);
 
@@ -136,7 +116,6 @@ export async function spawnAgentRun(thread: Thread, startedEvent: Event, resume?
           : createClaudeSession(options, { agent: declaration, workspaceId, cwd: stateDir, threadId }),
     },
 
-    files,
     stateDir,
     ...(resume ? { resume } : {}),
   };

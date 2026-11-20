@@ -38,7 +38,7 @@ export function createSchedulePass(): () => Promise<void> {
       } else if (row.at) {
         await passOnce(row, now);
       }
-      // No trigger: a stored procedure — run_task territory, not the heart's.
+      // No trigger: a stored procedure — schedule_run_task territory, not the heart's.
     }
   };
 
@@ -83,7 +83,7 @@ export function createSchedulePass(): () => Promise<void> {
 
     // Consume the row BEFORE firing: once means once, even if the action
     // fails (no retries). deleteMany keeps the pass idempotent against a
-    // concurrent cancel_task — zero rows deleted, nothing to fire; the
+    // concurrent schedule_cancel_task — zero rows deleted, nothing to fire; the
     // consumption is journaled with the delete.
     const count = await registryMutation(async (tx, journal) => {
       const deleted = await tx.scheduledTask.deleteMany({ where: { id: row.id } });

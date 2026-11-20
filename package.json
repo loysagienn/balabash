@@ -41,7 +41,6 @@
     "@playwright/mcp": "0.0.80",
     "@prisma/adapter-pg": "^7.10.0",
     "@prisma/client": "^7.10.0",
-    "@qase/mcp-server": "^2.7.5",
     "@tanstack/react-query": "^5.101.4",
     "@types/koa": "^3.0.3",
     "@types/koa__router": "^12.0.5",

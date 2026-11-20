@@ -6,7 +6,7 @@ import { describe, it } from 'node:test';
 import { CapabilityError, toCapabilityError } from './errors.ts';
 import { computeGrant, type GrantPolicy } from './grant.ts';
 import type { CallContext } from './definition.ts';
-import { accountAuthority, call, invokeCapability, secretAuthority } from './invoke.ts';
+import { accountAuthority, parseCallTarget, invokeCapability, secretAuthority } from './invoke.ts';
 import { describe as describeVertex } from './describe.ts';
 import { CALLER, OLD, WORK, testCatalog, testConnections, type Calls } from './test-tree.ts';
 
@@ -56,13 +56,10 @@ describe('the call of a capability', () => {
     const grant = await grantOf();
 
     assert.deepEqual(await invokeCapability(grant, 'notes_archive_purge', undefined, env), { purged: 0 });
-    assert.deepEqual(await call(grant, { name: 'notes_archive_purge' }, env), { purged: 0 });
 
     calls.length = 0;
 
     assert.equal((await errorOf(invokeCapability(grant, 'notes_archive_purge', null, env))).kind, 'invalid_input');
-    assert.equal((await errorOf(call(grant, { name: 'notes_archive_purge', input: null }, env))).kind, 'invalid_input');
-    assert.equal((await errorOf(call(grant, null, env))).kind, 'invalid_input');
     assert.deepEqual(calls, []);
   });
 
@@ -346,7 +343,7 @@ describe('the call of a capability', () => {
       message: 'the connections store is down',
     });
     assert.equal(
-      (await errorOf(call(grant, { name: 'mail_send', input }, { connections: refused }))).kind,
+      (await errorOf(invokeCapability(grant, 'mail_send', input, { connections: refused }))).kind,
       'unavailable',
     );
     assert.deepEqual((await errorOf(describeVertex(grant, { name: 'mail' }, { connections: broken }))).toValue(), {
@@ -367,27 +364,12 @@ describe('the call of a capability', () => {
   });
 });
 
-describe('the action call', () => {
-  it('calls a capability by its full name', async () => {
+describe('the call envelope', () => {
+  it('validates the target and preserves omitted input', async () => {
     const grant = await grantOf();
-
-    assert.deepEqual(await call(grant, { name: 'notes_archive_purge' }, env), { purged: 0 });
-    assert.deepEqual(await call(grant, { name: 'get_note', input: { id: 7 } }, env), {
-      id: 7,
-      title: 'First',
-      body: null,
-      attachment: null,
-    });
-  });
-
-  it('checks its own input and the grant', async () => {
-    const grant = await grantOf({ allows: vertex => vertex.fullName !== 'export_note' });
-
-    assert.equal((await errorOf(call(grant, { input: {} }, env))).kind, 'invalid_input');
-    assert.equal(
-      (await errorOf(call(grant, { name: 'export_note', input: { path: 'a.md' } }, env))).kind,
-      'unknown_capability',
-    );
+    assert.deepEqual(parseCallTarget(grant, { name: 'notes_archive_purge' }), { name: 'notes_archive_purge' });
+    assert.throws(() => parseCallTarget(grant, { name: 'notes_archive_purge', input: null }), { kind: 'invalid_input' });
+    assert.throws(() => parseCallTarget(grant, null), { kind: 'invalid_input' });
   });
 });
 

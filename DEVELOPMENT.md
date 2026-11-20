@@ -21,7 +21,7 @@ confidential from them.
   Playwright MCP of the agents that carry a browser, the loopback static
   server an agent renders its workbench files from).
 - `mcp-servers/` — connection settings for external services displayed by
-  the console (Notion, Qase). Agent capabilities live in `src/tree/`.
+  the console (Notion). Agent capabilities live in `src/tree/`.
 - `src/` — the app. `core/` (event log, envelopes, threads), `capabilities/`
   (the agent runtime and session runner,
   agent validation, per-user connections and installation secrets),
@@ -102,7 +102,7 @@ confidential from them.
 - NEVER start, stop or restart the Balabash app process yourself (no
   `npm start`, no `npm run dev`, no `kill`, no supervisor commands). A live
   process is serving the user right now. Code changes go live only through
-  an app restart, which is requested, not performed: `request_restart`
+  an app restart, which is requested, not performed: `system_request_restart`
   records the request and the app restarts under the supervisor once no
   agent turn is in flight — so after requesting one, end your turn to let it
   happen; your thread keeps its session and continues after the restart.

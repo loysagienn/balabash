@@ -116,11 +116,11 @@ describe('the catalog with the services of the installation', () => {
   const perUser = (name: string): ServiceView => ({ name, description: null, multiAccount: false, manualClient: false });
 
   it('is one list by name, each entry keeping its kind', () => {
-    const entries = catalogEntries([perUser('notion'), perUser('gmail')], [installation('perplexity', 'connected'), installation('qase', 'missing')]);
+    const entries = catalogEntries([perUser('notion'), perUser('gmail')], [installation('perplexity', 'connected'), installation('youtrack', 'missing')]);
 
     assert.deepEqual(
       entries.map(entry => `${entry.kind}:${entry.service.name}`),
-      ['accounts:gmail', 'accounts:notion', 'installation:perplexity', 'installation:qase'],
+      ['accounts:gmail', 'accounts:notion', 'installation:perplexity', 'installation:youtrack'],
     );
   });
 
@@ -149,7 +149,6 @@ describe('the catalog with the services of the installation', () => {
 
   it('gives the services of the installation their icons', () => {
     assert.equal(serviceIcon('perplexity'), 'search');
-    assert.equal(serviceIcon('qase'), 'list-todo');
     assert.equal(serviceIcon('slack'), 'messages-square');
   });
 });

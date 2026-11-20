@@ -169,6 +169,22 @@ describe('a path of the workspace file area', () => {
 });
 
 describe('export_file', () => {
+  test('a screenshot stays on disk until exported, and its export survives cleanup', async () => {
+    const { sessionScreenshots } = await import('../../agents/kit/playwright.ts');
+    const screenshots = sessionScreenshots(area, stand.mainThreadId);
+    const bytes = Buffer.from('89504e470d0a1a0a', 'hex');
+    const before = await prisma.file.count();
+    const screenshot = await screenshots.save({ data: bytes, mimeType: 'image/png' });
+    assert.equal(await prisma.file.count(), before);
+    assert.deepEqual(await fs.readFile(path.join(area, screenshot)), bytes);
+
+    const ref = await invoke('export_file', { path: screenshot });
+    await screenshots.dispose();
+    await assert.rejects(fs.stat(path.join(area, screenshot)), { code: 'ENOENT' });
+    assert.equal(ref.contentType, 'image/png');
+    assert.deepEqual(Buffer.from(await new Response(await files.openFileContent(ref.id)).arrayBuffer()), bytes);
+  });
+
   test('stores the file and gives its reference; the reference fixes the content as of the call', async () => {
     await put('reports/summary.md', '# Summary\n');
 

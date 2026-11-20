@@ -117,7 +117,7 @@ export function buildTurnPrompt({
   // pure function of the log, and the server's automatic prefix cache still
   // serves the heavy, byte-identical head (instructions + tools) for free.
   if (getLlmBackend().promptCache !== 'explicit') {
-    const { text } = buildTranscript(events, transcriptOptions());
+    const { text } = buildTranscript(events, { ...transcriptOptions(), includeSignatures: true });
 
     return text ? toPrompt([text], statusText, threadId) : null;
   }

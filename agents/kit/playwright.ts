@@ -5,7 +5,8 @@
 //
 // Environment tools carry text, never bytes (SessionEnvironmentTool), so an image in a
 // Playwright result (a screenshot) goes to the agent's sink, which decides
-// where the pixels live and returns the line the model reads instead.
+// where the pixels live. Both agents return a path relative to their workbench.
+// The agent exports that path when it needs to deliver the screenshot.
 //
 // browser_take_screenshot returns the image only when the call passes no
 // `filename` — with one, Playwright writes the file under its own output
@@ -27,6 +28,9 @@
 // scratchpad (/tmp/claude-<uid>/<cwd slug>/<session>/scratchpad) lies outside
 // every root the fence would allow.
 
+import { randomUUID } from 'node:crypto';
+import { mkdir, rm, writeFile } from 'node:fs/promises';
+import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createConnection } from '@playwright/mcp';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -37,10 +41,10 @@ import type { JsonObject, SessionEnvironmentTool } from '../../src/core/contract
 
 const PLAYWRIGHT_CALL_TIMEOUT_MS = 5 * 60_000;
 
-export type PlaywrightImage = { data: Buffer; mimeType: string };
+type PlaywrightImage = { data: Buffer; mimeType: string };
 
 // Takes the image, returns the text line that stands for it in the result.
-export type PlaywrightImageSink = (image: PlaywrightImage) => Promise<string>;
+type PlaywrightImageSink = (image: PlaywrightImage) => Promise<string>;
 
 export type PlaywrightMcp = {
   client: Client;
@@ -51,12 +55,19 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
-export function imageExtension(mimeType: string): string {
-  if (mimeType.includes('jpeg') || mimeType.includes('jpg')) {
-    return 'jpg';
-  }
-
-  return 'png';
+export function sessionScreenshots(cwd: string, threadId: string) {
+  const folder = path.join('tmp', 'screenshots', threadId);
+  const dir = path.join(cwd, folder);
+  return {
+    async save({ data, mimeType }: PlaywrightImage): Promise<string> {
+      await mkdir(dir, { recursive: true });
+      const ext = /jpe?g/i.test(mimeType) ? 'jpg' : 'png';
+      const filename = `screenshot-${randomUUID()}.${ext}`;
+      await writeFile(path.join(dir, filename), data);
+      return path.join(folder, filename);
+    },
+    dispose: () => rm(dir, { recursive: true, force: true }),
+  };
 }
 
 // The server's own output directory is for its artifacts (snapshots, console

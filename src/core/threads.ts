@@ -442,7 +442,7 @@ export async function rebuildThreadsProjection(db: DbClient = prisma): Promise<{
         const { agent, title, projectId } = threadStartFields(event.payload);
 
         // Timestamps come from the log, not the clock: a rebuilt row must
-        // date like the live one did (list_threads filters and pages on
+        // date like the live one did (threads_list filters and pages on
         // createdAt).
         await db.thread.create({
           data: {

@@ -555,7 +555,7 @@ describe('the secrets of the installation and web_perplexity', () => {
       /^The installation secrets of "perplexity" are not entered \(PERPLEXITY_API_KEY\): the operator has to enter them\.$/,
     );
     assert.equal(seen.mcp.length, calls);
-    await refuses(invoke('connections_forget_secret', { service: 'qase' }), 'not_found', /^There is no installation service "qase"/);
+    await refuses(invoke('connections_forget_secret', { service: 'unknown-service' }), 'not_found', /^There is no installation service "unknown-service"/);
   });
 });
 
