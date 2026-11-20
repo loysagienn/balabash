@@ -21,8 +21,6 @@ export type TurnRunOptions = RequestHead & {
   // Response id of the thread's previous request with this prefix; the
   // OpenAI driver asks the server for prompt-cache diagnostics against it.
   cacheComparisonResponseId?: string | null;
-  // Test seam of the OpenAI driver: a scripted client.
-  deps?: { client?: openai.TurnClient };
 };
 
 export type PrewarmOptions = RequestHead & {
@@ -36,19 +34,19 @@ export type TurnDriver = {
   prewarmPrompt: (options: PrewarmOptions) => Promise<string>;
 };
 
-const openaiDriver: TurnDriver = {
-  runTurn: ({ metrics, deliverText: _deliverText, deps, ...options }) =>
-    openai.runTurn({ ...options, metrics: startOpenaiMetrics(metrics), ...(deps?.client ? { deps: { client: deps.client } } : {}) }),
-  prewarmPrompt: ({ metrics, ...options }) => openai.prewarmPrompt({ ...options, metrics: startOpenaiMetrics(metrics) }),
-};
+// Optional scripted clients exercise both the turn and keepalive paths.
+export type TurnClients = { client?: openai.TurnClient; anthropicClient?: anthropic.AnthropicTurnClient };
 
-const anthropicDriver: TurnDriver = {
-  runTurn: ({ metrics, cacheComparisonResponseId: _ignored, deps: _deps, ...options }) =>
-    anthropic.runTurn({ ...options, metrics: startAnthropicMetrics(metrics) }),
-  prewarmPrompt: ({ metrics, cacheComparisonResponseId: _ignored, ...options }) =>
-    anthropic.prewarmPrompt({ ...options, metrics: startAnthropicMetrics(metrics) }),
-};
-
-export function getTurnDriver(): TurnDriver {
-  return getLlmBackend().kind === 'anthropic' ? anthropicDriver : openaiDriver;
+export function getTurnDriver({ client, anthropicClient }: TurnClients = {}): TurnDriver {
+  if (getLlmBackend().kind === 'anthropic') {
+    const deps = { client: anthropicClient };
+    return {
+      runTurn: ({ metrics, ...options }) => anthropic.runTurn({ ...options, metrics: startAnthropicMetrics(metrics), deps }),
+      prewarmPrompt: ({ metrics, ...options }) => anthropic.prewarmPrompt({ ...options, metrics: startAnthropicMetrics(metrics), deps }),
+    };
+  }
+  return {
+    runTurn: ({ metrics, ...options }) => openai.runTurn({ ...options, metrics: startOpenaiMetrics(metrics), deps: { client } }),
+    prewarmPrompt: ({ metrics, ...options }) => openai.prewarmPrompt({ ...options, metrics: startOpenaiMetrics(metrics), client }),
+  };
 }

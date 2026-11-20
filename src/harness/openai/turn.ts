@@ -229,6 +229,7 @@ export async function runTurn({
 
 type PrewarmOptions = RequestHead & {
   prompt: PrewarmPrompt;
+  client?: TurnClient;
   metrics: ReturnType<typeof startLlmRequestMetrics>;
   cacheComparisonResponseId?: string | null;
 };
@@ -248,13 +249,13 @@ export async function prewarmPrompt({
   prompt,
   metrics,
   cacheComparisonResponseId,
+  client: scriptedClient,
 }: PrewarmOptions): Promise<string> {
   if (getLlmBackend().promptCache !== 'explicit') {
     throw new Error('prewarmPrompt requires a backend with an explicit prompt cache');
   }
 
-  const client = getOpenaiClient();
-
+  const client = scriptedClient ?? getOpenaiClient();
   const response = await metrics.measure(() =>
     client.responses.create({
       ...baseRequest({ model, instructions, tools }, toInput(prompt)),

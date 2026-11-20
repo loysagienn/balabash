@@ -12,7 +12,7 @@
 // speaks to an external session.
 //
 import { z } from 'zod';
-import { CapabilityError, FileId, FileRef, JsonObject, capability, type Caller } from '../catalog/index.ts';
+import { CapabilityError, FileId, FileRef, JsonObject, capability, type CallContext, type Caller } from '../catalog/index.ts';
 import { isRemoteAgent, spawnHeadless, startable } from '../capabilities/agent-catalog.ts';
 import { appendEvent, type AppendResult } from '../core/append.ts';
 import type { ContentBlock, FileRef as StoredFile, JsonObject as Json, RemoteAgentDeclaration, Thread } from '../core/contract.ts';
@@ -139,6 +139,43 @@ async function write(input: AppendInput): Promise<AppendResult> {
 
 // --- The thread's own verbs -------------------------------------------------
 
+export async function deliverThreadMessage(
+  ctx: Pick<CallContext, 'caller' | 'program'>,
+  text: string | null,
+  files: StoredFile[] = [],
+): Promise<void> {
+  const thread = await callingThread(ctx.caller);
+
+  // A headless thread talks to its operator: the message is addressed to
+  // the parent thread. A message between threads always says something;
+  // files sent alone are named.
+  if (thread.headless && thread.parentId !== null) {
+    await write({
+      type: THREAD_MESSAGE,
+      ...callAuthor(ctx),
+      workspaceId: thread.workspaceId,
+      threadId: thread.id,
+      targetThreadId: thread.parentId,
+      payload: {
+        text: text ?? files.map(file => `[file] ${file.originalFilename ?? file.id}`).join('\n'),
+        ...(files.length ? { fileIds: files.map(file => file.id), files: files.map(messageFile) } : {}),
+      },
+    });
+
+    return;
+  }
+
+  const content: ContentBlock[] = [...(text === null ? [] : [{ type: 'text' as const, text }]), ...files.map(fileContentBlock)];
+
+  await write({
+    type: 'agent.message',
+    ...callAuthor(ctx),
+    workspaceId: thread.workspaceId,
+    threadId: thread.id,
+    payload: { content: content as unknown as Json[] },
+  });
+}
+
 const sendMessage = capability({
   name: 'send_message',
   summary: 'Send text, files or both to whoever this thread talks to',
@@ -152,7 +189,6 @@ const sendMessage = capability({
   output: z.null(),
   async run(input, ctx) {
     const { caller } = ctx;
-    const thread = await callingThread(caller);
     const text = input.text === undefined ? null : said('text', input.text);
     const files = await storedFiles(caller, input.files);
 
@@ -160,34 +196,7 @@ const sendMessage = capability({
       throw new CapabilityError('invalid_input', 'There is nothing to send: pass text, files or both.');
     }
 
-    // A headless thread talks to its operator: the message is addressed to
-    // the parent thread. A message between threads always says something;
-    // files sent alone are named.
-    if (thread.headless && thread.parentId !== null) {
-      await write({
-        type: THREAD_MESSAGE,
-        ...callAuthor(ctx),
-        workspaceId: caller.workspaceId,
-        threadId: thread.id,
-        targetThreadId: thread.parentId,
-        payload: {
-          text: text ?? files.map(file => `[file] ${file.originalFilename ?? file.id}`).join('\n'),
-          ...(files.length ? { fileIds: files.map(file => file.id), files: files.map(messageFile) } : {}),
-        },
-      });
-
-      return null;
-    }
-
-    const content: ContentBlock[] = [...(text === null ? [] : [{ type: 'text' as const, text }]), ...files.map(fileContentBlock)];
-
-    await write({
-      type: 'agent.message',
-      ...callAuthor(ctx),
-      workspaceId: caller.workspaceId,
-      threadId: thread.id,
-      payload: { content: content as unknown as Json[] },
-    });
+    await deliverThreadMessage(ctx, text, files);
 
     return null;
   },

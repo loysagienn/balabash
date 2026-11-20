@@ -86,7 +86,7 @@ function collector() {
 }
 
 describe('anthropic runTurn', () => {
-  it('renders the prompt with breakpoints on the instructions and the last chunk, the status as a system message', async () => {
+  it('renders the prompt with breakpoints on the instructions and the last two chunks, the status as a system message', async () => {
     const { client, requests } = makeClient([{}]);
     const { dispatch } = dispatcher({});
     const { deliverText } = collector();
@@ -103,7 +103,7 @@ describe('anthropic runTurn', () => {
       { name: 'projects_list', description: 'List projects', input_schema: schema, defer_loading: true },
     ]);
     assert.deepEqual(request.messages, [
-      { role: 'user', content: [{ type: 'text', text: 'older' }] },
+      { role: 'user', content: [{ type: 'text', text: 'older', cache_control: { type: 'ephemeral', ttl: '1h' } }] },
       { role: 'user', content: [{ type: 'text', text: 'newest', cache_control: { type: 'ephemeral', ttl: '1h' } }] },
       { role: 'system', content: 'status' },
     ]);
@@ -208,59 +208,84 @@ describe('anthropic runTurn', () => {
   });
 });
 
-it('replays a journaled opening at its chunk boundary in the Anthropic secretary turn and keepalive', async t => {
+it('keeps the previous chunk reachable across seven first openings within four breakpoints', async () => {
+  const { client, requests } = makeClient([]);
+  const openings = Array.from({ length: 7 }, (_, index) => ({
+    callId: `call-${index}`, definition: { ...leaf, name: `leaf_${index}` }, text: 'Returns: null', afterChunk: 3,
+  }));
+  const chunks = ['a', 'b', 'c'];
+  for (const frozen of [chunks, [...chunks, 'd']]) {
+    await prewarmPrompt({ ...head, prompt: { chunks: frozen, openings, cacheKey: 'thread' }, metrics, deps: { client } });
+  }
+
+  const marked = requests.map(request => request.messages.flatMap(message =>
+    Array.isArray(message.content) ? message.content.flatMap(block => block.type === 'text' && block.cache_control ? [block.text] : []) : [],
+  ));
+  assert.deepEqual(marked, [['b', 'c', 'Opened: leaf_6\nReturns: null'], ['c', 'd']]);
+});
+
+it('replays a journaled opening through the secretary turn, its scheduled keepalive and the next wake', async t => {
   const stand = await startStand();
   t.after(() => stand.stop());
   process.env.LLM_BACKEND = 'anthropic';
-  t.after(() => { delete process.env.LLM_BACKEND; });
+  process.env.MAIN_ANTHROPIC_MODEL = 'stand-model';
 
-  const { coordinatorPort } = await import('../../coordinator/port.ts');
-  const { buildTurnPrompt, buildKeepalivePrompt, catalogOpenings } = await import('../openai/prompt-builder.ts');
+  const { createCoordinatorRun, hasActiveCoordinatorTurns } = await import('../../coordinator/index.ts');
+  const { appendEvent } = await import('../../core/append.ts');
   const { getTranscript } = await import('../../core/events.ts');
+  const { prisma } = await import('../../db/client.ts');
   const { mainThreadId: threadId, workspaceId } = stand;
-  const port = await coordinatorPort(workspaceId, threadId);
-  const request = { ...port.head, model: 'm' };
-  assert.deepEqual(request.tools.map(fn => fn.name), ['describe', 'run_program']);
-  assert.match(request.instructions, /plain text you write is sent to the user/);
-  assert.doesNotMatch(request.instructions, /do_nothing|storage_get_file/);
-  assert.ok('deferredTools' in request && request.deferredTools);
-  const deferred = request.deferredTools.map(fn => fn.name);
-  assert.ok(deferred.includes('projects_list'));
-  assert.ok(!deferred.includes('end_thread') && !deferred.includes('projects') && !deferred.includes('gmail_get_thread'));
-
-  const prefix = { ...request, threadId, grantKey: port.grantKey };
-  const snapshot = async () => {
-    const events = await getTranscript(threadId, { last: 400, omitProgramCalls: true });
-    return { ...prefix, events, lastSeq: events.at(-1)!.seq, snapshotFull: false, statusText: 'status' };
-  };
-  const prompt = buildTurnPrompt(await snapshot());
-  assert.ok(prompt);
   const { client, requests } = makeClient([
     { calls: [{ name: 'describe', id: 'open-list', input: { name: 'projects_list' } }] },
     { calls: [{ name: 'projects_list', id: 'list', input: {} }] },
     { text: 'Done' },
   ]);
-  const openings = catalogOpenings(threadId);
-  const dispatch = async (call: FunctionCall) => port.dispatch(call, openings);
-  const { delivered, deliverText } = collector();
-  await runTurn({ ...request, prompt, metrics, dispatch, deliverText, deps: { client } });
-  assert.deepEqual(delivered, ['Done']);
-  assert.deepEqual(requests[1]!.tools, requests[0]!.tools);
-  const events = (await snapshot()).events;
+  let rejectPing = false;
+  const run = createCoordinatorRun({ threadId, workspaceId }, {
+    keepaliveIntervalMs: 10,
+    anthropicClient: { messages: { create: async params => {
+      if (params.max_tokens === 0) {
+        // One scheduled ping per wake.
+        process.env.COORDINATOR_CACHE_KEEPALIVE_MINUTES = '0';
+        if (rejectPing) throw new Error('stand ping rejected');
+      }
+      return client.messages.create(params);
+    } } },
+  });
+
+  async function wake(text: string) {
+    process.env.COORDINATOR_CACHE_KEEPALIVE_MINUTES = '360';
+    const result = await appendEvent({ workspaceId, threadId, type: 'user.message', actor: 'user', payload: { text } });
+    assert.ok(result.written);
+    run.accept(result.event);
+    await t.waitFor(() => assert.equal(hasActiveCoordinatorTurns(), false), { timeout: 10_000 });
+  }
+  await wake('List projects');
+  const first = requests[0]!;
+  const tools = first.tools!.filter((tool): tool is Anthropic.Tool => 'input_schema' in tool);
+  assert.deepEqual(tools.filter(tool => !tool.defer_loading).map(tool => tool.name), ['describe', 'run_program']);
+  const deferred = tools.filter(tool => tool.defer_loading).map(tool => tool.name);
+  assert.ok(deferred.includes('projects_list'));
+  assert.ok(!deferred.includes('end_thread') && !deferred.includes('projects') && !deferred.includes('gmail_get_thread'));
+  assert.match(JSON.stringify(first.system), /plain text you write is sent to the user/);
+  assert.doesNotMatch(JSON.stringify(first.system), /do_nothing|storage_get_file/);
+  assert.deepEqual(requests[1]!.tools, first.tools);
+
+  const events = await getTranscript(threadId, { last: 400, omitProgramCalls: true });
   const completed = events.filter(event => event.type === 'tool.call.completed');
   assert.deepEqual(completed.map(event => event.payload.callId), ['open-list', 'list']);
   assert.equal((completed[0]!.payload.value as { name: string }).name, 'projects_list');
   assert.doesNotMatch(JSON.stringify(completed[0]!.payload), /tool_reference|defer_loading/);
+  const reply = events.find(event => event.type === 'agent.message');
+  assert.equal(reply?.agentName, 'coordinator');
+  assert.deepEqual(reply?.payload.content, [{ type: 'text', text: 'Done' }]);
 
-  const warm = buildKeepalivePrompt(prefix);
-  assert.ok(warm);
-  const ping = async (frozen: typeof warm) => {
-    await prewarmPrompt({ ...request, prompt: frozen, metrics, deps: { client } });
-    return requests.at(-1)!;
-  };
-  const firstPing = await ping(warm);
-  assert.equal(firstPing.max_tokens, 0);
-  const pair = firstPing.messages.slice(1);
+  await t.waitFor(() => assert.equal(requests.length, 4), { timeout: 10_000 });
+  const ping = requests[3]!;
+  assert.equal(ping.max_tokens, 0);
+  assert.deepEqual(ping.tools, first.tools);
+  assert.deepEqual(ping.messages[0], first.messages[0]);
+  const pair = ping.messages.slice(1);
   assert.deepEqual(pair[0], { role: 'assistant', content: [
     { type: 'tool_use', id: 'open-list', name: 'describe', input: { name: 'projects_list' } },
   ] });
@@ -269,18 +294,30 @@ it('replays a journaled opening at its chunk boundary in the Anthropic secretary
   assert.match(live[1].text, /Returns:/);
   assert.deepEqual(pair[1], { role: 'user', content: [live[0], { ...live[1], cache_control: { type: 'ephemeral', ttl: '1h' } }] });
 
-  const next = buildTurnPrompt(await snapshot());
-  assert.ok(next);
-  await runTurn({ ...request, prompt: next, metrics, dispatch, deliverText, deps: { client } });
-  const secondTurn = requests.at(-1)!;
-  assert.deepEqual(secondTurn.messages[1], pair[0]);
-  assert.deepEqual(secondTurn.messages[2], { role: 'user', content: live });
-  assert.match(JSON.stringify(secondTurn.messages[3]), /projects_list/);
-  assert.deepEqual((await ping(buildKeepalivePrompt(prefix)!)).messages, secondTurn.messages.slice(0, -1));
+  rejectPing = true;
+  await wake('Next');
+  const second = requests[4]!;
+  assert.deepEqual(second.messages[1], pair[0]);
+  assert.deepEqual(second.messages[2], { role: 'user', content: live });
+  assert.match(JSON.stringify(second.messages[3]), /projects_list/);
+  assert.deepEqual(second.tools, first.tools);
 
-  const reduced = { ...prefix, deferredTools: request.deferredTools.filter(fn => fn.name !== 'projects_list') };
+  await t.waitFor(async () => {
+    const failed = await prisma.llmRequest.findFirst({ where: { threadId, purpose: 'keepalive', status: 'request_failed' } });
+    assert.equal(failed?.error, 'stand ping rejected');
+  }, { timeout: 10_000 });
+
+  // A grant change invalidates the same prefix for pings and turns.
+  const { coordinatorPort } = await import('../../coordinator/port.ts');
+  const { buildKeepalivePrompt, buildTurnPrompt } = await import('../openai/prompt-builder.ts');
+  const port = await coordinatorPort(workspaceId, threadId);
+  assert.ok('deferredTools' in port.head && port.head.deferredTools);
+  const prefix = { ...port.head, threadId, grantKey: port.grantKey, model: first.model };
+  assert.ok(buildKeepalivePrompt(prefix));
+  const reduced = { ...prefix, deferredTools: port.head.deferredTools.filter(fn => fn.name !== 'projects_list') };
   assert.equal(buildKeepalivePrompt(reduced), null);
-  const rebuilt = buildTurnPrompt({ ...await snapshot(), ...reduced });
+  const snapshot = await getTranscript(threadId, { last: 400, omitProgramCalls: true });
+  const rebuilt = buildTurnPrompt({ ...reduced, events: snapshot, lastSeq: snapshot.at(-1)!.seq, snapshotFull: false, statusText: 'status' });
   assert.ok(rebuilt);
   assert.deepEqual(rebuilt.openings ?? [], []);
 });

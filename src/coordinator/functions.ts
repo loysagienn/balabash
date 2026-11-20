@@ -404,13 +404,6 @@ async function executeSendMessage(args: JsonObject, ctx: DispatchContext): Promi
   });
 }
 
-// A text answer of the model (the Anthropic driver: a text block is the
-// model's message to the user) delivered the way send_message delivers —
-// the same agent.message event, text only.
-export async function deliverCoordinatorText(text: string, ctx: DispatchContext): Promise<void> {
-  await executeSendMessage({ text, fileIds: null }, ctx);
-}
-
 // Spawn a child thread for a catalog agent: thread.started addressed to the
 // coordinator's thread; the router starts the run. Async by design —
 // the model sees the thread in its transcript and status tail.

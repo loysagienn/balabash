@@ -17,15 +17,14 @@ import type { ProjectModel } from '../projects/store.ts';
 import { getFailingConsumers } from '../core/consumers.ts';
 import { getPendingRestart } from '../runtime/restart.ts';
 import { buildTurnPrompt, buildKeepalivePrompt, catalogOpenings, markPromptStateWarm } from '../harness/openai/prompt-builder.ts';
-import type { TurnClient } from '../harness/openai/turn.ts';
 import { getLlmBackend } from '../harness/openai/backend.ts';
-import { getTurnDriver } from '../harness/turn-driver.ts';
+import { getTurnDriver, type TurnClients } from '../harness/turn-driver.ts';
 import { createJournalWriter } from '../harness/session-journal.ts';
 import type { JournalWriter } from '../harness/session-journal.ts';
 import { sessionStateFrom } from '../projections/session.ts';
 import type { SessionState } from '../projections/session.ts';
 import { coordinatorPort } from './port.ts';
-import { deliverCoordinatorText } from './functions.ts';
+import { deliverThreadMessage } from '../tree/thread-verbs.ts';
 
 // Raw snapshot window, taken with a margin: the transcript builder selects
 // from it by char budget, so the effective depth per event class differs.
@@ -55,11 +54,11 @@ export type CoordinatorRun = {
   accept: (event: Event) => void;
 };
 
-// Tests can substitute the Responses client, journal writer and first retry delay.
-export type CoordinatorRunDeps = {
-  client?: TurnClient;
+// Tests can substitute the model client, journal writer and timer delays.
+export type CoordinatorRunDeps = TurnClients & {
   journal?: JournalWriter;
   stateRetryMs?: number;
+  keepaliveIntervalMs?: number;
 };
 
 // Coordinator turns in flight, process-wide — the restart module's busy
@@ -160,7 +159,7 @@ export function buildStatusText(children: Thread[], projects: ProjectModel[], wo
 
 export function createCoordinatorRun({ threadId, workspaceId }: { threadId: string; workspaceId: string }, deps: CoordinatorRunDeps = {}): CoordinatorRun {
   const journal = deps.journal ?? createJournalWriter();
-  const driver = getTurnDriver();
+  const driver = getTurnDriver(deps);
   let wakePending = false;
   let running = false;
 
@@ -244,7 +243,7 @@ export function createCoordinatorRun({ threadId, workspaceId }: { threadId: stri
     keepaliveTimer = setTimeout(() => {
       keepaliveTimer = null;
       void keepalive();
-    }, keepaliveIntervalMs());
+    }, deps.keepaliveIntervalMs ?? keepaliveIntervalMs());
     keepaliveTimer.unref();
   };
 
@@ -286,8 +285,7 @@ export function createCoordinatorRun({ threadId, workspaceId }: { threadId: stri
       });
       markPromptStateWarm(threadId);
     } catch (error) {
-      // Off the hot path and speculative by nature: a failed ping is logged,
-      // not journaled. The next ping finds the prefix cold and stops.
+      // The metrics writer records failed API calls in llm_requests.
       console.error(`[coordinator:${threadId}] cache keep-alive failed:`, error);
     }
 
@@ -339,9 +337,8 @@ export function createCoordinatorRun({ threadId, workspaceId }: { threadId: stri
         purpose: 'turn',
       },
       dispatch: async call => port.dispatch(call, openings),
-      deliverText: text => deliverCoordinatorText(text, { workspaceId, threadId }),
+      deliverText: text => deliverThreadMessage({ caller: { workspaceId, threadId, agentName: 'coordinator' }, program: null }, text),
       cacheComparisonResponseId: lastResponseId,
-      ...(deps.client ? { deps: { client: deps.client } } : {}),
     });
 
     lastResponseId = outcome.firstResponseId;

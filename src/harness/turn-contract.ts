@@ -44,7 +44,7 @@ export type DispatchResult =
   | { kind: 'sync'; result: ToolResult }
   | CatalogResult
   // Accepted for asynchronous execution; consequences arrive as events.
-  // Acknowledged to the model as 'accepted' and the loop continues.
+  // The legacy Responses driver acknowledges the call as 'accepted'.
   | { kind: 'async' }
   // Rejected at dispatch; the error goes back so the model can recover
   // in the same turn.

@@ -14,8 +14,8 @@
 //   echoed back verbatim (thinking blocks included, the API needs them
 //   unchanged) followed by all its tool results in one user message.
 // - The prompt cache is a prefix match at explicit breakpoints: one on the
-//   instructions (the end of the static head: tools + system), one on the
-//   last frozen block — both with the 1-hour TTL (backend.ts). The status
+//   instructions (the end of the static head: tools + system), the last
+//   two chunks and any trailing opening, all with the 1-hour TTL. The status
 //   rides after the chunks as a mid-conversation system message, so its
 //   change every turn costs nothing cached. The prewarm ping is the same
 //   request without the status and with max_tokens: 0 — the API runs
@@ -37,8 +37,7 @@ import type { startLlmRequestMetrics } from './llm-metrics.ts';
 // here is a failure (its tool inputs may be truncated), not a retry point.
 const MAX_OUTPUT_TOKENS = 16_000;
 
-// The one breakpoint shape of the thread's prefix. The longer TTL must come
-// first in the request, and both breakpoints share it.
+// All breakpoints of the thread's prefix share a TTL.
 const CACHE_BREAKPOINT: Anthropic.CacheControlEphemeral = { type: 'ephemeral', ttl: '1h' };
 
 type Head = RequestHead & { effort: EffortLevel };
@@ -57,13 +56,16 @@ function toTool(definition: FunctionDefinition): Anthropic.Tool {
   };
 }
 
-// Recreate each opening directly after its chunk. The final text block is
-// the cache boundary, including when a keepalive ends on an opening note.
+// The turn snapshot contains only earlier openings. This turn's original
+// tool_use is echoed live and first replayed in a later turn or keepalive.
 function toMessages({ chunks, openings = [], statusText }: PrewarmPrompt & { statusText?: string }): Anthropic.MessageParam[] {
   const messages: Anthropic.MessageParam[] = [];
   let tail: Anthropic.TextBlockParam | undefined;
   for (const [index, text] of chunks.entries()) {
     tail = { type: 'text', text };
+    // The previous turn wrote its last chunk. Look it up directly even
+    // when the replayed openings put it outside the API's 20-block window.
+    if (index >= chunks.length - 2) tail.cache_control = CACHE_BREAKPOINT;
     messages.push({ role: 'user', content: [tail] });
     for (const opening of openings.filter(entry => entry.afterChunk === index + 1)) {
       const { callId, definition: { name } } = opening;
