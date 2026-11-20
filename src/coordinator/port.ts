@@ -13,11 +13,13 @@ export async function coordinatorPort(workspaceId: string, threadId: string) {
     return {
       head: { ...head, deferredTools: port.capabilityDefinitions() },
       grantKey: port.grantKey,
+      sampleOpenings: port.sampleOpenings,
       dispatch: port.dispatch,
     };
   }
   return {
     head: { ...head, tools: [...port.tools, END_TURN_FUNCTION] },
+    sampleOpenings: port.sampleOpenings,
     grantKey: port.grantKey,
     dispatch: (call: FunctionCall, openings: CatalogOpeningContext) =>
       call.name === END_TURN_FUNCTION.name ? { kind: 'end' as const } : port.dispatch(call, openings),

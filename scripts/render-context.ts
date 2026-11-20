@@ -27,6 +27,7 @@ import { createRemoteDriverContext } from '../src/capabilities/remote-agent-secr
 import { buildStatusText } from '../src/coordinator/index.ts';
 import { createClaudePort } from '../src/harness/claude-sdk/bridge.ts';
 import { createCodexPort } from '../src/harness/codex-sdk/catalog-bridge.ts';
+import { catalogBlocks } from '../src/harness/anthropic/content.ts';
 import { coordinatorPort } from '../src/coordinator/port.ts';
 import { getMainThread } from '../src/core/threads.ts';
 import { startTree } from '../src/tree/index.ts';
@@ -135,18 +136,28 @@ function renderRemoteAgent(declaration: RemoteAgentDeclaration): string {
 async function renderCoordinator(workspaceId: string): Promise<string> {
   const main = await getMainThread(workspaceId);
   if (!main) throw new Error('The workspace has no main thread');
-  const { head: { instructions, tools } } = await coordinatorPort(workspaceId, main.id);
+  const { head, sampleOpenings } = await coordinatorPort(workspaceId, main.id);
   const sections = [
     '# Coordinator (the secretary)',
-    renderSection('Instructions (prompt-cache head)', instructions),
+    renderSection('Instructions (prompt-cache head)', head.instructions),
     renderSection(
       'Status tail (format sample, rendered fresh every turn)',
       `\`\`\`\n${buildStatusText([], [], workspaceId)}\n\`\`\``,
     ),
   ];
 
-  const functionsSection = tools.map(renderTool).join('\n\n');
+  const functionsSection = head.tools.map(renderTool).join('\n\n');
   sections.push(renderSection('Functions available at the start of the turn', functionsSection));
+
+  const samples: string[] = [];
+  for await (const { name, result } of sampleOpenings()) {
+    const note = 'deferredTools' in head ? catalogBlocks('describe', result).note?.text : undefined;
+    samples.push([
+      `### ${name || '(root)'}`, note ?? result.text,
+      ...(result.definition ? [result.definition.description, '```json', JSON.stringify(result.definition.parameters, null, 2), '```'] : []),
+    ].join('\n\n'));
+  }
+  sections.push(renderSection('First opening of each granted vertex', samples.join('\n\n')));
 
   return `${sections.join('\n\n')}\n`;
 }

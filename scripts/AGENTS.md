@@ -77,7 +77,7 @@ npm run build && npm run render-context [-- <workspaceId>]
 ```
 
 With one user in the database the workspaceId is inferred; with several the
-script lists them and exits. The script computes grants from workspace connections and renders the catalog without invoking capabilities or journaling calls.
+script lists them and exits. The coordinator file includes each granted vertex opened independently for the first time, with the text and definition of the configured port. The script reads the workspace grant and accounts without invoking capabilities or journaling calls.
 
 ## measure-context (`scripts/measure-context.ts`)
 
