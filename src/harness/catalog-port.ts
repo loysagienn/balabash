@@ -1,7 +1,7 @@
 // The catalog view for a port that assembles the model's context.
-import { catalogContext, catalogInstructions, portActions, vertexLine } from './catalog-context.ts';
+import { catalogContext, catalogInstructions, grantedCapabilities, guideForLeaf, portActions, vertexLine } from './catalog-context.ts';
 import {
-  FileRef, expandSchema, grantedGuide, grantedVertex, ruleText, toCapabilityError, typeText,
+  FileRef, expandSchema, grantedVertex, ruleText, toCapabilityError, typeText,
   type Catalog, type CatalogCapability, type FileRefValue, type Grant, type JsonSchema, type JsonValue,
 } from '../catalog/index.ts';
 import type { AgentPassport } from '../core/contract.ts';
@@ -57,9 +57,7 @@ export async function createCatalogPort(agent: AgentPassport, workspaceId: strin
       if (opened?.kind === 'capability') {
         const vertex = grantedVertex(grant, opened.name);
         if (vertex?.kind !== 'capability') throw new Error('Missing described capability');
-        const parent = vertex.parent;
-        const guide = openings.seenNodes.has(parent.fullName) ? [] : grantedGuide(grant, parent);
-        openings.seenNodes.add(parent.fullName);
+        const guide = guideForLeaf(grant, vertex.parent, openings.seenNodes);
         const text = [
           ...guide, 'Returns: ' + typeText(vertex.output, 0), ...vertex.inputRules.map(ruleText), ...opened.types, ...accounts,
         ].join('\n');
@@ -73,12 +71,7 @@ export async function createCatalogPort(agent: AgentPassport, workspaceId: strin
     }
   }
   function capabilityDefinitions(): FunctionDefinition[] {
-    const definitions: FunctionDefinition[] = [];
-    for (const name of grant.vertices) {
-      const vertex = tree.vertices.get(name)!;
-      if (vertex.kind === 'capability') definitions.push(capabilityDefinition(tree, vertex));
-    }
-    return definitions;
+    return Array.from(grantedCapabilities(grant), vertex => capabilityDefinition(tree, vertex));
   }
 
   const instructions = catalogInstructions(grant,

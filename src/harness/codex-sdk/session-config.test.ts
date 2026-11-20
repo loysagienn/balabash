@@ -14,7 +14,7 @@ describe('codexSessionConfig', () => {
   it('puts the brief in the developer-message position and the bridge as the one MCP server', () => {
     assert.equal(config.developer_instructions, 'Read balabash/AGENTS.md first.');
     assert.deepEqual(config.mcp_servers, {
-      balabash: { url: 'http://127.0.0.1:43123/mcp', required: true, default_tools_approval_mode: 'approve' },
+      balabash: { url: 'http://127.0.0.1:43123/mcp', required: true, tool_timeout_sec: 660, default_tools_approval_mode: 'approve' },
     });
   });
 

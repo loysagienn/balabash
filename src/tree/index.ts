@@ -80,7 +80,7 @@ export const root: RootDefinition = {
     { text: 'Pass exactly the fields of the signature and leave an optional field out.' },
     { text: 'Call a described capability through `call` by its full name.', requires: ['call'] },
     {
-      text: 'A chain of calls whose intermediate results you do not need to see goes into `run_program`: you get only what the program returns.',
+      text: 'With `run_program` you can chain calls and return just the result you need.',
       requires: ['run_program'],
     },
     {

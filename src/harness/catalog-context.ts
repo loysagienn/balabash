@@ -1,5 +1,5 @@
 import { agentGrantPolicy, isRemoteAgent, startable } from '../capabilities/agent-catalog.ts';
-import { computeGrant, grantedChildren, grantedGuide, type Grant } from '../catalog/index.ts';
+import { computeGrant, grantedChildren, grantedGuide, type CatalogNode, type Grant } from '../catalog/index.ts';
 import type { AgentPassport } from '../core/contract.ts';
 import { catalog } from '../tree/index.ts';
 import { connectionsPort } from '../tree/services.ts';
@@ -11,6 +11,21 @@ export async function catalogContext(agent: AgentPassport, workspaceId: string, 
   const caller = { workspaceId, threadId, agentName: agent.name };
   const grant = await computeGrant(catalog(), agentGrantPolicy(agent, portActions), { caller, connections });
   return { grant, connections };
+}
+
+export function* grantedCapabilities(grant: Grant) {
+  for (const name of grant.vertices) {
+    const vertex = grant.catalog.vertices.get(name)!;
+    if (vertex.kind === 'capability') yield vertex;
+  }
+}
+
+// Opening a leaf directly supplies its parent's guide once. Opening the
+// parent itself already delivered that guide in the node description.
+export function guideForLeaf(grant: Grant, parent: CatalogNode, seenNodes: Set<string>): string[] {
+  if (seenNodes.has(parent.fullName)) return [];
+  seenNodes.add(parent.fullName);
+  return grantedGuide(grant, parent);
 }
 
 export function vertexLine(kind: string, name: string, summary: string): string {

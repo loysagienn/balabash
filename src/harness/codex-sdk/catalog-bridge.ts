@@ -3,16 +3,17 @@
 import { randomUUID } from 'node:crypto';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { CallToolRequestSchema, ListToolsRequestSchema, type CallToolResult, type Tool } from '@modelcontextprotocol/sdk/types.js';
-import { expandSchema, grantedGuide, grantedVertex, type JsonSchema, type JsonValue } from '../../catalog/index.ts';
+import { expandSchema, grantedVertex, type JsonSchema, type JsonValue } from '../../catalog/index.ts';
 import type { AgentPassport } from '../../core/contract.ts';
 import { dispatchCatalogCall } from '../../tree/call-journal.ts';
-import { catalogContext, catalogInstructions, portActions } from '../catalog-context.ts';
+import { catalogContext, catalogInstructions, grantedCapabilities, guideForLeaf, portActions } from '../catalog-context.ts';
 import { BRIDGE_SERVER } from './session-config.ts';
 
 const RULE =
-  'In exec, open a catalog entry with tools.mcp__balabash__describe({name}) and read its structuredContent. ' +
-  'Call capabilities as tools.mcp__balabash__<name>(input). Read structuredContent.value on success and content on error. ' +
-  'Use JavaScript in exec for calls in this turn. To run platform program code that can also run as a task, use tools.mcp__balabash__run_program({code}).';
+  'In exec, open a catalog entry with tools.mcp__balabash__describe({name}). Use the same prefix for each catalog function. ' +
+  'Read structuredContent.value and any structuredContent.guide on success, and content on error. ' +
+  'Chain calls for the current turn in exec. To test code for a scheduled task, pass its body to run_program({code}). ' +
+  'Inside that program, invoke capabilities with call(name, input).';
 
 export async function createCodexPort(agent: AgentPassport, workspaceId: string, threadId: string) {
   const { grant, connections } = await catalogContext(agent, workspaceId, threadId);
@@ -32,9 +33,8 @@ export async function createCodexPort(agent: AgentPassport, workspaceId: string,
     const action = tree.actions.get(name)!;
     add(name, action.description, action.input, action.output);
   }
-  for (const name of grant.vertices) {
-    const vertex = tree.vertices.get(name)!;
-    if (vertex.kind === 'capability') add(name, vertex.description, vertex.input, vertex.output);
+  for (const vertex of grantedCapabilities(grant)) {
+    add(vertex.fullName, vertex.description, vertex.input, vertex.output);
   }
 
   const seenNodes = new Set(['']);
@@ -45,10 +45,7 @@ export async function createCodexPort(agent: AgentPassport, workspaceId: string,
     if (result.opened?.kind === 'node') seenNodes.add(result.opened.name);
     if (result.opened?.kind === 'capability') {
       const vertex = grantedVertex(grant, result.opened.name);
-      if (vertex?.kind === 'capability' && !seenNodes.has(vertex.parent.fullName)) {
-        guide = grantedGuide(grant, vertex.parent);
-        seenNodes.add(vertex.parent.fullName);
-      }
+      if (vertex?.kind === 'capability') guide = guideForLeaf(grant, vertex.parent, seenNodes);
     }
     return { content: [], structuredContent: { ...(guide?.length ? { guide } : {}), value: result.value } };
   }

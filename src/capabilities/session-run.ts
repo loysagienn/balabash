@@ -3,8 +3,7 @@
 // — everything the four original session agents used to copy by hand lives
 // here once: the SDK session lifecycle, rendering of incoming events into
 // session messages, channel binding (user-facing thread vs headless parent
-// dialogue), the end-of-turn report, abort handling
-// and tool-catalog resyncs.
+// dialogue), the end-of-turn report and abort handling.
 
 import { mkdirSync } from 'node:fs';
 import { SESSION_RESUMED_IDLE_NOTE, SESSION_RESUMED_INTERRUPTED_NOTE, THREAD_NAMING_NOTE } from '../../agents/world/index.ts';
@@ -71,8 +70,8 @@ function readableSize(bytes: number): string {
 }
 
 // Attached files as the session reads them: a line per file (the facts the
-// sender recorded, `who` names the sender) and one hint how to reach them —
-// the bytes are never in the prompt. Empty when there are no files.
+// sender recorded, `who` names the sender) and a retrieval hint for the legacy bridge.
+// The catalog supplies its own file guide.
 function describeFiles(files: unknown[], who: string, sdk: AgentDeclaration['sdk']): string[] {
   const parts: string[] = [];
 
@@ -88,9 +87,7 @@ function describeFiles(files: unknown[], who: string, sdk: AgentDeclaration['sdk
     );
   }
 
-  if (files.length && sdk === 'codex') {
-    parts.push('Use get_file_url for a temporary download address.');
-  } else if (files.length) {
+  if (files.length && sdk !== 'codex') {
     parts.push(
       `Use the storage_get_file tool for ${files.length === 1 ? 'its' : 'their'} metadata and a download URL; fetch the URL when ` +
         'the contents are needed. To work on a file in the workspace (scripts, workspace tools), put it there with ' +

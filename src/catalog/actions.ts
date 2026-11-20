@@ -47,6 +47,8 @@ export const describeOutput = z.union([
 
 export type DescribeValue = z.infer<typeof describeOutput>;
 
+export const MAX_RUN_PROGRAM_SECONDS = 600;
+
 export const ACTIONS: Record<ActionName, ActionDefinition> = {
   describe: {
     name: 'describe',
@@ -73,7 +75,7 @@ export const ACTIONS: Record<ActionName, ActionDefinition> = {
       'Run a program: JavaScript that calls capabilities and returns one result. `code` is the body of an async function with only `call(name, input)`, `describe(name)` and `console` in scope; a failed call throws a CapabilityError. Intermediate values and console output stay with the run: the returned JSON value is all you get. With nothing to return, end with `return null`.',
     input: z.strictObject({
       code: z.string(),
-      timeoutSeconds: z.int().min(1).max(600).default(120),
+      timeoutSeconds: z.int().min(1).max(MAX_RUN_PROGRAM_SECONDS).default(120),
     }),
     output: JsonValue,
   },

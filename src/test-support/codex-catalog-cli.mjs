@@ -19,6 +19,7 @@ for await (const chunk of process.stdin) input += chunk;
 emit({ type: 'thread.started', thread_id: id });
 emit({ type: 'turn.started' });
 const instructions = config('developer_instructions');
+assert.equal(config('mcp_servers.balabash.tool_timeout_sec'), 660);
 assert.match(instructions, /tools\.mcp__balabash__describe/);
 assert.doesNotMatch(instructions, /workspace_export_file|workspace_import_file|remote_fetch_file|send_images/);
 const client = new Client({ name: 'codex-scenario', version: '1' });

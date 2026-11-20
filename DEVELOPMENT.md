@@ -31,8 +31,8 @@ confidential from them.
   agent validation, per-user connections and installation secrets),
   `catalog/` (the capability catalog of the new tool scheme: what an author
   writes, the build with the rules of the scheme, signatures, grants,
-  `describe`, the one path of a call and the runner of programs; no port is
-  wired to it yet — the schedule runs its program tasks against it),
+  `describe`, the one path of a call and the runner of programs used by the
+  secretary, Codex agents and scheduled tasks),
   `tree/` (the real vertices of that catalog, one file per node: the root
   with its guide and its own capabilities, and the nodes written so far —
   each action takes its data from the app's own layers; at its start the
@@ -56,7 +56,8 @@ confidential from them.
   `test-support/` (the test PostgreSQL `npm test` starts: embedded-postgres,
   one migrated template, a copy per test; `stand.ts` — the stand of one test
   file: the app's modules over their own copy and file area, reached over
-  HTTP; `db/test-guard.ts` keeps test children off the live database).
+  HTTP; `codex-catalog-cli.mjs` exercises the SDK subprocess and MCP bridge;
+  `db/test-guard.ts` keeps test children off the live database).
 - `scripts/` — offline maintenance scripts (`scripts/AGENTS.md`); among them
   `render-context`, the verification instrument for any work on prompts and
   tool descriptions, `measure-context`, the measure of what a session's first

@@ -6,6 +6,7 @@
 // session needs — the brief and the bridge's address.
 
 import type { CodexOptions } from '@openai/codex-sdk';
+import { MAX_RUN_PROGRAM_SECONDS } from '../../catalog/actions.ts';
 
 export type CodexSessionConfig = NonNullable<CodexOptions['config']>;
 
@@ -51,6 +52,8 @@ export function codexSessionConfig(instructions: string, bridgeUrl: string, enab
       [BRIDGE_SERVER]: {
         url: bridgeUrl,
         required: true,
+        // Allow time for program teardown, journaling and delivery of the result.
+        tool_timeout_sec: MAX_RUN_PROGRAM_SECONDS + 60,
         default_tools_approval_mode: 'approve',
       },
     },
@@ -60,8 +63,8 @@ export function codexSessionConfig(instructions: string, bridgeUrl: string, enab
     // are off: the brief tells the agent which AGENTS.md to read.
     project_doc_max_bytes: 0,
     // ChatGPT apps/connectors, plugins and the memories store are not
-    // part of the Balabash tool set: integrations are the run's tool
-    // bundle, memory is the workspace. Codex's own agent team
+    // part of the Balabash tool set: the catalog supplies integrations
+    // and the workspace holds memory. Codex's own agent team
     // (multi_agent) stays on — its native sub-agents work inside the
     // session, next to the bridge's Balabash sub-agents (spawn_agent).
     features: {
