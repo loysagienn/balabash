@@ -189,10 +189,7 @@ export async function spawnAgentRun(thread: Thread, startedEvent: Event, resume?
   const threadNotificationLevel =
     (startedEvent.payload.notification as NotificationLevel | undefined) ?? declaration.notification ?? 'normal';
 
-  const bundle: ToolBundle = { declared: legacyServers(agentName) };
-
   const abortController = new AbortController();
-  const tools = createToolsApi({ workspaceId, threadId, agentName, bundle });
   const files = createFilesApi(workspaceId, agentName);
 
   const stateDir = path.join(AGENT_STATE_ROOT, agentName, workspaceId);
@@ -212,6 +209,7 @@ export async function spawnAgentRun(thread: Thread, startedEvent: Event, resume?
 
   const ctx: RunContext = {
     headless: thread.headless,
+    parentThreadId: thread.parentId,
     threadId,
     workspaceId,
     signal: abortController.signal,
@@ -339,11 +337,14 @@ export async function spawnAgentRun(thread: Thread, startedEvent: Event, resume?
       // inner stream of claude-sdk threads.
       sdkSession: options =>
         declaration.sdk === 'codex'
-          ? createCodexSession(options, { tools, cwd: stateDir, threadId })
-          : createClaudeSession(options, { tools, cwd: stateDir, threadId }),
+          ? createCodexSession(options, { agent: declaration, workspaceId, cwd: stateDir, threadId })
+          : createClaudeSession(options, {
+              tools: createToolsApi({ workspaceId, threadId, agentName, bundle: { declared: legacyServers(agentName) } }),
+              cwd: stateDir,
+              threadId,
+            }),
     },
 
-    tools,
     files,
     stateDir,
     ...(resume ? { resume } : {}),
@@ -354,7 +355,7 @@ export async function spawnAgentRun(thread: Thread, startedEvent: Event, resume?
   try {
     // The attachments of the spawn prompt are read like a message's: a line
     // per file and the hint how to reach them — the bytes stay in storage.
-    const prompt = withSpawnFiles(validateAgentInput(agentName, startedEvent.payload.input), startedEvent.payload.files);
+    const prompt = withSpawnFiles(validateAgentInput(agentName, startedEvent.payload.input), startedEvent.payload.files, declaration.sdk);
 
     // The declarative form is run by the platform's session runner; run() is
     // the imperative escape hatch (validate-agent guarantees exactly one).

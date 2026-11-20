@@ -29,6 +29,7 @@ import { readOpenSecretRequests } from '../capabilities/secret-requests.ts';
 import { getAgents, isRemoteAgent, startable } from '../capabilities/agent-catalog.ts';
 import { coordinator } from '../../agents/access.ts';
 import { legacyServers } from '../capabilities/legacy-bundles.ts';
+import { BRIDGE_SERVER } from '../harness/codex-sdk/session-config.ts';
 import { DEFAULT_EFFORT } from '../harness/default-effort.ts';
 import { config } from '../config/index.ts';
 import type { AgentDeclaration, RemoteAgentDeclaration } from '../core/contract.ts';
@@ -206,7 +207,7 @@ function agentView(agent: AgentDeclaration, lastModel: string | null): AgentView
     description: agent.description,
     icon: agent.icon ?? null,
     sdk: agent.sdk,
-    tools: effectiveBundleServers(legacyServers(agent.name)),
+    tools: agent.sdk === 'codex' ? [BRIDGE_SERVER] : effectiveBundleServers(legacyServers(agent.name)),
     agents: startable(agent.name).map(child => child.name),
     modes: agent.modes,
     defaultMode: agent.defaultMode,

@@ -150,7 +150,7 @@ export type AgentEventDecl = {
 // The declarative session agent (the preferred form): the whole lifecycle —
 // spawn-prompt validation, the SDK session, rendering of incoming events,
 // channel binding (user-facing thread vs headless parent dialogue by `headless`),
-// the standard end_thread / send_file verbs, abort — is run by the platform.
+// the end-of-turn report and abort — is run by the platform.
 // The agent supplies only data — plus, when the session needs machinery next
 // to it (the designer's browser), an `environment` the platform builds and
 // disposes around the session. An agent writes run() only when the lifecycle
@@ -177,14 +177,14 @@ export type SessionAgentSpec = {
   cwd?: string | ((workspaceId: string) => string);
   // Per-run machinery a declaration cannot express statically (a browser next
   // to the session): built once per run after the working directory exists
-  // and before the SDK session starts; its bridge tools join the base verbs;
+  // and before the SDK session starts; its Claude tools join the bridge;
   // disposed after the session ends, however it ends. Everything else of the
   // lifecycle stays the platform's.
   environment?(ctx: RunContext, cwd: string): Promise<SessionEnvironment>;
 };
 
 export type SessionEnvironment = {
-  extraTools?: SdkBridgeTool[]; // bridge-only tools on top of the base verbs
+  extraTools?: SdkBridgeTool[]; // Claude bridge-only tools on top of the base verbs
   // Facts that exist only once the environment is up (an address, a path),
   // appended to the declaration's instructions for this run; the static
   // prompt names the fact and where it stands.
@@ -407,6 +407,7 @@ export type SpawnOptions = {
 };
 
 export type RunContext = {
+  parentThreadId: string | null;
   headless: boolean; // mode of this thread, including a resumed one
   threadId: string;
   workspaceId: string;
@@ -438,7 +439,6 @@ export type RunContext = {
   sendToParent(text: string, fileIds?: string[]): Promise<void>;
 
   harness: HarnessApi; // injected core behaviour — instead of base classes
-  tools: ToolsApi; // the bundled tool set; calls are journaled as tool.call.*
   files: FilesApi;
   stateDir: string; // persistent per-agent/per-workspace directory
   // Set when the run continues the thread's session after an app restart
@@ -449,20 +449,17 @@ export type RunContext = {
 // The continuation of a thread's session after an app restart: the SDK's own
 // session to resume (the thread's newest session.sdk), whether a turn was in
 // flight when the old process went down (the thread's last session.state was
-// `run`), and the thread's active children (a fresh run learns them as it
-// spawns; a resumed one is told).
+// `run`).
 export type RunResume = {
   sdkSessionId: string;
   interrupted: boolean;
-  childThreadIds: string[];
 };
 
 // ---------------------------------------------------------------------------
-// Injected core APIs. The SDK session shape is finalized at stage 3; the
-// tool-server bundle joins ToolsApi at stage 4.
+// Injected APIs of a local agent session.
 
-// A bridge-only tool the agent adds on top of its ToolsApi bundle (e.g. the
-// a child agent's end_thread). Lives only inside the session's MCP bridge:
+// A Claude bridge-only tool in addition to the server bundle (e.g. a child
+// agent's end_thread). Lives only inside the session's MCP bridge:
 // it is not journaled as tool.call.* — the agent reflects its consequences
 // into the log itself (complete(), pushEvent()).
 export type SdkBridgeTool = {
@@ -481,7 +478,7 @@ export type SdkSessionOptions = {
   initialMessage: string; // the first user message opening the session
   model?: string; // agent-level choice; omit for the SDK default
   effort?: EffortLevel; // reasoning effort; default 'high'
-  extraTools?: SdkBridgeTool[]; // bridge-only tools on top of ctx.tools
+  extraTools?: SdkBridgeTool[]; // Claude bridge-only tools in addition to its server bundle
   // 'bridge-only' (default): the inner model sees the Balabash bridge and
   // nothing else. 'full' unlocks the provider's native tool preset for host
   // work; interpretation is SDK-specific (claude: the claude_code preset plus
@@ -533,7 +530,7 @@ export type AgentSdkSession = {
   // The texts and the ends of the turns, in order; ends after close(),
   // throws on turn failure.
   turns: AsyncIterable<SdkTurn>;
-  // Re-diff the bridge against ctx.tools after a catalog change; never rejects.
+  // Refresh tools after a catalog change. Codex computes the grant at turn start. Never rejects.
   syncTools(): Promise<void>;
   // Interrupt the turn in flight: the inner model stops, the interrupted turn
   // still closes through `turns` (empty text, `interrupted: true`) and the

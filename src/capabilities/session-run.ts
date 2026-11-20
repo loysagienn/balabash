@@ -3,7 +3,7 @@
 // — everything the four original session agents used to copy by hand lives
 // here once: the SDK session lifecycle, rendering of incoming events into
 // session messages, channel binding (user-facing thread vs headless parent
-// dialogue), the standard base verbs (end_thread, send_file), abort handling
+// dialogue), the end-of-turn report, abort handling
 // and tool-catalog resyncs.
 
 import { mkdirSync } from 'node:fs';
@@ -73,7 +73,7 @@ function readableSize(bytes: number): string {
 // Attached files as the session reads them: a line per file (the facts the
 // sender recorded, `who` names the sender) and one hint how to reach them —
 // the bytes are never in the prompt. Empty when there are no files.
-function describeFiles(files: unknown[], who: string): string[] {
+function describeFiles(files: unknown[], who: string, sdk: AgentDeclaration['sdk']): string[] {
   const parts: string[] = [];
 
   for (const file of files) {
@@ -88,7 +88,9 @@ function describeFiles(files: unknown[], who: string): string[] {
     );
   }
 
-  if (files.length > 0) {
+  if (files.length && sdk === 'codex') {
+    parts.push('Use get_file_url for a temporary download address.');
+  } else if (files.length) {
     parts.push(
       `Use the storage_get_file tool for ${files.length === 1 ? 'its' : 'their'} metadata and a download URL; fetch the URL when ` +
         'the contents are needed. To work on a file in the workspace (scripts, workspace tools), put it there with ' +
@@ -100,7 +102,7 @@ function describeFiles(files: unknown[], who: string): string[] {
 }
 
 // A user message as the session reads it: the text, then the attached files.
-function describeUserMessage(payload: Record<string, unknown>): string {
+function describeUserMessage(payload: Record<string, unknown>, sdk: AgentDeclaration['sdk']): string {
   const speaker = speakerOf(payload);
   const text = typeof payload.text === 'string' ? payload.text : '';
   const files = Array.isArray(payload.files) ? payload.files : [];
@@ -110,15 +112,15 @@ function describeUserMessage(payload: Record<string, unknown>): string {
     parts.push(speaker ? `${speaker}: ${text}` : text);
   }
 
-  return [...parts, ...describeFiles(files, 'the user sent')].join('\n');
+  return [...parts, ...describeFiles(files, 'the user sent', sdk)].join('\n');
 }
 
 // The spawn prompt with the attachments of thread.started (payload.files)
 // read like a message's: the spawner — the operator of the thread — attached
 // them. One rendering for the session runner and imperative run() agents
 // alike (the runtime applies it before either sees the prompt).
-export function withSpawnFiles(prompt: string, files: unknown): string {
-  return [prompt, ...describeFiles(Array.isArray(files) ? files : [], 'the operator attached')].join('\n');
+export function withSpawnFiles(prompt: string, files: unknown, sdk: AgentDeclaration['sdk']): string {
+  return [prompt, ...describeFiles(Array.isArray(files) ? files : [], 'the operator attached', sdk)].join('\n');
 }
 
 // An incoming thread.message: text plus attached file references. From the
@@ -130,7 +132,7 @@ export function withSpawnFiles(prompt: string, files: unknown): string {
 export function describeThreadMessage(
   event: Event,
   headless: boolean,
-  childThreadIds: ReadonlySet<string>,
+  parentThreadId: string | null,
 ): string {
   const payload = isObject(event.payload) ? event.payload : {};
   const text = typeof payload.text === 'string' ? payload.text.trim() : '';
@@ -138,7 +140,7 @@ export function describeThreadMessage(
     ? payload.fileIds.filter((id): id is string => typeof id === 'string' && Boolean(id))
     : [];
 
-  if (event.threadId && childThreadIds.has(event.threadId)) {
+  if (event.threadId && event.threadId !== parentThreadId) {
     return [
       ...(text ? [`[Reply from child thread ${event.threadId}]\n${text}`] : []),
       ...fileIds.map(fileId => `[the child attached a file: fileId=${fileId}]`),
@@ -310,7 +312,6 @@ function remoteKindWords(agents: CatalogAgent[]): string {
 function createChildTools(
   ctx: RunContext,
   declaration: AgentDeclaration,
-  childThreadIds: Set<string>,
 ): SdkBridgeTool[] {
   const agents = startable(declaration.name);
   if (!agents.length) {
@@ -394,8 +395,6 @@ function createChildTools(
         ...(options ? { options } : {}),
         ...(adopt ? { adopt } : {}),
       });
-
-      childThreadIds.add(child.threadId);
 
       return `Spawned child thread ${child.threadId}. Its report arrives when the thread ends.`;
     },
@@ -498,7 +497,7 @@ function createChildTools(
 // factories that build the live tools, run with inert state, mapped to bare
 // definitions. For offline rendering (scripts/render-context.ts): the
 // showcase must show the real texts, not a retelling.
-export function describeSessionBridgeTools(declaration: AgentDeclaration): ToolDefinition[] {
+export function describeClaudeBridgeTools(declaration: AgentDeclaration): ToolDefinition[] {
   const headless = declaration.defaultMode === 'headless';
   // Handlers of the built tools are never called here.
   const inertCtx = null as unknown as RunContext;
@@ -506,7 +505,7 @@ export function describeSessionBridgeTools(declaration: AgentDeclaration): ToolD
   const tools: SdkBridgeTool[] = [
     createEndThreadTool(inertCtx),
     createSendFileTool(inertCtx, headless),
-    ...createChildTools(inertCtx, declaration, new Set()),
+    ...createChildTools(inertCtx, declaration),
   ];
 
   return tools.map(tool => ({
@@ -523,10 +522,6 @@ export function createSessionRun(
   ctx: RunContext,
 ): AgentRun {
   const headless = ctx.headless;
-  // Children spawned by this run: their replies are labeled by threadId in
-  // the dialogue (a thread.message whose author is not the parent).
-  const childThreadIds = new Set<string>(ctx.resume?.childThreadIds ?? []);
-
   let settled = false;
   let resolveFinished: () => void;
   let rejectFinished: (error: unknown) => void;
@@ -604,12 +599,14 @@ export function createSessionRun(
       // Scripts run from the session reach the workspace database the same way
       // run_script children do: via the WORKSPACE_DB env variable.
       env: { WORKSPACE_DB: workspaceDbPath(ctx.workspaceId) },
-      extraTools: [
-        createEndThreadTool(ctx),
-        createSendFileTool(ctx, headless),
-        ...createChildTools(ctx, declaration, childThreadIds),
-        ...(environment?.extraTools ?? []),
-      ],
+      ...(declaration.sdk === 'claude' ? {
+        extraTools: [
+          createEndThreadTool(ctx),
+          createSendFileTool(ctx, headless),
+          ...createChildTools(ctx, declaration),
+          ...(environment?.extraTools ?? []),
+        ],
+      } : {}),
     });
 
   const stop = (error?: unknown) => {
@@ -757,7 +754,7 @@ export function createSessionRun(
       const payload = isObject(event.payload) ? event.payload : {};
 
       if (event.type === 'user.message') {
-        const text = describeUserMessage(payload);
+        const text = describeUserMessage(payload, declaration.sdk);
 
         if (text) {
           pushText(text);
@@ -767,7 +764,7 @@ export function createSessionRun(
       }
 
       if (event.type === 'thread.message') {
-        const text = describeThreadMessage(event, headless, childThreadIds);
+        const text = describeThreadMessage(event, headless, ctx.parentThreadId);
 
         if (text) {
           pushText(text);

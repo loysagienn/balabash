@@ -202,6 +202,7 @@ describe('the agent catalog of the snapshot', () => {
       assert.equal(agent.effort, decl.session?.effort ?? null, agent.name);
       assert.equal(agent.model, decl.session?.model ?? null, agent.name);
       assert.equal(agent.sdk, decl.sdk, agent.name);
+      if (decl.sdk === 'codex') assert.deepEqual(agent.tools, ['balabash']);
     }
   });
 

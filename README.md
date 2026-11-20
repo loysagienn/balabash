@@ -151,7 +151,8 @@ each run owns a thread — its context and its visibility boundary.**
   remote agent's thread holds no run at all: its row is its whole state.
 - **Agents are declarations.** An agent module declares its SDK, prompt, tools and spawn
   rights; the platform supplies the session lifecycle, event-to-message rendering, live
-  tool-catalog sync and the standard verbs (`end_thread`, `send_file`, spawning). Prompts
+  tool delivery and thread completion. Codex gets its catalog over MCP at each turn;
+  catalog calls and calls inside programs use the same event journal. Prompts
   are assembled from a world library — one file per fact, every prompt imports instead of
   retelling.
 - **The console is one more projection.** The browser hydrates from a snapshot of the

@@ -440,7 +440,7 @@ export const agent = {
         if (event.type === 'thread.message') {
           // The platform rendering, headless mode: the operator's text plain,
           // attachments as fileId markers (the browser spawns no children).
-          const text = describeThreadMessage(event, true, new Set());
+          const text = describeThreadMessage(event, true, ctx.parentThreadId);
 
           if (text) {
             sessionPush(text);

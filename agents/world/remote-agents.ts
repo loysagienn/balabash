@@ -16,6 +16,6 @@ export const REMOTE_AGENTS_NOTE =
   'empty text sends nothing, and that silence is the right answer to a step; relay to the user only what ' +
   'matters (a question of the agent, the end of a stage, a problem). A remote agent has no access to ' +
   'Balabash file storage: ' +
-  'a file reaches it only as an attachment (the fileIds of the spawn or of send_to_thread — the files ' +
+  'a file reaches it only as an attachment (attach it when spawning or sending to the thread — the files ' +
   'themselves land in its session), a fileId in the text is useless to it; a file it produced comes back ' +
-  'only by your explicit remote_fetch_file with its path in the session.';
+  'only when you fetch the file by its path in the remote session.';

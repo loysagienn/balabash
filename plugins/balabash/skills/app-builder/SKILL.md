@@ -144,9 +144,7 @@ app's own router reads the rest of the path. Rules:
 ## URLs and publication
 
 - The owner opens the app at `https://<the workspace's domain>/apps/<folder-path>`
-  (the exact URL comes from `apps_list` — ownerUrl). Give the user this link when the
+  (the app listing gives the exact ownerUrl). Give the user this link when the
   app is ready.
-- Making the app public (a no-auth URL for anyone — `apps_list` reports it as
-  publicUrl once published) is a separate explicit action owned by the secretary's
-  `apps_publish` tool — tell the user to ask for publication in the main thread if
-  they want a public link.
+- Making the app public (a no-auth URL for anyone — the app listing reports it as
+  publicUrl once published) requires a separate request to the secretary in the main thread.

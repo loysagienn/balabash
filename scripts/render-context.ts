@@ -6,7 +6,7 @@
 // and after a change and diff the output.
 //
 // It walks the same code paths as the live app (agent catalog, tool-manager
-// bundles, session-run base verbs, the configured coordinator port), so the
+// bundles, Claude base verbs, Codex catalog and the configured coordinator port), so the
 // output is the truth, not a retelling. Connecting per-user servers (gmail,
 // notion) may hit the network; a server that fails to connect is reported in
 // the output instead of failing the run.
@@ -33,7 +33,7 @@ import { createAuthToolServer } from '../src/capabilities/auth-tools.ts';
 import { createEventsToolServer, createStorageToolServer } from '../src/capabilities/builtin-tools.ts';
 import { createRestartToolServer } from '../src/capabilities/restart-tools.ts';
 import { createRemoteToolServer } from '../src/capabilities/remote-tools.ts';
-import { describeSessionBridgeTools } from '../src/capabilities/session-run.ts';
+import { describeClaudeBridgeTools } from '../src/capabilities/session-run.ts';
 import {
   getServerToolFunctions,
   loadToolServers,
@@ -43,6 +43,7 @@ import {
 import { createScheduleToolServer } from '../src/schedule/tools.ts';
 import { createProjectsToolServer } from '../src/projects/tools.ts';
 import { buildStatusText } from '../src/coordinator/index.ts';
+import { createCodexPort } from '../src/harness/codex-sdk/catalog-bridge.ts';
 import { coordinatorPort } from '../src/coordinator/port.ts';
 import { getMainThread } from '../src/core/threads.ts';
 import { startTree } from '../src/tree/index.ts';
@@ -103,7 +104,7 @@ async function renderAgent(declaration: AgentDeclaration, workspaceId: string): 
     `# Agent: ${declaration.name}`,
     '',
     `- sdk: ${declaration.sdk}`,
-    `- tools bundle: ${JSON.stringify(bundle.declared)}`,
+    ...(declaration.sdk === 'claude' ? [`- tools bundle: ${JSON.stringify(bundle.declared)}`] : []),
     ...(children.length ? [`- spawnable sub-agents: ${children.join(', ')}`] : []),
     ...(declaration.defaultMode === 'headless' ? ['- headless: no user-facing thread, talks only to its operator'] : []),
     ...(declaration.session?.model ? [`- model: ${declaration.session.model}`] : []),
@@ -119,7 +120,10 @@ async function renderAgent(declaration: AgentDeclaration, workspaceId: string): 
   const sections: string[] = [header, spawnSurface];
 
   if (declaration.session) {
-    sections.push(renderSection('System prompt (session.instructions)', declaration.session.instructions));
+    // Rendering lists definitions but makes no calls under this caller.
+    const port = declaration.sdk === 'codex' ? await createCodexPort(declaration, workspaceId, 'showcase') : null;
+    const instructions = [declaration.session.instructions, port?.instructions].filter(Boolean).join('\n\n');
+    sections.push(renderSection('System prompt', instructions));
 
     if (declaration.session.environment) {
       sections.push(
@@ -137,10 +141,18 @@ async function renderAgent(declaration: AgentDeclaration, workspaceId: string): 
         declaration.session.initialMessage ? declaration.session.initialMessage(SAMPLE_PROMPT) : SAMPLE_PROMPT,
       ),
     );
+    if (port) {
+      const definitions = port.tools.map(tool => [
+        `### ${tool.name}`, tool.description, '```json',
+        JSON.stringify({ inputSchema: tool.inputSchema, outputSchema: tool.outputSchema }, null, 2), '```',
+      ].join('\n'));
+      sections.push(renderSection('Catalog functions in exec (ALL_TOOLS)', definitions.join('\n\n')));
+      return sections.join('\n\n') + '\n';
+    }
     sections.push(
       renderSection(
         'Bridge base verbs (session-run)',
-        describeSessionBridgeTools(declaration).map(renderTool).join('\n\n'),
+        describeClaudeBridgeTools(declaration).map(renderTool).join('\n\n'),
       ),
     );
   } else {

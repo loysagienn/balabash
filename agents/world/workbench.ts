@@ -7,7 +7,7 @@ export const WORKBENCH_NOTE =
   "Your working directory is the user's workspace file area — your workbench, shared across your sessions " +
   'and with other workbench agents. It is your home base: files you produce and keep live here. Path map: ' +
   '`./x` for your native tools is the same file as `x` for the workspace bridge tools ' +
-  '(workspace_export_file, workspace_import_file); both address paths from the workbench root.\n\n' +
+  'that take paths relative to the workbench root.\n\n' +
   'The host filesystem beyond the workbench is accessible and yours to use when the task points there: a ' +
   "project's code repository, server configuration, a tool installed on the host. Go there because the " +
   'user or a project library sends you, not to explore on your own initiative. Privileged ' +

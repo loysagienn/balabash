@@ -1,18 +1,15 @@
 // The catalog view for a port that assembles the model's context.
-import { agentGrantPolicy, isRemoteAgent, startable } from '../capabilities/agent-catalog.ts';
+import { catalogContext, catalogInstructions, portActions, vertexLine } from './catalog-context.ts';
 import {
-  FileRef, computeGrant, expandSchema, grantedChildren, grantedGuide, grantedVertex, ruleText, toCapabilityError, typeText,
+  FileRef, expandSchema, grantedGuide, grantedVertex, ruleText, toCapabilityError, typeText,
   type Catalog, type CatalogCapability, type FileRefValue, type Grant, type JsonSchema, type JsonValue,
 } from '../catalog/index.ts';
 import type { AgentPassport } from '../core/contract.ts';
 import { getFileDownloadUrl, openFileContent } from '../files/index.ts';
 import { dispatchCatalogCall } from '../tree/call-journal.ts';
 import { viewKind, VIEW_TEXT_MAX_CHARS } from '../tree/files.ts';
-import { catalog } from '../tree/index.ts';
-import { connectionsPort } from '../tree/services.ts';
 import type { CatalogOpeningContext, CatalogResult, FunctionCall, FunctionDefinition } from './turn-contract.ts';
 
-const actions = ['describe', 'run_program'] as const;
 const PREVIEW_CHARS = 16_000;
 
 function preview(grant: Grant, value: JsonValue, seq: bigint, field: 'value' | 'error'): string {
@@ -31,37 +28,10 @@ function capabilityDefinition(tree: Catalog, vertex: CatalogCapability): Functio
   return definition(tree, vertex.fullName, vertex.description, vertex.input);
 }
 
-function vertexLine(kind: string, name: string, summary: string): string {
-  return `${kind} ${name} — ${summary}`;
-}
-
-function coreText(grant: Grant): string {
-  const root = grant.catalog.root;
-  const agents = startable(grant.caller.agentName).map(agent =>
-    JSON.stringify({
-      name: agent.name,
-      description: agent.description,
-      modes: agent.modes,
-      defaultMode: agent.defaultMode,
-      ...(isRemoteAgent(agent) ? { remote: true, options: agent.options ?? {} } : {}),
-    }),
-  );
-  return [
-    'Catalog guide',
-    ...grantedGuide(grant, root),
-    '\nCatalog entries',
-    ...grantedChildren(grant, root).map(child => vertexLine(child.kind, child.fullName, child.summary)),
-    '\nUse describe to add a capability to the available functions. If its name appears only in the transcript, describe it again. Call the function by its catalog name.',
-    ...(grant.vertices.has('spawn_agent') && agents.length ? ['\nAgents you can start:', ...agents] : []),
-  ].join('\n');
-}
-
 export async function createCatalogPort(agent: AgentPassport, workspaceId: string, threadId: string) {
-  const tree = catalog();
-  const connections = connectionsPort();
-  const caller = { workspaceId, threadId, agentName: agent.name };
-  const grant = await computeGrant(tree, agentGrantPolicy(agent, actions), { caller, connections });
-  const tools = actions.map(name => {
+  const { grant, connections } = await catalogContext(agent, workspaceId, threadId);
+  const tree = grant.catalog;
+  const tools = portActions.map(name => {
     const action = tree.actions.get(name)!;
     return definition(tree, name, action.description, action.input);
   });
@@ -111,7 +81,9 @@ export async function createCatalogPort(agent: AgentPassport, workspaceId: strin
     return definitions;
   }
 
-  return { instructions: coreText(grant), tools, capabilityDefinitions, dispatch, grantKey: JSON.stringify([...grant.vertices]) };
+  const instructions = catalogInstructions(grant,
+    'Use describe to add a capability to the available functions. If its name appears only in the transcript, describe it again. Call the function by its catalog name.');
+  return { instructions, tools, capabilityDefinitions, dispatch, grantKey: JSON.stringify([...grant.vertices]) };
 }
 
 async function showFile(text: string, file: FileRefValue): Promise<CatalogResult> {

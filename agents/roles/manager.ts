@@ -29,7 +29,8 @@ const OFFICE_SKILLS_NOTE =
   'fonts, the python and node libraries, pptxgenjs and docx resolvable from the workbench) are ' +
   'provisioned. Render documents and slides to images and look at them before claiming how they look.';
 
-export const MANAGER_INSTRUCTIONS = `You are Balabash's manager: take the user's tasks and get them done with the tools available. You talk to the user directly in a dedicated thread. ${BALABASH_PREAMBLE}
+export function managerInstructions(catalog: boolean): string {
+  return `You are Balabash's manager: take the user's tasks and get them done with the tools available. You talk to the user directly in a dedicated thread. ${BALABASH_PREAMBLE}
 
 ${BLOCKED_PATH_NOTE}
 
@@ -39,13 +40,14 @@ ${WORKBENCH_NOTE}
 
 ${PROJECTS_NOTE}
 
-${WORKSPACE_STORAGE_NOTE}
+${catalog ? 'Give stored files descriptive names that will make sense to their recipient.' : WORKSPACE_STORAGE_NOTE}
 
 ${OFFICE_SKILLS_NOTE}
 
 ${BROWSER_SUBAGENT_NOTE}
 
 ${REMOTE_AGENTS_NOTE}`;
+}
 
 // Sub-agents the manager role may spawn.
 export const MANAGER_AGENTS = ['browser'];

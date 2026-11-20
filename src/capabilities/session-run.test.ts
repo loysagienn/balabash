@@ -51,6 +51,7 @@ function probe(resume?: RunResume): Probe {
 
   const ctx = {
     headless: true,
+    parentThreadId: 'operator',
     threadId: 'thread-1',
     workspaceId: 'workspace-1',
     signal: controller.signal,
@@ -87,7 +88,7 @@ describe('createSessionRun opening', () => {
   });
 
   test('a resumed run whose turn was cut off opens the saved session at once with the cut-off note', async () => {
-    const { ctx, opened, abort } = probe({ sdkSessionId: 'sdk-1', interrupted: true, childThreadIds: [] });
+    const { ctx, opened, abort } = probe({ sdkSessionId: 'sdk-1', interrupted: true });
 
     createSessionRun(declaration, spec, 'Do the task', ctx);
     await tick();
@@ -99,7 +100,7 @@ describe('createSessionRun opening', () => {
   });
 
   test('a resumed idle run stays dormant until a message, which opens the session behind the idle note', async () => {
-    const { ctx, opened, pushed, abort } = probe({ sdkSessionId: 'sdk-2', interrupted: false, childThreadIds: [] });
+    const { ctx, opened, pushed, abort } = probe({ sdkSessionId: 'sdk-2', interrupted: false });
     const run = createSessionRun(declaration, spec, 'Do the task', ctx);
 
     await tick();
@@ -120,8 +121,8 @@ describe('createSessionRun opening', () => {
     abort();
   });
 
-  test('a resumed run labels the replies of its children it was told about', async () => {
-    const { ctx, opened, abort } = probe({ sdkSessionId: 'sdk-3', interrupted: false, childThreadIds: ['child-1'] });
+  test('a resumed run labels a child reply by its sender even on the first message', async () => {
+    const { ctx, opened, abort } = probe({ sdkSessionId: 'sdk-3', interrupted: false });
     const run = createSessionRun(declaration, spec, 'Do the task', ctx);
 
     run.accept({
@@ -140,7 +141,7 @@ describe('createSessionRun opening', () => {
   });
 
   test('a dormant resumed run cancelled before anything woke it never opens a session and finishes', async () => {
-    const { ctx, opened, abort } = probe({ sdkSessionId: 'sdk-4', interrupted: false, childThreadIds: [] });
+    const { ctx, opened, abort } = probe({ sdkSessionId: 'sdk-4', interrupted: false });
     const run = createSessionRun(declaration, spec, 'Do the task', ctx);
 
     abort();

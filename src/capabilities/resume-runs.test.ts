@@ -101,14 +101,4 @@ describe('the boot sweep and the resume', () => {
     assert.equal((await threads.getThread(thread))?.status, 'failed');
     assert.equal(runs.getRun(thread), null);
   });
-
-  test('listActiveChildIds names the active children only', async () => {
-    const parent = await startChild('manager');
-    const active = await startChild('browser', parent);
-    const done = await startChild('browser', parent);
-
-    await appendEvent({ type: 'thread.cancelled', actor: 'system', workspaceId: stand.workspaceId, threadId: done, payload: { reason: 'stop' } });
-
-    assert.deepEqual(await threads.listActiveChildIds(parent), [active]);
-  });
 });

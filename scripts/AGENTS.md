@@ -62,10 +62,10 @@ node scripts/console-icons.mjs <balabash-icon-transparent.png> <balabash-icon-da
 
 The instruction-layer showcase: materializes, per model, what that model
 actually sees — the assembled system prompt, the initialMessage template, the
-bridge base verbs and the descriptions of its real tool bundle — one markdown
+Claude bridge verbs and tool bundle, or Codex catalog with input and output schemas — one markdown
 file per agent plus `coordinator.md` for the secretary, written into
 `data/showcase/` (overwritten on every run). It walks the same code paths as
-the live app (agent catalog, tool-manager bundles, session-run base verbs,
+the live app (agent catalog, Claude bridge tools, Codex catalog port,
 the configured coordinator port), so the output is the truth, not a
 retelling.
 

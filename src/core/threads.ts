@@ -209,15 +209,6 @@ export async function listBusyRunThreads(): Promise<Thread[]> {
   );
 }
 
-// The active children of a thread — the dialogue partners a resumed run is
-// told about (a fresh run learns them as it spawns).
-export async function listActiveChildIds(threadId: string): Promise<string[]> {
-  const rows = await prisma.$queryRaw<Array<{ id: string }>>`
-    SELECT id FROM threads WHERE parent_id = ${threadId} AND status = 'active' ORDER BY created_seq`;
-
-  return rows.map(row => row.id);
-}
-
 // Every main thread across all workspaces, oldest first — the boot sweep
 // that settles the course a dead process left them in (src/coordinator).
 export async function listMainThreads(): Promise<Thread[]> {

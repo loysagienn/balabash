@@ -13,8 +13,8 @@ import http from 'node:http';
 import type { IncomingMessage } from 'node:http';
 import { Codex } from '@openai/codex-sdk';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import type { AgentSdkSession, SdkSessionOptions, SdkTurn, ToolsApi } from '../../core/contract.ts';
-import { createBridgeServer } from '../claude-sdk/bridge.ts';
+import type { AgentPassport, AgentSdkSession, SdkSessionOptions, SdkTurn } from '../../core/contract.ts';
+import { createCodexPort } from './catalog-bridge.ts';
 import { mergeEnv } from '../env.ts';
 import { ensureCodexHome } from './codex-home.ts';
 import { codexSessionConfig } from './session-config.ts';
@@ -22,13 +22,15 @@ import { emitCodexEvent, emitCodexSessionEnd } from './stream-tap.ts';
 import { DEFAULT_EFFORT } from '../default-effort.ts';
 
 export type CodexSessionDeps = {
-  tools: ToolsApi;
+  codexPathOverride?: string;
+  agent: AgentPassport;
+  workspaceId: string;
   // Fallback working directory — the run's stateDir; options.cwd wins.
   cwd: string;
-  // When set, every ThreadEvent of the inner stream is published on the
+  // Every ThreadEvent of the inner stream is published on the
   // Codex stream tap under this thread (the session journal's feed), and
   // the session's end on close().
-  threadId?: string;
+  threadId: string;
 };
 
 type InputWaiter = {
@@ -103,7 +105,7 @@ async function readJsonBody(request: IncomingMessage): Promise<unknown> {
   return raw ? JSON.parse(raw) : undefined;
 }
 
-async function startBridgeHttpServer(deps: CodexSessionDeps, extraTools: SdkSessionOptions['extraTools']) {
+async function startBridgeHttpServer(port: Awaited<ReturnType<typeof createCodexPort>>) {
   const httpServer = http.createServer(async (request, response) => {
     if (request.url !== '/mcp' || request.method !== 'POST') {
       response.writeHead(405, { 'content-type': 'application/json' });
@@ -118,16 +120,12 @@ async function startBridgeHttpServer(deps: CodexSessionDeps, extraTools: SdkSess
     }
 
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
-    let bridge: Awaited<ReturnType<typeof createBridgeServer>> | null = null;
+    const server = port.createServer();
 
     try {
-      bridge = await createBridgeServer({
-        tools: deps.tools,
-        extraTools: extraTools ?? [],
-      });
       const body = await readJsonBody(request);
 
-      await bridge.server.connect(transport);
+      await server.connect(transport);
       await transport.handleRequest(request, response, body);
     } catch (error) {
       if (!response.headersSent) {
@@ -142,7 +140,7 @@ async function startBridgeHttpServer(deps: CodexSessionDeps, extraTools: SdkSess
       }
     } finally {
       await transport.close().catch(() => {});
-      await bridge?.server.close().catch(() => {});
+      await server.close().catch(() => {});
     }
   });
 
@@ -182,86 +180,60 @@ export function createCodexSession(options: SdkSessionOptions, deps: CodexSessio
   let activeTurn: AbortController | null = null;
 
   async function* turns(): AsyncGenerator<SdkTurn> {
-    const bridge = await startBridgeHttpServer(deps, options.extraTools);
-
-    try {
-      const codexHome = ensureCodexHome();
-      const codex = new Codex({
-        // SDK `env` replaces the subprocess environment entirely, so merge the
-        // extra variables over the inherited app environment. CODEX_HOME is
-        // the app's isolated home, never the host user's ~/.codex.
-        env: mergeEnv({ ...options.env, CODEX_HOME: codexHome }),
-        // Every override rides each `codex exec` invocation (a turn is one
-        // invocation, resumed by thread id), so the whole session sees them
-        // (session-config.ts: the brief, the bridge, reasoning summaries on,
-        // the host layer off).
-        config: codexSessionConfig(options.instructions, bridge.url, { imageGeneration: options.imageGeneration === true }),
-      });
-      const threadOptions = {
-        ...(options.model ? { model: options.model } : {}),
-        // Reasoning effort: the platform scale is a subset of Codex's, so the
-        // value passes through; the platform default is explicit
-        // (default-effort.ts).
-        modelReasoningEffort: options.effort ?? DEFAULT_EFFORT,
-        workingDirectory: options.cwd ?? deps.cwd,
-        skipGitRepoCheck: true,
-        // Parity with the Claude sessions (bypassPermissions): the host is
-        // fully accessible and the network is open; the workbench boundary is
-        // held by the brief, not by a sandbox.
-        sandboxMode: 'danger-full-access',
-        approvalPolicy: 'never',
-        webSearchMode: 'live',
-      } as const;
-      // A run resumed after an app restart continues its Codex thread (the
-      // rollout in CODEX_HOME); every turn is a `codex exec … resume` anyway.
-      const thread = options.resume ? codex.resumeThread(options.resume, threadOptions) : codex.startThread(threadOptions);
-
-      for await (const input of queue.iterable) {
-        if (closed) {
-          return;
-        }
-
+    const env = mergeEnv({ ...options.env, CODEX_HOME: ensureCodexHome() });
+    const threadOptions = {
+      ...(options.model ? { model: options.model } : {}),
+      modelReasoningEffort: options.effort ?? DEFAULT_EFFORT,
+      workingDirectory: options.cwd ?? deps.cwd,
+      skipGitRepoCheck: true,
+      sandboxMode: 'danger-full-access',
+      approvalPolicy: 'never',
+      webSearchMode: 'live',
+    } as const;
+    let resumeId = options.resume;
+    for await (const input of queue.iterable) {
+      if (closed) return;
+      const port = await createCodexPort(deps.agent, deps.workspaceId, deps.threadId);
+      const bridge = await startBridgeHttpServer(port);
+      try {
+        if (closed) return;
+        const instructions = options.instructions + '\n\n' + port.instructions;
+        const codex = new Codex({
+          env,
+          codexPathOverride: deps.codexPathOverride,
+          config: codexSessionConfig(instructions, bridge.url, { imageGeneration: options.imageGeneration === true }),
+        });
+        const thread = resumeId ? codex.resumeThread(resumeId, threadOptions) : codex.startThread(threadOptions);
         const turnController = new AbortController();
         activeTurn = turnController;
+        const streamed = await thread.runStreamed(input, { signal: turnController.signal });
 
-        try {
-          const streamed = await thread.runStreamed(input, { signal: turnController.signal });
+        for await (const event of streamed.events) {
+          emitCodexEvent(deps.threadId, event);
 
-          for await (const event of streamed.events) {
-            if (deps.threadId) {
-              emitCodexEvent(deps.threadId, event);
-            }
-
-            if (event.type === 'item.completed' && event.item.type === 'agent_message') {
-              // Said on the way: the turn is over only when its stream is.
-              yield { text: event.item.text.trim(), ongoing: true };
-            } else if (event.type === 'turn.failed') {
-              throw new Error(`Codex SDK session turn failed: ${event.error.message}`);
-            } else if (event.type === 'error') {
-              throw new Error(`Codex SDK session failed: ${event.message}`);
-            }
-          }
-
-          // The stream of the turn is read to its end: the turn ran its
-          // course. Its texts are handed over already, so the end is empty.
-          yield { text: '' };
-        } finally {
-          if (activeTurn === turnController) {
-            activeTurn = null;
+          if (event.type === 'item.completed' && event.item.type === 'agent_message') {
+            // Said on the way: the turn is over only when its stream is.
+            yield { text: event.item.text.trim(), ongoing: true };
+          } else if (event.type === 'turn.failed') {
+            throw new Error(`Codex SDK session turn failed: ${event.error.message}`);
+          } else if (event.type === 'error') {
+            throw new Error(`Codex SDK session failed: ${event.message}`);
           }
         }
+
+        resumeId = thread.id ?? undefined;
+      } finally {
+        activeTurn = null;
+        await bridge.close();
       }
-    } finally {
-      activeTurn?.abort();
-      await bridge.close();
+      yield { text: '' };
     }
   }
 
   return {
     push: text => queue.push(text),
     turns: turns(),
-    // The HTTP bridge builds its MCP server from the current ToolsApi for
-    // every request, so the next list/call observes the latest catalog.
+    // Every queued input starts a new CLI process with a fresh grant.
     syncTools: async () => {},
     close: () => {
       if (closed) {
@@ -272,9 +244,7 @@ export function createCodexSession(options: SdkSessionOptions, deps: CodexSessio
       queue.end();
       activeTurn?.abort();
 
-      if (deps.threadId) {
-        emitCodexSessionEnd(deps.threadId);
-      }
+      emitCodexSessionEnd(deps.threadId);
     },
   };
 }

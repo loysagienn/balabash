@@ -10,7 +10,6 @@ const servers: Record<string, string[]> = {
   architect: general,
   auth: ['auth', 'storage', 'events'],
   browser: ['workspace', 'workspace_files', 'storage'],
-  codex: general,
   coordinator: [
     'apps', 'current_datetime', 'events', 'drive', 'gmail', 'http_get', 'perplexity', 'projects', 'remote',
     'schedule', 'storage', 'storage_download_file', 'workspace', 'workspace_files', 'restart',
@@ -18,7 +17,6 @@ const servers: Record<string, string[]> = {
   designer: general.filter(server => server !== 'drive'),
   engineer: [...general, 'restart'],
   gardener: ['current_datetime', 'projects', 'remote', 'storage', 'storage_download_file', 'workspace'],
-  image_generator: ['storage'],
   manager: general,
 };
 

@@ -16,16 +16,14 @@ import type { RunResume, Thread } from '../core/contract.ts';
 import { appendEvent } from '../core/append.ts';
 import { getLastThreadEvent, getWorkspaceEvent } from '../core/events.ts';
 import { THREAD_CANCELLED } from '../core/envelope.ts';
-import { getThread, listActiveChildIds, listActiveChildThreads } from '../core/threads.ts';
+import { getThread, listActiveChildThreads } from '../core/threads.ts';
 import { registerRun } from '../runtime/runs.ts';
 import { spawnAgentRun } from './agent-runtime.ts';
-
-export type SavedSession = Omit<RunResume, 'childThreadIds'>;
 
 // The thread's session in its SDK's store, as the journal last named it, and
 // whether a turn was in flight when the journal last heard of it (the last
 // session.state is `run`); null when no session was ever named.
-export async function savedSessionOf(threadId: string): Promise<SavedSession | null> {
+export async function savedSessionOf(threadId: string): Promise<RunResume | null> {
   const sdk = await getLastThreadEvent(threadId, 'session.sdk');
   const sdkSessionId = sdk?.payload.sdkSessionId;
 
@@ -93,8 +91,6 @@ export async function resumeThreadRuns(): Promise<{ resumed: number; failed: num
         continue;
       }
 
-      const resume: RunResume = { ...saved, childThreadIds: await listActiveChildIds(thread.id) };
-
       await appendEvent({
         type: 'session.resumed',
         actor: 'agent',
@@ -104,7 +100,7 @@ export async function resumeThreadRuns(): Promise<{ resumed: number; failed: num
         payload: { sdkSessionId: saved.sdkSessionId, interrupted: saved.interrupted },
       });
 
-      const run = await spawnAgentRun(thread, startedEvent, resume);
+      const run = await spawnAgentRun(thread, startedEvent, saved);
 
       if (run) {
         registerRun(thread.id, run);
