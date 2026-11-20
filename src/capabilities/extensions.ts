@@ -44,3 +44,16 @@ export async function importExtensionModule(file: string): Promise<Record<string
 
   return (await import(url)) as Record<string, unknown>;
 }
+
+export type ExtensionFailure = { file: string; error: string };
+export type ReportExtensionFailure = (failure: ExtensionFailure) => Promise<void>;
+
+export async function reportSkippedExtension(scope: string, file: string, cause: unknown, report?: ReportExtensionFailure) {
+  const error = cause instanceof Error ? cause.message : String(cause);
+  console.error(`[${scope}] ${file} skipped: ${error}`);
+  try {
+    await report?.({ file, error });
+  } catch (journalError) {
+    console.error(`[${scope}] failed to journal the skip of ${file}:`, journalError);
+  }
+}

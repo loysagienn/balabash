@@ -31,7 +31,7 @@ confidential from them.
   with its guide and its own capabilities, and the nodes written so far —
   each action takes its data from the app's own layers; at its start the
   app tells the services these nodes declare to the connections layer.
-  Installation connector nodes are built here from MCP discovery),
+  Installation nodes come from authored modules and MCP connector discovery),
   `coordinator/` (the secretary: instructions and function definitions),
   `harness/` (the model backends: `claude-sdk/`, `codex-sdk/`, `openai/`,
   `anthropic/`), `adapters/` (surfaces: `telegram/`, `ccr/`), `api/` (the
@@ -74,7 +74,8 @@ confidential from them.
   `workspace/<workspaceId>/` (the workbench: `workspace.sqlite`, `files/`,
   `tmp/`), `agent-state/`, `codex-home/`, `supervisor/`,
   `process-groups/` (program and workspace command groups checked at boot),
-  `showcase/` (render-context output), and the extensions below.
+  `showcase/` (render-context output), `nodes/` (written catalog nodes),
+  `mcp-servers/` (external service settings), and `remote-agents/` (drivers).
 - `.env` — the installation's configuration; `.env.example` documents every
   variable (`SETUP.md`).
 

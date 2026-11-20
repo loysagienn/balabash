@@ -293,3 +293,6 @@ export async function deleteFile(fileId: string): Promise<void> {
   await deleteStorageObject(file.bucket, normalizeObjectKey(file.objectKey));
   await prisma.file.delete({ where: { id: fileId } });
 }
+
+// Storage operations shared by installation extensions at boot and in offline tools.
+export const extensionFilesApi = { ingest: ingestFile, get: getFile, getDownloadUrl: getFileDownloadUrl, open: openFileContent };

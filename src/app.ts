@@ -11,10 +11,11 @@ import type { Consumer } from './core/consumers.ts';
 import { prisma } from './db/client.ts';
 import { config } from './config/index.ts';
 import { COORDINATOR_AGENT } from './core/threads.ts';
-import { getFile, getFileDownloadUrl, ingestFile, openFileContent } from './files/index.ts';
+import { extensionFilesApi } from './files/index.ts';
 import { loadAgents, repositoryAgentNames } from './capabilities/agent-catalog.ts';
 import { spawnAgentRun } from './capabilities/agent-runtime.ts';
 import { resumeThreadRuns, tombstoneUnresumableThreads } from './capabilities/resume-runs.ts';
+import type { ReportExtensionFailure } from './capabilities/extensions.ts';
 import { loadRemoteAgents } from './capabilities/remote-agent-source.ts';
 import { createRemoteDriverContext, refreshRemoteSecretTargets, registerRemoteSecretTargets } from './capabilities/remote-agent-secrets.ts';
 import { appendEvent } from './core/append.ts';
@@ -93,13 +94,14 @@ if (tombstoned > 0) {
 // before the web, resumed threads or schedule can start new runs.
 await sweepAbortedRuns();
 
-// Storage access for installation remote drivers.
-const extensionFilesApi = {
-  ingest: (input: Parameters<typeof ingestFile>[0]) => ingestFile(input),
-  get: (fileId: string) => getFile(fileId),
-  getDownloadUrl: (fileId: string, options?: { expiresInSeconds?: number }) => getFileDownloadUrl(fileId, options),
-  open: (fileId: string) => openFileContent(fileId),
-};
+function journalExtensionFailure(scope: string): ReportExtensionFailure {
+  return async ({ file, error }) => {
+    await appendEvent({
+      type: SYSTEM_EXCEPTION, actor: 'system', workspaceId: null,
+      payload: { scope, error: `${file}: ${error}` },
+    });
+  };
+}
 
 // The catalog: the repository's agents, then the installation's remote agent
 // kinds (data/remote-agents) — a kind that fails to load is skipped loudly,
@@ -108,14 +110,7 @@ loadAgents(
   await loadRemoteAgents({
     context: kind => createRemoteDriverContext(kind, extensionFilesApi),
     repositoryAgents: repositoryAgentNames(),
-    report: async ({ file, error }) => {
-      await appendEvent({
-        type: SYSTEM_EXCEPTION,
-        actor: 'system',
-        workspaceId: null,
-        payload: { scope: 'remote-agents', error: `${file}: ${error}` },
-      });
-    },
+    report: journalExtensionFailure('remote-agents'),
   }),
 );
 registerRemoteSecretTargets();
@@ -123,7 +118,7 @@ await refreshRemoteSecretTargets();
 
 // The tree of the capability catalog: its services join the connections
 // layer before the web surface and the schedule can ask for one.
-await startTree();
+await startTree(journalExtensionFailure('nodes'));
 
 startWebServer();
 

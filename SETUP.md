@@ -119,14 +119,14 @@ from the bot's `/auth_code`. A Telegram group becomes a workspace with
 ## Extension points of an installation
 
 At boot, Connections loads external service settings from
-`data/mcp-servers/<name>.json`. Node loads remote agent drivers directly from
+`data/mcp-servers/<name>.json`. Node.js loads remote agent drivers directly from
 `data/remote-agents/<name>.ts`. Drivers can import packages and repository types
 with `import type`. They receive platform services through `ctx`.
 
 ### Written catalog nodes
 
 Place one TypeScript module per top-level node in `data/nodes/<name>.ts`.
-The filename supplies its snake_case name. Node loads the module at startup.
+The filename supplies its snake_case name. Node.js loads the module at startup.
 Use a subdirectory for helpers. Export a synchronous `define` function. Import
 the contract as a **type** and use the catalog values passed by the running app:
 
@@ -148,11 +148,14 @@ export const define: DefineInstallationNode = ({ capability, z }) => ({
 ```
 
 Use `node` for nested groups, `namedType` for shared schemas and `CapabilityError`
-for typed failures. Each connection uses the same `account` or `secret` declaration
-as a repository node. The platform registers the service and supplies its authority
+for typed failures. Named types share a namespace with the repository and all installed nodes.
+In a capability's `run(input, ctx)`, `files.ingest(ctx, { body, originalFilename, contentType, sizeBytes })`
+stores bytes and returns a catalog `FileRef`. `files.open(ctx, fileId)` reads a stream from the caller's workspace.
+Each connection follows the `Connection` type in `src/catalog/definition.ts`. The platform registers the service and supplies its authority
 to calls. Agent or profile recipients receive the subtree subject to the workspace's
 connections. An empty or omitted list leaves it available to scheduled programs only.
-A broken module or a collision is logged with its filename and skipped as a unit.
+An unknown recipient produces a startup warning. A broken module or collision skips that file as a unit.
+The System screen shows its filename and error under `nodes`.
 Keep full names and service keys distinct from repository vertices, other installed
 nodes and configured services. Restart Balabash to load changes.
 

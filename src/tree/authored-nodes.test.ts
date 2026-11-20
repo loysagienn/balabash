@@ -22,6 +22,7 @@ test('written installation modules join the published tree and its consumers', a
   const account = (service: string) => JSON.stringify({ type: 'account', service, summary: 'Read notes',
     oauth: { url: 'https://notes.test', clientRegistration: 'dynamic' } });
   const simple = (fields: string) => `export function define() { return { summary: 'Read notes', children: [], ${fields} }; }`;
+  await write('async_node', 'export async function define() { throw new Error("unreachable"); }');
   await write('bad_service', simple('connection: ' + account('gmail')));
   await write('bad_config', simple('connection: ' + account('wiki')));
   await write('bad_text', simple("summary: 'For example, an unknown text'"));
@@ -33,9 +34,16 @@ test('written installation modules join the published tree and its consumers', a
       node({ name: 'part', summary: 'Duplicate part', children: [] }),
     ] };
   }`);
-  await write('meter', `export function define({ namedType, capability, node, z, secretAuthority }) {
+  await write('meter', `export function define({ namedType, capability, node, z, secretAuthority, files, FileRef, FileId }) {
     const reading = namedType('Reading', { description: 'A meter reading.' }, z.strictObject({ amount: z.number() }));
     return { summary: 'Read a meter', recipients: ['general', 'meter_reader'], children: [
+      capability({ name: 'save', summary: 'Save the reading', description: 'Store the report as a file.',
+        input: z.strictObject({}), output: FileRef, run: (_, ctx) => files.ingest(ctx, {
+          body: Buffer.from('meter report'), originalFilename: 'meter.txt', contentType: 'text/plain', sizeBytes: 12,
+        }) }),
+      capability({ name: 'load', summary: 'Read a file', description: 'Read the stored report.',
+        input: z.strictObject({ file: FileId }), output: z.string(),
+        run: async ({ file }, ctx) => new Response(await files.open(ctx, file)).text() }),
       node({ name: 'room', summary: 'Read a room meter', guide: [{ text: 'Read the meter in its room.' }],
         connection: { type: 'secret', service: 'room_meter', summary: 'Read a room meter', secrets: ['METER'] },
         children: [capability({ name: 'read', summary: 'Get a reading', description: 'Return the current reading.',
@@ -51,7 +59,8 @@ test('written installation modules join the published tree and its consumers', a
   const errors = t.mock.method(console, 'error', () => {});
   const warnings = t.mock.method(console, 'warn', () => {});
   const before = catalog();
-  await startTree();
+  const failures: { file: string; error: string }[] = [];
+  await startTree(async failure => { failures.push(failure); });
 
   await t.test('rejects collisions and invalid authored text before publishing services or types', () => {
     const messages = errors.mock.calls.map(call => call.arguments.join(' ')).join('\n');
@@ -60,7 +69,14 @@ test('written installation modules join the published tree and its consumers', a
     assert.match(messages, /bad_config\.ts skipped:.*wiki.*already configured/);
     assert.match(messages, /bad_text\.ts skipped:[\s\S]*carries an example/);
     assert.match(messages, /threads\.ts skipped:[\s\S]*two vertices share this full name/);
-    assert.match(warnings.mock.calls.map(call => call.arguments.join(' ')).join('\n'), /nightly\.ts has no agent recipients/);
+    const notices = warnings.mock.calls.map(call => call.arguments.join(' ')).join('\n');
+    assert.match(notices, /nightly\.ts has no agent recipients/);
+    assert.match(notices, /meter\.ts names unknown recipient "meter_reader"/);
+    assert.doesNotMatch(notices, /unknown recipient "general"/);
+    assert.deepEqual(failures.map(failure => failure.file), [
+      'alpha.ts', 'async_node.ts', 'bad_config.ts', 'bad_service.ts', 'bad_text.ts', 'threads.ts',
+    ]);
+    assert.match(failures[1].error, /define must return the node synchronously/);
     assert.equal(getAccountService('partial'), null);
     assert.equal(getAccountService('shadow'), null);
     assert.equal(getAccountService('wiki')?.url, 'https://wiki.test/mcp');
@@ -86,6 +102,21 @@ test('written installation modules join the published tree and its consumers', a
     const named = await catalogContext({ ...coordinator, name: 'meter_reader' }, workspaceId, mainThreadId);
     assert.ok(named.grant.vertices.has('meter_room_read'));
     assert.equal(grantKey(grant), grantKey((await context()).grant));
+  });
+
+  await t.test('a written capability stores a FileRef and opens only files of its caller', async () => {
+    const port = await createCatalogPort(agent, workspaceId, mainThreadId, 'function');
+    const call = (name: string, args: object) => port.dispatch({
+      callId: crypto.randomUUID(), name, arguments: JSON.stringify(args),
+    }, { seenNodes: new Set(), introduce: () => true });
+    const file = JSON.parse((await call('meter_save', {})).text);
+    assert.equal(file.kind, 'file');
+    assert.equal(file.name, 'meter.txt');
+    assert.equal(JSON.parse((await call('meter_load', { file: file.id })).text), 'meter report');
+    const { ingestFile } = await import('../files/index.ts');
+    const foreign = await ingestFile({ body: Buffer.from('private'), scope: 'test' });
+    const denied = await call('meter_load', { file: foreign.id });
+    assert.equal(JSON.parse(denied.text).kind, 'not_found');
   });
 
   await t.test('offline samples match independent first openings and leave the journal alone', async () => {
@@ -132,4 +163,23 @@ test('written installation modules join the published tree and its consumers', a
     } });
     assert.equal((completed.payload as { functionName: string }).functionName, 'nightly_read');
   });
+});
+
+test('authored revisions identify the built contract across independent builds', async () => {
+  const { buildCatalog, capability, node } = await import('../catalog/index.ts');
+  const { z } = await import('zod');
+  const installation = { source: 'authored' as const, revision: '', recipients: ['general'] };
+  const build = (description: string) => {
+    const leaf = capability({ name: 'read', summary: 'Read a meter', description,
+      input: z.strictObject({}), output: z.number(), run: () => 12 });
+    const root = node({ name: 'meter', summary: 'Meter', installation, children: [leaf] });
+    const { catalog } = buildCatalog({ summary: 'Catalog', children: [root] });
+    const vertex = catalog.vertices.get('meter');
+    assert.ok(vertex?.kind === 'node' && vertex.installation?.revision);
+    return vertex.installation.revision;
+  };
+  const revision = build('Return the current reading.');
+  assert.equal(build('Return the current reading.'), revision);
+  assert.notEqual(build('Return the previous reading.'), revision);
+  assert.equal(installation.revision, '');
 });

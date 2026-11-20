@@ -105,6 +105,7 @@ export {
   JsonValue,
   WorkspacePath,
   getNamedType,
+  withNamedTypes,
   namedType,
   type AccountValue,
   type FileRefValue,

@@ -53,16 +53,10 @@ export function loadAgents(remote: RemoteAgentDeclaration[] = []): void {
     loadedAgents.set(declaration.name, declaration);
   }
 
-  const recipients = new Set([coordinator.name, ...loadedAgents.keys(), ...Object.keys(accessProfiles)]);
-  for (const agent of remote) {
-    for (const name of agent.recipients ?? []) {
-      if (!recipients.has(name)) {
-        console.warn(`[remote-agents] ${agent.name} names unknown recipient "${name}"`);
-      }
-    }
-  }
-
   agents = loadedAgents;
+  for (const agent of remote) {
+    warnRecipients(`[remote-agents] ${agent.name}`, agent.recipients ?? []);
+  }
 
   console.log(`[agents] loaded: ${[...agents.keys()].join(', ') || '(none)'}`);
 }
@@ -85,6 +79,15 @@ export function getAgents(): CatalogAgent[] {
 
 export function passport(name: string): AgentPassport | RemoteAgentDeclaration | null {
   return name === coordinator.name ? coordinator : getAgent(name);
+}
+
+export function warnRecipients(extension: string, recipients: readonly string[]): void {
+  if (!recipients.length) console.warn(`${extension} has no agent recipients`);
+  for (const name of recipients) {
+    if (!passport(name) && !Object.hasOwn(accessProfiles, name)) {
+      console.warn(`${extension} names unknown recipient "${name}"`);
+    }
+  }
 }
 
 export function addressedTo(recipients: readonly string[], agent: AgentPassport | RemoteAgentDeclaration): boolean {

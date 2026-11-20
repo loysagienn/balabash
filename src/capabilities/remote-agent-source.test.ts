@@ -15,7 +15,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type { RemoteDriverContext } from '../core/contract.ts';
 import { getLoadedRemoteKind, loadRemoteAgents } from './remote-agent-source.ts';
-import type { RemoteAgentLoadFailure } from './remote-agent-source.ts';
+import type { ExtensionFailure } from './extensions.ts';
 
 let directory: string;
 
@@ -50,7 +50,7 @@ after(() => rm(directory, { recursive: true, force: true }));
 
 describe('loadRemoteAgents', () => {
   test('loads the valid kinds, skips and reports the rest, and remembers each kind with its context', async () => {
-    const failures: RemoteAgentLoadFailure[] = [];
+    const failures: ExtensionFailure[] = [];
     const contexts = new Map<string, RemoteDriverContext>();
     const context = (kind: string): RemoteDriverContext => {
       const ctx = { secrets: { get: async () => `secret-of-${kind}` }, files: {} as RemoteDriverContext['files'] };

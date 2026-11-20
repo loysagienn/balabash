@@ -57,7 +57,8 @@ import {
   type Node,
 } from '../catalog/index.ts';
 import { loadExternalServices } from '../capabilities/external-services.ts';
-import { authoredRevision, loadAuthoredNodes } from './authored-nodes.ts';
+import type { ReportExtensionFailure } from '../capabilities/extensions.ts';
+import { loadAuthoredNodes } from './authored-nodes.ts';
 import { addressedTo } from '../capabilities/agent-catalog.ts';
 import type { AgentPassport } from '../core/contract.ts';
 import { connectorNamesFor, startConnectors } from './connectors.ts';
@@ -166,12 +167,12 @@ let built: Catalog | null = null;
 
 const installed = new Map<string, Node>();
 
-function publishNode(node: Node, reserved: ReadonlySet<string>): void {
+function publishNode(node: Node): void {
   const { name } = node;
   const installation = node.installation!;
   const previous = installed.get(name)?.installation;
   if (previous && previous.source !== installation.source) throw new Error(`Node "${name}" is already installed`);
-  if (previous && previous.revision === installation.revision) return;
+  if (installation.source === 'discovered' && previous && previous.revision === installation.revision) return;
   const next = new Map(installed);
   next.set(name, node);
   const nodes = [...next.values()].sort((a, b) => a.name.localeCompare(b.name));
@@ -179,9 +180,6 @@ function publishNode(node: Node, reserved: ReadonlySet<string>): void {
   const catalog = buildCatalog({ ...root, children: [...root.children, ...nodes] }).catalog;
   const subtree = catalog.vertices.get(name)!;
   if (subtree.kind !== 'node') throw new Error(`Expected node "${name}"`);
-  if (installation.source === 'authored') {
-    installation.revision = authoredRevision(subtree, catalog, reserved);
-  }
   registerServices(subtree);
   installed.set(name, node);
   built = catalog;
@@ -207,15 +205,14 @@ export function catalog(): Catalog {
 // From then on they can be connected, and `connectionsPort()` (./services.ts)
 // answers for them. The catalog owns definitions of its nodes' services. The schedule gets what its programs run against:
 // this catalog and these connections.
-export async function startTree(): Promise<void> {
+export async function startTree(report?: ReportExtensionFailure): Promise<void> {
   const { connectors, names } = await loadExternalServices();
   for (const remote of getLoadedRemoteKinds()) {
     if (remote.secrets?.length) names.add(remote.name);
   }
   registerServices(catalog().root);
-  const publish = (node: Node) => publishNode(node, names);
-  await loadAuthoredNodes(publish);
-  await startConnectors(connectors, publish);
+  await loadAuthoredNodes(publishNode, names, report);
+  await startConnectors(connectors, publishNode);
   setProgramHost({ catalog, connections: connectionsPort(), traceCall: journalProgramCall });
   await refreshSecretServices();
 }

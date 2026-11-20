@@ -4,6 +4,7 @@
 // (CatalogBuildError lists every problem at once); a text over its length
 // budget or a field comment repeated verbatim is a warning.
 
+import { createHash } from 'node:crypto';
 import { ACTIONS, ACTION_NAMES, type ActionName } from './actions.ts';
 import type {
   AccountConnection,
@@ -123,6 +124,22 @@ type SchemaSide = {
   // Field names stay as the external server calls them.
   external: boolean;
 };
+
+// A restart can resume an opening from a previous process. Hash the actual
+// published contract, including types imported from a module's helper files.
+function authoredRevision(root: CatalogNode, types: Catalog['types']): string {
+  const hash = createHash('sha256');
+  function visit(vertex: CatalogVertex): void {
+    const contract = vertex.kind === 'node'
+      ? [vertex.fullName, vertex.summary, vertex.guide, vertex.connection]
+      : [vertex.fullName, vertex.summary, vertex.description, vertex.input, vertex.output, vertex.inputRules,
+          vertex.types.map(name => types.get(name))];
+    hash.update(JSON.stringify(contract));
+    if (vertex.kind === 'node') vertex.children.forEach(visit);
+  }
+  visit(root);
+  return hash.digest('hex');
+}
 
 export function buildCatalog(root: RootDefinition): { catalog: Catalog; warnings: string[] } {
   const problems: string[] = [];
@@ -743,6 +760,12 @@ export function buildCatalog(root: RootDefinition): { catalog: Catalog; warnings
 
   if (problems.length) {
     throw new CatalogBuildError(problems);
+  }
+
+  for (const node of nodes) {
+    if (node.installation?.source === 'authored') {
+      node.installation = { ...node.installation, revision: authoredRevision(node, types) };
+    }
   }
 
   return { catalog: { root: rootNode, vertices, types, actions }, warnings };

@@ -3,7 +3,7 @@
 import { createHash } from 'node:crypto';
 import { resolveOperatorCredentials, tokenTtlMs } from '../adapters/ccr/token.ts';
 import { connectorServer } from '../capabilities/claude-connector.ts';
-import { addressedTo } from '../capabilities/agent-catalog.ts';
+import { addressedTo, warnRecipients } from '../capabilities/agent-catalog.ts';
 import type { AgentPassport } from '../core/contract.ts';
 import type { ExternalServerConfig } from '../capabilities/server-config.ts';
 import { CapabilityError, type JsonObject, type Node } from '../catalog/index.ts';
@@ -32,7 +32,7 @@ export async function startConnectors(configs: [string, Config][], install: type
   publish = install;
   for (const [name, config] of configs) {
     const recipients = config.recipients ?? [];
-    if (!recipients.length) console.warn(`[connectors] ${name} has no agent recipients`);
+    warnRecipients(`[connectors] ${name}`, recipients);
     connectors.push({
       name, config, recipients, state: 'failed', error: null, tokenExpiresAt: null, generation: '', discoverAfter: 0,
     });

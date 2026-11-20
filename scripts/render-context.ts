@@ -20,7 +20,7 @@ import path from 'node:path';
 import type { AgentDeclaration, RemoteAgentDeclaration } from '../src/core/contract.ts';
 import type { FunctionDefinition } from '../src/harness/turn-contract.ts';
 import { prisma } from '../src/db/client.ts';
-import { getFile, getFileDownloadUrl, ingestFile, openFileContent } from '../src/files/index.ts';
+import { extensionFilesApi } from '../src/files/index.ts';
 import { getAgents, isRemoteAgent, loadAgents, repositoryAgentNames, startable } from '../src/capabilities/agent-catalog.ts';
 import { loadRemoteAgents } from '../src/capabilities/remote-agent-source.ts';
 import { createRemoteDriverContext } from '../src/capabilities/remote-agent-secrets.ts';
@@ -195,18 +195,11 @@ async function resolveWorkspaceId(): Promise<string> {
 
 const workspaceId = await resolveWorkspaceId();
 
-const filesApi = {
-  ingest: (input: Parameters<typeof ingestFile>[0]) => ingestFile(input),
-  get: (fileId: string) => getFile(fileId),
-  getDownloadUrl: (fileId: string, options?: { expiresInSeconds?: number }) => getFileDownloadUrl(fileId, options),
-  open: (fileId: string) => openFileContent(fileId),
-};
-
 // The installation's remote agent kinds join the catalog as at boot; a kind
 // that fails to load is reported here, not journaled.
 loadAgents(
   await loadRemoteAgents({
-    context: kind => createRemoteDriverContext(kind, filesApi),
+    context: kind => createRemoteDriverContext(kind, extensionFilesApi),
     repositoryAgents: repositoryAgentNames(),
   }),
 );
