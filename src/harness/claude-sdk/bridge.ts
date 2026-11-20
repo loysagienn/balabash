@@ -47,15 +47,15 @@ export async function createClaudePort(agent: AgentPassport, workspaceId: string
 export async function createClaudeBridge(agent: AgentPassport, workspaceId: string, threadId: string) {
   let port = await createClaudePort(agent, workspaceId, threadId);
   // Only the initial catalog survives compaction in the system prompt.
-  const systemPort = port;
-  let contextPort = systemPort;
+  const instructions = port.instructions;
+  let contextInstructions = instructions;
   let listChanged = false;
   const server = new McpServer({ name: BRIDGE_SERVER, version: '2.0.0' }, { capabilities: { tools: { listChanged: true } } });
   registerCatalogHandlers(server.server, () => port);
   return {
-    server, instructions: systemPort.instructions,
+    server, instructions,
     onCompact() {
-      contextPort = systemPort;
+      contextInstructions = instructions;
     },
     async refresh(text: string) {
       try {
@@ -69,8 +69,8 @@ export async function createClaudeBridge(agent: AgentPassport, workspaceId: stri
       } catch (error) {
         console.error(`[claude-catalog:${threadId}] refresh failed:`, error);
       }
-      if (contextPort.grantKey === port.grantKey && contextPort.instructions === port.instructions) return text;
-      contextPort = port;
+      if (contextInstructions === port.instructions) return text;
+      contextInstructions = port.instructions;
       return `[Updated Balabash catalog — replaces the catalog section of your instructions]\n${port.instructions}\n\n${text}`;
     },
   };

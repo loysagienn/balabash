@@ -39,7 +39,7 @@ import { FileNotFoundError, getFile, getWorkspaceFile, ingestFile, openFileConte
 import type { StorageBody } from '../files/storage.ts';
 import { verifyDownloadLink } from '../files/storage/local.ts';
 import { forgetExternalServerSecrets, getExternalServerSecretRequest, isExternalSecretServer, openExternalServerCredentialsRequest, provisionExternalServerSecrets } from '../capabilities/external-secrets.ts';
-import { connectorServiceViews } from '../tree/connectors.ts';
+import { connectorStatuses } from '../tree/connectors.ts';
 import { getAccountService, refreshSecretServices, listSecretServices, type SecretService } from '../capabilities/connections/services.ts';
 import { ConnectionError, disconnectConnection, getOauthClientRequest, getWorkspaceConnection, openOauthClientRequest, provisionOauthClient, reconnectConnection, renameConnection, startConnection, connectionView } from '../capabilities/connections/index.ts';
 import { AppManagementError, listApps, publishApp, unpublishApp } from '../apps/management.ts';
@@ -1826,7 +1826,7 @@ function installationServiceView(target: SecretService): InstallationServiceView
 router.get('/installation-services', requireSession, async ctx => {
   await refreshSecretServices();
 
-  const response: InstallationServicesResponse = { services: listSecretServices().map(installationServiceView), connectors: await connectorServiceViews() };
+  const response: InstallationServicesResponse = { services: listSecretServices().map(installationServiceView), connectors: await connectorStatuses() };
 
   ctx.body = prepareObject(response);
 });

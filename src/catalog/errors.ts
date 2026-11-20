@@ -10,7 +10,7 @@ export const ERROR_KINDS = [
   'unknown_capability', // the caller: no capability with this name in the caller's grant
   'not_found', // the caller: the object an argument points to does not exist
   'conflict', // the caller: the current state does not allow the action
-  'auth_required', // the user: the account is not connected or its authorization has expired
+  'auth_required', // the account holder or installation operator needs to supply valid credentials
   'external_error', // the outside system refused, or answered with something that does not fit the output type
   'unavailable', // the outside system gave no answer; whether the action took effect is unknown
   'internal', // the platform: a defect of the capability or of the platform

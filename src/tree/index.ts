@@ -56,7 +56,7 @@ import {
   type Node,
 } from '../catalog/index.ts';
 import { loadExternalServices } from '../capabilities/external-services.ts';
-import { configureConnectors, refreshConnectors } from './connectors.ts';
+import { startConnectors } from './connectors.ts';
 import { refreshSecretServices } from '../capabilities/connections/services.ts';
 import { connections } from './connections.ts';
 import { drive } from './drive.ts';
@@ -161,27 +161,21 @@ let built: Catalog | null = null;
 
 const installed = new Map<string, Node>();
 
-function publishNode(name: string, node: Node | null): void {
-  if (installed.get(name)?.installation?.revision === node?.installation?.revision) return;
+function publishNode(node: Node): void {
+  const { name } = node;
+  if (installed.get(name)?.installation?.revision === node.installation?.revision) return;
   const next = new Map(installed);
-  if (node) next.set(name, node);
-  else next.delete(name);
+  next.set(name, node);
   const nodes = [...next.values()].sort((a, b) => a.name.localeCompare(b.name));
   // Validate collisions before publishing anything. Existing turns keep their snapshot.
   const catalog = buildCatalog({ ...root, children: [...root.children, ...nodes] }).catalog;
-  if (node) installed.set(name, node);
-  else installed.delete(name);
+  installed.set(name, node);
   built = catalog;
 }
 
 export function catalog(): Catalog {
   built ??= buildCatalog(root).catalog;
   return built;
-}
-
-export async function currentCatalog(): Promise<Catalog> {
-  await refreshConnectors();
-  return catalog();
 }
 
 // What the app does with the tree when it starts, before anyone can ask for
@@ -191,10 +185,9 @@ export async function currentCatalog(): Promise<Catalog> {
 // answers for them. The catalog owns definitions of its nodes' services. The schedule gets what its programs run against:
 // this catalog and these connections.
 export async function startTree(): Promise<void> {
-  configureConnectors(await loadExternalServices(), publishNode);
+  await startConnectors(await loadExternalServices(), publishNode);
   registerServices(catalog());
-  await refreshConnectors();
-  setProgramHost({ catalog: currentCatalog, connections: connectionsPort(), traceCall: journalProgramCall });
+  setProgramHost({ catalog, connections: connectionsPort(), traceCall: journalProgramCall });
   await refreshSecretServices();
 }
 

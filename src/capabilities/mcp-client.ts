@@ -1,7 +1,5 @@
-// A call of a tool of an external MCP server: what a node of an external
-// server stands on. MCP is the wire here and nothing more — the capability
-// keeps its own name, its own input type and its own output type; its node
-// turns the answer of the server into the value.
+// MCP transport for authored and discovered nodes. The node translates
+// the server response into the value of the capability.
 //
 // Each call is a connection of its own: opened, used once, closed. Nothing
 // is kept between calls, so the authority of a call is the one the platform

@@ -4,7 +4,7 @@
 // read this one form.
 
 import { z } from 'zod';
-import type { Catalog } from './catalog.ts';
+import type { Catalog, CatalogAction, CatalogCapability } from './catalog.ts';
 import type { JsonSchema } from './json.ts';
 import { getNamedType } from './types.ts';
 
@@ -29,7 +29,10 @@ export function typeRefName(schema: JsonSchema): string | null {
 
 // Providers receive standalone JSON Schema, including named types nested in
 // other types and field-specific annotations beside a reference.
-export function expandSchema(catalog: Catalog, schema: JsonSchema): JsonSchema {
+export function portSchema(catalog: Catalog, entry: CatalogAction | CatalogCapability, side: 'input' | 'output'): JsonSchema {
+  const schema = entry[side];
+  if ('definition' in entry && entry.definition.serverSchemas?.[side]) return schema;
+
   function expand(value: unknown): unknown {
     if (Array.isArray(value)) return value.map(expand);
     if (!isObject(value)) return value;

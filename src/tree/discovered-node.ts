@@ -54,17 +54,21 @@ function sentence(text: string, budget: number): string {
 }
 
 export function discoveredNode(
-  settings: { name: string; description?: string; guide: string; recipients: string[] }, tools: Tool[], invoke: InvokeTool,
+  settings: { name: string; description?: string; guide: string; recipients: string[] },
+  tools: Tool[],
+  invoke: InvokeTool,
+  onInvalidOutput: () => void,
 ) {
   const { name, description, recipients } = settings;
   const sorted = [...tools].sort((a, b) => a.name.localeCompare(b.name));
   const summary = sentence(description || `Use the operator's ${name} connector`, 175);
   const guide = [{ text: settings.guide }];
   if (sorted.some(tool => !tool.outputSchema)) guide.push({
-    text: 'A tool returning JsonValue gives the server’s structured JSON when supplied. Otherwise it gives text, stored file references or resource links in response order: a single item directly, zero or several as an array.',
+    text: 'A capability returning JsonValue gives the server’s structured JSON when supplied. Otherwise it gives text, stored file references or resource links in response order: a single item directly, zero or several as an array.',
   });
   const children = sorted.map(tool => {
-    const leaf = tool.name.replace(/([a-z0-9])([A-Z])/g, '$1_$2').replace(/[^a-zA-Z0-9_]+/g, '_').toLowerCase();
+    const normalized = tool.name.replace(/([a-z0-9])([A-Z])/g, '$1_$2').replace(/[^a-zA-Z0-9_]+/g, '_').toLowerCase();
+    const leaf = normalized.startsWith(name + '_') ? normalized.slice(name.length + 1) : normalized;
     const title = tool.title || tool.annotations?.title || tool.name;
     const action = tool.description?.trim() || `Call ${title}.`;
     const inputCheck = validator(tool.inputSchema);
@@ -85,6 +89,7 @@ export function discoveredNode(
         const value = result.structuredContent;
         const checked = outputCheck(value);
         if (!checked.valid) {
+          onInvalidOutput();
           throw new CapabilityError('external_error', `${title} returned an invalid structured result: ${checked.errorMessage}`,
             await fallbackValue(result, tool.name, ctx));
         }

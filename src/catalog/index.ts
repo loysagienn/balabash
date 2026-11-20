@@ -94,7 +94,7 @@ export {
   type ProgramStart,
   type RunProgramEnv,
 } from './program.ts';
-export { expandSchema } from './schema.ts';
+export { portSchema } from './schema.ts';
 export { declarationText, ruleText, typeText, signatureText, typeDefinitionText } from './signature.ts';
 export {
   Account,

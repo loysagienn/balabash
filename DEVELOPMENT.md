@@ -29,9 +29,9 @@ confidential from them.
   secretary, local agents and scheduled tasks),
   `tree/` (the real vertices of that catalog, one file per node: the root
   with its guide and its own capabilities, and the nodes written so far —
-  installation connector nodes are built there from MCP discovery;
   each action takes its data from the app's own layers; at its start the
-  app tells the services these nodes declare to the connections layer),
+  app tells the services these nodes declare to the connections layer.
+  Installation connector nodes are built here from MCP discovery),
   `coordinator/` (the secretary: instructions and function definitions),
   `harness/` (the model backends: `claude-sdk/`, `codex-sdk/`, `openai/`,
   `anthropic/`), `adapters/` (surfaces: `telegram/`, `ccr/`), `api/` (the

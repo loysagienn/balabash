@@ -57,7 +57,7 @@ export const PROGRAM_TIMEOUT_MIN_MS = 1_000;
 export const PROGRAM_TIMEOUT_MAX_MS = 18_000_000;
 
 export type ProgramHost = {
-  catalog(): Promise<Catalog>;
+  catalog(): Catalog;
   connections: ConnectionsPort;
   traceCall: NonNullable<ProgramEnv['traceCall']>;
 };
@@ -122,7 +122,7 @@ async function runUnderMainThread(task: ScheduledTaskModel, main: Thread, start:
       throw new CapabilityError('internal', 'The catalog is not started: the schedule has nothing to run a program against.');
     }
 
-    const grant = await computeGrant(await host.catalog(), SCHEDULED, {
+    const grant = await computeGrant(host.catalog(), SCHEDULED, {
       caller: { workspaceId: task.workspaceId, threadId: main.id, agentName: main.agent },
       connections: host.connections,
     });

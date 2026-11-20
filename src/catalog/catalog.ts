@@ -154,6 +154,10 @@ export function buildCatalog(root: RootDefinition): { catalog: Catalog; warnings
       problem(vertex.fullName, `name "${vertex.name}" is not a snake_case segment`);
     }
 
+    if (vertex.kind === 'capability' && ('mcp__balabash__' + vertex.fullName).length > 64) {
+      problem(vertex.fullName, 'the function name including mcp__balabash__ exceeds 64 characters');
+    }
+
     if (vertices.has(vertex.fullName)) {
       problem(vertex.fullName, 'two vertices share this full name');
     }

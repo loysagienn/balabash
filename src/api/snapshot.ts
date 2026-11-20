@@ -187,7 +187,7 @@ function remoteAgentView(agent: RemoteAgentDeclaration): AgentView {
     description: agent.description,
     icon: agent.icon ?? null,
     sdk: 'remote',
-    nodes: connectorNamesFor(agent),
+    nodes: [],
     agents: startable(agent.name).map(child => child.name),
     modes: agent.modes,
     defaultMode: agent.defaultMode,

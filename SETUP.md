@@ -123,7 +123,8 @@ At boot, Connections loads external service settings from
 `data/remote-agents/<name>.ts`. Drivers can import packages and repository types
 with `import type`. They receive platform services through `ctx`.
 
-A claude.ai connector becomes a catalog node named after its file. For example,
+A claude.ai connector becomes a catalog node named after its file. Use a lower-case snake_case
+name matching `[a-z][a-z0-9_]*` before `.json`. For example,
 `data/mcp-servers/slack.json` can contain:
 
 ```json

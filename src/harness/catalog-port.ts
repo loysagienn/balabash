@@ -1,8 +1,8 @@
 // The catalog view for a port that assembles the model's context.
 import { catalogContext, catalogInstructions, grantKey, grantedCapabilities, guideForLeaf, portActions, vertexLine } from './catalog-context.ts';
 import {
-  ACTION_NAMES, FileRef, expandSchema, grantedVertex, ruleText, toCapabilityError, returnTypeText,
-  type Catalog, type CatalogCapability, type FileRefValue, type Grant, type JsonSchema, type JsonValue,
+  ACTION_NAMES, FileRef, portSchema, grantedVertex, ruleText, toCapabilityError, returnTypeText,
+  type Catalog, type CatalogAction, type CatalogCapability, type FileRefValue, type Grant, type JsonValue,
 } from '../catalog/index.ts';
 import type { AgentPassport } from '../core/contract.ts';
 import { getFileDownloadUrl, openFileContent } from '../files/index.ts';
@@ -20,24 +20,21 @@ function preview(grant: Grant, value: JsonValue, seq: bigint, field: 'value' | '
   return `${json.slice(0, PREVIEW_CHARS)}\n[Preview of event ${seq}.${hint}]`;
 }
 
-function definition(tree: Catalog, name: string, description: string, input: JsonSchema): FunctionDefinition {
-  return { type: 'function', name, description, parameters: expandSchema(tree, input), strict: false };
-}
-
-function capabilityDefinition(tree: Catalog, vertex: CatalogCapability): FunctionDefinition {
-  return vertex.definition.serverSchemas
-    ? { type: 'function', name: vertex.fullName, description: vertex.description, parameters: vertex.input, strict: false }
-    : definition(tree, vertex.fullName, vertex.description, vertex.input);
+function definition(tree: Catalog, entry: CatalogAction | CatalogCapability): FunctionDefinition {
+  return {
+    type: 'function',
+    name: 'fullName' in entry ? entry.fullName : entry.name,
+    description: entry.description,
+    parameters: portSchema(tree, entry, 'input'),
+    strict: false,
+  };
 }
 
 export async function createCatalogPort(agent: AgentPassport, workspaceId: string, threadId: string, opening: 'function' | 'signature') {
   const actions = opening === 'signature' ? ACTION_NAMES : portActions;
   const { grant, connections } = await catalogContext(agent, workspaceId, threadId, actions);
   const tree = grant.catalog;
-  const tools = actions.map(name => {
-    const action = tree.actions.get(name)!;
-    return definition(tree, name, action.description, action.input);
-  });
+  const tools = actions.map(name => definition(tree, tree.actions.get(name)!));
 
   async function dispatch(call: FunctionCall, openings: CatalogOpeningContext): Promise<CatalogResult> {
     let input: JsonValue;
@@ -67,7 +64,7 @@ export async function createCatalogPort(agent: AgentPassport, workspaceId: strin
         const text = [
           ...guide, 'Returns: ' + returnTypeText(vertex), ...vertex.inputRules.map(ruleText), ...opened.types, ...accounts,
         ].join('\n');
-        const tool = capabilityDefinition(tree, vertex);
+        const tool = definition(tree, vertex);
         return { kind: 'catalog', text, ...(openings.introduce(call.callId, tool, text) ? { definition: tool } : {}) };
       }
       const text = preview(grant, value, seq, 'value');
@@ -77,7 +74,7 @@ export async function createCatalogPort(agent: AgentPassport, workspaceId: strin
     }
   }
   function capabilityDefinitions(): FunctionDefinition[] {
-    return Array.from(grantedCapabilities(grant), vertex => capabilityDefinition(tree, vertex));
+    return Array.from(grantedCapabilities(grant), vertex => definition(tree, vertex));
   }
 
   const instructions = catalogInstructions(grant,

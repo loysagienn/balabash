@@ -2,7 +2,7 @@
 // a protocol Server per request, all reading the same turn's port.
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import type { CallToolResult, Tool } from '@modelcontextprotocol/sdk/types.js';
-import { expandSchema, grantedVertex, type JsonSchema, type JsonValue } from '../../catalog/index.ts';
+import { portSchema, grantedVertex, type JsonSchema, type JsonValue } from '../../catalog/index.ts';
 import type { AgentPassport } from '../../core/contract.ts';
 import { mcpCatalog, mcpError, registerCatalogHandlers } from '../catalog-mcp.ts';
 import { BRIDGE_SERVER } from '../sdk-mcp-config.ts';
@@ -28,10 +28,9 @@ function underValue(value: unknown): unknown {
 export async function createCodexPort(agent: AgentPassport, workspaceId: string, threadId: string) {
   const catalog = await mcpCatalog(agent, workspaceId, threadId);
   const { grant } = catalog;
-  const tools: Tool[] = catalog.entries.map(({ tool, output }) => {
-    const leaf = grantedVertex(grant, tool.name);
-    const properties: Record<string, JsonSchema> = { value: leaf?.kind === 'capability' && leaf.definition.serverSchemas?.output
-      ? underValue(output) as JsonSchema : expandSchema(grant.catalog, output) };
+  const tools: Tool[] = catalog.entries.map(({ tool, entry }) => {
+    const output = portSchema(grant.catalog, entry, 'output');
+    const properties: Record<string, JsonSchema> = { value: underValue(output) as JsonSchema };
     if (tool.name === 'describe') properties.guide = { type: 'array', items: { type: 'string' } };
     return { ...tool, outputSchema: { type: 'object', properties, required: ['value'], additionalProperties: false } };
   });

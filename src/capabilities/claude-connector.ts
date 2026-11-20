@@ -18,7 +18,7 @@ function authError(serverName: string, credentials: OperatorCredentials, detail?
   const state = ttl !== null && ttl <= 0 ? 'has expired' : 'was rejected by the proxy';
   const recovery = credentials.source === 'env'
     ? 'Replace CLAUDE_CODE_OAUTH_TOKEN in the service environment.'
-    : 'Run a Claude Code turn on this box to refresh the CLI login, then retry.';
+    : 'A turn by any local Claude Code agent refreshes the CLI login. If none is running, tell the operator.';
   return new CapabilityError('auth_required',
     `Claude connector "${serverName}": the operator’s Claude CLI token ${state}. ${detail ? detail + '. ' : ''}${recovery}`);
 }
@@ -48,8 +48,8 @@ function createClaudeConnectorFetch(serverName: string): FetchLike {
   const clientSessionId = crypto.randomUUID();
 
   return async (url, init) => {
-    const credentials = await resolveOperatorCredentials().catch(error => {
-      throw new CapabilityError('auth_required', String(error));
+    const credentials = await resolveOperatorCredentials().catch(() => {
+      throw new CapabilityError('auth_required', 'Ask the operator to sign in with the Claude CLI on this host.');
     });
     const ttl = tokenTtlMs(credentials);
 
