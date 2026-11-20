@@ -15,6 +15,7 @@ import type {
 } from '@modelcontextprotocol/sdk/shared/auth.js';
 import { Prisma } from '../../../prisma-generated/client.ts';
 import { prisma } from '../../db/client.ts';
+import { getAccountService } from './services.ts';
 import { config } from '../../config/index.ts';
 import type { ConnectionModel } from '../../../prisma-generated/models.ts';
 
@@ -102,6 +103,15 @@ async function loadClientInformation(server: string): Promise<OAuthClientInforma
   return (client?.clientInformation as OAuthClientInformationMixed | null) ?? undefined;
 }
 
+// A provider may forget a dynamic client while its issuer and redirect URI
+// stay the same. Discard only the registration actually refused: another
+// sign-in may already have saved its replacement.
+async function forgetRefusedClient(server: string, info: OAuthClientInformationMixed): Promise<void> {
+  await prisma.oauthClient.deleteMany({
+    where: { server, clientInformation: { equals: info as unknown as Prisma.InputJsonValue } },
+  });
+}
+
 // Persists the client registration obtained via DCR; manual clients are
 // provisioned through the operator form into the same table.
 async function saveClientInformation(server: string, info: OAuthClientInformationMixed): Promise<void> {
@@ -125,6 +135,7 @@ export function createInteractiveAuthProvider(
   authorizationRedirect: { url: URL | null },
   authorizationServer?: string,
 ): OAuthClientProvider {
+  let offered: OAuthClientInformationMixed | undefined;
   return {
     get redirectUrl() {
       return redirectUrl();
@@ -169,7 +180,13 @@ export function createInteractiveAuthProvider(
         return undefined;
       }
 
+      offered = info;
       return info;
+    },
+    invalidateCredentials: async scope => {
+      if (offered && (scope === 'all' || scope === 'client') && getAccountService(connection.server)?.clientRegistration === 'dynamic') {
+        await forgetRefusedClient(connection.server, offered);
+      }
     },
     saveClientInformation: info =>
       saveClientInformation(
@@ -322,20 +339,27 @@ async function refreshStoredTokens(
   const info = await discoverServerInfo(serverUrl);
   const clientInformation = await loadClientInformation(connection.server);
 
+  const dynamic = getAccountService(connection.server)?.clientRegistration === 'dynamic';
   if (!clientInformation) {
+    if (dynamic) throw new AuthorizationLostError('the dynamic client is missing; a new sign-in registers it');
     throw new OauthClientError('the installation holds no OAuth client of the service');
   }
 
   // No provider of ours sets a rule of its own on the resource.
   const resource = await selectResourceURL(serverUrl, {} as OAuthClientProvider, info.resourceMetadata);
-  const fresh = stampObtainedAt(
-    await refreshAuthorization(info.authorizationServerUrl, {
-      metadata: info.authorizationServerMetadata,
-      clientInformation,
-      refreshToken,
-      resource,
-    }),
-  );
+  let tokens: OAuthTokens;
+  try {
+    tokens = await refreshAuthorization(info.authorizationServerUrl, {
+      metadata: info.authorizationServerMetadata, clientInformation, refreshToken, resource,
+    });
+  } catch (error) {
+    if (dynamic && refreshFailure(error) instanceof OauthClientError) {
+      await forgetRefusedClient(connection.server, clientInformation);
+      throw new AuthorizationLostError('the provider refused the dynamic client; a new sign-in registers it');
+    }
+    throw error;
+  }
+  const fresh = stampObtainedAt(tokens);
 
   await prisma.connection.update({
     where: { id: connection.id },

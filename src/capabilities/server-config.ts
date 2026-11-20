@@ -5,12 +5,6 @@ import path from 'node:path';
 import { INSTALLATION_SERVERS_DIR, listExtensionFiles } from './extensions.ts';
 import { getSecretReferenceNames } from './server-secrets.ts';
 
-// Two directories, one catalog: the repository's mcp-servers/ and the
-// installation's data/mcp-servers/ (src/capabilities/extensions.ts). A name
-// present in both is a loud error — an extension never shadows the repository.
-const externalServersDirectory = path.resolve('mcp-servers');
-const externalServersDirectories = [externalServersDirectory, INSTALLATION_SERVERS_DIR];
-
 // Identity probe of a user-auth server: the provider's own answer to "who is
 // authorized here", fetched by the platform with a fresh access token right
 // after authorization. The service declares where to ask and which response
@@ -220,51 +214,18 @@ function validateExternalServerConfig(raw: unknown, source: string): ExternalSer
   return raw as ExternalServerConfig;
 }
 
-async function readExternalServerConfigFile(directory: string, serverName: string): Promise<ExternalServerConfig> {
-  const filename = `${serverName}.json`;
-  const raw = await readFile(path.join(directory, filename), 'utf8');
-
-  return validateExternalServerConfig(JSON.parse(raw), path.join(path.basename(directory), filename));
-}
-
-// Repository configs are validated hard (a broken file fails the build's
-// boot and the supervisor rolls the bundle back); an installation's
-// data/mcp-servers/<name>.json is NOT fail-fast — it lives outside the
-// bundle, so a boot failure could not be rolled back: a broken or clashing
-// file is logged and skipped, and the server does not exist until the file
-// is fixed and the app restarted.
+// A broken installation config is logged and skipped so it cannot prevent boot.
 export async function readExternalServerConfigs(): Promise<Record<string, ExternalServerConfig>> {
   const configs: Record<string, ExternalServerConfig> = {};
-  const origins = new Map<string, string>();
-
-  for (const directory of externalServersDirectories) {
-    const extension = directory === INSTALLATION_SERVERS_DIR;
-
-    for (const filename of await listExtensionFiles(directory, '.json')) {
-      const serverName = path.basename(filename, '.json');
-      const file = path.join(directory, filename);
-
-      try {
-        if (!/^[a-z][a-z0-9_]*$/.test(serverName)) throw new Error(`Invalid MCP service name "${serverName}"`);
-        const origin = origins.get(serverName);
-
-        if (origin) {
-          throw new Error(`External server "${serverName}" is defined twice: ${path.join(origin, filename)} and ${file}`);
-        }
-
-        const config = await readExternalServerConfigFile(directory, serverName);
-
-        origins.set(serverName, directory);
-        configs[serverName] = config;
-      } catch (error) {
-        if (!extension) {
-          throw error;
-        }
-
-        console.error(`[tools] extension server config ${file} skipped:`, error);
-      }
+  for (const filename of await listExtensionFiles(INSTALLATION_SERVERS_DIR, '.json')) {
+    const name = path.basename(filename, '.json');
+    const file = path.join(INSTALLATION_SERVERS_DIR, filename);
+    try {
+      if (!/^[a-z][a-z0-9_]*$/.test(name)) throw new Error(`Invalid MCP service name "${name}"`);
+      configs[name] = validateExternalServerConfig(JSON.parse(await readFile(file, 'utf8')), file);
+    } catch (error) {
+      console.error(`[tools] extension server config ${file} skipped:`, error);
     }
   }
-
   return configs;
 }

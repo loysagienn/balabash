@@ -92,12 +92,30 @@ export async function callServerTool(
   const signal = options.signal ?? undefined;
   const timeout = options.timeoutMs ?? EXTERNAL_CALL_TIMEOUT_MS;
   const client = new Client(CLIENT_INFO);
+  // Client.connect's timeout covers initialize, but the SDK then sends an
+  // initialized notification without request options. Bound its HTTP POST too.
+  const connectTime = Math.min(timeout, CONNECT_TIMEOUT_MS);
+  const handshake = AbortSignal.timeout(connectTime);
+  let connecting = true;
   const transport = new StreamableHTTPClientTransport(new URL(server.url), {
     requestInit: { headers: server.headers },
+    fetch: (url, init) => {
+      const signals: AbortSignal[] = [];
+      // DELETE has no timeout option in the SDK. Give cleanup its own budget,
+      // including when the caller has cancelled the original request.
+      if (init?.method === 'DELETE') signals.push(AbortSignal.timeout(5_000));
+      else {
+        if (init?.signal) signals.push(init.signal);
+        if (signal) signals.push(signal);
+        if (connecting && init?.method === 'POST') signals.push(handshake);
+      }
+      return fetch(url, { ...init, signal: AbortSignal.any(signals) });
+    },
   });
 
   try {
-    await client.connect(transport, { signal, timeout: Math.min(timeout, CONNECT_TIMEOUT_MS) });
+    await client.connect(transport, { signal, timeout: connectTime });
+    connecting = false;
 
     const result = await client.callTool({ name: tool, arguments: args }, undefined, {
       signal,
@@ -123,6 +141,11 @@ export async function callServerTool(
   } catch (error) {
     throw error instanceof CapabilityError ? error : failure(server, error, options.signal);
   } finally {
+    // A failed DELETE cannot change the outcome of a completed write or
+    // trigger an auth retry. Stateless transports have no session to delete.
+    await transport.terminateSession().catch(error => {
+      console.warn(`[mcp] could not end the session at ${server.title}: ${reason(error)}`);
+    });
     await client.close().catch(() => {});
   }
 }

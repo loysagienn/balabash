@@ -6,8 +6,8 @@ by one person on their own server.
 Balabash is a single Node.js process that owns a PostgreSQL event log and talks to the
 user through three surfaces — a web console, a Telegram forum group and the Claude app's
 remote sessions. A secretary agent answers in the main thread and hands substantial work
-to specialist agents, each in a thread of its own; agents operate integrations (Gmail,
-Google Drive, Notion, Perplexity, a real browser, any MCP server), keep data in a
+to specialist agents, each in a thread of its own; agents use Gmail,
+Google Drive, Notion and Perplexity, operate a real browser, keep data in a
 per-workspace workbench (SQLite + a file area + a script runner), run scheduled tasks,
 publish mini-apps, and change Balabash's own code — the engineer agent works on the live
 system and requests its restart. Every message, tool call, spawned thread and completed

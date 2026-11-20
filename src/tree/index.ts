@@ -30,6 +30,7 @@
 // - drive.ts — the node `drive` over the Drive API, on the same kind of
 //   access; drive-file.ts — a file of Drive as a value and the export
 //   formats of Google documents;
+// - notion.ts — Notion MCP on the access of a workspace account;
 // - google-api.ts — a request to an API of Google on the access of an
 //   account, and a list Google pages itself;
 // - connections.ts — the node `connections`; services.ts — the services the
@@ -59,6 +60,7 @@ import { drive } from './drive.ts';
 import { getEvent } from './events.ts';
 import { fileCapabilities } from './files.ts';
 import { gmail } from './gmail.ts';
+import { notionNode } from './notion.ts';
 import { projects } from './projects.ts';
 import { journalProgramCall } from './call-journal.ts';
 import { setProgramHost } from '../schedule/programs.ts';
@@ -146,6 +148,7 @@ export const root: RootDefinition = {
     web,
     gmail,
     drive,
+    notionNode(),
     connections,
     system,
   ],

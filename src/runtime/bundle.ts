@@ -8,7 +8,7 @@ import path from 'node:path';
 
 // What `npm run build` turns into the bundle, from the root of the
 // repository.
-const BUNDLE_SOURCES = ['src', 'agents', 'build', 'prisma', 'mcp-servers', 'package.json', 'supervisor.js'];
+const BUNDLE_SOURCES = ['src', 'agents', 'build', 'prisma', 'package.json', 'supervisor.js'];
 
 // What lies among the sources and is not of the app's bundle: the console is
 // a bundle of its own (dist/console), live with the next page load — a

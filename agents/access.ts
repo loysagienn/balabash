@@ -5,7 +5,7 @@ import type { AgentPassport, CatalogAccess } from '../src/core/contract.ts';
 
 export const accessProfiles: Readonly<Record<string, Omit<CatalogAccess, 'profile'>>> = {
   general: {
-    nodes: ['threads', 'drive', 'gmail', 'web', 'web_perplexity', 'projects', 'schedule', 'workspace'],
+    nodes: ['threads', 'drive', 'gmail', 'notion', 'web', 'web_perplexity', 'projects', 'schedule', 'workspace'],
     addRoot: ['get_event', 'fetch_thread_file', 'get_file_url'],
   },
 };

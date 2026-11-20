@@ -972,8 +972,7 @@ export type OpenSecretRequestView = {
   requestedAt: Date;
 };
 
-// A connectable service of the installation: the user-auth MCP servers of
-// the config (mcp-servers/*.json with auth: "user").
+// A registered OAuth service a user can connect to their workspace.
 export type ServiceView = {
   name: string;
   description: string | null;
@@ -995,9 +994,8 @@ export type ServiceView = {
 // the same route; connected accounts stay.
 export type OauthClientRequestResponse = { requestId: string };
 
-// A service of the installation: an external MCP server whose credentials
-// are the installation's (${secret:NAME} in its config) — one set for every
-// workspace, provisioned through the secrets form, forgotten for everyone.
+// Credentials shared across workspaces by a catalog service, installation
+// service or remote-agent kind. The secrets form provisions them for everyone.
 // state: connected; missing — a credential is not provisioned; failed —
 // provisioned, but the last connection attempt failed (error says why).
 export type InstallationServiceView = {

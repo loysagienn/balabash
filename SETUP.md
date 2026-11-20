@@ -79,8 +79,8 @@ the next boot reports into the log.
   process itself).
 - **Integrations** need nothing in `.env`: per-user OAuth (Gmail, Drive,
   Notion) runs through the platform with one redirect URI,
-  `https://<CONSOLE_DOMAIN>/oauth/callback`, registered at each provider;
-  installation OAuth clients (Google) and installation credentials
+  `https://<CONSOLE_DOMAIN>/oauth/callback`, which Notion registers dynamically. The operator registers this URI with Google.
+  Installation OAuth clients (Google) and installation credentials
   (such as the Perplexity API key) are entered through one-time forms
   from the console's Connections page or the auth agent.
 

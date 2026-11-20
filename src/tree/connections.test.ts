@@ -449,6 +449,17 @@ describe('the authority of an account', () => {
   });
 });
 
+test('a refused dynamic client is discarded so the next sign-in registers it anew', async () => {
+  await invoke('connections_authorize', { service: 'notes' });
+  await connect('notes', 'default', { access_token: 'old', refresh_token: 'client-refresh' });
+  await prisma.oauthClient.create({ data: { server: 'notes', clientInformation: { client_id: 'forgotten' } } });
+  await refuses(invoke('notes_token', { account: 'default', rejected: 'old' }), 'auth_required', /new sign-in registers it/);
+  assert.equal((await rowOf('notes', 'default'))?.status, 'reauthorization_required');
+  assert.equal(await prisma.oauthClient.count({ where: { server: 'notes' } }), 0);
+  const link = await invoke('connections_authorize', { service: 'notes', account: 'default' });
+  assert.match(link.url, /connect\/notes/);
+});
+
 describe('the secrets of the installation and web_perplexity', () => {
   test('the secrets are entered through a link; the node appears with them and acts with them', async () => {
     await refuses(invoke('connections_request_secret', { service: 'mailbox' }), 'not_found', /^There is no installation service "mailbox" that takes secrets\. Installation services: perplexity\.$/);

@@ -291,7 +291,7 @@ model Connection {
   id           String   @id @default(uuid())
   workspaceId  String   @map("workspace_id")
   threadId     String?  @map("thread_id") // thread that initiated the flow; connection.* events are addressed to it
-  server       String // mcp-servers config name
+  server       String // Service name used by the connections layer
   accountKey   String   @map("account_key") // immutable mnemonic slug — the account's address within (workspace, server)
   displayName  String   @map("display_name") // renameable human-readable label
   status       String // 'pending' | 'connected' | 'reauthorization_required'

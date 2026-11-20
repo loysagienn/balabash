@@ -1,6 +1,0 @@
-{
-  "transport": "http",
-  "url": "https://mcp.notion.com/mcp",
-  "auth": "user",
-  "description": "Notion workspace access. Each user authorizes their own account and chooses which pages to share."
-}
