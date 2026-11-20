@@ -24,6 +24,7 @@ import { identityLabel } from '../capabilities/connections/identity.ts';
 import { AuthorizationLostError, OauthClientError } from '../capabilities/connections/oauth-provider.ts';
 import {
   getAccountService,
+  getSecretService,
   registerAccountService,
   registerSecretServiceSource,
   type AccountService,
@@ -213,10 +214,10 @@ async function accountAuthority(workspaceId: string, name: string, account: stri
 }
 
 async function secretAuthority(name: string): Promise<SecretAuthority> {
-  const connection = secretServices.get(name);
+  const connection = getSecretService(name);
   const rows = connection ? await prisma.externalServerSecret.findMany({ where: { server: name } }) : [];
   const values = new Map(rows.map(row => [row.key, row.value]));
-  const missing = connection?.secrets.filter(secret => !values.has(secret)) ?? [];
+  const missing = connection?.secretNames.filter(secret => !values.has(secret)) ?? [];
 
   if (!connection || missing.length) {
     throw new CapabilityError(
@@ -225,7 +226,7 @@ async function secretAuthority(name: string): Promise<SecretAuthority> {
     );
   }
 
-  return { type: 'secret', secrets: Object.fromEntries(connection.secrets.map(secret => [secret, values.get(secret)!])) };
+  return { type: 'secret', secrets: Object.fromEntries(connection.secretNames.map(secret => [secret, values.get(secret)!])) };
 }
 
 // The connections port over the app's connections layer. It knows the
@@ -237,7 +238,7 @@ export function connectionsPort(): ConnectionsPort {
       return (await listAccounts(workspaceId, service)).map(accountOf);
     },
     async secretsReady(service) {
-      const connection = secretServices.get(service);
+      const connection = getSecretService(service);
 
       if (!connection) {
         return false;
@@ -245,7 +246,7 @@ export function connectionsPort(): ConnectionsPort {
 
       const secrets = await storedSecrets(service);
 
-      return connection.secrets.every(name => secrets.has(name));
+      return connection.secretNames.every(name => secrets.has(name));
     },
     accountAuthority,
     secretAuthority,

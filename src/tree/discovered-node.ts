@@ -6,10 +6,10 @@ import { Ajv2020 } from 'ajv/dist/2020.js';
 import { AjvJsonSchemaValidator } from '@modelcontextprotocol/sdk/validation/ajv';
 import type { CallToolResult, ContentBlock, Tool } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
-import { capability, CapabilityError, JsonValue, node, type CallContext, type JsonObject } from '../catalog/index.ts';
+import { capability, CapabilityError, JsonValue, node, type CallContext, type Connection, type Node, type JsonObject } from '../catalog/index.ts';
 import { fileRefValue, storeArrival } from './files.ts';
 
-type InvokeTool = (name: string, args: JsonObject, signal: AbortSignal | null) => Promise<CallToolResult>;
+type InvokeTool = (name: string, args: JsonObject, ctx: CallContext) => Promise<CallToolResult>;
 
 function validator(schema: Tool['inputSchema']) {
   // Older servers can explicitly advertise draft 7. MCP defaults to 2020-12.
@@ -53,16 +53,28 @@ function sentence(text: string, budget: number): string {
   return first.length <= budget ? first.replace(/[.!?]+$/, '') : first.slice(0, budget - 1).trimEnd() + '…';
 }
 
-export function discoveredNode(
-  settings: { name: string; description?: string; guide: string; recipients: string[] },
+type NodeSettings = { name: string; description?: string; guide?: string; recipients: string[]; connection?: Connection };
+
+export async function discoverAndPublish(
+  settings: NodeSettings,
+  list: () => Promise<Tool[]>,
+  invoke: InvokeTool,
+  onInvalidOutput: () => void,
+  publish: (node: Node) => void,
+) {
+  publish(discoveredNode(settings, await list(), invoke, onInvalidOutput));
+}
+
+function discoveredNode(
+  settings: NodeSettings,
   tools: Tool[],
   invoke: InvokeTool,
   onInvalidOutput: () => void,
 ) {
   const { name, description, recipients } = settings;
   const sorted = [...tools].sort((a, b) => a.name.localeCompare(b.name));
-  const summary = sentence(description || `Use the operator's ${name} connector`, 175);
-  const guide = [{ text: settings.guide }];
+  const summary = sentence(description || `Use the ${name} service`, 175);
+  const guide = settings.guide ? [{ text: settings.guide }] : [];
   if (sorted.some(tool => !tool.outputSchema)) guide.push({
     text: 'A capability returning JsonValue gives the server’s structured JSON when supplied. Otherwise it gives text, stored file references or resource links in response order: a single item directly, zero or several as an array.',
   });
@@ -84,7 +96,7 @@ export function discoveredNode(
       }),
       output: JsonValue,
       async run(input, ctx) {
-        const result = await invoke(tool.name, input as JsonObject, ctx.signal);
+        const result = await invoke(tool.name, input as JsonObject, ctx);
         if (!outputCheck) return fallbackValue(result, tool.name, ctx);
         const value = result.structuredContent;
         const checked = outputCheck(value);
@@ -99,5 +111,5 @@ export function discoveredNode(
   });
   const contracts = children.map((leaf, index) => [sorted[index].name, leaf.name, leaf.summary, leaf.description, leaf.serverSchemas]);
   const revision = createHash('sha256').update(JSON.stringify([summary, guide, contracts])).digest('hex');
-  return node({ name, external: true, summary, guide, installation: { source: 'discovered', recipients, revision }, children });
+  return node({ name, external: true, summary, guide, connection: settings.connection, installation: { source: 'discovered', recipients, revision }, children });
 }

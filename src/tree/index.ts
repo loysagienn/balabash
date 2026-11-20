@@ -56,12 +56,15 @@ import {
   type RootDefinition,
   type Node,
 } from '../catalog/index.ts';
-import { loadExternalServices } from '../capabilities/external-services.ts';
+import { configureServers } from './configured-servers.ts';
+import { readExternalServerConfigs, type ExternalServerConfig } from '../capabilities/server-config.ts';
+import { reportSkippedExtension } from '../capabilities/extensions.ts';
+import { getAccountService, getSecretService } from '../capabilities/connections/services.ts';
 import type { ReportExtensionFailure } from '../capabilities/extensions.ts';
 import { loadAuthoredNodes } from './authored-nodes.ts';
 import { addressedTo } from '../capabilities/agent-catalog.ts';
 import type { AgentPassport } from '../core/contract.ts';
-import { connectorNamesFor, startConnectors } from './connectors.ts';
+import { startConnectors } from './connectors.ts';
 import { getLoadedRemoteKinds } from '../capabilities/remote-agent-source.ts';
 import { refreshSecretServices } from '../capabilities/connections/services.ts';
 import { connections } from './connections.ts';
@@ -180,14 +183,18 @@ function publishNode(node: Node): void {
   const catalog = buildCatalog({ ...root, children: [...root.children, ...nodes] }).catalog;
   const subtree = catalog.vertices.get(name)!;
   if (subtree.kind !== 'node') throw new Error(`Expected node "${name}"`);
-  registerServices(subtree);
+  if (installation.source === 'authored') registerServices(subtree);
   installed.set(name, node);
   built = catalog;
 }
 
 // Agent cards show addressed nodes even before their credentials are in place.
+const configuredRecipients = new Map<string, string[]>();
 export function installationNamesFor(agent: AgentPassport): string[] {
-  const names = new Set(connectorNamesFor(agent));
+  const names = new Set<string>();
+  for (const [name, recipients] of configuredRecipients) {
+    if (addressedTo(recipients, agent)) names.add(name);
+  }
   for (const node of installed.values()) {
     if (addressedTo(node.installation!.recipients, agent)) names.add(node.name);
   }
@@ -206,12 +213,24 @@ export function catalog(): Catalog {
 // answers for them. The catalog owns definitions of its nodes' services. The schedule gets what its programs run against:
 // this catalog and these connections.
 export async function startTree(report?: ReportExtensionFailure): Promise<void> {
-  const { connectors, names } = await loadExternalServices();
-  for (const remote of getLoadedRemoteKinds()) {
-    if (remote.secrets?.length) names.add(remote.name);
-  }
   registerServices(catalog().root);
+  const configs = await readExternalServerConfigs(report);
+  const names = new Set(Object.keys(configs));
+  const remoteServices = new Set(getLoadedRemoteKinds().filter(remote => remote.secrets?.length).map(remote => remote.name));
+  for (const name of remoteServices) names.add(name);
+  const connectors: [string, Extract<ExternalServerConfig, { transport: 'claude-connector' }>][] = [];
+  const servers: Parameters<typeof configureServers>[0] = [];
+  for (const [name, config] of Object.entries(configs)) {
+    if (catalog().vertices.has(name) || getAccountService(name) || getSecretService(name) || remoteServices.has(name)) {
+      await reportSkippedExtension('mcp-servers', name + '.json', 'Name already belongs to a catalog vertex or service', report);
+      continue;
+    }
+    configuredRecipients.set(name, config.recipients ?? []);
+    if (config.transport === 'claude-connector') connectors.push([name, config]);
+    else servers.push([name, config]);
+  }
   await loadAuthoredNodes(publishNode, names, report);
+  configureServers(servers, publishNode, report);
   await startConnectors(connectors, publishNode);
   setProgramHost({ catalog, connections: connectionsPort(), traceCall: journalProgramCall });
   await refreshSecretServices();

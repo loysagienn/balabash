@@ -5,7 +5,6 @@
 // is kept between calls, so the authority of a call is the one the platform
 // gave it — secrets entered a moment ago are the ones that go out.
 
-import type { ExternalServerConfig } from './server-config.ts';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport, StreamableHTTPError } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
@@ -19,13 +18,20 @@ const CLIENT_INFO = { name: 'balabash', version: '2.0.0' };
 export const EXTERNAL_CALL_TIMEOUT_MS = 10 * 60_000;
 const CONNECT_TIMEOUT_MS = 30_000;
 
-export type ExternalServer = {
+type HttpServer = {
   // How the server is called in the text of an error.
   title: string;
   url: string;
   // The headers that carry the authority of the call.
   headers?: Record<string, string>;
   fetch?: FetchLike;
+};
+
+export type ExternalServer = HttpServer | {
+  title: string;
+  command: string;
+  args?: string[];
+  env?: Record<string, string>;
 };
 
 // What a tool answered: its text blocks joined, and its structured content
@@ -98,7 +104,9 @@ async function withServer<T>(
   const connectTime = Math.min(timeout, CONNECT_TIMEOUT_MS);
   const handshake = AbortSignal.timeout(connectTime);
   let connecting = true;
-  const transport = new StreamableHTTPClientTransport(new URL(server.url), {
+  const transport = 'command' in server
+    ? new StdioClientTransport({ command: server.command, args: server.args, env: server.env, stderr: 'ignore' })
+    : new StreamableHTTPClientTransport(new URL(server.url), {
     requestInit: { headers: server.headers },
     fetch: (url, init) => {
       const signals: AbortSignal[] = [];
@@ -124,9 +132,9 @@ async function withServer<T>(
   } finally {
     // A failed DELETE cannot change the outcome of a completed write or
     // trigger an auth retry. Stateless transports have no session to delete.
-    await transport.terminateSession().catch(error => {
-      console.warn(`[mcp] could not end the session at ${server.title}: ${reason(error)}`);
-    });
+    if (transport instanceof StreamableHTTPClientTransport) {
+      await transport.terminateSession().catch(() => console.warn(`[mcp] could not end the session at ${server.title}`));
+    }
     await client.close().catch(() => {});
   }
 }
@@ -165,28 +173,4 @@ export async function callServerTool(
 ): Promise<ToolAnswer> {
   const result = await callServerResult(server, tool, args, options);
   return { text: textOf(result.content), structured: result.structuredContent ?? null };
-}
-
-// Connections only needs the first page for a credential-backed service
-// without a catalog node. The HTTP probe shares the catalog session lifecycle.
-export async function probeExternalService(
-  name: string, config: Exclude<ExternalServerConfig, { transport: 'claude-connector' }>,
-): Promise<void> {
-  if (config.transport === 'http') {
-    await withServer({ title: name, url: config.url, headers: config.headers },
-      { signal: AbortSignal.timeout(CONNECT_TIMEOUT_MS), timeoutMs: CONNECT_TIMEOUT_MS },
-      (client, signal, timeout) => client.listTools({}, { signal, timeout }));
-    return;
-  }
-  const client = new Client(CLIENT_INFO);
-  const transport = new StdioClientTransport({
-    command: config.command, args: config.args ?? [],
-    env: config.env ? { ...(process.env as Record<string, string>), ...config.env } : undefined,
-  });
-  try {
-    await client.connect(transport);
-    await client.listTools();
-  } finally {
-    await client.close();
-  }
 }

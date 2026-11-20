@@ -2,7 +2,7 @@
 
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { INSTALLATION_SERVERS_DIR, listExtensionFiles } from './extensions.ts';
+import { INSTALLATION_SERVERS_DIR, listExtensionFiles, reportSkippedExtension, type ReportExtensionFailure } from './extensions.ts';
 import { getSecretReferenceNames } from './server-secrets.ts';
 
 // Identity probe of a user-auth server: the provider's own answer to "who is
@@ -25,6 +25,7 @@ export type IdentityProbeConfig = {
 export type ExternalServerConfig =
   | {
       transport: 'stdio';
+      recipients?: string[];
       command: string;
       args?: string[];
       env?: Record<string, string>;
@@ -53,6 +54,7 @@ export type ExternalServerConfig =
     }
   | {
       transport: 'http';
+      recipients?: string[];
       url: string;
       // Static headers sent with every request, e.g. an Authorization header
       // carrying a ${secret:NAME} API key. Not allowed with auth: "user" —
@@ -85,6 +87,14 @@ function validateExternalServerConfig(raw: unknown, source: string): ExternalSer
     throw new Error(`${source} must contain a JSON object`);
   }
 
+  if (raw.recipients !== undefined && (!Array.isArray(raw.recipients) ||
+      raw.recipients.some(name => typeof name !== 'string' || !name.trim()))) {
+    throw new Error(`${source}: "recipients" must be an array of agent or profile names`);
+  }
+  if (getSecretReferenceNames([raw.recipients, raw.description]).length) {
+    throw new Error(`${source}: secret references belong in transport settings`);
+  }
+
   if (raw.transport === 'stdio') {
     if (typeof raw.command !== 'string' || !raw.command) {
       throw new Error(`${source}: "command" must be a non-empty string`);
@@ -115,11 +125,6 @@ function validateExternalServerConfig(raw: unknown, source: string): ExternalSer
 
     if (raw.description !== undefined && typeof raw.description !== 'string') {
       throw new Error(`${source}: "description" must be a string`);
-    }
-
-    if (raw.recipients !== undefined && (!Array.isArray(raw.recipients) ||
-        raw.recipients.some(name => typeof name !== 'string' || !name.trim()))) {
-      throw new Error(`${source}: "recipients" must be an array of agent or profile names`);
     }
 
     if (getSecretReferenceNames(raw).length) {
@@ -221,7 +226,7 @@ function validateExternalServerConfig(raw: unknown, source: string): ExternalSer
 }
 
 // A broken installation config is logged and skipped so it cannot prevent boot.
-export async function readExternalServerConfigs(): Promise<Record<string, ExternalServerConfig>> {
+export async function readExternalServerConfigs(report?: ReportExtensionFailure): Promise<Record<string, ExternalServerConfig>> {
   const configs: Record<string, ExternalServerConfig> = {};
   for (const filename of await listExtensionFiles(INSTALLATION_SERVERS_DIR, '.json')) {
     const name = path.basename(filename, '.json');
@@ -230,7 +235,7 @@ export async function readExternalServerConfigs(): Promise<Record<string, Extern
       if (!/^[a-z][a-z0-9_]*$/.test(name)) throw new Error(`Invalid MCP service name "${name}"`);
       configs[name] = validateExternalServerConfig(JSON.parse(await readFile(file, 'utf8')), file);
     } catch (error) {
-      console.error(`[tools] extension server config ${file} skipped:`, error);
+      await reportSkippedExtension('mcp-servers', filename, error instanceof SyntaxError ? 'Invalid JSON' : error, report);
     }
   }
   return configs;

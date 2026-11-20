@@ -44,10 +44,10 @@ test('Connections probes the configured service once per key and releases its MC
   await fs.mkdir('data/mcp-servers', { recursive: true });
   await fs.writeFile('data/mcp-servers/search.json', JSON.stringify({ transport: 'http', url, headers: { Authorization: 'Bearer ${secret:KEY}' } }));
   await fs.writeFile('data/mcp-servers/wiki.json', JSON.stringify({ transport: 'http', url, auth: 'user', description: 'Wiki' }));
-  const { loadExternalServices } = await import('./external-services.ts');
+  const { startTree } = await import('../tree/index.ts');
   const { prisma } = await import('../db/client.ts');
   const { getAccountService, refreshSecretServices, getSecretService } = await import('./connections/services.ts');
-  await loadExternalServices();
+  await startTree();
   await refreshSecretServices();
   assert.equal(getAccountService('wiki')?.url, url);
   assert.equal(getSecretService('search')?.connected, false);

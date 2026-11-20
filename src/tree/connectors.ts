@@ -3,12 +3,11 @@
 import { createHash } from 'node:crypto';
 import { resolveOperatorCredentials, tokenTtlMs } from '../adapters/ccr/token.ts';
 import { connectorServer } from '../capabilities/claude-connector.ts';
-import { addressedTo, warnRecipients } from '../capabilities/agent-catalog.ts';
-import type { AgentPassport } from '../core/contract.ts';
+import { warnRecipients } from '../capabilities/agent-catalog.ts';
 import type { ExternalServerConfig } from '../capabilities/server-config.ts';
 import { CapabilityError, type JsonObject, type Node } from '../catalog/index.ts';
 import { callServerResult, EXTERNAL_CALL_TIMEOUT_MS, listServerTools } from '../capabilities/mcp-client.ts';
-import { discoveredNode } from './discovered-node.ts';
+import { discoverAndPublish } from './discovered-node.ts';
 
 type Config = Extract<ExternalServerConfig, { transport: 'claude-connector' }>;
 type Connector = {
@@ -90,18 +89,17 @@ async function refresh(): Promise<void> {
     connector.generation = generation;
 
     try {
-      const tools = await listServerTools(connectorServer(connector.name, connector.config.serverId));
-      const node = discoveredNode({
+      await discoverAndPublish({
         name: connector.name,
         description: connector.config.description,
         recipients: connector.recipients,
         guide: "Every call acts as the operator's own account at the provider, whoever asks.",
-      }, tools, (name, args, signal) => invoke(connector, name, args, signal), () => {
+      }, () => listServerTools(connectorServer(connector.name, connector.config.serverId)),
+      (name, args, ctx) => invoke(connector, name, args, ctx.signal), () => {
         // Queue discovery, including for a fixed environment token. A bad
         // result never replays a write or starts a probe per failing call.
         connector.discoverAfter = Math.min(connector.discoverAfter, Date.now() + MINUTE);
-      });
-      publish(node);
+      }, publish);
       connector.state = 'connected';
       connector.error = null;
       connector.tokenExpiresAt = null;
@@ -125,8 +123,4 @@ export async function connectorStatuses() {
   return connectors.map(({ name, config, recipients, state, error, tokenExpiresAt }) => ({
     name, description: config.description ?? null, recipients, state, error, tokenExpiresAt,
   }));
-}
-
-export function connectorNamesFor(agent: AgentPassport): string[] {
-  return connectors.filter(connector => addressedTo(connector.recipients, agent)).map(connector => connector.name);
 }
