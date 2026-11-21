@@ -92,11 +92,11 @@ export type ProgramLaunch = {
   // The id of the run and the moment it began, when the launcher keeps a
   // record of the run from its start: it names the run, writes the record
   // (the schedule journals `running` and gives the id at once) and launches
-  // after — the calls of the run and its outcome carry the same id. The
+  // after — action events and the outcome carry the same run id. The
   // runner names the run itself otherwise.
   start?: ProgramStart;
   // The slug of the scheduled task, when the schedule launches the run: the
-  // calls of the run carry it (`ProgramScope.task`).
+  // scope passes it to capabilities so their action events name the task.
   task?: string;
   // The heap of the process, when not the usual one.
   heapMb?: number;

@@ -332,6 +332,9 @@ export const schedule = node({
       text: 'What a scheduled program returns is delivered to the main thread as a schedule.fired event; returning null is silence. An exception or a timeout always lands there as a system.exception event.',
     },
     {
+      text: 'Calls inside a task have no call events. Use console.log to record the actions and outcomes the operator needs in the run history.',
+    },
+    {
       text: 'A scheduled program works in the main thread: `send_message` reaches the user. A child started with `spawn_agent` is headless when available and sends questions to the secretary. Set headless to false for questions to reach the user in the child thread.',
       requires: ['send_message', 'spawn_agent'],
     },

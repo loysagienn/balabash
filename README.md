@@ -149,7 +149,7 @@ each run owns a thread — its context and its visibility boundary.**
   tool delivery and thread completion. The secretary opens catalog capabilities through its configured API. On a stateless
   compatible Responses gateway it reads the signature with `describe` and uses `call`.
   Codex and Claude receive their catalogs over MCP.
-  A Claude Code mod opens deferred capabilities through describe. Catalog calls and calls inside programs use the same event journal. Prompts
+  A Claude Code mod opens deferred capabilities through describe. The event journal records agent calls, including calls inside `run_program`. Scheduled programs record the outcome and console output in their run history. Prompts
   are assembled from a world library — one file per fact, every prompt imports instead of
   retelling.
 - **The console is one more projection.** The browser hydrates from a snapshot of the
