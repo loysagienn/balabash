@@ -79,7 +79,7 @@ export type ProgramStart = {
 };
 
 export type ProgramEnv = {
-  traceCall?: (caller: Caller, program: ProgramScope, name: string, input: JsonValue, invoke: () => Promise<JsonValue>) => Promise<JsonValue>;
+  traceCall?: (caller: Caller, runId: string, name: string, input: JsonValue, invoke: () => Promise<JsonValue>) => Promise<JsonValue>;
   connections: ConnectionsPort;
   // Aborting it stops the run: the launcher no longer waits for it.
   signal?: AbortSignal;
@@ -375,7 +375,7 @@ export function executeProgram(grant: Grant, launch: ProgramLaunch, env: Program
       const invoke = () => request.kind === 'describe'
         ? describe(programGrant, input, env)
         : invokeCapability(programGrant, name, input, { ...env, program: scope });
-      const outcome = env.traceCall ? env.traceCall(grant.caller, scope, name, input, invoke) : invoke();
+      const outcome = env.traceCall ? env.traceCall(grant.caller, id, name, input, invoke) : invoke();
 
       outcome.then(
         value => answer(request, { ok: true, value }),

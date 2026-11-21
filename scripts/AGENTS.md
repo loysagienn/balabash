@@ -130,7 +130,12 @@ Offline step 3 of the agent-tools move. Restore a current dump into a separate P
 database and deploy the branch's Prisma migrations there first. Set DATABASE_URL to the
 restored database. The --database argument must match current_database() on that connection.
 
-    npm run migrate-agent-tools -- --database NAME --workspaces /path/to/data/workspace
+    npm run migrate-agent-tools -- --mode tasks --database NAME --workspaces /path/to/data/workspace
+
+At cutover, `tasks` moves the task registry and seeds Gmail memory. Run `journal` in a
+second offline window after verifying the branch on mixed history:
+
+    npm run migrate-agent-tools -- --mode journal --database NAME
 
 Use `--dry-run` on the restored copy to run the same translation and report the counts after
 rolling the transaction back. Both modes require the application and scheduler to stay offline

@@ -22,7 +22,7 @@
 // is journaled and told: for that long the task says it is running, a
 // restart waits (hasUnsettledRuns), and the boot sweep leaves the row alone.
 //
-// The catalog, its connections and its call journal are the tree's (src/tree), which
+// The catalog and its connections are the tree's (src/tree), which
 // itself reaches the schedule from its node `schedule`; so the tree hands
 // these over when the app starts (setProgramHost), the way it tells its
 // services to the connections layer.
@@ -40,7 +40,6 @@ import {
   type ConnectionsPort,
   type GrantPolicy,
   type ProgramRun,
-  type ProgramEnv,
   type ProgramStart,
 } from '../catalog/index.ts';
 import { appendEvent, storablePayload } from '../core/append.ts';
@@ -59,7 +58,6 @@ export const PROGRAM_TIMEOUT_MAX_MS = 18_000_000;
 export type ProgramHost = {
   catalog(workspaceId: string): Catalog;
   connections: ConnectionsPort;
-  traceCall: NonNullable<ProgramEnv['traceCall']>;
 };
 
 let host: ProgramHost | null = null;
@@ -130,7 +128,7 @@ async function runUnderMainThread(task: ScheduledTaskModel, main: Thread, start:
     return await executeProgram(
       grant,
       { code, timeoutMs: task.timeoutMs ?? PROGRAM_TIMEOUT_DEFAULT_MS, start, task: task.slug },
-      { connections: host.connections, traceCall: host.traceCall },
+      { connections: host.connections },
     );
   } catch (error) {
     return neverBegan(start, code, error);

@@ -1,5 +1,5 @@
 // Offline step 3, after deploying the additive schema. Nothing in app boot
-// runs this script. One transaction publishes the journal and registry together.
+// runs this script. Each maintenance window commits its own transaction.
 import { parseArgs } from 'node:util';
 import { prisma } from '../src/db/client.ts';
 import { workspaceRoot } from '../src/workspace/layout.ts';
@@ -9,11 +9,15 @@ import { migrateTasks, moveJobRuns } from './agent-tools/schedule.ts';
 const { values } = parseArgs({
   options: {
     database: { type: 'string' },
+    mode: { type: 'string' },
     workspaces: { type: 'string' },
     programs: { type: 'string' },
     'dry-run': { type: 'boolean' },
   },
 });
+
+const mode = values.mode;
+if (mode !== 'tasks' && mode !== 'journal') throw new Error('Select a maintenance window with --mode tasks or --mode journal.');
 
 const dryRun = new Error('Roll back the dry run');
 let counts;
@@ -33,10 +37,13 @@ try {
       // A dry run can wake autovacuum on the affected tables. Give PostgreSQL
       // time to release its maintenance lock before the immediate real run.
       await tx.$executeRaw`SET LOCAL lock_timeout = '5s'`;
-      await tx.$executeRaw`LOCK TABLE events, job_runs, schedule_runs, scheduled_tasks IN SHARE ROW EXCLUSIVE MODE`;
-      const tasks = await migrateTasks(tx, values.workspaces ?? workspaceRoot(), values.programs);
-      const jobs = await moveJobRuns(tx);
-      counts = { ...tasks, jobs, ...(await migrateCalls(tx)) };
+      if (mode === 'tasks') {
+        await tx.$executeRaw`LOCK TABLE events, schedule_runs, scheduled_tasks IN SHARE ROW EXCLUSIVE MODE`;
+        counts = await migrateTasks(tx, values.workspaces ?? workspaceRoot(), values.programs);
+      } else {
+        await tx.$executeRaw`LOCK TABLE events, job_runs, schedule_runs IN SHARE ROW EXCLUSIVE MODE`;
+        counts = { jobs: await moveJobRuns(tx), ...(await migrateCalls(tx)) };
+      }
       if (values['dry-run']) throw dryRun;
     },
     { timeout: 60 * 60 * 1000 },

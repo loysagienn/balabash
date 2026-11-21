@@ -14,7 +14,8 @@ it fires and WHAT it does. The scheme of capabilities knows two kinds
   scheduled runs (ScheduleRun; read by `journal.ts`); what the program
   returns comes to the main thread as `schedule.fired` (null is silence), a
   failure or a timeout as `system.exception`, a run stopped by a restart is
-  `aborted` and tells nobody.
+  `aborted` and tells nobody. Calls and describe lookups inside the task leave
+  no tool.call events. Domain events from their actions keep the task author.
 
 Every task carries the flag `wake`: `false` leaves its `schedule.fired` to
 wait in the main thread for the secretary's next turn.

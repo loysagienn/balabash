@@ -87,21 +87,30 @@ test('offline move rolls back on collision, preserves mixed history and runs onc
     INSERT INTO events (id,type,actor,agent_name,thread_id,workspace_id,payload)
     VALUES ('failed','tool.call.failed','agent','coordinator','thread','w',
             '{"callId":"failed","functionName":"storage_get_file","error":"provider offline"}')`);
+  await assert.rejects(migrate(), /--mode tasks or --mode journal/);
+  const tasks = (...args: string[]) => migrate('--mode', 'tasks', ...args);
+  const journal = (...args: string[]) => migrate('--mode', 'journal', ...args);
   const peer = new pg.Client({ connectionString: url, application_name: 'idle-scheduler' });
   await peer.connect();
   try {
-    await assert.rejects(migrate(), /Close other database connections.*idle-scheduler/);
+    await assert.rejects(tasks(), /Close other database connections.*idle-scheduler/);
   } finally {
     await peer.end();
   }
-  await assert.rejects(migrate(), /Unique constraint|duplicate key/i);
   const kind = async () => (await client.query('SELECT kind FROM scheduled_tasks')).rows[0].kind;
   assert.equal(await kind(), 'command');
-  await client.query('DELETE FROM schedule_runs');
-  const counts = { tasks: 1, seeds: 0, jobs: 1, renamed: 11, completed: 5, failures: 1 };
-  assert.deepEqual(await migrate('--dry-run'), counts);
+  assert.deepEqual(await tasks('--dry-run'), { tasks: 1, seeds: 0 });
   assert.equal(await kind(), 'command');
-  assert.deepEqual(await migrate(), counts);
+  assert.deepEqual(await tasks(), { tasks: 1, seeds: 0 });
+  assert.deepEqual(await tasks(), { tasks: 0, seeds: 0 });
+  assert.equal((await client.query("SELECT count(*)::int AS n FROM events WHERE payload ? 'result'")).rows[0].n, 5);
+  await assert.rejects(journal(), /Unique constraint|duplicate key/i);
+  assert.equal(await kind(), 'program');
+  await client.query('DELETE FROM schedule_runs');
+  const counts = { jobs: 1, renamed: 11, completed: 5, failures: 1 };
+  assert.deepEqual(await journal('--dry-run'), counts);
+  assert.equal((await client.query('SELECT count(*)::int AS n FROM job_runs')).rows[0].n, 1);
+  assert.deepEqual(await journal(), counts);
   const { rows } = await client.query('SELECT id,type,payload FROM events');
   const payload = (id: string) => rows.find(row => row.id === id)!.payload;
   assert.deepEqual(payload('failed').error, { kind: 'external_error', message: 'provider offline' });
@@ -128,14 +137,14 @@ test('offline move rolls back on collision, preserves mixed history and runs onc
     ),
     { output: 'out' },
   );
-  assert.deepEqual(await migrate(), { tasks: 0, seeds: 0, jobs: 0, renamed: 0, completed: 0, failures: 0 });
+  assert.deepEqual(await journal(), { jobs: 0, renamed: 0, completed: 0, failures: 0 });
 });
 
 test('code task replacements and the last five Gmail deliveries belong to their workspace', async t => {
   const { client, migrate } = await fixture(t);
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'task-programs-'));
   t.after(() => fs.rm(dir, { recursive: true, force: true }));
-  const args = ['--workspaces', dir, '--programs', dir];
+  const args = ['--mode', 'tasks', '--workspaces', dir, '--programs', dir];
   await client.query(`
     INSERT INTO scheduled_tasks (id,slug,workspace_id,name,kind)
     VALUES ('t','gmail-new-mail','w','Mail','code');
@@ -151,7 +160,7 @@ test('code task replacements and the last five Gmail deliveries belong to their 
   await fs.writeFile(file, 'return 123;');
   assert.equal((await migrate(...args, '--dry-run')).seeds, 0);
   await fs.writeFile(file, gmailNewMail);
-  assert.deepEqual(await migrate(...args), { tasks: 1, seeds: 5, jobs: 0, renamed: 0, completed: 0, failures: 0 });
+  assert.deepEqual(await migrate(...args), { tasks: 1, seeds: 5 });
   assert.equal((await client.query('SELECT code FROM scheduled_tasks')).rows[0].code, gmailNewMail);
   const seeds = await client.query(`
     SELECT r.id, r.value, r.has_value, r.started_at = e.created_at AND r.finished_at = e.created_at AS same_time

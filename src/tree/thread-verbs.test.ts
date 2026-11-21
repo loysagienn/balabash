@@ -729,6 +729,9 @@ describe('a program', () => {
     for (const event of [message, birth, word, finish, cancel, note]) {
       assert.deepEqual([event.actor, event.agentName, event.taskSlug, event.taskRunId], ['task', null, 'digest', runId]);
     }
+    assert.equal(await prisma.event.count({ where: {
+      type: { startsWith: 'tool.call.' }, payload: { path: ['runId'], equals: runId },
+    } }), 0);
     const childTranscript = await invoke('threads_get_transcript', { threadId: run.value.child });
     const [spawn] = childTranscript.transcript.split('\n').map((line: string) => JSON.parse(line));
     assert.deepEqual([spawn.actor, spawn.task, spawn.payload.agent], ['task', { slug: 'digest', runId }, 'browser']);

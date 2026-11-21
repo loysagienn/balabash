@@ -438,14 +438,15 @@ test('OpenAI opens a granted function, spawns through it and replays its definit
     { payload: { path: ['functionName'], equals: 'describe' } },
   ] } }), 1);
 
-  // A scheduled program left more calls than the whole history window
+  // An on-the-spot program left more nested calls than the whole history window
   // between wakes. Seed its journal in bulk, without hundreds of RPCs.
   const task = { actor: 'task', taskSlug: 'nightly', taskRunId: 'nightly-run', workspaceId: stand.workspaceId, threadId: stand.mainThreadId };
   await prisma.event.createMany({ data: Array.from({ length: 401 }, (_, i) => {
-    const call = { functionName: 'projects_list', callId: 'nightly-' + i, runId: task.taskRunId };
+    const author = { actor: 'agent', agentName: 'coordinator', workspaceId: stand.workspaceId, threadId: stand.mainThreadId };
+    const call = { functionName: 'projects_list', callId: 'lookup-' + i, runId: record.run.id };
     return [
-      { ...task, type: 'tool.call.started', payload: { ...call, input: {} } },
-      { ...task, type: 'tool.call.completed', payload: { ...call, value: [] } },
+      { ...author, type: 'tool.call.started', payload: { ...call, input: {} } },
+      { ...author, type: 'tool.call.completed', payload: { ...call, value: [] } },
     ];
   }).flat() });
   await prisma.event.create({ data: { ...task, type: 'schedule.fired', payload: { slug: task.taskSlug, runId: task.taskRunId, value: 'nightly result' } } });

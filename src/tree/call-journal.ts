@@ -10,18 +10,16 @@ import type {
   JsonObject,
   JsonValue,
   ProgramRun,
-  ProgramScope,
 } from '../catalog/index.ts';
 import { CapabilityError, describe, invokeCapability, parseCallTarget, runProgram, toCapabilityError } from '../catalog/index.ts';
 import { appendEvent } from '../core/append.ts';
-import { callAuthor } from './call-author.ts';
 
 type Call = {
   caller: Caller;
   callId: string;
   name: string;
   input: JsonValue;
-  program?: ProgramScope;
+  runId?: string;
 };
 
 async function journalCall<T extends JsonValue>(
@@ -29,13 +27,14 @@ async function journalCall<T extends JsonValue>(
   invoke: () => Promise<T>,
   runDetails?: () => JsonObject,
 ): Promise<{ value: T; seq: bigint } | { error: CapabilityErrorValue; seq: bigint }> {
-  const { caller, program } = call;
+  const { caller, runId } = call;
   const event = {
     workspaceId: caller.workspaceId,
     threadId: caller.threadId,
-    ...callAuthor({ caller, program: program ?? null }),
+    actor: 'agent' as const,
+    agentName: caller.agentName,
   };
-  const ids = { callId: call.callId, functionName: call.name, ...(program ? { runId: program.runId } : {}) };
+  const ids = { callId: call.callId, functionName: call.name, ...(runId ? { runId } : {}) };
   await appendEvent({ ...event, type: 'tool.call.started', payload: { ...ids, input: call.input } });
 
   let value: T;
@@ -76,14 +75,14 @@ function runDetails(run: ProgramRun): JsonObject {
   };
 }
 
-export async function journalProgramCall(
+async function journalProgramCall(
   caller: Caller,
-  program: ProgramScope,
+  runId: string,
   name: string,
   input: JsonValue,
   invoke: () => Promise<JsonValue>,
 ): Promise<JsonValue> {
-  const result = await journalCall({ caller, program, callId: randomUUID(), name, input }, invoke);
+  const result = await journalCall({ caller, runId, callId: randomUUID(), name, input }, invoke);
   if ('error' in result) {
     const { kind, message, details } = result.error;
     throw new CapabilityError(kind, message, details);

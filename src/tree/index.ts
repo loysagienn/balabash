@@ -75,7 +75,6 @@ import { fileCapabilities } from './files.ts';
 import { gmail } from './gmail.ts';
 import { notionNode } from './notion.ts';
 import { projects } from './projects.ts';
-import { journalProgramCall } from './call-journal.ts';
 import { setProgramHost } from '../schedule/programs.ts';
 import { schedule } from './schedule.ts';
 import { connectionsPort, registerServices } from './services.ts';
@@ -255,7 +254,7 @@ export async function startTree(report?: ReportExtensionFailure): Promise<void> 
   await loadAuthoredNodes(publishNode, names, report);
   await configureServers(servers, publishNode, report);
   await startConnectors(connectors, publishNode, report);
-  setProgramHost({ catalog, connections: connectionsPort(), traceCall: journalProgramCall });
+  setProgramHost({ catalog, connections: connectionsPort() });
   await refreshSecretServices();
 }
 

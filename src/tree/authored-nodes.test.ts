@@ -150,7 +150,7 @@ test('written installation modules join the published tree and its consumers', a
     const { fireTask } = await import('../schedule/engine.ts');
     const { isTaskRunning } = await import('../schedule/programs.ts');
     const task = await prisma.scheduledTask.create({ data: { slug: 'daily', name: 'Daily', workspaceId,
-      kind: 'program', code: 'return await call("nightly_read", {})', wake: false, timeoutMs: 5000 } });
+      kind: 'program', code: 'await describe("nightly_read"); return await call("nightly_read", {})', wake: false, timeoutMs: 5000 } });
     const fired = await fireTask(task, 'cron');
     assert.ok(fired.kind === 'fired' && fired.runId);
     const deadline = Date.now() + 15000;
@@ -158,10 +158,9 @@ test('written installation modules join the published tree and its consumers', a
     const run = await prisma.scheduleRun.findUniqueOrThrow({ where: { id: fired.runId } });
     assert.equal(run.status, 'ok', JSON.stringify(run.error));
     assert.equal(run.value, 'ready');
-    const completed = await prisma.event.findFirstOrThrow({ where: {
-      type: 'tool.call.completed', actor: 'task', taskSlug: task.slug, taskRunId: run.id, threadId: mainThreadId,
-    } });
-    assert.equal((completed.payload as { functionName: string }).functionName, 'nightly_read');
+    assert.equal(await prisma.event.count({ where: {
+      type: { startsWith: 'tool.call.' }, payload: { path: ['runId'], equals: run.id },
+    } }), 0);
   });
 });
 
