@@ -1,6 +1,4 @@
-// The printer of signatures: the texts of the actions and of the platform's
-// types are the ones the design catalog shows (agent-tools-catalog-view.md),
-// reached here from the zod definitions.
+// The printer derives the catalog's action signatures and platform types from their Zod definitions.
 
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
@@ -107,7 +105,7 @@ describe('the signature printer', () => {
       [
         '/** Reference to a file in Balabash storage: the form a file takes in an output. Identity and metadata, never content. */',
         'type FileRef = {',
-        '  kind: "file";  // Marks a file inside any value.',
+        '  kind: "file";  // The file reference discriminator.',
         '  id: FileId;',
         '  name: string | null;',
         '  contentType: string | null;  // MIME type.',

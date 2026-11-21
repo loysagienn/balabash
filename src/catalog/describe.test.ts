@@ -99,7 +99,7 @@ suite('describe', () => {
         [
           '/** Reference to a file in Balabash storage: the form a file takes in an output. Identity and metadata, never content. */',
           'type FileRef = {',
-          '  kind: "file";  // Marks a file inside any value.',
+          '  kind: "file";  // The file reference discriminator.',
           '  id: FileId;',
           '  name: string | null;',
           '  contentType: string | null;  // MIME type.',
