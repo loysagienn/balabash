@@ -25,6 +25,10 @@ export type ActionDetail =
   | { kind: 'diff'; diff: string; error?: string }
   // A sub-agent's report: Markdown, shown whole.
   | { kind: 'report'; text: string }
+  // A program (run_program): its code, what it wrote to `console` (the end
+  // of it when the run kept only the end) and the value or the error it
+  // ended with — console and output are null until the run has ended.
+  | { kind: 'program'; code: string; console: string | null; consoleTruncated: boolean; output: string | null }
   // The input and the result of any other tool, as text.
   | { kind: 'io'; input: string; output: string | null };
 
@@ -230,6 +234,7 @@ export function nativeAction(name: string, input: JsonObject, result?: JsonValue
 }
 
 const BRIDGE_ICONS: Record<string, IconName> = {
+  run_program: 'file-code',
   spawn_agent: 'bot',
   send_to_thread: 'message-square-reply',
   send_message: 'send',
@@ -260,6 +265,11 @@ export function bridgeAction(functionName: string, input: JsonValue): { label: A
   const icon = BRIDGE_ICONS[functionName] ?? (functionName.startsWith('gmail_') ? 'inbox' : functionName.startsWith('notion_') ? 'file-text' : functionName.startsWith('web_perplexity_') ? 'search' : 'wrench');
 
   return { label: { icon, tool: functionName, ...(arg ? { arg: clipLine(arg) } : {}) }, input: JSON.stringify(input, null, 2) };
+}
+
+// The code of a run_program call, when its input carries one.
+export function programCode(functionName: string, input: JsonValue): string | null {
+  return functionName === 'run_program' && input && typeof input === 'object' && !Array.isArray(input) && typeof input.code === 'string' ? input.code : null;
 }
 
 // Tools whose rows the feed does not draw: the plan card stands for them.

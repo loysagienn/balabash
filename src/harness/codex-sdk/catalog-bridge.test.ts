@@ -89,7 +89,9 @@ test('a Codex run opens, calls, and resumes with a new grant and the reply from 
   for (const { data } of starts) assert.equal(calls.filter(c => c.data.callId === data.callId).length, 2);
   const program = calls.find(c => c.type === 'tool.call.completed' && c.data.functionName === 'run_program')!.data;
   assert.equal(program.value, 0);
-  assert.ok(starts.some(c => c.data.functionName === 'projects_list' && c.data.runId === program.run.id));
+  // The call a program makes leaves no event of its own: the run is the record.
+  assert.equal(program.run.outcome, 'ok');
+  assert.equal(starts.filter(c => c.data.functionName === 'projects_list').length, 1);
   assert.equal(calls.find(c => c.type === 'tool.call.failed' && c.data.functionName === 'projects_get')!.data.error.kind, 'invalid_input');
   const opening = calls.find(c => c.type === 'tool.call.completed' && c.data.functionName === 'describe')!.data.value;
   assert.equal(opening.kind, 'capability');

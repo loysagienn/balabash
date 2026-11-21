@@ -440,9 +440,6 @@ type RenderedEvent = {
 // event stays out of the transcript. Truncation is applied separately, once
 // the event's position among the included ones is known.
 function renderEvent(event: TranscriptEvent, options: TranscriptOptions): RenderedEvent | null {
-  // A program's intermediate inputs and values are available by seq in the
-  // journal. Only its outer result and the domain events belong in the prompt.
-  if (event.type.startsWith('tool.call.') && asObject(event.payload).runId) return null;
   const renderer = renderers[event.type];
   const envelope: JsonObject = {
     seq: Number(event.seq),

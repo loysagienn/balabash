@@ -22,7 +22,7 @@ import { formatTokensK } from '../../ui/Ring/Ring.logic.ts';
 import type { IconName } from '../../ui/Icon/Icon.tsx';
 import type { StateName } from '../../ui/atoms/state.ts';
 import type { XpState } from '../../ui/Xp/Xp.tsx';
-import { actionDuration, bridgeAction, bridgeOutput, clipLine, isPlanTool, nativeAction } from './actions.ts';
+import { actionDuration, bridgeAction, bridgeOutput, clipLine, isPlanTool, nativeAction, programCode } from './actions.ts';
 import type { ActionDetail, ActionLabel } from './actions.ts';
 import { withWorkspace } from '../../lib/workspace/state.ts';
 
@@ -1046,7 +1046,9 @@ class Builder {
 
     if (is(event, 'tool.call.started')) {
       const { label, input } = bridgeAction(event.payload.functionName, event.payload.input ?? {});
-      const item = this.open({ kind: 'action', key, at, state: 'run', label, endedAt: null, endNote: null, detail: { kind: 'io', input, output: null }, nested: [] });
+      const code = programCode(event.payload.functionName, event.payload.input ?? {});
+      const detail: ActionDetail = code === null ? { kind: 'io', input, output: null } : { kind: 'program', code, console: null, consoleTruncated: false, output: null };
+      const item = this.open({ kind: 'action', key, at, state: 'run', label, endedAt: null, endNote: null, detail, nested: [] });
 
       this.tools.set(`call:${event.payload.callId}`, item);
       this.action(item);
@@ -1063,12 +1065,17 @@ class Builder {
           ? (typeof event.payload.value === 'string' ? event.payload.value : JSON.stringify(event.payload.value, null, 2))
           : bridgeOutput(event.payload.result);
       const isError = failed || (!('value' in event.payload) && event.payload.result?.isError === true);
+      // The run of a program, on the end of its run_program call.
+      const details = is(event, 'tool.call.failed') ? event.payload.run : 'value' in event.payload ? event.payload.run : undefined;
+      const run = details && typeof details === 'object' && !Array.isArray(details) ? details : undefined;
 
       if (item) {
         item.state = isError ? 'err' : 'done';
         item.endedAt = at;
-        item.endNote = isError ? 'error' : null;
-        item.detail = { kind: 'io', input: item.detail?.kind === 'io' ? item.detail.input : '', output };
+        item.endNote = isError ? (run?.outcome === 'timeout' ? 'timeout' : 'error') : null;
+        item.detail = item.detail?.kind === 'program'
+          ? { ...item.detail, console: typeof run?.console === 'string' ? run.console : null, consoleTruncated: run?.consoleTruncated === true, output }
+          : { kind: 'io', input: item.detail?.kind === 'io' ? item.detail.input : '', output };
       } else {
         this.action({
           kind: 'action',

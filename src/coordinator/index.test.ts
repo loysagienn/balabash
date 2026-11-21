@@ -433,29 +433,17 @@ test('OpenAI opens a granted function, spawns through it and replays its definit
   const record = runEnd.payload as { value: string; run: { id: string; console: string } };
   assert.equal(record.value, 'projects');
   assert.match(record.run.console, /lookup/);
-  assert.equal(await prisma.event.count({ where: { type: 'tool.call.completed', agentName: 'coordinator', AND: [
-    { payload: { path: ['runId'], equals: record.run.id } },
-    { payload: { path: ['functionName'], equals: 'describe' } },
-  ] } }), 1);
+  // The describe of the program left no event of its own: the run is the record.
+  const runStart = await prisma.event.findFirstOrThrow({ where: { type: 'tool.call.started', payload: { path: ['callId'], equals: 'catalog-2' } } });
+  assert.equal(await prisma.event.count({ where: { type: { startsWith: 'tool.call.' }, seq: { gt: runStart.seq, lt: runEnd.seq } } }), 0);
 
-  // An on-the-spot program left more nested calls than the whole history window
-  // between wakes. Seed its journal in bulk, without hundreds of RPCs.
   const task = { actor: 'task', taskSlug: 'nightly', taskRunId: 'nightly-run', workspaceId: stand.workspaceId, threadId: stand.mainThreadId };
-  const author = { actor: 'agent', agentName: 'coordinator', workspaceId: stand.workspaceId, threadId: stand.mainThreadId };
-  await prisma.event.createMany({ data: Array.from({ length: 401 }, (_, i) => {
-    const call = { functionName: 'projects_list', callId: 'lookup-' + i, runId: record.run.id };
-    return [
-      { ...author, type: 'tool.call.started', payload: { ...call, input: {} } },
-      { ...author, type: 'tool.call.completed', payload: { ...call, value: [] } },
-    ];
-  }).flat() });
   await prisma.event.create({ data: { ...task, type: 'schedule.fired', payload: { slug: task.taskSlug, runId: task.taskRunId, value: 'nightly result' } } });
   await wake();
   assert.deepEqual(items(4)[0], items(0)[0]);
   assert.deepEqual(items(4)[2], addition);
   assert.match(JSON.stringify(items(4)[3]), /nightly result/);
   assert.match(JSON.stringify(items(4)[3]), /spawn_agent/);
-  assert.doesNotMatch(JSON.stringify(items(4)[3]), /projects_list/);
   assert.equal(items(4).length, 5); // first chunk, describe text, definition, new chunk, status
   assert.deepEqual(requests[4]!.tools, first.tools);
   resetPromptState(stand.mainThreadId);

@@ -271,7 +271,7 @@ it('replays a journaled opening through the secretary turn, its scheduled keepal
   assert.doesNotMatch(JSON.stringify(first.system), /do_nothing|storage_get_file/);
   assert.deepEqual(requests[1]!.tools, first.tools);
 
-  const events = await getTranscript(threadId, { last: 400, omitProgramCalls: true });
+  const events = await getTranscript(threadId, { last: 400 });
   const completed = events.filter(event => event.type === 'tool.call.completed');
   assert.deepEqual(completed.map(event => event.payload.callId), ['open-list', 'list']);
   assert.equal((completed[0]!.payload.value as { name: string }).name, 'projects_list');
@@ -316,7 +316,7 @@ it('replays a journaled opening through the secretary turn, its scheduled keepal
   assert.ok(buildKeepalivePrompt(prefix));
   const reduced = { ...prefix, deferredTools: port.head.deferredTools.filter(fn => fn.name !== 'projects_list') };
   assert.equal(buildKeepalivePrompt(reduced), null);
-  const snapshot = await getTranscript(threadId, { last: 400, omitProgramCalls: true });
+  const snapshot = await getTranscript(threadId, { last: 400 });
   const rebuilt = buildTurnPrompt({ ...reduced, events: snapshot, lastSeq: snapshot.at(-1)!.seq, snapshotFull: false, statusText: 'status' });
   assert.ok(rebuilt);
   assert.deepEqual(rebuilt.openings ?? [], []);

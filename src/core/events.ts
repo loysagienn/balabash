@@ -2,7 +2,6 @@
 // formula (§5.2): транскрипт(T) = events authored in T ∪ events addressed
 // to T, in global seq order.
 
-import { Prisma } from '../../prisma-generated/client.ts';
 import { prisma } from '../db/client.ts';
 import { createLiveHub, installLiveHub } from './live.ts';
 import type { Event } from './contract.ts';
@@ -64,7 +63,6 @@ export async function getLogQuietSeconds(): Promise<number | null> {
 }
 
 type TranscriptOptions = {
-  omitProgramCalls?: boolean;
   afterSeq?: bigint;
   // Only events older than this seq: with `last`, a page of the transcript
   // read from the newest events back into history.
@@ -84,17 +82,11 @@ type TranscriptOptions = {
 // listThreadEvents).
 export async function getTranscript(
   threadId: string,
-  { afterSeq, beforeSeq, limit, last, omitProgramCalls }: TranscriptOptions = {},
+  { afterSeq, beforeSeq, limit, last }: TranscriptOptions = {},
 ): Promise<Event[]> {
   const where = {
     OR: [{ threadId }, { targetThreadId: threadId }],
     NOT: { type: { startsWith: SESSION_EVENT_PREFIX } },
-    // DbNull matches a missing JSON path. Direct calls (including legacy
-    // rows) stay in the window, as do domain events carrying a runId.
-    ...(omitProgramCalls ? { AND: { OR: [
-      { NOT: { type: { startsWith: 'tool.call.' } } },
-      { payload: { path: ['runId'], equals: Prisma.DbNull } },
-    ] } } : {}),
     ...(afterSeq !== undefined || beforeSeq !== undefined
       ? { seq: { ...(afterSeq !== undefined ? { gt: afterSeq } : {}), ...(beforeSeq !== undefined ? { lt: beforeSeq } : {}) } }
       : {}),

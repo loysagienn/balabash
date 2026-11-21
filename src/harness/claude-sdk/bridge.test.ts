@@ -137,5 +137,8 @@ test('Claude opens granted leaves, refreshes its list and journals the catalog v
   for (const { data } of starts) assert.equal(events.filter(row => row.data.callId === data.callId).length, 2);
   assert.equal(events.find(row => row.data.value?.kind === 'capability')!.data.value.parent, undefined);
   assert.equal(events.find(row => row.type === 'tool.call.failed' && row.data.functionName === 'projects_get')!.data.error.kind, 'invalid_input');
-  assert.ok(starts.some(row => row.data.functionName === 'projects_list' && row.data.runId === starts.find(row => row.data.functionName === 'run_program')!.data.callId));
+  // The call a program makes leaves no event of its own: the run is the record.
+  const run = events.findIndex(row => row.type === 'tool.call.started' && row.data.functionName === 'run_program');
+  assert.deepEqual([events[run + 1]!.type, events[run + 1]!.data.functionName], ['tool.call.completed', 'run_program']);
+  assert.equal(events[run + 1]!.data.run.outcome, 'ok');
 });

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { actionDuration, bridgeAction, nativeAction, resultText, shortPath } from './actions.ts';
+import { actionDuration, bridgeAction, nativeAction, programCode, resultText, shortPath } from './actions.ts';
 import { actionTimer, cutText, fence } from './details.ts';
 
 describe('nativeAction', () => {
@@ -41,6 +41,15 @@ describe('bridgeAction', () => {
     assert.deepEqual(bridgeAction('get_event', { seq: 17588 }).label, { icon: 'file-text', tool: 'get_event', arg: '17588' });
     assert.deepEqual(bridgeAction('send_message', { files: ['f'] }).label, { icon: 'send', tool: 'send_message', arg: 'f' });
     assert.deepEqual(bridgeAction('gmail_search_emails', {}).label, { icon: 'inbox', tool: 'gmail_search_emails' });
+  });
+
+  it('names a program by the first line of its code and gives the code apart from the input', () => {
+    const input = { code: "const list = await call('projects_list', {});\nreturn list.projects.length;", timeoutSeconds: 30 };
+
+    assert.deepEqual(bridgeAction('run_program', input).label, { icon: 'file-code', tool: 'run_program', arg: "const list = await call('projects_list', {});" });
+    assert.equal(programCode('run_program', input), input.code);
+    assert.equal(programCode('run_program', { code: 7 }), null);
+    assert.equal(programCode('get_event', { code: 'x' }), null);
   });
 });
 

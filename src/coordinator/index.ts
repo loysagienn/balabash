@@ -293,7 +293,7 @@ export function createCoordinatorRun({ threadId, workspaceId }: { threadId: stri
   };
 
   const turn = async (): Promise<void> => {
-    const events = await getTranscript(threadId, { last: HISTORY_LIMIT, omitProgramCalls: true });
+    const events = await getTranscript(threadId, { last: HISTORY_LIMIT });
 
     if (!events.length) {
       return;

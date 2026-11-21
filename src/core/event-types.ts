@@ -108,11 +108,11 @@ export type EventPayloads = {
   'agent.ask.resolved': { askId: string; outcome: string; by?: { identity?: UserIdentity; source?: string } };
 
   // Catalog calls keep the value or structured error. Bundle calls keep the MCP result.
-  'tool.call.started': { callId: string; functionName: string; input: JsonValue; runId?: string };
+  'tool.call.started': { callId: string; functionName: string; input: JsonValue };
   'tool.call.completed': { callId: string; functionName: string } & (
-    { serverName: string; toolName: string; result: ToolResult } | { value: JsonValue; runId?: string; run?: ProgramRunDetails }
+    { serverName: string; toolName: string; result: ToolResult } | { value: JsonValue; run?: ProgramRunDetails }
   );
-  'tool.call.failed': { callId: string; functionName: string; error: string | { kind: string; message: string; details?: JsonValue }; runId?: string; run?: ProgramRunDetails };
+  'tool.call.failed': { callId: string; functionName: string; error: string | { kind: string; message: string; details?: JsonValue }; run?: ProgramRunDetails };
 
   // Schedule and system.
   // A note task carries its note; a program task the id of its run and the

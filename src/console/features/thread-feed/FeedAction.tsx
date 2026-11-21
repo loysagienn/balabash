@@ -2,9 +2,10 @@
 // time on the right (a live timer while it runs — `now` ticks every second
 // then), and the details that mount when the row opens: a terminal with
 // the command and its output, a diff (with the tool's refusal above it
-// when the change failed), a sub-agent's report as Markdown, whole, the input
-// and the result of any other tool — each but the report cut to a
-// readable size with an honest notice. The frames of a native sub-agent render under the row.
+// when the change failed), a sub-agent's report as Markdown, whole, the code
+// of a program as a highlighted block with what it wrote to `console` and
+// what it ended with, the input and the result of any other tool — each but
+// the report cut to a readable size with an honest notice. The frames of a native sub-agent render under the row.
 // `still` — the folded row of an action group: no chevron, no details (Xp still).
 
 import { Md } from '../../ui/Md/Md.tsx';
@@ -23,6 +24,25 @@ function Notice({ cut }: { cut: Cut }) {
       Showing the first {cut.text.length.toLocaleString('en-US')} of {cut.total.toLocaleString('en-US')} characters
     </Trunc>
   ) : null;
+}
+
+// What a call ended with: its value, or its error.
+function Result({ output, error }: { output: string | null; error: boolean }) {
+  if (output === null) {
+    return null;
+  }
+
+  const cut = cutText(output);
+
+  return (
+    <>
+      <Terminal className={error ? 'tf-term-err' : undefined}>
+        <TermLine dim>{error ? 'error' : 'result'}</TermLine>
+        {cut.text || '(empty)'}
+      </Terminal>
+      <Notice cut={cut} />
+    </>
+  );
 }
 
 function Details({ detail, error }: { detail: ActionDetail; error: boolean }) {
@@ -63,9 +83,30 @@ function Details({ detail, error }: { detail: ActionDetail; error: boolean }) {
     case 'report':
       // Asked for whole: the row is the folded form, opening it is "show all".
       return <Md quiet source={detail.text} />;
+    case 'program': {
+      const code = cutText(detail.code);
+      const log = detail.console ? cutText(detail.console) : null;
+
+      return (
+        <>
+          <Md quiet source={fence('js', code.text)} />
+          <Notice cut={code} />
+          {log ? (
+            <>
+              <Terminal>
+                <TermLine dim>console</TermLine>
+                {log.text}
+              </Terminal>
+              {detail.consoleTruncated ? <Trunc>Only the end of the console output was kept</Trunc> : null}
+              <Notice cut={log} />
+            </>
+          ) : null}
+          <Result output={detail.output} error={error} />
+        </>
+      );
+    }
     case 'io': {
       const input = cutText(detail.input);
-      const output = detail.output === null ? null : cutText(detail.output);
 
       return (
         <>
@@ -78,15 +119,7 @@ function Details({ detail, error }: { detail: ActionDetail; error: boolean }) {
               <Notice cut={input} />
             </>
           ) : null}
-          {output ? (
-            <>
-              <Terminal className={error ? 'tf-term-err' : undefined}>
-                <TermLine dim>{error ? 'error' : 'result'}</TermLine>
-                {output.text || '(empty)'}
-              </Terminal>
-              <Notice cut={output} />
-            </>
-          ) : null}
+          <Result output={detail.output} error={error} />
         </>
       );
     }

@@ -20,6 +20,17 @@ app works at every point of the move.
 - If your checkout of `main` no longer has `scripts/migrate-agent-tools.ts`,
   check out the tag, do the whole move there, and update to `main` afterwards.
   A later revision cannot read a database that was not moved.
+- The tag and `main` up to `ba6535c` write a pair of `tool.call.*` events,
+  carrying `runId`, for every call a program of `run_program` makes. Later
+  `main` writes none and treats such an event as an agent's own call: the feed
+  shows it as a row of its own and the secretary reads it in the transcript.
+  If the app served agents on such a revision, delete those events once, right
+  after the update to `main` (`$dsn` as in the windows):
+
+  ```bash
+  psql -X --dbname="$dsn" -v ON_ERROR_STOP=1 \
+    -c "DELETE FROM events WHERE type IN ('tool.call.started','tool.call.completed','tool.call.failed') AND payload ? 'runId'"
+  ```
 
 ## What changes for an installation
 
@@ -268,9 +279,9 @@ What a program is (`src/schedule/AGENTS.md`, `src/catalog/program-process.ts`):
 - It runs as the task, in the workspace's main thread, with the whole tree of
   the workspace except `end_thread` and `view_file`. Default limit 600 s, at
   most 5 hours. Up to 8 calls of one run are in flight at a time.
-- Calls made inside a scheduled program leave no `tool.call.*` events. What the
-  operator should see of a run goes to `console.log` — the run keeps the last
-  16 KiB.
+- Calls made inside a program leave no `tool.call.*` events, scheduled or run
+  by `run_program`. What the operator should see of a run goes to
+  `console.log` — the run keeps the last 16 KiB.
 
 | Former `run(ctx)` | Program |
 |---|---|

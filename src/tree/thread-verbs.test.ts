@@ -701,6 +701,7 @@ describe('a program', () => {
 
     await invoke('schedule_create_task', { slug: 'digest', name: 'Digest', kind: 'program', code });
 
+    const head = (await prisma.event.findFirst({ orderBy: { seq: 'desc' } }))?.seq ?? 0n;
     const { runId } = await invoke('schedule_run_task', { slug: 'digest' });
     const run = await until(async () => {
       const state = await invoke('schedule_get_run', { runId });
@@ -729,9 +730,7 @@ describe('a program', () => {
     for (const event of [message, birth, word, finish, cancel, note]) {
       assert.deepEqual([event.actor, event.agentName, event.taskSlug, event.taskRunId], ['task', null, 'digest', runId]);
     }
-    assert.equal(await prisma.event.count({ where: {
-      type: { startsWith: 'tool.call.' }, payload: { path: ['runId'], equals: runId },
-    } }), 0);
+    assert.equal(await prisma.event.count({ where: { type: { startsWith: 'tool.call.' }, seq: { gt: head } } }), 0);
     const childTranscript = await invoke('threads_get_transcript', { threadId: run.value.child });
     const [spawn] = childTranscript.transcript.split('\n').map((line: string) => JSON.parse(line));
     assert.deepEqual([spawn.actor, spawn.task, spawn.payload.agent], ['task', { slug: 'digest', runId }, 'browser']);

@@ -1,6 +1,5 @@
 // A catalog call stores its JSON value or CapabilityError. Provider-specific
 // additions (schemas, file content and previews) live only in the model view.
-import { randomUUID } from 'node:crypto';
 import type {
   Caller,
   ConnectionsPort,
@@ -19,7 +18,6 @@ type Call = {
   callId: string;
   name: string;
   input: JsonValue;
-  runId?: string;
 };
 
 async function journalCall<T extends JsonValue>(
@@ -27,14 +25,14 @@ async function journalCall<T extends JsonValue>(
   invoke: () => Promise<T>,
   runDetails?: () => JsonObject,
 ): Promise<{ value: T; seq: bigint } | { error: CapabilityErrorValue; seq: bigint }> {
-  const { caller, runId } = call;
+  const { caller } = call;
   const event = {
     workspaceId: caller.workspaceId,
     threadId: caller.threadId,
     actor: 'agent' as const,
     agentName: caller.agentName,
   };
-  const ids = { callId: call.callId, functionName: call.name, ...(runId ? { runId } : {}) };
+  const ids = { callId: call.callId, functionName: call.name };
   await appendEvent({ ...event, type: 'tool.call.started', payload: { ...ids, input: call.input } });
 
   let value: T;
@@ -60,7 +58,8 @@ async function journalCall<T extends JsonValue>(
   return { value, seq: result.event.seq };
 }
 
-// Code and outcome already live in the input and result of run_program.
+// Code and outcome already live in the input and result of run_program. The
+// calls a program makes leave no events of their own: the run is the record.
 function runDetails(run: ProgramRun): JsonObject {
   return {
     run: {
@@ -73,21 +72,6 @@ function runDetails(run: ProgramRun): JsonObject {
       consoleTruncated: run.consoleTruncated,
     },
   };
-}
-
-async function journalProgramCall(
-  caller: Caller,
-  runId: string,
-  name: string,
-  input: JsonValue,
-  invoke: () => Promise<JsonValue>,
-): Promise<JsonValue> {
-  const result = await journalCall({ caller, runId, callId: randomUUID(), name, input }, invoke);
-  if ('error' in result) {
-    const { kind, message, details } = result.error;
-    throw new CapabilityError(kind, message, details);
-  }
-  return result.value;
 }
 
 // The entry point for direct catalog calls from a port. The port supplies
@@ -126,7 +110,6 @@ export async function dispatchCatalogCall(
       return runProgram(grant, input, {
         connections,
         start: { id: callId, startedAt: new Date() },
-        traceCall: journalProgramCall,
         record: outcome => { run = runDetails(outcome); },
       });
     }

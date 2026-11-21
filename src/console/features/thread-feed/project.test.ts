@@ -588,6 +588,33 @@ describe('projectFeed — actions', () => {
     assert.equal(output(rows[1]!), 'thread not found\n{\n  "threadId": "nope"\n}');
   });
 
+  it('shows a program as its code, its console output and what it ended with', () => {
+    const run = { id: 'p1', startedAt: '2026-11-21T10:00:00.000Z', endedAt: '2026-11-21T10:00:01.000Z', durationMs: 1000, console: 'two projects\n', consoleTruncated: true };
+    const code = "console.log('two projects');\nreturn 2;";
+    const started = [
+      own('tool.call.started', { callId: 'p1', functionName: 'run_program', input: { code } }),
+      own('tool.call.started', { callId: 'p2', functionName: 'run_program', input: { code: 'while (true) {}', timeoutSeconds: 1 } }),
+      own('tool.call.started', { callId: 'p3', functionName: 'run_program', input: { code: 'return 1;' } }),
+    ];
+    const rows = (projectFeed([
+      ...started,
+      own('tool.call.completed', { callId: 'p1', functionName: 'run_program', value: 2, run: { ...run, outcome: 'ok' } }),
+      own('tool.call.failed', { callId: 'p2', functionName: 'run_program', error: { kind: 'invalid_input', message: 'The program ran longer than 1 second and was killed.' }, run: { ...run, id: 'p2', outcome: 'timeout', console: '', consoleTruncated: false } }),
+    ], ctx)[0] as ActionsItem).items;
+
+    assert.deepEqual(rows.map(row => [row.label.tool, row.label.arg, row.state, row.endNote]), [
+      ['run_program', "console.log('two projects');", 'done', null],
+      ['run_program', 'while (true) {}', 'err', 'timeout'],
+      ['run_program', 'return 1;', 'run', null],
+    ]);
+    assert.deepEqual(rows[0]!.detail, { kind: 'program', code, console: 'two projects\n', consoleTruncated: true, output: '2' });
+    assert.deepEqual(rows[1]!.detail, {
+      kind: 'program', code: 'while (true) {}', console: '', consoleTruncated: false,
+      output: JSON.stringify({ kind: 'invalid_input', message: 'The program ran longer than 1 second and was killed.' }, null, 2),
+    });
+    assert.deepEqual(rows[2]!.detail, { kind: 'program', code: 'return 1;', console: null, consoleTruncated: false, output: null });
+  });
+
   it('shows catalog strings as text and preserves the JSON shape of other values', () => {
     const values = ['first\nsecond', [{ text: 'data', count: 1 }], null];
     const items = projectFeed(values.map((value, i) =>

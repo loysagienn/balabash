@@ -14,6 +14,9 @@
 //   (invoke.ts) under the grant of the run, carrying the id of the run. The
 //   process sends no more than a few at a time; the rest wait their turn
 //   inside it, in its own memory.
+// - A call of a program leaves no record of its own, whoever launched the
+//   run: the record is the run — its code, its value or error, its console.
+//   What a capability writes as its own action events is written as ever.
 // - When the run is over — returned, failed, out of time or stopped — its
 //   scope says so (`ProgramScope.ended`): a command the program started is
 //   killed with it. Any other call that had started goes on to its own end
@@ -34,7 +37,7 @@ import os from 'node:os';
 import vm from 'node:vm';
 import { recordProcessGroup } from '../runtime/process-groups.ts';
 import { ACTIONS } from './actions.ts';
-import type { Caller, ProgramScope } from './definition.ts';
+import type { ProgramScope } from './definition.ts';
 import { describe } from './describe.ts';
 import { CapabilityError, ERROR_KINDS, toCapabilityError, type CapabilityErrorValue, type ErrorKind } from './errors.ts';
 import type { ConnectionsPort, Grant } from './grant.ts';
@@ -79,7 +82,6 @@ export type ProgramStart = {
 };
 
 export type ProgramEnv = {
-  traceCall?: (caller: Caller, runId: string, name: string, input: JsonValue, invoke: () => Promise<JsonValue>) => Promise<JsonValue>;
   connections: ConnectionsPort;
   // Aborting it stops the run: the launcher no longer waits for it.
   signal?: AbortSignal;
@@ -372,10 +374,9 @@ export function executeProgram(grant: Grant, launch: ProgramLaunch, env: Program
       const input = request.kind === 'describe'
         ? (request.name === null ? {} : { name: request.name })
         : (request.input === null ? {} : JSON.parse(request.input));
-      const invoke = () => request.kind === 'describe'
+      const outcome: Promise<JsonValue> = request.kind === 'describe'
         ? describe(programGrant, input, env)
         : invokeCapability(programGrant, name, input, { ...env, program: scope });
-      const outcome = env.traceCall ? env.traceCall(grant.caller, id, name, input, invoke) : invoke();
 
       outcome.then(
         value => answer(request, { ok: true, value }),
