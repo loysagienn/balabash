@@ -441,8 +441,8 @@ test('OpenAI opens a granted function, spawns through it and replays its definit
   // An on-the-spot program left more nested calls than the whole history window
   // between wakes. Seed its journal in bulk, without hundreds of RPCs.
   const task = { actor: 'task', taskSlug: 'nightly', taskRunId: 'nightly-run', workspaceId: stand.workspaceId, threadId: stand.mainThreadId };
+  const author = { actor: 'agent', agentName: 'coordinator', workspaceId: stand.workspaceId, threadId: stand.mainThreadId };
   await prisma.event.createMany({ data: Array.from({ length: 401 }, (_, i) => {
-    const author = { actor: 'agent', agentName: 'coordinator', workspaceId: stand.workspaceId, threadId: stand.mainThreadId };
     const call = { functionName: 'projects_list', callId: 'lookup-' + i, runId: record.run.id };
     return [
       { ...author, type: 'tool.call.started', payload: { ...call, input: {} } },

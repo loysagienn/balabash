@@ -78,8 +78,7 @@ export const FileId = namedType(
   z.string(),
 );
 
-// The pair kind: 'file' is reserved for FileRef: by this mark the journal and
-// the interface recognize a file inside any value without a schema.
+// A nested file reference must match the whole strict shape, including in external JSON.
 export const FileRef = namedType(
   'FileRef',
   {
@@ -87,7 +86,7 @@ export const FileRef = namedType(
       'Reference to a file in Balabash storage: the form a file takes in an output. Identity and metadata, never content.',
   },
   z.strictObject({
-    kind: z.literal('file').describe('Marks a file inside any value.'),
+    kind: z.literal('file').describe('The file reference discriminator.'),
     id: FileId,
     name: z.string().nullable(),
     contentType: z.string().nullable().describe('MIME type.'),

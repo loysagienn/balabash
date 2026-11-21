@@ -152,6 +152,11 @@ test('code task replacements and the last five Gmail deliveries belong to their 
     SELECT 'mail-' || n,'schedule.fired','system','thread',CASE WHEN n = 7 THEN 'other' ELSE 'w' END,
            jsonb_build_object('slug','gmail-new-mail','name','Mail','count',n)
     FROM generate_series(1,7) n ORDER BY n`);
+  // A delivery made by the branch before a rollback already has its run.
+  await client.query(`
+    INSERT INTO events (id,type,actor,thread_id,workspace_id,payload)
+    VALUES ('modern-mail','schedule.fired','system','thread','w',
+      '{"slug":"gmail-new-mail","runId":"modern-run","value":{"count":20}}')`);
   await assert.rejects(migrate(...args), /Supply the translated program with --programs DIR: w\/gmail-new-mail.js/);
   await fs.mkdir(path.join(dir, 'w', 'tasks'), { recursive: true });
   await fs.writeFile(path.join(dir, 'w', 'tasks', 'gmail-new-mail.ts'), '// installation-specific task');

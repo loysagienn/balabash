@@ -50,6 +50,7 @@ async function seedGmail(tx: Tx, task: ScheduledTaskModel) {
       '// Historical gmail-new-mail notification from the TaskContext module.', 'ok', created_at, created_at,
       payload - 'name' - 'slug', true FROM events
     WHERE workspace_id = ${task.workspaceId} AND type = 'schedule.fired' AND payload->>'slug' = ${task.slug}
+      AND NOT (payload ? 'runId')
     ORDER BY seq DESC LIMIT 5`;
 }
 
