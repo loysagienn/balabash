@@ -2,7 +2,7 @@
 // validation that needs no database access (design doc §4.2).
 
 import { z } from 'zod';
-import type { Event, EventActor, JsonObject } from './contract.ts';
+import type { Event, EventActor, JsonObject, TaskAuthor } from './contract.ts';
 import type { EventModel as EventRow } from '../../prisma-generated/models.ts';
 
 export const THREAD_STARTED = 'thread.started';
@@ -133,6 +133,7 @@ export type AppendInput = {
   type: string;
   actor: EventActor;
   agentName?: string | null;
+  task?: TaskAuthor;
   workspaceId: string | null;
   threadId?: string | null;
   // For thread lifecycle events the target is derived from the projection
@@ -235,6 +236,14 @@ const LIFECYCLE_PAYLOAD_SCHEMAS: Record<string, z.ZodType> = {
 export function validateEnvelope(input: AppendInput): void {
   const { type, actor, agentName, workspaceId, threadId } = input;
 
+  if (actor === 'task') {
+    if (!input.task?.slug || !input.task.runId) {
+      throw new AppendError('actor_mismatch', `Task author requires a task slug and run id (type "${type}")`);
+    }
+  } else if (input.task) {
+    throw new AppendError('actor_mismatch', "Only actor 'task' carries a task author");
+  }
+
   if (isCanonicalType(type)) {
     validateCanonicalActor(input);
   } else {
@@ -289,7 +298,11 @@ function validateCanonicalActor(input: AppendInput): void {
     throw new AppendError('actor_mismatch', `user.message requires actor 'user'`);
   }
 
-  if ((type === 'agent.message' || type === AGENT_ASK || type === AGENT_ASK_RESOLVED) && actor !== 'agent') {
+  if (type === 'agent.message' && actor !== 'agent' && actor !== 'task') {
+    throw new AppendError('actor_mismatch', "agent.message requires actor 'agent' or 'task'");
+  }
+
+  if ((type === AGENT_ASK || type === AGENT_ASK_RESOLVED) && actor !== 'agent') {
     throw new AppendError('actor_mismatch', `${type} requires actor 'agent'`);
   }
 
@@ -298,8 +311,13 @@ function validateCanonicalActor(input: AppendInput): void {
   // The session journal is authored by the thread whose session it is.
   const isSessionEvent = type.startsWith(SESSION_EVENT_PREFIX);
 
+  if (isSessionEvent && actor === 'task') {
+    throw new AppendError('actor_mismatch', `A task cannot author a session event (type "${type}")`);
+  }
+
   if (
-    (requiresThread.includes(type) ||
+    (actor === 'task' ||
+      requiresThread.includes(type) ||
       isToolCall ||
       isSessionEvent ||
       TERMINAL_TYPES.has(type) ||
@@ -330,6 +348,9 @@ export function toEvent(row: EventRow): Event {
     type: row.type,
     actor: row.actor as EventActor,
     agentName: row.agentName,
+    ...(row.actor === 'task' && row.taskSlug && row.taskRunId
+      ? { task: { slug: row.taskSlug, runId: row.taskRunId } }
+      : {}),
     workspaceId: row.workspaceId,
     threadId: row.threadId,
     targetThreadId: row.targetThreadId,

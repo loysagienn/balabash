@@ -16,10 +16,8 @@
 
 import path from 'node:path';
 import type { RemoteAgentDeclaration, RemoteDriverContext } from '../core/contract.ts';
-import { INSTALLATION_REMOTE_AGENTS_DIR, importExtensionModule, listExtensionFiles } from './extensions.ts';
+import { INSTALLATION_REMOTE_AGENTS_DIR, importExtensionModule, listExtensionFiles, reportExtensionFailure, type ReportExtensionFailure } from './extensions.ts';
 import { validateRemoteAgent } from './validate-agent.ts';
-
-export type RemoteAgentLoadFailure = { file: string; error: string };
 
 export type LoadRemoteAgentsInput = {
   directory?: string;
@@ -28,12 +26,8 @@ export type LoadRemoteAgentsInput = {
   context: (kind: string) => RemoteDriverContext;
   repositoryAgents: ReadonlySet<string>;
   // A module skipped: journaled by the caller (system.exception).
-  report?: (failure: RemoteAgentLoadFailure) => Promise<void>;
+  report?: ReportExtensionFailure;
 };
-
-function getErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
 
 // The loaded kinds by name, with the context their drivers run in — the
 // remote engine's lookup (a kind is loaded iff it is here).
@@ -84,12 +78,7 @@ export async function loadRemoteAgents({
       declarations.push(declaration);
       loadedKinds.set(declaration.name, { declaration, context: ctx });
     } catch (error) {
-      const message = getErrorMessage(error);
-
-      console.error(`[remote-agents] ${file} skipped: ${message}`);
-      await report?.({ file, error: message }).catch(reportError => {
-        console.error(`[remote-agents] failed to journal the skip of ${file}:`, reportError);
-      });
+      await reportExtensionFailure('remote-agents', file, error, report);
     }
   }
 

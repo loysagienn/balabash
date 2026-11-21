@@ -14,7 +14,7 @@ import type { TaskCall } from './reducer.ts';
 // call per task at a time — the call in flight is schedule.calls[slug], and
 // the outcome names it (`request`): the reducer applies an outcome only
 // while the store still waits for exactly that call. A run's outcome is a
-// toast (the journal row of a command job is read by place, a note lands
+// toast (the journal row of a scheduled program is read by place, a note lands
 // in the main thread's feed); a delete drops the row at once — the same end
 // comes back as schedule.task.cancelled of the tail, idempotently. `id` —
 // the row the operator saw: the server refuses the command when the slug

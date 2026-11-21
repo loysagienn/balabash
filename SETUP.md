@@ -7,11 +7,12 @@ for working on the code.
 ## The process
 
 One Node.js process (`dist/app.js`), started from the repository root — every
-runtime path (`data/`, `dist/`, `files/`) resolves from the cwd. Boot order:
-`prisma migrate deploy` → database check → tombstone of orphaned threads
+runtime path (`data/`, `dist/`, `files/`) resolves from the cwd. Programs and
+workspace commands require Linux with a readable `/proc` to identify their
+process groups. Boot order: sweep recorded groups in `data/process-groups/`
+→ `prisma migrate deploy` → database check → tombstone of orphaned threads
 without a saved session → agent catalog (repository agents, then
-`data/remote-agents`) → tool servers (repository `tools/`, then `data/tools`
-and `data/mcp-servers`) → web server → channel adapters (Telegram and CCR
+`data/remote-agents`) → external service settings → capability catalog → web server → channel adapters (Telegram and CCR
 when configured) → resume of the surviving threads' runs → router, consumers,
 schedule heart, indexer → restart module. The process listens on one
 loopback port (`HTTP_PORT`); a TLS-terminating reverse proxy sends the whole
@@ -27,8 +28,8 @@ accumulated before this existed are removed once with
 `npm run cleanup-sessions` (`scripts/AGENTS.md`).
 
 Code changes go live only through a restart. A requested restart waits for a
-safe window — no agent or secretary turn in flight, no running workspace job,
-20 s of log quiet; threads between turns keep their SDK sessions and resume
+safe window — no agent or secretary turn in flight, no running program or command,
+a settled remote engine and 20 s of log quiet; threads between turns keep their SDK sessions and resume
 after it. In production the process runs
 under `supervisor.js`, which reads exit codes alone: `42` — a restart was
 requested and the safe window reached, relaunch at once; `0` — stop; anything
@@ -78,9 +79,9 @@ the next boot reports into the log.
   process itself).
 - **Integrations** need nothing in `.env`: per-user OAuth (Gmail, Drive,
   Notion) runs through the platform with one redirect URI,
-  `https://<CONSOLE_DOMAIN>/oauth/callback`, registered at each provider;
-  installation OAuth clients (Google) and installation credentials
-  (`${secret:NAME}` — Perplexity, Qase) are entered through one-time forms
+  `https://<CONSOLE_DOMAIN>/oauth/callback`, which Notion registers dynamically. The operator registers this URI with Google.
+  Installation OAuth clients (Google) and installation credentials
+  (such as the Perplexity API key) are entered through one-time forms
   from the console's Connections page or the auth agent.
 
 ## Modes
@@ -97,7 +98,7 @@ the next boot reports into the log.
   alone, live with the next page load.
 - `npm run types` — tsc over the core and, separately, over the console.
 - `npm test` — node's test runner over `src/**/*.test.ts` and
-  `tools/**/*.test.ts`; the global setup starts an embedded PostgreSQL 16,
+  `agents/**/*.test.ts`; the global setup starts an embedded PostgreSQL 16,
   deploys the migrations into a template and hands every test a copy; the
   live `DATABASE_URL` is taken away from the test children. Safe next to a
   running app.
@@ -117,13 +118,132 @@ from the bot's `/auth_code`. A Telegram group becomes a workspace with
 
 ## Extension points of an installation
 
-Code and configs of the installation live in `data/` and are picked up at
-boot (a task body at its fire) without a build — Node runs `.ts` natively:
-`data/tools/<name>.ts` (an in-process tool server, `export start(ctx)`),
-`data/mcp-servers/<name>.json` (an external MCP server), `data/remote-agents/
-<name>.ts` (a remote agent kind with its driver), `data/workspace/<id>/tasks/
-<slug>.ts` (a scheduled task body). Same contracts as their repository twins
-(`src/capabilities/extensions.ts`); names never shadow the repository's; no
-runtime imports from the repository tree — packages and `import type` only,
-everything else arrives through `ctx`.
+At boot, the catalog loads installation MCP servers from
+`data/mcp-servers/<name>.json`. Node.js loads remote agent drivers directly from
+`data/remote-agents/<name>.ts`. Drivers can import packages and repository types
+with `import type`. They receive platform services through `ctx`.
 
+### Written catalog nodes
+
+Place one TypeScript module per top-level node in `data/nodes/<name>.ts`.
+The filename supplies its snake_case name. Node.js loads the module at startup.
+Use a subdirectory for helpers. Export a synchronous `define` function. Import
+the contract as a **type** and use the catalog values passed by the running app:
+
+```ts
+import type { DefineInstallationNode } from '../../src/tree/authored-nodes.ts';
+
+export const define: DefineInstallationNode = ({ capability, z }) => ({
+  summary: 'Convert temperatures',
+  recipients: ['general'],
+  children: [capability({
+    name: 'fahrenheit',
+    summary: 'Convert Celsius to Fahrenheit',
+    description: 'Return the temperature in degrees Fahrenheit.',
+    input: z.strictObject({ celsius: z.number() }),
+    output: z.number(),
+    run: ({ celsius }) => celsius * 9 / 5 + 32,
+  })],
+});
+```
+
+Use `node` for nested groups, `namedType` for shared schemas and `CapabilityError`
+for typed failures. Named types share a namespace with the repository and all installed nodes.
+In a capability's `run(input, ctx)`, `files.ingest(ctx, { body, originalFilename, contentType, sizeBytes })`
+stores bytes and returns a catalog `FileRef`. `files.open(ctx, fileId)` reads a stream from the caller's workspace.
+Each connection follows the `Connection` type in `src/catalog/definition.ts`. The platform registers the service and supplies its authority
+to calls. Agent or profile recipients receive the subtree subject to the workspace's
+connections. An empty or omitted list leaves it available to scheduled programs only.
+An unknown recipient produces a startup warning. A broken module or collision skips that file as a unit.
+The System screen shows its filename and error under `nodes`.
+Keep full names and service keys distinct from repository vertices, other installed
+nodes and configured services. Restart Balabash to load changes.
+
+### HTTP and stdio MCP servers
+
+Place one JSON config per service in `data/mcp-servers/<name>.json`. Use a
+unique snake_case name. The catalog reads every page of `tools/list` and
+publishes the node under that name. Add agent or profile names to
+`recipients` to grant the node. Scheduled programs use their workspace’s
+full tree, including configured nodes with no agent recipients. The first
+sentence of `description` (up to 175 characters) tells an agent when to
+open the node. Configs containing `enabledTools` or `toolOverrides` are
+rejected. Review the provider’s exposed tools before removing these fields.
+
+```json
+{
+  "transport": "http",
+  "url": "https://provider.example/mcp",
+  "headers": { "Authorization": "Bearer ${secret:API_KEY}" },
+  "description": "Search the installation’s document index.",
+  "recipients": ["general"]
+}
+```
+
+For stdio, set `"transport": "stdio"`, `command` and optional string
+`args` and `env`. The MCP SDK runs the executable directly, with its default
+inherited environment and the configured variables. Each discovery or call
+starts its own process and closes it after the exchange. Use an executable
+available to the service account from the application directory. A server
+that needs a browser, session or other in-process state across calls is
+incompatible with this transport lifecycle. The process should exit when
+stdin closes to avoid a shutdown delay on every exchange.
+Enter referenced installation secrets in Connections. A service without
+secret references can publish at startup. Discovery runs on credential
+changes and retries failures in the background. A failed refresh keeps the
+last valid contract. Removing a key cuts the node from new grants and
+refuses calls using an old grant.
+
+For workspace OAuth, use HTTP with `"auth": "user"`, a `description` and
+the provider’s MCP URL. Dynamic client registration is the default.
+Use `"clientRegistration": "manual"` for an operator-provisioned client.
+Optional `scope`, `authorizationParams` and `identityProbe` configure sign-in.
+Sign-in, disconnect and loss of authorization refresh that workspace's
+contract. Balabash publishes tools whose names and input/output schemas
+match across the accounts that returned a list. A personalized title or
+description comes from the first of those accounts in stable row order.
+If no listing succeeds, the last valid contract stays available while an
+account that supplied it remains. System names tools omitted from the snapshot.
+Each call takes the workspace account address in `account`. That name is
+reserved in the provider’s input schema. The provider receives its own
+arguments and the selected account’s bearer token.
+
+System shows configuration and discovery failures under `mcp-servers`,
+with the JSON filename. OAuth discovery failures appear in the affected
+workspace. Connections shows installation credential status. Restart to
+reload edited files.
+
+### claude.ai connectors
+
+A claude.ai connector becomes a catalog node named after its file. Use a lower-case snake_case
+name matching `[a-z][a-z0-9_]*` before `.json`. For example,
+`data/mcp-servers/slack.json` can contain:
+
+```json
+{
+  "transport": "claude-connector",
+  "serverId": "mcpsrv_REPLACE",
+  "description": "Search and send Slack workspace messages as the operator.",
+  "recipients": ["general", "coordinator"]
+}
+```
+
+Set the actual Anthropic MCP server id and the agent or profile names that
+should receive the node. An empty or omitted list grants it to no agent.
+Scheduled programs use the full installation tree. Calls in every workspace
+act as the provider account linked in the operator’s claude.ai settings.
+Connections shows the recipients and discovery or CLI login status. Claude
+Code refreshes its login on this host; an environment token override must
+be replaced by the operator. Change the provider account on claude.ai.
+Edit or remove the JSON file and restart Balabash to change the local configuration.
+
+### Remote agents
+
+Remote kinds declare `modes` (for example `['user', 'headless']`),
+`defaultMode` (one of those modes), and `recipients` (agent or access
+profile names, e.g. `['coordinator', 'engineer']`). The shared access profiles,
+including `general`, are defined in [agents/access.ts](agents/access.ts). A kind with no recipients
+loads its driver for existing threads and is unavailable for new launches.
+At cutover, add the recipients and both mode fields to installation
+passports. An older passport omitting both mode fields supports both modes
+and defaults to `user`.

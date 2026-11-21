@@ -13,7 +13,7 @@
 //   message it takes, ~30 ms after the harness pushed it — so run is
 //   journaled as soon as the session has work; session.started only once,
 //   on the first init the journal sees;
-// - native tool uses (Bash, Read, Edit, Agent, …) with their results; the
+// - native and environment tool uses (Bash, Read, Playwright, …) with their results; the
 //   bridge's own tools (mcp__balabash__*) are already the tool.call.* events
 //   and are skipped; a result whose tool use the journal never saw is skipped
 //   too (nothing to pair it with);

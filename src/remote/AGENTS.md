@@ -13,7 +13,9 @@ system.
 
 - **The kind** — `data/remote-agents/<name>.ts` (outside git, per
   installation) exports `start(ctx)` returning a `RemoteAgentDeclaration`
-  (`src/core/contract.ts`): `kind: 'remote'`, the description, `options`
+  (`src/core/contract.ts`): `kind: 'remote'`, the description, `modes` (allowed `user` and/or `headless`),
+  `defaultMode` (one of them), `recipients` (agent or access profile names,
+  including `coordinator` for the secretary), `options`
   (an object JSON Schema of the launch parameters — the one exception to
   "every agent's input is one prompt"), `secrets` (installation secrets the
   driver reads through `ctx.secrets`; a kind with secrets is listed among
@@ -47,10 +49,9 @@ system.
 - **One live thread per session.** `(kind, ref)` is unique among the rows
   whose phase is not closed/gone (a partial unique index, by hand in the
   migration); a session whose thread ended can be adopted again.
-- **The owner is whoever spawned the thread**: the secretary's remote
-  thread talks to the user; another agent's is headless and talks to its
-  parent. The owner's end cancels a headless child (the platform's
-  cascade).
+- **The thread's mode determines the audience.** A headless thread talks to
+  its parent, a user-facing thread to the user. The mode chosen at spawn is
+  recorded in the thread and survives changes to the passport.
 - **Three ways to close, three words.** `thread.interrupt` stops the turn
   in flight (the thread waits on); `thread.cancel` closes the thread, the
   session untouched; `thread.finish` asks the session for a closing
@@ -73,7 +74,7 @@ system.
 - **Bytes cross only through the driver**: an attachment of the owner's
   message — or of the spawn prompt (`thread.started` files) — is streamed
   into the session; a file of the session is fetched by path on an explicit
-  ask (`remote_fetch_file`) and stored here.
+  ask (`fetch_thread_file`) and stored here.
 
 ## Working here
 

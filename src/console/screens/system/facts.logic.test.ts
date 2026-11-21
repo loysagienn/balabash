@@ -98,8 +98,8 @@ describe('the process', () => {
   it('says the uptime since the start, the sessions and the jobs, the moment of the facts', () => {
     assert.equal(processUptimeWords(at(2026, 10, 11, 0, 21), NOW), '16h 17m · since 00:21');
     assert.equal(processUptimeWords(at(2026, 10, 8, 0, 21), NOW), '3d 16h · since Oct 8, 00:21');
-    assert.equal(sessionsWords({ liveSessions: 4, workspaceJobs: 1 }), '4 live · 1 workspace job');
-    assert.equal(sessionsWords({ liveSessions: 0, workspaceJobs: 0 }), '0 live · 0 workspace jobs');
+    assert.equal(sessionsWords({ liveSessions: 4, runningPrograms: 1 }), '4 live · 1 program');
+    assert.equal(sessionsWords({ liveSessions: 0, runningPrograms: 0 }), '0 live · 0 programs');
     assert.equal(updatedWords(at(2026, 10, 11, 16, 38).getTime(), 10_000), 'updated 16:38 · every 10s');
     assert.equal(updatedWords(0, 10_000), null);
   });
@@ -122,17 +122,18 @@ describe('the process', () => {
 });
 
 describe('the restart in the way', () => {
-  const request = { requestedBy: 'engineer', requestedAt: at(2026, 10, 11, 16, 5), force: false, own: true };
-  const waiting = { threads: [], otherThreads: 0, secretaryTurn: false, workspaceJob: false, logQuiet: true };
+  const request = { requestedBy: 'engineer', requestedAt: at(2026, 10, 11, 16, 5), own: true };
+  const waiting = { threads: [], otherThreads: 0, secretaryTurn: false, programWork: false, remoteWork: false, logQuiet: true };
 
   it('names who asked and what the window waits for, this workspace’s threads last as links', () => {
     const threads = [{ id: 't1', title: 'Web UI: screens', agent: 'engineer' }];
 
     assert.deepEqual(restartNote(request, { ...waiting, threads }, NOW), { lead: 'Requested by engineer at 16:05', threads, tail: ' · waiting for 1 thread to finish a turn:' });
-    assert.deepEqual(restartNote(request, { ...waiting, secretaryTurn: true, workspaceJob: true, logQuiet: false }, NOW).tail, ' · waiting for a secretary turn to end, a workspace job to end, the log to go quiet');
+    assert.equal(restartNote(request, { ...waiting, remoteWork: true }, NOW).tail, ' · waiting for the remote engine to finish pending work');
+    assert.deepEqual(restartNote(request, { ...waiting, secretaryTurn: true, programWork: true, logQuiet: false }, NOW).tail, ' · waiting for a secretary turn to end, programs and commands to finish, the log to go quiet');
     assert.deepEqual(restartNote(request, { ...waiting, threads, otherThreads: 2, logQuiet: false }, NOW).tail, ' · waiting for the log to go quiet, 2 threads of other workspaces to finish a turn, 1 thread to finish a turn:');
     assert.deepEqual(restartNote(request, waiting, NOW).tail, ' · restarting now');
-    assert.deepEqual(restartNote({ ...request, requestedBy: null, force: true }, undefined, NOW), { lead: 'Requested by the operator at 16:05 · force', threads: [], tail: ' · checking the safe window' });
+    assert.deepEqual(restartNote({ ...request, requestedBy: null }, undefined, NOW), { lead: 'Requested by the operator at 16:05', threads: [], tail: ' · checking the safe window' });
     assert.equal(restartNote(request, null, NOW).tail, ' · checking the safe window');
     // Another workspace's request: no requester to name, its threads a count.
     assert.deepEqual(restartNote({ ...request, requestedBy: null, own: false }, { ...waiting, otherThreads: 1 }, NOW), { lead: 'Requested from another workspace at 16:05', threads: [], tail: ' · waiting for 1 thread of other workspaces to finish a turn' });
@@ -141,9 +142,10 @@ describe('the restart in the way', () => {
   it('is the facts’ pending unless the log completed it, else the log’s newest request after its newest completion', () => {
     resetSeq();
 
-    const requested = (seq: bigint) => event({ seq, type: 'system.restart.requested', actor: 'system', threadId: 't1', createdAt: request.requestedAt, payload: { reason: 'a build', requestedBy: 'engineer' } });
+    // Older journal entries can carry force; they follow the same pending-request rules.
+    const requested = (seq: bigint) => event({ seq, type: 'system.restart.requested', actor: 'system', threadId: 't1', createdAt: request.requestedAt, payload: { reason: 'a build', requestedBy: 'engineer', force: true } });
     const completed = (seq: bigint, requestSeq: number) => event({ seq, type: 'system.restart.completed', actor: 'system', targetThreadId: 'main', payload: { reason: 'a build', requestSeq } });
-    const pending = { seq: 7, own: true, reason: 'a build', requestedAt: request.requestedAt, requestedBy: 'engineer', threadId: 't1', force: false, waiting };
+    const pending = { seq: 7, own: true, reason: 'a build', requestedAt: request.requestedAt, requestedBy: 'engineer', threadId: 't1', waiting };
 
     // The facts name the request the log holds: the facts, with the window.
     assert.deepEqual(pendingOf([requested(7n)], pending), { request, waiting });

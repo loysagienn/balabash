@@ -23,7 +23,13 @@ export type JsonSchema = Record<string, unknown>;
 // ---------------------------------------------------------------------------
 // Event envelope
 
-export type EventActor = 'user' | 'system' | 'agent';
+export type EventActor = 'user' | 'system' | 'agent' | 'task';
+
+export type TaskAuthor = { slug: string; runId: string };
+
+export type CallAuthor =
+  | { actor: 'task'; task: TaskAuthor; agentName?: never }
+  | { actor: 'agent'; agentName: string; task?: never };
 
 export type Event = {
   seq: bigint;
@@ -31,6 +37,7 @@ export type Event = {
   type: string;
   actor: EventActor;
   agentName: string | null; // set iff actor === 'agent'
+  task?: TaskAuthor; // set iff actor === 'task'
   workspaceId: string | null; // workspace; null = installation-level
   threadId: string | null; // author's thread; null = outside threads
   targetThreadId: string | null; // addressee; strictly one hop
@@ -86,7 +93,7 @@ export type NotificationLevel = 'silent' | 'normal' | 'urgent';
 
 // ---------------------------------------------------------------------------
 // Content: canonical blocks of agent messages (agent.message payloads,
-// send_message, send_file) — binary content by fileId reference. A different
+// send_message) — binary content by fileId reference. A different
 // subject from tool results below.
 
 export type ContentBlock =
@@ -132,22 +139,13 @@ export type ToolResult = {
 // backend unchanged. 'high' is the platform default.
 export type EffortLevel = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
-// Machine-readable domain event declared by an agent: types '<agent>.*',
-// the first segment must equal the agent's name.
-export type AgentEventDecl = {
-  type: string;
-  description: string;
-  payloadSchema: JsonSchema;
-};
-
-// The declarative session agent (the preferred form): the whole lifecycle —
+// The local session agent: the whole lifecycle —
 // spawn-prompt validation, the SDK session, rendering of incoming events,
 // channel binding (user-facing thread vs headless parent dialogue by `headless`),
-// the standard end_thread / send_file verbs, abort — is run by the platform.
+// the end-of-turn report and abort — is run by the platform.
 // The agent supplies only data — plus, when the session needs machinery next
 // to it (the designer's browser), an `environment` the platform builds and
-// disposes around the session. An agent writes run() only when the lifecycle
-// itself differs (the browser agent's operator protocol).
+// disposes around the session.
 export type SessionAgentSpec = {
   instructions: string; // the inner session's system prompt
   // Renders the spawn prompt into the session-opening message. Optional: the
@@ -170,14 +168,14 @@ export type SessionAgentSpec = {
   cwd?: string | ((workspaceId: string) => string);
   // Per-run machinery a declaration cannot express statically (a browser next
   // to the session): built once per run after the working directory exists
-  // and before the SDK session starts; its bridge tools join the base verbs;
+  // and before the SDK session starts; its Claude tools have their own MCP server;
   // disposed after the session ends, however it ends. Everything else of the
   // lifecycle stays the platform's.
   environment?(ctx: RunContext, cwd: string): Promise<SessionEnvironment>;
 };
 
 export type SessionEnvironment = {
-  extraTools?: SdkBridgeTool[]; // bridge-only tools on top of the base verbs
+  environmentTools?: SessionEnvironmentTool[]; // tools offered by this Claude environment
   // Facts that exist only once the environment is up (an address, a path),
   // appended to the declaration's instructions for this run; the static
   // prompt names the fact and where it stands.
@@ -185,45 +183,50 @@ export type SessionEnvironment = {
   dispose?(): Promise<void>;
 };
 
-export type AgentDeclaration = {
-  name: string; // = spawn function name in the catalog
+export type AgentMode = 'user' | 'headless';
+
+export type AgentModes = {
+  modes: AgentMode[];
+  defaultMode: AgentMode;
+};
+
+// A node is named by its full catalog name, including each parent on the path.
+// Root capabilities can be added or removed individually.
+export type CatalogAccess = {
+  profile?: string;
+  nodes?: string[];
+  addRoot?: string[];
+  removeRoot?: string[];
+};
+
+export type AgentPassport = AgentModes & {
+  name: string;
   description: string;
-  icon?: string; // thread icon, shown by the user surface (e.g. the Telegram topic emoji)
-  sdk: 'claude' | 'codex'; // provider behind ctx.harness.sdkSession()
-  // Spawn input is the same for every agent: one non-empty text prompt — the
-  // task plus everything it should start from. No per-agent schema.
-  // The agent's tool passport: the tool-server names it gets, listed
-  // explicitly — no server reaches an agent that did not name it. A spawner's
-  // narrowing can still shrink the list.
-  tools: string[];
-  // Sub-agents this agent may spawn (part of the passport: spawning is a
-  // declared need, not an ambient right). ctx.spawn rejects anything not
-  // listed; omitted = spawns nothing. A session agent with a non-empty list
-  // gets the child-operating bridge tools (spawn_agent, send_to_thread,
-  // cancel_thread) — spawning makes it the child's operator.
+  access: CatalogAccess;
+  workspaceDisk?: boolean; // the agent can read and write files in the workbench
+  // Only repository children. Remote kinds name their recipients themselves.
   agents?: string[];
-  events?: AgentEventDecl[]; // domain types '<name>.*'
-  // A headless agent's thread has no user surface (no Telegram topic, no web chat): the user
-  // is not a participant — the agent talks to its parent via progress/summary
-  // and receives forwarded input as thread.message.
-  headless?: boolean;
+};
+
+export type AgentDeclaration = AgentPassport & {
+  icon?: string;
+  sdk: 'claude' | 'codex';
   notification?: NotificationLevel; // policy default
   resumable?: boolean; // reserved: thread resume after restart
-  // Exactly one of `session` (declarative, preferred) and `run` (imperative).
-  session?: SessionAgentSpec;
-  run?(prompt: string, ctx: RunContext): AgentRun;
+  session: SessionAgentSpec;
 };
 
 // ---------------------------------------------------------------------------
-// Remote agents: the third form of a catalog agent — its session runs in an
-// external system; the thread in Balabash is a mirror of
-// that session, kept by the remote engine (src/remote) through a driver that
+// A remote agent runs in an external system. The remote engine (src/remote)
+// mirrors its session in a Balabash thread through a driver that
 // translates the external system into the neutral dialogue vocabulary below.
 // Only installation extensions declare them (data/remote-agents/<name>.ts,
 // export start(ctx) → RemoteAgentDeclaration); the repository ships none.
 // The engine that drives them: src/remote/engine.ts.
 
-export type RemoteAgentDeclaration = {
+export type RemoteAgentDeclaration = AgentModes & {
+  // Names of agents or access profiles allowed to start this kind.
+  recipients?: string[];
   kind: 'remote';
   name: string; // = the file name; /^[a-z][a-z0-9_]*$/, never a repository agent's name
   description: string; // what the system is and when to start it — read by the spawners
@@ -251,8 +254,7 @@ export type RemoteDriverContext = {
   files: RemoteDriverFilesApi;
 };
 
-// The same surface a local tool server gets (LocalToolFilesApi); the body
-// type is the storage layer's.
+// Storage access supplied to an installation remote driver.
 export type RemoteDriverFilesApi = {
   ingest(input: {
     body: StorageBody;
@@ -366,62 +368,29 @@ export type RemoteDriver = {
 export type AgentRun = {
   accept(event: Event): void;
   // Soft stop (thread.interrupt): abort the current turn, keep the run alive
-  // and wait for the next message. Optional — an imperative run without an
-  // interruptible turn may omit it. Never throws; a no-op when idle.
-  interrupt?(): void;
+  // and wait for the next message. A no-op when idle.
+  interrupt(): void;
   finished: Promise<void>;
 };
 
-export type SpawnOptions = {
-  title?: string; // thread title — every user surface shows it (e.g. as the Telegram topic name)
-  tools?: string[]; // narrow the child's bundle; widening is not possible
-  notification?: NotificationLevel;
-  // The slug of the project the child works for: resolved against the
-  // workspace registry at spawn (an unknown slug rejects the spawn) and
-  // recorded in thread.started — the thread ↔ project link of the log.
-  project?: string;
-  // Remote kinds only (RemoteAgentDeclaration): the launch parameters by the
-  // kind's options schema, and adoption — the prompt is then the reference
-  // of an existing session rather than a task.
-  options?: JsonObject;
-  adopt?: boolean;
-  // Stored files attached to the spawn prompt (validated against the
-  // workspace at spawn; recorded in thread.started as fileIds + files, the
-  // way a thread.message carries them). Not with adopt.
-  fileIds?: string[];
-};
-
 export type RunContext = {
+  parentThreadId: string | null;
+  headless: boolean; // mode of this thread, including a resumed one
   threadId: string;
   workspaceId: string;
   signal: AbortSignal;
 
-  // Canonical events on the run's behalf + declared domain events.
-  pushEvent(type: string, payload: JsonObject): Promise<void>;
-  progress(text: string): Promise<void>; // thread.progress → parent
   // thread.completed → parent. The optional retrospective self-description
   // (title: 2–5 words naming the work; description: ~300 chars) rides the
-  // terminal payload and updates the thread row.
-  complete(summary: ThreadSummary, meta?: { title?: string; description?: string }): Promise<void>;
-  notify(level: NotificationLevel, text: string): Promise<void>; // thread.notification, gated by policy
+  // terminal payload and updates the thread row; `project` — the project the
+  // work concerned, when the thread names one at its end — replaces the one
+  // set at start.
+  complete(summary: ThreadSummary, meta?: { title?: string; description?: string; project?: { id: string; slug: string } }): Promise<void>;
 
-  spawn(agentName: string, prompt: string, options?: SpawnOptions): Promise<{ threadId: string }>;
-  cancelChild(threadId: string, reason: string): Promise<void>;
-  // thread.finish to a remote child: its session is asked for a closing
-  // summary, which completes the thread (src/remote).
-  finishChild(threadId: string): Promise<void>;
-
-  // Inter-thread dialogue (thread.message, one hop): drive a child agent with
-  // instructions, or answer the parent that drives this run. The counterpart
-  // arrives through accept() as a thread.message event. A message is text
-  // plus optional file references (workspace fileIds) — the universal way to
-  // hand a file to the interlocutor; bytes never travel through messages.
-  sendToChild(threadId: string, text: string, fileIds?: string[]): Promise<void>;
-  sendToParent(text: string, fileIds?: string[]): Promise<void>;
+  // Deliver the final text to the thread's ordinary interlocutor.
+  deliverTurnText(text: string): Promise<void>;
 
   harness: HarnessApi; // injected core behaviour — instead of base classes
-  tools: ToolsApi; // the bundled tool set; calls are journaled as tool.call.*
-  files: FilesApi;
   stateDir: string; // persistent per-agent/per-workspace directory
   // Set when the run continues the thread's session after an app restart
   // (src/capabilities/resume-runs.ts) instead of opening a new one.
@@ -431,30 +400,21 @@ export type RunContext = {
 // The continuation of a thread's session after an app restart: the SDK's own
 // session to resume (the thread's newest session.sdk), whether a turn was in
 // flight when the old process went down (the thread's last session.state was
-// `run`), and the thread's active children (a fresh run learns them as it
-// spawns; a resumed one is told).
+// `run`).
 export type RunResume = {
   sdkSessionId: string;
   interrupted: boolean;
-  childThreadIds: string[];
 };
 
 // ---------------------------------------------------------------------------
-// Injected core APIs. The SDK session shape is finalized at stage 3; the
-// tool-server bundle joins ToolsApi at stage 4.
+// Injected APIs of a local agent session.
 
-// A bridge-only tool the agent adds on top of its ToolsApi bundle (e.g. the
-// a child agent's end_thread). Lives only inside the session's MCP bridge:
-// it is not journaled as tool.call.* — the agent reflects its consequences
-// into the log itself (complete(), pushEvent()).
-export type SdkBridgeTool = {
+// A tool supplied by the Claude session environment (e.g. Playwright).
+export type SessionEnvironmentTool = {
   name: string;
   description: string;
   inputSchema: JsonSchema;
   // Birth contract, same as every tool of ours: return data or throw.
-  // The bridge shapes the structured result (object → structuredContent,
-  // primitive/array → {result}, throw → {error: {message, details?}} +
-  // isError). No content blocks, no bytes.
   handler(args: JsonObject): Promise<JsonValue>;
 };
 
@@ -463,9 +423,8 @@ export type SdkSessionOptions = {
   initialMessage: string; // the first user message opening the session
   model?: string; // agent-level choice; omit for the SDK default
   effort?: EffortLevel; // reasoning effort; default 'high'
-  extraTools?: SdkBridgeTool[]; // bridge-only tools on top of ctx.tools
-  // 'bridge-only' (default): the inner model sees the Balabash bridge and
-  // nothing else. 'full' unlocks the provider's native tool preset for host
+  environmentTools?: SessionEnvironmentTool[]; // tools offered by this Claude environment
+  // 'bridge-only' (default): catalog access with ToolSearch. 'full' unlocks the provider's native tool preset for host
   // work; interpretation is SDK-specific (claude: the claude_code preset plus
   // project settings from cwd; codex sessions are full by construction —
   // Codex's native tools plus the bridge, in the app's isolated CODEX_HOME).
@@ -490,10 +449,20 @@ export type SdkSessionOptions = {
   resume?: string;
 };
 
-// One completed session turn: the final text the inner model produced. A
-// failed turn ends the iteration with a thrown error.
+// What a session says through `turns`: a text of the inner model and where
+// its turn stands by it. An element is one of three — a text said on the way
+// (`ongoing`), the end of a turn that ran its course (neither flag; the text
+// is what the model closed the turn with, empty when it closed it with a
+// tool call or said it already), the end of a turn that was cut
+// (`interrupted`). A failed turn ends the iteration with a thrown error.
+// Only the end of a turn that ran its course is a boundary to act on: there
+// the one who runs the session closes the thread whose report was left in
+// the turn.
 export type SdkTurn = {
   text: string;
+  // The turn goes on after this text: a session whose harness gives every
+  // message of a turn as it is said (codex) hands it over at once.
+  ongoing?: true;
   // The turn was cut short by interrupt(); text is empty — whatever the
   // model produced before the stop already rode the live stream.
   interrupted?: true;
@@ -502,10 +471,9 @@ export type SdkTurn = {
 export type AgentSdkSession = {
   // Enqueue the next user message; throws after close().
   push(text: string): void;
-  // Completed turns, in order; ends after close(), throws on turn failure.
+  // The texts and the ends of the turns, in order; ends after close(),
+  // throws on turn failure.
   turns: AsyncIterable<SdkTurn>;
-  // Re-diff the bridge against ctx.tools after a catalog change; never rejects.
-  syncTools(): Promise<void>;
   // Interrupt the turn in flight: the inner model stops, the interrupted turn
   // still closes through `turns` (empty text, `interrupted: true`) and the
   // session stays open for the next push. A no-op when idle; never rejects.
@@ -519,22 +487,11 @@ export type HarnessApi = {
   sdkSession(options: SdkSessionOptions): AgentSdkSession;
 };
 
-export type ToolDefinition = {
-  name: string;
-  description: string;
-  inputSchema: JsonSchema;
-};
-
-export type ToolsApi = {
-  list(): Promise<ToolDefinition[]>;
-  call(name: string, args: JsonObject): Promise<ToolResult>;
-};
-
 // The platform's one file reference: the File model's fields without
 // the storage internals (bucket/objectKey), dates as ISO 8601 strings — the
 // shape is JSON-ready and identical in every tool result of ours. `url` is
 // the only ephemeral field: a presigned, time-limited download URL a
-// producer adds deliberately (e.g. storage_get_file); the transcript strips it.
+// producer adds deliberately. The transcript strips it from historical MCP results.
 export type FileRef = {
   id: string;
   workspaceId: string | null;
@@ -549,20 +506,4 @@ export type FileRef = {
   createdAt: string;
   updatedAt: string;
   url?: string;
-};
-
-export type IngestFileInput = {
-  body: NodeJS.ReadableStream | Uint8Array | string;
-  filename?: string | null;
-  contentType?: string | null;
-  sizeBytes?: number | null;
-};
-
-export type FilesApi = {
-  // Workspace-scoped: a fileId from outside the user boundary reads as missing.
-  getInfo(fileId: string): Promise<FileRef>;
-  getDownloadUrl(fileId: string, filename?: string): Promise<string>;
-  // Store new content in the run's workspace (the file's workspaceId is the run's
-  // workspace). The storage scope is the agent's name.
-  ingest(input: IngestFileInput): Promise<FileRef>;
 };

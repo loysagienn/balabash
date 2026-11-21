@@ -25,8 +25,8 @@ const OAUTH_FIELDS: SecretRequestField[] = [
 
 // The server's shape of an external-secrets request: every field required and secret.
 const EXTERNAL_FIELDS: SecretRequestField[] = [
-  { key: 'API_TOKEN', label: 'API_TOKEN', description: 'Value for ${secret:API_TOKEN} in github.json', required: true, secret: true },
-  { key: 'API_HOST', label: 'API_HOST', description: 'Value for ${secret:API_HOST} in github.json', required: true, secret: true },
+  { key: 'API_TOKEN', label: 'API_TOKEN', description: 'The secret API_TOKEN of github', required: true, secret: true },
+  { key: 'API_HOST', label: 'API_HOST', description: 'The secret API_HOST of github', required: true, secret: true },
 ];
 
 const OAUTH: SecretRequestView = { id: 'a', kind: 'oauth-client', server: 'notion', fields: OAUTH_FIELDS };

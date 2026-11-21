@@ -14,7 +14,7 @@ import path from 'node:path';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { DatabaseSync } from 'node:sqlite';
 import { BUSY_SLICE_MS, LOCK_WAIT_MS, WorkspaceDbBusyError, childBusyTimeoutMs, inWriteTransaction, isBusyError, withWorkspaceDb } from './sqlite.ts';
-import { queryInChild, statementInChild } from './child.ts';
+import { sqlInChild, statementInChild } from './child.ts';
 import { deleteMeta, ensureFilesDb, listDir, readMeta, upsertMeta } from './files.ts';
 import { workspaceDbPath, workspaceFilesDir } from './layout.ts';
 
@@ -212,14 +212,14 @@ describe('_files metadata under a foreign lock', () => {
   });
 });
 
-describe('SQL child runner (data_query / app endpoints)', () => {
+describe('SQL child runner (workspace_query / app endpoints)', () => {
   const caps = { maxRows: 10, maxBytes: 10_000, timeoutMs: 8_000 };
 
-  test('data_query write outwaits a foreign lock longer than the old 5 s', async () => {
+  test('workspace_query write outwaits a foreign lock longer than the old 5 s', async () => {
     const holder = await holdWriteLock(6_000);
     const startedAt = Date.now();
 
-    const outcome = await queryInChild(dbPath, root, "INSERT INTO _files (path, updated_at) VALUES ('q1', '')", {
+    const outcome = await sqlInChild(dbPath, root, "INSERT INTO _files (path, updated_at) VALUES ('q1', '')", {
       ...caps,
       timeoutMs: 20_000,
     });
@@ -248,7 +248,7 @@ describe('SQL child runner (data_query / app endpoints)', () => {
     const holder = await holdWriteLock(3_000);
 
     // timeoutMs 2 000 → busy timeout 1 000 (the floor), kill at 2 000.
-    const outcome = await queryInChild(dbPath, root, "INSERT INTO _files (path, updated_at) VALUES ('q2', '')", {
+    const outcome = await sqlInChild(dbPath, root, "INSERT INTO _files (path, updated_at) VALUES ('q2', '')", {
       ...caps,
       timeoutMs: 2_000,
     });
@@ -258,11 +258,27 @@ describe('SQL child runner (data_query / app endpoints)', () => {
     assert.match(outcome.status === 'sql_error' ? outcome.message : '', /database is locked.*another writer.*1s/);
   });
 
+  test('the lock is told apart from a refusal of the SQL itself', async () => {
+    const holder = await holdWriteLock(3_000);
+    const locked = await sqlInChild(dbPath, root, "INSERT INTO _files (path, updated_at) VALUES ('q3', '')", {
+      ...caps,
+      timeoutMs: 2_000,
+    });
+    await waitExit(holder);
+
+    assert.deepEqual([locked.status, locked.status === 'sql_error' && locked.locked], ['sql_error', true]);
+
+    // SQL that merely says the words is a refusal of the SQL.
+    const refused = await sqlInChild(dbPath, root, "SELECT * FROM \"database is locked\"", caps);
+
+    assert.deepEqual([refused.status, refused.status === 'sql_error' && refused.locked], ['sql_error', false]);
+  });
+
   test('reads never wait under WAL', async () => {
     const holder = await holdWriteLock(2_000);
     const startedAt = Date.now();
 
-    const outcome = await queryInChild(dbPath, root, 'SELECT count(*) AS n FROM _files', caps);
+    const outcome = await sqlInChild(dbPath, root, 'SELECT count(*) AS n FROM _files', caps);
     const elapsed = Date.now() - startedAt;
     await waitExit(holder);
 

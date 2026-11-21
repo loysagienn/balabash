@@ -2,7 +2,7 @@
 // a workspace folder into an app, and the manifest is the whole declaration
 // the platform executes — entry/styles for the UI and the api section as the
 // app's entire server-side perimeter (design.md §3). Tables are NOT declared
-// here (decision №13): the authoring agent creates them via data_query; the
+// here (decision №13): the authoring agent creates them via workspace_query; the
 // platform never executes anything beyond the declared statements, DDL
 // included.
 

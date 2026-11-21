@@ -4,7 +4,6 @@
 // right before connecting; they never appear in the log or the model context.
 
 import { prisma } from '../db/client.ts';
-import type { ExternalServerConfig } from './server-config.ts';
 
 const SECRET_REFERENCE_PATTERN = /\$\{secret:([A-Za-z_][A-Za-z0-9_]*)\}/g;
 
@@ -12,7 +11,7 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
-function resolveSecretReferences<T>(value: T, secrets: Record<string, string | undefined>): T {
+export function resolveSecretReferences<T>(value: T, secrets: Record<string, string | undefined>): T {
   if (typeof value === 'string') {
     return value.replace(SECRET_REFERENCE_PATTERN, (_match, name: string) => {
       const secret = secrets[name];
@@ -64,30 +63,13 @@ export function getSecretReferenceNames(value: unknown): string[] {
   return [...names].sort();
 }
 
-export type ResolvedExternalServerSecrets = {
-  // null: at least one referenced secret is missing — the server stays pending.
-  config: ExternalServerConfig | null;
-  secretNames: string[];
-  // Stable fingerprint of the used secret rows; a change means the secrets
-  // were re-provisioned and the server must reconnect.
-  secretVersion: string | null;
-};
-
-export async function resolveExternalServerSecrets(
-  serverName: string,
-  config: ExternalServerConfig,
-): Promise<ResolvedExternalServerSecrets> {
-  const secretNames = getSecretReferenceNames(config);
-
-  if (!secretNames.length) {
-    return { config, secretNames, secretVersion: null };
-  }
-
+export async function resolveExternalServerSecrets(serverName: string, secretNames: string[]) {
+  if (!secretNames.length) return { secrets: {}, secretVersion: null };
   const rows = await prisma.externalServerSecret.findMany({ where: { server: serverName } });
   const secrets = Object.fromEntries(rows.map(row => [row.key, row.value]));
 
   if (secretNames.some(name => secrets[name] === undefined)) {
-    return { config: null, secretNames, secretVersion: null };
+    return { secrets: null, secretVersion: null };
   }
 
   const secretVersion = rows
@@ -96,9 +78,5 @@ export async function resolveExternalServerSecrets(
     .map(row => `${row.key}:${row.updatedAt.getTime()}`)
     .join('|');
 
-  return {
-    config: resolveSecretReferences(config, secrets),
-    secretNames,
-    secretVersion,
-  };
+  return { secrets, secretVersion };
 }

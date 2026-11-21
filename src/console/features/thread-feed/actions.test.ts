@@ -23,7 +23,7 @@ describe('nativeAction', () => {
     assert.deepEqual(nativeAction('Grep', { pattern: 'slug', path: '/src/api' }).label, { icon: 'search', tool: 'Grep', arg: 'slug in src/api' });
     assert.deepEqual(nativeAction('WebFetch', { url: 'https://example.com/a' }).label, { icon: 'globe', tool: 'WebFetch', arg: 'example.com/a' });
     assert.deepEqual(nativeAction('Agent', { description: 'find refs', prompt: 'long' }).label, { icon: 'bot', tool: 'Agent', arg: 'find refs' });
-    assert.deepEqual(nativeAction('mcp__qase__get_file', { path: 'x.html' }).label, { icon: 'plug', tool: 'get_file', arg: 'x.html' });
+    assert.deepEqual(nativeAction('mcp__example__get_file', { path: 'x.html' }).label, { icon: 'plug', tool: 'get_file', arg: 'x.html' });
     assert.deepEqual(nativeAction('ToolSearch', { query: 'select:Foo', max_results: 1 }).label, { icon: 'wrench', tool: 'ToolSearch', arg: 'select:Foo' });
   });
 
@@ -39,6 +39,7 @@ describe('bridgeAction', () => {
   it('names a bridge function by its first string argument and a known icon', () => {
     assert.deepEqual(bridgeAction('spawn_agent', { agent: 'browser', title: 'Check' }).label, { icon: 'bot', tool: 'spawn_agent', arg: 'browser' });
     assert.deepEqual(bridgeAction('get_event', { seq: 17588 }).label, { icon: 'file-text', tool: 'get_event', arg: '17588' });
+    assert.deepEqual(bridgeAction('send_message', { files: ['f'] }).label, { icon: 'send', tool: 'send_message', arg: 'f' });
     assert.deepEqual(bridgeAction('gmail_search_emails', {}).label, { icon: 'inbox', tool: 'gmail_search_emails' });
   });
 });

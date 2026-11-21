@@ -1,7 +1,7 @@
 // The facts of a stored file as a message carries them — one vocabulary for
 // the two places the log records a file by reference: the image/file block
-// of an agent.message (send_file) and the files of a thread.message
-// (sendToParent/sendToChild of the agent runtime). The reader — the
+// of an agent.message (send_message) and the files of a thread.message
+// (send_message/send_to_thread). The reader — the
 // console's feed — names the attachment from the event itself; history
 // recorded before these facts has the fileId alone, and the reader asks
 // GET /api/files/:fileId/meta for it.

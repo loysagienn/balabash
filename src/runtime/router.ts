@@ -23,6 +23,7 @@
 // the remote engine's facade — a remote thread has no run, its "run" is a
 // stateless facade over the engine, risen on demand — plug in from above).
 
+import { taskAuthorLabel } from '../utils/task-author.ts';
 import type { Event, Thread } from '../core/contract.ts';
 import { appendEvent } from '../core/append.ts';
 import { startConsumer } from '../core/consumers.ts';
@@ -88,7 +89,8 @@ const ROUTED_TYPES = [
   // (redirected to main when the requester is gone) — wake the addressee.
   SYSTEM_RESTART_COMPLETED,
   // A scheduled task fired into the main thread — wake the coordinator so it
-  // interprets the note (or a code task's pushed payload) right away.
+  // acts on the note (or on what a program returned) right away, unless the
+  // task says its event can wait (`wake: false`).
   SCHEDULE_FIRED,
 ];
 
@@ -171,7 +173,7 @@ export function startThreadRouter({ createRun, spawnRun }: RouterHooks): Consume
           actor: 'system',
           workspaceId: event.workspaceId,
           threadId: event.targetThreadId,
-          payload: { reason, requestedBy: event.actor === 'agent' ? (event.agentName ?? 'agent') : event.actor },
+          payload: { reason, requestedBy: event.task ? taskAuthorLabel(event.task.slug) : event.agentName ?? event.actor },
         });
 
         return;
@@ -219,6 +221,12 @@ export function startThreadRouter({ createRun, spawnRun }: RouterHooks): Consume
           await deliver(event.targetThreadId, event);
         }
 
+        return;
+      }
+
+      // A task that does not wake: its event lies in the main thread and the
+      // secretary reads it in the transcript of the next turn.
+      if (event.type === SCHEDULE_FIRED && event.payload.wake === false) {
         return;
       }
 

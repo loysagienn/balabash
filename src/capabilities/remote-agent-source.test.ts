@@ -15,7 +15,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type { RemoteDriverContext } from '../core/contract.ts';
 import { getLoadedRemoteKind, loadRemoteAgents } from './remote-agent-source.ts';
-import type { RemoteAgentLoadFailure } from './remote-agent-source.ts';
+import type { ExtensionFailure } from './extensions.ts';
 
 let directory: string;
 
@@ -40,6 +40,8 @@ before(async () => {
   await writeFile(path.join(directory, 'engineer.ts'), kindModule('engineer'));
   await writeFile(path.join(directory, 'renamed.ts'), kindModule('other_name'));
   await writeFile(path.join(directory, 'required_options.ts'), kindModule('required_options', ", options: { type: 'object', properties: {}, required: ['x'] }"));
+  await writeFile(path.join(directory, 'bad_mode.ts'), kindModule('bad_mode', ", modes: ['headless'], defaultMode: 'user'"));
+  await writeFile(path.join(directory, 'addressed.ts'), kindModule('addressed', ", modes: ['user', 'headless'], defaultMode: 'headless', recipients: ['coordinator']"));
   await writeFile(path.join(directory, 'broken.ts'), `export function start() { throw new Error('no network'); }\n`);
   await writeFile(path.join(directory, 'notes.md'), 'not a module');
 });
@@ -48,7 +50,7 @@ after(() => rm(directory, { recursive: true, force: true }));
 
 describe('loadRemoteAgents', () => {
   test('loads the valid kinds, skips and reports the rest, and remembers each kind with its context', async () => {
-    const failures: RemoteAgentLoadFailure[] = [];
+    const failures: ExtensionFailure[] = [];
     const contexts = new Map<string, RemoteDriverContext>();
     const context = (kind: string): RemoteDriverContext => {
       const ctx = { secrets: { get: async () => `secret-of-${kind}` }, files: {} as RemoteDriverContext['files'] };
@@ -67,10 +69,16 @@ describe('loadRemoteAgents', () => {
       },
     });
 
-    assert.deepEqual(loaded.map(declaration => declaration.name), ['fake_agent']);
-    assert.equal(loaded[0].kind, 'remote');
-    assert.deepEqual(loaded[0].secrets, ['TOKEN']);
-    assert.equal(typeof loaded[0].driver.read, 'function');
+    assert.deepEqual(loaded.map(declaration => declaration.name), ['addressed', 'fake_agent']);
+    assert.deepEqual(loaded[0].recipients, ['coordinator']);
+    assert.equal(loaded[0].defaultMode, 'headless');
+    const legacy = loaded[1];
+    assert.deepEqual(legacy.modes, ['user', 'headless']);
+    assert.equal(legacy.defaultMode, 'user');
+    assert.equal(legacy.recipients, undefined);
+    assert.equal(legacy.kind, 'remote');
+    assert.deepEqual(legacy.secrets, ['TOKEN']);
+    assert.equal(typeof legacy.driver.read, 'function');
     // start() ran with the kind's own context (the files load in name order;
     // required_options.ts is the last start() that ran).
     assert.equal((globalThis as { __remoteStartCtx?: unknown }).__remoteStartCtx, contexts.get('required_options'));
@@ -80,7 +88,8 @@ describe('loadRemoteAgents', () => {
 
     const byFile = Object.fromEntries(failures.map(failure => [failure.file, failure.error]));
 
-    assert.deepEqual(Object.keys(byFile).sort(), ['broken.ts', 'engineer.ts', 'extra_export.ts', 'no_start.ts', 'renamed.ts', 'required_options.ts']);
+    assert.deepEqual(Object.keys(byFile).sort(), ['bad_mode.ts', 'broken.ts', 'engineer.ts', 'extra_export.ts', 'no_start.ts', 'renamed.ts', 'required_options.ts']);
+    assert.match(byFile['bad_mode.ts'], /include defaultMode/);
     assert.match(byFile['no_start.ts'], /must export only "start"/);
     assert.match(byFile['extra_export.ts'], /must export only "start"/);
     assert.match(byFile['engineer.ts'], /shadows a repository agent/);

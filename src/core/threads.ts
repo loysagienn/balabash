@@ -7,11 +7,11 @@ import { randomUUID } from 'node:crypto';
 import { Prisma } from '../../prisma-generated/client.ts';
 import { prisma } from '../db/client.ts';
 import type { DbClient } from '../db/client.ts';
-import type { JsonObject, JsonValue, Thread, ThreadCounts, ThreadStatus, ThreadSummary } from './contract.ts';
+import type { JsonObject, JsonValue, TaskAuthor, Thread, ThreadCounts, ThreadStatus, ThreadSummary } from './contract.ts';
 import type { ThreadModel as ThreadRow } from '../../prisma-generated/models.ts';
+import { COORDINATOR_AGENT } from './agent-names.ts';
 import { appendEvent, completionProjectionData } from './append.ts';
-import type { AppendResult } from './append.ts';
-import { AppendError, TERMINAL_TYPES, THREAD_CANCELLED, THREAD_STARTED, toEvent } from './envelope.ts';
+import { AppendError, TERMINAL_TYPES, THREAD_STARTED, toEvent } from './envelope.ts';
 import { config } from '../config/index.ts';
 import { threadStartFields } from '../projections/thread.ts';
 import { threadsWhere } from './thread-query.ts';
@@ -19,13 +19,16 @@ import { messageFile } from './file-blocks.ts';
 import type { StoredFileFacts } from './file-blocks.ts';
 import type { ThreadFilters } from './thread-query.ts';
 
-export const COORDINATOR_AGENT = 'coordinator';
+export { COORDINATOR_AGENT } from './agent-names.ts';
 
 // A threads row as the reads below select it: the projection's columns
 // plus `headless` and `remote`, read from the thread's own thread.started.
 type ThreadReadRow = ThreadRow & { headless: boolean; remote: boolean };
 
-function toThread(row: ThreadReadRow): Thread {
+// A thread without the summary it left: what a list of threads shows.
+export type ThreadHead = Omit<Thread, 'summary'>;
+
+function toThreadHead(row: Omit<ThreadReadRow, 'summary'>): ThreadHead {
   return {
     id: row.id,
     workspaceId: row.workspaceId,
@@ -34,7 +37,6 @@ function toThread(row: ThreadReadRow): Thread {
     title: row.title,
     description: row.description,
     status: row.status as ThreadStatus,
-    summary: row.summary as ThreadSummary | null,
     projectId: row.projectId,
     headless: row.headless,
     remote: row.remote,
@@ -45,6 +47,10 @@ function toThread(row: ThreadReadRow): Thread {
   };
 }
 
+function toThread(row: ThreadReadRow): Thread {
+  return { ...toThreadHead(row), summary: row.summary as ThreadSummary | null };
+}
+
 // Every read of threads is raw SQL over this shape: the columns of the
 // projection aliased to the model's field names, and the spawn-time facts
 // `headless` and `remote` joined in from the thread.started the row was
@@ -53,12 +59,17 @@ function toThread(row: ThreadReadRow): Thread {
 // source; `= 'true'::jsonb` reads a boolean and nothing else as true (a
 // missing or odd value is not), with no cast that could fail on an odd
 // payload.
-const THREAD_COLUMNS = Prisma.sql`threads.id, threads.workspace_id AS "workspaceId", threads.parent_id AS "parentId", threads.agent, threads.title,
-       threads.description, threads.status, threads.summary, threads.project_id AS "projectId",
+//
+// The summary is the one heavy column — a whole report — and stands apart:
+// a read of many threads that does not show it does not carry it out of the
+// database (listThreadHeads).
+const THREAD_HEAD_COLUMNS = Prisma.sql`threads.id, threads.workspace_id AS "workspaceId", threads.parent_id AS "parentId", threads.agent, threads.title,
+       threads.description, threads.status, threads.project_id AS "projectId",
        COALESCE(started.payload -> 'headless' = 'true'::jsonb, false) AS headless,
        COALESCE(started.payload -> 'remote' = 'true'::jsonb, false) AS remote,
        threads.created_seq AS "createdSeq", threads.terminal_seq AS "terminalSeq",
        threads.created_at AS "createdAt", threads.updated_at AS "updatedAt"`;
+const THREAD_COLUMNS = Prisma.sql`${THREAD_HEAD_COLUMNS}, threads.summary`;
 const THREADS_FROM = Prisma.sql`threads LEFT JOIN events started ON started.seq = threads.created_seq`;
 
 async function readThreads(db: DbClient, where: Prisma.Sql, tail: Prisma.Sql = Prisma.empty): Promise<Thread[]> {
@@ -96,6 +107,18 @@ export async function listThreads(workspaceId: string, { limit = 100, order = 'a
   }
 
   return threads;
+}
+
+// The same threads in the same order as listThreads with order 'desc' —
+// the same filters, newest first — without their summaries.
+export async function listThreadHeads(workspaceId: string, { limit = 100, ...filters }: ThreadFilters & { limit?: number } = {}): Promise<ThreadHead[]> {
+  const rows = await prisma.$queryRaw<Omit<ThreadReadRow, 'summary'>[]>`
+    SELECT ${THREAD_HEAD_COLUMNS}
+    FROM ${THREADS_FROM}
+    WHERE ${threadsWhere(workspaceId, filters)}
+    ORDER BY threads.created_seq DESC LIMIT ${limit}`;
+
+  return rows.map(toThreadHead);
 }
 
 // The thread of the workspace that ended last — the one with the greatest
@@ -184,15 +207,6 @@ export async function listBusyRunThreads(): Promise<Thread[]> {
       ORDER BY state.seq DESC LIMIT 1), 'run') = 'run'`,
     Prisma.sql`ORDER BY threads.created_seq`,
   );
-}
-
-// The active children of a thread — the dialogue partners a resumed run is
-// told about (a fresh run learns them as it spawns).
-export async function listActiveChildIds(threadId: string): Promise<string[]> {
-  const rows = await prisma.$queryRaw<Array<{ id: string }>>`
-    SELECT id FROM threads WHERE parent_id = ${threadId} AND status = 'active' ORDER BY created_seq`;
-
-  return rows.map(row => row.id);
 }
 
 // Every main thread across all workspaces, oldest first — the boot sweep
@@ -304,18 +318,13 @@ type StartThreadInput = {
   title?: string;
   // The spawn prompt — every agent's input is one text prompt.
   input?: string;
-  // Spawn-time policy riding in the payload (§7.4, §11.3): the notification
-  // level of the thread and the narrowed tool bundle. The projection does not
-  // store them — consumers read them from the thread.started event.
+  // Consumers read the notification level from thread.started.
   notification?: string;
-  tools?: string[];
   // The spawned agent's thread icon (§11.2): adapters know only core, so the
   // surface hint travels in the event, not in the catalog.
   icon?: string;
-  // Headless thread (§11.2): no user surface — adapters create none for it
-  // (e.g. no Telegram topic). Like
-  // icon, the hint comes from the spawned agent's declaration and travels in
-  // the event.
+  // The mode chosen at spawn travels in the event; adapters create a user
+  // surface only for a user-facing thread.
   headless?: boolean;
   // A remote agent's thread (src/remote/engine.ts): the session runs in
   // an external system, the thread mirrors it — no run here, survives
@@ -333,7 +342,8 @@ type StartThreadInput = {
   // what the projection stores and the console filters on, the slug is the
   // human-readable address at spawn time.
   project?: { id: string; slug: string };
-  actor: 'system' | 'agent';
+  actor: 'system' | 'agent' | 'task';
+  task?: TaskAuthor;
   agentName?: string; // the SPAWNING agent, not the spawned one
 };
 
@@ -351,10 +361,6 @@ export async function startThread(options: StartThreadInput): Promise<Thread> {
 
   if (options.notification !== undefined) {
     payload.notification = options.notification;
-  }
-
-  if (options.tools !== undefined) {
-    payload.tools = options.tools;
   }
 
   if (options.icon !== undefined) {
@@ -390,6 +396,7 @@ export async function startThread(options: StartThreadInput): Promise<Thread> {
   await appendEvent({
     type: THREAD_STARTED,
     actor: options.actor,
+    task: options.task,
     agentName: options.agentName ?? null,
     workspaceId: options.workspaceId,
     threadId,
@@ -398,47 +405,6 @@ export async function startThread(options: StartThreadInput): Promise<Thread> {
   });
 
   return (await getThread(threadId))!;
-}
-
-// ---------------------------------------------------------------------------
-// Tombstone (§5.5): on process start every active non-main thread with a
-// run is cancelled — runs live only in memory and did not survive the
-// restart. Remote threads are left alone: their session lives on in the
-// external system and the remote engine resumes them from the row. The
-// forced restart uses the same sweep. Cancelling a thread cascades over its
-// subtree inside appendEvent, so descendants reached later in the loop are
-// already terminal no-ops (a remote child of a cancelled thread goes with
-// its parent — a thread does not outlive its parent, remote or not).
-
-//
-// `spare` keeps a thread alive through the boot sweep: one whose run resumes
-// its saved SDK session (src/capabilities/resume-runs.ts). A spared thread
-// still goes when an ancestor is cancelled — the cascade decides, not the
-// predicate.
-export async function tombstoneActiveThreads(reason: string, spare?: (thread: Thread) => Promise<boolean>): Promise<number> {
-  const rows = await readThreads(prisma, ACTIVE_RUN_THREADS, Prisma.sql`ORDER BY threads.created_seq`);
-
-  let cancelled = 0;
-
-  for (const row of rows) {
-    if (spare && (await spare(row))) {
-      continue;
-    }
-
-    const result: AppendResult = await appendEvent({
-      type: THREAD_CANCELLED,
-      actor: 'system',
-      workspaceId: row.workspaceId,
-      threadId: row.id,
-      payload: { reason },
-    });
-
-    if (result.written) {
-      cancelled += 1;
-    }
-  }
-
-  return cancelled;
 }
 
 // ---------------------------------------------------------------------------
@@ -476,7 +442,7 @@ export async function rebuildThreadsProjection(db: DbClient = prisma): Promise<{
         const { agent, title, projectId } = threadStartFields(event.payload);
 
         // Timestamps come from the log, not the clock: a rebuilt row must
-        // date like the live one did (list_threads filters and pages on
+        // date like the live one did (threads_list filters and pages on
         // createdAt).
         await db.thread.create({
           data: {

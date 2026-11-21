@@ -6,6 +6,6 @@ export const IMAGE_GENERATOR_SUBAGENT_NOTE =
   'Give it the brief: what the image is for, its content and style, the size or aspect ratio, any exact text it ' +
   'must carry, and reference images — attached as fileIds (of spawn_agent or send_to_thread), or as paths in the ' +
   'workspace file area. It replies with the ' +
-  'finished images attached as stored fileIds; what happens to them is yours to decide (send_file to show them, ' +
-  'workspace_import_file to keep them in the workspace file area under a fitting name). It never ends on its ' +
+  'finished images attached as stored fileIds; what happens to them is yours to decide (send_message to show them, ' +
+  'import_file to keep them in the workspace file area under a fitting name). It never ends on its ' +
   'own: ask for corrections and variants in the same thread, and tell it to finish when the images are done.';

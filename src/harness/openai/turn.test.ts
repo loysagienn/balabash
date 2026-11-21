@@ -52,54 +52,54 @@ function dispatcher(kinds: Record<string, DispatchResult>) {
   const dispatch = async (call: FunctionCall): Promise<DispatchResult> => {
     dispatched.push(call.name);
 
-    return kinds[call.name] ?? { kind: 'rejected', error: `unknown ${call.name}` };
+    return kinds[call.name] ?? { kind: 'catalog', isError: true, text: JSON.stringify({ kind: 'unknown_capability' }) };
   };
 
   return { dispatch, dispatched };
 }
 
 describe('runTurn', () => {
-  it('continues after an async-only response and ends only on do_nothing', async () => {
-    const { client, requests } = makeClient([[{ name: 'send_to_thread' }], [{ name: 'engineer' }], [{ name: 'do_nothing' }]]);
+  it('continues after a catalog call and ends only on do_nothing', async () => {
+    const { client, requests } = makeClient([[{ name: 'send_to_thread' }], [{ name: 'spawn_agent' }], [{ name: 'do_nothing' }]]);
     const { dispatch, dispatched } = dispatcher({
-      send_to_thread: { kind: 'async' },
-      engineer: { kind: 'async' },
+      send_to_thread: { kind: 'catalog', text: 'null' },
+      spawn_agent: { kind: 'catalog', text: 'null' },
       do_nothing: { kind: 'end' },
     });
 
     const outcome = await runTurn({ ...head, metrics, dispatch, deps: { client, backend: stateful } });
 
-    assert.deepEqual(dispatched, ['send_to_thread', 'engineer', 'do_nothing']);
+    assert.deepEqual(dispatched, ['send_to_thread', 'spawn_agent', 'do_nothing']);
     assert.equal(requests.length, 3);
     assert.equal(outcome.firstResponseId, 'resp-1');
 
-    // The async call was acknowledged to the model, chained through
+    // The returned value is chained through
     // previous_response_id.
     assert.equal(requests[1]!.previous_response_id, 'resp-1');
-    assert.deepEqual(requests[1]!.input, [{ type: 'function_call_output', call_id: 'call-1-0', output: 'accepted' }]);
+    assert.deepEqual(requests[1]!.input, [{ type: 'function_call_output', call_id: 'call-1-0', output: 'null' }]);
   });
 
   it('dispatches every call of one response, do_nothing among them ends the turn after the others', async () => {
-    const { client, requests } = makeClient([[{ name: 'send_message' }, { name: 'manager' }, { name: 'do_nothing' }]]);
+    const { client, requests } = makeClient([[{ name: 'send_message' }, { name: 'spawn_agent' }, { name: 'do_nothing' }]]);
     const { dispatch, dispatched } = dispatcher({
-      send_message: { kind: 'async' },
-      manager: { kind: 'async' },
+      send_message: { kind: 'catalog', text: 'null' },
+      spawn_agent: { kind: 'catalog', text: 'null' },
       do_nothing: { kind: 'end' },
     });
 
     await runTurn({ ...head, metrics, dispatch, deps: { client, backend: stateful } });
 
-    assert.deepEqual(dispatched, ['send_message', 'manager', 'do_nothing']);
+    assert.deepEqual(dispatched, ['send_message', 'spawn_agent', 'do_nothing']);
     assert.equal(requests.length, 1);
   });
 
-  it('returns sync results and rejections to the model and keeps going', async () => {
+  it('returns values and capability errors to the model and keeps going', async () => {
     const { client, requests } = makeClient([
       [{ name: 'get_event', callId: 'a' }, { name: 'bogus', callId: 'b' }],
       [{ name: 'do_nothing' }],
     ]);
     const { dispatch } = dispatcher({
-      get_event: { kind: 'sync', result: { content: [{ type: 'text', text: 'the event' }] } as DispatchResult extends { result: infer R } ? R : never },
+      get_event: { kind: 'catalog', text: 'the event' },
       do_nothing: { kind: 'end' },
     });
 
@@ -112,12 +112,31 @@ describe('runTurn', () => {
     assert.equal(outputs.length, 2);
     assert.equal(outputs[0]!.call_id, 'a');
     assert.equal(outputs[1]!.call_id, 'b');
-    assert.match(String(outputs[1]!.output), /^rejected: unknown bogus/);
+    assert.equal(outputs[0]!.output, 'the event');
+    assert.deepEqual(JSON.parse(String(outputs[1]!.output)), { kind: 'unknown_capability' });
+  });
+
+  it('attaches catalog images and PDFs to their respective call outputs', async () => {
+    const { client, requests } = makeClient([[{ name: 'image', callId: 'a' }, { name: 'pdf', callId: 'b' }], [{ name: 'do_nothing' }]]);
+    const { dispatch } = dispatcher({
+      image: { kind: 'catalog', text: 'image ref', attachment: { kind: 'image', url: 'https://files/image' } },
+      pdf: { kind: 'catalog', text: 'pdf ref', attachment: { kind: 'pdf', url: 'https://files/pdf' } },
+      do_nothing: { kind: 'end' },
+    });
+    await runTurn({ ...head, metrics, dispatch, deps: { client, backend: stateful } });
+    assert.deepEqual(requests[1]!.input, [
+      { type: 'function_call_output', call_id: 'a', output: [
+        { type: 'input_text', text: 'image ref' }, { type: 'input_image', image_url: 'https://files/image', detail: 'auto' },
+      ] },
+      { type: 'function_call_output', call_id: 'b', output: [
+        { type: 'input_text', text: 'pdf ref' }, { type: 'input_file', file_url: 'https://files/pdf' },
+      ] },
+    ]);
   });
 
   it('stateless backend: resends the whole input with the response output echoed', async () => {
     const { client, requests } = makeClient([[{ name: 'send_message', callId: 'c1' }], [{ name: 'do_nothing' }]]);
-    const { dispatch } = dispatcher({ send_message: { kind: 'async' }, do_nothing: { kind: 'end' } });
+    const { dispatch } = dispatcher({ send_message: { kind: 'catalog', text: 'null' }, do_nothing: { kind: 'end' } });
 
     await runTurn({ ...head, metrics, dispatch, deps: { client, backend: stateless } });
 
@@ -128,13 +147,13 @@ describe('runTurn', () => {
     assert.deepEqual(input[0], { role: 'user', content: [{ type: 'input_text', text: 'hello' }] });
     assert.deepEqual(input[1], { role: 'developer', content: [{ type: 'input_text', text: 'status' }] });
     assert.equal(input[2]!.type, 'function_call');
-    assert.deepEqual(input[3], { type: 'function_call_output', call_id: 'c1', output: 'accepted' });
+    assert.deepEqual(input[3], { type: 'function_call_output', call_id: 'c1', output: 'null' });
   });
 
   it('fails loudly when the model never ends the turn', async () => {
     const script = Array.from({ length: MAX_TURN_ITERATIONS + 1 }, () => [{ name: 'send_message' }]);
     const { client, requests } = makeClient(script);
-    const { dispatch } = dispatcher({ send_message: { kind: 'async' } });
+    const { dispatch } = dispatcher({ send_message: { kind: 'catalog', text: 'null' } });
 
     await assert.rejects(
       runTurn({ ...head, metrics, dispatch, deps: { client, backend: stateful } }),

@@ -18,6 +18,7 @@ type TranscriptEvent = {
   seq: number | bigint;
   type: string;
   actor: string;
+  task?: { slug: string; runId: string };
   agentName: string | null;
   threadId: string | null;
   targetThreadId: string | null;
@@ -29,7 +30,7 @@ type JsonObject = Record<string, unknown>;
 
 // Fields of one specific event type; null — the event stays out of the
 // transcript.
-type Renderer = (payload: JsonObject, event: TranscriptEvent) => JsonObject | null;
+type Renderer = (payload: JsonObject, event: TranscriptEvent, options: TranscriptOptions) => JsonObject | null;
 
 function asObject(value: unknown): JsonObject {
   return value && typeof value === 'object' && !Array.isArray(value) ? (value as JsonObject) : {};
@@ -142,7 +143,7 @@ function renderContentBlocks(content: unknown): { text: string | null; files: un
 
 // The general FileRef.url rule of this projection: a presigned url expires
 // within minutes, so wherever a FileRef appears in a tool result it is
-// rendered without its url (call storage_get_file again for a fresh one). A FileRef
+// rendered without its url in historical MCP results. A FileRef
 // is detected structurally: id + originalFilename + contentType + url.
 function stripFileRefUrls(value: unknown): unknown {
   if (Array.isArray(value)) {
@@ -248,7 +249,22 @@ const renderers: Record<string, Renderer> = {
   // strict reading rule (§9): structuredContent is primary — when present
   // the content blocks are not read at all; without it the raw MCP blocks
   // are compacted. FileRef urls are stripped by the general projection rule.
-  'tool.call.completed': payload => {
+  'tool.call.completed': (payload, _event, options) => {
+    if ('value' in payload) {
+      const { value, functionName } = payload;
+      if (functionName === 'describe' && asObject(value).kind === 'capability') {
+        const { name, accounts, description, signature, types } = asObject(value);
+        return omitNullish({
+          functionName, described: name, accounts,
+          ...(options.includeSignatures ? { description, signature, types } : {}),
+        });
+      }
+      // Large arrays of short items would evade the per-string limit.
+      const json = JSON.stringify(value);
+      if (json.length > STRING_LIMIT_MAX) return { functionName, preview: json.slice(0, STRING_LIMIT_MAX), truncated: true };
+      return { functionName, value };
+    }
+
     const result = asObject(payload.result);
     const isError = result.isError === true ? true : undefined;
 
@@ -277,7 +293,7 @@ const renderers: Record<string, Renderer> = {
 
   // Thread lifecycle (§5.1) as seen from a parent's transcript: the child's
   // threadId comes from the envelope — the model needs it for cancel_thread
-  // and get_thread. Inputs and summaries stay whole; the decay/truncation
+  // and threads_get. Inputs and summaries stay whole; the decay/truncation
   // machinery bounds them like everything else.
   'thread.started': (payload, event) =>
     omitNullish({
@@ -389,15 +405,16 @@ const renderers: Record<string, Renderer> = {
   'system.restart.requested': payload =>
     omitNullish({
       reason: payload.reason,
-      force: payload.force,
       requestedBy: payload.requestedBy,
     }),
 
   // A scheduled task firing (schedule heart → main thread): slug names the
-  // registered task, note is a note-task's data. A code task may push extra
-  // payload fields of its own — they ride along after the known ones.
+  // registered task, note is a note-task's data; a program task carries the
+  // id of its run and the value it returned, and a body of the former kind
+  // 'code' may push fields of its own — they ride along after the known
+  // ones. `wake` is the router's: it says whether the event started a turn.
   'schedule.fired': payload => {
-    const { slug, name, note, ...rest } = payload;
+    const { slug, name, note, wake: _wake, ...rest } = payload;
 
     return omitNullish({ slug, name, note, ...rest });
   },
@@ -422,13 +439,17 @@ type RenderedEvent = {
 // Builds the envelope and the event fields without truncation; null — the
 // event stays out of the transcript. Truncation is applied separately, once
 // the event's position among the included ones is known.
-function renderEvent(event: TranscriptEvent): RenderedEvent | null {
+function renderEvent(event: TranscriptEvent, options: TranscriptOptions): RenderedEvent | null {
+  // A program's intermediate inputs and values are available by seq in the
+  // journal. Only its outer result and the domain events belong in the prompt.
+  if (event.type.startsWith('tool.call.') && asObject(event.payload).runId) return null;
   const renderer = renderers[event.type];
   const envelope: JsonObject = {
     seq: Number(event.seq),
     type: event.type,
-    // The author is ambient (user messages carry identity, coordinator events
-    // are its own) — only foreign agents are annotated.
+    // The secretary's own actions are ambient. A task acts independently in
+    // the same thread; keep its identity even on a condensed message or birth.
+    ...(event.task ? { actor: 'task', task: event.task } : {}),
     ...(event.actor === 'agent' && event.agentName && event.agentName !== 'coordinator'
       ? { agent: event.agentName }
       : {}),
@@ -437,7 +458,7 @@ function renderEvent(event: TranscriptEvent): RenderedEvent | null {
   let fields: JsonObject | null;
 
   if (renderer) {
-    fields = renderer(asObject(event.payload), event);
+    fields = renderer(asObject(event.payload), event, options);
   } else {
     // A type without a renderer (thread lifecycle of future children, domain
     // events of dynamic agents): the whole payload spills into the envelope.
@@ -527,13 +548,15 @@ export type Transcript = {
 };
 
 export type TranscriptOptions = {
+  // The compatible port reads opened signatures from history across turns.
+  includeSignatures?: boolean;
   // Overrides TRANSCRIPT_CHAR_LIMIT (the coordinator's budget is configured).
   charLimit?: number;
 };
 
 export function buildTranscript(events: TranscriptEvent[], options: TranscriptOptions = {}): Transcript {
   const charLimit = options.charLimit ?? TRANSCRIPT_CHAR_LIMIT;
-  const rendered = events.map(event => renderEvent(event)).filter(item => item !== null);
+  const rendered = events.map(event => renderEvent(event, options)).filter(item => item !== null);
 
   const lines = rendered.map((item, index) => ({
     at: item.at,

@@ -61,20 +61,17 @@ before(async () => {
   // The snapshot (read by the OAuth-client test) names the secretary's model.
   process.env.MAIN_OPENAI_MODEL ??= 'test-model';
 
-  const { registerUserAuthServer } = await import('../capabilities/tool-manager.ts');
+  const { registerAccountService } = await import('../capabilities/connections/services.ts');
   const service = (name: string, identityProbe: boolean, clientRegistration: 'dynamic' | 'manual' = 'dynamic') =>
-    registerUserAuthServer({
+    registerAccountService({
       name,
-      origin: 'external',
+      setup: null,
       url: `https://${name}.example/mcp`,
       description: `${name} service`,
       clientRegistration,
       scope: null,
       authorizationParams: null,
       identityProbe: identityProbe ? { url: `https://${name}.example/me`, idField: 'id', labelField: 'email' } : null,
-      enabledTools: undefined,
-      toolOverrides: undefined,
-      prefixTools: false,
     });
 
   // One account at most (no identity probe), several accounts, none yet;

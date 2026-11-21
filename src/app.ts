@@ -1,5 +1,5 @@
 // Process entry. Start order (design doc): db → files → tombstone of
-// orphaned threads → agent catalog → tool servers → web → channel adapters
+// orphaned threads → agent catalog → services and capability tree → web → channel adapters
 // (telegram when configured) → router → consumers → restart module. The
 // process runs under supervisor.js: a clean exit with RESTART_EXIT_CODE
 // relaunches it, exit 0 stops the pair.
@@ -11,28 +11,22 @@ import type { Consumer } from './core/consumers.ts';
 import { prisma } from './db/client.ts';
 import { config } from './config/index.ts';
 import { COORDINATOR_AGENT } from './core/threads.ts';
-import { getFile, getFileDownloadUrl, ingestFile, openFileContent } from './files/index.ts';
+import { extensionFilesApi } from './files/index.ts';
 import { loadAgents, repositoryAgentNames } from './capabilities/agent-catalog.ts';
 import { spawnAgentRun } from './capabilities/agent-runtime.ts';
 import { resumeThreadRuns, tombstoneUnresumableThreads } from './capabilities/resume-runs.ts';
+import { journalExtensionFailure } from './runtime/extension-journal.ts';
 import { loadRemoteAgents } from './capabilities/remote-agent-source.ts';
 import { createRemoteDriverContext, refreshRemoteSecretTargets, registerRemoteSecretTargets } from './capabilities/remote-agent-secrets.ts';
-import { appendEvent } from './core/append.ts';
-import { SYSTEM_EXCEPTION } from './core/envelope.ts';
-import { createAuthToolServer } from './capabilities/auth-tools.ts';
-import { createEventsToolServer, createStorageToolServer } from './capabilities/builtin-tools.ts';
-import { createRestartToolServer } from './capabilities/restart-tools.ts';
-import { createRemoteToolServer } from './capabilities/remote-tools.ts';
 import { startReauthDetector } from './capabilities/reauth-detector.ts';
-import { loadToolServers, registerBuiltinToolServer } from './capabilities/tool-manager.ts';
-import { isAnyJobRunning, killRunningJobs } from './schedule/engine.ts';
+import { hasRunningWork, startTree, stopRunningWork } from './tree/index.ts';
 import { startScheduleHeart } from './schedule/heart.ts';
+import { hasUnsettledRuns, sweepAbortedRuns } from './schedule/programs.ts';
 import { startWorkspaceIndexer } from './workspace/indexer.ts';
 import { startFileAreaTotals } from './workspace/totals.ts';
+import { sweepProcessGroups } from './runtime/process-groups.ts';
 import { startTelemetry } from './runtime/telemetry.ts';
 import { startSessionCleanup } from './capabilities/session-cleanup.ts';
-import { createScheduleToolServer } from './schedule/tools.ts';
-import { createProjectsToolServer } from './projects/tools.ts';
 import { createCoordinatorRun, hasActiveCoordinatorTurns, settleMainThreadStates } from './coordinator/index.ts';
 import { startWebServer } from './api/index.ts';
 import { startThreadRouter } from './runtime/router.ts';
@@ -45,6 +39,10 @@ import { startClaudeSessionJournal } from './harness/claude-sdk/session-journal.
 import { startPlanLimitsWatch } from './harness/claude-sdk/plan-limits.ts';
 import { startCodexPlanLimits } from './harness/codex-sdk/plan-limits.ts';
 import { startCodexSessionJournal } from './harness/codex-sdk/session-journal.ts';
+
+// A crashed app can leave programs and workspace commands running. Stop
+// their groups even if the database takes time to come back up.
+sweepProcessGroups();
 
 // Pending migrations are applied before anything else touches the database:
 // schema changes ride the same restart as the code that needs them. A
@@ -90,15 +88,9 @@ if (tombstoned > 0) {
   console.log(`[app] tombstoned ${tombstoned} orphaned threads without a saved session`);
 }
 
-// The files surface of the installation's extensions (local tool servers
-// and remote agent drivers): global — workspace scoping happens at the
-// calling run.
-const extensionFilesApi = {
-  ingest: (input: Parameters<typeof ingestFile>[0]) => ingestFile(input),
-  get: (fileId: string) => getFile(fileId),
-  getDownloadUrl: (fileId: string, options?: { expiresInSeconds?: number }) => getFileDownloadUrl(fileId, options),
-  open: (fileId: string) => openFileContent(fileId),
-};
+// Settle the previous process's running programs as aborted
+// before the web, resumed threads or schedule can start new runs.
+await sweepAbortedRuns();
 
 // The catalog: the repository's agents, then the installation's remote agent
 // kinds (data/remote-agents) — a kind that fails to load is skipped loudly,
@@ -107,48 +99,15 @@ loadAgents(
   await loadRemoteAgents({
     context: kind => createRemoteDriverContext(kind, extensionFilesApi),
     repositoryAgents: repositoryAgentNames(),
-    report: async ({ file, error }) => {
-      await appendEvent({
-        type: SYSTEM_EXCEPTION,
-        actor: 'system',
-        workspaceId: null,
-        payload: { scope: 'remote-agents', error: `${file}: ${error}` },
-      });
-    },
+    report: journalExtensionFailure,
   }),
 );
 registerRemoteSecretTargets();
 await refreshRemoteSecretTargets();
 
-// Dangerous-capability servers, granted only where deliberately listed: the
-// auth tools to the auth agent, the restart request to the coordinator and
-// the engineer and scheduler agents.
-registerBuiltinToolServer(createAuthToolServer());
-registerBuiltinToolServer(createRestartToolServer());
-
-// The workspace pull tools, split into two servers: 'storage'
-// (storage_get_file) and 'events' (the thread/event log). Agents opt in per
-// server in their tool lists.
-registerBuiltinToolServer(createStorageToolServer());
-registerBuiltinToolServer(createEventsToolServer());
-
-// The schedule registry tools: any agent listing the server may register,
-// list, cancel or manually run a scheduled task; the audit is the tool.call.*
-// journal in the calling agent's thread.
-registerBuiltinToolServer(createScheduleToolServer());
-
-// The project registry tools (passive libraries: identity in the db, the
-// knowledge in a workspace folder) — like schedule: any agent listing the
-// server may list, read and maintain projects; the audit is the tool.call.* journal.
-registerBuiltinToolServer(createProjectsToolServer());
-
-// The remote agents' server: a file out of a remote session, for the
-// thread's owner (the coordinator, the agents that may spawn remote kinds).
-registerBuiltinToolServer(createRemoteToolServer());
-
-// Local tool servers see the global files surface; workspace scoping happens
-// at the calling run.
-await loadToolServers({ filesApi: extensionFilesApi });
+// The tree of the capability catalog: its services join the connections
+// layer before the web surface and the schedule can ask for one.
+await startTree(journalExtensionFailure);
 
 startWebServer();
 
@@ -240,8 +199,7 @@ if (ccr) {
 
 consumers.push(startReauthDetector());
 
-// The schedule heart: boot sweep of sleeping code tasks, then the timer that
-// fires due triggers. Not a log consumer, but it stops like one.
+// The schedule heart fires due triggers. Not a log consumer, but it stops like one.
 consumers.push(startScheduleHeart());
 
 // The remote engine's heart: the remote threads' sessions read on their
@@ -277,9 +235,12 @@ await completePendingRestarts({ migrationsError });
 consumers.push(
   startRestartModule({
     isBusy: hasActiveCoordinatorTurns,
-    // Workspace jobs do not survive a restart — the safe window waits for
-    // them (force skips the wait; the shutdown sweep then kills the groups).
-    hasActiveJobs: isAnyJobRunning,
+    // What runs outside any agent turn does not survive a restart — the runs
+    // of programs with the calls and commands they started, a scheduled run
+    // from the moment its task is taken until its outcome is journaled and
+    // told. The safe window waits for them.
+    // On shutdown we stop any work that is still running.
+    hasProgramWork: () => hasRunningWork() || hasUnsettledRuns(),
     // The remote engine's verbs in flight (its state is durable; a verb
     // half-way through is better finished than replayed).
     hasRemoteWork: isRemoteEngineBusy,
@@ -324,10 +285,8 @@ async function shutdown(code: number): Promise<void> {
     }
   }
 
-  // Workspace jobs do not survive a restart: kill their process groups (the
-  // in-flight completions journal 'aborted'; anything missed is settled by
-  // the boot sweep of the next process).
-  killRunningJobs();
+  // Stop programs and commands. The next boot settles unfinished run records.
+  stopRunningWork();
 
   await prisma.$disconnect().catch(() => {});
 

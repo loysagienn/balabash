@@ -14,9 +14,8 @@
 // remote thread survives one, is no obstacle to the restart window and is
 // not tombstoned at boot (src/core/threads.ts).
 //
-// The owner is whoever spawned the thread: the secretary's remote thread
-// talks to the user (an ordinary thread); another agent's is headless and
-// talks to its parent. A remote thread never ends on its own — the session
+// A user-facing thread talks to the user; a headless one to its parent.
+// The mode is recorded at spawn. A remote thread never ends on its own — the session
 // is endless and the thread merely pauses when idle. Three different
 // words: thread.interrupt stops the turn in flight (the thread waits on);
 // thread.cancel closes the thread without touching the session; thread.finish
@@ -150,11 +149,14 @@ function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+// A verb of the driver that gave no answer in its time.
+class VerbTimeoutError extends Error {}
+
 // A verb of the driver, bounded in time.
 async function bounded<T>(verb: string, ms: number, work: Promise<T>): Promise<T> {
   let timer: NodeJS.Timeout | null = null;
   const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error(`${verb} timed out after ${ms} ms`)), ms);
+    timer = setTimeout(() => reject(new VerbTimeoutError(`${verb} timed out after ${ms} ms`)), ms);
   });
 
   try {
@@ -727,41 +729,81 @@ async function pause(row: RemoteRow): Promise<Commit> {
   return { patch: { watch, phase: 'paused', nextPollAt: new Date(now.getTime() + READ_EVERY_MS.paused) }, events };
 }
 
+// Why a file of a session was not handed over: who asks decides what it
+// means for them (a capability's error kind, a tool's message).
+export type RemoteFileRefusal =
+  // No remote thread of this workspace under the id.
+  | 'not_remote'
+  // The thread is over.
+  | 'ended'
+  // The caller is neither the thread's parent nor the thread itself.
+  | 'not_owner'
+  // The kind's driver is not loaded in this installation.
+  | 'not_loaded'
+  // The external system has no way to hand out files.
+  | 'cannot_fetch'
+  // The session is asleep: its files are out of reach until it wakes.
+  | 'asleep'
+  // No file at the path.
+  | 'no_file'
+  // The external system refused the request.
+  | 'refused'
+  // The external system gave no answer in time.
+  | 'no_answer';
+
+export class RemoteFileError extends Error {
+  code: RemoteFileRefusal;
+
+  constructor(code: RemoteFileRefusal, message: string) {
+    super(message);
+    this.name = 'RemoteFileError';
+    this.code = code;
+  }
+}
+
 // A file of the session by path, on an explicit ask of the thread's owner
-// (the remote_fetch_file tool): the driver fetches it, the file is stored
-// in the workspace and shown in the thread — to the user as an attachment,
-// to the parent as a thread.message with it. The caller must be the
-// thread's owner: its parent, or the thread itself.
+// (`fetch_thread_file`): the driver fetches it,
+// the file is stored in the workspace and shown in the thread — to the user
+// as an attachment, to the parent as a thread.message with it. The caller
+// must be the thread's owner: its parent, or the thread itself. A refusal is
+// a RemoteFileError. A driver answers "nothing" both for a sleeping session
+// and for a missing path; a thread that is paused reads as the first.
 export async function fetchRemoteFile(threadId: string, path: string, caller: { workspaceId: string; threadId: string }): Promise<FileRef> {
   return withLock(threadId, async () => {
     const row = await getRow(threadId);
 
     if (!row || row.workspaceId !== caller.workspaceId) {
-      throw new Error(`Thread ${threadId} is not a remote thread of this workspace`);
+      throw new RemoteFileError('not_remote', `Thread ${threadId} is not a remote thread of this workspace`);
     }
 
     if (!isLive(row)) {
-      throw new Error(`Thread ${threadId} is over`);
+      throw new RemoteFileError('ended', `Thread ${threadId} is over`);
     }
 
     if (caller.threadId !== row.watch.parentId && caller.threadId !== threadId) {
-      throw new Error(`Thread ${threadId} is not a child of the calling thread`);
+      throw new RemoteFileError('not_owner', `Thread ${threadId} is not a child of the calling thread`);
     }
 
     const kind = kindOf(row);
 
     if (!kind) {
-      throw new Error(`The driver of "${row.kind}" is not loaded`);
+      throw new RemoteFileError('not_loaded', `The driver of "${row.kind}" is not loaded`);
     }
 
     if (!kind.driver.fetchFile) {
-      throw new Error(`The driver of "${row.kind}" cannot fetch files`);
+      throw new RemoteFileError('cannot_fetch', `The driver of "${row.kind}" cannot fetch files`);
     }
 
-    const fetched = await verb('fetchFile', kind.driver.fetchFile(kind.context, { ref: row.ref, path }));
+    let fetched: Awaited<ReturnType<NonNullable<RemoteDriver['fetchFile']>>>;
+
+    try {
+      fetched = await verb('fetchFile', kind.driver.fetchFile(kind.context, { ref: row.ref, path }));
+    } catch (error) {
+      throw new RemoteFileError(error instanceof VerbTimeoutError ? 'no_answer' : 'refused', error instanceof Error ? error.message : String(error));
+    }
 
     if (!fetched) {
-      throw new Error(`The file is not available (the session asleep, or no such path): ${path}`);
+      throw new RemoteFileError(row.phase === 'paused' ? 'asleep' : 'no_file', `The file is not available (the session asleep, or no such path): ${path}`);
     }
 
     const file = await kind.context.files.ingest({

@@ -114,7 +114,7 @@ export function ConnectionsScreen() {
             {entries.length === 0 ? (
               installation.isPending ? null : (
                 <Empty icon="plug" title="No services">
-                  Services appear here when the installation declares them in mcp-servers: per-user sign-in (auth: user), installation credentials (secret:NAME) or a claude.ai connector (claude-connector).
+                  Account services, installation credentials and claude.ai connectors appear here when configured.
                 </Empty>
               )
             ) : (

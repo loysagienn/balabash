@@ -39,15 +39,15 @@ import { FileNotFoundError, getFile, getWorkspaceFile, ingestFile, openFileConte
 import type { StorageBody } from '../files/storage.ts';
 import { verifyDownloadLink } from '../files/storage/local.ts';
 import { forgetExternalServerSecrets, getExternalServerSecretRequest, isExternalSecretServer, openExternalServerCredentialsRequest, provisionExternalServerSecrets } from '../capabilities/external-secrets.ts';
-import { getUserAuthServer, listClaudeConnectorTargets, listExternalSecretTargets, refreshExternalServers } from '../capabilities/tool-manager.ts';
-import { resolveOperatorCredentials, tokenTtlMs } from '../adapters/ccr/token.ts';
+import { connectorStatuses } from '../tree/connectors.ts';
+import { getAccountService, refreshSecretServices, listSecretServices, type SecretService } from '../capabilities/connections/services.ts';
 import { ConnectionError, disconnectConnection, getOauthClientRequest, getWorkspaceConnection, openOauthClientRequest, provisionOauthClient, reconnectConnection, renameConnection, startConnection, connectionView } from '../capabilities/connections/index.ts';
 import { AppManagementError, listApps, publishApp, unpublishApp } from '../apps/management.ts';
 import { ProjectError, archiveProject, createProject, parseProjectInput, parseProjectPatch, unarchiveProject, updateProject } from '../projects/mutations.ts';
 import { projectView } from '../projects/store.ts';
 import { ScheduleError, createTask, deleteTask, runTask } from '../schedule/commands.ts';
 import { parseTaskInput } from '../schedule/input.ts';
-import { JOB_RUNS_PAGE_DEFAULT, JOB_RUNS_PAGE_MAX, getJobRun, latestJobRuns, listJobRuns } from '../schedule/runs.ts';
+import { findRunPosition, getRun, latestRuns, listRuns } from '../schedule/journal.ts';
 import { taskView } from '../schedule/view.ts';
 import { publicAppsBase } from '../apps/urls.ts';
 import { consumeAuthCode, createAuthCode } from './auth-codes.ts';
@@ -68,7 +68,6 @@ import type {
   OauthClientRequestResponse,
   InstallationServiceView,
   InstallationServicesResponse,
-  ConnectorServiceView,
   ConnectionResponse,
   CreateProjectResponse,
   CreateTaskResponse,
@@ -77,9 +76,9 @@ import type {
   DraftResponse,
   DraftView,
   FileMetaResponse,
-  JobRunResponse,
-  JobRunsResponse,
-  LatestJobRunsResponse,
+  ScheduleRunResponse,
+  ScheduleRunsResponse,
+  LatestScheduleRunsResponse,
   RunTaskResponse,
   ProjectResponse,
   PublicationResponse,
@@ -1432,21 +1431,15 @@ router.post('/projects/:id/unarchive', requireSession, async ctx => {
 });
 
 // --------------------------------------------------------------------------
-// The schedule (the Schedule screen): the run journal of workspace jobs —
-// job_runs, telemetry outside the event log, read by place (a page newest
-// first with a keyset cursor, one run with its output tails, the newest run
-// of every task) — and the operator's two commands over a task, the same
-// implementation the schedule tools use (src/schedule/commands.ts): a
-// manual run (the schedule untouched; the outcome of a command job is in
-// the journal, of a note or a code task in the log) and a delete (the row
-// and its schedule.task.cancelled commit together, authored by the
-// operator). The tasks themselves are the snapshot's.
+// The Schedule screen reads the journal and operates the shared task registry.
 
 const SLUG_MAX = 64;
+const SCHEDULE_RUNS_PAGE_DEFAULT = 50;
+const SCHEDULE_RUNS_PAGE_MAX = 200;
 
 function parseRunsLimit(value: string | undefined): number | null {
   if (value === undefined) {
-    return JOB_RUNS_PAGE_DEFAULT;
+    return SCHEDULE_RUNS_PAGE_DEFAULT;
   }
 
   if (!/^\d+$/.test(value)) {
@@ -1455,7 +1448,7 @@ function parseRunsLimit(value: string | undefined): number | null {
 
   const limit = Number(value);
 
-  return limit >= 1 && limit <= JOB_RUNS_PAGE_MAX ? limit : null;
+  return limit >= 1 && limit <= SCHEDULE_RUNS_PAGE_MAX ? limit : null;
 }
 
 router.get('/schedule/runs', requireSession, async ctx => {
@@ -1465,7 +1458,7 @@ router.get('/schedule/runs', requireSession, async ctx => {
   const limit = parseRunsLimit(queryValue(ctx.query.limit));
 
   if (limit === null) {
-    sendError(ctx, 400, 'bad_request', `limit must be an integer between 1 and ${JOB_RUNS_PAGE_MAX}`);
+    sendError(ctx, 400, 'bad_request', `limit must be an integer between 1 and ${SCHEDULE_RUNS_PAGE_MAX}`);
 
     return;
   }
@@ -1476,19 +1469,23 @@ router.get('/schedule/runs', requireSession, async ctx => {
     return;
   }
 
-  const response: JobRunsResponse = await listJobRuns(workspaceId, { slug, before, limit });
+  const position = before === undefined ? null : await findRunPosition(workspaceId, before);
+  const page = before !== undefined && !position
+    ? { runs: [], next: null }
+    : await listRuns(workspaceId, { slug, limit, before: position ?? undefined });
+  const response: ScheduleRunsResponse = { runs: page.runs, nextCursor: page.next?.id ?? null };
 
   ctx.body = prepareObject(response);
 });
 
 router.get('/schedule/runs/latest', requireSession, async ctx => {
-  const response: LatestJobRunsResponse = { runs: await latestJobRuns(ctx.state.workspaceId as string) };
+  const response: LatestScheduleRunsResponse = { runs: await latestRuns(ctx.state.workspaceId as string) };
 
   ctx.body = prepareObject(response);
 });
 
 router.get('/schedule/runs/:id', requireSession, async ctx => {
-  const run = await getJobRun(ctx.state.workspaceId as string, ctx.params.id as string);
+  const run = await getRun(ctx.state.workspaceId as string, ctx.params.id as string);
 
   if (!run) {
     sendError(ctx, 404, 'not_found', 'No such run');
@@ -1496,15 +1493,15 @@ router.get('/schedule/runs/:id', requireSession, async ctx => {
     return;
   }
 
-  const response: JobRunResponse = { run };
+  const response: ScheduleRunResponse = { run };
 
   ctx.body = prepareObject(response);
 });
 
-const SCHEDULE_ERROR_STATUS: Record<ScheduleError['code'], number> = { bad_request: 400, conflict: 409, not_found: 404, replaced: 409, sleeping: 409, no_main_thread: 409 };
+const SCHEDULE_ERROR_STATUS: Record<ScheduleError['code'], number> = { bad_request: 400, conflict: 409, not_found: 404, replaced: 409, no_main_thread: 409 };
 
 // not_found and bad_request are the API's common codes; the rest name the
-// task (task_conflict, task_replaced, task_sleeping, task_no_main_thread).
+// task (task_conflict, task_replaced, task_no_main_thread).
 function sendScheduleError(ctx: Context, error: ScheduleError): void {
   const common = error.code === 'not_found' || error.code === 'bad_request';
 
@@ -1512,10 +1509,9 @@ function sendScheduleError(ctx: Context, error: ScheduleError): void {
 }
 
 // A task registered by the operator: the input by the rules of the
-// create_task tool (one parser — src/schedule/input.ts), the row and its
+// schedule_create_task capability (one parser — src/schedule/input.ts), the row and its
 // schedule.task.created in one transaction, authored by the operator
-// (createdBy "operator"). The answer carries the row and whether a code
-// task sleeps.
+// (createdBy "operator"). The answer carries the created row.
 router.post('/schedule/tasks', requireSession, async ctx => {
   const workspaceId = ctx.state.workspaceId as string;
   const body = await readJsonBody(ctx);
@@ -1525,8 +1521,8 @@ router.post('/schedule/tasks', requireSession, async ctx => {
   }
 
   try {
-    const { task, sleeping } = await createTask(workspaceId, parseTaskInput(body), { kind: 'user', workspaceId });
-    const response: CreateTaskResponse = { task: taskView(task, new Date()), sleeping };
+    const task = await createTask(workspaceId, parseTaskInput(body), { kind: 'user', workspaceId });
+    const response: CreateTaskResponse = { task: taskView(task, new Date()) };
 
     ctx.body = prepareObject(response);
   } catch (error) {
@@ -1817,64 +1813,20 @@ router.post('/connections', requireSession, async ctx => {
 });
 
 // --------------------------------------------------------------------------
-// The services of the installation (the Connections screen's catalog beside
-// the per-user ones): external servers whose credentials are the
-// installation's — one set for every workspace. The list reads the states
-// after a reconnect attempt where one is due (secrets that just landed
-// connect here, as before a tool catalog); a request for the credentials
-// is the auth agent's own, addressed to the main thread (its
-// secrets.provisioned tells the secretary), and the console opens its form;
-// forgetting is the auth agent's too — no event, the server disconnects for
-// everyone. Any workspace may manage them (decision of the operator).
-// Beside them, read-only, the claude.ai connectors (transport
-// "claude-connector"): their authorization is the operator's claude.ai
-// account, their one local dependency the ambient Claude CLI token — its
-// expiry is looked at here, since a live connection outlives it.
+// Connections displays the latest state from each installation service.
+// The console opens the same credential form as the auth agent. Read-only
+// claude.ai connectors also show the expiry of the operator's CLI token.
 
-function installationServiceView(target: ReturnType<typeof listExternalSecretTargets>[number]): InstallationServiceView {
+function installationServiceView(target: SecretService): InstallationServiceView {
   const state = target.connected ? 'connected' : target.error ? 'failed' : 'missing';
 
   return { name: target.name, description: target.description, secretNames: target.secretNames, state, error: state === 'failed' ? target.error : null };
 }
 
-async function connectorServiceViews(): Promise<ConnectorServiceView[]> {
-  const targets = listClaudeConnectorTargets();
-
-  if (!targets.length) {
-    return [];
-  }
-
-  let tokenExpiresAt: Date | null = null;
-  let tokenError: string | null = null;
-
-  try {
-    const credentials = await resolveOperatorCredentials();
-    const ttl = tokenTtlMs(credentials);
-
-    if (ttl != null && ttl <= 0 && credentials.expiresAt != null) {
-      tokenExpiresAt = new Date(credentials.expiresAt);
-    }
-  } catch (error) {
-    tokenError = error instanceof Error ? error.message : String(error);
-  }
-
-  return targets.map(target => {
-    if (!target.connected) {
-      return { name: target.name, description: target.description, state: 'failed', error: target.error, tokenExpiresAt: null };
-    }
-
-    if (tokenError) {
-      return { name: target.name, description: target.description, state: 'failed', error: tokenError, tokenExpiresAt: null };
-    }
-
-    return { name: target.name, description: target.description, state: tokenExpiresAt ? 'token_expired' : 'connected', error: null, tokenExpiresAt };
-  });
-}
-
 router.get('/installation-services', requireSession, async ctx => {
-  await refreshExternalServers();
+  await refreshSecretServices();
 
-  const response: InstallationServicesResponse = { services: listExternalSecretTargets().map(installationServiceView), connectors: await connectorServiceViews() };
+  const response: InstallationServicesResponse = { services: listSecretServices().map(installationServiceView), connectors: await connectorStatuses() };
 
   ctx.body = prepareObject(response);
 });
@@ -1904,11 +1856,11 @@ router.post('/installation-services/:name/secret-request', requireSession, async
 // The installation OAuth client of a per-user service with a manual one
 // (gmail, drive): the Connect dialog's "Provide OAuth client" / "Replace
 // OAuth client" — the request the secrets form fulfils, as the auth agent's
-// request_oauth_client_credentials opens it.
+// connections_request_oauth_client opens it.
 router.post('/services/:name/oauth-client-request', requireSession, async ctx => {
   const workspaceId = ctx.state.workspaceId as string;
   const { name } = ctx.params;
-  const server = getUserAuthServer(name);
+  const server = getAccountService(name);
 
   if (!server || server.clientRegistration !== 'manual') {
     sendError(ctx, 404, 'not_found', 'No such service with an installation OAuth client');

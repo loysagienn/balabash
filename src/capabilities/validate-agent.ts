@@ -1,35 +1,25 @@
-// Hard validation of a dynamic agent module against the agent contract
-// — adaptation of the legacy validate-agent for the AgentDeclaration shape:
-// flat object, explicit tools list, domain events '<name>.*', no
-// acceptsEvents/exclusive/triggersMainModel (gone by construction).
-
 import path from 'node:path';
-import type { AgentDeclaration, AgentRun, RemoteAgentDeclaration } from '../core/contract.ts';
+import { accessProfiles } from '../../agents/access.ts';
+import type { AgentDeclaration, RemoteAgentDeclaration } from '../core/contract.ts';
+import { RESERVED_AGENT_NAMES } from '../core/agent-names.ts';
 import { RESERVED_DOMAINS } from '../core/envelope.ts';
 
 const AGENT_NAME_PATTERN = /^[a-z][a-z0-9_]*$/;
-const EVENT_TYPE_PATTERN = /^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$/;
 const NOTIFICATION_LEVELS = new Set(['silent', 'normal', 'urgent']);
-
-// The coordinator implements the contract statically in src/ — a dynamic
-// agent must not shadow it in the catalog. 'secretary' is what prompts call
-// the coordinator ('coordinator' stays the internal identifier in code, the
-// event log and thread rows), so both names are off-limits.
-const RESERVED_AGENT_NAMES = new Set(['coordinator', 'secretary']);
 
 const ALLOWED_KEYS = new Set([
   'name',
   'description',
   'icon',
   'sdk',
-  'tools',
+  'access',
+  'workspaceDisk',
   'agents',
-  'events',
-  'headless',
+  'modes',
+  'defaultMode',
   'notification',
   'resumable',
   'session',
-  'run',
 ]);
 
 const SESSION_KEYS = new Set([
@@ -48,6 +38,19 @@ const SESSION_PRESETS = new Set(['bridge-only', 'full']);
 
 export function isObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function isNameList(value: unknown): boolean {
+  return Array.isArray(value) && value.every(name => typeof name === 'string' && AGENT_NAME_PATTERN.test(name)) &&
+    new Set(value).size === value.length;
+}
+
+function checkModes(candidate: Record<string, unknown>, filename: string): void {
+  const { modes, defaultMode } = candidate;
+  if (!Array.isArray(modes) || !modes.every(mode => mode === 'user' || mode === 'headless') ||
+      new Set(modes).size !== modes.length || !modes.includes(defaultMode)) {
+    throw new Error(`${filename} modes must list supported modes (user, headless) and include defaultMode`);
+  }
 }
 
 export function validateAgent(module: Record<string, unknown>, filename: string): AgentDeclaration {
@@ -97,73 +100,27 @@ export function validateAgent(module: Record<string, unknown>, filename: string)
     throw new Error(`${filename} agent.sdk must be one of claude, codex`);
   }
 
-  const validTools =
-    Array.isArray(candidate.tools) && candidate.tools.every(name => typeof name === 'string' && Boolean(name.trim()));
+  checkModes(candidate, filename);
 
-  if (!validTools) {
-    throw new Error(`${filename} agent.tools must be an array of tool-server names`);
+  if (candidate.workspaceDisk !== undefined && typeof candidate.workspaceDisk !== 'boolean') {
+    throw new Error(`${filename} agent.workspaceDisk must be a boolean when present`);
   }
 
-  if (candidate.agents !== undefined) {
-    const validAgents =
-      Array.isArray(candidate.agents) &&
-      candidate.agents.every(name => typeof name === 'string' && AGENT_NAME_PATTERN.test(name)) &&
-      new Set(candidate.agents).size === candidate.agents.length;
-
-    if (!validAgents) {
-      throw new Error(`${filename} agent.agents must be an array of unique agent names when present`);
+  const access = candidate.access;
+  if (!isObject(access) || Object.keys(access).some(key => !['profile', 'nodes', 'addRoot', 'removeRoot'].includes(key))) {
+    throw new Error(`${filename} agent.access must declare a catalog grant`);
+  }
+  if (access.profile !== undefined && (typeof access.profile !== 'string' || !Object.hasOwn(accessProfiles, access.profile))) {
+    throw new Error(`${filename} unknown access profile "${access.profile}"`);
+  }
+  for (const key of ['nodes', 'addRoot', 'removeRoot']) {
+    if (access[key] !== undefined && !isNameList(access[key])) {
+      throw new Error(`${filename} access.${key} must list unique catalog names`);
     }
   }
 
-  if (candidate.events !== undefined) {
-    if (!Array.isArray(candidate.events)) {
-      throw new Error(`${filename} agent.events must be an array when present`);
-    }
-
-    const eventTypePrefix = `${candidate.name}.`;
-    const eventTypes = new Set<string>();
-
-    for (const [index, event] of candidate.events.entries()) {
-      if (!isObject(event)) {
-        throw new Error(`${filename} agent.events[${index}] must be an object`);
-      }
-
-      const eventKeys = Object.keys(event).sort();
-      const expectedEventKeys = ['description', 'payloadSchema', 'type'];
-
-      if (
-        eventKeys.length !== expectedEventKeys.length ||
-        eventKeys.some((key, keyIndex) => key !== expectedEventKeys[keyIndex])
-      ) {
-        throw new Error(`${filename} agent.events[${index}] must contain only type, description and payloadSchema`);
-      }
-
-      if (typeof event.type !== 'string' || !EVENT_TYPE_PATTERN.test(event.type)) {
-        throw new Error(`${filename} agent.events[${index}].type must match ${EVENT_TYPE_PATTERN}`);
-      }
-
-      if (!event.type.startsWith(eventTypePrefix)) {
-        throw new Error(`${filename} agent.events[${index}].type must start with "${eventTypePrefix}"`);
-      }
-
-      if (eventTypes.has(event.type)) {
-        throw new Error(`${filename} declares duplicate event type "${event.type}"`);
-      }
-
-      if (typeof event.description !== 'string' || !event.description.trim()) {
-        throw new Error(`${filename} agent.events[${index}].description must be a non-empty string`);
-      }
-
-      if (!isObject(event.payloadSchema)) {
-        throw new Error(`${filename} agent.events[${index}].payloadSchema must be an object`);
-      }
-
-      eventTypes.add(event.type);
-    }
-  }
-
-  if (candidate.headless !== undefined && typeof candidate.headless !== 'boolean') {
-    throw new Error(`${filename} agent.headless must be a boolean when present`);
+  if (candidate.agents !== undefined && !isNameList(candidate.agents)) {
+    throw new Error(`${filename} agent.agents must list unique repository agent names`);
   }
 
   if (candidate.notification !== undefined && !NOTIFICATION_LEVELS.has(candidate.notification as string)) {
@@ -174,111 +131,80 @@ export function validateAgent(module: Record<string, unknown>, filename: string)
     throw new Error(`${filename} agent.resumable must be a boolean when present`);
   }
 
-  // Exactly one of the declarative session spec and the imperative run().
-  const hasSession = candidate.session !== undefined;
-  const hasRun = candidate.run !== undefined;
+  const session = candidate.session;
 
-  if (hasSession === hasRun) {
-    throw new Error(`${filename} agent must declare exactly one of "session" and "run"`);
+  if (!isObject(session)) {
+    throw new Error(`${filename} agent.session must be an object`);
   }
 
-  if (hasRun && typeof candidate.run !== 'function') {
-    throw new Error(`${filename} agent.run must be a function`);
+  const unknownSessionKeys = Object.keys(session).filter(key => !SESSION_KEYS.has(key));
+
+  if (unknownSessionKeys.length) {
+    throw new Error(`${filename} agent.session has unknown keys: ${unknownSessionKeys.join(', ')}`);
   }
 
-  if (hasSession) {
-    const session = candidate.session;
+  if (typeof session.instructions !== 'string' || !session.instructions.trim()) {
+    throw new Error(`${filename} agent.session.instructions must be a non-empty string`);
+  }
 
-    if (!isObject(session)) {
-      throw new Error(`${filename} agent.session must be an object`);
+  if (session.initialMessage !== undefined && typeof session.initialMessage !== 'function') {
+    throw new Error(`${filename} agent.session.initialMessage must be a function when present`);
+  }
+
+  if (session.model !== undefined && (typeof session.model !== 'string' || !session.model.trim())) {
+    throw new Error(`${filename} agent.session.model must be a non-empty string when present`);
+  }
+
+  if (session.effort !== undefined && !SESSION_EFFORTS.has(session.effort as string)) {
+    throw new Error(`${filename} agent.session.effort must be one of low, medium, high, xhigh, max`);
+  }
+
+  if (session.preset !== undefined && !SESSION_PRESETS.has(session.preset as string)) {
+    throw new Error(`${filename} agent.session.preset must be one of bridge-only, full`);
+  }
+
+  if (session.artifacts !== undefined) {
+    if (typeof session.artifacts !== 'boolean') {
+      throw new Error(`${filename} agent.session.artifacts must be a boolean when present`);
     }
 
-    const unknownSessionKeys = Object.keys(session).filter(key => !SESSION_KEYS.has(key));
+    if (candidate.sdk !== 'claude') {
+      throw new Error(`${filename} agent.session.artifacts is supported by the claude sdk only`);
+    }
+  }
 
-    if (unknownSessionKeys.length) {
-      throw new Error(`${filename} agent.session has unknown keys: ${unknownSessionKeys.join(', ')}`);
+  if (session.imageGeneration !== undefined) {
+    if (typeof session.imageGeneration !== 'boolean') {
+      throw new Error(`${filename} agent.session.imageGeneration must be a boolean when present`);
     }
 
-    if (typeof session.instructions !== 'string' || !session.instructions.trim()) {
-      throw new Error(`${filename} agent.session.instructions must be a non-empty string`);
+    if (candidate.sdk !== 'codex') {
+      throw new Error(`${filename} agent.session.imageGeneration is supported by the codex sdk only`);
     }
+  }
 
-    if (session.initialMessage !== undefined && typeof session.initialMessage !== 'function') {
-      throw new Error(`${filename} agent.session.initialMessage must be a function when present`);
-    }
+  const validCwd =
+    session.cwd === undefined ||
+    typeof session.cwd === 'function' ||
+    (typeof session.cwd === 'string' && Boolean(session.cwd.trim()));
 
-    if (session.model !== undefined && (typeof session.model !== 'string' || !session.model.trim())) {
-      throw new Error(`${filename} agent.session.model must be a non-empty string when present`);
-    }
+  if (!validCwd) {
+    throw new Error(`${filename} agent.session.cwd must be a non-empty string or a (workspaceId) => string function`);
+  }
 
-    if (session.effort !== undefined && !SESSION_EFFORTS.has(session.effort as string)) {
-      throw new Error(`${filename} agent.session.effort must be one of low, medium, high, xhigh, max`);
-    }
-
-    if (session.preset !== undefined && !SESSION_PRESETS.has(session.preset as string)) {
-      throw new Error(`${filename} agent.session.preset must be one of bridge-only, full`);
-    }
-
-    if (session.artifacts !== undefined) {
-      if (typeof session.artifacts !== 'boolean') {
-        throw new Error(`${filename} agent.session.artifacts must be a boolean when present`);
-      }
-
-      if (candidate.sdk !== 'claude') {
-        throw new Error(`${filename} agent.session.artifacts is supported by the claude sdk only`);
-      }
-    }
-
-    if (session.imageGeneration !== undefined) {
-      if (typeof session.imageGeneration !== 'boolean') {
-        throw new Error(`${filename} agent.session.imageGeneration must be a boolean when present`);
-      }
-
-      if (candidate.sdk !== 'codex') {
-        throw new Error(`${filename} agent.session.imageGeneration is supported by the codex sdk only`);
-      }
-    }
-
-    const validCwd =
-      session.cwd === undefined ||
-      typeof session.cwd === 'function' ||
-      (typeof session.cwd === 'string' && Boolean(session.cwd.trim()));
-
-    if (!validCwd) {
-      throw new Error(`${filename} agent.session.cwd must be a non-empty string or a (workspaceId) => string function`);
-    }
-
-    if (session.environment !== undefined && typeof session.environment !== 'function') {
-      throw new Error(`${filename} agent.session.environment must be a function when present`);
-    }
+  if (session.environment !== undefined && typeof session.environment !== 'function') {
+    throw new Error(`${filename} agent.session.environment must be a function when present`);
   }
 
   return candidate as unknown as AgentDeclaration;
 }
 
-export function validateAgentRun(run: unknown, agentName: string): AgentRun {
-  if (!isObject(run)) {
-    throw new Error(`Agent "${agentName}" run() must return an AgentRun object`);
-  }
-
-  if (typeof run.accept !== 'function') {
-    throw new Error(`Agent "${agentName}" AgentRun.accept must be a function`);
-  }
-
-  if (!isObject(run.finished) || typeof run.finished.then !== 'function') {
-    throw new Error(`Agent "${agentName}" AgentRun.finished must be a Promise`);
-  }
-
-  return run as unknown as AgentRun;
-}
-
-// ---------------------------------------------------------------------------
-// Remote agents (RemoteAgentDeclaration — the third form): what an
+// Remote agents (RemoteAgentDeclaration): what an
 // installation extension's start() returned. Same hardness as validateAgent;
 // repositoryAgents — the names of the catalog's own agents, which an
 // extension never shadows (extensions.ts).
 
-const REMOTE_KEYS = new Set(['kind', 'name', 'description', 'icon', 'notification', 'options', 'secrets', 'driver']);
+const REMOTE_KEYS = new Set(['kind', 'name', 'description', 'icon', 'notification', 'options', 'secrets', 'driver', 'recipients', 'modes', 'defaultMode']);
 const REMOTE_DRIVER_VERBS = ['open', 'describe', 'read', 'say', 'answer', 'stop'];
 const REMOTE_DRIVER_OPTIONAL_VERBS = ['fetchFile', 'list'];
 const SECRET_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -381,5 +307,15 @@ export function validateRemoteAgent(candidate: unknown, filename: string, reposi
     }
   }
 
-  return candidate as unknown as RemoteAgentDeclaration;
+  if (candidate.recipients !== undefined && !isNameList(candidate.recipients)) {
+    throw new Error(`${filename} recipients must list unique agent or profile names`);
+  }
+  // Before the installation updates its passport the driver still loads for
+  // its existing threads. Old kinds supported both modes, default user.
+  const declaration = candidate.modes === undefined && candidate.defaultMode === undefined
+    ? { ...candidate, modes: ['user', 'headless'], defaultMode: 'user' }
+    : candidate;
+  checkModes(declaration, filename);
+
+  return declaration as unknown as RemoteAgentDeclaration;
 }

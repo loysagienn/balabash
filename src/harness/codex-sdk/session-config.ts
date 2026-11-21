@@ -5,6 +5,8 @@
 // whole user layer the session sees, and a pure function of what the
 // session needs — the brief and the bridge's address.
 
+import { MAX_RUN_PROGRAM_SECONDS } from '../../catalog/actions.ts';
+import { BRIDGE_SERVER } from '../sdk-mcp-config.ts';
 import type { CodexOptions } from '@openai/codex-sdk';
 
 export type CodexSessionConfig = NonNullable<CodexOptions['config']>;
@@ -23,10 +25,6 @@ export type CodexSessionConfig = NonNullable<CodexOptions['config']>;
 // 2026-11-19). "detailed" over "concise": the row shows the thought itself,
 // as the Claude feed does, not a headline.
 export const CODEX_REASONING_SUMMARY = 'detailed';
-
-// The name of the bridge's MCP server in the session (the journal tells its
-// calls apart from other MCP servers by it).
-export const BRIDGE_SERVER = 'balabash';
 
 // What a session may switch on beyond the base: Codex's built-in image
 // generation (the image_gen tool inside exec plus the bundled imagegen skill)
@@ -51,6 +49,8 @@ export function codexSessionConfig(instructions: string, bridgeUrl: string, enab
       [BRIDGE_SERVER]: {
         url: bridgeUrl,
         required: true,
+        // Allow time for program teardown, journaling and delivery of the result.
+        tool_timeout_sec: MAX_RUN_PROGRAM_SECONDS + 60,
         default_tools_approval_mode: 'approve',
       },
     },
@@ -60,8 +60,8 @@ export function codexSessionConfig(instructions: string, bridgeUrl: string, enab
     // are off: the brief tells the agent which AGENTS.md to read.
     project_doc_max_bytes: 0,
     // ChatGPT apps/connectors, plugins and the memories store are not
-    // part of the Balabash tool set: integrations are the run's tool
-    // bundle, memory is the workspace. Codex's own agent team
+    // part of the Balabash tool set: the catalog supplies integrations
+    // and the workspace holds memory. Codex's own agent team
     // (multi_agent) stays on — its native sub-agents work inside the
     // session, next to the bridge's Balabash sub-agents (spawn_agent).
     features: {

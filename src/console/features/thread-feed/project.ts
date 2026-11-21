@@ -15,6 +15,8 @@
 
 import type { Event, JsonObject } from '../../../core/contract.ts';
 import type { EventOf, EventPayloads, EventType, InboundFile, SessionPlanItem, UserIdentity } from '../../../core/event-types.ts';
+import { restartRequester } from '../../../utils/restart-requester.ts';
+import { taskAuthorLabel } from '../../../utils/task-author.ts';
 import { dateTimeLabel } from '../../lib/format/index.ts';
 import { formatTokensK } from '../../ui/Ring/Ring.logic.ts';
 import type { IconName } from '../../ui/Icon/Icon.tsx';
@@ -136,6 +138,7 @@ export type ChildItem = {
   threadId: string;
   agent: string;
   title: string;
+  startedByTask?: string;
   // null — the start is not in the loaded range, only the terminal is.
   startedAt: Date | null;
   endedAt: Date | null;
@@ -240,17 +243,21 @@ function otherUser(event: Event, ctx: FeedContext): string | null {
   return identity.displayName || identity.username || 'another user';
 }
 
+function taskName(event: Event): string | undefined {
+  return event.task ? taskAuthorLabel(event.task.slug) : undefined;
+}
+
 // The party an event speaks for: "you" for a user's (the Message block and
 // the system lines name you), another user by their name, an agent by its.
 function who(event: Event, ctx: FeedContext): string {
-  return event.actor === 'user' ? (otherUser(event, ctx) ?? 'you') : (event.agentName ?? 'system');
+  return event.actor === 'user' ? (otherUser(event, ctx) ?? 'you') : (taskName(event) ?? event.agentName ?? 'system');
 }
 
 // The words of a command's author in a system line: a person — your name
 // (Settings), "You", or the other user's name; an agent — its name.
 function actorWords(event: Event, ctx: FeedContext): string {
   if (event.actor !== 'user') {
-    return event.agentName ?? 'system';
+    return taskName(event) ?? event.agentName ?? 'system';
   }
 
   return otherUser(event, ctx) ?? ctx.you ?? 'You';
@@ -516,6 +523,7 @@ class Builder {
           agent: event.payload.agent,
           title: event.payload.title?.trim() || event.payload.agent,
           startedAt: at,
+          ...(event.task ? { startedByTask: event.task.slug } : {}),
           endedAt: null,
           state: null,
           summary: null,
@@ -691,9 +699,9 @@ class Builder {
       if (own) {
         const to = event.targetThreadId ? (this.children.get(event.targetThreadId)?.agent ?? this.ctx.agentOf(event.targetThreadId) ?? this.ctx.parentAgent ?? 'parent') : (this.ctx.parentAgent ?? 'parent');
 
-        this.push({ kind: 'message', key, at, from: this.ctx.agent, to, text, atts, fold: shouldFold(text) });
+        this.push({ kind: 'message', key, at, from: taskName(event) ?? this.ctx.agent, to, text, atts, fold: shouldFold(text) });
       } else {
-        const from = event.agentName ?? (event.threadId ? (this.children.get(event.threadId)?.agent ?? this.ctx.agentOf(event.threadId)) : null) ?? 'system';
+        const from = taskName(event) ?? event.agentName ?? (event.threadId ? (this.children.get(event.threadId)?.agent ?? this.ctx.agentOf(event.threadId)) : null) ?? 'system';
         const fromChild = event.threadId !== null && this.children.has(event.threadId);
 
         this.push({ kind: 'message', key, at, from, to: this.ctx.agent, ...(fromChild ? {} : { variant: 'task' as const }), text, atts, fold: shouldFold(text) });
@@ -725,7 +733,7 @@ class Builder {
       const content = Array.isArray(event.payload.content) ? event.payload.content : [];
       const text = contentText(content);
 
-      this.push({ kind: 'message', key, at, from: event.agentName ?? this.ctx.agent, to: 'you', text, atts: contentAtts(content, key), fold: false });
+      this.push({ kind: 'message', key, at, from: taskName(event) ?? event.agentName ?? this.ctx.agent, to: 'you', text, atts: contentAtts(content, key), fold: false });
 
       return;
     }
@@ -1049,8 +1057,12 @@ class Builder {
     if (is(event, 'tool.call.completed') || is(event, 'tool.call.failed')) {
       const item = this.tools.get(`call:${event.payload.callId}`);
       const failed = is(event, 'tool.call.failed');
-      const output = failed ? event.payload.error : bridgeOutput(event.payload.result);
-      const isError = failed || event.payload.result?.isError === true;
+      const output = failed
+        ? (typeof event.payload.error === 'string' ? event.payload.error : JSON.stringify(event.payload.error, null, 2))
+        : 'value' in event.payload
+          ? (typeof event.payload.value === 'string' ? event.payload.value : JSON.stringify(event.payload.value, null, 2))
+          : bridgeOutput(event.payload.result);
+      const isError = failed || (!('value' in event.payload) && event.payload.result?.isError === true);
 
       if (item) {
         item.state = isError ? 'err' : 'done';
@@ -1101,7 +1113,8 @@ class Builder {
     }
 
     if (is(event, 'oauth_client.requested') || is(event, 'secrets.requested')) {
-      this.push({ kind: 'sys', key, at, icon: 'key-round', state: 'act', text: `${event.payload.server}: ${event.type === 'secrets.requested' ? 'secrets' : 'OAuth client'} requested` });
+      const by = taskName(event);
+      this.push({ kind: 'sys', key, at, icon: 'key-round', state: 'act', text: `${event.payload.server}: ${event.type === 'secrets.requested' ? 'secrets' : 'OAuth client'} requested${by ? ` by ${by}` : ''}` });
 
       return;
     }
@@ -1119,7 +1132,8 @@ class Builder {
     }
 
     if (is(event, 'system.restart.requested')) {
-      this.push({ kind: 'sys', key, at, icon: 'refresh-cw', text: `Restart requested${event.payload.requestedBy ? ` by ${event.payload.requestedBy}` : ''} — ${event.payload.reason}` });
+      const who = restartRequester(event);
+      this.push({ kind: 'sys', key, at, icon: 'refresh-cw', text: `Restart requested${who ? ` by ${who}` : ''} — ${event.payload.reason}` });
 
       return;
     }

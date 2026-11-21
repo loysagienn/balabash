@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import type { JobRunView, TaskView } from '../../../api/contract.ts';
+import type { ScheduleRunView, TaskView } from '../../../api/contract.ts';
 import type { ScheduleRoute } from '../../lib/router/routes.ts';
 import { writeRoute } from '../../lib/router/routes.ts';
 import { routeTo } from '../../store/router/actions.ts';
@@ -38,39 +38,35 @@ const task = (patch: Partial<TaskView> = {}): TaskView => ({
   slug: 'db-backup',
   name: 'DB backup',
   description: 'pg_dump to file storage',
-  kind: 'command',
+  kind: 'program',
   cron: '0 4 * * *',
   at: null,
   note: null,
-  command: 'pg_dump -Fc balabash',
-  cwd: null,
+  code: 'await call("workspace_run_command", { command: "pg_dump -Fc balabash" }); return null;',
+  wake: true,
   timeoutMs: 600_000,
-  reportOnSuccess: false,
   createdBy: 'engineer',
   createdAt: at(2, 10, 0),
   nextRunAt: at(11, 4, 0),
   ...patch,
 });
 
-const run = (patch: Partial<JobRunView> = {}): JobRunView => ({
+const run = (patch: Partial<ScheduleRunView> = {}): ScheduleRunView => ({
   id: 'r1',
   slug: 'db-backup',
   trigger: 'cron',
   status: 'ok',
-  exitCode: 0,
+  hasValue: false,
   startedAt: at(10, 4, 0),
   finishedAt: at(10, 4, 1),
   durationMs: 41_000,
-  stdoutTruncated: false,
-  stderrTruncated: false,
   ...patch,
 });
 
 describe('the task', () => {
   it('names the kinds as the design does', () => {
     assert.deepEqual(kindWords('note'), { label: 'reminder', icon: 'bell' });
-    assert.deepEqual(kindWords('code'), { label: 'code', icon: 'file-code' });
-    assert.deepEqual(kindWords('command'), { label: 'command', icon: 'square-terminal' });
+    assert.deepEqual(kindWords('program'), { label: 'program', icon: 'file-code' });
     assert.deepEqual(kindWords('other'), { label: 'other', icon: 'calendar-clock' });
   });
 
@@ -120,7 +116,7 @@ describe('the task', () => {
     assert.equal(taskMatches(task(), 'STORAGE'), true);
     assert.equal(taskMatches(task(), 'db-back'), true);
     assert.equal(taskMatches(task(), 'pg_dump -fc'), true);
-    assert.equal(taskMatches(task({ kind: 'note', command: null, note: 'Call the electrician' }), 'electrician'), true);
+    assert.equal(taskMatches(task({ kind: 'note', code: null, note: 'Call the electrician' }), 'electrician'), true);
     assert.equal(taskMatches(task(), 'mail'), false);
   });
 
@@ -145,27 +141,26 @@ describe('the runs', () => {
   });
 
   it('reads the outcome of a run', () => {
-    assert.deepEqual(runOutcome({ status: 'ok', exitCode: 0 }), { state: 'done', icon: 'circle-check', exit: 'exit 0', end: null });
-    assert.deepEqual(runOutcome({ status: 'failed', exitCode: 127 }), { state: 'err', icon: 'circle-x', exit: 'exit 127', end: 'failed', endState: 'err' });
-    assert.deepEqual(runOutcome({ status: 'timeout', exitCode: null }), { state: 'err', icon: 'circle-x', exit: null, end: 'timeout', endState: 'err' });
-    assert.deepEqual(runOutcome({ status: 'spawn_error', exitCode: null }), { state: 'err', icon: 'circle-x', exit: null, end: 'didn’t start', endState: 'err' });
-    assert.deepEqual(runOutcome({ status: 'aborted', exitCode: null }), { state: 'off', icon: 'circle-slash', exit: null, end: 'interrupted', endState: 'off' });
-    assert.deepEqual(runOutcome({ status: 'running', exitCode: null }), { state: 'run', icon: 'loader-circle', exit: null, end: 'running', endState: 'run' });
+    assert.deepEqual(runOutcome({ status: 'ok' }), { state: 'done', icon: 'circle-check', end: null });
+    assert.deepEqual(runOutcome({ status: 'failed' }), { state: 'err', icon: 'circle-x', end: 'failed', endState: 'err' });
+    assert.deepEqual(runOutcome({ status: 'timeout' }), { state: 'err', icon: 'circle-x', end: 'timeout', endState: 'err' });
+    assert.deepEqual(runOutcome({ status: 'aborted' }), { state: 'off', icon: 'circle-slash', end: 'interrupted', endState: 'off' });
+    assert.deepEqual(runOutcome({ status: 'running' }), { state: 'run', icon: 'loader-circle', end: 'running', endState: 'run' });
   });
 
   it('words a run among its task’s runs', () => {
-    assert.deepEqual(taskRunWords(run({ startedAt: at(8, 4, 0) }), NOW), { state: 'done', icon: 'circle-check', tool: 'Oct 8, 04:00', arg: 'scheduled · exit 0', end: '41s', endState: undefined });
-    assert.deepEqual(taskRunWords(run({ status: 'spawn_error', exitCode: 127, durationMs: 100, trigger: 'cron' }), NOW), {
+    assert.deepEqual(taskRunWords(run({ startedAt: at(8, 4, 0) }), NOW), { state: 'done', icon: 'circle-check', tool: 'Oct 8, 04:00', arg: 'scheduled', end: '41s', endState: undefined });
+    assert.deepEqual(taskRunWords(run({ status: 'failed', durationMs: 100, trigger: 'cron' }), NOW), {
       state: 'err',
       icon: 'circle-x',
       tool: '04:00',
-      arg: 'scheduled · exit 127',
-      end: 'didn’t start · 0.1s',
+      arg: 'scheduled',
+      end: 'failed · 0.1s',
       endState: 'err',
     });
-    assert.deepEqual(taskRunWords(run({ status: 'timeout', exitCode: null, durationMs: 600_000, trigger: 'manual' }), NOW).end, 'timeout · 10:00');
+    assert.deepEqual(taskRunWords(run({ status: 'timeout', durationMs: 600_000, trigger: 'manual' }), NOW).end, 'timeout · 10:00');
     // A run still going is measured to now; a journal without a duration, to its end.
-    assert.deepEqual(taskRunWords(run({ status: 'running', exitCode: null, finishedAt: null, durationMs: null, startedAt: at(10, 16, 30) }), NOW), {
+    assert.deepEqual(taskRunWords(run({ status: 'running', finishedAt: null, durationMs: null, startedAt: at(10, 16, 30) }), NOW), {
       state: 'run',
       icon: 'loader-circle',
       tool: '16:30',
@@ -173,16 +168,16 @@ describe('the runs', () => {
       end: 'running · 8:00',
       endState: 'run',
     });
-    assert.equal(taskRunWords(run({ status: 'aborted', exitCode: null, durationMs: null, startedAt: at(5, 4, 0), finishedAt: at(5, 4, 3), trigger: 'at' }), NOW).end, 'interrupted · 3:00');
-    assert.equal(taskRunWords(run({ trigger: 'at' }), NOW).arg, 'one-off · exit 0');
+    assert.equal(taskRunWords(run({ status: 'aborted', durationMs: null, startedAt: at(5, 4, 0), finishedAt: at(5, 4, 3), trigger: 'at' }), NOW).end, 'interrupted · 3:00');
+    assert.equal(taskRunWords(run({ trigger: 'at' }), NOW).arg, 'one-off');
   });
 
   it('words a run in the log by its task', () => {
-    assert.deepEqual(logRunWords(run({ status: 'failed', exitCode: 1, durationMs: 3_000, startedAt: at(10, 16, 30) }), 'Mail sync', NOW), {
+    assert.deepEqual(logRunWords(run({ status: 'failed', durationMs: 3_000, startedAt: at(10, 16, 30) }), 'Mail sync', NOW), {
       state: 'err',
       icon: 'circle-x',
       tool: 'Mail sync',
-      arg: 'scheduled · exit 1',
+      arg: 'scheduled',
       end: '16:30 · failed · 3.0s',
       endState: 'err',
     });
@@ -195,19 +190,17 @@ describe('the runs', () => {
     assert.equal(lastRunTime(at(5, 10, 0), NOW), 'Mon 10:00');
     assert.equal(lastRunTime(at(1, 10, 0), NOW), 'Oct 1, 10:00');
     assert.deepEqual(lastRunWords(run({ startedAt: at(10, 12, 0) }), NOW), { state: 'done', label: '12:00' });
-    assert.deepEqual(lastRunWords(run({ status: 'failed', exitCode: 1, startedAt: at(10, 16, 30) }), NOW), { state: 'err', label: 'error · 16:30' });
-    assert.deepEqual(lastRunWords(run({ status: 'spawn_error', exitCode: 127 }), NOW), { state: 'err', label: 'didn’t start · 04:00' });
-    assert.deepEqual(lastRunWords(run({ status: 'timeout', exitCode: null }), NOW), { state: 'err', label: 'timeout · 04:00' });
-    assert.deepEqual(lastRunWords(run({ status: 'aborted', exitCode: null }), NOW), { state: 'off', label: 'interrupted · 04:00' });
-    assert.deepEqual(lastRunWords(run({ status: 'running', exitCode: null }), NOW), { state: 'run', label: 'running' });
+    assert.deepEqual(lastRunWords(run({ status: 'failed', startedAt: at(10, 16, 30) }), NOW), { state: 'err', label: 'error · 16:30' });
+    assert.deepEqual(lastRunWords(run({ status: 'timeout' }), NOW), { state: 'err', label: 'timeout · 04:00' });
+    assert.deepEqual(lastRunWords(run({ status: 'aborted' }), NOW), { state: 'off', label: 'interrupted · 04:00' });
+    assert.deepEqual(lastRunWords(run({ status: 'running' }), NOW), { state: 'run', label: 'running' });
   });
 
   it('writes the banner of a last run gone wrong', () => {
     assert.equal(lastRunNote(run(), NOW), null);
     assert.equal(lastRunNote(run({ status: 'running' }), NOW), null);
-    assert.equal(lastRunNote(run({ status: 'failed', exitCode: 1 }), NOW), 'The last run failed with exit code 1 · 04:00. A notification went to the bell; the output is below.');
-    assert.equal(lastRunNote(run({ status: 'timeout', exitCode: null, durationMs: 600_000, startedAt: at(8, 4, 0) }), NOW), 'The last run timed out after 10:00 · Oct 8, 04:00. The process group was killed; a notification went to the bell.');
-    assert.match(lastRunNote(run({ status: 'spawn_error' }), NOW) ?? '', /didn’t start/);
+    assert.equal(lastRunNote(run({ status: 'failed' }), NOW), 'The last run failed · 04:00. A notification went to the bell; the output is below.');
+    assert.equal(lastRunNote(run({ status: 'timeout', durationMs: 600_000, startedAt: at(8, 4, 0) }), NOW), 'The last run timed out after 10:00 · Oct 8, 04:00. The process group was killed; a notification went to the bell.');
     assert.match(lastRunNote(run({ status: 'aborted' }), NOW) ?? '', /interrupted by a restart/);
   });
 
@@ -228,8 +221,7 @@ describe('the runs', () => {
 
   it('says what a task of a kind leaves behind', () => {
     assert.match(noJournalWords('note') ?? '', /reminder leaves no run log/);
-    assert.match(noJournalWords('code') ?? '', /code task leaves no run log/);
-    assert.equal(noJournalWords('command'), null);
+    assert.equal(noJournalWords('program'), null);
   });
 });
 

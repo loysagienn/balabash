@@ -19,7 +19,6 @@ import {
   PROJECTS_NOTE,
   REMOTE_AGENTS_NOTE,
   WORKBENCH_NOTE,
-  WORKSPACE_STORAGE_NOTE,
 } from './world/index.ts';
 
 const ARCHITECT_MODEL = 'claude-fable-5-2';
@@ -48,8 +47,6 @@ ${WORKBENCH_NOTE}
 
 ${PROJECTS_NOTE}
 
-${WORKSPACE_STORAGE_NOTE}
-
 ${BROWSER_SUBAGENT_NOTE}
 
 ${REMOTE_AGENTS_NOTE}
@@ -66,21 +63,10 @@ export const agent = {
     'summary is a plan to hand to an engineering agent (e.g. engineer).',
   icon: '📐',
   sdk: 'claude',
-  tools: [
-    'current_datetime',
-    'events',
-    'drive',
-    'gmail',
-    'http_get',
-    'notion',
-    'perplexity',
-    'projects',
-    'remote',
-    'schedule',
-    'storage',
-    'storage_download_file',
-    'workspace',
-  ],
+  modes: ['user'],
+  defaultMode: 'user',
+  workspaceDisk: true,
+  access: { profile: 'general' },
   agents: ['browser'],
   notification: 'normal',
 

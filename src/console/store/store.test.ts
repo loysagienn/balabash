@@ -135,7 +135,7 @@ function fakeApi(overrides: ApiOverrides = {}, calls: Calls = []): Api {
     run: async () => {
       throw new Error('not here');
     },
-    createTask: async input => ({ task: taskRow(input.slug, { name: input.name, kind: input.kind, cron: input.cron ?? null, command: input.command ?? null, note: input.note ?? null, createdBy: 'operator' }), sleeping: false }),
+    createTask: async input => ({ task: taskRow(input.slug, { name: input.name, kind: input.kind, cron: input.cron ?? null, code: input.code ?? null, note: input.note ?? null, createdBy: 'operator' }) }),
     runTask: async () => ({ outcome: 'fired', runId: 'run-1' }),
     deleteTask: async slug => ({ task: taskRow(slug) }),
     ...overrides.schedule,
@@ -219,7 +219,7 @@ function fakeApi(overrides: ApiOverrides = {}, calls: Calls = []): Api {
   };
 }
 
-const taskRow = (slug: string, patch: Partial<TaskView> = {}): TaskView => ({ id: `task-${slug}`, slug, name: slug, description: null, kind: 'command', cron: '0 3 * * *', at: null, note: null, command: 'pg_dump', cwd: null, timeoutMs: null, reportOnSuccess: false, createdBy: 'scheduler', createdAt: new Date(ISO_NOW), nextRunAt: new Date(ISO_NOW), ...patch });
+const taskRow = (slug: string, patch: Partial<TaskView> = {}): TaskView => ({ id: `task-${slug}`, slug, name: slug, description: null, kind: 'program', cron: '0 3 * * *', at: null, note: null, code: 'return null;', wake: true, timeoutMs: null, createdBy: 'scheduler', createdAt: new Date(ISO_NOW), nextRunAt: new Date(ISO_NOW), ...patch });
 
 async function dispatched(store: AppStore, action: Action): Promise<void> {
   await (store.dispatch(action) as unknown as Promise<void> | void);
@@ -1743,8 +1743,8 @@ describe('agents screen', () => {
             thread({ id: 'b1', createdSeq: 8n, agent: 'browser' }),
           ],
           agents: [
-            { name: 'engineer', description: 'code', icon: null, sdk: 'claude', tools: ['events'], agents: ['browser'], headless: false, notification: null, model: 'm', effort: 'high', defaultEffort: 'high', lastModel: null },
-            { name: 'browser', description: 'web', icon: null, sdk: 'claude', tools: [], agents: [], headless: true, notification: null, model: null, effort: null, defaultEffort: 'high', lastModel: null },
+            { name: 'engineer', description: 'code', icon: null, sdk: 'claude', nodes: ['threads'], agents: ['browser'], modes: ['user'], defaultMode: 'user', notification: null, model: 'm', effort: 'high', defaultEffort: 'high', lastModel: null },
+            { name: 'browser', description: 'web', icon: null, sdk: 'claude', nodes: [], agents: [], modes: ['headless'], defaultMode: 'headless', notification: null, model: null, effort: null, defaultEffort: 'high', lastModel: null },
           ],
         }),
     });
@@ -1869,7 +1869,7 @@ describe('registry events', () => {
     await dispatched(store, sessionCheck());
     await settle();
 
-    const record = { id: 'k1', slug: 'backup', name: 'Backup', description: null, kind: 'command', cron: '0 3 * * *', at: null, note: null, command: 'pg_dump', cwd: null, timeoutMs: null, reportOnSuccess: false, createdBy: 'scheduler', createdAt: ISO, nextRunAt: LATER };
+    const record = { id: 'k1', slug: 'backup', name: 'Backup', description: null, kind: 'program', cron: '0 3 * * *', at: null, note: null, code: 'return null;', wake: true, timeoutMs: null, createdBy: 'scheduler', createdAt: ISO, nextRunAt: LATER };
 
     store.dispatch(eventAction(event({ type: 'schedule.task.created', threadId: 'main', payload: record })));
     assert.deepEqual(store.getState().schedule.ids, ['k1']);
@@ -2808,7 +2808,7 @@ describe('schedule commands', () => {
 
   async function onSchedule(overrides: ApiOverrides = {}, calls: Calls = [], route: AppRoute = { key: 'schedule' }): Promise<AppStore> {
     const store = createStore({
-      api: fakeApi({ snapshot: async () => snapshot({ tasks: [taskRow('backup'), taskRow('remind', { kind: 'note', command: null, note: 'Call', cron: null }), taskRow('sync', { kind: 'code', command: null })] }), ...overrides }, calls),
+      api: fakeApi({ snapshot: async () => snapshot({ tasks: [taskRow('backup'), taskRow('remind', { kind: 'note', code: null, note: 'Call', cron: null }), taskRow('sync', { kind: 'program', code: 'return null;' })] }), ...overrides }, calls),
       initialRoute: route,
     });
 
@@ -2818,7 +2818,7 @@ describe('schedule commands', () => {
     return store;
   }
 
-  it('runs a task: one call per task, a toast in the kind’s words, the journal stamp moved only by a command job', async () => {
+  it('runs a task: one call per task, a toast in the kind’s words, the journal stamp moved only by a scheduled program', async () => {
     const calls: Calls = [];
     const answers: Answer<{ outcome: 'fired' | 'already_running'; runId: string | null }>[] = [];
     const store = await onSchedule({ schedule: { runTask: held(answers) } }, calls);
@@ -2853,25 +2853,25 @@ describe('schedule commands', () => {
 
     // A refusal is a toast with the server's words; the call is freed.
     store.dispatch(runTask('sync', 'task-sync'));
-    answers[3]!.reject(new ApiError(409, 'task_sleeping', 'task "sync" is sleeping — no run(ctx) body'));
+    answers[3]!.reject(new ApiError(409, 'task_replaced', 'task "sync" was replaced'));
     await settle();
     assert.equal(selectTaskCall(store.getState(), 'sync'), null);
     assert.deepEqual(toasts(store)[3], { title: 'Couldn’t run “sync”', state: 'err' });
-    assert.equal(store.getState().ui.toasts[3]!.desc, 'task "sync" is sleeping — no run(ctx) body');
+    assert.equal(store.getState().ui.toasts[3]!.desc, 'task "sync" was replaced');
   });
 
-  it('the journal stamp follows a job that reported through the log', async () => {
+  it('the journal stamp follows a program that reported through the log', async () => {
     resetSeq(400n);
 
     const store = await onSchedule();
     const stamp = selectRunsChanged(store.getState());
 
-    store.dispatch(eventAction(event({ type: 'schedule.fired', actor: 'system', targetThreadId: 'main', payload: { slug: 'backup', name: 'backup', runId: 'run-2', output: 'ok' } })));
+    store.dispatch(eventAction(event({ type: 'schedule.fired', actor: 'system', targetThreadId: 'main', payload: { slug: 'backup', name: 'backup', runId: 'run-2', value: 'ok' } })));
     assert.equal(selectRunsChanged(store.getState()), stamp + 1);
     // A note's fire names no run.
     store.dispatch(eventAction(event({ type: 'schedule.fired', actor: 'system', targetThreadId: 'main', payload: { slug: 'remind', name: 'remind', note: 'Call' } })));
     assert.equal(selectRunsChanged(store.getState()), stamp + 1);
-    store.dispatch(eventAction(event({ type: 'system.exception', actor: 'system', threadId: 'main', payload: { scope: 'workspace-job', slug: 'backup', runId: 'run-3', status: 'failed', exitCode: 1, error: 'Workspace job "backup" failed' } })));
+    store.dispatch(eventAction(event({ type: 'system.exception', actor: 'system', threadId: 'main', payload: { scope: 'scheduled-program', slug: 'backup', runId: 'run-4', status: 'failed', error: 'Program "backup" failed' } })));
     assert.equal(selectRunsChanged(store.getState()), stamp + 2);
     store.dispatch(eventAction(event({ type: 'system.exception', actor: 'system', threadId: 'main', payload: { scope: 'scheduled-task', slug: 'sync', error: 'failed' } })));
     assert.equal(selectRunsChanged(store.getState()), stamp + 2);
@@ -2897,7 +2897,7 @@ describe('schedule commands', () => {
 
     const after = store.getState().schedule;
 
-    store.dispatch(eventAction(event({ type: 'schedule.task.cancelled', actor: 'user', payload: { id: 'task-backup', slug: 'backup', name: 'backup', kind: 'command', createdAt: ISO_NOW, reason: 'cancelled' } })));
+    store.dispatch(eventAction(event({ type: 'schedule.task.cancelled', actor: 'user', payload: { id: 'task-backup', slug: 'backup', name: 'backup', kind: 'program', createdAt: ISO_NOW, reason: 'cancelled' } })));
     assert.equal(store.getState().schedule, after);
 
     // A refusal keeps the row and tells it; the screen of another task is not moved.
@@ -3244,7 +3244,7 @@ describe('a new task from the form', () => {
         answers.push({ resolve, reject });
       });
 
-  const INPUT = { slug: 'nightly', name: 'Nightly', description: null, kind: 'command' as const, cron: '0 4 * * *', at: null, note: null, command: 'pg_dump', cwd: null, timeoutMs: null, reportOnSuccess: false };
+  const INPUT = { slug: 'nightly', name: 'Nightly', description: null, kind: 'program' as const, cron: '0 4 * * *', at: null, note: null, code: 'return null;', wake: true, timeoutMs: null };
 
   async function onForm(overrides: ApiOverrides = {}, calls: Calls = [], route: AppRoute = { key: 'schedule', new: true }): Promise<AppStore> {
     const store = createStore({ api: fakeApi({ snapshot: async () => snapshot({ tasks: [taskRow('backup')] }), ...overrides }, calls), initialRoute: route });
@@ -3259,7 +3259,7 @@ describe('a new task from the form', () => {
     resetSeq(500n);
 
     const calls: Calls = [];
-    const answers: Answer<{ task: TaskView; sleeping: boolean }>[] = [];
+    const answers: Answer<{ task: TaskView }>[] = [];
     const store = await onForm({ schedule: { createTask: held(answers) } }, calls);
 
     store.dispatch(createTask(INPUT));
@@ -3273,7 +3273,7 @@ describe('a new task from the form', () => {
 
     const row = taskRow('nightly', { name: 'Nightly', createdBy: 'operator' });
 
-    answers[0]!.resolve({ task: row, sleeping: false });
+    answers[0]!.resolve({ task: row });
     await settle();
     assert.deepEqual(selectTaskCreate(store.getState()), { pending: false, error: null, done: 1 });
     assert.deepEqual(selectTasks(store.getState()).map(task => task.slug), ['backup', 'nightly']);
@@ -3284,10 +3284,10 @@ describe('a new task from the form', () => {
     assert.deepEqual(selectTasks(store.getState()).map(task => task.slug), ['backup', 'nightly']);
   });
 
-  it('a refusal stays in the form state; the next submit clears it; the words of a sleeping code task and a reminder', async () => {
+  it('a refusal stays in the form state; the next submit clears it; the words of a program and a reminder', async () => {
     resetSeq(520n);
 
-    const answers: Answer<{ task: TaskView; sleeping: boolean }>[] = [];
+    const answers: Answer<{ task: TaskView }>[] = [];
     const store = await onForm({ schedule: { createTask: held(answers) } });
 
     store.dispatch(createTask(INPUT));
@@ -3298,16 +3298,16 @@ describe('a new task from the form', () => {
     assert.deepEqual(store.getState().router.route, { key: 'schedule', new: true });
     assert.equal(store.getState().ui.toasts.length, 0);
 
-    store.dispatch(createTask({ ...INPUT, slug: 'digest', kind: 'code', cron: null, command: null }));
+    store.dispatch(createTask({ ...INPUT, slug: 'digest', kind: 'program', cron: null, code: 'return null;' }));
     assert.deepEqual(selectTaskCreate(store.getState()), { pending: true, error: null, done: 0 });
-    answers[1]!.resolve({ task: taskRow('digest', { kind: 'code', command: null, cron: null, nextRunAt: null }), sleeping: true });
+    answers[1]!.resolve({ task: taskRow('digest', { kind: 'program', code: 'return null;', cron: null, nextRunAt: null }) });
     await settle();
-    assert.deepEqual(store.getState().ui.toasts.map(toast => [toast.title, toast.state]), [['Task created — sleeping', 'wait']]);
-    assert.match(store.getState().ui.toasts[0]!.desc!, /sleeps until an agent writes tasks\/digest\.ts/);
+    assert.deepEqual(store.getState().ui.toasts.map(toast => [toast.title, toast.state]), [['Task created', 'done']]);
+    assert.match(store.getState().ui.toasts[0]!.desc!, /runs on “Run now” only/);
 
     store.dispatch(routeTo({ key: 'schedule', new: true }));
-    store.dispatch(createTask({ ...INPUT, slug: 'call', kind: 'note', cron: null, command: null, note: 'Call' }));
-    answers[2]!.resolve({ task: taskRow('call', { kind: 'note', command: null, note: 'Call' }), sleeping: false });
+    store.dispatch(createTask({ ...INPUT, slug: 'call', kind: 'note', cron: null, code: null, note: 'Call' }));
+    answers[2]!.resolve({ task: taskRow('call', { kind: 'note', code: null, note: 'Call' }) });
     await settle();
     assert.deepEqual(store.getState().ui.toasts[1]!.title, 'Reminder created');
   });
@@ -3320,16 +3320,16 @@ describe('a new task from the form', () => {
   it('a late answer does not bring back a task the tail already ended (consumed, deleted elsewhere): the form is done, the list shows in its place, the search kept', async () => {
     resetSeq(560n);
 
-    const answers: Answer<{ task: TaskView; sleeping: boolean }>[] = [];
+    const answers: Answer<{ task: TaskView }>[] = [];
     const store = await onForm({ schedule: { createTask: held(answers) } }, [], { key: 'schedule', new: true, q: 'night' });
-    const row = taskRow('nightly', { name: 'Nightly', kind: 'note', cron: null, command: null, note: 'Call', createdBy: 'operator' });
+    const row = taskRow('nightly', { name: 'Nightly', kind: 'note', cron: null, code: null, note: 'Call', createdBy: 'operator' });
 
-    store.dispatch(createTask({ ...INPUT, kind: 'note', cron: null, at: '2026-10-09T09:00:00.000Z', command: null, note: 'Call' }));
+    store.dispatch(createTask({ ...INPUT, kind: 'note', cron: null, at: '2026-10-09T09:00:00.000Z', code: null, note: 'Call' }));
     store.dispatch(createdEvent(row));
     store.dispatch(cancelledEvent(row, 'consumed'));
     assert.deepEqual(selectTasks(store.getState()).map(task => task.slug), ['backup']);
 
-    answers[0]!.resolve({ task: row, sleeping: false });
+    answers[0]!.resolve({ task: row });
     await settle();
     assert.deepEqual(selectTasks(store.getState()).map(task => task.slug), ['backup'], 'the consumed task stays gone');
     assert.deepEqual(selectTaskCreate(store.getState()), { pending: false, error: null, done: 1 });
@@ -3341,7 +3341,7 @@ describe('a new task from the form', () => {
   it('a late answer after the slug was taken again by a new row: one row per slug, the new one; the operator gone elsewhere gets no "Open"', async () => {
     resetSeq(580n);
 
-    const answers: Answer<{ task: TaskView; sleeping: boolean }>[] = [];
+    const answers: Answer<{ task: TaskView }>[] = [];
     const store = await onForm({ schedule: { createTask: held(answers) } });
     const ours = taskRow('nightly', { name: 'Nightly', createdBy: 'operator' });
     const theirs = taskRow('nightly', { id: 'task-nightly-2', name: 'Nightly again', createdBy: 'scheduler' });
@@ -3352,7 +3352,7 @@ describe('a new task from the form', () => {
     store.dispatch(cancelledEvent(ours, 'cancelled'));
     store.dispatch(createdEvent(theirs));
 
-    answers[0]!.resolve({ task: ours, sleeping: false });
+    answers[0]!.resolve({ task: ours });
     await settle();
     assert.deepEqual(
       selectTasks(store.getState()).map(task => [task.id, task.slug]),
@@ -3368,13 +3368,13 @@ describe('a new task from the form', () => {
   it('a snapshot that replaced the list during the call has the last word: a row it lacks is not folded, a row it has opens', async () => {
     resetSeq(600n);
 
-    const answers: Answer<{ task: TaskView; sleeping: boolean }>[] = [];
+    const answers: Answer<{ task: TaskView }>[] = [];
     const store = await onForm({ schedule: { createTask: held(answers) } });
     const row = taskRow('nightly', { name: 'Nightly', createdBy: 'operator' });
 
     store.dispatch(createTask(INPUT));
     store.dispatch(snapshotLoadDone(snapshot({ tasks: [taskRow('backup')] })));
-    answers[0]!.resolve({ task: row, sleeping: false });
+    answers[0]!.resolve({ task: row });
     await settle();
     assert.deepEqual(selectTasks(store.getState()).map(task => task.slug), ['backup']);
     assert.deepEqual(store.getState().router.route, { key: 'schedule' });
@@ -3388,7 +3388,7 @@ describe('a new task from the form', () => {
     const digest = taskRow('digest', { createdBy: 'operator' });
 
     store.dispatch(snapshotLoadDone(snapshot({ tasks: [taskRow('backup'), row, digest] })));
-    answers[1]!.resolve({ task: digest, sleeping: false });
+    answers[1]!.resolve({ task: digest });
     await settle();
     assert.deepEqual(selectTasks(store.getState()).map(task => task.slug), ['backup', 'nightly', 'digest']);
     assert.deepEqual(store.getState().router.route, { key: 'schedule', slug: 'digest' });
@@ -3397,12 +3397,12 @@ describe('a new task from the form', () => {
   it('an answer after the operator left the form: no navigation, the toast carries "Open"; an answer of another session’s form touches nothing', async () => {
     resetSeq(540n);
 
-    const answers: Answer<{ task: TaskView; sleeping: boolean }>[] = [];
+    const answers: Answer<{ task: TaskView }>[] = [];
     const store = await onForm({ schedule: { createTask: held(answers) } });
 
     store.dispatch(createTask(INPUT));
     store.dispatch(routeTo({ key: 'home' }));
-    answers[0]!.resolve({ task: taskRow('nightly', { name: 'Nightly' }), sleeping: false });
+    answers[0]!.resolve({ task: taskRow('nightly', { name: 'Nightly' }) });
     await settle();
     assert.deepEqual(store.getState().router.route, { key: 'home' });
     assert.deepEqual(store.getState().ui.toasts[0]!.action, { label: 'Open', route: { key: 'schedule', slug: 'nightly' } });
@@ -3414,7 +3414,7 @@ describe('a new task from the form', () => {
     const request = selectTaskCreate(store.getState());
 
     store.dispatch({ type: 'CREATE_TASK_FAIL', request, error: { status: 0, code: 'network', message: 'offline' } });
-    answers[1]!.resolve({ task: taskRow('late'), sleeping: false });
+    answers[1]!.resolve({ task: taskRow('late') });
     await settle();
     assert.deepEqual(selectTasks(store.getState()).map(task => task.slug), ['backup', 'nightly'], 'the late answer is not folded');
     assert.equal(selectTaskCreate(store.getState()).error?.message, 'offline');

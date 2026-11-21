@@ -1,91 +1,32 @@
-# Scheduled task bodies — the workspace's tasks/
+# Scheduled tasks
 
-A `kind: 'code'` scheduled task is a registry row (the ScheduledTask table,
-operated via the `schedule` tool server: create_task / list_tasks /
-cancel_task / run_task) that says WHEN it fires, plus a run(ctx) body that
-says WHAT it does. The slug joins the two.
+A scheduled task is a registry row (the ScheduledTask table) that says WHEN
+it fires and WHAT it does. The scheme of capabilities knows two kinds
+(the node `schedule` of the catalog, `src/tree/schedule.ts`):
 
-A task is a workspace notion: its body is a file of the workspace,
-`data/workspace/<workspaceId>/tasks/<slug>.ts` (the directory is
-`$WORKSPACE_TASKS_DIR` in an agent session), outside git, travelling with the
-workspace's data. The file is imported fresh at every fire — NO build, NO
-restart, an edit is live at the next moment; a broken file fails that run
-(system.exception), never the boot. The loader is `src/schedule/catalog.ts`;
-it keeps `tasks/package.json` with `"type": "module"` (the directory is an ES
-module scope whatever sits above it) — leave that file in place.
+- `note` — a text for the secretary: at the trigger it lands in the main
+  thread as a `schedule.fired` event, and the secretary acts on it.
+- `program` — code kept in the row itself and run at the trigger by the
+  catalog's runner (`programs.ts` over `src/catalog/program.ts`): a process
+  of its own per run, only `call`, `describe` and `console` in scope, as
+  the task in the workspace's main thread with the whole tree but `end_thread`
+  and `view_file`, for up to 5 hours. Every run is a row of the journal of
+  scheduled runs (ScheduleRun; read by `journal.ts`); what the program
+  returns comes to the main thread as `schedule.fired` (null is silence), a
+  failure or a timeout as `system.exception`, a run stopped by a restart is
+  `aborted` and tells nobody. Calls and describe lookups inside the task leave
+  no tool.call events. Domain events from their actions keep the task author.
 
-## Choosing the kind
+Every task carries the flag `wake`: `false` leaves its `schedule.fired` to
+wait in the main thread for the secretary's next turn.
 
-Three kinds share the registry; only 'code' has a body here:
-
-- `note` — natural-language intent, fired into the main thread, interpreted
-  by the secretary. No engineering at all.
-- `command` — a WORKSPACE JOB: a shell command (`bash -c`) run in the
-  workspace file area (usually a project folder), hermetic environment
-  (PATH/HOME/locale/TZ + WORKSPACE_DB), exit code is the whole protocol.
-  Armed the moment the row exists — NO bundle, NO build, NO restart, no
-  sleeping. Every run is journaled (list_job_runs / get_job_run); failure
-  always surfaces as system.exception, success is silent unless
-  report_on_success. Prefer this kind for user/workspace automations: a
-  script collecting data into workspace.sqlite, a periodic export, anything
-  deterministic that needs no LLM and nothing platform-internal.
-- `code` — trusted code with ctx.prisma / ctx.tools: a workspace task file,
-  live at the next fire.
-
-## The contract
-
-- One task = one file `$WORKSPACE_TASKS_DIR/<slug>.ts` exporting ONLY
-  `async function run(ctx)`, nothing else to register in code. Slugs match
-  `^[a-z][a-z0-9_-]*$`.
-- Validation at fire time: a module with extra exports or a non-function
-  `run` is rejected (that run fails).
-- Types come from `src/schedule/contract.ts` via `import type` only — NO
-  runtime imports from the repository tree (a task file importing `src/...`
-  would load a second copy of a bundled module); packages from node_modules
-  are fine. Everything a body needs arrives through ctx.
-
-## ctx
-
-- `ctx.workspaceId` — the task's workspace. The event log is shared by every
-  workspace: a body that reads its own past events (a watermark, dedup)
-  filters them by `workspaceId: ctx.workspaceId`.
-- `ctx.pushEvent(payload)` — journals a `schedule.fired` event addressed to
-  the workspace's main thread, with the task's slug and name mixed into the
-  payload. The task code does not choose the event type or the addressee.
-  This is the ONLY trace a run leaves and the way to hand results to the
-  coordinator. Keep payloads compact; push nothing when there is nothing to
-  say.
-- `ctx.prisma` — the app's database client (src/db/client.ts).
-- `ctx.tools` — the workspace tool surface for the task's workspace: the
-  repository servers of the task bundle (TASK_REPOSITORY_SERVERS in
-  src/schedule/engine.ts) plus, since the bundle names `projects`, every
-  extension server of the installation (data/tools, data/mcp-servers — see
-  src/capabilities/extensions.ts); `list()` and `call(name, args)`. These calls are NOT journaled as tool.call.* (a task
-  has no thread).
-
-## Execution semantics
+## Triggers and execution
 
 - Cron triggers are an alarm clock (evaluated in SCHEDULE_TIMEZONE, default
   Asia/Jerusalem): a moment missed while the app was down is skipped; the
   next one counts from "now". `at` means "not before this instant" and is
   consumed by firing — success or failure alike. No retries, no catch-up,
-  no pause/resume. A task without a trigger runs only via run_task.
-- Bodies run detached inside the app process. If a previous run of the same
-  slug is still going when the trigger fires again, the new moment burns.
-- An exception ends the run and is journaled as a system.exception into the
-  main thread. Do not build retry machinery around it.
-- Never block forever, never install timers, never restart or exit the
-  process from inside a task.
-- The `note` field of the registry row is IGNORED for code tasks.
-
-## Shipping order
-
-1. Write `$WORKSPACE_TASKS_DIR/<slug>.ts`.
-2. `create_task` with kind `code` and the same slug (either order is fine).
-3. Try it: `run_task` — the file is imported right there.
-
-Until the file exists the task SLEEPS: registered but body-less — the heart
-does not arm it, run_task rejects it synchronously, and every boot journals
-a system.exception per sleeping task. To edit a task's schedule or
-metadata: cancel_task + create_task under the same slug (the body file
-stays). To retire a code task: cancel_task and delete the file.
+  no pause/resume. A task without a trigger runs only via schedule_run_task.
+- A trigger during a previous run of the same task is skipped. A manual run
+  leaves the trigger untouched.
+- To schedule a workspace script, call `workspace_run_command` from a program.

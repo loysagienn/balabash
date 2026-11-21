@@ -116,40 +116,63 @@ describe('terminals', () => {
     assert.equal((await lifecycleOf([child])).filter(event => TERMINALS.includes(event.type)).length, 1);
   });
 
-  test('a completed thread bumps its project: updatedAt moves and a project.updated authored by the thread is journaled; a failed one and a thread outside any project bump nothing', async () => {
+  test('a thread of a project bumps it when it starts and when it completes: updatedAt moves and a project.updated authored by the thread follows the thread\'s event; a failed thread, a thread outside any project and a project of another workspace bump nothing', async () => {
     const project = await prisma.project.create({ data: { workspaceId: stand.workspaceId, title: 'Bumped', slug: 'bumped', description: 'd', updatedAt: new Date(Date.now() - 60_000) } });
-    const startIn = (id: string) =>
-      appendEvent({ type: 'thread.started', actor: 'system', workspaceId: stand.workspaceId, threadId: id, targetThreadId: stand.mainThreadId, payload: { agent: 'engineer', title: id, projectId: project.id } });
+    const startIn = (id: string, projectId = project.id) =>
+      appendEvent({ type: 'thread.started', actor: 'system', workspaceId: stand.workspaceId, threadId: id, targetThreadId: stand.mainThreadId, payload: { agent: 'engineer', title: id, projectId } });
     const bumps = async () =>
       (await prisma.event.findMany({ where: { type: 'project.updated' }, orderBy: { seq: 'asc' } })).filter(row => (row.payload as { id: string }).id === project.id);
-
-    const failing = randomUUID();
-
-    await startIn(failing);
-    await fail(failing);
-    assert.equal((await bumps()).length, 0);
+    const updatedAt = async () => (await prisma.project.findUniqueOrThrow({ where: { id: project.id } })).updatedAt;
+    const authorOf = (bump: { actor: string; agentName: string | null; threadId: string | null }) => ({ actor: bump.actor, agentName: bump.agentName, threadId: bump.threadId });
 
     const outside = await startChild();
 
     await complete(outside);
     assert.equal((await bumps()).length, 0);
-    assert.equal((await prisma.project.findUniqueOrThrow({ where: { id: project.id } })).updatedAt.getTime(), project.updatedAt.getTime());
+    assert.equal((await updatedAt()).getTime(), project.updatedAt.getTime());
+
+    // The start is work on the project already.
+    const failing = randomUUID();
+    const started = await startIn(failing);
+    const atStart = await bumps();
+    const afterStart = await updatedAt();
+
+    assert.ok(started.written);
+    assert.equal(atStart.length, 1);
+    assert.equal(atStart[0]!.seq, started.event.seq + 1n);
+    assert.deepEqual(authorOf(atStart[0]!), { actor: 'agent', agentName: 'engineer', threadId: failing });
+    assert.ok(afterStart.getTime() > project.updatedAt.getTime());
+    assert.equal((atStart[0]!.payload as { updatedAt: string }).updatedAt, afterStart.toISOString());
+
+    await fail(failing);
+    assert.equal((await bumps()).length, 1);
+    assert.equal((await updatedAt()).getTime(), afterStart.getTime());
 
     const completing = randomUUID();
 
     await startIn(completing);
+    assert.equal((await bumps()).length, 2);
 
     const terminal = await complete(completing);
-    const [bump, ...more] = await bumps();
-    const row = await prisma.project.findUniqueOrThrow({ where: { id: project.id } });
+    const all = await bumps();
+    const bump = all[2];
+    const row = await updatedAt();
 
     assert.ok(terminal.written);
-    assert.equal(more.length, 0);
+    assert.equal(all.length, 3);
     assert.ok(bump);
     assert.ok(bump.seq > terminal.event.seq);
-    assert.deepEqual({ actor: bump.actor, agentName: bump.agentName, threadId: bump.threadId }, { actor: 'agent', agentName: 'engineer', threadId: completing });
-    assert.ok(row.updatedAt.getTime() > project.updatedAt.getTime());
-    assert.equal((bump.payload as { updatedAt: string }).updatedAt, row.updatedAt.toISOString());
+    assert.deepEqual(authorOf(bump), { actor: 'agent', agentName: 'engineer', threadId: completing });
+    assert.ok(row.getTime() >= afterStart.getTime());
+    assert.equal((bump.payload as { updatedAt: string }).updatedAt, row.toISOString());
+
+    // A project of another workspace is not the thread's to move.
+    const elsewhere = await prisma.workspace.create({ data: {} });
+    const foreign = await prisma.project.create({ data: { workspaceId: elsewhere.id, title: 'Foreign', slug: 'foreign', description: 'd', updatedAt: new Date(Date.now() - 60_000) } });
+
+    await startIn(randomUUID(), foreign.id);
+    assert.equal((await prisma.project.findUniqueOrThrow({ where: { id: foreign.id } })).updatedAt.getTime(), foreign.updatedAt.getTime());
+    assert.equal((await bumps()).length, 3);
   });
 
   test('the main thread takes none; a spawn under a closed parent and a terminal of an unknown thread are refused', async () => {

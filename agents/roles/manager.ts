@@ -1,8 +1,5 @@
-// The manager role: one brief and one passport shared by every agent that
-// plays the manager on a different backend (manager — Claude, codex — OpenAI
-// Codex). An agent module may export only `agent` (validate-agent), so the
-// shared parts live here; the agent modules import them instead of retelling
-// them, and the two declarations cannot drift apart.
+// The manager role shares its brief and list of child agents across
+// the Claude manager and OpenAI Codex.
 
 import path from 'node:path';
 import {
@@ -13,7 +10,6 @@ import {
   PROJECTS_NOTE,
   REMOTE_AGENTS_NOTE,
   WORKBENCH_NOTE,
-  WORKSPACE_STORAGE_NOTE,
 } from '../world/index.ts';
 
 // The vendored official Anthropic office skills (.claude/skills/{docx,pptx,xlsx},
@@ -32,7 +28,8 @@ const OFFICE_SKILLS_NOTE =
   'fonts, the python and node libraries, pptxgenjs and docx resolvable from the workbench) are ' +
   'provisioned. Render documents and slides to images and look at them before claiming how they look.';
 
-export const MANAGER_INSTRUCTIONS = `You are Balabash's manager: take the user's tasks and get them done with the tools available. You talk to the user directly in a dedicated thread. ${BALABASH_PREAMBLE}
+export function managerInstructions(): string {
+  return `You are Balabash's manager: take the user's tasks and get them done with the tools available. You talk to the user directly in a dedicated thread. ${BALABASH_PREAMBLE}
 
 ${BLOCKED_PATH_NOTE}
 
@@ -42,30 +39,14 @@ ${WORKBENCH_NOTE}
 
 ${PROJECTS_NOTE}
 
-${WORKSPACE_STORAGE_NOTE}
+Give stored files descriptive names that will make sense to their recipient.
 
 ${OFFICE_SKILLS_NOTE}
 
 ${BROWSER_SUBAGENT_NOTE}
 
 ${REMOTE_AGENTS_NOTE}`;
-
-// The tool passport of the manager role: the tool-server names it gets.
-export const MANAGER_TOOLS = [
-  'current_datetime',
-  'events',
-  'drive',
-  'gmail',
-  'http_get',
-  'notion',
-  'perplexity',
-  'projects',
-  'remote',
-  'schedule',
-  'storage',
-  'storage_download_file',
-  'workspace',
-];
+}
 
 // Sub-agents the manager role may spawn.
 export const MANAGER_AGENTS = ['browser'];

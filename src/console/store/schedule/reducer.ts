@@ -16,13 +16,7 @@
 // answer: the answer's row is folded only when nothing newer could have
 // spoken of it — a dropped id is not brought back, and after a snapshot the
 // snapshot and its tail say whether the row lives.
-// runsChanged — a stamp of the run journal (job_runs, read by place): it
-// moves when a manual run of a command job was accepted (RUN_TASK_DONE
-// with a runId), when a job reported through the log (schedule.fired with
-// a runId — a success asked to report, system.exception of a workspace job
-// — a failure); the process lib/query/schedule.ts re-reads the journal's
-// queries on it. A silent success writes no event: the screen polls while a
-// run is going (screens/schedule/queries.ts).
+// runsChanged invalidates journal reads on a manual launch or a reported outcome.
 
 import type { TaskView } from '../../../api/contract.ts';
 import type { FormCallState } from '../../lib/forms/attempt.ts';
@@ -121,7 +115,7 @@ export function scheduleReducer(state: ScheduleState = initialSchedule, action: 
     case 'event/schedule.fired':
       return action.event.payload.runId ? { ...state, runsChanged: state.runsChanged + 1 } : state;
     case 'event/system.exception':
-      return action.event.payload.scope === 'workspace-job' ? { ...state, runsChanged: state.runsChanged + 1 } : state;
+      return action.event.payload.scope === 'scheduled-program' ? { ...state, runsChanged: state.runsChanged + 1 } : state;
     case 'RUN_TASK':
       return ownCall(state.calls, action.slug) ? state : { ...state, calls: { ...state.calls, [action.slug]: { kind: 'run' } } };
     case 'DELETE_TASK':

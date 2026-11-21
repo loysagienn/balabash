@@ -14,7 +14,6 @@ import {
   PROJECTS_WORLD_NOTE,
   REMOTE_AGENTS_NOTE,
   WORKBENCH_NOTE,
-  WORKSPACE_STORAGE_NOTE,
 } from './world/index.ts';
 
 const LIBRARY_LAW = `## The law of a project library
@@ -70,7 +69,10 @@ export const agent = {
     'suggestion to; name the project in the prompt.',
   icon: '🌿',
   sdk: 'claude',
-  tools: ['current_datetime', 'projects', 'remote', 'storage', 'storage_download_file', 'workspace'],
+  modes: ['user'],
+  defaultMode: 'user',
+  workspaceDisk: true,
+  access: { nodes: ['projects', 'web', 'workspace'], addRoot: ['fetch_thread_file', 'get_file_url'] },
   notification: 'normal',
 
   session: {
@@ -85,8 +87,6 @@ ${LIBRARY_LAW}
 ${GARDENER_CONTRACT}
 
 ${OUTPUT_NOTE}
-
-${WORKSPACE_STORAGE_NOTE}
 
 ${REMOTE_AGENTS_NOTE}
 

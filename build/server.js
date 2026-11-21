@@ -36,6 +36,7 @@ function getOptions(NODE_ENV, APP_VERSION) {
     // Object form so both entries land flat in dist/ regardless of source dir.
     entryPoints: {
       app: './src/app.ts',
+      'migrate-agent-tools': './scripts/migrate-agent-tools.ts',
       'rebuild-threads': './scripts/rebuild-threads.ts',
       'render-context': './scripts/render-context.ts',
       'import-sqlite': './scripts/import-sqlite.ts',

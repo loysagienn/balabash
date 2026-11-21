@@ -28,8 +28,10 @@ model Event {
   seq            BigInt  @id @default(autoincrement()) // global order + consumer cursor
   id             String  @unique @default(uuid()) // stable reference (refs, delivery idempotency)
   type           String // canonical type (§4.2) or agent domain type '<agent>.*'
-  actor          String // 'user' | 'system' | 'agent'
-  agentName      String? @map("agent_name") // agent name when actor='agent' (runId is a payload detail)
+  actor          String // 'user' | 'system' | 'agent' | 'task'
+  agentName      String? @map("agent_name") // agent name when actor='agent'
+  taskSlug       String? @map("task_slug") // scheduled task when actor='task'
+  taskRunId      String? @map("task_run_id") // ScheduleRun.id of the authoring run
   workspaceId    String? @map("workspace_id") // workspace; null = installation-level event
   threadId       String? @map("thread_id") // author's thread; null = event outside threads
   targetThreadId String? @map("target_thread_id") // addressee thread, one hop (§4.3)
@@ -289,7 +291,7 @@ model Connection {
   id           String   @id @default(uuid())
   workspaceId  String   @map("workspace_id")
   threadId     String?  @map("thread_id") // thread that initiated the flow; connection.* events are addressed to it
-  server       String // mcp-servers config name
+  server       String // Service name used by the connections layer
   accountKey   String   @map("account_key") // immutable mnemonic slug — the account's address within (workspace, server)
   displayName  String   @map("display_name") // renameable human-readable label
   status       String // 'pending' | 'connected' | 'reauthorization_required'
@@ -330,6 +332,7 @@ model OauthClientRequest {
   id          String   @id @default(uuid())
   workspaceId String   @map("workspace_id")
   threadId    String?  @map("thread_id") // thread that issued the link; oauth_client.provisioned is addressed to it
+  taskSlug    String?  @map("task_slug")
   server      String
   nonce       String   @unique
   expiresAt   DateTime @map("expires_at")
@@ -359,6 +362,7 @@ model ExternalServerSecretRequest {
   id          String   @id @default(uuid())
   workspaceId String   @map("workspace_id")
   threadId    String?  @map("thread_id") // thread that issued the link; secrets.provisioned is addressed to it
+  taskSlug    String?  @map("task_slug")
   server      String
   nonce       String   @unique
   fields      Json
@@ -422,29 +426,28 @@ model LlmRequest {
 // at (one-shot, "not before T" — fired once and the row is deleted); a task
 // with neither is a stored procedure started manually via run_task. kind
 // 'note' carries data that fires as a schedule.fired event into the main
-// thread; kind 'code' names a run(ctx) body in the static tasks/ catalog (a
-// row without a body in the current process sleeps until a rebuild+restart);
-// kind 'command' is a workspace job — a shell command run in the workspace
-// file area, armed from the moment the row exists (no build, no restart, no
-// sleeping). note/code runs leave no rows behind — a task's only memory is
-// the events it pushes; command runs are journaled in JobRun.
+// thread; kind 'program' runs its code and journals every run in ScheduleRun.
 model ScheduledTask {
   id              String    @id @default(uuid())
   slug            String    @unique
   workspaceId     String    @map("workspace_id")
   name            String
   description     String?
-  kind            String // 'note' | 'code' | 'command'
+  // 'note' | 'program'.
+  kind            String
   cron            String? // cron expression, evaluated in config.scheduleTimezone
   at              DateTime? // one-shot "not before T"; consumed on fire
-  note            String? // the payload of a 'note' task; ignored for 'code'/'command'
-  // kind 'command' only: the shell command (`bash -c`), its working
-  // directory (relative to the workspace file area; null = the root), the
-  // kill timeout and whether a successful run pushes a schedule.fired event
-  // (failures always surface as system.exception).
+  note            String? // kind 'note': the text delivered at the trigger
+  code            String? // kind 'program': the body of an async function, run at the trigger
+  // The limit of time of one run: kind 'program' (and the former 'command').
+  timeoutMs       Int?      @map("timeout_ms")
+  // true: the task's schedule.fired starts the secretary's turn at once;
+  // false: the event waits in the main thread for the next turn.
+  wake            Boolean   @default(true)
+  // The former kind 'command' only: the shell command, its working
+  // directory and whether a successful run pushes a schedule.fired event.
   command         String?
   cwd             String?
-  timeoutMs       Int?      @map("timeout_ms")
   reportOnSuccess Boolean   @default(false) @map("report_on_success")
   createdBy       String?   @map("created_by") // who registered the task: the agent, or "operator" from the console
   createdAt       DateTime  @default(now()) @map("created_at")
@@ -453,16 +456,48 @@ model ScheduledTask {
   @@map("scheduled_tasks")
 }
 
-// Run journal of workspace jobs (kind 'command' scheduled tasks) — operational
-// telemetry in the platform database, deliberately NOT in workspace.sqlite
-// (fate-sharing: a job that corrupts or locks the workspace database must not
-// take the record of that very run down with it) and deliberately outside the
-// event log (the LlmRequest pattern: machinery telemetry, not domain
-// history). Rows are written fire-and-forget — a failed insert/update never
-// affects the run; the id is generated before the insert so run_task can
-// return it regardless. command/cwd are snapshots of the registry row at fire
-// time: a one-shot task's row is deleted before the run, and a recreated slug
-// may carry a different command — the journal keeps what actually executed.
+// The journal of scheduled runs: one row per run of a program task, the
+// silent ones included — by the journal one sees that a task is alive, and a
+// task remembers through it. The schedule writes the row before the run
+// begins ('running') and settles the same row when it ends; a row left
+// 'running' by a dead process is settled as 'aborted' at boot. Operational
+// telemetry in the platform database, outside the event log and outside
+// workspace.sqlite (a program that locks the workspace database must not
+// take the record of that very run down with it). slug and code are
+// snapshots of the registry row at fire time: a one-shot task's row is
+// deleted before the run, and a recreated slug may carry other code.
+model ScheduleRun {
+  id          String @id
+  workspaceId String @map("workspace_id")
+  slug        String
+  trigger     String // 'cron' | 'at' | 'manual'
+  code        String
+
+  status String // 'running' | 'ok' | 'failed' | 'timeout' | 'aborted'
+
+  startedAt  DateTime  @map("started_at")
+  finishedAt DateTime? @map("finished_at")
+  durationMs Int?      @map("duration_ms")
+
+  // What the program returned, when it returned anything but null; a run
+  // without a value — silent, unfinished or failed — has none. hasValue
+  // says which, so that a list never loads the values.
+  value    Json?
+  hasValue Boolean @default(false) @map("has_value")
+  // The error that ended a run that is not ok: {kind, message, details?}.
+  error Json?
+
+  // The last 16 KiB of what the program wrote to console.
+  console          String  @default("")
+  consoleTruncated Boolean @default(false) @map("console_truncated")
+
+  @@index([workspaceId, startedAt])
+  @@index([slug, startedAt])
+  @@map("schedule_runs")
+}
+
+// Historical command runs. The shared journal reads their command, exit and
+// output snapshots alongside program runs until the data migration.
 model JobRun {
   id          String @id
   workspaceId String @map("workspace_id")

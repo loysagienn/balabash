@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import type { Store } from 'redux';
 import type { Action, State } from '../../store/types.ts';
-import { JOB_RUNS_KEY, connectQueryClientToSchedule } from './schedule.ts';
+import { SCHEDULE_RUNS_KEY, connectQueryClientToSchedule } from './schedule.ts';
 
 function fakeStore(runsChanged = 0) {
   const listeners = new Set<() => void>();
@@ -48,7 +48,7 @@ describe('the run journal against the store', () => {
     assert.deepEqual(invalidated, []);
 
     bump();
-    assert.deepEqual(invalidated, [JOB_RUNS_KEY]);
+    assert.deepEqual(invalidated, [SCHEDULE_RUNS_KEY]);
 
     touch();
     assert.equal(invalidated.length, 1);

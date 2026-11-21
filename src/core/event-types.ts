@@ -33,9 +33,14 @@ export type SessionTaskUsage = { totalTokens: number; toolUses: number; duration
 // One item of the session's live plan (TodoWrite / todo list).
 export type SessionPlanItem = { content: string; status: string; activeForm?: string };
 
+type ProgramRunDetails = {
+  id: string; startedAt: string; endedAt: string; durationMs: number;
+  outcome: 'ok' | 'failed' | 'timeout' | 'aborted'; console: string; consoleTruncated: boolean;
+};
+
 export type EventPayloads = {
-  // Lifecycle. thread.started is authored by the new thread itself
-  // (threadId) and addressed to its parent (targetThreadId); the spawn-time
+  // Lifecycle. thread.started identifies the new thread
+  // (threadId) and is addressed to its parent (targetThreadId); the spawn-time
   // policy rides in the payload, the projection stores agent/title/project.
   'thread.started': {
     agent: string;
@@ -44,7 +49,6 @@ export type EventPayloads = {
     headless?: boolean;
     icon?: string;
     notification?: NotificationLevel;
-    tools?: string[];
     projectId?: string;
     projectSlug?: string;
     // A remote agent's thread (src/remote): the launch options by the
@@ -65,7 +69,9 @@ export type EventPayloads = {
   // history recorded before them).
   'thread.message': { text: string; fileIds?: string[]; files?: InboundFile[] };
   'thread.notification': { text: string; level: NotificationLevel };
-  'thread.completed': { summary: ThreadSummary; title?: string; description?: string };
+  // projectId, projectSlug — the project the thread names at its end: the
+  // thread moves to it (absent — the one set at start stays).
+  'thread.completed': { summary: ThreadSummary; title?: string; description?: string; projectId?: string; projectSlug?: string };
   'thread.failed': { error: string };
   // The commands from above (the parent authors them, one hop down): the
   // coordinator's cancel, a surface's Stop/Cancel button (identity and
@@ -101,17 +107,24 @@ export type EventPayloads = {
   'agent.ask': { askId: string; kind: 'approval' | 'credential' | 'other'; text: string; link?: string; options: string[]; expiresAt?: string };
   'agent.ask.resolved': { askId: string; outcome: string; by?: { identity?: UserIdentity; source?: string } };
 
-  // Journaled tool calls of the bundle (src/capabilities/tool-journal.ts).
-  'tool.call.started': { callId: string; functionName: string; input: JsonObject };
-  'tool.call.completed': { callId: string; functionName: string; serverName: string; toolName: string; result: ToolResult };
-  'tool.call.failed': { callId: string; functionName: string; error: string };
+  // Catalog calls keep the value or structured error. Bundle calls keep the MCP result.
+  'tool.call.started': { callId: string; functionName: string; input: JsonValue; runId?: string };
+  'tool.call.completed': { callId: string; functionName: string } & (
+    { serverName: string; toolName: string; result: ToolResult } | { value: JsonValue; runId?: string; run?: ProgramRunDetails }
+  );
+  'tool.call.failed': { callId: string; functionName: string; error: string | { kind: string; message: string; details?: JsonValue }; runId?: string; run?: ProgramRunDetails };
 
   // Schedule and system.
+  // A note task carries its note; a program task the id of its run and the
+  // value the program returned. `wake: false` — the event waits in the main
+  // thread for the secretary's next turn (an event without the flag wakes).
   'schedule.fired': {
     slug: string;
     name: string;
+    wake?: boolean;
     note?: string;
     runId?: string;
+    value?: JsonObject[string];
     output?: string;
     count?: number;
     since?: string;
@@ -129,6 +142,7 @@ export type EventPayloads = {
     status?: string;
     exitCode?: number;
   };
+  // Historical requests from main identify the requester in the payload.
   'system.restart.requested': { reason: string; requestedBy?: string };
   'system.restart.completed': {
     reason: string;
@@ -364,10 +378,9 @@ export type TaskRecord = {
   cron: string | null;
   at: string | null;
   note: string | null;
-  command: string | null;
-  cwd: string | null;
+  code: string | null;
   timeoutMs: number | null;
-  reportOnSuccess: boolean;
+  wake: boolean;
   createdBy: string | null;
   createdAt: string;
   nextRunAt: string | null;

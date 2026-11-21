@@ -5,11 +5,7 @@
 // instrument for any work on prompts and tool descriptions: run it before
 // and after a change and diff the output.
 //
-// It walks the same code paths as the live app (agent catalog, tool-manager
-// bundles, session-run base verbs, coordinator function definitions), so the
-// output is the truth, not a retelling. Connecting per-user servers (gmail,
-// notion) may hit the network; a server that fails to connect is reported in
-// the output instead of failing the run.
+// The catalog ports build the same headers and definitions as a live turn.
 //
 // Usage: npm run build && npm run render-context [-- <workspaceId>]
 //   Output: data/showcase/<name>.md (overwritten on every run).
@@ -17,33 +13,25 @@
 //   script lists them and exits.
 //
 // Read-only by intent: it renders texts and never journals events, spawns
-// threads or calls tools. (Connecting user-auth servers may refresh their
-// OAuth tokens through the shared connections layer — same as any app turn.)
+// threads or calls capabilities.
 
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import type { AgentDeclaration, RemoteAgentDeclaration, ToolDefinition } from '../src/core/contract.ts';
+import type { AgentDeclaration, RemoteAgentDeclaration } from '../src/core/contract.ts';
+import type { FunctionDefinition } from '../src/harness/turn-contract.ts';
 import { prisma } from '../src/db/client.ts';
-import { getFile, getFileDownloadUrl, ingestFile, openFileContent } from '../src/files/index.ts';
-import { getAgents, isRemoteAgent, loadAgents, repositoryAgentNames } from '../src/capabilities/agent-catalog.ts';
+import { extensionFilesApi } from '../src/files/index.ts';
+import { getAgents, isRemoteAgent, loadAgents, repositoryAgentNames, startable } from '../src/capabilities/agent-catalog.ts';
 import { loadRemoteAgents } from '../src/capabilities/remote-agent-source.ts';
 import { createRemoteDriverContext } from '../src/capabilities/remote-agent-secrets.ts';
-import { createAuthToolServer } from '../src/capabilities/auth-tools.ts';
-import { createEventsToolServer, createStorageToolServer } from '../src/capabilities/builtin-tools.ts';
-import { createRestartToolServer } from '../src/capabilities/restart-tools.ts';
-import { createRemoteToolServer } from '../src/capabilities/remote-tools.ts';
-import { describeSessionBridgeTools } from '../src/capabilities/session-run.ts';
-import {
-  getServerToolFunctions,
-  loadToolServers,
-  registerBuiltinToolServer,
-  type ToolBundle,
-} from '../src/capabilities/tool-manager.ts';
-import { createScheduleToolServer } from '../src/schedule/tools.ts';
-import { createProjectsToolServer } from '../src/projects/tools.ts';
 import { buildStatusText } from '../src/coordinator/index.ts';
-import { COORDINATOR_INSTRUCTIONS } from '../src/coordinator/instructions.ts';
-import { getCoordinatorFunctionDefinitions } from '../src/coordinator/functions.ts';
+import { createClaudePort } from '../src/harness/claude-sdk/bridge.ts';
+import { createCodexPort } from '../src/harness/codex-sdk/catalog-bridge.ts';
+import { deferredTool } from '../src/harness/anthropic/turn.ts';
+import { openingBlocks } from '../src/harness/anthropic/content.ts';
+import { coordinatorPort } from '../src/coordinator/port.ts';
+import { getMainThread } from '../src/core/threads.ts';
+import { startTree } from '../src/tree/index.ts';
 
 const OUT_DIR = path.resolve('data', 'showcase');
 
@@ -56,14 +44,14 @@ const SAMPLE_PROMPT = '<prompt>';
 // ---------------------------------------------------------------------------
 // Rendering
 
-function renderTool(tool: ToolDefinition & { serverName?: string }): string {
+function renderTool(tool: FunctionDefinition): string {
   return [
-    `### ${tool.name}${tool.serverName ? `  _(server: ${tool.serverName})_` : ''}`,
+    `### ${tool.name}`,
     '',
     tool.description,
     '',
     '```json',
-    JSON.stringify(tool.inputSchema, null, 2),
+    JSON.stringify(tool.parameters, null, 2),
     '```',
   ].join('\n');
 }
@@ -72,40 +60,17 @@ function renderSection(title: string, body: string): string {
   return `## ${title}\n\n${body}`;
 }
 
-async function renderBundleTools(workspaceId: string, bundle: ToolBundle): Promise<string> {
-  const functions = await getServerToolFunctions(workspaceId, bundle);
-
-  if (!functions.length) {
-    return '(no server tools in this bundle)';
-  }
-
-  return functions
-    .map(fn =>
-      renderTool({
-        name: fn.functionName,
-        serverName: fn.serverName,
-        description: fn.description,
-        inputSchema: fn.inputSchema as ToolDefinition['inputSchema'],
-      }),
-    )
-    .join('\n\n');
-}
-
 async function renderAgent(declaration: AgentDeclaration, workspaceId: string): Promise<string> {
-  const bundle: ToolBundle = {
-    declared: declaration.tools,
-  };
-
+  const children = startable(declaration.name).map(agent => agent.name);
   const header = [
     `# Agent: ${declaration.name}`,
     '',
     `- sdk: ${declaration.sdk}`,
-    `- tools bundle: ${JSON.stringify(declaration.tools)}`,
-    ...(declaration.agents?.length ? [`- spawnable sub-agents: ${declaration.agents.join(', ')}`] : []),
-    ...(declaration.headless ? ['- headless: no user-facing thread, talks only to its operator'] : []),
-    ...(declaration.session?.model ? [`- model: ${declaration.session.model}`] : []),
-    ...(declaration.session?.effort ? [`- effort: ${declaration.session.effort}`] : []),
-    ...(declaration.session?.preset ? [`- preset: ${declaration.session.preset}`] : []),
+    ...(children.length ? [`- spawnable sub-agents: ${children.join(', ')}`] : []),
+    ...(declaration.defaultMode === 'headless' ? ['- headless: no user-facing thread, talks only to its operator'] : []),
+    ...(declaration.session.model ? [`- model: ${declaration.session.model}`] : []),
+    ...(declaration.session.effort ? [`- effort: ${declaration.session.effort}`] : []),
+    ...(declaration.session.preset ? [`- preset: ${declaration.session.preset}`] : []),
   ].join('\n');
 
   const spawnSurface = renderSection(
@@ -115,51 +80,37 @@ async function renderAgent(declaration: AgentDeclaration, workspaceId: string): 
 
   const sections: string[] = [header, spawnSurface];
 
-  if (declaration.session) {
-    sections.push(renderSection('System prompt (session.instructions)', declaration.session.instructions));
+  const makePort = declaration.sdk === 'codex' ? createCodexPort : createClaudePort;
+  const port = await makePort(declaration, workspaceId, 'showcase');
+  sections.push(renderSection('System prompt', declaration.session.instructions + '\n\n' + port.instructions));
 
-    if (declaration.session.environment) {
-      sections.push(
-        renderSection(
-          'Environment addendum',
-          `(the declaration's environment starts per run — a browser, a server — and may append the facts that exist only ` +
-            `then (an address, a path) to the prompt above; see agents/${declaration.name}.ts)`,
-        ),
-      );
-    }
-
+  if (declaration.session.environment) {
     sections.push(
       renderSection(
-        `Initial message (${declaration.session.initialMessage ? 'declaration template' : 'platform default: the prompt verbatim'}, rendered with a placeholder prompt)`,
-        declaration.session.initialMessage ? declaration.session.initialMessage(SAMPLE_PROMPT) : SAMPLE_PROMPT,
-      ),
-    );
-    sections.push(
-      renderSection(
-        'Bridge base verbs (session-run)',
-        describeSessionBridgeTools(declaration).map(renderTool).join('\n\n'),
-      ),
-    );
-  } else {
-    sections.push(
-      renderSection(
-        'System prompt',
-        `(imperative run() agent — its instructions are assembled at run start inside agents/${declaration.name}.ts ` +
-          'and are not renderable offline; in-run tools like the Playwright surface come from live connections)',
+        'Environment addendum',
+        `(the declaration's environment starts per run — a browser, a server — and may append the facts that exist only ` +
+          `then (an address, a path) to the prompt above; see agents/${declaration.name}.ts)`,
       ),
     );
   }
 
-  let bundleTools: string;
+  sections.push(
+    renderSection(
+      `Initial message (${declaration.session.initialMessage ? 'declaration template' : 'platform default: the prompt verbatim'}, rendered with a placeholder prompt)`,
+      declaration.session.initialMessage ? declaration.session.initialMessage(SAMPLE_PROMPT) : SAMPLE_PROMPT,
+    ),
+  );
 
-  try {
-    bundleTools = await renderBundleTools(workspaceId, bundle);
-  } catch (error) {
-    bundleTools = `(failed to assemble the bundle: ${error instanceof Error ? error.message : String(error)})`;
+  const definitions = port.tools.map(tool => [
+    `### ${tool.name}`, tool.description, '\`\`\`json',
+    JSON.stringify({ inputSchema: tool.inputSchema, outputSchema: tool.outputSchema, _meta: tool._meta }, null, 2), '\`\`\`',
+  ].join('\n'));
+  sections.push(renderSection(declaration.sdk === 'codex' ? 'Catalog functions in exec (ALL_TOOLS)' : 'MCP catalog (alwaysLoad actions and deferred capabilities)', definitions.join('\n\n')));
+  const samples: string[] = [];
+  for await (const { name, result } of port.sampleOpenings()) {
+    samples.push([`### ${name || '(root)'}`, '```json', JSON.stringify(result, null, 2), '```'].join('\n'));
   }
-
-  sections.push(renderSection('Tool bundle (tool-manager)', bundleTools));
-
+  sections.push(renderSection('First opening of each granted vertex', samples.join('\n\n')));
   return `${sections.join('\n\n')}\n`;
 }
 
@@ -170,6 +121,8 @@ function renderRemoteAgent(declaration: RemoteAgentDeclaration): string {
     `# Agent: ${declaration.name}`,
     '',
     '- kind: remote (the session runs in an external system; the thread mirrors it — src/remote/engine.ts)',
+    `- modes: ${declaration.modes.join(', ')} (default: ${declaration.defaultMode})`,
+    `- recipients: ${declaration.recipients?.join(', ') || '(none)'}`,
     ...(declaration.secrets?.length ? [`- secrets: ${declaration.secrets.join(', ')}`] : []),
     ...(declaration.notification ? [`- notification: ${declaration.notification}`] : []),
   ].join('\n');
@@ -187,34 +140,38 @@ function renderRemoteAgent(declaration: RemoteAgentDeclaration): string {
 }
 
 async function renderCoordinator(workspaceId: string): Promise<string> {
+  const main = await getMainThread(workspaceId);
+  if (!main) throw new Error('The workspace has no main thread');
+  const { head, sampleOpenings } = await coordinatorPort(workspaceId, main.id);
   const sections = [
     '# Coordinator (the secretary)',
-    renderSection('Instructions (prompt-cache head)', COORDINATOR_INSTRUCTIONS),
+    renderSection('Instructions (prompt-cache head)', head.instructions),
     renderSection(
       'Status tail (format sample, rendered fresh every turn)',
       `\`\`\`\n${buildStatusText([], [], workspaceId)}\n\`\`\``,
     ),
   ];
 
-  let functionsSection: string;
+  const functionsSection = head.tools.map(renderTool).join('\n\n');
+  sections.push(renderSection('Functions available at the start of the turn', functionsSection));
 
-  try {
-    const definitions = await getCoordinatorFunctionDefinitions(workspaceId);
-
-    functionsSection = definitions
-      .map(definition =>
-        renderTool({
-          name: definition.name,
-          description: definition.description ?? '',
-          inputSchema: definition.parameters as ToolDefinition['inputSchema'],
-        }),
-      )
-      .join('\n\n');
-  } catch (error) {
-    functionsSection = `(failed to assemble the function catalog: ${error instanceof Error ? error.message : String(error)})`;
+  const samples: string[] = [];
+  for await (const { name, result } of sampleOpenings()) {
+    const anthropic = 'deferredTools' in head;
+    const parts = [`### ${name || '(root)'}`];
+    if (anthropic && result.definition) {
+      const { result: reference, note } = openingBlocks('describe', name, result.text);
+      parts.push(JSON.stringify(reference.content), note.text);
+    } else {
+      parts.push(result.text);
+    }
+    if (result.definition) {
+      const tool = anthropic ? deferredTool(result.definition) : result.definition;
+      parts.push('```json\n' + JSON.stringify(tool, null, 2) + '\n```');
+    }
+    samples.push(parts.join('\n\n'));
   }
-
-  sections.push(renderSection('Function catalog (static + agent spawns + tool servers)', functionsSection));
+  sections.push(renderSection('First opening of each granted vertex', samples.join('\n\n')));
 
   return `${sections.join('\n\n')}\n`;
 }
@@ -243,31 +200,16 @@ async function resolveWorkspaceId(): Promise<string> {
 
 const workspaceId = await resolveWorkspaceId();
 
-const filesApi = {
-  ingest: (input: Parameters<typeof ingestFile>[0]) => ingestFile(input),
-  get: (fileId: string) => getFile(fileId),
-  getDownloadUrl: (fileId: string, options?: { expiresInSeconds?: number }) => getFileDownloadUrl(fileId, options),
-  open: (fileId: string) => openFileContent(fileId),
-};
-
 // The installation's remote agent kinds join the catalog as at boot; a kind
 // that fails to load is reported here, not journaled.
 loadAgents(
   await loadRemoteAgents({
-    context: kind => createRemoteDriverContext(kind, filesApi),
+    context: kind => createRemoteDriverContext(kind, extensionFilesApi),
     repositoryAgents: repositoryAgentNames(),
   }),
 );
 
-registerBuiltinToolServer(createAuthToolServer());
-registerBuiltinToolServer(createRestartToolServer());
-registerBuiltinToolServer(createStorageToolServer());
-registerBuiltinToolServer(createEventsToolServer());
-registerBuiltinToolServer(createScheduleToolServer());
-registerBuiltinToolServer(createProjectsToolServer());
-registerBuiltinToolServer(createRemoteToolServer());
-
-await loadToolServers({ filesApi });
+await startTree();
 
 await mkdir(OUT_DIR, { recursive: true });
 
@@ -288,6 +230,3 @@ for (const declaration of getAgents()) {
 console.log(`[render-context] workspace ${workspaceId}; written:\n${written.map(file => `  ${file}`).join('\n')}`);
 
 await prisma.$disconnect();
-
-// Local tool servers keep loopback HTTP servers alive; the render is done.
-process.exit(0);

@@ -40,11 +40,13 @@ export function resolveLocalPath(root: string, key: string): string {
 // file beside it and take the key's name by a link that refuses an
 // existing object — a body that fails midway (an upload cut off, a source
 // that errors) leaves nothing under the key, the temp file is removed and
-// so is the uuid folder it alone would have occupied.
+// so is the uuid folder it alone would have occupied. A write the signal
+// cuts ends the same way.
 export async function writeLocalObject(
   root: string,
   key: string,
   body: LocalStorageBody,
+  { signal }: { signal?: AbortSignal } = {},
 ): Promise<{ sizeBytes: number; etag: string }> {
   const filePath = resolveLocalPath(root, key);
   const folder = path.dirname(filePath);
@@ -62,7 +64,7 @@ export async function writeLocalObject(
   };
 
   try {
-    await pipeline(source, hashing, createWriteStream(temp, { flags: 'wx' }));
+    await pipeline(source, hashing, createWriteStream(temp, { flags: 'wx' }), { signal });
     await link(temp, filePath);
   } catch (error) {
     await rm(temp, { force: true });

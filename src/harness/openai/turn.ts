@@ -1,14 +1,6 @@
 // The inner loop of one model turn over the OpenAI Responses API (§8.1):
-// tool_choice: 'required', parallel calls. Every call's outcome returns to
-// the model in the same turn as function_call_output — synchronous tool
-// results as they are, async dispatches (messages, spawns) as 'accepted'
-// (their consequences arrive as later events), dispatch errors as
-// 'rejected: …' so the model can recover — and the model may call more.
-// The turn ends only when the model says so: an 'end' dispatch (the
-// coordinator's do_nothing). Before 2026-10-09 an all-async response ended
-// the turn by itself, which cut every step-by-step plan short: the model
-// (one call per response, the next after the result) notified a child and
-// never got to spawn the agent the user had asked for.
+// Every catalog result goes back to the model as a function_call_output.
+// do_nothing ends the turn after dispatching every call in that response.
 //
 // How one iteration continues into the next is the backend's business
 // (backend.ts): with stateful turns the next request carries
@@ -34,29 +26,24 @@ import type { DispatchResult, FunctionCall, PrewarmPrompt, RequestHead, TurnOutc
 import { getLlmBackend } from './backend.ts';
 import type { LlmBackend } from './backend.ts';
 import { getOpenaiClient } from './client.ts';
-import { toolResultToModelOutput } from './content.ts';
-import type { ModelOutput } from './content.ts';
 import type { startLlmRequestMetrics } from './llm-metrics.ts';
 
 // The contract types, re-exported for the readers that knew them here.
 export { MAX_TURN_ITERATIONS } from '../turn-contract.ts';
 export type { DispatchResult, FunctionCall, FunctionDefinition, TurnOutcome } from '../turn-contract.ts';
 
-type FunctionCallOutputItem = {
-  type: 'function_call_output';
-  call_id: string;
-  output: ModelOutput;
-};
-
 // The prompt in Responses API shape: each frozen chunk a user message, the
 // volatile status a developer message after them. A prewarm prompt has no
 // status: the request ends with the frozen prefix.
-function toInput({ chunks, statusText }: PrewarmPrompt & { statusText?: string }): ResponseInput {
+function toInput({ chunks, openings = [], statusText }: PrewarmPrompt & { statusText?: string }): ResponseInput {
   return [
-    ...chunks.map(text => ({
-      role: 'user' as const,
-      content: [{ type: 'input_text' as const, text }],
-    })),
+    ...chunks.flatMap((text, index): ResponseInputItem[] => [
+      { role: 'user', content: [{ type: 'input_text', text }] },
+      ...openings.filter(opening => opening.afterChunk === index + 1).flatMap((opening): ResponseInputItem[] => [
+        { role: 'user', content: [{ type: 'input_text', text: `Opened: ${opening.definition.name}\n${opening.text}` }] },
+        { type: 'additional_tools', role: 'developer', tools: [opening.definition] },
+      ]),
+    ]),
     ...(statusText === undefined
       ? []
       : [
@@ -108,11 +95,11 @@ export type TurnClient = {
 // own history, see the header.
 type Continuation = { input: ResponseInput; previousResponseId?: string };
 
-function continueStateful(response: Response, outputs: FunctionCallOutputItem[]): Continuation {
+function continueStateful(response: Response, outputs: ResponseInputItem[]): Continuation {
   return { input: outputs, previousResponseId: response.id };
 }
 
-function continueStateless(input: ResponseInput, response: Response, outputs: FunctionCallOutputItem[]): Continuation {
+function continueStateless(input: ResponseInput, response: Response, outputs: ResponseInputItem[]): Continuation {
   const history = typeof input === 'string' ? [{ role: 'user' as const, content: input }] : input;
 
   return { input: [...history, ...(response.output as ResponseInputItem[]), ...outputs] };
@@ -160,7 +147,7 @@ export async function runTurn({
       throw new Error(`OpenAI response ${response.id} contains no function calls`);
     }
 
-    const outputs: FunctionCallOutputItem[] = [];
+    const outputs: ResponseInputItem[] = [];
     let ended = false;
 
     for (const functionCall of functionCalls) {
@@ -171,30 +158,19 @@ export async function runTurn({
       });
 
       switch (outcome.kind) {
-        case 'sync':
+        case 'catalog':
           outputs.push({
-            type: 'function_call_output',
-            call_id: functionCall.call_id,
-            output: await toolResultToModelOutput(outcome.result, functionCall.name),
+            type: 'function_call_output', call_id: functionCall.call_id,
+            output: outcome.attachment ? [
+              { type: 'input_text', text: outcome.text },
+              outcome.attachment.kind === 'image'
+                ? { type: 'input_image', image_url: outcome.attachment.url, detail: 'auto' }
+                : { type: 'input_file', file_url: outcome.attachment.url },
+            ] : outcome.text,
           });
-          break;
-
-        case 'async':
-          outputs.push({
-            type: 'function_call_output',
-            call_id: functionCall.call_id,
-            output: 'accepted',
-          });
-          break;
-
-        case 'rejected':
-          // The model must see the rejection and gets the chance to recover
-          // within the same turn.
-          outputs.push({
-            type: 'function_call_output',
-            call_id: functionCall.call_id,
-            output: `rejected: ${outcome.error}`,
-          });
+          if (outcome.definition) {
+            outputs.push({ type: 'additional_tools', role: 'developer', tools: [outcome.definition] });
+          }
           break;
 
         case 'end':
@@ -218,6 +194,7 @@ export async function runTurn({
 
 type PrewarmOptions = RequestHead & {
   prompt: PrewarmPrompt;
+  client?: TurnClient;
   metrics: ReturnType<typeof startLlmRequestMetrics>;
   cacheComparisonResponseId?: string | null;
 };
@@ -237,13 +214,13 @@ export async function prewarmPrompt({
   prompt,
   metrics,
   cacheComparisonResponseId,
+  client: scriptedClient,
 }: PrewarmOptions): Promise<string> {
   if (getLlmBackend().promptCache !== 'explicit') {
     throw new Error('prewarmPrompt requires a backend with an explicit prompt cache');
   }
 
-  const client = getOpenaiClient();
-
+  const client = scriptedClient ?? getOpenaiClient();
   const response = await metrics.measure(() =>
     client.responses.create({
       ...baseRequest({ model, instructions, tools }, toInput(prompt)),

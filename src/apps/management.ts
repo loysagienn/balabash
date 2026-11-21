@@ -10,11 +10,24 @@ import { prisma } from '../db/client.ts';
 import { WorkspacePathError, sanitizeRelPath } from '../workspace/files.ts';
 import { workspaceFilesDir } from '../workspace/layout.ts';
 import { APP_MANIFEST_FILENAME, readAppManifest } from './manifest.ts';
-import { registryMutation } from '../core/registry-events.ts';
+import { registryMutation, type RegistryAuthor } from '../core/registry-events.ts';
 import { ownerAppUrl } from './urls.ts';
 
+// What a rejected call ran into: the call itself (a malformed or reserved
+// value), a thing that is not there, or the state of things as they are.
+export type AppManagementErrorCode = 'bad_request' | 'not_found' | 'conflict';
+
 // The user-facing message of a rejected management call (a 400, not a 500).
-export class AppManagementError extends Error {}
+// The code is for an edge that tells the refusals apart (the capability
+// catalog, src/tree/workspace-apps.ts); the web API answers 400 to them all.
+export class AppManagementError extends Error {
+  code: AppManagementErrorCode;
+
+  constructor(message: string, code: AppManagementErrorCode = 'bad_request') {
+    super(message);
+    this.code = code;
+  }
+}
 
 const SLUG_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/;
 
@@ -152,7 +165,12 @@ function sanitizeAppPath(rawPath: unknown): string {
  * right now — publishing a broken manifest is refused with the reason (this
  * is the owner edge; the public edge never shows it).
  */
-export async function publishApp(workspaceId: string, rawPath: unknown, rawSlug: unknown): Promise<{ slug: string; path: string }> {
+export async function publishApp(
+  workspaceId: string,
+  rawPath: unknown,
+  rawSlug: unknown,
+  author: RegistryAuthor = { kind: 'user', workspaceId },
+): Promise<{ slug: string; path: string }> {
   const appPath = sanitizeAppPath(rawPath);
 
   const slug = typeof rawSlug === 'string' ? rawSlug.trim().toLowerCase() : '';
@@ -168,11 +186,11 @@ export async function publishApp(workspaceId: string, rawPath: unknown, rawSlug:
   const manifest = await readAppManifest(workspaceId, appPath);
 
   if (manifest.status === 'absent') {
-    throw new AppManagementError(`${appPath} is not an app: no ${APP_MANIFEST_FILENAME} there`);
+    throw new AppManagementError(`${appPath} is not an app: no ${APP_MANIFEST_FILENAME} there`, 'not_found');
   }
 
   if (manifest.status === 'invalid') {
-    throw new AppManagementError(`The app's manifest is broken — fix it before publishing: ${manifest.error}`);
+    throw new AppManagementError(`The app's manifest is broken — fix it before publishing: ${manifest.error}`, 'conflict');
   }
 
   const existingByPath = await prisma.appPublication.findUnique({ where: { workspaceId_path: { workspaceId, path: appPath } } });
@@ -182,6 +200,7 @@ export async function publishApp(workspaceId: string, rawPath: unknown, rawSlug:
       existingByPath.slug === slug
         ? `Already published as "${existingByPath.slug}"`
         : `Already published as "${existingByPath.slug}" — unpublish first to change the slug`,
+      'conflict',
     );
   }
 
@@ -191,12 +210,13 @@ export async function publishApp(workspaceId: string, rawPath: unknown, rawSlug:
     row = await registryMutation(async (tx, journal) => {
       const created = await tx.appPublication.create({ data: { workspaceId, path: appPath, slug } });
 
-      // Publication is the operator's act from the owner edge (the session API
-      // is the only caller): the event is authored by the user.
+      // The event is authored by whoever published: the operator from the
+      // owner edge (the session API — the default), or the thread that
+      // asked for it.
       await journal(
         'app.published',
         { path: created.path, slug: created.slug, name: manifest.manifest.name, description: manifest.manifest.description },
-        { kind: 'user', workspaceId },
+        author,
       );
 
       return created;
@@ -205,7 +225,7 @@ export async function publishApp(workspaceId: string, rawPath: unknown, rawSlug:
     // The slug unique constraint: taken by any workspace (including a racing
     // publish). The message deliberately does not say by whom.
     if (typeof error === 'object' && error !== null && (error as { code?: string }).code === 'P2002') {
-      throw new AppManagementError(`The slug "${slug}" is taken — pick another one`);
+      throw new AppManagementError(`The slug "${slug}" is taken — pick another one`, 'conflict');
     }
 
     throw error;
@@ -215,32 +235,37 @@ export async function publishApp(workspaceId: string, rawPath: unknown, rawSlug:
 }
 
 /** Unpublishes by path or by slug (whichever is given); ownership-scoped. */
-export async function unpublishApp(workspaceId: string, rawPath: unknown, rawSlug: unknown): Promise<{ slug: string; path: string }> {
+export async function unpublishApp(
+  workspaceId: string,
+  rawPath: unknown,
+  rawSlug: unknown,
+  author: RegistryAuthor = { kind: 'user', workspaceId },
+): Promise<{ slug: string; path: string }> {
   if (typeof rawSlug === 'string' && rawSlug.trim()) {
     const slug = rawSlug.trim().toLowerCase();
     const row = await prisma.appPublication.findUnique({ where: { slug } });
 
     if (!row || row.workspaceId !== workspaceId) {
-      throw new AppManagementError(`Nothing is published as "${slug}"`);
+      throw new AppManagementError(`Nothing is published as "${slug}"`, 'not_found');
     }
 
-    return unpublishRow(workspaceId, row);
+    return unpublishRow(row, author);
   }
 
   const appPath = sanitizeAppPath(rawPath);
   const row = await prisma.appPublication.findUnique({ where: { workspaceId_path: { workspaceId, path: appPath } } });
 
   if (!row) {
-    throw new AppManagementError(`${appPath} is not published`);
+    throw new AppManagementError(`${appPath} is not published`, 'not_found');
   }
 
-  return unpublishRow(workspaceId, row);
+  return unpublishRow(row, author);
 }
 
-async function unpublishRow(workspaceId: string, row: { id: string; slug: string; path: string }): Promise<{ slug: string; path: string }> {
+async function unpublishRow(row: { id: string; slug: string; path: string }, author: RegistryAuthor): Promise<{ slug: string; path: string }> {
   await registryMutation(async (tx, journal) => {
     await tx.appPublication.delete({ where: { id: row.id } });
-    await journal('app.unpublished', { path: row.path, slug: row.slug }, { kind: 'user', workspaceId });
+    await journal('app.unpublished', { path: row.path, slug: row.slug }, author);
   });
 
   return { slug: row.slug, path: row.path };

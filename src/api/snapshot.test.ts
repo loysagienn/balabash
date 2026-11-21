@@ -17,6 +17,7 @@
 import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { accessProfiles, coordinator as secretary } from '../../agents/access.ts';
 import { STAND_HOST, startStand } from '../test-support/stand.ts';
 import type { Stand } from '../test-support/stand.ts';
 import type { JsonObject, Thread } from '../core/contract.ts';
@@ -37,7 +38,6 @@ let readAgents: typeof import('./snapshot.ts')['readAgents'];
 let loadAgents: typeof import('../capabilities/agent-catalog.ts')['loadAgents'];
 let getAgents: typeof import('../capabilities/agent-catalog.ts')['getAgents'];
 let isRemoteAgent: typeof import('../capabilities/agent-catalog.ts')['isRemoteAgent'];
-let COORDINATOR_BUNDLE: typeof import('../coordinator/functions.ts')['COORDINATOR_BUNDLE'];
 let getEventsAfter: typeof import('../core/events.ts')['getEventsAfter'];
 let prisma: typeof import('../db/client.ts')['prisma'];
 let startedModel: typeof import('../projections/last-model.ts')['startedModel'];
@@ -49,7 +49,6 @@ before(async () => {
   ({ appendEvent } = await import('../core/append.ts'));
   ({ readMainLastMessage, readAgents } = await import('./snapshot.ts'));
   ({ loadAgents, getAgents, isRemoteAgent } = await import('../capabilities/agent-catalog.ts'));
-  ({ COORDINATOR_BUNDLE } = await import('../coordinator/functions.ts'));
   ({ getEventsAfter } = await import('../core/events.ts'));
   ({ prisma } = await import('../db/client.ts'));
   ({ startedModel } = await import('../projections/last-model.ts'));
@@ -177,9 +176,10 @@ describe('the agent catalog of the snapshot', () => {
     assert.equal(coordinator.name, 'coordinator');
     assert.equal(coordinator.sdk, 'openai');
     assert.equal(coordinator.model, MODEL);
-    assert.deepEqual(coordinator.tools, COORDINATOR_BUNDLE.declared);
+    assert.deepEqual(coordinator.nodes, secretary.access.nodes);
     assert.deepEqual(coordinator.agents, names);
-    assert.equal(coordinator.headless, false);
+    assert.deepEqual(coordinator.modes, ['user']);
+    assert.equal(coordinator.defaultMode, 'user');
     assert.equal(coordinator.effort, null);
     assert.equal(coordinator.defaultEffort, null);
     assert.equal(coordinator.lastModel, null);
@@ -199,9 +199,11 @@ describe('the agent catalog of the snapshot', () => {
       }
 
       assert.equal(agent.defaultEffort, 'high', agent.name);
-      assert.equal(agent.effort, decl.session?.effort ?? null, agent.name);
-      assert.equal(agent.model, decl.session?.model ?? null, agent.name);
+      assert.equal(agent.effort, decl.session.effort ?? null, agent.name);
+      assert.equal(agent.model, decl.session.model ?? null, agent.name);
       assert.equal(agent.sdk, decl.sdk, agent.name);
+      const profile = decl.access.profile ? accessProfiles[decl.access.profile] : undefined;
+      assert.deepEqual(agent.nodes, [...new Set([...(profile?.nodes ?? []), ...(decl.access.nodes ?? [])])]);
     }
   });
 

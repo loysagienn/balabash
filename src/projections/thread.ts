@@ -44,20 +44,23 @@ export type ThreadCompletionFields = {
   summary?: ThreadSummary;
   title?: string;
   description?: string;
+  projectId?: string;
 };
 
 // What thread.completed carries besides the terminal itself: the summary,
-// the retrospective description and the one-time title correction (the
-// event stays the immutable fact — thread.started keeps the starting title
-// forever; the row is a projection of the current state). A field absent
-// from the payload is absent from the result: the row keeps its value.
+// the retrospective description, the one-time title correction and the
+// project the work turned out to concern (the event stays the immutable
+// fact — thread.started keeps the starting title and project forever; the
+// row is a projection of the current state). A field absent from the
+// payload is absent from the result: the row keeps its value.
 export function threadCompletionFields(payload: JsonObject): ThreadCompletionFields {
-  const { summary, title, description } = payload;
+  const { summary, title, description, projectId } = payload;
 
   return {
     ...(isSummary(summary) ? { summary } : {}),
     ...(typeof title === 'string' && title.trim() ? { title: title.trim() } : {}),
     ...(typeof description === 'string' ? { description } : {}),
+    ...(typeof projectId === 'string' && projectId ? { projectId } : {}),
   };
 }
 

@@ -2,8 +2,9 @@
 // hooks: a child's thread.started spawns through the hook; a delivered
 // event rises the run lazily when the hook allows — and so does
 // thread.interrupt, which after a restart finds no run in memory for a
-// remote thread and must still reach its facade; a routed terminal aborts
-// and drops the run.
+// remote thread and must still reach its facade; a schedule.fired of a task
+// that does not wake is not delivered; a routed terminal aborts and drops
+// the run.
 //
 // Run: npm test  (node:test, native type stripping — no build needed).
 
@@ -127,6 +128,25 @@ describe('the thread router', () => {
     assert.ok(log.includes(`rise ${local}`));
     assert.ok(!log.includes(`interrupt ${local}`));
     assert.equal(runs.getRun(local), null);
+  });
+
+  test('a schedule.fired of a task that does not wake stays in the log and starts nothing', async () => {
+    const remote = await startChild({ remote: true });
+
+    await until(() => Boolean(runs.getRun(remote)), 'the spawn');
+
+    const fired = (payload: Record<string, unknown>) =>
+      appendEvent({ type: 'schedule.fired', actor: 'system', workspaceId: stand.workspaceId, threadId: null, targetThreadId: remote, payload: { slug: 'digest', name: 'Digest', ...payload } });
+
+    await fired({ note: 'waits', wake: false });
+    await fired({ note: 'wakes', wake: true });
+    // An event written before the flag existed wakes.
+    await fired({ note: 'old' });
+    await until(() => (accepted.get(remote) ?? []).some(event => event.payload.note === 'old'), 'the last firing');
+    assert.deepEqual(
+      (accepted.get(remote) ?? []).filter(event => event.type === 'schedule.fired').map(event => event.payload.note),
+      ['wakes', 'old'],
+    );
   });
 
   test('a routed terminal aborts and drops the run', async () => {

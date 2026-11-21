@@ -67,7 +67,7 @@ const fmt = (n: number): string => n.toLocaleString('en-US');
 
 loadAgents();
 
-const sessionAgents = getAgents().filter((agent): agent is AgentDeclaration => !isRemoteAgent(agent) && Boolean(agent.session));
+const sessionAgents = getAgents().filter((agent): agent is AgentDeclaration => !isRemoteAgent(agent));
 const normalize = (text: string) => text.replace(/\s+/g, ' ').trim();
 
 function agentByPrompt(prompt: string, sdk: 'claude' | 'codex'): AgentDeclaration | null {
@@ -77,7 +77,7 @@ function agentByPrompt(prompt: string, sdk: 'claude' | 'codex'): AgentDeclaratio
   let best: { agent: AgentDeclaration; length: number } | null = null;
 
   for (const agent of sessionAgents.filter(agent => agent.sdk === sdk)) {
-    const instructions = normalize(agent.session!.instructions);
+    const instructions = normalize(agent.session.instructions);
     const probe = instructions.slice(0, Math.min(instructions.length, 160));
 
     if (probe.length >= 40 && text.startsWith(probe) && (!best || probe.length > best.length)) {
@@ -687,8 +687,7 @@ function attribute(measure: Measure, journal: Map<string, { agent: string; threa
 }
 
 // Balabash's own Claude project directories: the agents' cwds under data/
-// and the repository root (the scheduler's cwd — shared with the operator's
-// own sessions there, hence the attribution by content).
+// and the repository root for historical sessions, attributed by content.
 async function claudeTranscripts(): Promise<string[]> {
   const prefixes = [
     `${claudeProjectDirName(path.resolve('data', 'workspace'))}-`,
@@ -862,7 +861,9 @@ function renderClaude(entry: Attributed, measure: ClaudeMeasure): string {
 
   sections.push(
     [
-      `## Deferred tools (${measure.deferred.length}; names only, loaded through ToolSearch)`,
+      `## Deferred tool inventory (${measure.deferred.length} names in the CLI attachment)`,
+      '',
+      'The catalog mod filters the names shown to the model. Compare the rendered deferred_tools_delta and request shape for prompt occupancy.',
       '',
       `- native (${native.length}): ${native.join(', ') || '—'}`,
       ...[...byServer.entries()].map(([server, count]) => `- mcp__${server}__ (${count}): ${mcp.filter(name => name.startsWith(`mcp__${server}__`)).map(name => name.slice(`mcp__${server}__`.length)).join(', ')}`),
@@ -1020,9 +1021,7 @@ if (sessionArg) {
 
   console.log(`[measure-context] ${candidates.length} sessions in the stores (${stats.length} Claude transcripts, ${rollouts.length} Codex rollouts); ${selected.length} newest per agent measured, ${skipped} skipped (older, unattributed or without a recorded first request)`);
 
-  // Every repository agent, run()-based ones included: their sessions are
-  // attributed by the journal or by their agent-state directory.
-  const missing = getAgents().filter(agent => !isRemoteAgent(agent)).map(agent => agent.name).filter(name => !selected.some(entry => entry.agent === name));
+  const missing = sessionAgents.map(agent => agent.name).filter(name => !selected.some(entry => entry.agent === name));
 
   if (missing.length) {
     console.log(`[measure-context] no session found for: ${missing.join(', ')}`);
@@ -1085,7 +1084,7 @@ if (!sessionArg) {
     '',
     'The newest session of each agent: the first request\'s tokens (usage) and the sizes in chars of its parts — our prompt, the text the SDK adds around it (Claude: the dynamic block; Codex: its own system prompt and appendices), the reminders or environment context in the user turn, the tool definitions. Details per agent in the files beside.',
     '',
-    table(['agent', 'sdk', 'session', 'date', 'first-request tokens', 'Balabash prompt', 'SDK-added text (dynamic block / Codex prompt)', 'reminders / environment', 'tool defs', 'tools', 'deferred', 'skills'], summaryRows),
+    table(['agent', 'sdk', 'session', 'date', 'first-request tokens', 'Balabash prompt', 'SDK-added text (dynamic block / Codex prompt)', 'reminders / environment', 'tool defs', 'tools', 'deferred inventory', 'skills'], summaryRows),
     '',
   ].join('\n');
   const file = path.join(outDir, 'summary.md');

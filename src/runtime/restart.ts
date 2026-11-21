@@ -8,11 +8,11 @@
 //   journal's last session.state; a thread between turns is no obstacle —
 //   it keeps its SDK session and its run resumes after the restart,
 //   src/capabilities/resume-runs.ts; a remote agent's thread — the mirror
-//   of a session elsewhere, no run here — never blocks); force skips this
-//   wait and cuts the turns in flight, their threads resume with a note,
+//   of a session elsewhere, no run here — never blocks),
 // - no coordinator turn in flight (injected — the in-memory truth; a pure
 //   "quiet log" heuristic would kill a turn mid-inference and lose the
 //   reply, because the lazy rise cannot replay it),
+// - programs, commands and remote engine work have settled,
 // - 20s of log quiet as a buffer against updates already inside an adapter
 //   but not yet appended.
 //
@@ -21,6 +21,8 @@
 // a request too), addressing the requester thread — the dead-target redirect
 // delivers it to the main thread when the requester already finished.
 
+import type { CallAuthor } from '../core/contract.ts';
+import { restartRequester } from '../utils/restart-requester.ts';
 import { readFile, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import { appendEvent } from '../core/append.ts';
@@ -51,9 +53,8 @@ type PendingRestart = {
   workspaceId: string | null;
   threadId: string | null;
   reason: string;
-  // The agent of the requesting thread, as the request names it.
+  // Who requested the restart, as the request names it.
   requestedBy: string | null;
-  force: boolean;
   requestedAt: Date;
   notified: boolean;
   // What the newest poll found in the way — every workspace's threads with
@@ -61,7 +62,8 @@ type PendingRestart = {
   waiting: {
     threads: { id: string; title: string | null; agent: string; workspaceId: string }[];
     secretaryTurn: boolean;
-    workspaceJob: boolean;
+    programWork: boolean;
+    remoteWork: boolean;
     logQuiet: boolean;
   } | null;
 };
@@ -78,7 +80,7 @@ export function getPendingRestart(workspaceId: string): PendingRestartView | nul
     return null;
   }
 
-  const { seq, reason, requestedAt, requestedBy, threadId, force, waiting } = pending;
+  const { seq, reason, requestedAt, requestedBy, threadId, waiting } = pending;
   const own = pending.workspaceId === workspaceId;
 
   return {
@@ -88,17 +90,35 @@ export function getPendingRestart(workspaceId: string): PendingRestartView | nul
     requestedAt,
     requestedBy: own ? requestedBy : null,
     threadId: own ? threadId : null,
-    force,
     waiting: waiting
       ? {
           threads: waiting.threads.filter(thread => thread.workspaceId === workspaceId).map(({ id, title, agent }) => ({ id, title, agent })),
           otherThreads: waiting.threads.filter(thread => thread.workspaceId !== workspaceId).length,
           secretaryTurn: waiting.secretaryTurn,
-          workspaceJob: waiting.workspaceJob,
+          programWork: waiting.programWork,
+          remoteWork: waiting.remoteWork,
           logQuiet: waiting.logQuiet,
         }
       : null,
   };
+}
+
+// The request of a restart: the event is the request and the log is its
+// audit trail; the module's consumer picks it up and waits for the window.
+// Written on behalf of the requesting thread, which gets the completion.
+export async function requestRestart(request: {
+  workspaceId: string;
+  threadId: string;
+  reason: string;
+  author: CallAuthor;
+}): Promise<void> {
+  await appendEvent({
+    type: SYSTEM_RESTART_REQUESTED,
+    ...request.author,
+    workspaceId: request.workspaceId,
+    threadId: request.threadId,
+    payload: { reason: request.reason },
+  });
 }
 
 async function readRollbackMarker(): Promise<{ at?: string; reason?: string } | null> {
@@ -191,24 +211,20 @@ type RestartModuleHooks = {
   // In-memory truth about coordinator turns in flight — injected by the
   // composition root (the runtime does not know the coordinator, §3).
   isBusy(): boolean;
-  // In-memory truth about workspace jobs (kind 'command' scheduled tasks) in
-  // flight — injected likewise (the runtime does not know the schedule
-  // module). Jobs do not survive a restart, so the safe window waits for
-  // them; force skips the wait and the shutdown sweep kills their process
-  // groups.
-  hasActiveJobs(): boolean;
+  // Runs of programs, their calls and commands, and settlement of scheduled runs.
+  hasProgramWork(): boolean;
   // In-memory truth about the remote engine (src/remote): a verb of a
   // driver in flight or an inbound wake not yet served. Its state is
   // durable and a replay after the restart is safe, but a verb half-way
   // through is better finished than repeated; the safe window waits.
-  hasRemoteWork?(): boolean;
+  hasRemoteWork(): boolean;
   // Graceful shutdown ending in process.exit(RESTART_EXIT_CODE).
   onRestartWindow(): Promise<void>;
   // How often the safe window is polled; the tests shorten it.
   pollIntervalMs?: number;
 };
 
-export function startRestartModule({ isBusy, hasActiveJobs, hasRemoteWork, onRestartWindow, pollIntervalMs = POLL_INTERVAL_MS }: RestartModuleHooks): Consumer {
+export function startRestartModule({ isBusy, hasProgramWork, hasRemoteWork, onRestartWindow, pollIntervalMs = POLL_INTERVAL_MS }: RestartModuleHooks): Consumer {
   let exiting = false;
 
   const notifyLongPending = async (current: PendingRestart, blockedBy: string[]): Promise<void> => {
@@ -243,9 +259,7 @@ export function startRestartModule({ isBusy, hasActiveJobs, hasRemoteWork, onRes
       return;
     }
 
-    // Agent turns in flight hold the window; force does not wait for them —
-    // the restart cuts them off and their threads resume with a note.
-    const busyThreads = current.force ? [] : await listBusyRunThreads();
+    const busyThreads = await listBusyRunThreads();
     const blockedBy: string[] = [];
 
     if (busyThreads.length) {
@@ -263,14 +277,16 @@ export function startRestartModule({ isBusy, hasActiveJobs, hasRemoteWork, onRes
       blockedBy.push('a secretary turn in flight');
     }
 
-    const workspaceJob = hasActiveJobs();
+    const programWork = hasProgramWork();
 
-    if (workspaceJob) {
-      blockedBy.push('a workspace job still running');
+    if (programWork) {
+      blockedBy.push('programs and commands to finish');
     }
 
-    if (hasRemoteWork?.()) {
-      blockedBy.push('a remote thread’s command in flight');
+    const remoteWork = hasRemoteWork();
+
+    if (remoteWork) {
+      blockedBy.push('the remote engine to finish pending work');
     }
 
     const quietSeconds = await getLogQuietSeconds();
@@ -283,7 +299,8 @@ export function startRestartModule({ isBusy, hasActiveJobs, hasRemoteWork, onRes
     current.waiting = {
       threads: busyThreads.map(thread => ({ id: thread.id, title: thread.title, agent: thread.agent, workspaceId: thread.workspaceId })),
       secretaryTurn,
-      workspaceJob,
+      programWork,
+      remoteWork,
       logQuiet,
     };
 
@@ -316,21 +333,18 @@ export function startRestartModule({ isBusy, hasActiveJobs, hasRemoteWork, onRes
         return;
       }
 
-      const force = event.payload.force === true || (pending?.force ?? false);
-
       pending = {
         seq: event.seq,
         workspaceId: event.workspaceId,
         threadId: event.threadId,
         reason: typeof event.payload.reason === 'string' ? event.payload.reason : 'restart',
-        requestedBy: typeof event.payload.requestedBy === 'string' ? event.payload.requestedBy : null,
-        force,
+        requestedBy: restartRequester(event),
         requestedAt: event.createdAt,
         notified: false,
         waiting: null,
       };
 
-      console.log(`[restart] pending (seq=${event.seq}${force ? ', force' : ''}): ${pending.reason}`);
+      console.log(`[restart] pending (seq=${event.seq}): ${pending.reason}`);
     },
   });
 

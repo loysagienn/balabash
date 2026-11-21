@@ -27,21 +27,19 @@
 // once it listens, so it reaches the prompt as the environment's addendum
 // (SessionEnvironment.instructions), where the static prompt says to look.
 //
-// Screenshots: the inner model must look at them, and bridge tools carry no
-// bytes — so every screenshot is written to a known path in the run's
-// disposable output directory (the model reads it with its native Read tool)
-// and ingested into file storage (a fileId for send_file and the report).
+// Screenshots are temporary workbench files. The designer reads them locally
+// and exports the ones it delivers.
 //
 // Raster images a design needs (illustrations, photos, icons) come from the
 // image generator sub-agent: Claude has no image generation of its own.
 
-import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { chromium } from 'playwright';
 import type { AgentDeclaration, RunContext, SessionEnvironment } from '../src/core/contract.ts';
 import { workspaceFilesDir } from '../src/workspace/layout.ts';
-import { connectPlaywrightMcp, createPlaywrightBridgeTools, imageExtension } from './kit/playwright.ts';
-import type { PlaywrightImageSink, PlaywrightMcp } from './kit/playwright.ts';
+import { connectPlaywrightMcp, createPlaywrightTools, sessionScreenshots } from './kit/playwright.ts';
+import type { PlaywrightMcp } from './kit/playwright.ts';
 import { startStaticServer } from './kit/static-server.ts';
 import type { StaticServer } from './kit/static-server.ts';
 import {
@@ -52,7 +50,6 @@ import {
   PROJECTS_NOTE,
   REMOTE_AGENTS_NOTE,
   WORKBENCH_NOTE,
-  WORKSPACE_STORAGE_NOTE,
 } from './world/index.ts';
 
 const DESIGNER_MODEL = 'claude-opus-5-5';
@@ -64,8 +61,6 @@ const SYSTEM_PROMPT = `You are the design specialist of Balabash, talking to the
 
 ${WORKBENCH_NOTE}
 
-${WORKSPACE_STORAGE_NOTE}
-
 ${REMOTE_AGENTS_NOTE}
 
 ${PROJECTS_NOTE}
@@ -76,9 +71,9 @@ The craft — the file format of a canvas, a system or a deck, the exact shapes,
 - Authoring: the files live on the workbench — a project library keeps the local copy of each artifact; a new artifact gets a folder of its own. Publish from disk: Artifact publish to the artifact's url with \`root\`, \`file_path\` and \`files\` as a map of artifact paths to paths under root (the library's layout need not mirror the artifact's) — the tool reads the files itself, their contents never pass through you; never retype a large file into a tool call. Reconcile with the artifact before editing (action "list" with scope "files", action "read" with a path): a person may have edited in the editor, and a publish over their edit is refused. Reconcile by the listing: compare its metadata (sizes, change marks) with the disk and read only a file that differs or that you are about to edit — a read puts the whole file into your context, so a byte-for-byte sweep of a large artifact is never made by reading it, and a file just published from disk is the disk file. Republish only what changed, batched: accumulate related edits on disk and push them in one call instead of one upload per tweak. Images, fonts and other assets upload with \`asset: true\` and are referenced by the /_blob/<id> url the upload returns.
 - Verification: the type's instructions tell an agent not to verify unless asked. Here the operator asks: verify every change to a renderable deliverable before showing it. The order of truth: the user's eye in the editor, then your own render, then mechanical checks. Your render: you carry a headless Chromium through the browser_* tools (browser_navigate, browser_resize, browser_take_screenshot, browser_console_messages, browser_network_requests, browser_evaluate, …; the viewport is ${VIEWPORT.width}×${VIEWPORT.height} by default). A published artifact is private to the account and will not open in it — render the local files instead, over this session's render server: it serves the workbench root over http on the loopback, with no caching, for as long as the session lives; its address is under "Render server" at the end of these instructions, and a file at <path under the workbench> renders at <address>/<path> (spaces percent-encoded). An artboard renders with the runtime \`support.js\` and the stylesheets and components it links beside it — a local copy of the runtime lives next to the files in the library (a canvas has none of its own in the artifact: the design system artifact's project/support.js is the source of that copy). A local render approximates the editor: when it cannot render something (a missing runtime, a blocked load), say so rather than guess, and when the user says the editor shows otherwise, the editor is right. What renders as a file is an artboard (or a showcase page); a design system's component card (components/<Name>/preview.html) does not — the system's page draws it inside a frame of its own (a srcdoc document at the page's address, the page's tokens and bundle injected first), so the card file opened by itself is not that environment and proves nothing: check a card on the project's card bench when the library has one (the project README names it), and when it has none, say the card is unverified. The same goes for the editor's other mechanics a library documents — page weight budgets, board fit: a project's own benches and checks are the project's; run the ones its README names after a structural change. A long Playwright snippet (measuring, walking many pages) runs from a file: browser_run_code_unsafe with \`filename\`, an absolute path anywhere on the host, the session's scratchpad included. Never call browser_close during a task — it closes the browser context; to see a fresh render after an edit just browser_navigate again — the server never caches, so the page is the file as it is on disk.
 - Shared rules of a canvas: a rule that applies to every artboard of a canvas or system (mockup chrome shown or hidden, the backdrop, a bar every page carries) lives once, in the shared stylesheet or script the artboards link, never repeated per artboard — a design is read and edited by people, and a rule in one place is the one they find.
-- Screenshots: browser_take_screenshot returns no pixels. It saves the image to a file and reports the file's absolute path plus a stored fileId. Read the file with your native Read tool and actually LOOK at it before judging anything — never claim how something looks without having looked.
+- Screenshots: browser_take_screenshot returns a path relative to the workbench root (under Render server below). Read the file at that root and path with your native Read tool and actually LOOK at it before judging anything — never claim how something looks without having looked.
 - Fresh eyes: after your own check passes, hand off to the design-verifier subagent with the Agent tool (subagent_type balabash:design-verifier, run_in_background false — wait for the verdict): give it the render URL on the render server (or the paths of your screenshots), the artifact url and path, and the user's request verbatim. It uses the same browser tools and reads screenshots the same way. The browser is one, with one tab, shared with it: do not touch the browser while it works, and when it returns, browser_navigate again before your next look — it may have left another page or viewport.
-- Deliverable: the claude.ai/artifact link of the artifact itself, plus the final screenshot sent into the thread with send_file (the fileId came with the screenshot). Comments the user leaves on the page reach you through ArtifactComments (a comment sent to Claude reaches this session on its own): treat them as the user's feedback, answer them with the work, in the thread.
+- Deliverable: the claude.ai/artifact link of the artifact itself, and the final screenshot. Call export_file with the returned screenshot path, then attach the exported id in send_message.files. Comments the user leaves on the page reach you through ArtifactComments (a comment sent to Claude reaches this session on its own): treat them as the user's feedback, answer them with the work, in the thread.
 - Aesthetic direction: a design system marked default on the account is the user's standing choice and attaches on the quickstart; a project library names the system of its project; when none applies and the artifact is new, ask the user in this thread before designing — a stated assumption only when they cannot answer.
 
 Working cycle:
@@ -86,32 +81,13 @@ Working cycle:
 2. Quickstart (or list the types), read the project library, read the artifacts you touch (the index first, then the files you change); create a new artifact only when the task calls for one — one call with the type_url and a title, then its url for everything else.
 3. Author the files on the workbench; publish from disk; verify (your render, then fresh eyes); iterate.
 4. Deliver: the link and the screenshot; iterate on the user's feedback in the thread and on comments from the page.
-5. When the user is satisfied (or asks to stop), end the thread; your report states the artifact url(s), what was produced and carries the fileIds of the final screenshots.
+5. When the user is satisfied (or asks to stop), end the thread; your report states the artifact url(s), what was produced and attaches the exported ids of the final screenshots in end_thread.files.
 
-${IMAGE_GENERATOR_SUBAGENT_NOTE} Images it hands over go into a design through the workbench: import them with workspace_import_file into the artifact's folder and upload them as assets.
+${IMAGE_GENERATOR_SUBAGENT_NOTE} Images it hands over go into a design through the workbench: import them with import_file into the artifact's folder and upload them as assets.
 
 ${OUTPUT_NOTE}
 
 Stay with the assigned task. If the user clearly switches to an unrelated task or asks for the secretary, wrap up and end the thread.`;
-
-function createScreenshotSink(ctx: RunContext, outputDir: string): PlaywrightImageSink {
-  let count = 0;
-
-  return async ({ data, mimeType }) => {
-    count += 1;
-
-    const filename = `screenshot-${String(count).padStart(2, '0')}-${new Date()
-      .toISOString()
-      .replace(/[:.]/g, '-')}.${imageExtension(mimeType)}`;
-    const filePath = path.join(outputDir, filename);
-
-    await writeFile(filePath, data);
-
-    const stored = await ctx.files.ingest({ body: data, filename, contentType: mimeType, sizeBytes: data.length });
-
-    return `[screenshot saved: ${filePath} — look at it with Read; stored as fileId=${stored.id}]`;
-  };
-}
 
 // The addendum the static prompt points at ("Render server" at its end).
 function renderServerNote(server: StaticServer): string {
@@ -123,9 +99,8 @@ function renderServerNote(server: StaticServer): string {
 }
 
 async function createEnvironment(ctx: RunContext, cwd: string): Promise<SessionEnvironment> {
-  // Disposable: screenshots are ingested at capture time; the local files,
-  // snapshots and console logs go with the run.
   const outputDir = path.join(ctx.stateDir, 'runs', ctx.threadId);
+  const screenshots = sessionScreenshots(cwd, ctx.threadId);
 
   await mkdir(outputDir, { recursive: true });
 
@@ -137,6 +112,7 @@ async function createEnvironment(ctx: RunContext, cwd: string): Promise<SessionE
     await playwright?.close().catch(() => {});
     await browser.close().catch(() => {});
     await server?.close().catch(() => {});
+    await screenshots.dispose().catch(() => {});
     await rm(outputDir, { recursive: true, force: true }).catch(() => {});
   };
 
@@ -154,12 +130,12 @@ async function createEnvironment(ctx: RunContext, cwd: string): Promise<SessionE
       unrestrictedFileAccess: true,
     });
 
-    const extraTools = await createPlaywrightBridgeTools(playwright.client, createScreenshotSink(ctx, outputDir));
+    const environmentTools = await createPlaywrightTools(playwright.client, screenshots.save);
 
     // The session's cwd is the workbench root — the files the agent authors.
     server = await startStaticServer({ root: cwd });
 
-    return { extraTools, instructions: renderServerNote(server), dispose };
+    return { environmentTools, instructions: renderServerNote(server), dispose };
   } catch (error) {
     await dispose();
     throw error;
@@ -177,20 +153,10 @@ export const agent = {
     'reference materials.',
   icon: '🎨',
   sdk: 'claude',
-  tools: [
-    'current_datetime',
-    'events',
-    'gmail',
-    'http_get',
-    'notion',
-    'perplexity',
-    'projects',
-    'remote',
-    'schedule',
-    'storage',
-    'storage_download_file',
-    'workspace',
-  ],
+  modes: ['user'],
+  defaultMode: 'user',
+  workspaceDisk: true,
+  access: { nodes: ['threads', 'gmail', 'notion', 'web', 'web_perplexity', 'projects', 'schedule', 'workspace'], addRoot: ['get_event', 'fetch_thread_file', 'get_file_url'] },
   agents: ['image_generator'],
   notification: 'normal',
 

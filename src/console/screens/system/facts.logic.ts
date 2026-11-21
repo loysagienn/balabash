@@ -7,6 +7,7 @@
 // Restarts card shows. Pure, tested.
 
 import type { MachineView, PendingRestartView, ProcessVersionView, ProcessView, SystemResponse } from '../../../api/contract.ts';
+import { restartRequester } from '../../../utils/restart-requester.ts';
 import type { Event } from '../../../core/contract.ts';
 import { byteLabel, byteShareLabel, countOf, dateTimeLabel, durationLabel, plural, timeOfDay } from '../../lib/format/index.ts';
 import type { IconName } from '../../ui/Icon/icons.ts';
@@ -134,10 +135,10 @@ export function processUptimeWords(startedAt: Date, now: Date): string {
   return `${durationLabel(now.getTime() - startedAt.getTime())} · since ${dateTimeLabel(startedAt, now)}`;
 }
 
-// "4 live · 1 workspace job" — the runs alive in the process, every
+// "4 live · 1 program" — the runs alive in the process, every
 // workspace's (the sidebar counts this workspace's active threads instead).
-export function sessionsWords(process: Pick<ProcessView, 'liveSessions' | 'workspaceJobs'>): string {
-  return `${process.liveSessions} live · ${countOf(process.workspaceJobs, 'workspace job')}`;
+export function sessionsWords(process: Pick<ProcessView, 'liveSessions' | 'runningPrograms'>): string {
+  return `${process.liveSessions} live · ${countOf(process.runningPrograms, 'program')}`;
 }
 
 export type VersionWords = {
@@ -184,10 +185,10 @@ export type RestartNote = {
   tail: string;
 };
 
-// The request as the note needs it: who asked and when, whether forced,
+// The request as the note needs it: who asked and when,
 // whether it is this workspace's own (another workspace's request has no
 // requester to name).
-export type RestartSource = { requestedBy: string | null; requestedAt: Date; force: boolean; own: boolean };
+export type RestartSource = { requestedBy: string | null; requestedAt: Date; own: boolean };
 
 function waitWords(waiting: NonNullable<PendingRestartView['waiting']>): string {
   const reasons: string[] = [];
@@ -195,8 +196,11 @@ function waitWords(waiting: NonNullable<PendingRestartView['waiting']>): string 
   if (waiting.secretaryTurn) {
     reasons.push('a secretary turn to end');
   }
-  if (waiting.workspaceJob) {
-    reasons.push('a workspace job to end');
+  if (waiting.programWork) {
+    reasons.push('programs and commands to finish');
+  }
+  if (waiting.remoteWork) {
+    reasons.push('the remote engine to finish pending work');
   }
   if (!waiting.logQuiet) {
     reasons.push('the log to go quiet');
@@ -221,7 +225,7 @@ function waitWords(waiting: NonNullable<PendingRestartView['waiting']>): string 
 // yet; null — no poll yet).
 export function restartNote(request: RestartSource, waiting: PendingRestartView['waiting'] | undefined, now: Date): RestartNote {
   const when = dateTimeLabel(request.requestedAt, now);
-  const lead = `${request.own ? `Requested by ${request.requestedBy ?? 'the operator'}` : 'Requested from another workspace'} at ${when}${request.force ? ' · force' : ''}`;
+  const lead = `${request.own ? `Requested by ${request.requestedBy ?? 'the operator'}` : 'Requested from another workspace'} at ${when}`;
 
   if (!waiting) {
     return { lead, threads: [], tail: ' · checking the safe window' };
@@ -233,9 +237,8 @@ export function restartNote(request: RestartSource, waiting: PendingRestartView[
 // The request event of the store as the note's input.
 export function requestOf(event: Event): RestartSource {
   return {
-    requestedBy: typeof event.payload.requestedBy === 'string' ? event.payload.requestedBy : null,
+    requestedBy: restartRequester(event),
     requestedAt: event.createdAt,
-    force: event.payload.force === true,
     own: true,
   };
 }
@@ -254,7 +257,7 @@ export function pendingOf(log: readonly Event[], pending: PendingRestartView | n
 
   if (pending && typeof pending.seq === 'number' && (completed === null || BigInt(pending.seq) > completed)) {
     return {
-      request: { requestedBy: pending.requestedBy, requestedAt: pending.requestedAt, force: pending.force, own: pending.own !== false },
+      request: { requestedBy: pending.requestedBy, requestedAt: pending.requestedAt, own: pending.own !== false },
       waiting: pending.waiting,
     };
   }
@@ -355,7 +358,7 @@ export function logRows(log: readonly Event[]): LogRow[] {
 
     if (event.type === 'system.restart.requested') {
       const pending = completed === null || event.seq > completed;
-      const who = text(event.payload.requestedBy) ?? 'the operator';
+      const who = restartRequester(event) ?? 'the operator';
 
       rows.push({
         ...base,
@@ -374,7 +377,7 @@ export function logRows(log: readonly Event[]): LogRow[] {
       const request = typeof event.payload.requestSeq === 'number' ? requests.get(event.payload.requestSeq) : undefined;
       const rolledBack = event.payload.rolledBack === true;
       const failed = list(event.payload.migrationsFailed);
-      const who = request ? (text(request.payload.requestedBy) ?? 'the operator') : null;
+      const who = request ? (restartRequester(request) ?? 'the operator') : null;
       const parts = [who ? `requested by ${who}` : null, rolledBack ? `rolled back to the last good bundle${text(event.payload.rollbackReason) ? ` (${event.payload.rollbackReason})` : ''}` : null, failed.length ? `migrations failed: ${clip(failed.join(', '), 120)}` : null].filter((part): part is string => part !== null);
 
       rows.push({

@@ -1,16 +1,11 @@
-// OAuthClientProvider implementations for the MCP SDK (§10). Two flavours:
-// the interactive provider drives a browser flow (consent URL capture, PKCE
-// verifier on the connection row), the transport provider serves stored
-// tokens to background MCP clients, refreshes them ahead of expiry and saves
-// refreshes, but refuses to start an interactive flow. Tokens and PKCE state
-// live only in the connections table — never in the log (§2 ставка 4).
+// Browser consent through the MCP SDK and access-token refresh for catalog
+// calls. Tokens and PKCE state live in the connections table.
 
 import crypto from 'node:crypto';
 import {
   discoverOAuthServerInfo,
   refreshAuthorization,
   selectResourceURL,
-  UnauthorizedError,
 } from '@modelcontextprotocol/sdk/client/auth.js';
 import type { OAuthClientProvider, OAuthServerInfo } from '@modelcontextprotocol/sdk/client/auth.js';
 import type {
@@ -20,6 +15,7 @@ import type {
 } from '@modelcontextprotocol/sdk/shared/auth.js';
 import { Prisma } from '../../../prisma-generated/client.ts';
 import { prisma } from '../../db/client.ts';
+import { getAccountService } from './services.ts';
 import { config } from '../../config/index.ts';
 import type { ConnectionModel } from '../../../prisma-generated/models.ts';
 
@@ -107,6 +103,15 @@ async function loadClientInformation(server: string): Promise<OAuthClientInforma
   return (client?.clientInformation as OAuthClientInformationMixed | null) ?? undefined;
 }
 
+// A provider may forget a dynamic client while its issuer and redirect URI
+// stay the same. Discard only the registration actually refused: another
+// sign-in may already have saved its replacement.
+async function forgetRefusedClient(server: string, info: OAuthClientInformationMixed): Promise<void> {
+  await prisma.oauthClient.deleteMany({
+    where: { server, clientInformation: { equals: info as unknown as Prisma.InputJsonValue } },
+  });
+}
+
 // Persists the client registration obtained via DCR; manual clients are
 // provisioned through the operator form into the same table.
 async function saveClientInformation(server: string, info: OAuthClientInformationMixed): Promise<void> {
@@ -130,6 +135,7 @@ export function createInteractiveAuthProvider(
   authorizationRedirect: { url: URL | null },
   authorizationServer?: string,
 ): OAuthClientProvider {
+  let offered: OAuthClientInformationMixed | undefined;
   return {
     get redirectUrl() {
       return redirectUrl();
@@ -174,7 +180,17 @@ export function createInteractiveAuthProvider(
         return undefined;
       }
 
+      offered = info;
       return info;
+    },
+    invalidateCredentials: async scope => {
+      if (
+        offered &&
+        (scope === 'all' || scope === 'client') &&
+        getAccountService(connection.server)?.clientRegistration === 'dynamic'
+      ) {
+        await forgetRefusedClient(connection.server, offered);
+      }
     },
     saveClientInformation: info =>
       saveClientInformation(
@@ -232,24 +248,38 @@ export function createInteractiveAuthProvider(
 
 // Refresh this long before the access token actually expires.
 const REFRESH_LEEWAY_MS = 60 * 1000;
-// A failed proactive refresh is not retried for this long: the SDK's own
-// 401-driven refresh runs right after it and must not be preceded by a
-// second identical attempt on every request.
+// A failed refresh ahead of expiry is not retried for this long while the
+// stored token can still go out: a transport's own 401-driven refresh runs
+// right after it and must not be preceded by a second identical attempt on
+// every request, and a direct call hands out the token that still lives.
 const REFRESH_FAILURE_BACKOFF_MS = 30 * 1000;
 
 function stampObtainedAt(tokens: OAuthTokens): StoredTokens {
   return { ...tokens, obtained_at: new Date().toISOString() };
 }
 
-function isExpiringSoon(tokens: StoredTokens): boolean {
+// The instant the access token stops being good, when the tokens say it.
+function expiresAt(tokens: StoredTokens): number | null {
   const obtainedAt = typeof tokens.obtained_at === 'string' ? Date.parse(tokens.obtained_at) : NaN;
   const expiresIn = Number(tokens.expires_in);
 
   if (Number.isNaN(obtainedAt) || !Number.isFinite(expiresIn) || expiresIn <= 0) {
-    return false;
+    return null;
   }
 
-  return Date.now() >= obtainedAt + expiresIn * 1000 - REFRESH_LEEWAY_MS;
+  return obtainedAt + expiresIn * 1000;
+}
+
+function isExpiringSoon(tokens: StoredTokens): boolean {
+  const expiry = expiresAt(tokens);
+
+  return expiry !== null && Date.now() >= expiry - REFRESH_LEEWAY_MS;
+}
+
+function isExpired(tokens: StoredTokens): boolean {
+  const expiry = expiresAt(tokens);
+
+  return expiry !== null && Date.now() >= expiry;
 }
 
 // Authorization server discovery per resource server url, once per process:
@@ -270,33 +300,73 @@ function discoverServerInfo(serverUrl: string): Promise<OAuthServerInfo> {
   return pending;
 }
 
-// One refresh at a time per connection row: concurrent requests of one
-// account share the in-flight attempt instead of each asking the provider.
-const refreshesInFlight = new Map<string, Promise<StoredTokens>>();
-const refreshFailedAt = new Map<string, number>();
+// The authorization of a connection is gone: there is no stored token, or
+// the provider no longer honors the refresh token. Only the user's consent
+// brings it back.
+export class AuthorizationLostError extends Error {
+  override name = 'AuthorizationLostError';
+}
+
+// The OAuth client of the installation cannot act for the service: there is
+// none, or the provider refuses the client itself (a wrong client secret, a
+// client deleted at the provider). No account of the service renews its
+// token until the client is put right — and nothing is said by it about the
+// authorization of any account.
+export class OauthClientError extends Error {
+  override name = 'OauthClientError';
+}
+
+// What the provider answered the exchange (RFC 6749 §5.2), as the SDK names
+// the classes of its OAuth errors: a refresh token it no longer honors, a
+// client it does not accept. Anything else — no answer, a server error — is
+// left as it is: the authorization itself may be fine.
+function refreshFailure(error: unknown): unknown {
+  const name = error instanceof Error ? error.constructor.name : '';
+  const said = error instanceof Error && error.message ? error.message : name;
+
+  if (name === 'InvalidGrantError') {
+    return new AuthorizationLostError(`the provider no longer honors the refresh token (${said})`);
+  }
+
+  if (name === 'InvalidClientError' || name === 'UnauthorizedClientError') {
+    return new OauthClientError(`the provider refused the OAuth client of the installation (${said})`);
+  }
+
+  return error;
+}
 
 async function refreshStoredTokens(
   connection: { id: string; server: string },
   serverUrl: string,
-  provider: OAuthClientProvider,
   refreshToken: string,
 ): Promise<StoredTokens> {
   const info = await discoverServerInfo(serverUrl);
   const clientInformation = await loadClientInformation(connection.server);
 
+  const dynamic = getAccountService(connection.server)?.clientRegistration === 'dynamic';
   if (!clientInformation) {
-    throw new Error('no OAuth client information');
+    if (dynamic) throw new AuthorizationLostError('the dynamic client is missing; a new sign-in registers it');
+    throw new OauthClientError('the installation holds no OAuth client of the service');
   }
 
-  const resource = await selectResourceURL(serverUrl, provider, info.resourceMetadata);
-  const fresh = stampObtainedAt(
-    await refreshAuthorization(info.authorizationServerUrl, {
+  // No provider of ours sets a rule of its own on the resource.
+  const resource = await selectResourceURL(serverUrl, {} as OAuthClientProvider, info.resourceMetadata);
+  let tokens: OAuthTokens;
+  try {
+    tokens = await refreshAuthorization(info.authorizationServerUrl, {
       metadata: info.authorizationServerMetadata,
       clientInformation,
       refreshToken,
       resource,
-    }),
-  );
+    });
+  } catch (error) {
+    if (dynamic && refreshFailure(error) instanceof OauthClientError) {
+      await forgetRefusedClient(connection.server, clientInformation);
+      throw new AuthorizationLostError('the provider refused the dynamic client; a new sign-in registers it');
+    }
+    throw error;
+  }
+  const fresh = stampObtainedAt(tokens);
 
   await prisma.connection.update({
     where: { id: connection.id },
@@ -306,103 +376,105 @@ async function refreshStoredTokens(
   return fresh;
 }
 
-// Used by background MCP transports. It serves stored tokens (refreshing
-// them ahead of expiry) and saves the SDK's own refreshes, but deliberately
-// refuses to start an interactive flow. Addressed by connection row id: one
-// provider serves exactly one account's tokens. serverUrl is the resource
-// server the tokens are for — the anchor of authorization server discovery.
-export function createTransportAuthProvider(
+// The one exchange of a refresh token, for a transport and for a direct call
+// alike. One at a time per connection row: concurrent requests of one
+// account share the attempt in flight instead of each asking the provider.
+// A failure says what it means (refreshFailure) and is remembered: while the
+// stored token still lives, the next request does not repeat the attempt.
+const refreshesInFlight = new Map<string, Promise<StoredTokens>>();
+const refreshFailedAt = new Map<string, number>();
+
+function exchangeRefreshToken(
   connection: { id: string; server: string },
   serverUrl: string,
-): OAuthClientProvider {
-  const getConnection = () => prisma.connection.findUnique({ where: { id: connection.id } });
+  refreshToken: string,
+): Promise<StoredTokens> {
+  let inFlight = refreshesInFlight.get(connection.id);
 
-  const provider: OAuthClientProvider = {
-    get redirectUrl() {
-      return redirectUrl();
-    },
-    get clientMetadata() {
-      return clientMetadata();
-    },
-    state: () => crypto.randomBytes(24).toString('base64url'),
-    clientInformation: () => loadClientInformation(connection.server),
-    saveClientInformation: info => saveClientInformation(connection.server, info),
-    tokens: async () => {
-      const row = await getConnection();
+  if (!inFlight) {
+    inFlight = refreshStoredTokens(connection, serverUrl, refreshToken)
+      .then(
+        fresh => {
+          refreshFailedAt.delete(connection.id);
 
-      if (!row || row.status !== 'connected' || !isObject(row.tokens)) {
-        return undefined;
-      }
+          return fresh;
+        },
+        error => {
+          refreshFailedAt.set(connection.id, Date.now());
 
-      const stored = row.tokens as StoredTokens;
+          throw refreshFailure(error);
+        },
+      )
+      .finally(() => {
+        refreshesInFlight.delete(connection.id);
+      });
+    refreshesInFlight.set(connection.id, inFlight);
+  }
 
-      if (!stored.refresh_token || !isExpiringSoon(stored)) {
-        return stored;
-      }
+  return inFlight;
+}
 
-      const failedAt = refreshFailedAt.get(connection.id);
+function refreshFailedLately(connectionId: string): boolean {
+  const failedAt = refreshFailedAt.get(connectionId);
 
-      if (failedAt !== undefined && Date.now() - failedAt < REFRESH_FAILURE_BACKOFF_MS) {
-        return stored;
-      }
+  return failedAt !== undefined && Date.now() - failedAt < REFRESH_FAILURE_BACKOFF_MS;
+}
 
-      let inFlight = refreshesInFlight.get(connection.id);
+// The access token of a connected account for a call made straight to the
+// provider's API — no MCP transport in between to refresh on a 401, so the
+// token handed out is good now or the call is refused here. A token about
+// to expire is renewed first; when that exchange got no answer, a token that
+// still lives goes out as it is, and an expired one does not. `rejected`
+// names a token the provider has just refused: the answer is a newer one —
+// the stored token when another call has renewed it meanwhile, a refreshed
+// one otherwise. An account that cannot act any more throws
+// AuthorizationLostError, a client of the installation the provider does not
+// accept — OauthClientError; an exchange the authorization server did not
+// answer throws whatever it threw — the authorization itself may be fine.
+export async function connectionAccessToken(
+  connection: { id: string; server: string },
+  serverUrl: string,
+  rejected?: string,
+): Promise<string> {
+  const row = await prisma.connection.findUnique({
+    where: { id: connection.id },
+    select: { status: true, tokens: true },
+  });
+  const stored = row?.status === 'connected' && isObject(row.tokens) ? (row.tokens as StoredTokens) : null;
 
-      if (!inFlight) {
-        inFlight = refreshStoredTokens(connection, serverUrl, provider, stored.refresh_token).finally(() => {
-          refreshesInFlight.delete(connection.id);
-        });
-        refreshesInFlight.set(connection.id, inFlight);
-      }
+  if (!stored?.access_token) {
+    throw new AuthorizationLostError('the account holds no access token');
+  }
 
-      try {
-        const fresh = await inFlight;
+  if (rejected !== undefined) {
+    if (stored.access_token !== rejected) {
+      return stored.access_token;
+    }
 
-        refreshFailedAt.delete(connection.id);
-        console.log(`[oauth] refreshed "${connection.server}" tokens ahead of expiry (connection ${connection.id})`);
+    if (!stored.refresh_token) {
+      throw new AuthorizationLostError('the provider refused the access token and the account holds no refresh token');
+    }
 
-        return fresh;
-      } catch (error) {
-        // The stored tokens go out as they are: the resource server's 401
-        // hands the SDK its own refresh attempt, and a refresh token the
-        // provider no longer honors ends in re-authorization there.
-        refreshFailedAt.set(connection.id, Date.now());
-        console.warn(
-          `[oauth] proactive refresh of "${connection.server}" tokens failed (connection ${connection.id}): ${error instanceof Error ? error.message : String(error)}`,
-        );
+    return (await exchangeRefreshToken(connection, serverUrl, stored.refresh_token)).access_token;
+  }
 
-        return stored;
-      }
-    },
-    saveTokens: async tokens => {
-      const row = await getConnection();
+  if (!stored.refresh_token || !isExpiringSoon(stored)) {
+    return stored.access_token;
+  }
 
-      if (row) {
-        await prisma.connection.update({
-          where: { id: row.id },
-          data: { tokens: stampObtainedAt(tokens) as unknown as Prisma.InputJsonValue },
-        });
-      }
-    },
-    redirectToAuthorization: () => {
-      throw new UnauthorizedError('User authorization is required');
-    },
-    saveCodeVerifier: () => {},
-    codeVerifier: () => {
-      throw new Error('Background connection cannot run an authorization flow');
-    },
-    invalidateCredentials: async scope => {
-      if (scope !== 'all' && scope !== 'tokens') {
-        return;
-      }
+  const alive = !isExpired(stored);
 
-      const row = await getConnection();
+  if (alive && refreshFailedLately(connection.id)) {
+    return stored.access_token;
+  }
 
-      if (row) {
-        await prisma.connection.update({ where: { id: row.id }, data: { tokens: Prisma.DbNull } });
-      }
-    },
-  };
+  try {
+    return (await exchangeRefreshToken(connection, serverUrl, stored.refresh_token)).access_token;
+  } catch (error) {
+    if (alive && !(error instanceof AuthorizationLostError) && !(error instanceof OauthClientError)) {
+      return stored.access_token;
+    }
 
-  return provider;
+    throw error;
+  }
 }

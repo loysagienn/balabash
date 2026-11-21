@@ -31,6 +31,9 @@ type FileMetadata = {
 type IngestFileInput = FileMetadata & {
   body: StorageBody;
   cacheControl?: string | null;
+  // Cuts the upload of the bytes. Once storage has taken them the file is
+  // recorded whatever the signal says: a file is stored or it is not.
+  signal?: AbortSignal;
 };
 
 type DownloadUrlOptions = {
@@ -41,7 +44,28 @@ const normalizeObjectKey = (objectKey: string) => {
   return objectKey.replace(/^\/+/, '');
 };
 
-const MAX_OBJECT_KEY_FILENAME_LENGTH = 200;
+// In bytes of UTF-8: the last segment of the key is a file name on the disk
+// of the local driver, and a file system counts a name in bytes (255).
+const MAX_OBJECT_KEY_FILENAME_BYTES = 200;
+const MAX_OBJECT_KEY_EXTENSION_BYTES = 20;
+
+// The longest beginning of the text that fits the bytes, cut at a character.
+const fitBytes = (text: string, maxBytes: number): string => {
+  let fitted = '';
+  let bytes = 0;
+
+  for (const character of text) {
+    bytes += Buffer.byteLength(character);
+
+    if (bytes > maxBytes) {
+      break;
+    }
+
+    fitted += character;
+  }
+
+  return fitted;
+};
 
 // Turns a user-supplied filename into a safe last path segment for the object
 // key. That final segment is what Telegram shows when it fetches the file by
@@ -61,14 +85,14 @@ const sanitizeObjectKeyFilename = (originalFilename: string): string | null => {
     return null;
   }
 
-  if (cleaned.length <= MAX_OBJECT_KEY_FILENAME_LENGTH) {
+  if (Buffer.byteLength(cleaned) <= MAX_OBJECT_KEY_FILENAME_BYTES) {
     return cleaned;
   }
 
   // Preserve the extension while shortening.
   const dotIndex = cleaned.lastIndexOf('.');
-  const extension = dotIndex > 0 ? cleaned.slice(dotIndex).slice(0, 20) : '';
-  return cleaned.slice(0, MAX_OBJECT_KEY_FILENAME_LENGTH - extension.length) + extension;
+  const extension = dotIndex > 0 ? fitBytes(cleaned.slice(dotIndex), MAX_OBJECT_KEY_EXTENSION_BYTES) : '';
+  return fitBytes(cleaned, MAX_OBJECT_KEY_FILENAME_BYTES - Buffer.byteLength(extension)) + extension;
 };
 
 // The object key ends with the (sanitized) original filename so a client that
@@ -140,36 +164,73 @@ export async function ingestFile({
   width,
   height,
   cacheControl,
+  signal,
 }: IngestFileInput): Promise<FileRef> {
   const bucket = getStorageBucket();
   const objectKey = buildObjectKey(scope, originalFilename);
 
-  const uploadResult = await uploadStorageObject({
-    bucket,
-    key: objectKey,
-    body,
-    contentType,
-    contentLength: sizeBytes ?? undefined,
-    cacheControl,
-  });
+  // An object without a row is bytes nobody can name: whichever of the two
+  // steps fails, the object does not stay behind.
+  const dropObject = () =>
+    deleteStorageObject(bucket, objectKey).catch((error: unknown) => {
+      console.warn(`[files] the object "${objectKey}" could not be dropped after a failed ingest:`, error);
+    });
 
-  const fileRecord = await prisma.file.create({
-    data: {
+  let uploadResult: Awaited<ReturnType<typeof uploadStorageObject>>;
+
+  try {
+    uploadResult = await uploadStorageObject({
       bucket,
-      objectKey,
-      workspaceId: workspaceId ?? undefined,
-      contentType: contentType ?? undefined,
-      sizeBytes: uploadResult.sizeBytes ?? sizeBytes ?? undefined,
-      etag: uploadResult.ETag ?? undefined,
-      originalFilename: originalFilename ?? undefined,
-      scope: scope ?? undefined,
-      width: width ?? undefined,
-      height: height ?? undefined,
-      uploadedAt: new Date(),
-    },
-  });
+      key: objectKey,
+      body,
+      contentType,
+      contentLength: sizeBytes ?? undefined,
+      cacheControl,
+      signal,
+    });
+  } catch (error) {
+    // An upload that failed on this side — cut by the signal, its answer
+    // lost — may have landed on the other.
+    await dropObject();
 
-  return toFileRef(fileRecord);
+    throw error;
+  }
+
+  try {
+    const fileRecord = await prisma.file.create({
+      data: {
+        bucket,
+        objectKey,
+        workspaceId: workspaceId ?? undefined,
+        contentType: contentType ?? undefined,
+        sizeBytes: uploadResult.sizeBytes ?? sizeBytes ?? undefined,
+        etag: uploadResult.ETag ?? undefined,
+        originalFilename: originalFilename ?? undefined,
+        scope: scope ?? undefined,
+        width: width ?? undefined,
+        height: height ?? undefined,
+        uploadedAt: new Date(),
+      },
+    });
+
+    return toFileRef(fileRecord);
+  } catch (error) {
+    // The failure of an insert does not say whether the row was written (a
+    // connection lost on the commit): the key does. A row that is there is
+    // the stored file; without one the object goes; when even that cannot
+    // be told, the object stays — it may be a file's content.
+    const written = await prisma.file.findUnique({ where: { bucket_objectKey: { bucket, objectKey } } }).catch(() => undefined);
+
+    if (written) {
+      return toFileRef(written);
+    }
+
+    if (written === null) {
+      await dropObject();
+    }
+
+    throw error;
+  }
 }
 
 export async function getFile(fileId: string): Promise<FileRef> {
@@ -232,3 +293,6 @@ export async function deleteFile(fileId: string): Promise<void> {
   await deleteStorageObject(file.bucket, normalizeObjectKey(file.objectKey));
   await prisma.file.delete({ where: { id: fileId } });
 }
+
+// Storage operations shared by installation extensions at boot and in offline tools.
+export const extensionFilesApi = { ingest: ingestFile, get: getFile, getDownloadUrl: getFileDownloadUrl, open: openFileContent };

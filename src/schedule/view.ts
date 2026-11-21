@@ -8,9 +8,13 @@ import type { TaskView } from '../api/contract.ts';
 import type { TaskRecord } from '../core/event-types.ts';
 import { cronNextRun } from './cron.ts';
 
-function safeNextRun(cron: string, now: Date): Date | null {
+export function nextRunAt(row: ScheduledTaskModel, now: Date): Date | null {
+  if (!row.cron) {
+    return row.at;
+  }
+
   try {
-    return cronNextRun(cron, now);
+    return cronNextRun(row.cron, now);
   } catch {
     return null;
   }
@@ -26,13 +30,12 @@ export function taskView(row: ScheduledTaskModel, now: Date): TaskView {
     cron: row.cron,
     at: row.at,
     note: row.note,
-    command: row.command,
-    cwd: row.cwd,
+    code: row.code,
     timeoutMs: row.timeoutMs,
-    reportOnSuccess: row.reportOnSuccess,
+    wake: row.wake,
     createdBy: row.createdBy,
     createdAt: row.createdAt,
-    nextRunAt: row.cron ? safeNextRun(row.cron, now) : row.at,
+    nextRunAt: nextRunAt(row, now),
   };
 }
 

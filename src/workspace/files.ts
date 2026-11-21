@@ -1,10 +1,10 @@
 // The core of the workspace FILE AREA: the one place that owns the path
 // boundary, the content-type table and the primitives over
 // data/workspace/<workspaceId>/files. All consumers go through here — the
-// workbench tool servers (tools/workspace.ts, tools/workspace_files.ts) and
+// catalog capabilities and
 // the web API (/api/workspace/*) — so the boundary check exists exactly once.
 // The currency is a relative path inside the file area; the workspaceId comes from
-// the caller's identity (MCP _meta / web session), never from model- or
+// the caller's identity (catalog caller / web session), never from model- or
 // user-supplied parameters.
 //
 // Reads NEVER provision: no mkdir, and workspace.sqlite is only opened when
@@ -115,6 +115,8 @@ export const CONTENT_TYPES_BY_EXTENSION: Record<string, string> = {
   '.hpp': 'text/x-c++',
   '.xml': 'application/xml',
   '.pdf': 'application/pdf',
+  '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
   '.potx': 'application/vnd.openxmlformats-officedocument.presentationml.template',
   '.ppsx': 'application/vnd.openxmlformats-officedocument.presentationml.slideshow',
@@ -148,7 +150,7 @@ export type FileMeta = { title: string | null; description: string | null };
 // The tiny metadata operations run on short-lived in-process handles under
 // the platform's lock policy (src/workspace/sqlite.ts: short synchronous
 // busy slices, asynchronous retries — the event loop stays free while a
-// foreign writer holds the database). Bulk SQL (data_query) runs in a child
+// foreign writer holds the database). Bulk SQL (workspace_query) runs in a child
 // process instead — DatabaseSync is synchronous and must not block the
 // single app process on a heavy query.
 
@@ -177,21 +179,30 @@ export function readMeta(db: DatabaseSync, relPath: string): FileMeta {
 // The write primitive of the metadata: annotating a file. A null keeps
 // the existing value (COALESCE) — callers update title and description
 // independently. The caller is responsible for the database existing (the
-// tools' ensureWorkspace provisions it).
+// tools' ensureWorkspace provisions it). The stamp is the moment of the
+// write, or the moment the caller gives, to the millisecond — the precision
+// the indexer compares it with the file's mtime by: a stamp of whole seconds
+// stood before a file written within the same second, and the indexer
+// annotated over it. A caller that must not be annotated over passes a
+// moment not older than the file.
 export function upsertMeta(
   dbPath: string,
   relPath: string,
   title: string | null,
   description: string | null,
+  stampedAt?: Date,
 ): Promise<FileMeta> {
+  // 'YYYY-MM-DD HH:MM:SS.sss' in UTC, the form of the default.
+  const stamp = stampedAt ? stampedAt.toISOString().replace('T', ' ').replace('Z', '') : null;
+
   return withWorkspaceDb(dbPath, db => {
     db.prepare(
-      "INSERT INTO _files (path, title, description, updated_at) VALUES (?, ?, ?, datetime('now')) " +
+      "INSERT INTO _files (path, title, description, updated_at) VALUES (?, ?, ?, COALESCE(?, strftime('%Y-%m-%d %H:%M:%f', 'now'))) " +
         'ON CONFLICT(path) DO UPDATE SET ' +
         'title = COALESCE(excluded.title, _files.title), ' +
         'description = COALESCE(excluded.description, _files.description), ' +
         'updated_at = excluded.updated_at',
-    ).run(relPath, title, description);
+    ).run(relPath, title, description, stamp);
 
     return readMeta(db, relPath);
   });
@@ -273,7 +284,8 @@ export async function readAnnotationTimes(workspaceId: string): Promise<Map<stri
     }>;
 
     for (const row of rows) {
-      // sqlite datetime('now') stores 'YYYY-MM-DD HH:MM:SS' in UTC.
+      // 'YYYY-MM-DD HH:MM:SS.sss' in UTC; a row stamped before the
+      // milliseconds carries whole seconds.
       const parsed = new Date(`${row.updated_at.replace(' ', 'T')}Z`);
 
       if (!Number.isNaN(parsed.getTime())) {

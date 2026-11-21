@@ -69,7 +69,7 @@ describe('GET /api/system', () => {
     assert.ok(body.process.startedAt instanceof Date);
     assert.ok(body.process.uptimeSeconds > 0);
     assert.ok(body.process.rssBytes > 0);
-    assert.deepEqual({ sessions: body.process.liveSessions, jobs: body.process.workspaceJobs }, { sessions: 0, jobs: 0 });
+    assert.deepEqual({ sessions: body.process.liveSessions, jobs: body.process.runningPrograms }, { sessions: 0, jobs: 0 });
     assert.equal(body.database.available, true);
     assert.ok((body.database.sizeBytes ?? 0) > 0);
     assert.equal(body.database.error, null);
@@ -225,6 +225,35 @@ describe('the restart in the way, as this workspace may see it', () => {
     }
   };
 
+  test('only pending remote work keeps a quiet process from restarting', async () => {
+    let remoteWork = true;
+    let opened = false;
+    const restarts = startRestartModule({
+      isBusy: () => false,
+      hasProgramWork: () => false,
+      hasRemoteWork: () => remoteWork,
+      onRestartWindow: async () => { opened = true; },
+      pollIntervalMs: 50,
+    });
+
+    try {
+      const request = await appendEvent({ type: 'system.restart.requested', actor: 'system', workspaceId: stand.workspaceId, threadId: stand.mainThreadId, payload: { reason: 'remote work' } });
+      assert.ok(request.written);
+      // Place the stand's events outside the quiet window.
+      await prisma.event.updateMany({ data: { createdAt: new Date(Date.now() - 60_000) } });
+      const waiting = await until(async () => {
+        const { pending } = (await stand.request('GET', '/api/system')).json<SystemResponse>().restart;
+        return pending?.seq === Number(request.event.seq) && pending.waiting?.logQuiet ? pending.waiting : null;
+      });
+      assert.deepEqual(waiting, { threads: [], otherThreads: 0, secretaryTurn: false, programWork: false, remoteWork: true, logQuiet: true });
+      assert.equal(opened, false);
+      remoteWork = false;
+      await until(async () => opened || null);
+    } finally {
+      restarts.stop();
+    }
+  });
+
   test('another workspace’s request is a bare fact — no reason, no requester, no thread — and its threads in the way a count; an own request names its own', async () => {
     const other = await prisma.workspace.create({ data: {} });
     const otherMain = await ensureMainThread(other.id);
@@ -232,13 +261,15 @@ describe('the restart in the way, as this workspace may see it', () => {
     // The safe window never opens: a secretary turn is always in flight.
     const restarts = startRestartModule({
       isBusy: () => true,
-      hasActiveJobs: () => false,
+      hasProgramWork: () => false,
+      hasRemoteWork: () => false,
       onRestartWindow: () => assert.fail('the window must not open'),
       pollIntervalMs: 50,
     });
 
     try {
-      const foreign = await appendEvent({ type: 'system.restart.requested', actor: 'system', workspaceId: other.id, threadId: foreignChild.id, payload: { reason: 'foreign confidential reason', requestedBy: 'engineer' } });
+      // Even a request from the former schema waits for the busy thread.
+      const foreign = await appendEvent({ type: 'system.restart.requested', actor: 'system', workspaceId: other.id, threadId: foreignChild.id, payload: { reason: 'foreign confidential reason', requestedBy: 'engineer', force: true } });
 
       assert.ok(foreign.written);
       const seen = await until(async () => {
@@ -249,16 +280,17 @@ describe('the restart in the way, as this workspace may see it', () => {
       });
 
       assert.deepEqual(
-        { own: seen.own, reason: seen.reason, requestedBy: seen.requestedBy, threadId: seen.threadId, force: seen.force, threads: seen.waiting?.threads, otherThreads: seen.waiting?.otherThreads, secretaryTurn: seen.waiting?.secretaryTurn },
-        { own: false, reason: null, requestedBy: null, threadId: null, force: false, threads: [], otherThreads: 1, secretaryTurn: true },
+        { own: seen.own, reason: seen.reason, requestedBy: seen.requestedBy, threadId: seen.threadId, threads: seen.waiting?.threads, otherThreads: seen.waiting?.otherThreads, secretaryTurn: seen.waiting?.secretaryTurn },
+        { own: false, reason: null, requestedBy: null, threadId: null, threads: [], otherThreads: 1, secretaryTurn: true },
       );
+      assert.ok(!('force' in seen));
       assert.ok(seen.requestedAt instanceof Date);
       assert.ok(!JSON.stringify(seen).includes('foreign confidential'));
 
       // The workspace's own request, blocked by the other workspace's thread
       // and by a child of its own: its words, its thread named, the other's counted.
       const ownChild = await startThread({ workspaceId: stand.workspaceId, parentThreadId: stand.mainThreadId, agent: 'engineer', title: 'own thread', actor: 'system' });
-      const own = await appendEvent({ type: 'system.restart.requested', actor: 'system', workspaceId: stand.workspaceId, threadId: stand.mainThreadId, payload: { reason: 'my build', requestedBy: 'engineer' } });
+      const own = await appendEvent({ type: 'system.restart.requested', actor: 'task', task: { slug: 'maintenance', runId: 'run-1' }, workspaceId: stand.workspaceId, threadId: stand.mainThreadId, payload: { reason: 'my build' } });
 
       assert.ok(own.written);
       const mine = await until(async () => {
@@ -270,7 +302,7 @@ describe('the restart in the way, as this workspace may see it', () => {
 
       assert.deepEqual(
         { own: mine.own, reason: mine.reason, requestedBy: mine.requestedBy, threadId: mine.threadId, threads: mine.waiting?.threads, otherThreads: mine.waiting?.otherThreads },
-        { own: true, reason: 'my build', requestedBy: 'engineer', threadId: stand.mainThreadId, threads: [{ id: ownChild.id, title: 'own thread', agent: 'engineer' }], otherThreads: 1 },
+        { own: true, reason: 'my build', requestedBy: 'task maintenance', threadId: stand.mainThreadId, threads: [{ id: ownChild.id, title: 'own thread', agent: 'engineer' }], otherThreads: 1 },
       );
     } finally {
       restarts.stop();

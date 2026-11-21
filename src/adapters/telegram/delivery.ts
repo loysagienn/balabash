@@ -263,7 +263,7 @@ export function startTelegramDelivery({ bot }: { bot: Bot }): Consumer {
       return;
     }
 
-    // A headless thread has no user surface by declaration: no topic, and
+    // A headless thread has no user surface: no topic, and
     // with no telegram_topics row every later delivery skips it naturally.
     // The agent talks to its parent; the coordinator relays what matters.
     if (event.payload.headless === true) {

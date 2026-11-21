@@ -1,201 +1,91 @@
-// In-process MCP bridge (§8.2): exposes the run's ToolsApi bundle plus the
-// agent's bridge-only tools to the inner SDK session. The bridge is a
-// pass-through, not a projection (§9): a live tool result goes to the inner
-// session exactly as the server produced it — raw MCP content, base64 and
-// isError included, nothing re-encoded or padded. Bridge-only tools follow
-// the birth contract (data or throw) and are shaped by the platform wrapper.
-
-import { McpServer, type RegisteredTool } from '@modelcontextprotocol/sdk/server/mcp.js';
-import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
+// The SDK takes a McpServer instance. Install the catalog handlers on its
+// protocol server so a schema refusal follows the same journaled path as a call.
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
-import type { JsonObject, SdkBridgeTool, ToolDefinition, ToolsApi } from '../../core/contract.ts';
-import { runToolHandler, toErrorResult } from '../../capabilities/tool-result.ts';
+import { grantedGuide, grantedVertex, ruleText, returnTypeText, type DescribeValue, type JsonValue } from '../../catalog/index.ts';
+import type { AgentPassport, JsonObject, SessionEnvironmentTool } from '../../core/contract.ts';
+import { catalogInstructions, grantKey, sampleOpenings } from '../catalog-context.ts';
+import { mcpCatalog, mcpError, registerCatalogHandlers } from '../catalog-mcp.ts';
+import { BRIDGE_SERVER } from '../sdk-mcp-config.ts';
 
-function getErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
+const RULE = 'Use mcp__balabash__describe to open a catalog entry. Call the opened capability as mcp__balabash__<name>. ' +
+  'If describe returns its definition as text, load the function with ToolSearch using select:mcp__balabash__<name>. ' +
+  'After context compaction, describe a capability again before calling it.';
 
-function inputSchema(parameters: Record<string, unknown>) {
-  return z.fromJSONSchema(parameters as never);
-}
-
-// The inner CLI surfaces a failed call's message only from text content
-// blocks and falls back to a literal "Unknown error" when there are none —
-// the platform's structured-only error shape (§9) would arrive illegible.
-// The bridge mirrors the structured message (details included) into a text
-// block for the inner session; the journal keeps the clean structured form.
-function withLegibleError(result: CallToolResult): CallToolResult {
-  if (!result.isError || result.content?.length) {
-    return result;
+export async function createClaudePort(agent: AgentPassport, workspaceId: string, threadId: string) {
+  const catalog = await mcpCatalog(agent, workspaceId, threadId);
+  const { grant } = catalog;
+  const tools: Tool[] = catalog.entries.map(({ tool, action }) =>
+    action ? { ...tool, _meta: { 'anthropic/alwaysLoad': true } } : tool);
+  function openingValue(opened: DescribeValue) {
+    if (opened.kind === 'node') return opened;
+    const leaf = grantedVertex(grant, opened.name);
+    if (leaf?.kind !== 'capability') throw new Error('Missing described capability');
+    // The CLI hook reads this companion data from the MCP result.
+    return {
+      ...opened, parent: leaf.parent.fullName, guide: leaf.parent.fullName ? grantedGuide(grant, leaf.parent) : [],
+      returns: returnTypeText(leaf), rules: leaf.inputRules.map(ruleText),
+    };
   }
-
-  const error = (result.structuredContent as { error?: { message?: unknown; details?: unknown } } | undefined)?.error;
-  const message = typeof error?.message === 'string' ? error.message : null;
-
-  if (!message) {
-    return result;
-  }
-
-  const details = error?.details !== undefined ? `\n${JSON.stringify(error.details)}` : '';
-
-  return { ...result, content: [{ type: 'text', text: `${message}${details}` }] };
-}
-
-type BridgeEntry = {
-  definition: ToolDefinition;
-  registered: RegisteredTool;
-};
-
-function definitionFingerprint(definition: ToolDefinition): string {
-  return JSON.stringify({ description: definition.description, parameters: definition.inputSchema });
-}
-
-export type BridgeServer = {
-  server: McpServer;
-  // Re-diff the exposed set against ToolsApi; serialized, never rejects.
-  syncTools: () => Promise<void>;
-};
-
-type BridgeOptions = {
-  tools: ToolsApi;
-  extraTools: SdkBridgeTool[];
-};
-
-export async function createBridgeServer({ tools, extraTools }: BridgeOptions): Promise<BridgeServer> {
-  const server = new McpServer({ name: 'balabash', version: '2.0.0' }, { capabilities: { tools: {} } });
-  const entries = new Map<string, BridgeEntry>();
-  const extraNames = new Set(extraTools.map(tool => tool.name));
-  const warnedNames = new Set<string>();
-
-  const warnOnce = (name: string, message: string) => {
-    if (!warnedNames.has(name)) {
-      warnedNames.add(name);
-      console.warn(`[sdk-bridge] ${message}`);
-    }
-  };
-
-  // Bridge-only tools are fixed for the session's lifetime and shadow
-  // same-named catalog tools. Their handlers follow the birth contract (data
-  // or throw); the platform wrapper shapes the structured result, errors
-  // included.
-  for (const tool of extraTools) {
-    server.registerTool(
-      tool.name,
-      { description: tool.description, inputSchema: inputSchema(tool.inputSchema) },
-      args => runToolHandler(() => tool.handler(args as JsonObject)).then(withLegibleError),
-    );
-  }
-
-  // Handlers dispatch by name at call time, so a definition update between
-  // syncs keeps working without re-registration. Pass-through: the live
-  // result goes to the inner session as-is; breakage of the call itself
-  // becomes the same structured error convert.
-  const callBridgeTool = async (name: string, args: JsonObject) => {
-    if (!entries.has(name)) {
-      throw new Error(`Tool "${name}" is no longer available`);
-    }
-
-    const result = await tools.call(name, args);
-
-    // The cast is the pass-through: the verbatim result crosses into the MCP
-    // SDK's stricter static shape unchanged (except the error-legibility
-    // mirror above).
-    return withLegibleError({ ...result, content: result.content ?? [] } as CallToolResult);
-  };
-
-  const listDesired = async (): Promise<Map<string, ToolDefinition>> => {
-    const desired = new Map<string, ToolDefinition>();
-
-    for (const definition of await tools.list()) {
-      if (extraNames.has(definition.name)) {
-        warnOnce(definition.name, `catalog tool "${definition.name}" is shadowed by a bridge tool and not exposed`);
-        continue;
+  return {
+    tools,
+    sampleOpenings: () => sampleOpenings(grant, catalog.connections, openingValue),
+    grantKey: grantKey(grant),
+    instructions: catalogInstructions(grant, RULE),
+    async call(name: string, input: JsonValue) {
+      const answer = await catalog.call(name, input);
+      if ('error' in answer) {
+        return mcpError(answer.error);
       }
-
-      desired.set(definition.name, definition);
-    }
-
-    return desired;
+      const value = answer.opened ? openingValue(answer.opened) : answer.value;
+      return { content: [{ type: 'text' as const, text: JSON.stringify(value) }] };
+    },
   };
+}
 
-  const registerCatalogTool = (name: string, next: ToolDefinition) => {
-    const registered = server.registerTool(
-      name,
-      { description: next.description, inputSchema: inputSchema(next.inputSchema) },
-      args => callBridgeTool(name, args as JsonObject).catch(error => withLegibleError(toErrorResult(error))),
-    );
-
-    entries.set(name, { definition: next, registered });
-  };
-
-  // A schema this MCP SDK cannot express must not kill the session: every
-  // register/update is isolated per tool, and a broken tool is skipped or
-  // hidden until its definition changes again.
-  const applyDesired = (desired: Map<string, ToolDefinition>) => {
-    // Snapshot: a changed definition re-registers under the same name, and a
-    // re-inserted key must not be revisited by this very loop.
-    for (const [name, entry] of [...entries]) {
-      const next = desired.get(name);
-
-      if (!next) {
-        if (entry.registered.enabled) {
-          entry.registered.disable();
-        }
-        continue;
-      }
-
-      desired.delete(name);
-
+export async function createClaudeBridge(agent: AgentPassport, workspaceId: string, threadId: string) {
+  let port = await createClaudePort(agent, workspaceId, threadId);
+  // Only the initial catalog survives compaction in the system prompt.
+  const instructions = port.instructions;
+  let contextInstructions = instructions;
+  let listChanged = false;
+  const server = new McpServer({ name: BRIDGE_SERVER, version: '2.0.0' }, { capabilities: { tools: { listChanged: true } } });
+  registerCatalogHandlers(server.server, () => port);
+  return {
+    server, instructions,
+    onCompact() {
+      contextInstructions = instructions;
+    },
+    async refresh(text: string) {
       try {
-        if (definitionFingerprint(entry.definition) !== definitionFingerprint(next)) {
-          // Not update(): the SDK's update() unconditionally treats
-          // paramsSchema as a raw Zod shape (objectFromShape), which mangles
-          // a real ZodObject into a broken validator — every later call of
-          // the tool then dies with "keyValidator._parse is not a function".
-          // Remove + fresh registration stays on the code path that handles
-          // a full schema correctly.
-          entry.registered.remove();
-          entries.delete(name);
-          registerCatalogTool(name, next);
-        } else if (!entry.registered.enabled) {
-          entry.registered.enable();
+        const next = await createClaudePort(agent, workspaceId, threadId);
+        if (next.grantKey !== port.grantKey) listChanged = true;
+        port = next;
+        if (listChanged) {
+          await server.server.sendToolListChanged();
+          listChanged = false;
         }
       } catch (error) {
-        console.error(`[sdk-bridge] failed to update bridge tool "${name}": ${getErrorMessage(error)}`);
-        // If re-registration failed after removal, the entry is already gone;
-        // a still-registered tool is hidden until its definition changes.
-        try {
-          entries.get(name)?.registered.disable();
-        } catch {
-          // A tool that cannot even be disabled is left as-is.
-        }
+        console.error(`[claude-catalog:${threadId}] refresh failed:`, error);
       }
-    }
-
-    for (const [name, next] of desired) {
-      try {
-        registerCatalogTool(name, next);
-      } catch (error) {
-        console.error(`[sdk-bridge] skipping bridge tool "${name}": ${getErrorMessage(error)}`);
-      }
-    }
+      if (contextInstructions === port.instructions) return text;
+      contextInstructions = port.instructions;
+      return `[Updated Balabash catalog — replaces the catalog section of your instructions]\n${port.instructions}\n\n${text}`;
+    },
   };
+}
 
-  // Serialized: concurrent syncs would race on registration. Errors are
-  // swallowed after logging, so the returned promise never rejects and the
-  // chain never sticks in a rejected state.
-  let syncChain = Promise.resolve();
-  const syncTools = (): Promise<void> => {
-    syncChain = syncChain
-      .then(async () => applyDesired(await listDesired()))
-      .catch(error => console.error(`[sdk-bridge] tool sync failed: ${getErrorMessage(error)}`));
-    return syncChain;
-  };
-
-  // The initial population is strict on purpose: per-tool errors are still
-  // skipped, but a catalog that cannot be listed at all fails the run start
-  // loudly instead of opening a session with no tools.
-  applyDesired(await listDesired());
-
-  return { server, syncTools };
+// Environment tools have their own namespace. The CLI can discover them
+// normally and the session journal records them alongside native tools.
+export function environmentServer(tools: SessionEnvironmentTool[]) {
+  const server = new McpServer({ name: 'environment', version: '1.0.0' });
+  for (const tool of tools) {
+    server.registerTool(tool.name, { description: tool.description, inputSchema: z.fromJSONSchema(tool.inputSchema as never) },
+      async args => {
+        const value = await tool.handler(args as JsonObject);
+        return { content: [{ type: 'text' as const, text: typeof value === 'string' ? value : JSON.stringify(value) }] };
+      });
+  }
+  return server;
 }

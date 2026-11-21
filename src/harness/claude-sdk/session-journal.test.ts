@@ -155,6 +155,9 @@ describe('mapSdkMessage', () => {
     assert.deepEqual(bridge, []);
     assert.deepEqual(mapSdkMessage(memory, toolResult('b1', 'accepted')), []);
     assert.deepEqual(mapSdkMessage(memory, toolResult('never-seen', 'x')), []);
+    const env = mapSdkMessage(memory, assistant([{ type: 'tool_use', id: 'pw', name: 'mcp__environment__browser_navigate', input: {} }]));
+    assert.deepEqual(types(env), ['session.tool.started']);
+    assert.deepEqual(types(mapSdkMessage(memory, toolResult('pw', 'Snapshot'))), ['session.tool.completed']);
 
     const todo = mapSdkMessage(
       memory,

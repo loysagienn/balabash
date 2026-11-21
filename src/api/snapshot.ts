@@ -22,12 +22,12 @@ import { listProjects, projectView } from '../projects/store.ts';
 import { listApps } from '../apps/management.ts';
 import { publicAppsBase } from '../apps/urls.ts';
 import { taskView } from '../schedule/view.ts';
-import { connectionView, listWorkspaceConnections } from '../capabilities/connections/index.ts';
-import { effectiveBundleServers, listUserAuthServers } from '../capabilities/tool-manager.ts';
+import { connectionView, listProvisionedOauthClients, listWorkspaceConnections } from '../capabilities/connections/index.ts';
+import { listAccountServices } from '../capabilities/connections/services.ts';
 import { readOpenSecretRequests } from '../capabilities/secret-requests.ts';
-import { getAgents, isRemoteAgent, type CatalogAgent } from '../capabilities/agent-catalog.ts';
-import { COORDINATOR_AGENT } from '../core/threads.ts';
-import { COORDINATOR_BUNDLE, COORDINATOR_DESCRIPTION } from '../coordinator/functions.ts';
+import { declaredNodes, getAgents, isRemoteAgent, startable } from '../capabilities/agent-catalog.ts';
+import { installationNamesFor } from '../tree/index.ts';
+import { coordinator } from '../../agents/access.ts';
 import { DEFAULT_EFFORT } from '../harness/default-effort.ts';
 import { config } from '../config/index.ts';
 import type { AgentDeclaration, RemoteAgentDeclaration } from '../core/contract.ts';
@@ -141,13 +141,10 @@ async function readConnections(workspaceId: string): Promise<ConnectionView[]> {
 }
 
 // The catalog of connectable services, with whether a manual OAuth client
-// is in place (one query over the oauth_clients rows of the manual ones).
+// is in place.
 async function readServices(): Promise<ServiceView[]> {
-  const servers = listUserAuthServers();
-  const manual = servers.filter(server => server.clientRegistration === 'manual').map(server => server.name);
-  const provisioned = new Set(
-    manual.length ? (await prisma.oauthClient.findMany({ where: { server: { in: manual } }, select: { server: true } })).map(row => row.server) : [],
-  );
+  const servers = listAccountServices();
+  const provisioned = await listProvisionedOauthClients();
 
   return servers.map(server => ({
     name: server.name,
@@ -183,18 +180,17 @@ async function readLastModels(workspaceId: string): Promise<Map<string, string |
   return models;
 }
 
-// A remote agent kind: the session runs in an external system — no tool
-// passport, no sub-agents, no model of ours; the options schema is the
-// system's, shown nowhere yet.
+// A remote kind runs in the external system with its own model and tools.
 function remoteAgentView(agent: RemoteAgentDeclaration): AgentView {
   return {
     name: agent.name,
     description: agent.description,
     icon: agent.icon ?? null,
     sdk: 'remote',
-    tools: [],
-    agents: [],
-    headless: false,
+    nodes: [],
+    agents: startable(agent.name).map(child => child.name),
+    modes: agent.modes,
+    defaultMode: agent.defaultMode,
     notification: agent.notification ?? null,
     model: null,
     effort: null,
@@ -209,12 +205,13 @@ function agentView(agent: AgentDeclaration, lastModel: string | null): AgentView
     description: agent.description,
     icon: agent.icon ?? null,
     sdk: agent.sdk,
-    tools: effectiveBundleServers(agent.tools),
-    agents: agent.agents ?? [],
-    headless: agent.headless ?? false,
+    nodes: [...declaredNodes(agent), ...installationNamesFor(agent)],
+    agents: startable(agent.name).map(child => child.name),
+    modes: agent.modes,
+    defaultMode: agent.defaultMode,
     notification: agent.notification ?? null,
-    model: agent.session?.model ?? null,
-    effort: agent.session?.effort ?? null,
+    model: agent.session.model ?? null,
+    effort: agent.session.effort ?? null,
     // Both SDK sessions run with the platform default when the declaration
     // names no effort (src/harness/default-effort.ts).
     defaultEffort: DEFAULT_EFFORT,
@@ -222,22 +219,17 @@ function agentView(agent: AgentDeclaration, lastModel: string | null): AgentView
   };
 }
 
-// The coordinator — the secretary of the main thread — is not a catalog
-// module (its loop is src/coordinator), so its view is built from its own
-// facts: the OpenAI backend and the model of the config, the tool servers of
-// its passport (with the extension servers its "projects" brings), every catalog agent as what it launches (its spawn functions
-// derive from the whole catalog). Its requests name no reasoning effort and
-// its turns journal no session.started — effort, defaultEffort and
-// lastModel stay null.
-function coordinatorView(catalog: CatalogAgent[]): AgentView {
+// The main thread runs the configured API model and journals no SDK session.
+function coordinatorView(): AgentView {
   return {
-    name: COORDINATOR_AGENT,
-    description: COORDINATOR_DESCRIPTION,
+    name: coordinator.name,
+    description: coordinator.description,
     icon: null,
     sdk: 'openai',
-    tools: effectiveBundleServers(COORDINATOR_BUNDLE.declared),
-    agents: catalog.map(agent => agent.name),
-    headless: false,
+    nodes: [...declaredNodes(coordinator), ...installationNamesFor(coordinator)],
+    agents: startable(coordinator.name).map(agent => agent.name),
+    modes: coordinator.modes,
+    defaultMode: coordinator.defaultMode,
     notification: null,
     model: config.mainModel,
     effort: null,
@@ -254,7 +246,7 @@ export async function readAgents(workspaceId: string): Promise<AgentView[]> {
   const lastModels = await readLastModels(workspaceId);
 
   return [
-    coordinatorView(catalog),
+    coordinatorView(),
     ...catalog.map(agent => (isRemoteAgent(agent) ? remoteAgentView(agent) : agentView(agent, lastModels.get(agent.name) ?? null))),
   ];
 }

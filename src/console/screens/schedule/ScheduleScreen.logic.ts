@@ -4,7 +4,7 @@
 // run — in a task's runs, in the log, as the last run of a row — and of
 // the task's own facts (timeout, who created it). Pure, tested.
 
-import type { JobRunStatus, JobRunView, JobTrigger, TaskView } from '../../../api/contract.ts';
+import type { ScheduleRunView, TaskView } from '../../../api/contract.ts';
 import type { IconName } from '../../ui/Icon/Icon.tsx';
 import type { StateName } from '../../ui/atoms/state.ts';
 import type { XpState } from '../../ui/Xp/Xp.tsx';
@@ -23,10 +23,8 @@ export function kindWords(kind: string): KindWords {
   switch (kind) {
     case 'note':
       return { label: 'reminder', icon: 'bell' };
-    case 'code':
-      return { label: 'code', icon: 'file-code' };
-    case 'command':
-      return { label: 'command', icon: 'square-terminal' };
+    case 'program':
+      return { label: 'program', icon: 'file-code' };
     default:
       return { label: kind, icon: 'calendar-clock' };
   }
@@ -146,15 +144,15 @@ export function createdWords(task: Pick<TaskView, 'createdBy' | 'createdAt'>, no
 }
 
 // The search looks through the name, the description, the slug, the
-// command and the note, case-insensitive.
-export function taskMatches(task: Pick<TaskView, 'name' | 'description' | 'slug' | 'command' | 'note'>, q: string | undefined): boolean {
+// code and the note, case-insensitive.
+export function taskMatches(task: Pick<TaskView, 'name' | 'description' | 'slug' | 'code' | 'note'>, q: string | undefined): boolean {
   const needle = q?.trim().toLowerCase();
 
   if (!needle) {
     return true;
   }
 
-  return [task.name, task.description, task.slug, task.command, task.note].some(text => text !== null && text.toLowerCase().includes(needle));
+  return [task.name, task.description, task.slug, task.code, task.note].some(text => text !== null && text.toLowerCase().includes(needle));
 }
 
 // The tasks in the order of the list: the ones with a next run first, the
@@ -174,7 +172,7 @@ export function orderTasks<T extends { nextRunAt: Date | null }>(tasks: T[]): T[
 
 export type TriggerName = 'scheduled' | 'one-off' | 'manual';
 
-export function triggerName(trigger: JobTrigger | string): TriggerName | string {
+export function triggerName(trigger: string): TriggerName | string {
   switch (trigger) {
     case 'cron':
       return 'scheduled';
@@ -213,7 +211,7 @@ export function runDuration(ms: number): string {
 
 // How long a run took, or has been going: the journaled duration, else
 // the span of its start and end, else the span to now.
-export function runLength(run: Pick<JobRunView, 'startedAt' | 'finishedAt' | 'durationMs'>, now: Date): number {
+export function runLength(run: Pick<ScheduleRunView, 'startedAt' | 'finishedAt' | 'durationMs'>, now: Date): number {
   if (run.durationMs !== null) {
     return run.durationMs;
   }
@@ -224,45 +222,33 @@ export function runLength(run: Pick<JobRunView, 'startedAt' | 'finishedAt' | 'du
 export type RunOutcome = {
   state: XpState;
   icon: IconName;
-  // "exit 0", "exit 127" — the exit code when the run ended by itself.
-  exit: string | null;
-  // "didn’t start", "timeout", "interrupted", "running" — what ended the
-  // run otherwise; null for a plain success or failure.
+  // "failed", "timeout", "interrupted", "running" — what ended the
+  // run; null for a successful run.
   end: string | null;
   endState?: 'run' | 'err' | 'off';
 };
 
-// The outcome of a run in the words of the design's rows: a success is a
-// check with its exit code, a failure a cross with its code, a timeout the
-// kill with the length it was allowed, a spawn error "didn’t start", a run
-// killed by a restart "interrupted", a run still going "running".
-export function runOutcome(run: Pick<JobRunView, 'status' | 'exitCode'>): RunOutcome {
-  const exit = run.exitCode !== null ? `exit ${run.exitCode}` : null;
-
-  switch (run.status as JobRunStatus) {
+// Run status as an icon and an outcome in the list.
+export function runOutcome(run: Pick<ScheduleRunView, 'status'>): RunOutcome {
+  switch (run.status) {
     case 'ok':
-      return { state: 'done', icon: 'circle-check', exit: exit ?? 'exit 0', end: null };
+      return { state: 'done', icon: 'circle-check', end: null };
     case 'failed':
-      return { state: 'err', icon: 'circle-x', exit, end: 'failed', endState: 'err' };
+      return { state: 'err', icon: 'circle-x', end: 'failed', endState: 'err' };
     case 'timeout':
-      return { state: 'err', icon: 'circle-x', exit, end: 'timeout', endState: 'err' };
-    case 'spawn_error':
-      return { state: 'err', icon: 'circle-x', exit, end: 'didn’t start', endState: 'err' };
+      return { state: 'err', icon: 'circle-x', end: 'timeout', endState: 'err' };
     case 'aborted':
-      return { state: 'off', icon: 'circle-slash', exit, end: 'interrupted', endState: 'off' };
+      return { state: 'off', icon: 'circle-slash', end: 'interrupted', endState: 'off' };
     case 'running':
-      return { state: 'run', icon: 'loader-circle', exit: null, end: 'running', endState: 'run' };
-    default:
-      return { state: 'off', icon: 'circle-slash', exit, end: run.status, endState: 'off' };
+      return { state: 'run', icon: 'loader-circle', end: 'running', endState: 'run' };
   }
 }
 
 export type RunRowWords = { state: XpState; icon: IconName; tool: string; arg: string; end: string; endState?: 'run' | 'err' | 'off' };
 
 // A run among its task's runs: when it started, how it was triggered and
-// how it ended, how long it took — "Oct 8, 04:00 · scheduled · exit 127 ·
-// didn’t start · 0.1s".
-export function taskRunWords(run: JobRunView, now: Date): RunRowWords {
+// how it ended and how long it took.
+export function taskRunWords(run: ScheduleRunView, now: Date): RunRowWords {
   const outcome = runOutcome(run);
   const length = runDuration(runLength(run, now));
 
@@ -270,15 +256,15 @@ export function taskRunWords(run: JobRunView, now: Date): RunRowWords {
     state: outcome.state,
     icon: outcome.icon,
     tool: dateTimeLabel(run.startedAt, now),
-    arg: [triggerName(run.trigger), outcome.exit].filter((part): part is string => part !== null).join(' · '),
+    arg: triggerName(run.trigger),
     end: outcome.end ? `${outcome.end} · ${length}` : length,
     endState: outcome.endState,
   };
 }
 
 // A run in the log of every task: the task's name first, then the trigger
-// and the exit code; on the right the time of day and the length.
-export function logRunWords(run: JobRunView, name: string, now: Date): RunRowWords {
+// and, on the right, the time of day and the length.
+export function logRunWords(run: ScheduleRunView, name: string, now: Date): RunRowWords {
   const outcome = runOutcome(run);
   const length = runDuration(runLength(run, now));
 
@@ -286,7 +272,7 @@ export function logRunWords(run: JobRunView, name: string, now: Date): RunRowWor
     state: outcome.state,
     icon: outcome.icon,
     tool: name,
-    arg: [triggerName(run.trigger), outcome.exit].filter((part): part is string => part !== null).join(' · '),
+    arg: triggerName(run.trigger),
     end: `${timeOfDay(run.startedAt)} · ${outcome.end ? `${outcome.end} · ${length}` : length}`,
     endState: outcome.endState,
   };
@@ -315,12 +301,12 @@ export function lastRunTime(date: Date, now: Date): string {
 export type LastRunWords = { state: StateName; label: string };
 
 // The last run in a task's row: a success by its time, anything else by
-// what happened — "error · 16:30", "didn’t start · 04:00", "running".
-export function lastRunWords(run: JobRunView, now: Date): LastRunWords {
+// what happened — "error · 16:30", "running".
+export function lastRunWords(run: ScheduleRunView, now: Date): LastRunWords {
   const outcome = runOutcome(run);
   const time = lastRunTime(run.startedAt, now);
 
-  switch (run.status as JobRunStatus) {
+  switch (run.status) {
     case 'ok':
       return { state: 'done', label: time };
     case 'running':
@@ -333,16 +319,14 @@ export function lastRunWords(run: JobRunView, now: Date): LastRunWords {
 }
 
 // The banner over a task whose last run went wrong, with where to look.
-export function lastRunNote(run: JobRunView, now: Date): string | null {
+export function lastRunNote(run: ScheduleRunView, now: Date): string | null {
   const when = dateTimeLabel(run.startedAt, now);
 
-  switch (run.status as JobRunStatus) {
+  switch (run.status) {
     case 'failed':
-      return `The last run failed${run.exitCode !== null ? ` with exit code ${run.exitCode}` : ''} · ${when}. A notification went to the bell; the output is below.`;
+      return `The last run failed · ${when}. A notification went to the bell; the output is below.`;
     case 'timeout':
       return `The last run timed out after ${runDuration(runLength(run, now))} · ${when}. The process group was killed; a notification went to the bell.`;
-    case 'spawn_error':
-      return `The last run didn’t start · ${when}. The error is in its output below; a notification went to the bell.`;
     case 'aborted':
       return `The last run was interrupted by a restart · ${when}. It was not retried.`;
     default:
@@ -351,9 +335,9 @@ export function lastRunNote(run: JobRunView, now: Date): string | null {
 }
 
 // The runs of the log under day dividers, newest first.
-export type RunDay = { key: string; label: string; runs: JobRunView[] };
+export type RunDay = { key: string; label: string; runs: ScheduleRunView[] };
 
-export function groupRunsByDay(runs: JobRunView[], now: Date): RunDay[] {
+export function groupRunsByDay(runs: ScheduleRunView[], now: Date): RunDay[] {
   const days: RunDay[] = [];
 
   for (const run of runs) {
@@ -371,17 +355,15 @@ export function groupRunsByDay(runs: JobRunView[], now: Date): RunDay[] {
 }
 
 // Whether a list of runs holds one still going — the screen polls then.
-export function anyRunning(runs: Pick<JobRunView, 'status'>[]): boolean {
+export function anyRunning(runs: Pick<ScheduleRunView, 'status'>[]): boolean {
   return runs.some(run => run.status === 'running');
 }
 
-// What a task of a kind leaves behind: only a command job has a journal.
+// What a task of a kind leaves behind: only a scheduled program has a journal.
 export function noJournalWords(kind: string): string | null {
   switch (kind) {
     case 'note':
       return 'A reminder leaves no run log: when it fires, the note lands in the main thread as a message to the secretary.';
-    case 'code':
-      return 'A code task leaves no run log: it reports through the events it pushes to the main thread; a failure shows in the bell.';
     default:
       return null;
   }

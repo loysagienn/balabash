@@ -23,7 +23,7 @@
 
 import crypto from 'node:crypto';
 import { config } from '../../config/index.ts';
-import type { PrewarmPrompt, TurnPrompt } from '../turn-contract.ts';
+import type { CatalogOpeningContext, PrewarmPrompt, TurnPrompt } from '../turn-contract.ts';
 import { getLlmBackend } from './backend.ts';
 import { buildTranscript } from './transcript.ts';
 
@@ -49,6 +49,8 @@ const promptCacheTtlMs = () => getLlmBackend().promptCacheTtlMs;
 
 type PromptState = {
   headHash: string;
+  seenNodes: Set<string>;
+  openings: NonNullable<TurnPrompt['openings']>;
   chunks: string[];
   totalChars: number;
   lastSeq: bigint; // the log is covered by chunks up to this seq inclusive
@@ -71,6 +73,8 @@ type BuildTurnPromptOptions = {
   // Final serialized tool definitions — hashed as bytes: the cache prefix
   // depends on the exact serialization, not on logical equality.
   tools: readonly unknown[];
+  deferredTools?: readonly unknown[];
+  grantKey?: string;
   // Volatile status rendered fresh every turn (current time; active children
   // from stage 3). Rendered after the chunks (a developer message on
   // OpenAI, a system message on Anthropic) and deliberately kept out of the
@@ -84,8 +88,10 @@ function isWarm(state: PromptState): boolean {
   return Date.now() - state.lastWarmAt <= promptCacheTtlMs();
 }
 
-function headHashOf(model: string, instructions: string, tools: readonly unknown[]): string {
-  return crypto.createHash('sha256').update(JSON.stringify({ model, instructions, tools })).digest('hex');
+type PromptHead = Pick<BuildTurnPromptOptions, 'model' | 'instructions' | 'tools' | 'deferredTools' | 'grantKey'>;
+
+function headHashOf({ model, instructions, tools, deferredTools, grantKey }: PromptHead): string {
+  return crypto.createHash('sha256').update(JSON.stringify({ model, instructions, tools, deferredTools, grantKey })).digest('hex');
 }
 
 function toPrompt(chunks: string[], statusText: string, cacheKey: string): TurnPrompt {
@@ -103,22 +109,20 @@ export function buildTurnPrompt({
   events,
   lastSeq,
   snapshotFull,
-  model,
-  instructions,
-  tools,
   statusText,
+  ...head
 }: BuildTurnPromptOptions): TurnPrompt | null {
   // Without an explicit prompt cache there is nothing to freeze: the
   // transcript is rebuilt from the log every turn — the model's view is a
   // pure function of the log, and the server's automatic prefix cache still
   // serves the heavy, byte-identical head (instructions + tools) for free.
   if (getLlmBackend().promptCache !== 'explicit') {
-    const { text } = buildTranscript(events, transcriptOptions());
+    const { text } = buildTranscript(events, { ...transcriptOptions(), includeSignatures: true });
 
     return text ? toPrompt([text], statusText, threadId) : null;
   }
 
-  const headHash = headHashOf(model, instructions, tools);
+  const headHash = headHashOf(head);
 
   const state = states.get(threadId);
   // Coverage is continuous when the snapshot reaches back into the range
@@ -148,7 +152,7 @@ export function buildTurnPrompt({
       state.lastSeq = lastSeq;
       state.lastWarmAt = Date.now();
 
-      return toPrompt([...state.chunks], statusText, threadId);
+      return { ...toPrompt([...state.chunks], statusText, threadId), openings: [...state.openings] };
     }
   }
 
@@ -162,6 +166,8 @@ export function buildTurnPrompt({
 
   states.set(threadId, {
     headHash,
+    seenNodes: new Set(['']),
+    openings: [],
     chunks: [text],
     totalChars: text.length,
     lastSeq,
@@ -174,6 +180,22 @@ export function buildTurnPrompt({
   return toPrompt([text], statusText, threadId);
 }
 
+// A definition occupies the same position in subsequent turns and prewarms.
+// Resetting the prefix drops its openings along with the frozen chunks.
+export function catalogOpenings(threadId: string): CatalogOpeningContext {
+  const state = states.get(threadId);
+  const entries = state?.openings ?? [];
+  return {
+    seenNodes: state?.seenNodes ?? new Set(['']),
+    introduce(callId, definition, text) {
+      if (entries.some(entry => entry.definition.name === definition.name)) return false;
+      entries.push({ afterChunk: state?.chunks.length ?? 0, callId, definition, text });
+      if (state) state.totalChars += JSON.stringify(definition).length + text.length;
+      return true;
+    },
+  };
+}
+
 // A restart of the owning run drops its builder state explicitly (the next
 // turn is a clean rebuild); process restarts drop everything implicitly.
 export function resetPromptState(threadId: string): void {
@@ -182,7 +204,7 @@ export function resetPromptState(threadId: string): void {
 
 export type KeepalivePrompt = PrewarmPrompt & { lastSeq: bigint };
 
-type BuildKeepalivePromptOptions = Pick<BuildTurnPromptOptions, 'threadId' | 'model' | 'instructions' | 'tools'>;
+type BuildKeepalivePromptOptions = PromptHead & { threadId: string };
 
 /**
  * The prompt of a prewarm ping: the thread's frozen chunks as the last turn
@@ -192,14 +214,14 @@ type BuildKeepalivePromptOptions = Pick<BuildTurnPromptOptions, 'threadId' | 'mo
  * prefix already past its TTL (rewriting a cold prefix speculatively costs
  * as much as the cold turn it would save).
  */
-export function buildKeepalivePrompt({ threadId, model, instructions, tools }: BuildKeepalivePromptOptions): KeepalivePrompt | null {
+export function buildKeepalivePrompt({ threadId, ...head }: BuildKeepalivePromptOptions): KeepalivePrompt | null {
   const state = states.get(threadId);
 
-  if (!state || state.headHash !== headHashOf(model, instructions, tools) || !isWarm(state)) {
+  if (!state || state.headHash !== headHashOf(head) || !isWarm(state)) {
     return null;
   }
 
-  return { chunks: [...state.chunks], cacheKey: threadId, lastSeq: state.lastSeq };
+  return { chunks: [...state.chunks], openings: [...state.openings], cacheKey: threadId, lastSeq: state.lastSeq };
 }
 
 // A successful prewarm ping extends the prefix lifetime by another TTL.

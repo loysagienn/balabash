@@ -8,6 +8,22 @@ const ctx: FeedContext = { threadId: 't1', agent: 'engineer', parentAgent: 'coor
 
 const own = (type: string, payload: object, extra: object = {}) => event({ type, threadId: 't1', payload: payload as never, ...extra });
 
+it('keeps the task that spoke, started a child or addressed it on both sides of the feed', () => {
+  const author = { actor: 'task' as const, task: { slug: 'digest', runId: 'run-1' } };
+  const birth = event({ ...author, type: 'thread.started', threadId: 'c9', targetThreadId: 't1', payload: { agent: 'browser', input: 'Read it.' } });
+  const message = own('thread.message', { text: 'More.' }, { ...author, targetThreadId: 'c9' });
+  const [out, child, sent, finish] = projectFeed([
+    own('agent.message', { content: [{ type: 'text', text: 'Ready.' }] }, author), birth, message,
+    own('thread.finish', {}, { ...author, targetThreadId: 'c9' }),
+  ], ctx);
+  assert.equal(out?.kind === 'message' && out.from, 'task digest');
+  assert.equal(child?.kind === 'child' && child.startedByTask, 'digest');
+  assert.equal(sent?.kind === 'message' && sent.from, 'task digest');
+  assert.match(finish?.kind === 'sys' ? finish.text : '', /^task digest asked/);
+  const received = projectFeed([birth, message], { ...ctx, threadId: 'c9', agent: 'browser' });
+  assert.deepEqual(received.map(item => item.kind === 'message' && item.from), ['task digest', 'task digest']);
+});
+
 describe('projectFeed — a question for the user (agent.ask)', () => {
   it('is a card with the options while open, static with the outcome once resolved; a resolution without its card is a line', () => {
     resetSeq(1n);
@@ -570,6 +586,18 @@ describe('projectFeed — actions', () => {
     assert.equal(output(rows[0]!), '{\n  "text": "important result"\n}');
     assert.equal(rows[1]!.state, 'err');
     assert.equal(output(rows[1]!), 'thread not found\n{\n  "threadId": "nope"\n}');
+  });
+
+  it('shows catalog strings as text and preserves the JSON shape of other values', () => {
+    const values = ['first\nsecond', [{ text: 'data', count: 1 }], null];
+    const items = projectFeed(values.map((value, i) =>
+      own('tool.call.completed', { callId: String(i), functionName: 'web_perplexity_ask', value }),
+    ), ctx);
+    const rows = (items[0] as ActionsItem).items;
+    assert.deepEqual(rows.map(row => row.detail?.kind === 'io' && row.detail.output), [
+      'first\nsecond', JSON.stringify(values[1], null, 2), 'null',
+    ]);
+    assert.equal(rows[0]!.label.icon, 'search');
   });
 
   it('keeps the refusal of a failed file change next to the requested diff', () => {

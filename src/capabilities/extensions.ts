@@ -1,33 +1,11 @@
-// Extensions: code and configs that are part of the installation or of a
-// workspace rather than of the repository — loaded from `data/` (gitignored)
-// at runtime by dynamic import, next to the repository catalogs that ship
-// inside the bundle. Node runs .ts files natively (type stripping), and an
-// import() of a path computed at runtime is left alone by esbuild, so an
-// extension needs no build: a tool or a server config is picked up at the
-// next boot, a task body at its next fire.
-//
-//   data/tools/<name>.ts                      in-process tool server, export start(ctx)
-//   data/mcp-servers/<name>.json              external MCP server config
-//   data/remote-agents/<name>.ts              remote agent kind: export start(ctx) →
-//                                             RemoteAgentDeclaration (remote-agent-source.ts,
-//                                             the driver contract in src/core/contract.ts)
-//   data/workspace/<workspaceId>/tasks/<slug>.ts   scheduled task body, export run(ctx)
-//
-// Tools, server configs and remote agent kinds are installation-wide (shared
-// by every workspace, like the repository's tools/ and mcp-servers/); a task
-// is a workspace notion and lives with the workspace. Names never shadow the repository's:
-// a clash is a loud error. The contract of an extension module is the same
-// as its repository twin's, with one rule: no runtime imports from the
-// repository tree — packages from node_modules and `import type` only;
-// everything else arrives through ctx (a second copy of a bundled module
-// would be a different module instance). Extensions run inside the app
-// process with the same trust as bundled code.
+// Installation extensions shared by all workspaces: MCP connection settings
+// in data/mcp-servers, catalog nodes in data/nodes and drivers in data/remote-agents.
 
 import { readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-export const INSTALLATION_TOOLS_DIR = path.resolve('data', 'tools');
+export const INSTALLATION_NODES_DIR = path.resolve('data', 'nodes');
 export const INSTALLATION_SERVERS_DIR = path.resolve('data', 'mcp-servers');
 export const INSTALLATION_REMOTE_AGENTS_DIR = path.resolve('data', 'remote-agents');
 
@@ -58,11 +36,24 @@ export async function listExtensionFiles(directory: string, extension: string): 
 /**
  * Imports an extension module fresh: the file's mtime rides in the URL, so
  * an edited file is a new module to the loader (the previous version stays
- * in memory until the process ends — negligible for task-sized modules).
+ * in memory until the process ends).
  */
 export async function importExtensionModule(file: string): Promise<Record<string, unknown>> {
   const stats = await stat(file);
   const url = `${pathToFileURL(file).href}?v=${Math.round(stats.mtimeMs)}`;
 
   return (await import(url)) as Record<string, unknown>;
+}
+
+export type ExtensionFailure = { scope: string; file: string; error: string; workspaceId?: string };
+export type ReportExtensionFailure = (failure: ExtensionFailure) => Promise<void>;
+
+export async function reportExtensionFailure(scope: string, file: string, cause: unknown, report?: ReportExtensionFailure, workspaceId?: string) {
+  const error = cause instanceof Error ? cause.message : String(cause);
+  console.error(`[${scope}] ${file}: ${error}`);
+  try {
+    await report?.({ scope, file, error, ...(workspaceId && { workspaceId }) });
+  } catch (journalError) {
+    console.error(`[${scope}] failed to journal ${file}:`, journalError);
+  }
 }

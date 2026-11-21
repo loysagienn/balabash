@@ -73,4 +73,4 @@ if (problems.length) {
 }
 
 console.log(`✓ ${appDir}: the manifest is valid (${Object.keys(manifest.api).length} endpoint(s)), all declared files exist`);
-console.log('Remember: create the app tables via data_query yourself — the platform executes no DDL.');
+console.log('Remember: create the app tables via workspace_query yourself — the platform executes no DDL.');

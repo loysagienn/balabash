@@ -14,8 +14,8 @@ describe('agents screen rules', () => {
   });
 
   it('names the mode', () => {
-    assert.equal(modeLabel(true), 'headless · no user surface');
-    assert.equal(modeLabel(false), 'with the user · not headless');
+    assert.equal(modeLabel({ modes: ['headless'], defaultMode: 'headless' }), 'headless');
+    assert.equal(modeLabel({ modes: ['user', 'headless'], defaultMode: 'user' }), 'with the user (default) · headless');
   });
 
   it('names the model of a row: the declared one, else the newest session’s, else the engine’s unseen default', () => {

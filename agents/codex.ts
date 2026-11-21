@@ -1,16 +1,15 @@
-// Codex agent: the manager on OpenAI Codex. Same brief, same tool passport,
+// Codex agent: the manager on OpenAI Codex. Same brief, same access profile,
 // same browser sub-agent and the same workbench (the workspace file area as
 // cwd) as the manager agent — the role is shared through roles/manager; only
 // the backend differs: an OpenAI Codex session with its native tool set
-// (shell, file editing, web search) plus the run's Balabash MCP bundle and
-// the standard base verbs. The session runs in an isolated CODEX_HOME
+// (shell, file editing, web search) plus the turn's Balabash catalog over MCP. The session runs in an isolated CODEX_HOME
 // (harness/codex-sdk/codex-home), so nothing from the host user's ~/.codex —
 // personal AGENTS.md, MCP servers, memories — reaches it. Fully declarative:
 // the platform's session runner drives the lifecycle.
 
 import type { AgentDeclaration } from '../src/core/contract.ts';
 import { workspaceFilesDir } from '../src/workspace/layout.ts';
-import { MANAGER_AGENTS, MANAGER_INSTRUCTIONS, MANAGER_TOOLS } from './roles/manager.ts';
+import { MANAGER_AGENTS, managerInstructions } from './roles/manager.ts';
 
 export const agent = {
   name: 'codex',
@@ -22,12 +21,15 @@ export const agent = {
     'or wants a task done by the OpenAI model.',
   icon: '🤖',
   sdk: 'codex',
-  tools: MANAGER_TOOLS,
+  modes: ['user'],
+  defaultMode: 'user',
+  workspaceDisk: true,
+  access: { profile: 'general' },
   agents: MANAGER_AGENTS,
   notification: 'normal',
 
   session: {
-    instructions: MANAGER_INSTRUCTIONS,
+    instructions: managerInstructions(),
     model: 'gpt-6.2-astra',
     effort: 'high',
     preset: 'full',

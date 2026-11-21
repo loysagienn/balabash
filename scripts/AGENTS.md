@@ -62,11 +62,11 @@ node scripts/console-icons.mjs <balabash-icon-transparent.png> <balabash-icon-da
 
 The instruction-layer showcase: materializes, per model, what that model
 actually sees — the assembled system prompt, the initialMessage template, the
-bridge base verbs and the descriptions of its real tool bundle — one markdown
+SDK catalog definitions and their port-specific metadata — one markdown
 file per agent plus `coordinator.md` for the secretary, written into
 `data/showcase/` (overwritten on every run). It walks the same code paths as
-the live app (agent catalog, tool-manager bundles, session-run base verbs,
-coordinator function definitions), so the output is the truth, not a
+the live app (agent catalog, Claude and Codex catalog ports,
+the configured coordinator port), so the output is the truth, not a
 retelling.
 
 This is the verification instrument for any work on prompts and tool
@@ -77,10 +77,8 @@ npm run build && npm run render-context [-- <workspaceId>]
 ```
 
 With one user in the database the workspaceId is inferred; with several the
-script lists them and exits. Connecting per-user servers (gmail, notion) may
-hit the network; a server that fails to connect is reported inside the
-output instead of failing the run. Safe to run next to the live app: it
-renders texts and never journals events or calls tools.
+script lists them and exits. Each SDK agent file and the coordinator file include an independent first opening of each granted vertex.
+Claude shows the JSON text returned by its MCP bridge, Codex the structured content, and the coordinator the text and definition of its configured port. The script reads the workspace grant and accounts without invoking capabilities or journaling calls.
 
 ## measure-context (`scripts/measure-context.ts`)
 
@@ -110,8 +108,8 @@ input tokens minus the known texts).
 
 By default the newest session of every repository agent found in the stores
 of this installation: the Claude project directories derived from the agents'
-cwds (`data/workspace/*/files`, `data/agent-state/*`, the repository root —
-the scheduler's cwd, shared with the operator's own sessions there) and the
+cwds (`data/workspace/*/files`, `data/agent-state/*`, the repository root
+for historical transcripts, shared with the operator's own sessions) and the
 Codex rollouts of `data/codex-home`. A session is attributed to its agent by
 the journal (`session.sdk` of its thread) when it knows it, else by the
 system prompt's head against the catalog's instructions (within the session's
@@ -125,3 +123,34 @@ journal and writes the reports; safe next to the live app.
 ```
 npm run build && npm run measure-context [-- --session <id>] [-- --out <dir>]
 ```
+
+## migrate-agent-tools
+
+Offline step 3 of the agent-tools move. Restore a current dump into a separate PostgreSQL
+database and deploy the branch's Prisma migrations there first. Set DATABASE_URL to the
+restored database. The --database argument must match current_database() on that connection.
+
+    npm run migrate-agent-tools -- --mode tasks --database NAME --workspaces /path/to/data/workspace
+
+At cutover, `tasks` moves the task registry and seeds Gmail memory. Run `journal` in a
+second offline window after verifying the branch on mixed history:
+
+    npm run migrate-agent-tools -- --mode journal --database NAME
+
+Use `--dry-run` on the restored copy to run the same translation and report the counts after
+rolling the transaction back. Both modes require the application and scheduler to stay offline
+for the target database. The script refuses other client connections with its login, including
+idle ones. It waits up to five seconds to acquire each table lock (for example during
+autovacuum) and excludes concurrent writes throughout the transaction. Stop writers before the
+maintenance window and keep them stopped until verification is complete.
+
+The migration reads workspace task files and writes only PostgreSQL. Without `--dry-run` it
+prints changed-row counts after commit. Running it again should give zeros. On failure every
+change rolls back.
+
+Command tasks are translated directly. The bundled Gmail program recognizes the original
+module by its digest and takes its initial memory from that workspace's last five deliveries.
+For another code task, supply its reviewed JavaScript program body in
+`--programs DIR` under `<workspaceId>/<slug>.js`. A custom program takes responsibility
+for its own initial state. A task without a translation aborts the transaction.
+Historical job runs retain their ids, positions and the values shown by the schedule reader.

@@ -8,15 +8,14 @@
 //   block in a response IS the model's message to the user — delivered
 //   through `deliverText` (the coordinator journals it as its agent.message,
 //   exactly what send_message does) before the response's tool calls are
-//   dispatched. An 'end' dispatch (do_nothing, when the catalog still
-//   offers it) ends the turn too.
+//   dispatched.
 // - Iterations are stateless: every request carries the whole conversation
 //   — the prompt's chunks, then the status, then each response's content
 //   echoed back verbatim (thinking blocks included, the API needs them
 //   unchanged) followed by all its tool results in one user message.
 // - The prompt cache is a prefix match at explicit breakpoints: one on the
-//   instructions (the end of the static head: tools + system), one on the
-//   last frozen chunk — both with the 1-hour TTL (backend.ts). The status
+//   instructions (the end of the static head: tools + system), the last
+//   two chunks and any trailing opening, all with the 1-hour TTL. The status
 //   rides after the chunks as a mid-conversation system message, so its
 //   change every turn costs nothing cached. The prewarm ping is the same
 //   request without the status and with max_tokens: 0 — the API runs
@@ -31,15 +30,14 @@ import { config } from '../../config/index.ts';
 import { MAX_TURN_ITERATIONS } from '../turn-contract.ts';
 import type { DispatchResult, FunctionCall, FunctionDefinition, PrewarmPrompt, RequestHead, TurnOutcome, TurnPrompt } from '../turn-contract.ts';
 import { getAnthropicClient } from './client.ts';
-import { toolResultToContent } from './content.ts';
+import { catalogBlocks, openingBlocks } from './content.ts';
 import type { startLlmRequestMetrics } from './llm-metrics.ts';
 
 // Room for the thinking and the tool calls of one response; a response cut
 // here is a failure (its tool inputs may be truncated), not a retry point.
 const MAX_OUTPUT_TOKENS = 16_000;
 
-// The one breakpoint shape of the thread's prefix. The longer TTL must come
-// first in the request, and both breakpoints share it.
+// All breakpoints of the thread's prefix share a TTL.
 const CACHE_BREAKPOINT: Anthropic.CacheControlEphemeral = { type: 'ephemeral', ttl: '1h' };
 
 type Head = RequestHead & { effort: EffortLevel };
@@ -50,59 +48,42 @@ export type AnthropicTurnClient = {
   messages: { create(params: Anthropic.MessageCreateParamsNonStreaming): Promise<Anthropic.Message> };
 };
 
-// Strict mode compiles the schemas server-side and caps union-typed
-// parameters (type arrays, anyOf) at 16 across the whole request — the
-// catalog's nullable optionals (`type: ['array', 'null']`, the Responses
-// API's strict idiom) exceed that at once. So a tool is strict only when its
-// schema has no unions; the others keep their schema and lose only the
-// server-side argument guarantee (an invalid call is still rejected by the
-// dispatcher and seen by the model).
-function hasUnionTypes(schema: unknown): boolean {
-  if (Array.isArray(schema)) {
-    return schema.some(hasUnionTypes);
-  }
-
-  if (!schema || typeof schema !== 'object') {
-    return false;
-  }
-
-  const node = schema as Record<string, unknown>;
-
-  if (Array.isArray(node.type) || Array.isArray(node.anyOf) || Array.isArray(node.oneOf)) {
-    return true;
-  }
-
-  return Object.values(node).some(hasUnionTypes);
-}
-
 function toTool(definition: FunctionDefinition): Anthropic.Tool {
   return {
     name: definition.name,
     description: definition.description,
     input_schema: definition.parameters as Anthropic.Tool.InputSchema,
-    strict: definition.strict && !hasUnionTypes(definition.parameters),
   };
 }
 
-// The prompt in Messages API shape: each frozen chunk a user message (the
-// last one carrying the cache breakpoint), the volatile status a system
-// message after them — it must follow a user message and be last or be
-// followed by an assistant turn, which the loop's echoes satisfy. A prewarm
-// prompt has no status: the request ends at the breakpoint.
-function toMessages({ chunks, statusText }: PrewarmPrompt & { statusText?: string }): Anthropic.MessageParam[] {
-  return [
-    ...chunks.map((text, index) => ({
-      role: 'user' as const,
-      content: [
-        {
-          type: 'text' as const,
-          text,
-          ...(index === chunks.length - 1 ? { cache_control: CACHE_BREAKPOINT } : {}),
-        },
-      ],
-    })),
-    ...(statusText === undefined ? [] : [{ role: 'system' as const, content: statusText }]),
-  ];
+export function deferredTool(definition: FunctionDefinition): Anthropic.Tool {
+  return { ...toTool(definition), defer_loading: true };
+}
+
+// The turn snapshot contains only earlier openings. This turn's original
+// tool_use is echoed live and first replayed in a later turn or keepalive.
+function toMessages({ chunks, openings = [], statusText }: PrewarmPrompt & { statusText?: string }): Anthropic.MessageParam[] {
+  const messages: Anthropic.MessageParam[] = [];
+  let tail: Anthropic.TextBlockParam | undefined;
+  for (const [index, text] of chunks.entries()) {
+    tail = { type: 'text', text };
+    // The previous turn wrote its last chunk. Look it up directly even
+    // when the replayed openings put it outside the API's 20-block window.
+    if (index >= chunks.length - 2) tail.cache_control = CACHE_BREAKPOINT;
+    messages.push({ role: 'user', content: [tail] });
+    for (const opening of openings.filter(entry => entry.afterChunk === index + 1)) {
+      const { callId, definition: { name } } = opening;
+      const { result, note } = openingBlocks(callId, name, opening.text);
+      messages.push(
+        { role: 'assistant', content: [{ type: 'tool_use', id: callId, name: 'describe', input: { name } }] },
+        { role: 'user', content: [result, note] },
+      );
+      tail = note;
+    }
+  }
+  if (tail) tail.cache_control = CACHE_BREAKPOINT;
+  if (statusText !== undefined) messages.push({ role: 'system', content: statusText });
+  return messages;
 }
 
 // The request parameters shared by every call of a thread: the prompt-cache
@@ -110,12 +91,12 @@ function toMessages({ chunks, statusText }: PrewarmPrompt & { statusText?: strin
 // prewarm pings must agree byte for byte. Thinking stays at the model's
 // own default (adaptive, always on for the current models), depth through
 // effort.
-function baseRequest({ model, instructions, tools, effort }: Head, messages: Anthropic.MessageParam[]): Anthropic.MessageCreateParamsNonStreaming {
+function baseRequest({ model, instructions, tools, deferredTools = [], effort }: Head, messages: Anthropic.MessageParam[]): Anthropic.MessageCreateParamsNonStreaming {
   return {
     model,
     max_tokens: MAX_OUTPUT_TOKENS,
     system: [{ type: 'text', text: instructions, cache_control: CACHE_BREAKPOINT }],
-    tools: tools.map(toTool),
+    tools: [...tools.map(toTool), ...deferredTools.map(deferredTool)],
     tool_choice: { type: 'auto' },
     output_config: { effort },
     messages,
@@ -142,9 +123,9 @@ function describeStop(message: Anthropic.Message): string {
   return details ? `${message.stop_reason} (${details.category ?? 'uncategorized'}: ${details.explanation ?? 'no explanation'})` : String(message.stop_reason);
 }
 
-export async function runTurn({ model, instructions, tools, prompt, metrics, dispatch, deliverText, deps }: RunTurnOptions): Promise<TurnOutcome> {
+export async function runTurn({ model, instructions, tools, deferredTools, prompt, metrics, dispatch, deliverText, deps }: RunTurnOptions): Promise<TurnOutcome> {
   const client: AnthropicTurnClient = deps?.client ?? getAnthropicClient();
-  const head: Head = { model, instructions, tools, effort: deps?.effort ?? config.coordinatorEffort };
+  const head: Head = { model, instructions, tools, deferredTools, effort: deps?.effort ?? config.coordinatorEffort };
 
   const messages: Anthropic.MessageParam[] = toMessages(prompt);
   let firstResponseId: string | undefined;
@@ -184,7 +165,7 @@ export async function runTurn({ model, instructions, tools, prompt, metrics, dis
     }
 
     const results: Anthropic.ToolResultBlockParam[] = [];
-    let ended = false;
+    const notes: Anthropic.TextBlockParam[] = [];
 
     for (const toolUse of toolUses) {
       const outcome = await dispatch({
@@ -193,40 +174,16 @@ export async function runTurn({ model, instructions, tools, prompt, metrics, dis
         arguments: JSON.stringify(toolUse.input ?? {}),
       });
 
-      switch (outcome.kind) {
-        case 'sync':
-          results.push({
-            type: 'tool_result',
-            tool_use_id: toolUse.id,
-            content: toolResultToContent(outcome.result, toolUse.name),
-            ...(outcome.result.isError ? { is_error: true } : {}),
-          });
-          break;
-
-        case 'async':
-          results.push({ type: 'tool_result', tool_use_id: toolUse.id, content: 'accepted' });
-          break;
-
-        case 'rejected':
-          // The model must see the rejection and gets the chance to recover
-          // within the same turn.
-          results.push({ type: 'tool_result', tool_use_id: toolUse.id, content: `rejected: ${outcome.error}`, is_error: true });
-          break;
-
-        case 'end':
-          ended = true;
-          break;
-      }
-    }
-
-    if (ended) {
-      return { firstResponseId };
+      if (outcome.kind !== 'catalog') throw new Error(`Unexpected Anthropic dispatch result: ${outcome.kind}`);
+      const { result, note } = catalogBlocks(toolUse.id, outcome);
+      results.push(result);
+      if (note) notes.push(note);
     }
 
     // The response echoed back verbatim (thinking blocks included), then all
     // its tool results in one user message — the shape the API expects.
     messages.push({ role: 'assistant', content: response.content });
-    messages.push({ role: 'user', content: results });
+    messages.push({ role: 'user', content: [...results, ...notes] });
   }
 }
 
@@ -248,9 +205,9 @@ type PrewarmOptions = RequestHead & {
  * cache read that restarts the TTL; on a cold one it writes the prefix,
  * which the next real turn then finds warm. Returns the message id.
  */
-export async function prewarmPrompt({ model, instructions, tools, prompt, metrics, deps }: PrewarmOptions): Promise<string> {
+export async function prewarmPrompt({ model, instructions, tools, deferredTools, prompt, metrics, deps }: PrewarmOptions): Promise<string> {
   const client: AnthropicTurnClient = deps?.client ?? getAnthropicClient();
-  const head: Head = { model, instructions, tools, effort: deps?.effort ?? config.coordinatorEffort };
+  const head: Head = { model, instructions, tools, deferredTools, effort: deps?.effort ?? config.coordinatorEffort };
 
   const response = await metrics.measure(() => client.messages.create({ ...baseRequest(head, toMessages(prompt)), max_tokens: 0 }));
 

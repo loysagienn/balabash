@@ -1,10 +1,10 @@
 // The operator's and the agents' commands over the task registry — one
-// implementation for the schedule tool server (src/schedule/tools.ts) and
-// the console's endpoints (src/api/api.ts), the way src/projects/mutations.ts
-// serves both for projects. Creating writes the row and journals
+// implementation for the node `schedule` of the catalog
+// (src/tree/schedule.ts)
+// and the console's endpoints (src/api/api.ts), the way
+// src/projects/mutations.ts serves every door for projects. Creating writes the row and journals
 // schedule.task.created in its transaction by whoever asked (RegistryAuthor:
-// an agent's thread names the agent as the row's author, the operator is
-// "operator"); the input is checked by one pure rule (input.ts). Deleting
+// an agent name, "task <slug>" or "operator"); the input is checked by one pure rule (input.ts). Deleting
 // journals schedule.task.cancelled in the row's transaction; running fires
 // the task exactly as a trigger would and leaves the schedule untouched. A
 // refusal is a ScheduleError (errors.ts) whose code the api maps to a
@@ -15,15 +15,15 @@
 // touches nothing; a tool names only the slug and means whatever row holds
 // it.
 
+import { taskAuthorLabel } from '../utils/task-author.ts';
 import { prisma } from '../db/client.ts';
 import { registryMutation } from '../core/registry-events.ts';
 import type { RegistryAuthor } from '../core/registry-events.ts';
 import { getThread } from '../core/threads.ts';
 import type { ScheduledTaskModel } from '../../prisma-generated/models.ts';
-import { hasTaskBody, workspaceTaskFile } from './catalog.ts';
 import { fireTask } from './engine.ts';
 import { ScheduleError } from './errors.ts';
-import type { TaskInput } from './input.ts';
+import { isTaskKind, type TaskInput } from './input.ts';
 import { taskRecord } from './view.ts';
 
 export { ScheduleError } from './errors.ts';
@@ -32,12 +32,6 @@ export type { ScheduleErrorCode } from './errors.ts';
 // The console's word for the operator in the row's author column (an
 // agent's row names the agent).
 export const OPERATOR_AUTHOR = 'operator';
-
-export type CreateOutcome = {
-  task: ScheduledTaskModel;
-  // A code task without a run(ctx) body — it sleeps until one exists.
-  sleeping: boolean;
-};
 
 function isUniqueViolation(error: unknown): boolean {
   return typeof error === 'object' && error !== null && (error as { code?: unknown }).code === 'P2002';
@@ -48,21 +42,22 @@ function isUniqueViolation(error: unknown): boolean {
 // to the registry) is a 'conflict': told ahead of the write, and the unique
 // index stays the last word — two creations of one slug at once leave one
 // row, the other is the same refusal (P2002), not a crash. The author
-// column: the agent of the asking thread, "operator" for the console, null
+// column: agent name or "task <slug>" for a call, "operator" for the console, null
 // for the system.
-export async function createTask(workspaceId: string, input: TaskInput, by: RegistryAuthor): Promise<CreateOutcome> {
-  const taken = () => new ScheduleError('conflict', `slug "${input.slug}" is already taken — cancel_task it first to recreate`);
+export async function createTask(workspaceId: string, input: TaskInput, by: RegistryAuthor): Promise<ScheduledTaskModel> {
+  const taken = () => new ScheduleError('conflict', `slug "${input.slug}" is already taken — use schedule_cancel_task before recreating it`);
   const existing = await prisma.scheduledTask.findUnique({ where: { slug: input.slug } });
 
   if (existing) {
     throw taken();
   }
 
-  const createdBy = by.kind === 'thread' ? ((await getThread(by.threadId))?.agent ?? null) : by.kind === 'user' ? OPERATOR_AUTHOR : null;
-  let task: ScheduledTaskModel;
+  const createdBy = by.kind === 'thread'
+    ? (by.task ? taskAuthorLabel(by.task.slug) : (await getThread(by.threadId))?.agent ?? null)
+    : by.kind === 'user' ? OPERATOR_AUTHOR : null;
 
   try {
-    task = await registryMutation(async (tx, journal) => {
+    return await registryMutation(async (tx, journal) => {
       const created = await tx.scheduledTask.create({ data: { ...input, workspaceId, createdBy } });
 
       await journal('schedule.task.created', taskRecord(created, new Date()), by);
@@ -76,22 +71,10 @@ export async function createTask(workspaceId: string, input: TaskInput, by: Regi
 
     throw error;
   }
-
-  return { task, sleeping: await isSleeping(task) };
 }
 
 export async function findTask(workspaceId: string, slug: string): Promise<ScheduledTaskModel | null> {
   return prisma.scheduledTask.findFirst({ where: { slug, workspaceId } });
-}
-
-// A code task without its run(ctx) body file in the workspace sleeps: the
-// heart never arms it and a manual run is refused.
-export async function isSleeping(task: ScheduledTaskModel): Promise<boolean> {
-  return task.kind === 'code' && !(await hasTaskBody(task.workspaceId, task.slug));
-}
-
-export function sleepingText(task: ScheduledTaskModel): string {
-  return `task "${task.slug}" is sleeping — no run(ctx) body: ${workspaceTaskFile(task.workspaceId, task.slug)} does not exist.`;
 }
 
 // The row the command means, when it named one: another row under the
@@ -135,8 +118,7 @@ export type RunOutcome = { kind: 'fired'; task: ScheduledTaskModel; runId: strin
 
 // Runs the task of the user by hand, right now — the action exactly as on
 // a trigger fire, the schedule untouched (a one-shot is not consumed, a
-// cron task keeps its moment). Refusals: no such task, a sleeping code
-// task, a workspace without a main thread to fire into, a slug held by
+// cron task keeps its moment). Refusals: no such task, a workspace without a main thread to fire into, a slug held by
 // another row than expectId names.
 export async function runTask(workspaceId: string, slug: string, expectId?: string): Promise<RunOutcome> {
   const task = await findTask(workspaceId, slug);
@@ -147,9 +129,8 @@ export async function runTask(workspaceId: string, slug: string, expectId?: stri
 
   assertExpected(task, expectId);
 
-  // The sleeping-task rule, synchronously: a body-less code task cannot run.
-  if (await isSleeping(task)) {
-    throw new ScheduleError('sleeping', sleepingText(task));
+  if (!isTaskKind(task.kind)) {
+    throw new ScheduleError('not_found', `no runnable task with slug "${slug}" in this workspace (registry kind: ${task.kind})`);
   }
 
   const outcome = await fireTask(task, 'manual');
@@ -161,7 +142,5 @@ export async function runTask(workspaceId: string, slug: string, expectId?: stri
       return { kind: 'already_running', task };
     case 'no_main_thread':
       throw new ScheduleError('no_main_thread', 'workspace has no main thread to fire into');
-    case 'sleeping':
-      throw new ScheduleError('sleeping', `task "${slug}" is sleeping — its body file does not exist`);
   }
 }

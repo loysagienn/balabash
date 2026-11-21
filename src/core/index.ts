@@ -41,7 +41,6 @@ export {
   activeSubtree,
   ensureMainThread,
   startThread,
-  tombstoneActiveThreads,
   rebuildThreadsProjection,
 } from './threads.ts';
 

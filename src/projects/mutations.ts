@@ -32,12 +32,19 @@ export const DESCRIPTION_MAX_LENGTH = 500;
 // slug or the folder path is taken.
 export type ProjectErrorCode = 'bad_request' | 'not_found' | 'conflict';
 
+// What a conflict over a title or a slug ran into: the field, the value
+// asked for and the project that holds it — for a caller that words the
+// refusal itself.
+export type ProjectClash = { field: 'title' | 'slug'; value: string; project: ProjectModel };
+
 export class ProjectError extends Error {
   readonly code: ProjectErrorCode;
+  readonly clash: ProjectClash | null;
 
-  constructor(code: ProjectErrorCode, message: string) {
+  constructor(code: ProjectErrorCode, message: string, clash: ProjectClash | null = null) {
     super(message);
     this.code = code;
+    this.clash = clash;
   }
 }
 
@@ -145,7 +152,11 @@ export async function requireProject(workspaceId: string, id: string): Promise<P
 }
 
 function takenBy(field: 'title' | 'slug', value: string, clash: ProjectModel): ProjectError {
-  return new ProjectError('conflict', `${field} "${value}" is already taken by project ${clash.id}${clash.archived ? ` (archived — ${field}s stay reserved)` : ''}`);
+  return new ProjectError(
+    'conflict',
+    `${field} "${value}" is already taken by project ${clash.id}${clash.archived ? ` (archived — ${field}s stay reserved)` : ''}`,
+    { field, value, project: clash },
+  );
 }
 
 export type CreatedProject = { project: ProjectModel; adopted: boolean };

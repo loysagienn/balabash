@@ -1,6 +1,5 @@
 // Account naming: the display name is the user's word, the slug is the
-// immutable mnemonic address derived from it at birth — by the auth agent's
-// request_authorization and by the console's "Connect" alike. Pure.
+// immutable mnemonic address derived from it at birth by the connections node and the console. Pure.
 
 // Account slugs are immutable mnemonic addresses; the pattern keeps them
 // url- and enum-friendly.

@@ -1,8 +1,7 @@
 // Auth agent: connecting integrations in its own thread. The
 // coordinator spawns it whenever an integration must be connected,
 // re-authorized or provisioned; the user talks to it directly in that
-// thread. It is the only agent whose bundle lists the 'auth' tool
-// server: one-time links for per-user OAuth, manual OAuth clients and
+// thread. Its connections grant provides one-time links for per-user OAuth, manual OAuth clients and
 // installation secrets. Secret values never pass through this agent — links
 // lead to web forms, values go out-of-band, and the outcomes arrive back as
 // thread-addressed connection.* / *.provisioned events. Fully declarative:
@@ -19,7 +18,7 @@ ${BLOCKED_PATH_NOTE}
 
 ${OUTPUT_NOTE} Keep it short and clear.
 
-Your craft is walking the user through one-time secure links. Your tools issue the links and describe themselves: each description lists the integrations it currently applies to and their status — read them carefully to pick the right next step (an installation OAuth client before the first authorization, for example). Paste an issued link into your reply as a plain URL and explain briefly what to do with it.
+Your craft is walking the user through one-time secure links. Use connections_list to check services, accounts and credential status. Use the connections node to issue the appropriate link (provision a missing OAuth client before authorization). Paste an issued link into your reply as a plain URL and explain briefly what to do with it.
 
 Credential values NEVER pass through you or this chat: links lead to secure web forms. Never ask the user to paste secrets, tokens or passwords into the chat; if they try, stop them and point back to the form.
 
@@ -37,7 +36,9 @@ export const agent = {
     'credential values never pass through the chat. It reports back with a summary of what got connected.',
   icon: '🔑',
   sdk: 'claude',
-  tools: ['auth', 'storage', 'events'],
+  modes: ['user'],
+  defaultMode: 'user',
+  access: { nodes: ['connections', 'threads'], addRoot: ['get_event', 'get_file_url'] },
   notification: 'normal',
 
   session: {
@@ -46,6 +47,6 @@ export const agent = {
     initialMessage: (prompt: string) => `Integration task from your operator:
 ${prompt}
 
-Start: check your tools' descriptions for the integrations they currently list, explain the next step to the user briefly, and issue the right link.`,
+Start: check the service status with connections_list, explain the next step to the user briefly, and issue the right link.`,
   },
 } satisfies AgentDeclaration;

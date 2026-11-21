@@ -114,12 +114,12 @@ app's own router reads the rest of the path. Rules:
 
 ## Your duties as the author (do these every time)
 
-1. **Create the app's tables yourself** via `data_query` when you create or change the
+1. **Create the app's tables yourself** via `workspace_query` when you create or change the
    app — the platform executes NO DDL, ever. An endpoint over a missing table fails at
    runtime with "no such table". Apps may also read/write existing workspace tables —
    through declared statements only.
 2. **Verify the endpoints** after writing them: call each statement once through
-   `data_query` (or exercise the app) to catch typos before the user does.
+   `workspace_query` (or exercise the app) to catch typos before the user does.
 3. **Validate the manifest** before handing the app over — run (from the app folder's
    parent or anywhere):
 
@@ -144,9 +144,7 @@ app's own router reads the rest of the path. Rules:
 ## URLs and publication
 
 - The owner opens the app at `https://<the workspace's domain>/apps/<folder-path>`
-  (the exact URL comes from `apps_list` — ownerUrl). Give the user this link when the
+  (the app listing gives the exact ownerUrl). Give the user this link when the
   app is ready.
-- Making the app public (a no-auth URL for anyone — `apps_list` reports it as
-  publicUrl once published) is a separate explicit action owned by the secretary's
-  `apps_publish` tool — tell the user to ask for publication in the main thread if
-  they want a public link.
+- Making the app public (a no-auth URL for anyone — the app listing reports it as
+  publicUrl once published) requires a separate request to the secretary in the main thread.

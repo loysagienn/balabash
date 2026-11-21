@@ -1,8 +1,7 @@
 // Agents — the catalog from the snapshot and the selected agent: its
 // settings (engine, model, effort, mode, whom it launches; a remote kind —
 // engine “Remote”, the external system in place of a model, the "remote"
-// tag, no effort or tools of ours), its tool
-// servers (the passport names the servers, not the single tools) and its
+// tag, no effort or tools of ours), its declared catalog nodes and its
 // activity — the threads of the agent the store knows, active first, under
 // the agent's whole count and its count of the last 30 days, read by place
 // (features/thread-list/queries.ts — the store holds only a window).
@@ -110,7 +109,7 @@ function AgentDetail({ agent, running }: { agent: AgentView; running: number }) 
             { key: 'model', value: <Setting value={model.value} note={model.note} code /> },
             // A remote kind has no effort of ours.
             ...(agent.sdk === 'remote' ? [] : [{ key: 'effort', value: <Setting value={effort.value} note={effort.note} /> }]),
-            { key: 'mode', value: modeLabel(agent.headless) },
+            { key: 'mode', value: modeLabel(agent) },
             {
               key: 'launches',
               value:
@@ -127,15 +126,15 @@ function AgentDetail({ agent, running }: { agent: AgentView; running: number }) 
           ]}
         />
       </DetailSection>
-      <DetailSection title={`Tool servers · ${agent.tools.length}`}>
-        {agent.tools.length > 0 ? (
+      <DetailSection title={`Catalog nodes · ${agent.nodes.length}`}>
+        {agent.nodes.length > 0 ? (
           <div className="agt-chips">
-            {agent.tools.map(tool => (
-              <Code key={tool}>{tool}</Code>
+            {agent.nodes.map(node => (
+              <Code key={node}>{node}</Code>
             ))}
           </div>
         ) : (
-          <Quiet>no tool servers</Quiet>
+          <Quiet>no catalog nodes</Quiet>
         )}
       </DetailSection>
       <DetailSection title="Activity" end={failed ? <TotalFailure queries={[all, recent]} /> : caption ? <Quiet>{caption}</Quiet> : undefined}>
@@ -205,7 +204,7 @@ export function AgentsScreen({ route }: { route: AgentsRoute }) {
               title={
                 <>
                   {agent.name}
-                  {agent.headless ? <Tag>headless</Tag> : null}
+                  {!agent.modes.includes('user') ? <Tag>headless</Tag> : null}
                   {agent.sdk === 'remote' ? <Tag>remote</Tag> : null}
                 </>
               }

@@ -1,0 +1,120 @@
+// The catalog view for a port that assembles the model's context.
+import { catalogContext, catalogInstructions, grantKey, grantedCapabilities, guideForLeaf, portActions, sampleOpenings, vertexLine } from './catalog-context.ts';
+import {
+  ACTION_NAMES, FileRef, portSchema, grantedVertex, ruleText, toCapabilityError, returnTypeText,
+  type DescribeValue, type Catalog, type CatalogAction, type CatalogCapability, type FileRefValue, type Grant, type JsonValue,
+} from '../catalog/index.ts';
+import type { AgentPassport } from '../core/contract.ts';
+import { getFileDownloadUrl, openFileContent } from '../files/index.ts';
+import { dispatchCatalogCall } from '../tree/call-journal.ts';
+import { viewKind, VIEW_TEXT_MAX_CHARS } from '../tree/files.ts';
+import type { CatalogOpeningContext, CatalogResult, FunctionCall, FunctionDefinition } from './turn-contract.ts';
+
+const PREVIEW_CHARS = 16_000;
+
+function preview(grant: Grant, value: JsonValue, seq: bigint, field: 'value' | 'error'): string {
+  const json = JSON.stringify(value);
+  if (json.length <= PREVIEW_CHARS) return json;
+  const path = `(await call("get_event", {seq: ${seq}})).payload.${field}`;
+  const hint = grant.vertices.has('get_event') ? ` Use run_program to select the part you need from ${path}.` : '';
+  return `${json.slice(0, PREVIEW_CHARS)}\n[Preview of event ${seq}.${hint}]`;
+}
+
+function definition(tree: Catalog, entry: CatalogAction | CatalogCapability): FunctionDefinition {
+  return {
+    type: 'function',
+    name: 'fullName' in entry ? entry.fullName : entry.name,
+    description: entry.description,
+    parameters: portSchema(tree, entry, 'input'),
+    strict: false,
+  };
+}
+
+export async function createCatalogPort(agent: AgentPassport, workspaceId: string, threadId: string, opening: 'function' | 'signature') {
+  const actions = opening === 'signature' ? ACTION_NAMES : portActions;
+  const { grant, connections } = await catalogContext(agent, workspaceId, threadId, actions);
+  const tree = grant.catalog;
+  const tools = actions.map(name => definition(tree, tree.actions.get(name)!));
+
+  function renderOpening(opened: DescribeValue, seenNodes: Set<string>): CatalogResult {
+    const accounts = opened.accounts.length ? ['Accounts: ' + JSON.stringify(opened.accounts)] : [];
+    if (opened.kind === 'node') {
+      seenNodes.add(opened.name);
+      const children = opened.children.map(child => vertexLine(child.kind, child.name, child.summary));
+      return { kind: 'catalog', text: [opened.summary, ...opened.guide, ...children, ...accounts].join('\n') };
+    }
+    const vertex = grantedVertex(grant, opened.name);
+    if (vertex?.kind !== 'capability') throw new Error('Missing described capability');
+    const guide = guideForLeaf(grant, vertex.parent, seenNodes);
+    if (opening === 'signature') {
+      return { kind: 'catalog', text: [...guide, opened.description, opened.signature, ...opened.types, ...accounts].join('\n') };
+    }
+    const text = [
+      ...guide, 'Returns: ' + returnTypeText(vertex), ...vertex.inputRules.map(ruleText), ...opened.types, ...accounts,
+    ].join('\n');
+    return { kind: 'catalog', text, definition: definition(tree, vertex) };
+  }
+
+  async function dispatch(call: FunctionCall, openings: CatalogOpeningContext): Promise<CatalogResult> {
+    let input: JsonValue;
+    try {
+      input = JSON.parse(call.arguments);
+    } catch {
+      input = call.arguments;
+    }
+
+    try {
+      const result = await dispatchCatalogCall(grant, connections, { callId: call.callId, name: call.name, input });
+      if ('error' in result) return { kind: 'catalog', isError: true, text: preview(grant, result.error, result.seq, 'error') };
+      const { value, seq, opened } = result;
+      if (opened) {
+        const rendered = renderOpening(opened, openings.seenNodes);
+        if (rendered.definition && !openings.introduce(call.callId, rendered.definition, rendered.text)) {
+          return { kind: 'catalog', text: rendered.text };
+        }
+        return rendered;
+      }
+      const text = preview(grant, value, seq, 'value');
+      return result.name === 'view_file' ? showFile(text, FileRef.parse(value)) : { kind: 'catalog', text };
+    } catch (error) {
+      return { kind: 'catalog', isError: true, text: JSON.stringify(toCapabilityError(error).toValue()) };
+    }
+  }
+  function capabilityDefinitions(): FunctionDefinition[] {
+    return Array.from(grantedCapabilities(grant), vertex => definition(tree, vertex));
+  }
+
+  const instructions = catalogInstructions(grant,
+    opening === 'signature' ? 'Use the signature in the transcript. If it is missing or truncated, describe the capability again.' :
+    'Use describe to add a capability to the available functions. If its name appears only in the transcript, describe it again. Call the function by its catalog name.');
+  return { instructions, tools, capabilityDefinitions, dispatch, grantKey: grantKey(grant),
+    sampleOpenings: () => sampleOpenings(grant, connections, opened => renderOpening(opened, new Set())),
+  };
+}
+
+async function showFile(text: string, file: FileRefValue): Promise<CatalogResult> {
+  try {
+    const kind = viewKind({ contentType: file.contentType, originalFilename: file.name });
+    if (kind === 'text') {
+      const reader = (await openFileContent(file.id)).getReader();
+      const decoder = new TextDecoder();
+      let content = '';
+      try {
+        while (content.length <= VIEW_TEXT_MAX_CHARS) {
+          const chunk = await reader.read();
+          content += decoder.decode(chunk.value, { stream: !chunk.done });
+          if (chunk.done) break;
+        }
+      } finally {
+        await reader.cancel();
+      }
+      const cutoff = content.length > VIEW_TEXT_MAX_CHARS ? `\n[First ${VIEW_TEXT_MAX_CHARS} characters shown.]` : '';
+      return { kind: 'catalog', text: text + '\n' + content.slice(0, VIEW_TEXT_MAX_CHARS) + cutoff };
+    }
+
+    const { url } = await getFileDownloadUrl(file.id);
+    return { kind: 'catalog', text, attachment: { kind: kind === 'image' ? 'image' : 'pdf', url } };
+  } catch (error) {
+    return { kind: 'catalog', text: text + '\nFile content unavailable: ' + toCapabilityError(error).message };
+  }
+}

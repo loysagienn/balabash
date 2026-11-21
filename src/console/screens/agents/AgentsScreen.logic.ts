@@ -75,8 +75,11 @@ export function effortWords(agent: Pick<AgentView, 'effort' | 'defaultEffort'>):
   return { value: null, note: 'default of the model' };
 }
 
-export function modeLabel(headless: boolean): string {
-  return headless ? 'headless · no user surface' : 'with the user · not headless';
+export function modeLabel(agent: Pick<AgentView, 'modes' | 'defaultMode'>): string {
+  const label = (mode: AgentView['defaultMode']) => mode === 'user' ? 'with the user' : 'headless';
+  return agent.modes.map(mode =>
+    agent.modes.length > 1 && mode === agent.defaultMode ? `${label(mode)} (default)` : label(mode),
+  ).join(' · ');
 }
 
 // "11 agents · 4 active threads" above the catalog.

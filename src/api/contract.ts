@@ -173,7 +173,7 @@ export type {
   ThreadSummary,
 } from '../core/contract.ts';
 
-import type { Event, Thread, ThreadCounts, ThreadStatus } from '../core/contract.ts';
+import type { AgentModes, Event, Thread, ThreadCounts, ThreadStatus } from '../core/contract.ts';
 
 // GET /api/threads query: everything optional, everything scoped to the
 // session's workspaceId on the server. Newest first; `before` is the cursor —
@@ -805,14 +805,16 @@ export type TaskView = {
   slug: string;
   name: string;
   description: string | null;
-  kind: string; // 'note' | 'code' | 'command'
+  kind: string; // 'note' | 'program'
   cron: string | null;
   at: Date | null;
   note: string | null;
-  command: string | null;
-  cwd: string | null;
+  // Kind 'program': the code the trigger runs.
+  code: string | null;
   timeoutMs: number | null;
-  reportOnSuccess: boolean;
+  // false: the task's schedule.fired waits in the main thread for the
+  // secretary's next turn instead of starting one.
+  wake: boolean;
   createdBy: string | null;
   createdAt: Date;
   // The next cron moment after now (config.scheduleTimezone), or the one-shot
@@ -821,42 +823,13 @@ export type TaskView = {
 };
 
 // ---------------------------------------------------------------------------
-// The schedule's run journal and the operator's commands over a task (the
-// Schedule screen). A run is a row of job_runs — the journal of workspace
-// jobs (kind 'command'): every run of one is written, a success as well as
-// a failure; a note task leaves a schedule.fired event instead, a code task
-// only what it pushes. The journal is telemetry outside the event log (the
-// llm_requests pattern), so the console reads it by place.
+// Telemetry outside the event log: the shared journal joins scheduled
+// program runs and the workspace's earlier job history.
+import type { RunSummary as ScheduleRunView, RunRecord as ScheduleRunDetailView } from '../schedule/run-record.ts';
 
-export type JobRunStatus = 'running' | 'ok' | 'failed' | 'timeout' | 'spawn_error' | 'aborted';
-export type JobTrigger = 'cron' | 'at' | 'manual';
+export type { ScheduleRunView, ScheduleRunDetailView };
 
-// One run as the lists show it: the outcome and the timing, without the
-// output tails (a page of runs stays small).
-export type JobRunView = {
-  id: string;
-  slug: string;
-  trigger: JobTrigger;
-  status: JobRunStatus;
-  exitCode: number | null;
-  startedAt: Date;
-  finishedAt: Date | null;
-  durationMs: number | null;
-  // Whether the kept tail of a stream lost its beginning (16 KiB kept).
-  stdoutTruncated: boolean;
-  stderrTruncated: boolean;
-};
-
-// One run in full: the command and working directory as they were at fire
-// time (the task may be gone or changed since) and the tails of both streams.
-export type JobRunDetailView = JobRunView & {
-  command: string;
-  cwd: string | null;
-  stdoutTail: string;
-  stderrTail: string;
-};
-
-export type JobRunsQuery = {
+export type ScheduleRunsQuery = {
   // Only the runs of this task.
   slug?: string;
   // Cursor: the id of the oldest run of the previous page — the next page
@@ -867,19 +840,19 @@ export type JobRunsQuery = {
 
 // Newest first; nextCursor — the id to ask `before` for the next page, null
 // at the end.
-export type JobRunsResponse = {
-  runs: JobRunView[];
+export type ScheduleRunsResponse = {
+  runs: ScheduleRunView[];
   nextCursor: string | null;
 };
 
 // The newest run of every task that has one (by slug): the "last run" of
 // the task rows.
-export type LatestJobRunsResponse = {
-  runs: JobRunView[];
+export type LatestScheduleRunsResponse = {
+  runs: ScheduleRunView[];
 };
 
-export type JobRunResponse = {
-  run: JobRunDetailView;
+export type ScheduleRunResponse = {
+  run: ScheduleRunDetailView;
 };
 
 // The row a command over a task means — the task the operator saw and
@@ -892,40 +865,33 @@ export type TaskCommandRequest = {
 };
 
 // POST /schedule/tasks — a task registered from the console, by the rules of
-// the create_task tool (src/schedule/input.ts, one parser for both doors):
+// the schedule_create_task capability (src/schedule/input.ts, one parser for both doors):
 // the slug's shape, a name, at most one trigger — a cron expression
 // (evaluated in the schedule's time zone) or `at`, an ISO 8601 instant with
-// an explicit offset — a note for kind 'note', the command fields for kind
-// 'command' only (cwd relative to the file area, timeoutMs 1 s – 5 h, null
-// for the default 10 min). null and absent are one "not given". The
-// answer is the row as the snapshot has it (the same row arrives as
-// schedule.task.created of the tail, folded idempotently) and whether a
-// code task sleeps (no run(ctx) body yet). Refusals: 400 bad_request (the
+// an explicit offset. A note has text and a program has code and an optional
+// timeout. The response holds the created row. Refusals: 400 bad_request (the
 // message starts with the field at fault), 409 task_conflict (the slug is
 // taken — by any workspace: slugs are global to the registry).
 export type CreateTaskRequest = {
   slug: string;
   name: string;
   description?: string | null;
-  kind: 'note' | 'code' | 'command';
+  kind: 'note' | 'program';
   cron?: string | null;
   at?: string | null;
   note?: string | null;
-  command?: string | null;
-  cwd?: string | null;
+  code?: string | null;
   timeoutMs?: number | null;
-  reportOnSuccess?: boolean | null;
+  wake?: boolean | null;
 };
 
 export type CreateTaskResponse = {
   task: TaskView;
-  sleeping: boolean;
 };
 
 // POST /schedule/tasks/:slug/run — the task fired by hand, the schedule
-// untouched: `fired` with the runId of a command job (null for a note or a
-// code task — they leave no journal row), or `already_running` when a run of
-// the same task is still going and this one burns.
+// untouched: `fired` with a program runId (null for a note), or
+// `already_running` when a run of the same task is still going and this one burns.
 export type RunTaskResponse = {
   outcome: 'fired' | 'already_running';
   runId: string | null;
@@ -1000,13 +966,13 @@ export type OpenSecretRequestView = {
   // predates the thread being kept or the thread is gone.
   threadId: string | null;
   agent: string | null;
+  taskSlug?: string; // the issuing task, when it opened the request
   // When the link was issued; a request issued again for the same server
   // replaces the open one and carries the new moment.
   requestedAt: Date;
 };
 
-// A connectable service of the installation: the user-auth MCP servers of
-// the config (mcp-servers/*.json with auth: "user").
+// A registered OAuth service a user can connect to their workspace.
 export type ServiceView = {
   name: string;
   description: string | null;
@@ -1028,9 +994,8 @@ export type ServiceView = {
 // the same route; connected accounts stay.
 export type OauthClientRequestResponse = { requestId: string };
 
-// A service of the installation: an external MCP server whose credentials
-// are the installation's (${secret:NAME} in its config) — one set for every
-// workspace, provisioned through the secrets form, forgotten for everyone.
+// Credentials shared across workspaces by a catalog service, installation
+// service or remote-agent kind. The secrets form provisions them for everyone.
 // state: connected; missing — a credential is not provisioned; failed —
 // provisioned, but the last connection attempt failed (error says why).
 export type InstallationServiceView = {
@@ -1042,14 +1007,15 @@ export type InstallationServiceView = {
 };
 
 // A claude.ai connector of the installation (transport "claude-connector"
-// in mcp-servers): the provider's authorization lives in the operator's
+// in data/mcp-servers): the provider's authorization lives in the operator's
 // claude.ai account, the proxy takes the operator's ambient Claude CLI
 // token — nothing to provide or forget here, the catalog shows it
-// read-only. state: connected; token_expired — connected, but the ambient
+// read-only. state: connected; token_expired — the ambient
 // token on this box has expired (calls fail until a Claude Code session
 // rotates it; tokenExpiresAt says since when); failed — the connection
 // itself failed (error says why, retried on the next look).
 export type ConnectorServiceView = {
+  recipients: string[];
   name: string;
   description: string | null;
   state: 'connected' | 'token_expired' | 'failed';
@@ -1071,22 +1037,18 @@ export type InstallationSecretRequestResponse = { requestId: string };
 // deleted (how many values) and the server disconnected for everyone.
 export type ForgetInstallationSecretsResponse = { server: string; forgotten: number };
 
-// An agent of the catalog as the console shows it, plus the coordinator —
-// the secretary of the main thread, which is not a catalog module: its
-// engine is the OpenAI backend, its tools are the tool servers of its own
-// passport (src/coordinator/functions.ts), it launches every catalog agent.
-export type AgentView = {
+// A loaded agent or the main thread: its declared modes, the children it
+// can start, and the catalog nodes in its declaration and access profile.
+export type AgentView = AgentModes & {
   name: string;
   description: string;
   icon: string | null;
   // 'remote' — a remote agent kind of the installation (src/remote): the
   // session runs in an external system; no tools, no model of ours.
   sdk: 'claude' | 'codex' | 'openai' | 'remote';
-  // The tool servers of the passport as it acts (not the single tools): the
-  // names it lists plus the extension servers "projects" brings.
-  tools: string[];
+  // Catalog nodes named by the declaration and its access profile.
+  nodes: string[];
   agents: string[];
-  headless: boolean;
   notification: string | null;
   // The model the declaration names; null leaves the choice to the engine.
   model: string | null;
@@ -1156,11 +1118,9 @@ export type ProcessView = ProcessVersionView & {
   uptimeSeconds: number;
   rssBytes: number;
   heapUsedBytes: number;
-  // The runs alive in the process — the live agent sessions of every
-  // workspace, the coordinator's among them — and the workspace jobs of
-  // the schedule in flight.
+  // Live agent sessions and running programs across all workspaces.
   liveSessions: number;
-  workspaceJobs: number;
+  runningPrograms: number;
 };
 
 export type DatabaseView = {
@@ -1202,11 +1162,8 @@ export type FileAreaTotalsView = {
 
 // The restart in the way, as this workspace may see it: the request's own
 // words (reason, requester, thread) only when the request came from this
-// workspace (`own`); another workspace's request is a bare fact — that a
-// restart is pending since when, and whether it is forced (a forced
-// restart cuts every workspace's agent turns in flight). What it waits for
-// names the threads of this workspace with a turn in flight and counts the
-// others.
+// workspace (`own`). Other workspaces see when the restart was requested.
+// Each workspace sees its own busy threads and a count of the others.
 export type PendingRestartView = {
   // The seq of the system.restart.requested event — a completion of the log
   // with a greater seq means this view is stale.
@@ -1216,7 +1173,6 @@ export type PendingRestartView = {
   requestedAt: Date;
   requestedBy: string | null;
   threadId: string | null;
-  force: boolean;
   // What the newest poll of the safe window found in the way; null before
   // the first poll.
   waiting: {
@@ -1224,7 +1180,8 @@ export type PendingRestartView = {
     // Threads of other workspaces with a turn in flight — a count, not names.
     otherThreads: number;
     secretaryTurn: boolean;
-    workspaceJob: boolean;
+    programWork: boolean;
+    remoteWork: boolean;
     logQuiet: boolean;
   } | null;
 };

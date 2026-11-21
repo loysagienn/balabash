@@ -16,7 +16,7 @@ describe('registry records → views', () => {
   });
 
   it('parses a task record with its optional fields', () => {
-    const view = taskFromRecord({ id: 'k1', slug: 'backup', name: 'Backup', description: null, kind: 'command', cron: '0 3 * * *', at: null, note: null, command: 'pg_dump', cwd: null, timeoutMs: 1000, reportOnSuccess: true, createdBy: 'scheduler', createdAt: '2026-10-09T10:00:00.000Z', nextRunAt: '2026-10-10T03:00:00.000Z' });
+    const view = taskFromRecord({ id: 'k1', slug: 'backup', name: 'Backup', description: null, kind: 'program', cron: '0 3 * * *', at: null, note: null, timeoutMs: 1000, code: 'return null;', wake: false, createdBy: 'scheduler', createdAt: '2026-10-09T10:00:00.000Z', nextRunAt: '2026-10-10T03:00:00.000Z' });
 
     assert.equal(view?.nextRunAt?.toISOString(), '2026-10-10T03:00:00.000Z');
     assert.equal(view?.at, null);

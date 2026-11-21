@@ -81,10 +81,6 @@ export function serviceIcon(server: string): IconName {
     return 'search';
   }
 
-  if (name.includes('qase')) {
-    return 'list-todo';
-  }
-
   if (name.includes('slack')) {
     return 'messages-square';
   }

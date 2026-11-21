@@ -1,16 +1,17 @@
-// Installation credentials for external MCP servers (§10): every
-// ${secret:NAME} reference is provisioned through a one-time web form —
+// The secrets of the installation services (connections/services.ts): every
+// secret a service declares is provisioned through a one-time web form —
 // values go straight to the database, never through the chat, the model or
 // the log (§2 ставка 4). The log records only the facts: a request opened
 // (secrets.requested, secret-requests.ts — the console's bell shows it)
 // and a sanitized secrets.provisioned event addressed to the thread that
 // issued the link.
 
+import type { TaskAuthor } from '../core/contract.ts';
 import { prisma } from '../db/client.ts';
 import { appendEventIn, logTransaction } from '../core/append.ts';
 import { notifyAppended } from '../core/live.ts';
 import { SECRETS_PROVISIONED } from '../core/envelope.ts';
-import { disconnectExternalServer, listExternalSecretTargets, refreshExternalSecretTargetSources, type ExternalSecretTarget } from './tool-manager.ts';
+import { getSecretService, refreshSecretServices, type SecretService } from './connections/services.ts';
 import { openSecretRequest, secretRequestUrl } from './secret-requests.ts';
 
 const SECRET_KEY_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -20,15 +21,8 @@ export type ExternalServerSecretField = {
   description: string;
 };
 
-function toFields(target: ExternalSecretTarget): ExternalServerSecretField[] {
-  return target.secretNames.map(key => ({
-    key,
-    description: `Value for \${secret:${key}} in ${target.name}.json`,
-  }));
-}
-
-function getTarget(serverName: string): ExternalSecretTarget | null {
-  return listExternalSecretTargets().find(target => target.name === serverName) ?? null;
+function toFields(target: SecretService): ExternalServerSecretField[] {
+  return target.secretNames.map(key => ({ key, description: `The secret ${key} of ${target.name}` }));
 }
 
 function parseFields(value: unknown): ExternalServerSecretField[] {
@@ -63,8 +57,9 @@ export async function requestExternalServerCredentials(
   workspaceId: string,
   threadId: string,
   serverName: string,
+  task?: TaskAuthor,
 ): Promise<string> {
-  const { id } = await openExternalServerCredentialsRequest(workspaceId, threadId, serverName);
+  const { id } = await openExternalServerCredentialsRequest(workspaceId, threadId, serverName, task);
 
   return secretRequestUrl(id, workspaceId);
 }
@@ -75,28 +70,27 @@ export async function openExternalServerCredentialsRequest(
   workspaceId: string,
   threadId: string,
   serverName: string,
+  task?: TaskAuthor,
 ): Promise<{ id: string }> {
-  const target = getTarget(serverName);
+  const target = getSecretService(serverName);
 
   if (!target) {
     throw new Error(`External server "${serverName}" is not awaiting installation credentials`);
   }
 
-  return openSecretRequest('external-secrets', { workspaceId, threadId, server: target.name, fields: toFields(target) });
+  return openSecretRequest('external-secrets', { workspaceId, threadId, task, server: target.name, fields: toFields(target) });
 }
 
 // Whether the installation has a server with installation credentials
 // under this name (the console's 404 otherwise).
 export function isExternalSecretServer(serverName: string): boolean {
-  return getTarget(serverName) !== null;
+  return getSecretService(serverName) !== null;
 }
 
 // The reverse of provisioning (auth agent):
-// the server's installation credentials are deleted and its live client
-// closed — the server returns to pending and its functions disappear from
-// every catalog. Returns the number of deleted secret rows.
+// delete the server's installation credentials and refresh its state. Returns the number of deleted secret rows.
 export async function forgetExternalServerSecrets(serverName: string): Promise<number> {
-  const target = getTarget(serverName);
+  const target = getSecretService(serverName);
 
   if (!target) {
     throw new Error(`External server "${serverName}" has no installation credentials to forget`);
@@ -104,10 +98,7 @@ export async function forgetExternalServerSecrets(serverName: string): Promise<n
 
   const { count } = await prisma.externalServerSecret.deleteMany({ where: { server: target.name } });
 
-  // An external server leaves the catalog; a holder of another source (a
-  // remote agent kind) only shows the values gone.
-  await disconnectExternalServer(target.name);
-  await refreshExternalSecretTargetSources();
+  await refreshSecretServices();
 
   return count;
 }
@@ -120,8 +111,7 @@ export type ExternalServerSecretRequestView = {
 
 // The request as the web window may see it: field METADATA only, never
 // values. workspaceId comes from the session; a foreign or missing request is the
-// caller's 404. The live tool-manager is deliberately not consulted here —
-// the row itself is the source of truth until fulfilled.
+// caller's 404. The row is the source of truth until fulfilled.
 export async function getExternalServerSecretRequest(
   workspaceId: string,
   requestId: string,
@@ -206,5 +196,5 @@ export async function provisionExternalServerSecrets(
     notifyAppended(seq);
   }
 
-  await refreshExternalSecretTargetSources();
+  await refreshSecretServices();
 }

@@ -31,7 +31,7 @@ export type ClaudeSession = {
 };
 
 type QueueWaiter = {
-  resolve: (result: IteratorResult<SDKUserMessage>) => void;
+  resolve: (result: IteratorResult<string>) => void;
 };
 
 function createUserMessage(text: string): SDKUserMessage {
@@ -45,12 +45,12 @@ function createUserMessage(text: string): SDKUserMessage {
   };
 }
 
-function createMessageQueue(initialMessage: SDKUserMessage) {
-  const messages: SDKUserMessage[] = [initialMessage];
+function createMessageQueue(initialMessage: string) {
+  const messages: string[] = [initialMessage];
   const waiters: QueueWaiter[] = [];
   let ended = false;
 
-  const push = (message: SDKUserMessage) => {
+  const push = (message: string) => {
     if (ended) {
       throw new Error('Claude session input is already closed');
     }
@@ -76,13 +76,13 @@ function createMessageQueue(initialMessage: SDKUserMessage) {
     }
   };
 
-  const iterable: AsyncIterable<SDKUserMessage> = {
+  const iterable: AsyncIterable<string> = {
     [Symbol.asyncIterator]() {
       return {
-        next: async (): Promise<IteratorResult<SDKUserMessage>> => {
+        next: async (): Promise<IteratorResult<string>> => {
           const message = messages.shift();
 
-          if (message) {
+          if (message !== undefined) {
             return { value: message, done: false };
           }
 
@@ -101,17 +101,35 @@ function createMessageQueue(initialMessage: SDKUserMessage) {
   return { iterable, push, end };
 }
 
-export function startClaudeSession(initialText: string, options: ClaudeSessionOptions): ClaudeSession {
-  const queue = createMessageQueue(createUserMessage(initialText));
+export async function* sessionInputs(messages: AsyncIterable<string>, refresh: (text: string) => Promise<string>) {
+  let first = true;
+  for await (const text of messages) {
+    // The opening and its system prompt already share one grant.
+    yield createUserMessage(first ? text : await refresh(text));
+    first = false;
+  }
+}
+
+export function startClaudeSession(
+  initialText: string,
+  options: ClaudeSessionOptions,
+  catalog: { refresh(text: string): Promise<string>; onCompact(): void },
+): ClaudeSession {
+  const queue = createMessageQueue(initialText);
   const session = query({
-    prompt: queue.iterable,
+    prompt: sessionInputs(queue.iterable, catalog.refresh),
     options,
   });
   let closed = false;
 
   return {
-    messages: session,
-    push: text => queue.push(createUserMessage(text)),
+    messages: (async function* () {
+      for await (const message of session) {
+        if (message.type === 'system' && message.subtype === 'compact_boundary') catalog.onCompact();
+        yield message;
+      }
+    })(),
+    push: queue.push,
     interrupt: async () => {
       if (closed) {
         return;

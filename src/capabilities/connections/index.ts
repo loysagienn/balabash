@@ -16,7 +16,7 @@ import { auth, discoverOAuthServerInfo } from '@modelcontextprotocol/sdk/client/
 import { Prisma } from '../../../prisma-generated/client.ts';
 import type { ConnectionModel } from '../../../prisma-generated/models.ts';
 import { prisma } from '../../db/client.ts';
-import type { JsonObject } from '../../core/contract.ts';
+import type { JsonObject, TaskAuthor } from '../../core/contract.ts';
 import type { ConnectionView } from '../../api/contract.ts';
 import type { ConnectionRecord } from '../../core/event-types.ts';
 import { appendEvent, appendEventIn, logTransaction } from '../../core/append.ts';
@@ -32,15 +32,12 @@ import {
   OAUTH_CLIENT_PROVISIONED,
 } from '../../core/envelope.ts';
 import { config } from '../../config/index.ts';
-import { dropWorkspaceClient, getUserAuthServer, type UserAuthServer } from '../tool-manager.ts';
-import { createInteractiveAuthProvider } from './oauth-provider.ts';
-import { backfillConnectionIdentity, getAccessToken, identityData, identityLabel, probeIdentity } from './identity.ts';
+import { accountCatalogChanged, getAccountService, type AccountService } from './services.ts';
+import { AuthorizationLostError, connectionAccessToken, createInteractiveAuthProvider } from './oauth-provider.ts';
+import { ProbeRefusedError, getAccessToken, identityData, identityLabel, probeIdentity } from './identity.ts';
 import type { ProbedIdentity } from './identity.ts';
 import type { IdentityProbeConfig } from '../server-config.ts';
-import { ACCOUNT_KEY_PATTERN, DEFAULT_ACCOUNT_KEY, deriveAccountKey } from './account-key.ts';
-
-export { createTransportAuthProvider } from './oauth-provider.ts';
-export { ACCOUNT_KEY_PATTERN } from './account-key.ts';
+import { DEFAULT_ACCOUNT_KEY, deriveAccountKey } from './account-key.ts';
 
 // A refusal of a connection command, for the two callers alike: the auth
 // tools answer the model with the message, the console's endpoints map the
@@ -78,8 +75,8 @@ function randomToken(): string {
   return crypto.randomBytes(24).toString('base64url');
 }
 
-function getServer(serverName: string): UserAuthServer {
-  const server = getUserAuthServer(serverName);
+function getServer(serverName: string): AccountService {
+  const server = getAccountService(serverName);
 
   if (!server) {
     throw new ConnectionError('not_found', `Unknown integration "${serverName}"`);
@@ -111,7 +108,17 @@ export async function getOauthClient(serverName: string): Promise<Record<string,
   return (row?.clientInformation as Record<string, unknown> | null) ?? null;
 }
 
-async function requireManualOauthClient(server: UserAuthServer): Promise<void> {
+// Which services hold an OAuth client, by name — the client itself is not
+// read.
+export async function listProvisionedOauthClients(): Promise<Set<string>> {
+  return new Set((await prisma.oauthClient.findMany({ select: { server: true } })).map(row => row.server));
+}
+
+export async function hasOauthClient(serverName: string): Promise<boolean> {
+  return (await prisma.oauthClient.count({ where: { server: serverName } })) > 0;
+}
+
+async function requireManualOauthClient(server: AccountService): Promise<void> {
   if (server.clientRegistration !== 'manual') {
     return;
   }
@@ -128,6 +135,16 @@ async function requireManualOauthClient(server: UserAuthServer): Promise<void> {
 // canonical one in the client registry — never Postgres plan roulette.
 export async function listWorkspaceConnections(workspaceId: string) {
   return prisma.connection.findMany({ where: { workspaceId }, orderBy: { createdAt: 'asc' } });
+}
+
+// The accounts of the workspace — all, or of one service — as anyone may
+// see them: who they are and how they stand, never their tokens.
+export async function listAccounts(workspaceId: string, server?: string) {
+  return prisma.connection.findMany({
+    where: { workspaceId, server },
+    orderBy: { createdAt: 'asc' },
+    select: { id: true, server: true, accountKey: true, displayName: true, identity: true, status: true },
+  });
 }
 
 // One row of the user by its id — the address the console's endpoints
@@ -258,7 +275,7 @@ export async function renameConnection(
   return { accountKey: row.accountKey, previousName: row.displayName, name: trimmed, connection: renamed };
 }
 
-// Disconnects one account: the row dies, its live client is dropped, the
+// Disconnects one account: the row dies and the
 // slug becomes free. Tokens go with the row; access at the provider side is
 // revoked by the user in the provider's own UI.
 export async function disconnectConnection(
@@ -277,7 +294,7 @@ export async function disconnectConnection(
     return row;
   });
 
-  dropWorkspaceClient(row.server, workspaceId, row.accountKey);
+  await accountCatalogChanged(row.server, workspaceId, 'disconnected');
   await journalConnectionEvent(CONNECTION_DISCONNECTED, { ...row, threadId: threadId ?? row.threadId }, {
     connectionId: row.id,
     server: row.server,
@@ -295,23 +312,8 @@ export async function disconnectConnection(
 // OAuth state).
 export type ConnectLink = { url: string; connection: ConnectionView; expiresAt: Date };
 
-// Issues a one-time authorization link for one account of the service and
-// answers only its address — the auth agent's request_authorization.
-export async function requestAuthorization(
-  workspaceId: string,
-  threadId: string,
-  serverName: string,
-  requestedAccountKey?: string,
-  displayName?: string,
-): Promise<string> {
-  return (await issueConnectLink(workspaceId, threadId, serverName, requestedAccountKey, displayName)).url;
-}
-
-// What a link is asked for — the three callers of the one issue.
+// What a link is asked for — the two callers of the one issue.
 type LinkTarget =
-  // The auth agent's request_authorization: the account at this address —
-  // re-authorized when it exists, born when it does not.
-  | { kind: 'account'; accountKey: string; displayName: string | undefined }
   // The console's "Reconnect": this very row, as the screen showed it —
   // re-authorized; gone meanwhile, not found (never born again).
   | { kind: 'row'; id: string }
@@ -325,19 +327,8 @@ type LinkResolution = { existing: ConnectionModel } | { create: { accountKey: st
 
 // The row the target names among the rows of (workspace, server) as they are
 // under the lock, or the row to create.
-function resolveLinkTarget(server: UserAuthServer, target: LinkTarget, rows: ConnectionModel[]): LinkResolution {
+function resolveLinkTarget(server: AccountService, target: LinkTarget, rows: ConnectionModel[]): LinkResolution {
   switch (target.kind) {
-    case 'account': {
-      const existing = rows.find(row => row.accountKey === target.accountKey);
-
-      if (existing) {
-        return { existing };
-      }
-
-      // Proper naming at birth arrives with the lifecycle verbs; until then
-      // the display name falls back to the address.
-      return { create: { accountKey: target.accountKey, displayName: target.displayName?.trim() || (target.accountKey === DEFAULT_ACCOUNT_KEY ? server.name : target.accountKey) } };
-    }
     case 'row': {
       const existing = rows.find(row => row.id === target.id);
 
@@ -369,19 +360,6 @@ function resolveLinkTarget(server: UserAuthServer, target: LinkTarget, rows: Con
   }
 }
 
-// Whether the target, over these rows, would create a row (the gate below
-// applies) rather than re-authorize one.
-function wouldCreate(target: LinkTarget, rows: ConnectionModel[]): boolean {
-  switch (target.kind) {
-    case 'account':
-      return !rows.some(row => row.accountKey === target.accountKey);
-    case 'row':
-      return false;
-    case 'new':
-      return true;
-  }
-}
-
 // The rows that keep the multiplicity gate shut: a row without a known
 // identity that holds tokens (a row with no stored tokens holds no provider
 // account — an abandoned link, a cleared re-auth — there is nothing for a
@@ -397,7 +375,7 @@ function identityUnknown(rows: ConnectionModel[]): ConnectionModel[] {
 // identity is known (else the twin guard is blind). The backfill that
 // asks the provider ran before the lock (issueLink); its refusals are
 // told by row, a row that appeared since is told to retry.
-function assertCanCreate(server: UserAuthServer, rows: ConnectionModel[], backfillRefusals: Map<string, string>): void {
+function assertCanCreate(server: AccountService, rows: ConnectionModel[], backfillRefusals: Map<string, string>): void {
   if (!rows.length) {
     return;
   }
@@ -416,7 +394,7 @@ function assertCanCreate(server: UserAuthServer, rows: ConnectionModel[], backfi
 
     throw new ConnectionError(
       'conflict',
-      `Cannot add another "${server.name}" account yet: the identity of account "${blind.accountKey}" is unknown (${reason}). Use that account once (a live call refreshes its token and records the identity), or re-authorize it, then retry.`,
+      `Cannot add another "${server.name}" account yet: the identity of account "${blind.accountKey}" is unknown (${reason}). Retry once the reason is gone, or re-authorize that account first.`,
     );
   }
 }
@@ -428,7 +406,7 @@ function assertCanCreate(server: UserAuthServer, rows: ConnectionModel[], backfi
 // so the rules hold at the write. threadId is the issuing thread — the auth
 // agent's, or the main thread when the operator asks from the console: the
 // flow's connection.* events are addressed to it.
-async function issueLink(workspaceId: string, threadId: string, server: UserAuthServer, target: LinkTarget): Promise<ConnectLink> {
+async function issueLink(workspaceId: string, threadId: string, server: AccountService, target: LinkTarget): Promise<ConnectLink> {
   await requireManualOauthClient(server);
 
   // The backfill asks the provider — outside the lock and the transaction;
@@ -436,9 +414,9 @@ async function issueLink(workspaceId: string, threadId: string, server: UserAuth
   const backfillRefusals = new Map<string, string>();
   const seen = await prisma.connection.findMany({ where: { workspaceId, server: server.name } });
 
-  if (wouldCreate(target, seen) && server.identityProbe) {
+  if (target.kind === 'new' && server.identityProbe) {
     for (const row of identityUnknown(seen)) {
-      const backfill = await backfillConnectionIdentity(server.identityProbe, row.id);
+      const backfill = await backfillConnectionIdentity({ url: server.url, identityProbe: server.identityProbe }, row.id);
 
       if (!backfill.ok) {
         backfillRefusals.set(row.id, backfill.reason);
@@ -491,28 +469,6 @@ async function issueLink(workspaceId: string, threadId: string, server: UserAuth
   return { url: `https://${config.consoleDomain}/connect/${server.name}?nonce=${connectNonce}`, connection: connectionView(row), expiresAt };
 }
 
-// Issues a one-time authorization link for one account of the service by
-// its address — the auth agent's request_authorization. Passing an unknown
-// accountKey starts a new account — gated on the service declaring an
-// identity probe and on every existing account's identity being known
-// (else the twin guard is blind).
-export async function issueConnectLink(
-  workspaceId: string,
-  threadId: string,
-  serverName: string,
-  requestedAccountKey?: string,
-  displayName?: string,
-): Promise<ConnectLink> {
-  const server = getServer(serverName);
-  const accountKey = requestedAccountKey ?? DEFAULT_ACCOUNT_KEY;
-
-  if (!ACCOUNT_KEY_PATTERN.test(accountKey)) {
-    throw new ConnectionError('bad_request', `Account key "${accountKey}" must match ${ACCOUNT_KEY_PATTERN}`);
-  }
-
-  return issueLink(workspaceId, threadId, server, { kind: 'account', accountKey, displayName });
-}
-
 // The console's "Reconnect" of one row: a link for that very row (its
 // re-authorization); a row of another workspace and a missing one are one
 // not-found — a row gone by the write is not born again.
@@ -528,7 +484,7 @@ export async function reconnectConnection(workspaceId: string, threadId: string,
 
 // The console's "Connect" on a service of the catalog: a link for a new
 // account. With a name — a new account named so (the address derived from
-// the name, as the auth agent derives it; a name in use is refused — that
+// the name; a name in use is refused — that
 // account is re-authorized from its own row); without — the service's
 // first account under the default address, and a refusal once the service
 // has one (another account needs a name, an existing one its own
@@ -548,8 +504,9 @@ export async function requestOauthClientCredentials(
   workspaceId: string,
   threadId: string,
   serverName: string,
+  task?: TaskAuthor,
 ): Promise<string> {
-  const row = await openOauthClientRequest(workspaceId, threadId, serverName);
+  const row = await openOauthClientRequest(workspaceId, threadId, serverName, task);
 
   return secretRequestUrl(row.id, workspaceId);
 }
@@ -561,6 +518,7 @@ export async function openOauthClientRequest(
   workspaceId: string,
   threadId: string,
   serverName: string,
+  task?: TaskAuthor,
 ): Promise<{ id: string }> {
   const server = getServer(serverName);
 
@@ -568,7 +526,7 @@ export async function openOauthClientRequest(
     throw new ConnectionError('not_found', `Integration "${server.name}" uses Dynamic Client Registration`);
   }
 
-  return openSecretRequest('oauth-client', { workspaceId, threadId, server: server.name });
+  return openSecretRequest('oauth-client', { workspaceId, threadId, task, server: server.name });
 }
 
 export type OauthClientRequestView = {
@@ -722,6 +680,7 @@ export async function handleOauthCallback(query: Record<string, unknown>): Promi
   }
 
   const journal = async (type: string, payload: JsonObject) => {
+    if (type === CONNECTION_COMPLETED) await accountCatalogChanged(row.server, row.workspaceId, 'connected');
     await appendEvent({
       type,
       actor: 'system',
@@ -762,7 +721,7 @@ export async function handleOauthCallback(query: Record<string, unknown>): Promi
     return fail('Authorization response contains no code');
   }
 
-  let server: UserAuthServer;
+  let server: AccountService;
 
   try {
     server = getServer(row.server);
@@ -787,10 +746,6 @@ export async function handleOauthCallback(query: Record<string, unknown>): Promi
     return fail(getErrorMessage(error));
   }
 
-  // A stale client may exist after re-authorization; the next turn reconnects
-  // with the fresh tokens.
-  dropWorkspaceClient(row.server, row.workspaceId, row.accountKey);
-
   if (server.identityProbe) {
     // The pre-flow snapshot (`row` was read before the token exchange) tells
     // whether this flow gave birth to the row, and holds the tokens/status to
@@ -804,7 +759,7 @@ export async function handleOauthCallback(query: Record<string, unknown>): Promi
     } catch (error) {
       // Identity is a best-effort annotation at this point — a crash here
       // must not turn a completed authorization into a raw 500 with no
-      // journaled event. The lazy backfill retries later.
+      // journaled event. The backfill asks again later.
       console.error(`[connections] identity establishment failed for "${row.server}" (${row.accountKey}):`, error);
       outcome = { kind: 'unknown', reason: getErrorMessage(error) };
     }
@@ -822,10 +777,6 @@ export async function handleOauthCallback(query: Record<string, unknown>): Promi
     }
 
     if (outcome.kind === 'twin') {
-      // The consent landed on an already-connected provider account; its row
-      // took the fresh tokens, so its live client is stale too.
-      dropWorkspaceClient(row.server, row.workspaceId, outcome.twinAccountKey);
-
       if (bornHere) {
         // The newborn row died in establishIdentity: the registry lost it.
         await journal(CONNECTION_DISCONNECTED, {
@@ -862,7 +813,7 @@ export async function handleOauthCallback(query: Record<string, unknown>): Promi
 type IdentityOutcome =
   | { kind: 'ok'; label: string | null }
   // The probe could not answer; the connection stays identity-less and the
-  // lazy backfill retries on later connects.
+  // backfill asks again before another account is added.
   | { kind: 'unknown'; reason: string }
   | { kind: 'twin'; twinId: string; twinAccountKey: string; twinName: string; label: string | null }
   | { kind: 'wrong-account'; error: string };
@@ -978,6 +929,7 @@ export async function markReauthorizationRequired(connectionId: string, error: s
   }
 
   await prisma.connection.update({ where: { id: row.id }, data: { status: 'reauthorization_required' } });
+  await accountCatalogChanged(row.server, row.workspaceId, 'reauthorization_required');
   await appendEvent({
     type: CONNECTION_REAUTHORIZATION_REQUIRED,
     actor: 'system',
@@ -995,4 +947,97 @@ export async function markReauthorizationRequired(connectionId: string, error: s
   }).catch(appendError => {
     console.error(`[connections] failed to journal reauthorization for "${row.server}":`, appendError);
   });
+}
+
+// The access token of a connected account for a call made straight to the
+// provider (connectionAccessToken), with the one thing every such call owes
+// the account: an authorization that turns out to be gone — the provider no
+// longer honors the refresh token — is recorded on the row, and the thread
+// that connected the account gets the event. A client of the installation
+// the provider does not accept and an exchange that got no answer say
+// nothing about the account: its row stays as it is. The failure is thrown
+// on as it came; what it means to the caller is the caller's to say.
+export async function accountAccessToken(
+  connection: { id: string; server: string },
+  serverUrl: string,
+  rejected?: string,
+): Promise<string> {
+  try {
+    return await connectionAccessToken(connection, serverUrl, rejected);
+  } catch (error) {
+    if (error instanceof AuthorizationLostError) {
+      await markReauthorizationRequired(connection.id, error.message);
+    }
+
+    throw error;
+  }
+}
+
+// Backfill for a row without identity — one connected before the service
+// declared its probe, or one whose probe got no answer at the callback: ask
+// the provider who the account is and record the answer. The account is
+// asked the way a call of it acts: on its current access, renewed when it
+// has expired or the provider refuses it — a row that has not been used
+// since its token ran out is no reason to send the user to re-authorize. An
+// account whose authorization turns out to be gone is marked like on any
+// other call of it (accountAccessToken).
+// Refuses to write a twin (two rows claiming one provider account) — that
+// conflict is surfaced to the caller, never resolved silently here.
+async function backfillConnectionIdentity(
+  service: { url: string; identityProbe: IdentityProbeConfig },
+  connectionId: string,
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  const row = await prisma.connection.findUnique({ where: { id: connectionId } });
+
+  if (!row) {
+    return { ok: false, reason: 'connection no longer exists' };
+  }
+
+  if (row.identityId) {
+    return { ok: true };
+  }
+
+  if (row.status !== 'connected') {
+    return { ok: false, reason: 'the account is not connected' };
+  }
+
+  let identity: ProbedIdentity;
+
+  try {
+    const accessToken = await accountAccessToken(row, service.url);
+
+    identity = await probeIdentity(service.identityProbe, accessToken).catch(async (error: unknown) => {
+      if (!(error instanceof ProbeRefusedError) || error.status !== 401) {
+        throw error;
+      }
+
+      return probeIdentity(service.identityProbe, await accountAccessToken(row, service.url, accessToken));
+    });
+  } catch (error) {
+    return { ok: false, reason: getErrorMessage(error) };
+  }
+
+  const twin = await prisma.connection.findFirst({
+    where: { workspaceId: row.workspaceId, server: row.server, identityId: identity.id, NOT: { id: row.id } },
+  });
+
+  if (twin) {
+    return {
+      ok: false,
+      reason: `provider account "${identity.label ?? identity.id}" is already connected as "${twin.accountKey}"`,
+    };
+  }
+
+  try {
+    await prisma.connection.update({
+      where: { id: row.id },
+      data: { identityId: identity.id, identity: identityData(identity) },
+    });
+  } catch (error) {
+    // A twin created concurrently lands here as a unique violation — surface
+    // it like the check above instead of throwing into the caller.
+    return { ok: false, reason: getErrorMessage(error) };
+  }
+
+  return { ok: true };
 }

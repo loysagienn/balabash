@@ -15,6 +15,7 @@
 import crypto from 'node:crypto';
 import { prisma } from '../db/client.ts';
 import { config } from '../config/index.ts';
+import type { TaskAuthor } from '../core/contract.ts';
 import type { Tx } from '../core/append.ts';
 import { registryMutation } from '../core/registry-events.ts';
 import type { Prisma } from '../../prisma-generated/client.ts';
@@ -32,6 +33,7 @@ export type OpenSecretRequestInput = {
   workspaceId: string;
   threadId: string;
   server: string;
+  task?: TaskAuthor;
   // The fields of an external-secrets request (stored in the row for the
   // form); an OAuth client request has the fixed two.
   fields?: ExternalServerSecretField[];
@@ -53,12 +55,13 @@ export function secretRequestUrl(id: string, workspaceId: string): string {
 // Opens (or replaces) the request of one server for one workspace and journals
 // it; answers the row's id — the address of the one-time link.
 export async function openSecretRequest(kind: SecretRequestKind, input: OpenSecretRequestInput): Promise<{ id: string }> {
-  const { workspaceId, threadId, server } = input;
+  const { workspaceId, threadId, server, task } = input;
+  const by = { kind: 'thread' as const, workspaceId, threadId, task };
   // nonce/expiresAt are vestigial: the session flow never reads them. They
   // stay written (columns are required) until a later cleanup migration
   // drops them once no running code references them. createdAt is the
   // moment of this request: a replacement is a new request in the same row.
-  const stamp = () => ({ nonce: randomToken(), expiresAt: new Date(), createdAt: new Date() });
+  const stamp = () => ({ taskSlug: task?.slug ?? null, nonce: randomToken(), expiresAt: new Date(), createdAt: new Date() });
 
   return registryMutation(async (tx, journal) => {
     if (kind === 'external-secrets') {
@@ -69,7 +72,7 @@ export async function openSecretRequest(kind: SecretRequestKind, input: OpenSecr
         update: { threadId, fields, ...stamp() },
       });
 
-      await journal(SECRETS_REQUESTED, secretRequestRecord(row, (input.fields ?? []).map(field => field.key)), { kind: 'thread', workspaceId, threadId });
+      await journal(SECRETS_REQUESTED, secretRequestRecord(row, (input.fields ?? []).map(field => field.key)), by);
 
       return { id: row.id };
     }
@@ -80,7 +83,7 @@ export async function openSecretRequest(kind: SecretRequestKind, input: OpenSecr
       update: { threadId, ...stamp() },
     });
 
-    await journal(OAUTH_CLIENT_REQUESTED, secretRequestRecord(row, OAUTH_CLIENT_FIELDS), { kind: 'thread', workspaceId, threadId });
+    await journal(OAUTH_CLIENT_REQUESTED, secretRequestRecord(row, OAUTH_CLIENT_FIELDS), by);
 
     return { id: row.id };
   });
@@ -102,14 +105,14 @@ export async function readOpenSecretRequests(workspaceId: string, client: Tx | t
     client.oauthClientRequest.findMany({ where: { workspaceId } }),
   ]);
   const rows: Array<Omit<OpenSecretRequestView, 'agent'>> = [
-    ...secrets.map(row => ({ id: row.id, kind: 'external-secrets' as const, server: row.server, fields: fieldNames(row.fields), threadId: row.threadId, requestedAt: row.createdAt })),
-    ...clients.map(row => ({ id: row.id, kind: 'oauth-client' as const, server: row.server, fields: [...OAUTH_CLIENT_FIELDS], threadId: row.threadId, requestedAt: row.createdAt })),
+    ...secrets.map(row => ({ id: row.id, kind: 'external-secrets' as const, server: row.server, fields: fieldNames(row.fields), threadId: row.threadId, ...(row.taskSlug ? { taskSlug: row.taskSlug } : {}), requestedAt: row.createdAt })),
+    ...clients.map(row => ({ id: row.id, kind: 'oauth-client' as const, server: row.server, fields: [...OAUTH_CLIENT_FIELDS], threadId: row.threadId, ...(row.taskSlug ? { taskSlug: row.taskSlug } : {}), requestedAt: row.createdAt })),
   ];
   const threadIds = [...new Set(rows.map(row => row.threadId).filter((id): id is string => id !== null))];
   const threads = threadIds.length ? await client.thread.findMany({ where: { id: { in: threadIds } }, select: { id: true, agent: true } }) : [];
   const agents = new Map(threads.map(thread => [thread.id, thread.agent]));
 
   return rows
-    .map(row => ({ ...row, agent: row.threadId ? (agents.get(row.threadId) ?? null) : null }))
+    .map(row => ({ ...row, agent: row.threadId && !row.taskSlug ? (agents.get(row.threadId) ?? null) : null }))
     .sort((a, b) => a.requestedAt.getTime() - b.requestedAt.getTime() || a.id.localeCompare(b.id));
 }

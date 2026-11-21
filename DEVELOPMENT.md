@@ -12,20 +12,26 @@ confidential from them.
 
 - `agents/` — the agent catalog: one declaration per agent, registered in the
   static index `agents/index.ts` (a new agent is a module plus an entry
-  there). `agents/world/` is the world library: canonical prompt fragments,
+  there). An agent names catalog nodes, root overrides, spawnable repository
+  agents and thread modes in its passport. `agents/access.ts` holds named access
+  profiles and the secretary's passport. `agents/world/` is the world library: canonical prompt fragments,
   one file per world fact, every prompt imports instead of retelling.
   `agents/roles/` holds a brief shared by agents that play one role on
   different backends; `agents/kit/` — pieces shared by agent modules (the
   Playwright MCP of the agents that carry a browser, the loopback static
   server an agent renders its workbench files from).
-- `tools/` — the repository's in-process tool servers (MCP over loopback
-  HTTP): the workbench (`workspace`, `workspace_files`), `gmail` and `drive`
-  over the shared Google plumbing, `http_get`, `apps`, … registered in
-  `tools/index.ts`. `mcp-servers/` — the JSON configs of external MCP servers
-  (Notion, Perplexity, Qase).
 - `src/` — the app. `core/` (event log, envelopes, threads), `capabilities/`
-  (tool servers, the tool manager, the agent runtime and session runner,
+  (the agent runtime and session runner,
   agent validation, per-user connections and installation secrets),
+  `catalog/` (the capability catalog of the new tool scheme: what an author
+  writes, the build with the rules of the scheme, signatures, grants,
+  `describe`, the one path of a call and the runner of programs used by the
+  secretary, local agents and scheduled tasks),
+  `tree/` (the real vertices of that catalog, one file per node: the root
+  with its guide and its own capabilities, and the nodes written so far —
+  each action takes its data from the app's own layers; at its start the
+  app tells the services these nodes declare to the connections layer.
+  Installation nodes come from authored modules and MCP discovery (HTTP, stdio and claude.ai)),
   `coordinator/` (the secretary: instructions and function definitions),
   `harness/` (the model backends: `claude-sdk/`, `codex-sdk/`, `openai/`,
   `anthropic/`), `adapters/` (surfaces: `telegram/`, `ccr/`), `api/` (the
@@ -34,9 +40,9 @@ confidential from them.
   served by the core on `CONSOLE_DOMAIN` through `src/api/console.ts`),
   `users/` (users, identities, workspace membership), `workspace/` (the
   per-workspace workbench: layout, sqlite, child processes, the annotation
-  indexer), `projects/` (the project registry), `schedule/` (scheduled tasks
-  and jobs; `schedule/AGENTS.md` — the contract of task bodies, which live in
-  the workspace, not in the repository), `remote/` (remote agents: an
+  indexer), `projects/` (the project registry), `schedule/` (scheduled
+  tasks — notes and programs — and the journal of their runs;
+  `schedule/AGENTS.md` — the execution contract for scheduled notes and programs), `remote/` (remote agents: an
   external system's session mirrored as a thread; `remote/AGENTS.md` — the
   pieces and the invariants; the drivers live in the installation's
   `data/remote-agents/`, not in the repository), `apps/` (the mini-app
@@ -45,7 +51,8 @@ confidential from them.
   `test-support/` (the test PostgreSQL `npm test` starts: embedded-postgres,
   one migrated template, a copy per test; `stand.ts` — the stand of one test
   file: the app's modules over their own copy and file area, reached over
-  HTTP; `db/test-guard.ts` keeps test children off the live database).
+  HTTP; `codex-catalog-cli.mjs` exercises the SDK subprocess and MCP bridge;
+  `db/test-guard.ts` keeps test children off the live database).
 - `scripts/` — offline maintenance scripts (`scripts/AGENTS.md`); among them
   `render-context`, the verification instrument for any work on prompts and
   tool descriptions, `measure-context`, the measure of what a session's first
@@ -53,7 +60,7 @@ confidential from them.
   `patch-sdk-bridge.mjs`, run by `postinstall` and every build.
 - `plugins/balabash/` — the platform plugin (skills) every full-preset agent
   session loads, whatever its working directory; Codex sessions get the same
-  skills linked into their home.
+  skills linked into their home. `plugins/catalog/` is the Claude Code mod for catalog discovery in both Claude presets.
 - `prisma/` — the database schema and its migrations; `prisma-generated/` is
   the generated client (`npm run build` regenerates it).
 - `build/` — the esbuild configuration; `dist/` is the bundle output
@@ -65,8 +72,10 @@ confidential from them.
   under; dependency-free, changed by hand only.
 - `data/` — runtime state and installation extensions (gitignored):
   `workspace/<workspaceId>/` (the workbench: `workspace.sqlite`, `files/`,
-  `tmp/`, `tasks/`), `agent-state/`, `codex-home/`, `supervisor/`,
-  `showcase/` (render-context output), and the extensions below.
+  `tmp/`), `agent-state/`, `codex-home/`, `supervisor/`,
+  `process-groups/` (program and workspace command groups checked at boot),
+  `showcase/` (render-context output), `nodes/` (written catalog nodes),
+  `mcp-servers/` (external service settings), and `remote-agents/` (drivers).
 - `.env` — the installation's configuration; `.env.example` documents every
   variable (`SETUP.md`).
 
@@ -93,7 +102,7 @@ confidential from them.
 - NEVER start, stop or restart the Balabash app process yourself (no
   `npm start`, no `npm run dev`, no `kill`, no supervisor commands). A live
   process is serving the user right now. Code changes go live only through
-  an app restart, which is requested, not performed: `request_restart`
+  an app restart, which is requested, not performed: `system_request_restart`
   records the request and the app restarts under the supervisor once no
   agent turn is in flight — so after requesting one, end your turn to let it
   happen; your thread keeps its session and continues after the restart.

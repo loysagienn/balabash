@@ -6,8 +6,8 @@ by one person on their own server.
 Balabash is a single Node.js process that owns a PostgreSQL event log and talks to the
 user through three surfaces — a web console, a Telegram forum group and the Claude app's
 remote sessions. A secretary agent answers in the main thread and hands substantial work
-to specialist agents, each in a thread of its own; agents operate integrations (Gmail,
-Google Drive, Notion, Perplexity, a real browser, any MCP server), keep data in a
+to specialist agents, each in a thread of its own; agents use Gmail,
+Google Drive, Notion and Perplexity, operate a real browser, keep data in a
 per-workspace workbench (SQLite + a file area + a script runner), run scheduled tasks,
 publish mini-apps, and change Balabash's own code — the engineer agent works on the live
 system and requests its restart. Every message, tool call, spawned thread and completed
@@ -43,7 +43,6 @@ Setup and operation: [SETUP.md](SETUP.md). Working on the code: [DEVELOPMENT.md]
 | 🤖 **codex** | The manager on OpenAI Codex: the same brief, tools and workbench, run as a Codex session. |
 | 🛠 **engineer** | Software engineering on the host with the native toolset (shell, files, web, git) in whatever repository a task or a project points to — Balabash's own included, where it builds and requests a restart of itself. |
 | 📐 **architect** | Architectural reasoning and audits at maximum reasoning effort; advises, never implements. |
-| ⏰ **scheduler** | Engineers scheduled tasks that need code: workspace jobs and `run(ctx)` bodies. |
 | 🎨 **designer** | Design work in Claude Design on claude.ai (Artifacts): design canvases of UI screens, landing pages and option boards, design systems, decks; verifies its renders in its own browser with a fresh-eyes verifier. |
 | 🌿 **gardener** | One care pass over a project library: drains the inbox into the settled files and the journal, consolidates, reports every removal. |
 | 🔑 **auth** | Connects, re-authorizes and provisions integrations. Sends links only — credential values never pass through it. |
@@ -51,7 +50,7 @@ Setup and operation: [SETUP.md](SETUP.md). Working on the code: [DEVELOPMENT.md]
 | 🖼️ **image_generator** | A headless sub-agent on Codex making raster images with its built-in image generation; results arrive as stored files. |
 
 Three model vendors run side by side behind one session contract. The secretary runs on
-the configured LLM backend — OpenAI's Responses API, any OpenAI-compatible server, or
+the configured LLM backend — OpenAI's Responses API, a compatible Responses API gateway, or
 Anthropic's Messages API; the other agents run on Claude (Claude Agent SDK, the host's
 Claude login) or on OpenAI Codex (Codex SDK, the host's ChatGPT login). An agent picks its
 backend with a one-line declaration.
@@ -68,22 +67,17 @@ the user. A system arrives as an installation driver, not as repository code.
 - **Google Drive** — search across My Drive and shared drives, folder listing, Docs/Sheets/
   Slides as text, download into and upload from file storage, replace a file's content;
   the same Google OAuth client as Gmail.
-- **Notion** — the official hosted MCP server; each user connects their own workspace.
 - **Perplexity** — search, ask, reason, deep research on the installation's key.
-- **Qase** — test management through the official MCP server on the operator's token.
 - **Claude Code Artifacts** — the harness's Artifact tools, on for the designer agent: design
   canvases, design systems and decks published to claude.ai under the host's Claude login.
 - **Web** — fetch pages and download files into storage, with SSRF protection (DNS/IP
   blocklists, redirect and size caps).
 - **Browser** — a persistent per-user Chromium profile for anything without an API.
-- **Any MCP server** (stdio or HTTP) added with a JSON file — the platform runs OAuth
-  (discovery, dynamic client registration, PKCE), per-user connections with several
-  accounts of one service, and `${secret:NAME}` installation credentials. In-process tool
-  servers are TypeScript modules; an installation adds its own next to the repository's
-  (Yandex Direct and Metrika run this way on the original installation).
+- **Connections** — per-user OAuth accounts and installation credentials. The Connections
+  screen also displays external MCP services configured by the installation.
 
 **A data workbench per workspace** — a private SQLite database, a scoped file area and a
-script runner (Python/Node), so bulk data moves disk-to-disk instead of through model
+shell command runner, so bulk data moves disk-to-disk instead of through model
 context. Data goes to tables and files; the model sees short summaries. A background indexer
 annotates every file with a title and a description.
 
@@ -93,9 +87,9 @@ work on a project; the project is not tied to a thread.
 
 **Scheduling** — a durable registry of named tasks: recurring (cron with alarm-clock
 semantics), one-shot ("not before T", consumed by firing) or trigger-less. A task is a
-**note** fired into the main thread for the secretary to interpret, a **command** — a script
-in the workspace run as a job with its runs journaled, or **code** — a TypeScript body in the
-workspace, live without a build. Every agent can operate the registry.
+**note** delivered to the main thread or a **program** whose JavaScript is stored in the task.
+Every program run is journaled. A returned value reaches the secretary in the main thread,
+and returning `null` keeps a successful run silent.
 
 **Mini-apps** — a workspace folder with a manifest and `.tsx` sources, run in the browser at
 its own URL without a build step and bridged to the workspace SQLite through SQL endpoints
@@ -120,10 +114,8 @@ into the log.
   table and nowhere else.
 - **Re-authorization is automatic.** An expired token opens an auth thread and notifies the
   user — one active auth thread per workspace.
-- **Every grant is explicit.** Each agent declares the exact list of tool servers it gets;
-  sensitive servers (auth, restart) reach only the agents that list them. A spawner may
-  narrow a child's tool bundle, and narrowing only shrinks. Spawning is a declared right:
-  an agent starts only the sub-agents named in its declaration.
+- **Every grant is explicit.** Agent passports select catalog nodes and root capabilities, including connection management and restart. An agent can start the repository children in its declaration and
+  remote kinds that name it or its access profile as a recipient.
 - **Workspace isolation at every model-facing edge.** A file or thread id of another
   workspace yields the same "not found" as a missing one. Caller identity comes from the
   platform, never from model-visible arguments.
@@ -154,7 +146,10 @@ each run owns a thread — its context and its visibility boundary.**
   remote agent's thread holds no run at all: its row is its whole state.
 - **Agents are declarations.** An agent module declares its SDK, prompt, tools and spawn
   rights; the platform supplies the session lifecycle, event-to-message rendering, live
-  tool-catalog sync and the standard verbs (`end_thread`, `send_file`, spawning). Prompts
+  tool delivery and thread completion. The secretary opens catalog capabilities through its configured API. On a stateless
+  compatible Responses gateway it reads the signature with `describe` and uses `call`.
+  Codex and Claude receive their catalogs over MCP.
+  A Claude Code mod opens deferred capabilities through describe. The event journal records agent calls, including calls inside `run_program`. Scheduled programs record the outcome and console output in their run history. Prompts
   are assembled from a world library — one file per fact, every prompt imports instead of
   retelling.
 - **The console is one more projection.** The browser hydrates from a snapshot of the
