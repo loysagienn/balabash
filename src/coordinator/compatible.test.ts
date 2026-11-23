@@ -25,6 +25,8 @@ test('compatible Responses opens signatures and journals the actual capability u
     ['do_nothing', {}],
     ['call', { name: 'projects_list' }],
     ['do_nothing', {}],
+    ['call', { name: 'do_nothing' }], // the end of a turn reached through call
+    ['call', { name: 'do_nothing', input: null }],
   ] as const;
   const requests: ResponseCreateParamsNonStreaming[] = [];
   const run = createCoordinatorRun({ threadId, workspaceId }, {
@@ -48,6 +50,8 @@ test('compatible Responses opens signatures and journals the actual capability u
     assert.ok(last?.type === 'function_call_output' && typeof last.output === 'string');
     return last.output;
   }
+  await wake();
+  await wake();
   await wake();
   await wake();
   assert.equal(requests.length, calls.length);
@@ -89,4 +93,8 @@ test('compatible Responses opens signatures and journals the actual capability u
       ['tool.call.started', name], ['tool.call.failed', name],
     ]);
   }
+  // do_nothing through call ends the turn at once: one request a wake, no
+  // capability call journaled, no failed turn.
+  assert.deepEqual([...entries('c9'), ...entries('c10')], []);
+  assert.deepEqual(events.filter(event => event.type === 'system.exception'), []);
 });
