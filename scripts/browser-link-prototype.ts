@@ -67,6 +67,8 @@ type Active = {
 };
 
 let active: Active | null = null;
+// Why the last session ended, when it was the browser's side that ended it.
+let lastEnd = '';
 let screenshotCount = 0;
 
 const theBrowser = () => {
@@ -113,6 +115,15 @@ async function openSession(): Promise<string[]> {
 
     toModel?.(method, params);
   };
+
+  const toRelay = session.onClose;
+
+  session.onClose = reason => {
+    lastEnd = reason;
+    log(`the session link closed: ${reason}`);
+    toRelay?.(reason);
+  };
+  lastEnd = '';
 
   const remote = await chromium.connectOverCDP(relay.endpoint, { noDefaults: true });
   const context = remote.contexts()[0];
@@ -172,7 +183,7 @@ async function admin(route: string, body: Record<string, unknown>): Promise<unkn
       const tool = active?.tools.find(candidate => candidate.name === body.name);
 
       if (!tool) {
-        throw new Error(active ? `No tool ${String(body.name)}` : 'No session is open');
+        throw new Error(active ? `No tool ${String(body.name)}` : `No session is open${lastEnd ? ` — the last one ended: ${lastEnd}` : ''}`);
       }
 
       return { text: await tool.handler((body.args ?? {}) as never) };

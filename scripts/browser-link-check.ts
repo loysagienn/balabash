@@ -24,7 +24,10 @@ import type { ConnectedBrowser } from '../src/browser-link/hub.ts';
 import { startCdpRelay } from '../src/browser-link/relay.ts';
 
 // The functions passed to the extension's worker run there, where `chrome` is.
-declare const chrome: { storage: { local: { set(items: Record<string, unknown>): Promise<void> } } };
+declare const chrome: {
+  storage: { local: { set(items: Record<string, unknown>): Promise<void> } };
+  windows: { create(options: Record<string, unknown>): Promise<{ id?: number }> };
+};
 
 const EXTENSION_DIR = path.resolve('dist', 'browser-extension');
 const TOKEN = randomUUID();
@@ -116,8 +119,21 @@ async function main(): Promise<void> {
     assert.equal(userTab.owned, false);
     step(`tabs are listed without a session: ${tabs.map(tab => JSON.stringify(tab.title || tab.url)).join(', ')}`);
 
+    // The window the user looks at need not be one with tabs: the console
+    // installed as an app is a window of its own, and it has no tab groups.
+    await worker.evaluate(url => chrome.windows.create({ type: 'popup', focused: true, url }), `${origin}/user.html`);
+
     // A session: the link, the relay, Playwright over CDP.
     const session = await browser.openSession({ clientName: 'check' });
+    const sessionTab = (await browser.listTabs()).find(tab => tab.owned);
+
+    assert.ok(sessionTab, 'the session has a tab of its own');
+    assert.equal(sessionTab.windowId, userTab.windowId, "the session's tab is in the window with tabs");
+    assert.equal(sessionTab.active, false, "the session's tab stays in the background");
+    await new Promise(resolve => setTimeout(resolve, 500));
+    assert.notEqual((await browser.listTabs()).find(tab => tab.id === sessionTab.id)?.groupId, -1, "the session's tab is in its group");
+    step("the session's tab is in the background of the window with tabs, in its own group");
+
     const relay = await startCdpRelay(session);
     const remote = await withTimeout(chromium.connectOverCDP(relay.endpoint, { noDefaults: true }), 30_000, 'connectOverCDP');
     const context = remote.contexts()[0];
@@ -125,6 +141,16 @@ async function main(): Promise<void> {
     assert.ok(context, 'the browser has its default context');
     assert.equal(context.pages().length, 1, 'the session starts with one blank tab');
     step('connectOverCDP reached the browser through the relay; the session has its own blank tab');
+
+    // A tab the client opens joins the session's tab, in the background.
+    const opened = await context.newPage();
+    const openedTab = (await browser.listTabs()).find(tab => tab.owned && tab.id !== sessionTab.id);
+
+    assert.ok(openedTab, 'the opened tab is the session\'s');
+    assert.equal(openedTab.windowId, userTab.windowId, 'the opened tab is in the window with tabs');
+    assert.equal(openedTab.active, false, 'the opened tab stays in the background');
+    await opened.close();
+    step('a tab the client opens lands in the same window, in the background');
 
     // The agent's tools, exactly as the browser agent builds them.
     const screenshots: Buffer[] = [];

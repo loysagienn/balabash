@@ -15,7 +15,8 @@
  */
 
 // Changed for Balabash: a tab that could not be put into the group of its session is reported (_moveIntoGroup)
-// instead of passing in silence.
+// instead of passing in silence; a new group is made in the window of its tab (ClientTabGroup.add), not in the
+// current window, which can be one without tab groups — a site installed as an app.
 
 
 import { report } from '../diagnostics';
@@ -42,10 +43,10 @@ class ClientTabGroup {
     this.color = color;
   }
 
-  async add(tabId: number): Promise<void> {
+  async add(tabId: number, windowId: number): Promise<void> {
     const isNewGroup = await changeGroups(async () => {
       const isNewGroup = this.groupId === undefined;
-      this.groupId = await chrome.tabs.group({ groupId: this.groupId, tabIds: [tabId] });
+      this.groupId = await chrome.tabs.group(isNewGroup ? { createProperties: { windowId }, tabIds: [tabId] } : { groupId: this.groupId, tabIds: [tabId] });
       return isNewGroup;
     });
     if (isNewGroup)
@@ -129,7 +130,7 @@ export class TabGroupManager {
       return;
     const isNewGroup = group.groupId === undefined;
     // Chrome does not put the tab of a popup window into a group.
-    await group.add(tab.id!).catch(error => report(`Tab ${tab.id} did not join the group of its session: ${error?.message ?? error}`));
+    await group.add(tab.id!, tab.windowId).catch(error => report(`Tab ${tab.id} did not join the group of its session: ${error?.message ?? error}`));
     if (isNewGroup)
       await this._recordClientGroups();
   }

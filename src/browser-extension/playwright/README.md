@@ -13,7 +13,8 @@ session, the CDP methods a session may not call, and the session link's
 framing. What connects a session — in Playwright a page the local relay
 opens — is replaced by `../link.ts`.
 
-Two of them are changed, each change stated at the top of its file, as the
-license asks: `tabRegistry.ts` (the user's new tab is not claimed for the
+Three of them are changed, each change stated at the top of its file, as the
+license asks: `clientSession.ts` (a tab the client asks for is created in
+the window of the session's tabs), `tabRegistry.ts` (the user's new tab is not claimed for the
 session whose tab was active) and `tabGroupManager.ts` (a failed grouping is
-reported). The rest are unchanged.
+reported; a new group is made in the window of its tab). The rest are unchanged.

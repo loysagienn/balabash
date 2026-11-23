@@ -12,8 +12,14 @@
 // request's ticket, a blank tab of its own in the session's tab group. From
 // there the session is Playwright's (playwright/clientSession.ts): it owns
 // tabs, attaches the debugger and refuses what its policy refuses.
+//
+// Chrome shows a bar in every window while the debugger is attached; the
+// user closing it (the cross or Cancel) detaches the debugger from every
+// tab at once. That is the user saying stop: the session ends, instead of
+// living on to open new tabs and bring the bar back.
 
 import { setReportSink } from './diagnostics.ts';
+import { windowForTabs } from './windows.ts';
 import { Channel } from './playwright/channel';
 import { ClientSession } from './playwright/clientSession';
 import { isDebuggableUrl } from './playwright/ownedTab';
@@ -27,6 +33,9 @@ const PING_INTERVAL_MS = 20_000;
 const OPEN_TIMEOUT_MS = 10_000;
 const RETRY_DELAYS_MS = [1000, 2000, 5000, 10_000];
 const TAB_GROUP_TITLE = 'Balabash';
+// The reason Chrome gives when the user closes its debugging bar.
+const DETACHED_BY_USER = 'canceled_by_user';
+const STOPPED_BY_USER = 'The user stopped the session in the browser';
 
 export type Settings = {
   // wss://host of the server, no path.
@@ -75,6 +84,13 @@ export class Link {
     this._groups = groups;
     this._listeners = listeners;
     this._ready = Promise.all([registry.ready, groups.ready]);
+    // Added after the registry's own listener, so the session still hears of
+    // the detach before its link closes.
+    listeners.add(chrome.debugger.onDetach, (source, reason) => {
+      if (reason === DETACHED_BY_USER && source.tabId !== undefined) {
+        this._registry.ownerOf(source.tabId)?.close(STOPPED_BY_USER);
+      }
+    });
   }
 
   // Idempotent: called at every start of the worker, by the alarm and after
@@ -282,8 +298,10 @@ export class Link {
     try {
       this._groups.register(session);
 
-      // A session starts with a tab of its own, in the background.
-      const tab = await chrome.tabs.create({ url: 'about:blank', active: false });
+      // A session starts with a tab of its own, in the background of a window
+      // with tabs — the window the user looks at can be a site installed as
+      // an app, which has none.
+      const tab = await chrome.tabs.create({ url: 'about:blank', active: false, windowId: await windowForTabs([]) });
 
       this._registry.claim(tab, session);
       session.didInitialize();

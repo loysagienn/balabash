@@ -14,7 +14,11 @@
  * limitations under the License.
  */
 
+// Changed for Balabash: a tab the client asks for is created in the window of the session's tabs
+// (chrome.tabs.create), not in the current window, which can be one without a tab strip.
 
+
+import { windowForTabs } from '../windows';
 import { checkCdpMethod } from './cdpPolicy';
 
 import type { Channel } from './channel';
@@ -83,7 +87,8 @@ export class ClientSession {
       }
       case 'chrome.tabs.create': {
         const [{ url, active }] = params;
-        const tab = await chrome.tabs.create({ url, active });
+        const windowId = await windowForTabs(this._registry.tabIdsOf(this));
+        const tab = await chrome.tabs.create({ url, active, windowId });
         // The response announces the tab to the client.
         if (!this._channel.closed)
           this._registry.claim(tab, this, { announce: false });
