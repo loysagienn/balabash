@@ -56,6 +56,7 @@ const hub = createBrowserLinkHub({ authenticate: async candidate => (sameToken(c
 
 hub.onConnected = browser => log(`connected: "${browser.name}", extension ${browser.extensionVersion}`);
 hub.onDisconnected = (browser, reason) => log(`disconnected: "${browser.name}" — ${reason}`);
+hub.onReport = (browser, text) => log(`report from "${browser.name}": ${text}`);
 
 type Active = {
   session: ExtensionSession;
@@ -98,6 +99,21 @@ async function openSession(): Promise<string[]> {
 
   const session = await theBrowser().openSession({ clientName: 'prototype' });
   const relay = await startCdpRelay(session);
+  const toModel = session.onEvent;
+
+  // What the extension tells about tabs and the debugger, without the CDP traffic.
+  session.onEvent = (method, params) => {
+    if (method !== 'chrome.debugger.onEvent') {
+      const [first, second] = params as [{ id?: number; tabId?: number; url?: string; pendingUrl?: string } | number, unknown];
+      const tab = typeof first === 'number' ? first : (first?.tabId ?? first?.id);
+      const url = typeof first === 'object' ? (first?.url || first?.pendingUrl || '') : '';
+
+      log(`session event ${method}: tab ${tab}${url ? ` ${url.slice(0, 60)}` : ''}${typeof second === 'string' ? ` — ${second}` : ''}`);
+    }
+
+    toModel?.(method, params);
+  };
+
   const remote = await chromium.connectOverCDP(relay.endpoint, { noDefaults: true });
   const context = remote.contexts()[0];
 

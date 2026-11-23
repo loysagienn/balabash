@@ -13,6 +13,7 @@
 // there the session is Playwright's (playwright/clientSession.ts): it owns
 // tabs, attaches the debugger and refuses what its policy refuses.
 
+import { setReportSink } from './diagnostics.ts';
 import { Channel } from './playwright/channel';
 import { ClientSession } from './playwright/clientSession';
 import { isDebuggableUrl } from './playwright/ownedTab';
@@ -165,6 +166,11 @@ export class Link {
           this._detail = '';
           this._attempt = 0;
           this._startPing(socket);
+          setReportSink(text => {
+            if (socket.readyState === WebSocket.OPEN) {
+              socket.send(JSON.stringify({ method: 'report', params: { text } }));
+            }
+          });
           resolve();
 
           return;
@@ -190,6 +196,7 @@ export class Link {
     this._socket = undefined;
     this._welcomed = false;
     this._detail = reason;
+    setReportSink(undefined);
     clearInterval(this._pingTimer);
     // The sessions were the server's: without it they have no client.
     this._closeSessions(reason);
@@ -328,6 +335,7 @@ export class Link {
 
     this._socket = undefined;
     this._welcomed = false;
+    setReportSink(undefined);
     socket?.close(1000, reason);
   }
 }

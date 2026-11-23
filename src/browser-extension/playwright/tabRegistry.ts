@@ -14,8 +14,11 @@
  * limitations under the License.
  */
 
+// Changed for Balabash: a new tab that shows a page of the browser itself is not claimed for the owner of its
+// opener (_onTabCreated) — that is the user's new tab, opened while a tab of a session was active.
 
-import { OwnedTab, detachDebuggersOfPreviousServiceWorker } from './ownedTab';
+
+import { OwnedTab, detachDebuggersOfPreviousServiceWorker, isDebuggableUrl } from './ownedTab';
 
 import type { ChromeListeners } from './chromeListeners';
 import type { ClientSession } from './clientSession';
@@ -105,7 +108,8 @@ export class TabRegistry {
 
   private _onTabCreated(tab: chrome.tabs.Tab): void {
     const opener = tab.openerTabId === undefined ? undefined : this.ownerOf(tab.openerTabId);
-    if (opener)
+    // The new tab page names the active tab as its opener, whoever owns it.
+    if (opener && isDebuggableUrl(tab.pendingUrl ?? tab.url))
       this.claim(tab, opener);
   }
 

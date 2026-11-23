@@ -56,6 +56,8 @@ export type BrowserLinkHub = {
   browsers(): ConnectedBrowser[];
   onConnected: ((browser: ConnectedBrowser) => void) | null;
   onDisconnected: ((browser: ConnectedBrowser, reason: string) => void) | null;
+  // A trouble the extension reported about itself.
+  onReport: ((browser: ConnectedBrowser, text: string) => void) | null;
   close(): void;
 };
 
@@ -137,6 +139,7 @@ export function createBrowserLinkHub(options: {
   const hub: BrowserLinkHub = {
     onConnected: null,
     onDisconnected: null,
+    onReport: null,
     browsers: () => [...connected.values()].map(entry => entry.browser),
 
     handleUpgrade(request, socket, head) {
@@ -359,6 +362,10 @@ export function createBrowserLinkHub(options: {
 
       if (frame.method === 'ping') {
         socket.send(JSON.stringify({ method: 'pong' }));
+      } else if (frame.method === 'report') {
+        const text = (frame.params as { text?: unknown } | undefined)?.text;
+
+        hub.onReport?.(browser, String(text).slice(0, 2000));
       }
     });
 

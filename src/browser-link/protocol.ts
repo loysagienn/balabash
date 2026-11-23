@@ -6,7 +6,8 @@
 //
 // - the control link — one per browser, kept open: the extension names
 //   itself (`hello`), then answers the server's requests (the list of tabs,
-//   opening a session, handing a tab to a session) and pings;
+//   opening a session, handing a tab to a session), pings and reports what
+//   went wrong inside it (`report`, text only);
 // - a session link — one per agent run, opened by the extension on the
 //   server's request with the one-time ticket the request carried. It speaks
 //   the protocol of the Playwright extension unchanged (commands

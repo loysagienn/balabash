@@ -14,6 +14,11 @@
  * limitations under the License.
  */
 
+// Changed for Balabash: a tab that could not be put into the group of its session is reported (_moveIntoGroup)
+// instead of passing in silence.
+
+
+import { report } from '../diagnostics';
 
 import type { ChromeListeners } from './chromeListeners';
 import type { ClientSession } from './clientSession';
@@ -124,7 +129,7 @@ export class TabGroupManager {
       return;
     const isNewGroup = group.groupId === undefined;
     // Chrome does not put the tab of a popup window into a group.
-    await group.add(tab.id!).catch(() => {});
+    await group.add(tab.id!).catch(error => report(`Tab ${tab.id} did not join the group of its session: ${error?.message ?? error}`));
     if (isNewGroup)
       await this._recordClientGroups();
   }

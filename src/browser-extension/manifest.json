@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Balabash Browser Link",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Connects this browser to your Balabash server so that its agent can see the tabs, open pages and act in them.",
   "minimum_chrome_version": "120",
   "permissions": ["debugger", "tabs", "tabGroups", "storage", "alarms"],
