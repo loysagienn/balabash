@@ -36,6 +36,10 @@
 //   apple-touch-icon.png                      180 px, the dark icon as is — opaque, iOS
 //                                             rounds the corners itself and ignores
 //                                             transparency
+//
+// And, into src/browser-extension/icons, the icons of the browser extension
+// (the toolbar button and the card on chrome://extensions): icon-16.png,
+// icon-32.png, icon-48.png, icon-128.png — the cropped mark, as the favicons.
 
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -43,6 +47,8 @@ import { chromium } from 'playwright';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 const OUT_DIR = path.join(ROOT, 'src', 'console', 'public');
+// The browser extension carries the same mark (src/browser-extension/icons).
+const EXTENSION_DIR = path.join(ROOT, 'src', 'browser-extension', 'icons');
 
 // tokens.css --bg: the surface under the maskable icon (the dark PNG's own
 // graphite is the same color).
@@ -64,6 +70,15 @@ const ICONS = [
   { name: 'icon-maskable-192.png', size: 192, source: 'transparent', scale: MASKABLE_SCALE, background: BG, crop: false },
   { name: 'icon-maskable-512.png', size: 512, source: 'transparent', scale: MASKABLE_SCALE, background: BG, crop: false },
   { name: 'apple-touch-icon.png', size: 180, source: 'dark', scale: 1, background: BG, crop: false },
+  ...[16, 32, 48, 128].map(size => ({
+    name: `icon-${size}.png`,
+    dir: EXTENSION_DIR,
+    size,
+    source: 'transparent',
+    scale: 1,
+    background: 'transparent',
+    crop: true,
+  })),
 ];
 
 /**
@@ -210,7 +225,8 @@ async function main() {
         cropNote = `, cropped to ${box.w}×${box.h} at ${box.x},${box.y}; ${checkCrop(box, out)}`;
       }
 
-      await fs.writeFile(path.join(OUT_DIR, icon.name), png);
+      await fs.mkdir(icon.dir ?? OUT_DIR, { recursive: true });
+      await fs.writeFile(path.join(icon.dir ?? OUT_DIR, icon.name), png);
       await page.close();
 
       console.log(`[console-icons] ${icon.name} (${icon.size} px, ${png.length} bytes${cropNote})`);

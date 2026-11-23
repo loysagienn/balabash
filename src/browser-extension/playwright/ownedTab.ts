@@ -14,6 +14,8 @@
  * limitations under the License.
  */
 
+// Changed for Balabash: the title of the toolbar button on a tab with the debugger attached (showBadge).
+
 
 import type { ClientSession } from './clientSession';
 
@@ -135,7 +137,7 @@ function showBadge(tabId: number, attached: boolean): void {
   const updates = attached ? [
     chrome.action.setBadgeText({ tabId, text: '✓' }),
     chrome.action.setBadgeBackgroundColor({ tabId, color: '#4CAF50' }),
-    chrome.action.setTitle({ tabId, title: 'Connected to Playwright client' }),
+    chrome.action.setTitle({ tabId, title: 'Controlled by the Balabash agent' }),
   ] : [
     chrome.action.setBadgeText({ tabId, text: '' }),
     chrome.action.setTitle({ tabId, title: '' }),

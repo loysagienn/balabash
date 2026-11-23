@@ -2,8 +2,8 @@
 // the unpacked extension a user loads into Chrome ("Load unpacked" on
 // chrome://extensions) to link the browser to this server.
 //
-// Layout of dist/browser-extension: manifest.json and options.html as they
-// are in the source, background.js (the service worker, one ES module) and
+// Layout of dist/browser-extension: manifest.json, options.html and icons/ as
+// they are in the source, background.js (the service worker, one ES module) and
 // options.js. Not minified: Chrome shows the user the code it runs.
 // Rides the full build; on its own it is `npm run build-extension`.
 
@@ -32,6 +32,8 @@ export async function buildBrowserExtension() {
   for (const name of ['manifest.json', 'options.html']) {
     await fs.copyFile(path.join(SRC_DIR, name), path.join(OUT_DIR, name));
   }
+
+  await fs.cp(path.join(SRC_DIR, 'icons'), path.join(OUT_DIR, 'icons'), { recursive: true });
 
   // The license of the Playwright modules travels with the bundle.
   await fs.copyFile(path.join(SRC_DIR, 'playwright', 'LICENSE'), path.join(OUT_DIR, 'LICENSE-playwright.txt'));

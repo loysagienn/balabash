@@ -34,7 +34,8 @@ npm run build && npm run cleanup-sessions [-- --older-than 7] [-- --apply]
 
 ## console-icons (`scripts/console-icons.mjs`)
 
-Renders the console's app icons (`src/console/public/*.png`: the tab's
+Renders the icons of the browser extension (`src/browser-extension/icons/icon-16/32/48/128.png` — the cropped
+mark, as the favicons) and the console's app icons (`src/console/public/*.png`: the tab's
 `favicon-32/192`, install icons 192/512 `any` and `maskable`,
 `apple-touch-icon` 180) from the approved service icon — the pair of 1254 px
 PNGs in the project library, `balabash/design/balabash-icon-transparent.png`
