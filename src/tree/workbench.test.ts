@@ -489,6 +489,38 @@ describe('workspace_query', () => {
     assert.deepEqual((await invoke('workspace_query', { sql: "SELECT count(*) AS n FROM items WHERE name = 'lost'; -- done" })).rows, [{ n: 0 }]);
   });
 
+  test('blanks, comments and empty statements around a statement are no statements', async () => {
+    const one = { rows: [{ x: 1 }], truncated: false, changes: null };
+
+    // Nothing follows a row-returning statement but text SQLite reads as blank.
+    for (const sql of [
+      'SELECT 1 AS x',
+      'SELECT 1 AS x;',
+      'SELECT 1 AS x ; ;; \n\t',
+      'SELECT 1 AS x; /* a block */ ; -- and a line',
+      ';;\n-- before\n/* and a block */ SELECT 1 AS x',
+      '﻿SELECT 1 AS x;﻿',
+      // A block comment left open runs to the end of the text.
+      'SELECT 1 AS x; /* open ; SELECT 2',
+    ]) {
+      assert.deepEqual(await invoke('workspace_query', { sql }), one, JSON.stringify(sql));
+    }
+
+    for (const sql of ['', ';', ' ;; \n;', '/* open', '--', '-- a line\n/* a block */;', '﻿']) {
+      await refuses(invoke('workspace_query', { sql }), 'invalid_input', /holds no statement/);
+    }
+
+    // Empty statements between and after the statements of a script.
+    assert.deepEqual(
+      await invoke('workspace_query', { sql: 'CREATE TABLE blanks (n INTEGER); ; ;\n INSERT INTO blanks VALUES (1);; -- the end\n/* and after it */ ;' }),
+      { rows: null, truncated: false, changes: 1 },
+    );
+    // What is not blank is SQLite's to judge.
+    await refuses(invoke('workspace_query', { sql: 'SELECT 1 AS x; /' }), 'invalid_input', /Statement 1 returns rows/);
+    await refuses(invoke('workspace_query', { sql: 'INSERT INTO blanks VALUES (2); - ' }), 'invalid_input', /Statement 2: .*syntax error.*Statement 1 has run/);
+    assert.deepEqual((await invoke('workspace_query', { sql: 'SELECT n FROM blanks ORDER BY n' })).rows, [{ n: 1 }, { n: 2 }]);
+  });
+
   test('a script that stops half-way says what has run, and the database agrees', async () => {
     const names = async () => (await invoke('workspace_query', { sql: "SELECT name FROM halfway ORDER BY name" })).rows.map((row: Value) => row.name);
 

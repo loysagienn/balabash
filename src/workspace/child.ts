@@ -286,36 +286,60 @@ const rowsWithinCaps = iterator => {
   }
   return { rows, truncated };
 };
+// Where the next statement of a script begins, from a position of its text:
+// past everything SQLite reads as no statement — white space, comments, a
+// byte order mark and the semicolons of empty statements — or the length of
+// the text when nothing else is left. The rules are those of SQLite's
+// tokenizer: white space begins with a space, tab, line feed, form feed or
+// carriage return and runs on over vertical tabs too; a line comment ends
+// before its line feed; a block comment needs a character after its opening
+// and, left open, runs to the end of the text. What prepare() makes of text
+// that holds no statement differs between versions of Node (a finalized
+// statement in one, an error in another), so it is never asked.
+const skipBlank = (sql, from) => {
+  let at = from;
+  for (;;) {
+    const code = sql.charCodeAt(at);
+    if (code === 32 || code === 9 || code === 10 || code === 12 || code === 13) {
+      at += 1;
+      for (let next = sql.charCodeAt(at); next === 32 || (next >= 9 && next <= 13); next = sql.charCodeAt(at)) at += 1;
+    } else if (code === 59 || code === 0xfeff) {
+      at += 1;
+    } else if (code === 45 && sql.charCodeAt(at + 1) === 45) {
+      const end = sql.indexOf('\\n', at + 2);
+      at = end === -1 ? sql.length : end;
+    } else if (code === 47 && sql.charCodeAt(at + 1) === 42 && at + 2 < sql.length) {
+      const end = sql.indexOf('*/', at + 2);
+      at = end === -1 ? sql.length : end + 2;
+    } else {
+      return at;
+    }
+  }
+};
 // The next statement of a script, from a position of its text: the prepared
-// statement and where its text ends — null when nothing but blanks and
-// comments is left. The end is SQLite's own (the text of a prepared
-// statement is the part of the input it took), so a semicolon in a string,
-// a comment or the body of a trigger ends nothing. prepare() reads its whole
-// input, and a script of many statements would be read again for each of
-// them: the statement is prepared from a window of the text, widened until
-// the statement ends inside it — a statement that ends before the end of
-// its input ended at its own semicolon, whatever follows.
+// statement and where its text ends — null when nothing but blanks, comments
+// and empty statements is left. The end is SQLite's own (the text of a
+// prepared statement is the part of the input it took), so a semicolon in a
+// string, a comment or the body of a trigger ends nothing. prepare() reads
+// its whole input, and a script of many statements would be read again for
+// each of them: the statement is prepared from a window of the text, widened
+// until the statement ends inside it — a statement that ends before the end
+// of its input ended at its own semicolon, whatever follows.
 const SCRIPT_WINDOW = 4096;
-const nextStatement = (db, sql, at) => {
+const nextStatement = (db, sql, from) => {
+  const at = skipBlank(sql, from);
+  if (at >= sql.length) return null;
   for (let size = SCRIPT_WINDOW; ; size *= 4) {
     const whole = at + size >= sql.length;
     const piece = whole ? sql.slice(at) : sql.slice(at, at + size);
     let stmt;
-    let text;
     try {
       stmt = db.prepare(piece);
     } catch (error) {
       if (whole) throw error;
       continue;
     }
-    try {
-      text = stmt.sourceSQL;
-    } catch (error) {
-      // prepare() of blank or comment-only text gives a finalized statement.
-      if (!(error && error.code === 'ERR_INVALID_STATE')) throw error;
-      if (whole) return null;
-      continue;
-    }
+    const text = stmt.sourceSQL;
     if (whole || text.length < piece.length) return { stmt, end: at + text.length };
   }
 };
