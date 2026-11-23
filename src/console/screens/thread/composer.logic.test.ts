@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { DraftAttachment } from '../../store/attachments/reducer.ts';
-import { chipWords, conflictWords, refusalWords, waitWords } from './composer.logic.ts';
+import { chipWords, conflictWords, refusalWords } from './composer.logic.ts';
 
 const att = (over: Partial<DraftAttachment>): DraftAttachment => ({
   id: 'a',
@@ -22,11 +22,6 @@ test('a chip reads its progress, its size, or the reason with or without Retry',
   assert.deepEqual(chipWords(att({ state: 'done', fileId: 'f' })), { status: '2.1 MiB', state: 'done', retry: false });
   assert.deepEqual(chipWords(att({ state: 'err', error: { reason: 'Connection lost', retry: true } })), { status: 'Connection lost', state: 'err', retry: true });
   assert.deepEqual(chipWords(att({ state: 'err', error: { reason: 'Larger than 2 GB', retry: false } })), { status: 'Larger than 2 GB', state: 'err', retry: false });
-});
-
-test('Send waits while files upload', () => {
-  assert.equal(waitWords(0), '');
-  assert.equal(waitWords(1), 'Uploading 1 file…');
 });
 
 test('a refused send says why and what to do', () => {

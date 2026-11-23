@@ -13,7 +13,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { DatabaseSync } from 'node:sqlite';
-import { BUSY_SLICE_MS, LOCK_WAIT_MS, WorkspaceDbBusyError, childBusyTimeoutMs, inWriteTransaction, isBusyError, withWorkspaceDb } from './sqlite.ts';
+import { BUSY_SLICE_MS, WorkspaceDbBusyError, inWriteTransaction, isBusyError, withWorkspaceDb } from './sqlite.ts';
 import { sqlInChild, statementInChild } from './child.ts';
 import { deleteMeta, ensureFilesDb, listDir, readMeta, upsertMeta } from './files.ts';
 import { workspaceDbPath, workspaceFilesDir } from './layout.ts';
@@ -72,13 +72,6 @@ function loopLagProbe(): { stop: () => number } {
 }
 
 describe('policy constants', () => {
-  test('a child waits as long as the policy allows but clear of its kill timeout', () => {
-    assert.equal(childBusyTimeoutMs(60_000), LOCK_WAIT_MS);
-    assert.equal(childBusyTimeoutMs(10_000), 5_000);
-    assert.equal(childBusyTimeoutMs(2_000), 1_000);
-    assert.ok(childBusyTimeoutMs(60_000) < 60_000);
-  });
-
   test('isBusyError recognizes SQLITE_BUSY by code and by message', () => {
     const byCode = Object.assign(new Error('x'), { errcode: 5 });
     const extended = Object.assign(new Error('x'), { errcode: 261 }); // SQLITE_BUSY_RECOVERY

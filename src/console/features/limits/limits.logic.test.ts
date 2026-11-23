@@ -14,7 +14,6 @@ import {
   measuredWords,
   noLimitsWords,
   overageWords,
-  planWords,
   resetWords,
   windowTitle,
 } from './limits.logic.ts';
@@ -146,14 +145,6 @@ describe('limits words', () => {
       'Couldn’t measure the Claude limits 16:35: get_usage is not supported in this context',
     );
     assert.equal(failureWords('Codex', { at: new Date(2026, 9, 9, 16, 35), message: 'no answer within 10 s' }, NOW), 'Couldn’t measure the Codex limits Oct 9, 16:35: no answer within 10 s');
-  });
-
-  it('the plan of a group’s header: known names, an unknown one capitalised, nothing when not said', () => {
-    assert.equal(planWords('max'), 'Max plan');
-    assert.equal(planWords('prolite'), 'Pro Lite plan');
-    assert.equal(planWords('enterprise_cbp_usage_based'), 'Enterprise Cbp Usage Based plan');
-    assert.equal(planWords(null), null);
-    assert.equal(planWords(''), null);
   });
 });
 

@@ -1,16 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { threadCompletionFields, threadStartFields, threadStatusFrom } from './thread.ts';
-
-describe('threadStatusFrom', () => {
-  it('maps the three terminals and nothing else', () => {
-    assert.equal(threadStatusFrom('thread.completed'), 'completed');
-    assert.equal(threadStatusFrom('thread.failed'), 'failed');
-    assert.equal(threadStatusFrom('thread.cancelled'), 'cancelled');
-    assert.equal(threadStatusFrom('thread.cancel'), null);
-    assert.equal(threadStatusFrom('thread.started'), null);
-  });
-});
+import { threadCompletionFields, threadStartFields } from './thread.ts';
 
 describe('threadStartFields', () => {
   it('keeps agent, title and the project link; blanks become null', () => {

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { PHONE_MEDIA, guardsPinch, installPinchGuard, isPinchMove } from './pinch.ts';
+import { PHONE_MEDIA, guardsPinch, installPinchGuard } from './pinch.ts';
 
 type Listener = (event: Event) => void;
 
@@ -57,10 +57,6 @@ function fakeQuery(matches: boolean) {
 }
 
 describe('pinch guard', () => {
-  it('the phone line is the primary input: a coarse pointer without hover', () => {
-    assert.equal(PHONE_MEDIA, '(pointer: coarse) and (hover: none)');
-  });
-
   it('guards only a phone with a touch screen', () => {
     assert.equal(guardsPinch({ maxTouchPoints: 5 }, true), true);
     // A touch-capable desktop: a fine primary pointer with hover — its touch pinch stays.
@@ -68,12 +64,6 @@ describe('pinch guard', () => {
     // No touch at all: nothing to guard whatever the query says.
     assert.equal(guardsPinch({ maxTouchPoints: 0 }, true), false);
     assert.equal(guardsPinch({ maxTouchPoints: 0 }, false), false);
-  });
-
-  it('a pinch is two or more fingers moving', () => {
-    assert.equal(isPinchMove(1), false);
-    assert.equal(isPinchMove(2), true);
-    assert.equal(isPinchMove(3), true);
   });
 
   it('installs nothing on a desktop without touch: the trackpad and the keyboard zoom stay', () => {

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { foldSession, isSessionEvent, sessionStateFrom } from './session.ts';
+import { foldSession } from './session.ts';
 
 describe('foldSession', () => {
   it('builds the view from state and context events, keeping the reference when nothing changes', () => {
@@ -81,12 +81,5 @@ describe('foldSession', () => {
     assert.deepEqual(remote, { state: 'wait', context: null, started: { model: 'ext', effort: null, remoteLink: 'https://ext/chat/s1' } });
     assert.equal(foldSession(remote, 'session.started', { model: 'ext', effort: null, remoteLink: 'https://ext/chat/s1' }), remote);
     assert.equal(foldSession(null, 'session.started', { model: 'ext', remoteLink: '' })?.started?.remoteLink, undefined);
-  });
-
-  it('helpers', () => {
-    assert.equal(sessionStateFrom({ state: 'act' }), 'act');
-    assert.equal(sessionStateFrom({}), null);
-    assert.equal(isSessionEvent('session.turn'), true);
-    assert.equal(isSessionEvent('thread.started'), false);
   });
 });

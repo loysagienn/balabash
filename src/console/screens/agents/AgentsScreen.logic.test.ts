@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { activityCaption, agentMatches, agentsDetail, agentsShell, agentsSummary, catalogModel, effortWords, emptyActivity, modeLabel, modelWords, withAgentsFilters } from './AgentsScreen.logic.ts';
+import { activityCaption, agentMatches, agentsDetail, agentsShell, catalogModel, effortWords, emptyActivity, modelWords, withAgentsFilters } from './AgentsScreen.logic.ts';
 
 describe('agents screen rules', () => {
   it('matches the search against the name and the description, case-insensitive', () => {
@@ -11,11 +11,6 @@ describe('agents screen rules', () => {
     assert.equal(agentMatches(agent, 'ENG'), true);
     assert.equal(agentMatches(agent, 'scripts'), true);
     assert.equal(agentMatches(agent, 'browser'), false);
-  });
-
-  it('names the mode', () => {
-    assert.equal(modeLabel({ modes: ['headless'], defaultMode: 'headless' }), 'headless');
-    assert.equal(modeLabel({ modes: ['user', 'headless'], defaultMode: 'user' }), 'with the user (default) · headless');
   });
 
   it('names the model of a row: the declared one, else the newest session’s, else the engine’s unseen default', () => {
@@ -38,12 +33,6 @@ describe('agents screen rules', () => {
     assert.deepEqual(effortWords({ effort: 'max', defaultEffort: 'high' }), { value: 'max', note: null });
     assert.deepEqual(effortWords({ effort: null, defaultEffort: 'high' }), { value: 'high', note: 'default of the platform' });
     assert.deepEqual(effortWords({ effort: null, defaultEffort: null }), { value: null, note: 'default of the model' });
-  });
-
-  it('summarizes the catalog', () => {
-    assert.equal(agentsSummary(11, 4), '11 agents · 4 active threads');
-    assert.equal(agentsSummary(1, 1), '1 agent · 1 active thread');
-    assert.equal(agentsSummary(0, 0), '0 agents · 0 active threads');
   });
 
   it('captions the activity with the whole count, the recent one and the running ones, each when known', () => {

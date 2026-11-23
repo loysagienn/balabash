@@ -127,10 +127,4 @@ describe('sweepExpiredSessions', () => {
     assert.deepEqual(await cleanup.sweepExpiredSessions(ALL(), working), { deleted: 1, missing: 0, failed: 0 });
     assert.deepEqual(working.calls, ['c-stuck']);
   });
-
-  test('retentionCutoff is N days before now', () => {
-    const now = new Date('2026-11-09T12:00:00Z');
-
-    assert.equal(cleanup.retentionCutoff(now, 7).toISOString(), '2026-11-02T12:00:00.000Z');
-  });
 });

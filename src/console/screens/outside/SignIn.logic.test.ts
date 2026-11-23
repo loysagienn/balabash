@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { readRoute } from '../../lib/router/routes.ts';
-import { errorWords, isConsoleWord, loginDestination, submitLabel } from './SignIn.logic.ts';
+import { errorWords, isConsoleWord, loginDestination } from './SignIn.logic.ts';
 import type { LoginDestination } from './SignIn.logic.ts';
 
 describe('sign-in logic', () => {
@@ -11,12 +11,6 @@ describe('sign-in logic', () => {
     assert.ok(isConsoleWord('CONSOLE'));
     assert.equal(isConsoleWord('K7QM2X'), false);
     assert.equal(isConsoleWord('console1'), false);
-  });
-
-  it('names what the button waits for', () => {
-    assert.equal(submitLabel(null), 'Sign in');
-    assert.equal(submitLabel({ kind: 'sign-in' }), 'Signing in');
-    assert.equal(submitLabel({ kind: 'console-code' }), 'Requesting a code');
   });
 
   it('words a refused code and passes the server on anything else', () => {

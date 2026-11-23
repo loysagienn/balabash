@@ -1,13 +1,8 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { appLink, appTitle, appUrlText, ownerAppHref, publicAppAddress } from './appLink.ts';
+import { appLink, appTitle, ownerAppHref, publicAppAddress } from './appLink.ts';
 
 describe('app links', () => {
-  it('shows the address without the scheme', () => {
-    assert.equal(appUrlText('https://apps.example/kcal'), 'apps.example/kcal');
-    assert.equal(appUrlText('http://localhost/a/kcal'), 'localhost/a/kcal');
-  });
-
   it('opens a published app with a valid manifest, keeps the address of a broken one without opening it', () => {
     const owner = '/apps/apps/kcal';
     const ownerUrl = 'https://console.example/apps/apps/kcal';

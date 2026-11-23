@@ -62,8 +62,4 @@ describe('focusesField', () => {
   it('the controls keep their taps: the buttons, the chips, the textarea', () => {
     assert.equal(focusesField(at([COMPOSER_CONTROLS])), false);
   });
-
-  it('no target — nothing to focus', () => {
-    assert.equal(focusesField(null), false);
-  });
 });

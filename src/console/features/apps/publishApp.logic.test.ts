@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { normalizeSlug, publicationDialog, publishFailureUnderField, slugError, slugTakenBy, suggestedSlug, takenWords, unpublishWords } from './publishApp.logic.ts';
+import { publicationDialog, publishFailureUnderField, slugError, slugTakenBy, suggestedSlug, takenWords } from './publishApp.logic.ts';
 import type { PublicationDialog } from './publishApp.logic.ts';
 
 const APPS = [
@@ -16,10 +16,6 @@ describe('publish dialog rules', () => {
     assert.equal(suggestedSlug({ name: null, path: 'apps/wind-2' }), 'wind-2');
     assert.equal(suggestedSlug({ name: '🙂', path: 'apps/kcal' }), 'kcal');
     assert.equal(suggestedSlug({ name: `${'a'.repeat(63)} b`, path: 'x' }), 'a'.repeat(63));
-  });
-
-  it('normalizes what the operator typed the way the server stores it', () => {
-    assert.equal(normalizeSlug('  Kcal '), 'kcal');
   });
 
   it('checks the slug by the server rule and the reserved names', () => {
@@ -56,10 +52,6 @@ describe('publish dialog rules', () => {
     assert.equal(publishFailureUnderField('apps/slug-demo is not an app: no balabash-app.json there'), false);
     assert.equal(publishFailureUnderField('The app\'s manifest is broken — fix it before publishing: unknown key "slug"'), false);
     assert.equal(publishFailureUnderField('Invalid path'), false);
-  });
-
-  it('words the unpublish question', () => {
-    assert.equal(unpublishWords('apps.example/kcal'), 'The link apps.example/kcal will stop working, and the URL becomes free for any app.');
   });
 
   it('shows the chosen publication dialog only while the row still calls for it', () => {

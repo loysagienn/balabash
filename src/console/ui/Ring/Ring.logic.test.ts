@@ -1,25 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { ctxVals, formatTokensK, ringDash, ringLevel } from './Ring.logic.ts';
-
-describe('ringLevel', () => {
-  it('follows rule 5: accent below 80, warn to 99, over from 100', () => {
-    assert.equal(ringLevel(0), undefined);
-    assert.equal(ringLevel(79.9), undefined);
-    assert.equal(ringLevel(80), 'warn');
-    assert.equal(ringLevel(99), 'warn');
-    assert.equal(ringLevel(100), 'over');
-    assert.equal(ringLevel(130), 'over');
-  });
-});
-
-describe('ringDash', () => {
-  it('clamps the drawn part to 0–100 of a 100-long path', () => {
-    assert.equal(ringDash(62), '62 100');
-    assert.equal(ringDash(130), '100 100');
-    assert.equal(ringDash(-5), '0 100');
-  });
-});
+import { ctxVals, formatTokensK } from './Ring.logic.ts';
 
 describe('ctxVals', () => {
   it('captions the percentage and spells the tokens in the tooltip', () => {

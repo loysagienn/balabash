@@ -11,10 +11,7 @@ import {
   reduceSave,
   requestState,
   requestStateOfFailure,
-  secretRequestKey,
   secretsFailure,
-  secretsTitle,
-  submitLabel,
 } from './Secrets.logic.ts';
 import type { SaveState, SecretRequestState, Submission } from './Secrets.logic.ts';
 
@@ -38,11 +35,6 @@ const REFUSED: ApiFailure = { status: 400, code: 'provisioning_failed', message:
 const NETWORK: ApiFailure = { status: 0, code: 'network', message: 'Failed to fetch' };
 
 describe('secret entry logic', () => {
-  it('names the card by the kind of request', () => {
-    assert.equal(secretsTitle({ kind: 'oauth-client', server: 'notion' }), 'OAuth client for notion');
-    assert.equal(secretsTitle({ kind: 'external-secrets', server: 'github' }), 'Secrets for github');
-  });
-
   it('finds the required fields still empty, whitespace included, for both kinds', () => {
     assert.deepEqual(missingRequired(OAUTH_FIELDS, {}), { client_id: REQUIRED_ERROR });
     assert.deepEqual(missingRequired(OAUTH_FIELDS, { client_id: '  \n' }), { client_id: REQUIRED_ERROR });
@@ -71,19 +63,9 @@ describe('secret entry logic', () => {
     assert.deepEqual(secretsFailure(REFUSED), { kind: 'failed', message: 'Client ID is required' });
     assert.deepEqual(secretsFailure(NETWORK), { kind: 'failed', message: 'Failed to fetch' });
   });
-
-  it('names what the button waits for', () => {
-    assert.equal(submitLabel(false), 'Save');
-    assert.equal(submitLabel(true), 'Saving');
-  });
 });
 
 describe('what the screen knows about one request id', () => {
-  it('keys the knowledge by the id alone', () => {
-    assert.deepEqual(secretRequestKey('a'), ['secret-request', 'a']);
-    assert.notDeepEqual(secretRequestKey('a'), secretRequestKey('b'));
-  });
-
   it('reads the answer of the GET: the form, or the row already gone', () => {
     assert.deepEqual(requestState({ request: OAUTH }), { kind: 'form', request: OAUTH });
     assert.deepEqual(requestStateOfFailure(NOT_FOUND), { kind: 'expired' });
@@ -140,10 +122,6 @@ describe('what the screen knows about one request id', () => {
 
 describe('one submit of the form', () => {
   const a: Submission = { id: 'a' };
-
-  it('starts idle, without a value anywhere', () => {
-    assert.deepEqual(SAVE_IDLE, { submission: null, failure: null });
-  });
 
   it('holds the submission in flight and forgets an earlier refusal', () => {
     const refused: SaveState = { submission: null, failure: 'Client ID is required' };

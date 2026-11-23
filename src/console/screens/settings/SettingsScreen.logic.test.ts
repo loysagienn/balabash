@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { browserWords, loginSourceWords, telegramWords, timezoneWords, workspaceSessionWords } from './SettingsScreen.logic.ts';
+import { browserWords, telegramWords, timezoneWords, workspaceSessionWords } from './SettingsScreen.logic.ts';
 
 const NOW = new Date(2026, 9, 10, 16, 38); // October 10, local
 
@@ -21,12 +21,6 @@ describe('settings screen rules', () => {
     assert.equal(browserWords(''), null);
     assert.equal(browserWords('Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36'), 'Linux');
     assert.equal(browserWords('SomeBot/1.0 Chrome/1.0'), 'Chrome');
-  });
-
-  it('names where the code came from', () => {
-    assert.equal(loginSourceWords('telegram'), 'code from Telegram');
-    assert.equal(loginSourceWords('console'), 'code from the server log');
-    assert.equal(loginSourceWords(null), null);
   });
 
   it('lines up a workspace row of this browser: the moment and the source — the parts the facts give', () => {

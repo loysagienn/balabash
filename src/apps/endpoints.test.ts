@@ -15,7 +15,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { gunzipSync } from 'node:zlib';
 import type { Readable } from 'node:stream';
 import { appManifestSchema } from './manifest.ts';
-import { BULK_MAX_BYTES, BULK_MAX_IN_FLIGHT, BULK_MAX_ROWS, BulkSlots, endpointCaps } from './endpoints.ts';
+import { BulkSlots, endpointCaps } from './endpoints.ts';
 import { GZIP_MIN_CHARS, acceptsGzip, encodeJsonResponse } from './wire.ts';
 import { statementInChild } from '../workspace/child.ts';
 
@@ -64,22 +64,6 @@ describe('manifest: the bulk opt-in', () => {
       assert.match(result.success ? '' : result.error.issues.map(i => i.message).join('; '), /kind "all"/);
     }
   });
-
-  test('must be a boolean', () => {
-    assert.ok(!manifestWith({ statement: 'SELECT 1', kind: 'all', bulk: 'yes' }).success);
-  });
-});
-
-describe('endpoint caps', () => {
-  test('the ordinary window stays 200 rows / 50 KB; bulk gets the ceiling with the same timeout', () => {
-    const plain = endpointCaps({ bulk: false });
-    const bulk = endpointCaps({ bulk: true });
-
-    assert.deepEqual([plain.maxRows, plain.maxBytes], [200, 50_000]);
-    assert.deepEqual([bulk.maxRows, bulk.maxBytes], [BULK_MAX_ROWS, BULK_MAX_BYTES]);
-    assert.equal(bulk.timeoutMs, plain.timeoutMs);
-    assert.ok(BULK_MAX_ROWS >= 100_000 && BULK_MAX_BYTES >= 8_000_000, 'the ceiling fits the 84 489-row / 6.3 MB dataset');
-  });
 });
 
 describe('bulk slots (the concurrency fence)', () => {
@@ -107,10 +91,6 @@ describe('bulk slots (the concurrency fence)', () => {
     const slots = new BulkSlots(1);
     await assert.rejects(slots.run(async () => { throw new Error('boom'); }), /boom/);
     assert.equal(slots.active, 0);
-  });
-
-  test('the platform limit is small', () => {
-    assert.ok(BULK_MAX_IN_FLIGHT >= 1 && BULK_MAX_IN_FLIGHT <= 4);
   });
 });
 

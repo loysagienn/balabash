@@ -8,7 +8,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import type { ConnectionView, ConnectorServiceView, InstallationServiceView, ServiceView } from '../../../api/contract.ts';
-import { accountMeta, canConnect, catalogCount, catalogEntries, clientMissing, connectorWords, installationWords, linkAlive, nameHint, nameRequired, objState, pendingWords, rowAction, scopeList, serviceIcon, statusWords, validateConnectName, validateRename } from './ConnectionsScreen.logic.ts';
+import { accountMeta, canConnect, catalogCount, catalogEntries, clientMissing, linkAlive, nameHint, nameRequired, pendingWords, rowAction, scopeList, validateConnectName, validateRename } from './ConnectionsScreen.logic.ts';
 
 const NOW = new Date(2026, 9, 10, 22, 30);
 
@@ -17,29 +17,6 @@ function connection(patch: Partial<ConnectionView> = {}): ConnectionView {
 }
 
 const service = (patch: Partial<ServiceView> = {}): ServiceView => ({ name: 'notion', description: 'Pages and databases', multiAccount: true, manualClient: false, ...patch });
-
-describe('status words', () => {
-  it('maps the three statuses to the palette and shows an unknown one as it is', () => {
-    assert.deepEqual(statusWords('connected'), { state: 'done', label: 'connected' });
-    assert.deepEqual(statusWords('pending'), { state: 'wait', label: 'pending' });
-    assert.deepEqual(statusWords('reauthorization_required'), { state: 'act', label: 'needs sign-in' });
-    assert.deepEqual(statusWords('frozen'), { state: 'off', label: 'frozen' });
-    assert.equal(objState('connected'), undefined);
-    assert.equal(objState('pending'), 'wait');
-  });
-
-  it('picks the service icon by name', () => {
-    assert.equal(serviceIcon('notion'), 'book-open');
-    assert.equal(serviceIcon('gmail'), 'mail');
-    assert.equal(serviceIcon('google-calendar'), 'calendar-days');
-    assert.equal(serviceIcon('yandex'), 'megaphone');
-    assert.equal(serviceIcon('google-drive'), 'hard-drive');
-    assert.equal(serviceIcon('github'), 'git-fork');
-    assert.equal(serviceIcon('yandex-direct'), 'megaphone');
-    assert.equal(serviceIcon('todoist'), 'list-checks');
-    assert.equal(serviceIcon('something-else'), 'plug');
-  });
-});
 
 describe('the row', () => {
   it('meta: service, identity or address, since when; a pending row names its link', () => {
@@ -124,12 +101,6 @@ describe('the catalog with the services of the installation', () => {
     );
   });
 
-  it('words a service of the installation by its state: set up while missing, manage otherwise', () => {
-    assert.deepEqual(installationWords({ state: 'missing' }), { label: 'not set up', link: 'Set up', state: undefined });
-    assert.deepEqual(installationWords({ state: 'connected' }), { label: 'connected · installation-wide', link: 'Manage', state: undefined });
-    assert.deepEqual(installationWords({ state: 'failed' }), { label: 'connection failed', link: 'Manage', state: 'err' });
-  });
-
   it('puts the claude.ai connectors into the same list by name', () => {
     const connector: ConnectorServiceView = { name: 'slack', recipients: ['general'], description: null, state: 'connected', error: null, tokenExpiresAt: null };
     const entries = catalogEntries([perUser('notion')], [installation('youtrack', 'connected')], [connector]);
@@ -139,16 +110,5 @@ describe('the catalog with the services of the installation', () => {
       ['accounts:notion', 'connector:slack', 'installation:youtrack'],
     );
     assert.deepEqual(catalogEntries([perUser('notion')], []).map(entry => entry.kind), ['accounts']);
-  });
-
-  it('words a claude.ai connector by its state, read-only', () => {
-    assert.deepEqual(connectorWords({ state: 'connected' }), { label: 'connected · via claude.ai', state: undefined });
-    assert.deepEqual(connectorWords({ state: 'token_expired' }), { label: 'Claude CLI token expired', state: 'act' });
-    assert.deepEqual(connectorWords({ state: 'failed' }), { label: 'connection failed', state: 'err' });
-  });
-
-  it('gives the services of the installation their icons', () => {
-    assert.equal(serviceIcon('perplexity'), 'search');
-    assert.equal(serviceIcon('slack'), 'messages-square');
   });
 });

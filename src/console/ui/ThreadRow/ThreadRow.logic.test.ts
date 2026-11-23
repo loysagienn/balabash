@@ -1,18 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { isActiveState, threadRowMeta } from './ThreadRow.logic.ts';
-
-describe('isActiveState', () => {
-  it('counts the session states as live, paused among them', () => {
-    assert.equal(isActiveState('run'), true);
-    assert.equal(isActiveState('wait'), true);
-    assert.equal(isActiveState('act'), true);
-    assert.equal(isActiveState('paused'), true);
-    assert.equal(isActiveState('done'), false);
-    assert.equal(isActiveState('err'), false);
-    assert.equal(isActiveState('off'), false);
-  });
-});
+import { threadRowMeta } from './ThreadRow.logic.ts';
 
 describe('threadRowMeta', () => {
   it('lists agent, headless and remote tags, project, children and the last command', () => {

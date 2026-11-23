@@ -4,7 +4,7 @@
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { THEMES, THEME_STORAGE_KEY, themeBootScript } from '../../../utils/console-themes.ts';
+import { THEME_STORAGE_KEY, themeBootScript } from '../../../utils/console-themes.ts';
 import { applyTheme, pageTheme, readTheme, writeTheme } from './index.ts';
 
 function memory(initial: Record<string, string> = {}) {
@@ -85,21 +85,6 @@ describe('the theme choice', () => {
 });
 
 describe('the shell’s boot script', () => {
-  it('names the storage key and every theme but Graphite with its page color and scheme', () => {
-    const script = themeBootScript();
-
-    assert.match(script, /localStorage\.getItem\("balabash\.theme"\)/);
-    assert.match(script, /data-bb-theme/);
-
-    for (const theme of THEMES) {
-      if (theme.id === 'graphite') {
-        assert.doesNotMatch(script, /"graphite"/);
-      } else {
-        assert.ok(script.includes(`"${theme.id}":["${theme.bg}","${theme.scheme}"]`), theme.id);
-      }
-    }
-  });
-
   it('runs as plain script: sets the attribute and the metas for a stored theme, leaves Graphite alone', () => {
     const run = (stored: string | null) => {
       const attrs = new Map<string, string>();

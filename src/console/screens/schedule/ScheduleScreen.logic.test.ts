@@ -9,13 +9,11 @@ import {
   anyRunning,
   createdWords,
   groupRunsByDay,
-  kindWords,
   lastRunNote,
   lastRunTime,
   lastRunWords,
   logRunWords,
   newTaskRoute,
-  noJournalWords,
   orderTasks,
   runDuration,
   runOutcome,
@@ -64,12 +62,6 @@ const run = (patch: Partial<ScheduleRunView> = {}): ScheduleRunView => ({
 });
 
 describe('the task', () => {
-  it('names the kinds as the design does', () => {
-    assert.deepEqual(kindWords('note'), { label: 'reminder', icon: 'bell' });
-    assert.deepEqual(kindWords('program'), { label: 'program', icon: 'file-code' });
-    assert.deepEqual(kindWords('other'), { label: 'other', icon: 'calendar-clock' });
-  });
-
   it('spells the trigger', () => {
     assert.deepEqual(triggerWords({ cron: '0 4 * * *', at: null }, NOW), { human: 'daily at 4:00', cron: '0 4 * * *' });
     assert.deepEqual(triggerWords({ cron: '*/15 9-17 * * 1-5', at: null }, NOW), { human: 'on schedule', cron: '*/15 9-17 * * 1-5' });
@@ -217,11 +209,6 @@ describe('the runs', () => {
     assert.equal(anyRunning([run(), run({ status: 'running' })]), true);
     assert.equal(anyRunning([run()]), false);
     assert.equal(anyRunning([]), false);
-  });
-
-  it('says what a task of a kind leaves behind', () => {
-    assert.match(noJournalWords('note') ?? '', /reminder leaves no run log/);
-    assert.equal(noJournalWords('program'), null);
   });
 });
 

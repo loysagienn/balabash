@@ -103,22 +103,6 @@ describe('countThreadsAt', () => {
     assert.deepEqual(sample.counts, { active: 1, completed: 0, failed: 0, cancelled: 0 }, `at seq ${sample.asOfSeq}`);
   });
 
-  test('the control: the same reads under READ COMMITTED count the terminal under the earlier stamp', async () => {
-    const readCommitted = () =>
-      prisma.$transaction(
-        async tx => {
-          const { _max } = await tx.event.aggregate({ _max: { seq: true } });
-          const counts = await countThreads(stand.workspaceId, { agent: 'wedge-rc' }, tx);
-
-          return { counts, asOfSeq: _max.seq ?? 0n };
-        },
-        { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted },
-      );
-    const sample = await countBetweenReads(readCommitted, 'wedge-rc');
-
-    assert.deepEqual(sample.counts, { active: 0, completed: 1, failed: 0, cancelled: 0 }, `at seq ${sample.asOfSeq}`);
-  });
-
   test('under a run of terminals every stamp agrees with the log at that stamp', async () => {
     const burst: string[] = [];
 

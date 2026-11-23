@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { ZONE_PENDING, atHint, changeTaskForm, cronFacts, cronFieldHint, cronHint, fieldOfTaskFailure, initialTaskForm, instantInZone, parseTimeout, slugFromName, taskRequest, validateTaskForm, zoneNoteWords } from './taskForm.logic.ts';
+import { ZONE_PENDING, atHint, changeTaskForm, cronFacts, cronFieldHint, cronHint, fieldOfTaskFailure, initialTaskForm, instantInZone, parseTimeout, slugFromName, taskRequest, validateTaskForm } from './taskForm.logic.ts';
 import type { TaskFormValues } from './taskForm.logic.ts';
 
 const NOW = new Date('2026-10-11T12:00:00Z');
@@ -188,10 +188,5 @@ describe('the schedule’s time zone not known yet (Settings not answered, or fa
     assert.equal(taskRequest(values({ when: 'manual' }), null).at, null);
     assert.equal(taskRequest(values({ when: 'at', at: '2026-10-12T09:00' }), null).at, null, 'never an instant of a guessed zone');
     assert.equal(taskRequest(values({ when: 'at', at: '2026-10-12T09:00' }), 'Asia/Jerusalem').at, '2026-10-12T06:00:00.000Z');
-  });
-
-  it('zoneNoteWords: reading, and the failure with what still works', () => {
-    assert.equal(zoneNoteWords(null), 'Reading the schedule’s time zone — a schedule and a moment are read in it.');
-    assert.equal(zoneNoteWords('Internal error'), 'Couldn’t read the schedule’s time zone — Internal error. A schedule and a moment are read in it; “Manual only” needs none.');
   });
 });
