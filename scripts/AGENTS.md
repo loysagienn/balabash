@@ -154,3 +154,33 @@ For another code task, supply its reviewed JavaScript program body in
 `--programs DIR` under `<workspaceId>/<slug>.js`. A custom program takes responsibility
 for its own initial state. A task without a translation aborts the transaction.
 Historical job runs retain their ids, positions and the values shown by the schedule reader.
+
+## browser-link-check (`scripts/browser-link-check.ts`)
+
+The end-to-end check of the browser link (`src/browser-link`,
+`src/browser-extension`) on this host: a Chromium with the built extension
+plays the user's browser, the hub and the relay run in the script's process,
+and the browser agent's own tools (`agents/kit/playwright.ts`) drive it
+through `connectOverCDP`. Touches neither the app nor its database; prints a
+line per step and exits non-zero on the first failure. Not bundled: run from
+the source.
+
+```
+npm run build-extension && node scripts/browser-link-check.ts
+```
+
+## browser-link-prototype (`scripts/browser-link-prototype.ts`)
+
+The stand of the browser link outside the app, for a check with a real
+browser on a user's machine: the hub on a loopback port (3041 unless named),
+one token for every browser (`BROWSER_LINK_TOKEN`). The reverse proxy has to
+send `/browser-link/` of the console domain to that port with the WebSocket
+upgrade headers. `/admin/*` — who is connected, the tabs, one session driven
+through the kit's tools — is not routed by the proxy and asks for the same
+token in `x-browser-link-token`; the head of the script lists the routes.
+Not bundled: run from the source.
+
+```
+BROWSER_LINK_TOKEN=<token> node scripts/browser-link-prototype.ts [port]
+```
+

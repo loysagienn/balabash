@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Balabash Browser Link</title>
+    <style>
+      body { font: 14px/1.5 system-ui, sans-serif; max-width: 560px; margin: 40px auto; padding: 0 16px; color: #1b1b1b; }
+      h1 { font-size: 18px; margin: 0 0 20px; }
+      label { display: block; margin: 14px 0 4px; font-weight: 600; }
+      input[type='text'], input[type='password'] { width: 100%; box-sizing: border-box; padding: 7px 9px; font: inherit; border: 1px solid #b9b9b9; border-radius: 6px; }
+      .row { display: flex; gap: 10px; align-items: center; margin-top: 18px; }
+      button { font: inherit; padding: 7px 14px; border-radius: 6px; border: 1px solid #888; background: #f3f3f3; cursor: pointer; }
+      #status { margin-top: 22px; padding: 10px 12px; border-radius: 6px; background: #f3f3f3; white-space: pre-wrap; }
+      #status[data-state='connected'] { background: #e2f4e4; }
+      #status[data-state='paused'] { background: #fff2cc; }
+      .hint { color: #666; font-size: 12px; margin-top: 3px; }
+    </style>
+  </head>
+  <body>
+    <h1>Balabash Browser Link</h1>
+    <label for="serverUrl">Server</label>
+    <input id="serverUrl" type="text" placeholder="wss://console.example.com" />
+    <div class="hint">The address of your Balabash console, with wss://.</div>
+    <label for="token">Token</label>
+    <input id="token" type="password" />
+    <label for="name">Name of this browser</label>
+    <input id="name" type="text" placeholder="MacBook" />
+    <div class="row">
+      <button id="save">Save and connect</button>
+      <label style="margin: 0; font-weight: 400"><input id="paused" type="checkbox" /> Pause</label>
+    </div>
+    <div id="status">…</div>
+    <script type="module" src="options.js"></script>
+  </body>
+</html>
