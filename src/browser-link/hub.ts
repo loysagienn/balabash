@@ -24,6 +24,14 @@
 // the extension took a tab away — travels over the control link and names
 // the session by the id the extension gave it.
 //
+// A session whose agent is idle is parked (ParkedSession): the extension is
+// asked to let its tabs go and keep their group, and the session link is
+// closed — with the last debugger Chrome's bar leaves the user's windows.
+// The parked session is still a session of its control link: it ends with
+// the link, by the user's stop (a notice of the extension) or by the
+// server's own hand, and it comes back by opening a session that names it.
+// An extension older than PARKING_SINCE_VERSION does not park.
+//
 // The frames of a session link are handled one per turn of the event loop,
 // in the order they came. An answer reaches whoever waits for it through a
 // chain of promises, an event at once — and two frames that came in one
@@ -49,8 +57,11 @@ import {
   CLOSE_UNAUTHORIZED,
   CLOSE_UNSUPPORTED_PROTOCOL,
   CONTROL_PATH,
+  PARKING_SINCE_VERSION,
   PROTOCOL_VERSION,
+  SESSION_OVER,
   SESSION_PATH,
+  compareVersions,
 } from './protocol.ts';
 import type {
   BrowserTab,
@@ -103,6 +114,26 @@ export type ExtensionSession = {
   ended: Promise<{ end: SessionEnd; detail: string }>;
   // The server ends the session: done with it by default.
   close(end?: Exclude<SessionEnd, 'stopped'>, detail?: string): void;
+  // Whether the extension behind the link parks sessions.
+  canPark: boolean;
+  // Parks the session: the extension lets its tabs go and keeps their
+  // group, and the link closes as closed by the server. A refusal ends the
+  // session as lost — what the extension holds of it is not known.
+  park(): Promise<ParkedSession>;
+};
+
+// A session the extension keeps without a link while its agent is idle.
+export type ParkedSession = {
+  // The id the extension keeps the session by.
+  id: number;
+  // Settles once if the session ended before it came back: how, and what
+  // was said about it. A session that came back leaves it unsettled.
+  ended: Promise<{ end: SessionEnd; detail: string }>;
+  // The session comes back: a new link, and the tabs of its group — the
+  // ones of `tabIds` first, in that order. A failure ends it as lost.
+  resume(options: { clientName: string; label: string; tabIds: number[] }): Promise<ExtensionSession>;
+  // The server is done with the session, or withdraws the browser from it.
+  close(end?: 'closed' | 'revoked'): void;
 };
 
 export type ConnectedBrowser = {
@@ -282,8 +313,16 @@ const SERVER_CLOSE: Record<Exclude<SessionEnd, 'stopped'>, { code: number; detai
 
 type OpenSession = ExtensionSession & { initialized: Promise<void>; setId(id: number): void };
 
-// How the control link asks for a tab on behalf of a session.
-type ClaimTab = (sessionId: number, tabId: number) => Promise<void>;
+// What a session asks of its control link: a tab of the user, and to be parked.
+type SessionControl = {
+  claimTab(sessionId: number, tabId: number): Promise<void>;
+  canPark(): boolean;
+  park(session: OpenSession): Promise<ParkedSession>;
+};
+
+type Outcome = { end: SessionEnd; detail: string };
+
+const STOPPED_BY_USER = 'The user stopped the session in the browser';
 
 export function createBrowserLinkHub(options: {
   admit(hello: HelloParams): Promise<Admission | null>;
@@ -305,7 +344,11 @@ export function createBrowserLinkHub(options: {
   const pingIntervalMs = options.pingIntervalMs ?? PING_INTERVAL_MS;
   const controlSockets = new WebSocketServer({ noServer: true, maxPayload: MAX_CONTROL_FRAME_BYTES });
   const sessionSockets = new WebSocketServer({ noServer: true, maxPayload: MAX_SESSION_FRAME_BYTES });
-  const connected = new Map<string, { browser: ConnectedBrowser; socket: WebSocket; sessions: Set<OpenSession> }>();
+  // `parked` — how each parked session of the link is ended, by its id.
+  const connected = new Map<
+    string,
+    { browser: ConnectedBrowser; socket: WebSocket; sessions: Set<OpenSession>; parked: Map<number, (outcome: Outcome) => void> }
+  >();
   const tickets = new Map<string, { take(socket: WebSocket): void; timer: NodeJS.Timeout }>();
 
   const send = <E extends keyof ControlEvents>(socket: WebSocket, method: E | 'welcome', params?: ControlEvents[E] | WelcomeParams) => {
@@ -334,7 +377,7 @@ export function createBrowserLinkHub(options: {
     return { socket, forget };
   };
 
-  const wrapSession = (socket: WebSocket, claimTab: ClaimTab): OpenSession => {
+  const wrapSession = (socket: WebSocket, control: SessionControl): OpenSession => {
     const requester = createRequester(socket, null);
     const stopPings = keepAlive(socket, pingIntervalMs);
     let markInitialized!: () => void;
@@ -364,7 +407,11 @@ export function createBrowserLinkHub(options: {
       initialized,
       ended,
       onNotice: null,
-      claimTab: tabId => claimTab(id, tabId),
+      claimTab: tabId => control.claimTab(id, tabId),
+      get canPark() {
+        return control.canPark();
+      },
+      park: () => control.park(session),
       send: (method, params) => requester.request(method, params),
       get onEvent() {
         return onEvent;
@@ -450,6 +497,8 @@ export function createBrowserLinkHub(options: {
     const requester = createRequester(socket, REQUEST_TIMEOUT_MS);
     const stopPings = keepAlive(socket, pingIntervalMs);
     const sessions = new Set<OpenSession>();
+    const parked = new Map<number, (outcome: Outcome) => void>();
+    let canPark = false;
     let browser: ConnectedBrowser | null = null;
     let admitting = false;
     let idle: NodeJS.Timeout | null = null;
@@ -466,14 +515,18 @@ export function createBrowserLinkHub(options: {
     const request = <M extends ControlMethod>(method: M, params: ControlRequests[M]['params'], timeoutMs?: number) =>
       requester.request(method, params, timeoutMs) as Promise<ControlRequests[M]['result']>;
 
-    const claimTab: ClaimTab = async (sessionId, tabId) => {
-      await request('session.claim', { sessionId, tabId }, CLAIM_TIMEOUT_MS);
-    };
-
-    const openSession: ConnectedBrowser['openSession'] = async ({ clientName, label }) => {
+    const open = async ({
+      clientName,
+      label,
+      resume,
+    }: {
+      clientName: string;
+      label: string;
+      resume?: ControlRequests['session.open']['params']['resume'];
+    }): Promise<OpenSession> => {
       const ticket = randomBytes(32).toString('base64url');
       const dialed = sessionSocket(ticket);
-      const opened = request('session.open', { ticket, clientName, label });
+      const opened = request('session.open', { ticket, clientName, label, ...(resume ? { resume } : {}) });
 
       // Whichever fails first tells why; the other must not be left unhandled.
       dialed.socket.catch(() => {});
@@ -482,7 +535,7 @@ export function createBrowserLinkHub(options: {
       let session: OpenSession;
 
       try {
-        session = wrapSession(await Promise.race([dialed.socket, opened.then(() => dialed.socket)]), claimTab);
+        session = wrapSession(await Promise.race([dialed.socket, opened.then(() => dialed.socket)]), control);
       } catch (error) {
         dialed.forget();
 
@@ -510,6 +563,81 @@ export function createBrowserLinkHub(options: {
       return session;
     };
 
+    const park = async (session: OpenSession): Promise<ParkedSession> => {
+      const id = session.id;
+
+      try {
+        await request('session.park', { sessionId: id });
+      } catch (error) {
+        session.close('lost');
+
+        throw error;
+      }
+
+      let over = false;
+      let settle!: (outcome: Outcome) => void;
+      const ended = new Promise<Outcome>(resolve => {
+        settle = resolve;
+      });
+      // True for the one call that takes the session out of the parked ones.
+      const leave = () => {
+        if (over) {
+          return false;
+        }
+
+        over = true;
+        parked.delete(id);
+
+        return true;
+      };
+
+      parked.set(id, outcome => {
+        if (leave()) {
+          settle(outcome);
+        }
+      });
+      session.close('closed', 'The session is parked');
+
+      return {
+        id,
+        ended,
+        resume: async ({ clientName, label, tabIds }) => {
+          if (!leave()) {
+            throw new BrowserRequestError('This session is over');
+          }
+
+          try {
+            return await open({ clientName, label, resume: { sessionId: id, tabIds } });
+          } catch (error) {
+            // The extension holds the session no more — the user has stopped
+            // it, and the word of it is still on its way — or what it holds
+            // of the session is not known, and it lets go.
+            const stopped = error instanceof BrowserRequestError && error.code === SESSION_OVER;
+
+            send(socket, 'session.drop', { sessionId: id });
+            settle(stopped ? { end: 'stopped', detail: STOPPED_BY_USER } : { end: 'lost', detail: error instanceof Error ? error.message : String(error) });
+
+            throw error;
+          }
+        },
+        close: (end = 'closed') => {
+          if (leave()) {
+            send(socket, 'session.drop', { sessionId: id });
+            settle({ end, detail: SERVER_CLOSE[end].detail });
+          }
+        },
+      };
+    };
+
+    const control: SessionControl = {
+      claimTab: async (sessionId, tabId) => {
+        await request('session.claim', { sessionId, tabId }, CLAIM_TIMEOUT_MS);
+      },
+      canPark: () => canPark,
+      park,
+    };
+    const openSession: ConnectedBrowser['openSession'] = ({ clientName, label }) => open({ clientName, label });
+
     const admit = async (params: unknown) => {
       const hello = parseHello(params);
 
@@ -536,13 +664,14 @@ export function createBrowserLinkHub(options: {
       // The same browser dialing again replaces its previous link.
       connected.get(admission.browserId)?.socket.close(1000, 'Replaced by a new link');
 
+      canPark = compareVersions(hello!.extensionVersion, PARKING_SINCE_VERSION) >= 0;
       browser = {
         id: admission.browserId,
         extensionVersion: hello!.extensionVersion,
         listTabs: async () => (await request('tabs.list', {})).tabs,
         openSession,
       };
-      connected.set(browser.id, { browser, socket, sessions });
+      connected.set(browser.id, { browser, socket, sessions, parked });
       send(socket, 'welcome', {
         browserId: admission.browserId,
         name: admission.name,
@@ -588,7 +717,7 @@ export function createBrowserLinkHub(options: {
 
         hub.onReport?.(browser.id, String(text).slice(0, 2000));
       } else if (frame.method === 'session.notice') {
-        const notice = (frame.params ?? {}) as Partial<SessionNotice>;
+        const notice = (frame.params ?? {}) as { sessionId?: unknown; kind?: unknown; tabId?: unknown };
 
         if (notice.kind === 'tab_blocked' && typeof notice.tabId === 'number') {
           for (const session of sessions) {
@@ -596,6 +725,8 @@ export function createBrowserLinkHub(options: {
               session.onNotice?.({ sessionId: session.id, kind: notice.kind, tabId: notice.tabId });
             }
           }
+        } else if (notice.kind === 'stopped' && typeof notice.sessionId === 'number') {
+          parked.get(notice.sessionId)?.({ end: 'stopped', detail: STOPPED_BY_USER });
         }
       }
     });
@@ -614,6 +745,10 @@ export function createBrowserLinkHub(options: {
       // the revocation already closed keeps its own reason.
       for (const session of sessions) {
         session.close('lost');
+      }
+
+      for (const end of [...parked.values()]) {
+        end({ end: 'lost', detail: SERVER_CLOSE.lost.detail });
       }
 
       if (browser && connected.get(browser.id)?.socket === socket) {
@@ -685,6 +820,10 @@ export function createBrowserLinkHub(options: {
 
         for (const session of entry.sessions) {
           session.close('revoked');
+        }
+
+        for (const end of [...entry.parked.values()]) {
+          end({ end: 'revoked', detail: SERVER_CLOSE.revoked.detail });
         }
 
         entry.socket.close(CLOSE_UNAUTHORIZED, 'Disconnected in the console');

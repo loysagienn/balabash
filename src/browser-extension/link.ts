@@ -29,6 +29,15 @@
 // (consent.ts) — unless they chose in the settings not to be asked. A tab
 // of a blocked site is nobody's to hand.
 //
+// A session whose agent is idle is parked on the server's request: the
+// debugger leaves its tabs — Chrome takes its bar away with the last
+// debugger — and the session link closes, while the session stays here with
+// its group of tabs, in the look it had. The server opens it again when the
+// agent goes on: the tabs that are in the group then are the session's, in
+// the order the server names. A parked session is the user's to stop like
+// any other, and is told to the server when they do; it ends with the
+// control link, as a session that holds a link does.
+//
 // A session works in the background of the user's window. A tab a page of
 // a session opens (a link with a target, window.open) is born in front, in
 // the group of its page: it joins the session there (tabGroupManager.ts),
@@ -52,7 +61,7 @@ import { Channel } from './playwright/channel';
 import { ClientSession } from './playwright/clientSession';
 import { isDebuggableUrl } from './playwright/ownedTab';
 import type { ChromeListeners } from './playwright/chromeListeners';
-import type { TabGroupManager } from './playwright/tabGroupManager';
+import type { ParkedTabGroup, TabGroupManager } from './playwright/tabGroupManager';
 import type { TabRegistry } from './playwright/tabRegistry';
 import {
   CLOSE_SESSION_STOPPED,
@@ -60,6 +69,7 @@ import {
   CLOSE_UNSUPPORTED_PROTOCOL,
   CONTROL_PATH,
   PROTOCOL_VERSION,
+  SESSION_OVER,
   SESSION_PATH,
   compareVersions,
 } from '../browser-link/protocol.ts';
@@ -90,6 +100,11 @@ function refusal(code: ControlRefusal, message: string): Error {
   return Object.assign(new Error(message), { code });
 }
 
+// A parked session the server asks back is not held any more.
+function sessionOver(): Error {
+  return Object.assign(new Error('This session is over'), { code: SESSION_OVER });
+}
+
 // What the extension keeps between the starts of its worker.
 type Stored = {
   // Empty while the browser is not paired.
@@ -108,7 +123,9 @@ export type LinkStatus = {
   detail: string;
   // The server builds a newer extension than this one.
   outdated: boolean;
-  sessions: { id: number; label: string; tabIds: number[] }[];
+  // `parked` — the agent is idle: the session holds no tab now, `tabIds`
+  // are the tabs of its group, which it takes when it comes back.
+  sessions: { id: number; label: string; tabIds: number[]; parked: boolean }[];
 };
 
 async function readStored(): Promise<Stored> {
@@ -136,6 +153,8 @@ export class Link {
   private _retryTimer: ReturnType<typeof setTimeout> | undefined;
   private _pingTimer: ReturnType<typeof setInterval> | undefined;
   private _sessions = new Map<number, { session: ClientSession; label: string }>();
+  // The sessions the server parked, with the group each comes back for.
+  private _parked = new Map<number, { label: string; group: ParkedTabGroup }>();
   private _lastSessionId = 0;
   // The pairing the next `hello` carries, until the server answered it.
   private _pairing: { code: string; settle(result: PagePairResult): void } | undefined;
@@ -220,10 +239,25 @@ export class Link {
         session.close(STOPPED_BY_USER, CLOSE_SESSION_STOPPED);
       }
     }
+
+    for (const id of [...this._parked.keys()]) {
+      if (sessionId === undefined || id === sessionId) {
+        this._dropParked(id, true);
+      }
+    }
   }
 
-  // The user hands a tab to a session themselves: no question to ask.
+  // The user hands a tab to a session themselves: no question to ask. A
+  // parked session finds the tab in its group when it comes back.
   async handTab(sessionId: number, tabId: number): Promise<void> {
+    const parked = this._parked.get(sessionId);
+
+    if (parked) {
+      await this._groups.addToParked(parked.group, await this._claimable(tabId));
+
+      return;
+    }
+
     const session = this._sessions.get(sessionId)?.session;
 
     if (!session) {
@@ -264,7 +298,17 @@ export class Link {
       outdated:
         this._unsupported ||
         (this._serverExtensionVersion !== '' && compareVersions(chrome.runtime.getManifest().version, this._serverExtensionVersion) < 0),
-      sessions: [...this._sessions].map(([id, { session, label }]) => ({ id, label, tabIds: this._registry.tabIdsOf(session) })),
+      sessions: [
+        ...[...this._sessions].map(([id, { session, label }]) => ({ id, label, tabIds: this._registry.tabIdsOf(session), parked: false })),
+        ...(await Promise.all(
+          [...this._parked].map(async ([id, { label, group }]) => ({
+            id,
+            label,
+            tabIds: (await this._groups.tabsOfParked(group)).flatMap(tab => tab.id ?? []),
+            parked: true,
+          })),
+        )),
+      ].sort((left, right) => left.id - right.id),
     };
   }
 
@@ -366,6 +410,7 @@ export class Link {
     clearInterval(this._pingTimer);
     // The sessions were the server's: without it they have no client.
     this._closeSessions(reason);
+    this._dropAllParked(false);
 
     if (pairing && this._pairing === pairing) {
       // The refusal was of the code: the secret this browser had, if any,
@@ -410,6 +455,12 @@ export class Link {
         if (typeof name === 'string') {
           await chrome.storage.local.set({ name });
         }
+      } else if (frame.method === 'session.drop') {
+        const { sessionId } = (frame.params ?? {}) as Partial<ControlEvents['session.drop']>;
+
+        if (typeof sessionId === 'number') {
+          this._dropParked(sessionId, false);
+        }
       }
 
       return;
@@ -434,6 +485,8 @@ export class Link {
         return { tabs: await this._listTabs() } satisfies ControlRequests['tabs.list']['result'];
       case 'session.open':
         return await this._openSession(params as ControlRequests['session.open']['params']);
+      case 'session.park':
+        return await this._parkSession(params as ControlRequests['session.park']['params']);
       case 'session.claim':
         return await this._claimTab(params as ControlRequests['session.claim']['params']);
     }
@@ -462,14 +515,34 @@ export class Link {
       }));
   }
 
-  private async _openSession({ ticket, clientName, label }: ControlRequests['session.open']['params']): Promise<ControlRequests['session.open']['result']> {
+  private async _openSession({
+    ticket,
+    clientName,
+    label,
+    resume,
+  }: ControlRequests['session.open']['params']): Promise<ControlRequests['session.open']['result']> {
     // The boundaries a session is held to are read before it can ask for anything.
     await readSettings();
 
+    const parked = resume ? this._parked.get(resume.sessionId) : undefined;
+
+    if (resume && !parked) {
+      throw sessionOver();
+    }
+
     const channel = await Channel.open(`${__SERVER_URL__}${SESSION_PATH}?ticket=${encodeURIComponent(ticket)}`);
     const session = new ClientSession(channel, this._registry, { clientName, tabGroup: { title: TAB_GROUP_TITLE }, background: true });
-    const sessionId = ++this._lastSessionId;
 
+    // The user stopped it while its link was being dialed.
+    if (resume && this._parked.get(resume.sessionId) !== parked) {
+      session.close('This session is over');
+
+      throw sessionOver();
+    }
+
+    const sessionId = resume ? resume.sessionId : ++this._lastSessionId;
+
+    this._parked.delete(sessionId);
     this._sessions.set(sessionId, { session, label: typeof label === 'string' ? label : clientName });
     this._didChangeSessions();
     session.onClose = () => {
@@ -480,22 +553,109 @@ export class Link {
     };
 
     try {
-      this._groups.register(session);
+      let returned = 0;
 
-      // A session starts with a tab of its own, in the background of a window
-      // with tabs — the window the user looks at can be a site installed as
-      // an app, which has none.
-      const tab = await chrome.tabs.create({ url: 'about:blank', active: false, windowId: await windowForTabs([]) });
+      if (parked) {
+        await this._groups.resume(parked.group, session);
+        returned = await this._returnTabs(session, parked.group, Array.isArray(resume?.tabIds) ? resume.tabIds : []);
+      } else {
+        this._groups.register(session);
+      }
 
-      this._registry.claim(tab, session);
+      if (!returned) {
+        // A session starts with a tab of its own, in the background of a window
+        // with tabs — the window the user looks at can be a site installed as
+        // an app, which has none.
+        const tab = await chrome.tabs.create({ url: 'about:blank', active: false, windowId: await windowForTabs([]) });
+
+        this._registry.claim(tab, session);
+      }
+
       session.didInitialize();
     } catch (error: any) {
       session.close(error.message);
+
+      // A group that did not get as far as its session is nobody's.
+      if (parked) {
+        void this._groups.release(parked.group);
+      }
 
       throw error;
     }
 
     return { sessionId };
+  }
+
+  // The session's tabs go free and its link closes next, by the server's
+  // hand; the session stays, with its group.
+  private async _parkSession({ sessionId }: ControlRequests['session.park']['params']): Promise<ControlRequests['session.park']['result']> {
+    const entry = this._sessions.get(sessionId);
+    const group = entry && this._groups.park(entry.session);
+
+    if (!entry || !group) {
+      throw new Error('This session is over');
+    }
+
+    this._sessions.delete(sessionId);
+    this._parked.set(sessionId, { label: entry.label, group });
+    // Nothing more to end when its link closes.
+    entry.session.onClose = undefined;
+    await this._registry.releaseAll(entry.session);
+    this._didChangeSessions();
+
+    return {};
+  }
+
+  // The tabs that are in the group of a session that came back: the ones
+  // the server names first, in its order, then the ones the user put there
+  // meanwhile. A tab of a blocked site is put out of the group instead.
+  private async _returnTabs(session: ClientSession, group: ParkedTabGroup, order: number[]): Promise<number> {
+    const inGroup = await this._groups.tabsOfParked(group);
+    const ordered = [
+      ...order.flatMap(tabId => inGroup.find(tab => tab.id === tabId) ?? []),
+      ...inGroup.filter(tab => !order.includes(tab.id!)),
+    ];
+    let returned = 0;
+
+    for (const tab of ordered) {
+      if (isBlocked(tab.url ?? tab.pendingUrl)) {
+        await this._groups.ungroup(tab.id!);
+
+        continue;
+      }
+
+      try {
+        this._registry.claim(tab, session);
+        returned += 1;
+      } catch (error: any) {
+        report(`Tab ${tab.id} did not come back to its session: ${error?.message ?? error}`);
+      }
+    }
+
+    return returned;
+  }
+
+  // A parked session is over. `stopped` — by the user's word: the server is told.
+  private _dropParked(sessionId: number, stopped: boolean): void {
+    const parked = this._parked.get(sessionId);
+
+    if (!parked) {
+      return;
+    }
+
+    this._parked.delete(sessionId);
+
+    if (stopped) {
+      this._sendEvent('session.notice', { sessionId, kind: 'stopped' } satisfies SessionNotice);
+    }
+
+    void this._groups.release(parked.group);
+  }
+
+  private _dropAllParked(stopped: boolean): void {
+    for (const sessionId of [...this._parked.keys()]) {
+      this._dropParked(sessionId, stopped);
+    }
   }
 
   // A tab born in front, in the group of a session. Chrome names the tab
@@ -510,8 +670,9 @@ export class Link {
     await chrome.tabs.update(tab.openerTabId, { active: true }).catch(error => report(`The user's tab was not put back in front: ${error?.message ?? error}`));
   }
 
-  // The tab as a session may take it; throws the refusal otherwise.
-  private async _claimable(tabId: number, session: ClientSession): Promise<chrome.tabs.Tab> {
+  // The tab as a session may take it; throws the refusal otherwise. A
+  // parked session holds no tab, so any owner is another session.
+  private async _claimable(tabId: number, session?: ClientSession): Promise<chrome.tabs.Tab> {
     await readSettings();
 
     const tab = await chrome.tabs.get(tabId).catch(() => undefined);
@@ -602,6 +763,8 @@ export class Link {
     clearTimeout(this._retryTimer);
     clearInterval(this._pingTimer);
     this._closeSessions(reason, sessionCode);
+    // Told while the link is still there to carry it.
+    this._dropAllParked(sessionCode === CLOSE_SESSION_STOPPED);
 
     const socket = this._socket;
 

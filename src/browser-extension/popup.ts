@@ -1,7 +1,8 @@
 // The popup of the toolbar button — the one page the user meets the
 // extension on: what the link is doing and the pause; the sessions agents
-// hold in this browser, each with its label and tabs, a button that stops
-// it and one that hands it the tab in front; and the user's boundaries
+// hold in this browser — the ones at work and the parked ones, whose agent
+// is idle — each with its label and tabs, a button that stops it and one
+// that hands it the tab in front; and the user's boundaries
 // (boundaries.ts) — whether the agent sees the list of tabs, whether it is
 // handed a tab without the user being asked, the blocked sites. Everything
 // goes through the worker (background.ts).
@@ -73,10 +74,11 @@ async function show(current: LinkStatus | undefined): Promise<void> {
 
       block.className = 'session';
       block.dataset.session = String(session.id);
+      block.dataset.parked = String(session.parked);
       label.className = 'label';
       label.textContent = session.label;
       tabs.className = 'tabs';
-      tabs.textContent = `${session.tabIds.length} tab(s)`;
+      tabs.textContent = `${session.tabIds.length} tab(s)${session.parked ? ' — idle: the agent is not working in them now' : ''}`;
       actions.className = 'actions';
       actions.append(
         button('Stop', () => {

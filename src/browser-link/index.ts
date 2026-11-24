@@ -12,8 +12,10 @@
 // An agent of a workspace reaches the browsers enabled in that workspace,
 // whoever owns them: it lists them, reads the tabs of one and opens a
 // session in it — the session link of the hub behind a CDP endpoint on
-// loopback (relay.ts) a Playwright client connects to. A browser disabled
-// in a workspace or disconnected takes its sessions with it at once.
+// loopback (relay.ts) a Playwright client connects to. A session whose
+// agent is idle is parked and comes back behind a new endpoint (hub.ts). A
+// browser disabled in a workspace or disconnected takes its sessions with
+// it at once, the parked ones too.
 //
 // What is connected now is the hub's memory; connections are not journaled.
 // The consoles learn of a change — a browser came or went, was paired,
@@ -28,7 +30,7 @@ import path from 'node:path';
 import { config } from '../config/index.ts';
 import { prisma } from '../db/client.ts';
 import { createBrowserLinkHub } from './hub.ts';
-import type { BrowserLinkHub, ConnectedBrowser, ExtensionSession, SessionEnd } from './hub.ts';
+import type { BrowserLinkHub, ConnectedBrowser, ExtensionSession, ParkedSession, SessionEnd } from './hub.ts';
 import { createPairings } from './pairings.ts';
 import { EXTENSION_ID, compareVersions } from './protocol.ts';
 import type { BrowserTab, HelloParams, SessionNotice } from './protocol.ts';
@@ -349,20 +351,47 @@ export type BrowserSession = {
   claimTab(tabId: number): Promise<void>;
   // Hears what the extension did to the session by the user's rules.
   onNotice(listener: (notice: SessionNotice) => void): void;
+  // The tabs of the session, in the order its client numbers them.
+  tabIds(): number[];
+  // Whether the extension of the browser parks sessions.
+  canPark: boolean;
+  // Parks the session while its agent is idle: the debugger leaves its tabs
+  // and the endpoint closes; the group of tabs stays the session's. A
+  // refusal ends the session as lost.
+  park(): Promise<ParkedBrowserSession>;
   // Settles once, when the session is over: how, and what was said about it.
   ended: Promise<{ end: SessionEnd; detail: string }>;
   // The agent is done with the session; its tabs stay open in the browser.
   close(): Promise<void>;
 };
 
-// The sessions open now, with the workspace each was opened from.
-const openSessions = new Set<{ browserId: string; workspaceId: string; session: ExtensionSession }>();
+// A session parked in a browser: no endpoint, no debugger, its group of
+// tabs kept for its return.
+export type ParkedBrowserSession = {
+  browserId: string;
+  // Settles once if the session ended before it came back: the user stopped
+  // it, the browser's access was withdrawn, the link was lost.
+  ended: Promise<{ end: SessionEnd; detail: string }>;
+  // The session comes back behind a new endpoint with the tabs of its group
+  // — the ones of `tabIds` first, in that order (the order of
+  // BrowserSession.tabIds before the parking). A failure ends it.
+  resume(options: { clientName: string; label: string; tabIds: number[] }): Promise<BrowserSession>;
+  // The agent is done with the session.
+  close(): void;
+};
+
+// Counts a session of a browser — open or parked — for whoever may have to
+// withdraw the browser from it; answers what to call once it is there no more.
+type Keep = (withdraw: () => void) => () => void;
+
+// The sessions open or parked now, with the workspace each was opened from.
+const heldSessions = new Set<{ browserId: string; workspaceId: string; withdraw(): void }>();
 
 // The browser is no longer the workspace's: the sessions opened from it end.
 function closeSessions(browserId: string, workspaceId: string): void {
-  for (const entry of openSessions) {
+  for (const entry of [...heldSessions]) {
     if (entry.browserId === browserId && entry.workspaceId === workspaceId) {
-      entry.session.close('revoked');
+      entry.withdraw();
     }
   }
 }
@@ -383,11 +412,15 @@ export async function openBrowserSession(options: {
   label: string;
 }): Promise<BrowserSession> {
   const { workspaceId, browserId } = options;
-  const session = await (await reach(workspaceId, browserId)).openSession({ clientName: options.clientName, label: options.label });
-  const entry = { browserId, workspaceId, session };
+  const keep: Keep = withdraw => {
+    const entry = { browserId, workspaceId, withdraw };
 
-  openSessions.add(entry);
-  void session.ended.then(() => openSessions.delete(entry));
+    heldSessions.add(entry);
+
+    return () => heldSessions.delete(entry);
+  };
+  const session = await (await reach(workspaceId, browserId)).openSession({ clientName: options.clientName, label: options.label });
+  const relayed = await relaySession(browserId, session, keep);
 
   // Disabled while the session was opening: nobody was there to close it.
   if (!(await isBrowserEnabled(browserId, workspaceId))) {
@@ -396,17 +429,71 @@ export async function openBrowserSession(options: {
     throw new BrowserAccessError('not_enabled', 'This browser is not enabled in the workspace');
   }
 
-  return await relaySession(browserId, session);
+  return relayed;
 }
 
 // A session of the hub as a Playwright client and an agent's run use it:
-// behind a CDP endpoint on loopback.
-export async function relaySession(browserId: string, session: ExtensionSession): Promise<BrowserSession> {
+// behind a CDP endpoint on loopback. `keep` hears of the session, and of
+// what it becomes when it is parked and comes back.
+export async function relaySession(browserId: string, session: ExtensionSession, keep: Keep = () => () => {}): Promise<BrowserSession> {
+  void session.ended.then(keep(() => session.close('revoked')));
+
   const relay = await startCdpRelay(session).catch(error => {
     session.close();
 
     throw error;
   });
+
+  const park = async (): Promise<ParkedBrowserSession> => {
+    const parked: ParkedSession = await relay.park();
+    const forget = keep(() => parked.close('revoked'));
+    // How it ended when it was on its way back that it ended.
+    let fail!: (outcome: { end: SessionEnd; detail: string }) => void;
+    const ended = Promise.race([
+      parked.ended,
+      new Promise<{ end: SessionEnd; detail: string }>(resolve => {
+        fail = resolve;
+      }),
+    ]);
+
+    void ended.then(forget);
+
+    return {
+      browserId,
+      ended,
+      resume: async options => {
+        // Between the two the session is neither parked nor open: a
+        // withdrawal is remembered for the one that comes back.
+        let withdrawn = false;
+        const forgetReturning = keep(() => {
+          withdrawn = true;
+        });
+
+        forget();
+
+        try {
+          const back = await parked.resume(options);
+
+          if (withdrawn) {
+            back.close('revoked');
+            fail({ end: 'revoked', detail: 'Access to the browser was withdrawn' });
+
+            throw new BrowserAccessError('not_enabled', 'This browser is not enabled in the workspace');
+          }
+
+          return await relaySession(browserId, back, keep);
+        } catch (error) {
+          // The link has said how already, when it was the link that failed.
+          fail({ end: 'lost', detail: error instanceof Error ? error.message : String(error) });
+
+          throw error;
+        } finally {
+          forgetReturning();
+        }
+      },
+      close: () => parked.close(),
+    };
+  };
 
   return {
     browserId,
@@ -415,6 +502,9 @@ export async function relaySession(browserId: string, session: ExtensionSession)
     onNotice: listener => {
       session.onNotice = listener;
     },
+    tabIds: relay.tabIds,
+    canPark: session.canPark,
+    park,
     ended: session.ended,
     close: relay.close,
   };

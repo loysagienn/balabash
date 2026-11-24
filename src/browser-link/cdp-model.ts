@@ -25,6 +25,13 @@
 // when its user switches between the tabs of the session — is answered
 // without being carried out: it would pull the tab, and the user with it,
 // to the front of the user's window.
+//
+// The order of the tabs is kept. The client numbers its tabs in the order
+// they were attached, and an agent names a tab by that number — so the tabs
+// known when the client connects are attached one after another, in the
+// order the extension announced them, and `tabIds` tells that order: a
+// session that is parked and comes back gets its tabs under the numbers
+// they had.
 
 export type CdpMessage = {
   id?: number;
@@ -52,6 +59,8 @@ export type CdpModel = {
   handleCommand(method: string, params: Record<string, unknown> | undefined, sessionId: string | undefined): Promise<unknown>;
   // Where the model's own CDP events go; null while no client is attached.
   setClient(send: ((message: CdpMessage) => void) | null): void;
+  // The tabs the client is attached to, in the order it met them.
+  tabIds(): number[];
 };
 
 export function createCdpModel(sendToExtension: (method: string, params: unknown[]) => Promise<unknown>): CdpModel {
@@ -149,6 +158,8 @@ export function createCdpModel(sendToExtension: (method: string, params: unknown
       sendToClient = send;
     },
 
+    tabIds: () => [...tabSessions.keys()],
+
     handleExtensionEvent(method, params) {
       switch (method) {
         case 'chrome.tabs.onCreated': {
@@ -228,7 +239,11 @@ export function createCdpModel(sendToExtension: (method: string, params: unknown
           }
 
           autoAttach = true;
-          await Promise.all([...knownTabs].map(attachQuietly));
+
+          // One after another: the order is the client's numbering (see the header).
+          for (const tabId of [...knownTabs]) {
+            await attachQuietly(tabId);
+          }
 
           return {};
         }

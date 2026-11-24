@@ -20,7 +20,8 @@ confidential from them.
   different backends (the manager) or with different browsers (the browser
   operator); `agents/kit/` — pieces shared by agent modules (the
   Playwright MCP of the agents that carry a browser, the user's own browser
-  of a run — which linked browser it takes, its session, its own tools —
+  of a run — which linked browser it takes, its session and the parking
+  of it while the agent is idle, its own tools —
   and the loopback static server an agent renders its workbench files from).
 - `src/` — the app. `core/` (event log, envelopes, threads), `capabilities/`
   (the agent runtime and session runner,
@@ -43,7 +44,8 @@ confidential from them.
   `browser-link/` (the link to users' own browsers: the wire between the
   extension and the server and the messages a console page sends to the
   extension, the hub that accepts the WebSockets the extensions open — the
-  upgrade requests of the web server — and opens sessions in the browsers,
+  upgrade requests of the web server — opens sessions in the browsers and
+  parks the ones whose agent is idle,
   the CDP endpoint of a session a Playwright client connects to (`relay.ts`
   over `cdp-model.ts`, which plays the browser Playwright expects), the
   rule of the sites a user blocks for the agent (`sites.ts`), the
@@ -53,8 +55,9 @@ confidential from them.
   `browser-extension/` (the Chrome extension that dials that
   link from the user's browser: a browser sub-project with its own tsconfig,
   built for one installation — the console domain is a constant of its
-  bundle; the worker with the link, the user's boundaries — blocked sites,
-  consent for a tab, what the debugger may not do — and two pages: the
+  bundle; the worker with the link and its sessions — the open ones and
+  the parked ones, which hold no debugger — the user's boundaries — blocked
+  sites, consent for a tab, what the debugger may not do — and two pages: the
   popup of the toolbar button, with the settings in it, and the consent
   window;
   `playwright/` holds modules of the Playwright extension under

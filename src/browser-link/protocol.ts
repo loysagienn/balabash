@@ -8,16 +8,26 @@
 // - the control link — one per browser, kept open: the extension names
 //   itself (`hello`, with the secret of its pairing or with a pairing code),
 //   the server answers `welcome` or closes; then the extension answers the
-//   server's requests (the list of tabs, opening a session, handing a tab
-//   of the user to a session), pings, tells what it did to a session by the
-//   user's rules (`session.notice`) and reports what went wrong inside it
-//   (`report`, text only);
+//   server's requests (the list of tabs, opening a session, parking it,
+//   handing a tab of the user to a session), pings, tells what it did to a
+//   session by the user's rules (`session.notice`) and reports what went
+//   wrong inside it (`report`, text only);
 // - a session link — one per agent run, opened by the extension on the
 //   server's request with the one-time ticket the request carried. It speaks
 //   the protocol of the Playwright extension unchanged (commands
 //   `chrome.debugger.*` / `chrome.tabs.*`, events `chrome.*` and
 //   `extension.initialized`), so the server side stays the model Playwright
 //   itself connects to.
+//
+// A session whose agent is idle is parked: the server asks for it
+// (`session.park`) and closes the session link, the extension takes the
+// debugger off the session's tabs — Chrome's debugging bar goes with the
+// last debugger — and keeps the session with its group of tabs. The session
+// comes back by a `session.open` that names it (`resume`): a new session
+// link, the tabs of its group its own again. A parked session lives inside
+// its control link like any other: it ends when the link does, when the
+// user stops it (`session.notice`), or when the server drops it
+// (`session.drop`).
 //
 // Every frame is one JSON object. A request carries `id`, its answer the
 // same `id` with `result` or with `error` (a text) and `code` (the machine
@@ -66,6 +76,14 @@ export const CLOSE_UNSUPPORTED_PROTOCOL = 4426;
 export const CLOSE_SESSION_STOPPED = 4000;
 export const CLOSE_SESSION_REVOKED = 4001;
 
+// The first version of the extension that parks a session. An older one
+// keeps its session open, debugger and bar, for as long as the run lives.
+export const PARKING_SINCE_VERSION = '0.5.0';
+
+// The `code` of the refusal to bring back a parked session the extension
+// holds no more: on a link that lives, the user has stopped it.
+export const SESSION_OVER = 'session_over';
+
 export type BrowserTab = {
   id: number;
   windowId: number;
@@ -92,16 +110,28 @@ export type ControlRequests = {
   // The extension opens a session link with the ticket, gives the session a
   // blank tab of its own and answers once the link is initialized. `label`
   // is what the user reads about the session (the workspace and the title of
-  // the agent's thread).
-  'session.open': { params: { ticket: string; clientName: string; label: string }; result: { sessionId: number } };
+  // the agent's thread). With `resume` it is a parked session that comes
+  // back, under the id it had: instead of a blank tab it gets the tabs that
+  // are in its group now — the ones of `tabIds` first, in that order (the
+  // order the client knew its tabs in), then the ones the user added — and
+  // a blank tab only when the group is empty or gone.
+  'session.open': {
+    params: { ticket: string; clientName: string; label: string; resume?: { sessionId: number; tabIds: number[] } };
+    result: { sessionId: number };
+  };
+  // The session is parked: the debugger leaves its tabs, the group of tabs
+  // stays the session's. The server closes the session link on the answer.
+  'session.park': { params: { sessionId: number }; result: Record<string, never> };
   // The session asks for a tab of the user. The extension asks the user in
   // a window of its own and answers once they agreed — up to a minute.
   'session.claim': { params: { sessionId: number; tabId: number }; result: Record<string, never> };
 };
 
 // What the extension did to a session by the user's rules: a tab of the
-// session went to a blocked site and was taken from it.
-export type SessionNotice = { sessionId: number; kind: 'tab_blocked'; tabId: number };
+// session went to a blocked site and was taken from it; the user stopped
+// the session while it was parked (one that holds a link says so by the
+// close code of the link).
+export type SessionNotice = { sessionId: number; kind: 'tab_blocked'; tabId: number } | { sessionId: number; kind: 'stopped' };
 
 export type ControlMethod = keyof ControlRequests;
 
@@ -110,6 +140,8 @@ export type ControlEvents = {
   pong: undefined;
   // The user renamed the browser in the console.
   'browser.updated': { name: string };
+  // The server is done with a parked session: its group is nobody's.
+  'session.drop': { sessionId: number };
 };
 
 export type Frame = {

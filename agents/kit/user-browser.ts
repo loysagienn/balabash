@@ -19,6 +19,19 @@
 // the agent calls `user_browser_connect`. The reason is words the operator
 // can act on.
 //
+// A session nobody has used for a while is parked (src/browser-link/hub.ts):
+// the debugger leaves its tabs, and Chrome's debugging bar leaves the user's
+// windows with it; the tabs stay in their group. The next browser call
+// brings the session back. The kit's own state does not survive that — its
+// Playwright client is a new one — so what the agent could notice is put
+// back here: the tabs come back in the order the kit numbered them, and the
+// tab the kit worked in is made its current tab again (the kit's own
+// browser_tabs tells which one that is, and selects it). What cannot be put
+// back is said to the agent with the result of that call: the tabs the user
+// closed or took out of the group meanwhile. A parked session can end like
+// an open one — the user stops it, the owner withdraws the browser, the
+// link is lost — and the next browser call then answers with the reason.
+//
 // The user's boundaries live in the extension, and what it refuses comes
 // here as a code this module turns into words: a tab the user did not hand
 // over, a site of the user's blocked list, the list of tabs switched off.
@@ -29,9 +42,20 @@ import { chromium } from 'playwright';
 import type { BrowserContext } from 'playwright';
 import type { JsonObject, SessionEnvironmentTool } from '../../src/core/contract.ts';
 import { BrowserAccessError, BrowserRequestError, openBrowserSession, workspaceBrowserTabs, workspaceBrowsers } from '../../src/browser-link/index.ts';
-import type { BrowserSession, BrowserTab, ControlRefusal, SessionEnd, WorkspaceBrowser } from '../../src/browser-link/index.ts';
+import type {
+  BrowserSession,
+  BrowserTab,
+  ControlRefusal,
+  ParkedBrowserSession,
+  SessionEnd,
+  WorkspaceBrowser,
+} from '../../src/browser-link/index.ts';
 
 const CONNECT_TIMEOUT_MS = 30_000;
+// How long a session stands unused before it is parked. Longer than an
+// agent thinks between two calls: every parking and return shows in the
+// user's windows as the debugging bar going and coming.
+const IDLE_PARK_MS = 60_000;
 // How long a failed browser call waits to learn that the session is over:
 // the call fails first, the end of the link is heard a moment later.
 const END_SETTLE_MS = 300;
@@ -60,6 +84,10 @@ export type UserBrowser = {
 
 // The session a run holds: where, and its Playwright client.
 type Held = { browser: WorkspaceBrowser; session: BrowserSession; context: BrowserContext; detach(): Promise<void> };
+
+// The session a run parked: the tabs it had, in the kit's numbering, and
+// the one the kit worked in (null — not known).
+type Resting = { browser: WorkspaceBrowser; parked: ParkedBrowserSession; order: number[]; front: number | null };
 
 const same = (left: string, right: string) => left.trim().toLowerCase() === right.trim().toLowerCase();
 
@@ -165,6 +193,29 @@ export const TAB_TAKEN_TEXT =
   'browser, but you cannot work in it or read it. Do not try to reach that site another way; tell the operator. The session goes on in its other ' +
   'tabs — browser_tabs lists them.';
 
+// What the agent hears with the first result after a parked session came
+// back without some of its tabs.
+export function tabsGoneText(gone: number, frontGone: boolean): string {
+  return (
+    `While your session was parked, ${gone === 1 ? 'one of its tabs was' : `${gone} of its tabs were`} closed or taken out of its group by the user` +
+    `${frontGone ? ' — the tab you were working in among them' : ''}. The session goes on in the tabs it has now: browser_tabs lists them.`
+  );
+}
+
+// The number of the kit's current tab in the listing its browser_tabs
+// prints ("- 1: (current) [title](url)"), and how many tabs the listing has.
+export function currentTabOf(listing: string): { index: number; count: number } | null {
+  // The answer of a kit tool is sections under `### ` headings; the listing is the result.
+  const from = listing.indexOf('### Result\n');
+  const body = from === -1 ? listing : listing.slice(from + '### Result\n'.length);
+  const until = body.indexOf('\n### ');
+  const result = until === -1 ? body : body.slice(0, until);
+  const lines = result.split('\n').filter(line => /^- \d+:/.test(line));
+  const index = lines.findIndex(line => /^- \d+: \(current\) /.test(line));
+
+  return index === -1 ? null : { index, count: lines.length };
+}
+
 function accessRefusal(error: unknown, browser: WorkspaceBrowser): Error {
   if (error instanceof BrowserRequestError && error.code && error.code in REFUSALS) {
     return new Error(REFUSALS[error.code as ControlRefusal]);
@@ -224,16 +275,33 @@ export function createUserBrowser(options: {
   // What the user reads about the session in their browser.
   label(): Promise<string>;
   link?: UserBrowserLink;
+  // How long a session stands unused before it is parked.
+  idleParkMs?: number;
 }): UserBrowser {
   const link = options.link ?? liveLink(options.workspaceId, options);
+  const idleParkMs = options.idleParkMs ?? IDLE_PARK_MS;
   // The browser the agent named: the next session opens there.
   let chosen: WorkspaceBrowser | null = null;
   let current: Held | null = null;
   let opening: Promise<Held> | null = null;
+  // The session is parked, on its way there, or on its way back.
+  let resting: Resting | null = null;
+  let parking: Promise<void> | null = null;
+  let waking: Promise<Held> | null = null;
   // Why the last session ended, when it was not this run that ended it.
   let ended: string | null = null;
   // The extension took a tab from the session, and the agent has not heard yet.
   let tabTaken = false;
+  // The browser calls in flight, and the clock of the session's idleness.
+  let inUse = 0;
+  let idleTimer: NodeJS.Timeout | undefined;
+  let disposed = false;
+  // The kit's own tool of tabs: tells and sets the tab the kit works in.
+  let tabsTool: SessionEnvironmentTool | null = null;
+  // After a session came back: the number of the tab to make current again,
+  // and what the agent has to hear.
+  let reselect: number | null = null;
+  let note: string | null = null;
 
   const pick = async (wanted: Wanted | null): Promise<WorkspaceBrowser> => {
     const candidates = await link.browsers();
@@ -248,39 +316,45 @@ export function createUserBrowser(options: {
     return choice.browser;
   };
 
+  // The Playwright client of a session that has just been opened or has
+  // come back; from here on the session is the one the run holds.
+  const hold = async (browser: WorkspaceBrowser, session: BrowserSession): Promise<Held> => {
+    try {
+      const attached = await link.attach(session.endpoint);
+      const held: Held = { browser, session, ...attached };
+
+      current = held;
+      ended = null;
+      tabTaken = false;
+      session.onNotice(() => {
+        if (current === held) {
+          tabTaken = true;
+        }
+      });
+      void session.ended.then(({ end }) => {
+        if (current === held) {
+          current = null;
+          ended = end === 'closed' ? null : sessionEndText(end, browser);
+        }
+
+        void held.detach().catch(() => {});
+      });
+
+      return held;
+    } catch (error) {
+      await session.close().catch(() => {});
+
+      throw accessRefusal(error, browser);
+    }
+  };
+
   const open = (browser: WorkspaceBrowser): Promise<Held> => {
     opening ??= (async (): Promise<Held> => {
       const session = await link.open(browser.id).catch(error => {
         throw accessRefusal(error, browser);
       });
 
-      try {
-        const attached = await link.attach(session.endpoint);
-        const held: Held = { browser, session, ...attached };
-
-        current = held;
-        ended = null;
-        tabTaken = false;
-        session.onNotice(() => {
-          if (current === held) {
-            tabTaken = true;
-          }
-        });
-        void session.ended.then(({ end }) => {
-          if (current === held) {
-            current = null;
-            ended = end === 'closed' ? null : sessionEndText(end, browser);
-          }
-
-          void held.detach().catch(() => {});
-        });
-
-        return held;
-      } catch (error) {
-        await session.close().catch(() => {});
-
-        throw accessRefusal(error, browser);
-      }
+      return hold(browser, session);
     })().finally(() => {
       opening = null;
     });
@@ -288,8 +362,164 @@ export function createUserBrowser(options: {
     return opening;
   };
 
+  // The tab the kit works in, among the tabs of the session in the kit's
+  // numbering; null when the kit does not tell.
+  const frontTab = async (order: number[]): Promise<number | null> => {
+    if (order.length < 2 || !tabsTool) {
+      return order.length === 1 ? order[0] : null;
+    }
+
+    const listed = currentTabOf(String(await tabsTool.handler({ action: 'list' }).catch(() => '')));
+
+    return listed && listed.count === order.length ? order[listed.index] : null;
+  };
+
+  const park = async (held: Held): Promise<void> => {
+    const order = held.session.tabIds();
+    const front = await frontTab(order);
+
+    if (current !== held) {
+      return;
+    }
+
+    let parked: ParkedBrowserSession;
+
+    try {
+      parked = await held.session.park();
+    } catch (error) {
+      // The refusal ended the session as lost, and the run has heard so.
+      console.warn(`[user-browser] the session in the browser ${describe(held.browser)} was not parked:`, error);
+
+      return;
+    }
+
+    if (current === held) {
+      current = null;
+    }
+
+    resting = { browser: held.browser, parked, order, front };
+    void held.detach().catch(() => {});
+    void parked.ended.then(({ end }) => {
+      if (resting?.parked === parked) {
+        resting = null;
+        ended = end === 'closed' ? null : sessionEndText(end, held.browser);
+      }
+    });
+  };
+
+  const wake = (): Promise<Held> => {
+    waking ??= (async (): Promise<Held> => {
+      const { browser, parked, order, front } = resting!;
+      let session: BrowserSession;
+
+      try {
+        session = await parked.resume({ clientName: options.clientName, label: await options.label(), tabIds: order });
+      } catch (error) {
+        // A session that did not come back is over, and the link says how.
+        const { end } = await parked.ended;
+
+        if (resting?.parked === parked) {
+          resting = null;
+          ended = sessionEndText(end === 'closed' ? 'lost' : end, browser);
+        }
+
+        throw new Error(ended ?? sessionEndText('lost', browser));
+      }
+
+      resting = null;
+
+      const held = await hold(browser, session).catch(error => {
+        ended = sessionEndText('lost', browser);
+
+        throw error;
+      });
+      const now = session.tabIds();
+      const gone = order.filter(tabId => !now.includes(tabId));
+      const frontNow = front === null ? -1 : now.indexOf(front);
+
+      // The kit starts on the first of the tabs.
+      reselect = frontNow > 0 ? frontNow : null;
+      note = gone.length ? tabsGoneText(gone.length, front !== null && frontNow === -1) : null;
+
+      return held;
+    })().finally(() => {
+      waking = null;
+    });
+
+    return waking;
+  };
+
+  const startIdleClock = () => {
+    clearTimeout(idleTimer);
+
+    if (disposed || !current?.session.canPark) {
+      return;
+    }
+
+    idleTimer = setTimeout(() => {
+      const held = current;
+
+      if (held && inUse === 0 && !parking) {
+        parking = park(held).finally(() => {
+          parking = null;
+        });
+      }
+    }, idleParkMs);
+    idleTimer.unref();
+  };
+
+  // A call that works in the session: the session is not parked under it,
+  // and a parking under way is over before it starts.
+  const using = async <T>(work: () => Promise<T>): Promise<T> => {
+    inUse += 1;
+    clearTimeout(idleTimer);
+
+    try {
+      await parking;
+
+      return await work();
+    } finally {
+      inUse -= 1;
+
+      if (inUse === 0) {
+        startIdleClock();
+      }
+    }
+  };
+
+  // The session the call works in: the open one, the parked one brought
+  // back, or a new one.
+  const session = async (): Promise<Held> => {
+    if (current) {
+      return current;
+    }
+
+    if (resting || waking) {
+      return wake();
+    }
+
+    if (ended) {
+      throw new Error(ended);
+    }
+
+    return opening ?? open(await pick(null));
+  };
+
   const close = async () => {
-    const held = current ?? (await opening?.catch(() => null));
+    clearTimeout(idleTimer);
+    await parking?.catch(() => {});
+
+    if (resting && !waking) {
+      const { parked } = resting;
+
+      // Ended by this run: no reason to keep.
+      resting = null;
+      parked.close();
+
+      return;
+    }
+
+    const held = current ?? (await (waking ?? opening)?.catch(() => null));
 
     if (!held) {
       return;
@@ -309,7 +539,9 @@ export function createUserBrowser(options: {
 
     chosen = browser;
 
-    if (current?.browser.id === browser.id) {
+    if ((current ?? resting)?.browser.id === browser.id) {
+      await session();
+
       return `The session is already open in the browser ${describe(browser)}.`;
     }
 
@@ -323,18 +555,22 @@ export function createUserBrowser(options: {
     );
   };
 
+  // What the agent has to hear after a session came back, with the result
+  // or the failure of the call that brought it back.
+  const told = (text: string): string => {
+    if (!note) {
+      return text;
+    }
+
+    const said = note;
+
+    note = null;
+
+    return `${said}\n\n${text}`;
+  };
+
   return {
-    async context() {
-      if (current) {
-        return current.context;
-      }
-
-      if (ended) {
-        throw new Error(ended);
-      }
-
-      return (await (opening ?? open(await pick(null)))).context;
-    },
+    context: async () => (await session()).context,
 
     tools: () => [
       {
@@ -350,7 +586,7 @@ export function createUserBrowser(options: {
             name: browser.name,
             connected: browser.connected,
             lastSeenAt: browser.lastSeenAt?.toISOString() ?? null,
-            session: current?.browser.id === browser.id,
+            session: (current ?? resting)?.browser.id === browser.id,
           })),
         }),
       },
@@ -361,7 +597,7 @@ export function createUserBrowser(options: {
           'Name the browser by `browser`, by `owner`, or by both; without arguments — the browser named before, or the only one connected now. ' +
           'A session open in another browser is closed first. This is also the only way to a new session after one has ended.',
         inputSchema: { type: 'object', properties: WANTED_SCHEMA },
-        handler: async args => connect(wantedOf(args)),
+        handler: async args => using(() => connect(wantedOf(args))),
       },
       {
         name: 'user_browser_tabs',
@@ -372,7 +608,7 @@ export function createUserBrowser(options: {
           'user_browser_connect or the only one connected. browser_tabs, by contrast, lists the tabs of your own session.',
         inputSchema: { type: 'object', properties: {} },
         handler: async () => {
-          const browser = current?.browser ?? (await pick(null));
+          const browser = (current ?? resting)?.browser ?? (await pick(null));
           const tabs = await link.tabs(browser.id).catch(error => {
             throw accessRefusal(error, browser);
           });
@@ -408,58 +644,86 @@ export function createUserBrowser(options: {
             throw new Error('user_browser_take_tab needs the numeric `tabId` of a tab from user_browser_tabs');
           }
 
-          if (!current && ended) {
-            throw new Error(ended);
-          }
+          const tabId = args.tabId;
 
-          const held = current ?? (await (opening ?? open(await pick(null))));
+          return using(async () => {
+            const held = await session();
 
-          await held.session.claimTab(args.tabId).catch(error => {
-            throw accessRefusal(error, held.browser);
+            await held.session.claimTab(tabId).catch(error => {
+              throw accessRefusal(error, held.browser);
+            });
+
+            return 'The user handed the tab over: it is in your session now, and browser_tabs lists it.';
           });
-
-          return 'The user handed the tab over: it is in your session now, and browser_tabs lists it.';
         },
       },
     ],
 
-    guard: tool => ({
-      ...tool,
-      handler: async args => {
-        if (!current && ended) {
-          throw new Error(ended);
-        }
+    guard: tool => {
+      if (tool.name === 'browser_tabs') {
+        tabsTool = tool;
+      }
 
-        // Told once, before the agent goes on as if the tab were there.
-        if (current && tabTaken) {
-          tabTaken = false;
+      return {
+        ...tool,
+        handler: args =>
+          using(async () => {
+            if (!current && !resting && ended) {
+              throw new Error(ended);
+            }
 
-          throw new Error(TAB_TAKEN_TEXT);
-        }
+            // Before the kit asks for its context: what the return changes is set right first.
+            if (resting || waking) {
+              await wake();
+            }
 
-        try {
-          return await tool.handler(args);
-        } catch (error) {
-          if (current) {
-            // The end of the link, or of a tab, is heard a moment after the call it broke.
-            await new Promise(resolve => setTimeout(resolve, END_SETTLE_MS));
-          }
+            // Told once, before the agent goes on as if the tab were there.
+            if (current && tabTaken) {
+              tabTaken = false;
 
-          if (!current && ended) {
-            throw new Error(ended);
-          }
+              throw new Error(TAB_TAKEN_TEXT);
+            }
 
-          if (current && tabTaken) {
-            tabTaken = false;
+            if (reselect !== null && tabsTool) {
+              const index = reselect;
 
-            throw new Error(TAB_TAKEN_TEXT);
-          }
+              reselect = null;
+              // The kit learns the tabs of its new client when it is asked for them.
+              await tabsTool
+                .handler({ action: 'list' })
+                .then(() => tabsTool!.handler({ action: 'select', index }))
+                .catch(error => console.warn('[user-browser] the tab the agent worked in was not made current again:', error));
+            }
 
-          throw error;
-        }
-      },
-    }),
+            try {
+              const result = await tool.handler(args);
 
-    dispose: close,
+              return typeof result === 'string' ? told(result) : result;
+            } catch (error) {
+              if (current) {
+                // The end of the link, or of a tab, is heard a moment after the call it broke.
+                await new Promise(resolve => setTimeout(resolve, END_SETTLE_MS));
+              }
+
+              if (!current && ended) {
+                throw new Error(ended);
+              }
+
+              if (current && tabTaken) {
+                tabTaken = false;
+
+                throw new Error(TAB_TAKEN_TEXT);
+              }
+
+              throw note ? new Error(told(error instanceof Error ? error.message : String(error))) : error;
+            }
+          }),
+      };
+    },
+
+    dispose: async () => {
+      disposed = true;
+      await close();
+    },
   };
 }

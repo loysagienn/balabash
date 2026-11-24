@@ -18,7 +18,9 @@
 // instead of passing in silence; a new group is made in the window of its tab (ClientTabGroup.add), not in the
 // current window, which can be one without tab groups — a site installed as an app; a tab that is born in the
 // group of a session — Chrome puts a tab a grouped page opens into the group of that page — is the session's
-// from its birth (the constructor), the same as one the user dragged in.
+// from its birth (the constructor), the same as one the user dragged in; the group of a session that is parked
+// — no client for a while, the same session expected back — is kept apart from the sessions with the look it had
+// (park, resume, release and the two that read and fill a parked group), instead of being greyed as left.
 
 
 import { report } from '../diagnostics';
@@ -32,6 +34,8 @@ import type { GroupColor } from './types';
 const CLIENT_COLORS: GroupColor[] = ['green', 'blue', 'purple', 'orange', 'pink', 'cyan', 'yellow', 'red'];
 const ORPHAN_COLOR: GroupColor = 'grey';
 const STORAGE_KEY = 'clientGroupIds';
+
+export type { ClientTabGroup as ParkedTabGroup };
 
 class ClientTabGroup {
   readonly color: GroupColor;
@@ -70,6 +74,7 @@ export class TabGroupManager {
   readonly ready: Promise<void>;
   private _registry: TabRegistry;
   private _groups = new Map<ClientSession, ClientTabGroup>();
+  private _parked = new Set<ClientTabGroup>();
 
   constructor(registry: TabRegistry, listeners: ChromeListeners) {
     this._registry = registry;
@@ -86,11 +91,57 @@ export class TabGroupManager {
     });
     listeners.add(chrome.tabGroups.onRemoved, removed => {
       const session = this._sessionOfGroup(removed.id);
-      if (!session)
+      const group = session ? this._groups.get(session) : [...this._parked].find(parked => parked.groupId === removed.id);
+      if (!group)
         return;
-      this._groups.get(session)!.groupId = undefined;
+      group.groupId = undefined;
       void this._recordClientGroups();
     });
+  }
+
+  // The session leaves and is expected back: its group stays as it looks, and belongs to no session meanwhile.
+  park(session: ClientSession): ClientTabGroup | undefined {
+    const group = this._groups.get(session);
+    if (!group)
+      return undefined;
+    this._groups.delete(session);
+    this._parked.add(group);
+    return group;
+  }
+
+  // The session that came back takes the parked group.
+  async resume(group: ClientTabGroup, session: ClientSession): Promise<void> {
+    await this._forgetIfRemoved(group);
+    this._parked.delete(group);
+    this._groups.set(session, group);
+  }
+
+  // Nobody comes back for the parked group.
+  async release(group: ClientTabGroup): Promise<void> {
+    if (!this._parked.delete(group))
+      return;
+    if (group.groupId !== undefined)
+      await markOrphan(group.groupId);
+    await this._recordClientGroups();
+  }
+
+  async tabsOfParked(group: ClientTabGroup): Promise<chrome.tabs.Tab[]> {
+    if (group.groupId === undefined)
+      return [];
+    return await chrome.tabs.query({ groupId: group.groupId }).catch(() => []);
+  }
+
+  // The user hands a tab to a parked session: it waits in the group for the session to come back.
+  async addToParked(group: ClientTabGroup, tab: chrome.tabs.Tab): Promise<void> {
+    await this._forgetIfRemoved(group);
+    await group.add(tab.id!, tab.windowId);
+    await this._recordClientGroups();
+  }
+
+  // The listeners are off while no session holds a link: a group the user removed meanwhile went unnoticed.
+  private async _forgetIfRemoved(group: ClientTabGroup): Promise<void> {
+    if (group.groupId !== undefined && !(await chrome.tabGroups.get(group.groupId).catch(() => undefined)))
+      group.groupId = undefined;
   }
 
   register(session: ClientSession): void {
@@ -171,12 +222,12 @@ export class TabGroupManager {
   }
 
   private _firstFreeColor(): GroupColor {
-    const used = new Set([...this._groups.values()].map(group => group.color));
+    const used = new Set([...this._groups.values(), ...this._parked].map(group => group.color));
     return CLIENT_COLORS.find(color => !used.has(color)) ?? CLIENT_COLORS[0];
   }
 
   private async _recordClientGroups(): Promise<void> {
-    const groupIds = [...this._groups.values()].map(group => group.groupId).filter(groupId => groupId !== undefined);
+    const groupIds = [...this._groups.values(), ...this._parked].map(group => group.groupId).filter(groupId => groupId !== undefined);
     await chrome.storage.session.set({ [STORAGE_KEY]: groupIds });
   }
 

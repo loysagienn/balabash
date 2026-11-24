@@ -22,4 +22,5 @@ of its link; a new tab and a CDP command pass the user's boundaries of
 new tab is not claimed for the session whose tab was active) and
 `tabGroupManager.ts` (a failed grouping is reported; a new group is made in
 the window of its tab; a tab born in the group of a session is the
-session's). The rest are unchanged.
+session's; the group of a parked session is kept, with its look, for the
+session's return). The rest are unchanged.

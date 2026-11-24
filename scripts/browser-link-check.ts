@@ -33,6 +33,13 @@
 // cookies of the profile are not read through the debugger; the list of
 // tabs can be switched off — all of it set in the popup, which also shows
 // the sessions and stops one;
+// a session nobody uses is parked — the debugger leaves its tabs, the tabs
+// stay in their group, the popup shows it idle — and the next browser call
+// brings it back with the same tabs under the same numbers and the same
+// current tab, a page the user worked in meanwhile as they left it; a tab
+// the user closed meanwhile is told to the run, a tab handed over from the
+// popup meanwhile is the session's; Stop ends a parked session too, and a
+// run that ends drops its parked session;
 // the pause drops the link and its end brings it back; a link the server
 // dropped is dialed again; a refused re-pairing leaves the browser paired;
 // a revoked browser loses its session, forgets its secret and stays away.
@@ -58,12 +65,18 @@ import type { PagePairResult, PageStatus } from '../src/browser-link/protocol.ts
 declare const chrome: {
   runtime?: { sendMessage?(extensionIdOrMessage: unknown, message?: unknown): Promise<unknown> };
   tabs: { group(options: { groupId: number; tabIds: number[] }): Promise<number>; get(tabId: number): Promise<{ groupId: number }> };
+  tabGroups: { get(groupId: number): Promise<{ color: string }> };
 };
 
 const CONSOLE_ORIGIN = 'https://console.browser-link.test';
 const OTHER_ORIGIN = 'https://elsewhere.browser-link.test';
 // A site the user of the check keeps away from the agent.
 const BLOCKED_SITE = 'blocked.browser-link.test';
+
+// How long the run of the parking steps leaves its session unused before
+// it is parked; the other runs of the check are never idle that long.
+const IDLE_PARK_MS = 1500;
+const NEVER_IDLE_MS = 24 * 3600_000;
 
 // How long a session keeps silent before it is used again.
 const SILENCE_SECONDS = Number(process.argv.find(argument => argument.startsWith('--silence='))?.split('=')[1] ?? 90);
@@ -73,6 +86,8 @@ const PAGES: Record<string, string> = {
   '/agent.html':
     '<title>Agent page</title><h1>Agent page</h1><button onclick="document.title=\'Pressed\'">Press me</button><input aria-label="Note" />',
   '/second.html': '<title>Second agent page</title><h1>Second agent page</h1>',
+  '/third.html': '<title>Third agent page</title><h1>Third agent page</h1>',
+  '/fourth.html': '<title>Fourth agent page</title><h1>Fourth agent page</h1>',
   '/upload.html':
     '<title>Upload page</title><h1>Upload page</h1><input type="file" aria-label="Attachment" ' +
     'onchange="this.files[0].text().then(text => { document.title = this.files[0].name + \': \' + text })" />',
@@ -164,7 +179,7 @@ async function main(): Promise<void> {
   // its session (agents/user_browser.ts), with the hub of this script for
   // the link.
   const runs: { close(): Promise<void> }[] = [];
-  const startRun = async (name: string) => {
+  const startRun = async (name: string, idleParkMs = NEVER_IDLE_MS) => {
     const link: UserBrowserLink = {
       browsers: async () => [{ id: BROWSER_ID, name: 'Check browser', ownerName: 'Check user', connected: Boolean(hub.browser(BROWSER_ID)), lastSeenAt: null }],
       tabs: async () => {
@@ -187,7 +202,7 @@ async function main(): Promise<void> {
       },
       attach: attachToSession,
     };
-    const userBrowser = createUserBrowser({ workspaceId: 'check', clientName: 'browser-link-check', label: async () => name, link });
+    const userBrowser = createUserBrowser({ workspaceId: 'check', clientName: 'browser-link-check', label: async () => name, link, idleParkMs });
     const cwd = path.join(workDir, name);
     const playwright = await connectPlaywrightMcp({ outputDir: path.join(cwd, 'output'), cwd, clientName: 'browser-link-check', context: userBrowser.context });
     const screenshots: Buffer[] = [];
@@ -414,7 +429,7 @@ async function main(): Promise<void> {
     // What the extension's own pages ask the worker, as the popup does.
     const askWorker = <T>(message: unknown) =>
       withTimeout(popupPage.evaluate(body => chrome.runtime!.sendMessage!(body), message), 20_000, `the answer to ${JSON.stringify(message)}`) as Promise<T>;
-    type Sessions = { sessions: { id: number; label: string; tabIds: number[] }[] };
+    type Sessions = { sessions: { id: number; label: string; tabIds: number[]; parked: boolean }[] };
     const sessionOf = async (label: string) => (await askWorker<Sessions>({ type: 'status' })).sessions.find(session => session.label === label)!;
     // The window in which the extension asks the user about a tab.
     const consentWindow = async () => {
@@ -579,6 +594,103 @@ async function main(): Promise<void> {
     await popupPage.locator('#save').click();
     await until('the list is back', async () => /Stand page/.test(await first.call('user_browser_tabs').catch(() => '')));
     step('the list of tabs is switched off in the popup and on again; the session works meanwhile');
+
+    // --- A session nobody uses.
+
+    const resting = await startRun('resting', IDLE_PARK_MS);
+    // The tabs of the kit, as it numbers them: the address of each, and the number of the current one.
+    const kitTabs = async () => {
+      const listing = await resting.call('browser_tabs', { action: 'list' });
+      const lines = (listing.split('### Result\n')[1] ?? listing).split('\n### ')[0].split('\n').filter(line => /^- \d+:/.test(line));
+
+      return { urls: lines.map(line => /\]\((.*)\)/.exec(line)?.[1] ?? ''), current: lines.findIndex(line => line.includes('(current)')) };
+    };
+    // What a tool answered, without the sections that describe the tabs around it.
+    const resultOf = (answer: string) => (answer.split('### Result\n')[1] ?? answer).split('\n### ')[0];
+    const parked = async (state: boolean) => until(`the session is ${state ? 'parked' : 'back'}`, async () => (await sessionOf('resting'))?.parked === state);
+
+    await resting.call('browser_navigate', { url: `${standOrigin}/agent.html` });
+    await resting.call('browser_tabs', { action: 'new', url: `${standOrigin}/third.html` });
+    await resting.call('browser_tabs', { action: 'new', url: `${standOrigin}/fourth.html` });
+    await resting.call('browser_tabs', { action: 'select', index: 1 });
+
+    const kitBefore = await kitTabs();
+    const restingTabs = (await sessionOf('resting')).tabIds;
+    const restingGroup = (await tabsNow()).find(tab => tab.id === restingTabs[0])!.groupId;
+    const groupColor = async () => (await worker.evaluate(groupId => chrome.tabGroups.get(groupId), restingGroup)).color;
+    const colorBefore = await groupColor();
+
+    assert.deepEqual([kitBefore.urls.length, kitBefore.current, restingTabs.length], [3, 1, 3], JSON.stringify(kitBefore));
+    assert.notEqual(colorBefore, 'grey');
+    await parked(true);
+
+    const whileParked = (await tabsNow()).filter(tab => restingTabs.includes(tab.id));
+
+    assert.deepEqual(whileParked.map(tab => [tab.owned, tab.groupId]), restingTabs.map(() => [false, restingGroup]), JSON.stringify(whileParked));
+    assert.equal(await groupColor(), colorBefore, 'the group of a parked session keeps its look');
+    assert.deepEqual((await sessionOf('resting')).tabIds.toSorted(), restingTabs.toSorted(), 'the popup still counts the tabs of the group');
+    await popupPage.locator('.session[data-parked="true"]', { hasText: 'resting' }).waitFor({ timeout: 10_000 });
+    assert.match(await resting.call('user_browsers_list'), /"session":true/);
+    step('a session nobody used is parked: the debugger left its tabs, the tabs stay in their group, the popup shows it idle');
+
+    // The user works in a tab of the parked session, as in a manual step.
+    const thirdPage = userBrowser.pages().find(candidate => candidate.url() === `${standOrigin}/third.html` && !candidate.isClosed());
+
+    assert.ok(thirdPage, 'the tab of the parked session is a tab of the user’s browser');
+    await thirdPage.evaluate("document.title = document.title + ' — left by the user'");
+    assert.match(resultOf(await resting.call('browser_evaluate', { function: '() => document.title' })), /Third agent page — left by the user/);
+    await parked(false);
+    assert.deepEqual(await kitTabs(), kitBefore, 'the same tabs under the same numbers, the same current tab');
+    assert.deepEqual((await sessionOf('resting')).tabIds.toSorted(), restingTabs.toSorted());
+    assert.equal((await tabsNow()).filter(tab => restingTabs.includes(tab.id)).every(tab => tab.owned), true);
+    assert.match(await resting.call('browser_snapshot'), /heading "Third agent page"/);
+    step('the next browser call brought the session back: the same tabs under the same numbers, the same current tab, the page as the user left it');
+
+    // Parked again: the user closes one of its tabs and hands it another.
+    await parked(true);
+
+    const handedPage = await userBrowser.newPage();
+
+    await handedPage.goto(`${OTHER_ORIGIN}/fourth`);
+
+    const handedTab = (await tabsNow()).find(tab => tab.url === `${OTHER_ORIGIN}/fourth`)!;
+    const closing = userBrowser.pages().find(candidate => candidate.url() === `${standOrigin}/fourth.html` && !candidate.isClosed());
+
+    assert.ok(closing, 'the third tab of the session is there to close');
+    await closing.close();
+    assert.deepEqual(await askWorker({ type: 'handTab', sessionId: (await sessionOf('resting')).id, tabId: handedTab.id }), { ok: true });
+    await until('the handed tab waits in the group', async () => (await tabsNow()).find(tab => tab.id === handedTab.id)?.groupId === restingGroup);
+
+    const saidBack = await resting.call('browser_snapshot');
+
+    assert.match(saidBack, /^While your session was parked, one of its tabs was closed or taken out of its group by the user\. /);
+    assert.match(saidBack, /heading "Third agent page"/, 'the current tab is the one it was');
+
+    const kitAfter = await kitTabs();
+
+    assert.deepEqual([kitAfter.urls, kitAfter.current], [[kitBefore.urls[0], kitBefore.urls[1], `${OTHER_ORIGIN}/fourth`], 1], JSON.stringify(kitAfter));
+    assert.doesNotMatch(await resting.call('browser_snapshot'), /While your session was parked/, 'told once');
+    step('a tab the user closed while the session was parked is told to the run; a tab handed over from the popup meanwhile is the session’s');
+
+    // Stop is the user's for a parked session too.
+    await parked(true);
+    await popupPage.locator('.session', { hasText: 'resting' }).getByRole('button', { name: 'Stop', exact: true }).click();
+    await until('the popup lists the parked session no more', async () => !(await popupPage.locator('.session .label').allTextContents()).includes('resting'));
+    await assert.rejects(resting.call('browser_snapshot'), /The user stopped the session in their browser "Check browser" of Check user/);
+    assert.equal(await groupColor(), 'grey', 'the group of a stopped session is left');
+    step('Stop in the popup ends a parked session: the run is told that the user stopped it');
+
+    // A run that ends while its session is parked leaves nothing behind.
+    assert.match(await resting.call('user_browser_connect'), /A session is open/);
+    await parked(true);
+
+    const lastTab = (await sessionOf('resting')).tabIds[0];
+    const lastGroup = (await tabsNow()).find(tab => tab.id === lastTab)!.groupId;
+
+    await resting.close();
+    await until('the extension holds the session no more', async () => !(await sessionOf('resting')));
+    await until('its group is left', async () => (await worker.evaluate(groupId => chrome.tabGroups.get(groupId), lastGroup)).color === 'grey');
+    step('a run that ends drops its parked session');
 
     // The sessions in the popup, and Stop for one of them.
     await until('the popup lists both sessions', async () => (await popupPage.locator('.session .label').allTextContents()).join() === 'first,second');

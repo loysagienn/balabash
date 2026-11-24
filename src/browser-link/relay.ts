@@ -5,7 +5,9 @@
 // One endpoint — one session — one client. The path is a random id and the
 // port is bound to loopback: knowing the address is the right to use it,
 // as with Playwright's own relay. The endpoint lives as long as the session
-// link: either side going away closes the other.
+// link: either side going away closes the other. Parking the session
+// (hub.ts) is the one end that is not the session's: the endpoint goes, the
+// session stays with the extension to come back behind a new endpoint.
 
 import { randomUUID } from 'node:crypto';
 import type { AddressInfo } from 'node:net';
@@ -13,11 +15,17 @@ import { WebSocketServer } from 'ws';
 import type { WebSocket } from 'ws';
 import { createCdpModel } from './cdp-model.ts';
 import type { CdpMessage } from './cdp-model.ts';
-import type { ExtensionSession } from './hub.ts';
+import type { ExtensionSession, ParkedSession } from './hub.ts';
 
 export type CdpRelay = {
   // ws://127.0.0.1:<port>/cdp/<id> — for chromium.connectOverCDP.
   endpoint: string;
+  // The tabs of the session the client is attached to, in the order it
+  // numbers them.
+  tabIds(): number[];
+  // Parks the session and closes the endpoint. The client is not told of
+  // the tabs being let go: its connection simply ends.
+  park(): Promise<ParkedSession>;
   close(): Promise<void>;
 };
 
@@ -94,5 +102,18 @@ export async function startCdpRelay(session: ExtensionSession): Promise<CdpRelay
     socket.on('error', error => console.warn('[browser-link] CDP client error:', error.message));
   });
 
-  return { endpoint: `ws://127.0.0.1:${(server.address() as AddressInfo).port}${path}`, close };
+  const park = async (): Promise<ParkedSession> => {
+    model.setClient(null);
+
+    // A refusal has ended the session, and the endpoint with it.
+    const parked = await session.park();
+
+    closed = true;
+    client?.close(1000, 'The session is parked');
+    await new Promise<void>(resolve => server.close(() => resolve()));
+
+    return parked;
+  };
+
+  return { endpoint: `ws://127.0.0.1:${(server.address() as AddressInfo).port}${path}`, tabIds: model.tabIds, park, close };
 }

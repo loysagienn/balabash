@@ -70,3 +70,30 @@ describe('a command of the client', () => {
   });
 });
 
+
+describe('the tabs known when the client connects', () => {
+  test('are attached one after another, in the order the extension announced them: that order is the client’s numbering', async () => {
+    const toClient: CdpMessage[] = [];
+    const model = createCdpModel(async (method, params) => {
+      const tabId = (params[0] as { tabId: number }).tabId;
+
+      // The first tab answers slower than the ones behind it.
+      await new Promise(resolve => setTimeout(resolve, tabId === 7 ? 30 : 1));
+
+      return method === 'chrome.debugger.sendCommand' && params[1] === 'Target.getTargetInfo' ? { targetInfo: { targetId: `T${tabId}`, type: 'page' } } : {};
+    });
+
+    model.setClient(message => toClient.push(message));
+
+    for (const id of [7, 8, 9]) {
+      model.handleExtensionEvent('chrome.tabs.onCreated', [{ id }]);
+    }
+
+    await model.handleCommand('Target.setAutoAttach', { autoAttach: true }, undefined);
+    assert.deepEqual(model.tabIds(), [7, 8, 9]);
+    assert.deepEqual(toClient.map(message => (message.params as { targetInfo: { targetId: string } }).targetInfo.targetId), ['T7', 'T8', 'T9']);
+
+    model.handleExtensionEvent('chrome.tabs.onRemoved', [8]);
+    assert.deepEqual(model.tabIds(), [7, 9]);
+  });
+});

@@ -1,6 +1,7 @@
 // The user's browser of an agent's run (user-browser.ts) over a link a test
-// plays: which browser a run takes, when a session is opened, and what the
-// browser tools say once a session ended by somebody else's hand.
+// plays: which browser a run takes, when a session is opened, what the
+// browser tools say once a session ended by somebody else's hand, and how a
+// session nobody uses is parked and comes back.
 //
 // Run: npm test  (node:test, native type stripping — no build needed).
 
@@ -8,9 +9,9 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import type { BrowserContext } from 'playwright';
 import { BrowserAccessError, BrowserRequestError } from '../../src/browser-link/index.ts';
-import type { BrowserSession, ControlRefusal, SessionEnd, WorkspaceBrowser } from '../../src/browser-link/index.ts';
+import type { BrowserSession, ControlRefusal, ParkedBrowserSession, SessionEnd, WorkspaceBrowser } from '../../src/browser-link/index.ts';
 import type { JsonObject, SessionEnvironmentTool } from '../../src/core/contract.ts';
-import { chooseBrowser, createUserBrowser } from './user-browser.ts';
+import { chooseBrowser, createUserBrowser, currentTabOf } from './user-browser.ts';
 import type { UserBrowserLink } from './user-browser.ts';
 
 const browser = (id: string, name: string, ownerName: string, connected: boolean): WorkspaceBrowser => ({
@@ -73,11 +74,92 @@ describe('the browser a run takes', () => {
   });
 });
 
-// A link whose sessions the test ends by hand.
-function fakeLink(browsers: WorkspaceBrowser[]) {
-  const opened: { browserId: string; end(how: SessionEnd): void; notice(): void; claims: number[]; closed: boolean }[] = [];
+// A session of the fake link: the test ends it by hand, and plays what
+// became of its tabs while it was parked.
+type Opened = {
+  browserId: string;
+  end(how: SessionEnd): void;
+  notice(): void;
+  claims: number[];
+  closed: boolean;
+  // The tabs of the session, in the order its client numbers them.
+  tabs: number[];
+  parked?: {
+    // Ends the parked session before it came back.
+    end(how: SessionEnd): void;
+    closed: boolean;
+    // The order the run asked its tabs back in.
+    asked?: number[];
+    // The tabs the session comes back with; the ones it had by default.
+    back?: number[];
+  };
+};
+
+// A link whose sessions the test ends by hand. `canPark` — the extension
+// behind it parks sessions.
+function fakeLink(browsers: WorkspaceBrowser[], canPark = false) {
+  const opened: Opened[] = [];
   // How the user answers a request for a tab: nothing — they agree.
   const answers: { claim: null | ControlRefusal; tabs: null | ControlRefusal } = { claim: null, tabs: null };
+  const outcome = () => {
+    let end!: (how: SessionEnd) => void;
+    const ended = new Promise<{ end: SessionEnd; detail: string }>(resolve => {
+      end = how => resolve({ end: how, detail: '' });
+    });
+
+    return { end, ended };
+  };
+  const makeSession = (browserId: string, tabs: number[]): BrowserSession => {
+    const { end, ended } = outcome();
+    let notify: () => void = () => {};
+    const entry: Opened = { browserId, end, notice: () => notify(), claims: [], closed: false, tabs };
+
+    const session: BrowserSession = {
+      browserId,
+      endpoint: `ws://test/${opened.length}`,
+      claimTab: async tabId => {
+        if (answers.claim) {
+          throw new BrowserRequestError('refused by the extension', answers.claim);
+        }
+
+        entry.claims.push(tabId);
+      },
+      onNotice: listener => {
+        notify = () => listener({ sessionId: 1, kind: 'tab_blocked', tabId: 9 });
+      },
+      tabIds: () => entry.tabs,
+      canPark,
+      park: async (): Promise<ParkedBrowserSession> => {
+        const parked = outcome();
+        const state: NonNullable<Opened['parked']> = { end: parked.end, closed: false };
+
+        entry.parked = state;
+        end('closed');
+
+        return {
+          browserId,
+          ended: parked.ended,
+          resume: async ({ tabIds }) => {
+            state.asked = tabIds;
+
+            return makeSession(browserId, state.back ?? entry.tabs);
+          },
+          close: () => {
+            state.closed = true;
+          },
+        };
+      },
+      ended,
+      close: async () => {
+        entry.closed = true;
+        end('closed');
+      },
+    };
+
+    opened.push(entry);
+
+    return session;
+  };
   const link: UserBrowserLink = {
     browsers: async () => browsers,
     tabs: async () => {
@@ -92,35 +174,7 @@ function fakeLink(browsers: WorkspaceBrowser[]) {
         throw new BrowserAccessError('offline', 'This browser is not connected now');
       }
 
-      let end!: (how: SessionEnd) => void;
-      const ended = new Promise<{ end: SessionEnd; detail: string }>(resolve => {
-        end = how => resolve({ end: how, detail: '' });
-      });
-      let notify: () => void = () => {};
-      const entry = { browserId, end, notice: () => notify(), claims: [] as number[], closed: false };
-      const session: BrowserSession = {
-        browserId,
-        endpoint: `ws://test/${opened.length}`,
-        claimTab: async tabId => {
-          if (answers.claim) {
-            throw new BrowserRequestError('refused by the extension', answers.claim);
-          }
-
-          entry.claims.push(tabId);
-        },
-        onNotice: listener => {
-          notify = () => listener({ sessionId: 1, kind: 'tab_blocked', tabId: 9 });
-        },
-        ended,
-        close: async () => {
-          entry.closed = true;
-          end('closed');
-        },
-      };
-
-      opened.push(entry);
-
-      return session;
+      return makeSession(browserId, [1]);
     },
     attach: async endpoint => ({ context: { endpoint } as unknown as BrowserContext, detach: async () => {} }),
   };
@@ -273,5 +327,166 @@ describe('the boundaries the user keeps in the extension', () => {
     opened[0].notice();
     await assert.rejects(snapshot(), /went to a site of the user's list of blocked sites and was taken from the session/);
     assert.equal(await snapshot(), 'ws://test/0', 'the session goes on');
+  });
+});
+
+// A run over an extension that parks sessions, with the kit's tool of tabs
+// played: `kit.current` is the number of the tab the kit works in — the
+// first one for a client that has just connected, as in Playwright MCP.
+function parkingRun() {
+  const { link, opened } = fakeLink([WORK], true);
+  const userBrowser = createUserBrowser({ workspaceId: 'w', clientName: 'test', label: async () => 'Label', link, idleParkMs: 20 });
+  const tools = new Map(userBrowser.tools().map(tool => [tool.name, tool]));
+  const kit = { current: 0, selected: [] as number[], endpoint: '' };
+  const endpoint = async () => {
+    const now = ((await userBrowser.context()) as unknown as { endpoint: string }).endpoint;
+
+    // A new client knows nothing of the tab the previous one worked in.
+    if (now !== kit.endpoint) {
+      kit.endpoint = now;
+      kit.current = 0;
+    }
+
+    return now;
+  };
+  const snapshot = userBrowser.guard({ name: 'browser_snapshot', description: '', inputSchema: {}, handler: endpoint });
+  const slow = userBrowser.guard({
+    name: 'browser_wait_for',
+    description: '',
+    inputSchema: {},
+    handler: async () => {
+      await new Promise(resolve => setTimeout(resolve, 80));
+
+      return endpoint();
+    },
+  });
+
+  userBrowser.guard({
+    name: 'browser_tabs',
+    description: '',
+    inputSchema: {},
+    handler: async args => {
+      await endpoint();
+
+      if (args.action === 'select') {
+        kit.current = Number(args.index);
+        kit.selected.push(kit.current);
+      }
+
+      const tabs = opened.at(-1)!.tabs;
+
+      return `### Result\n${tabs.map((tab, index) => `- ${index}:${index === kit.current ? ' (current)' : ''} [Tab ${tab}](https://tab.test/${tab})`).join('\n')}`;
+    },
+  });
+
+  return {
+    userBrowser,
+    opened,
+    kit,
+    snapshot: () => snapshot.handler({}),
+    slow: () => slow.handler({}),
+    call: (name: string, args: JsonObject = {}) => tools.get(name)!.handler(args),
+    idle: () => new Promise(resolve => setTimeout(resolve, 60)),
+  };
+}
+
+describe('a session nobody uses', () => {
+  test('is parked, and the next browser call brings it back with its tabs in their order and the same current tab', async () => {
+    const { opened, kit, snapshot, call, idle } = parkingRun();
+
+    assert.equal(await snapshot(), 'ws://test/0');
+    opened[0].tabs = [11, 12, 13];
+    kit.current = 2;
+    await idle();
+    assert.ok(opened[0].parked, 'the idle session is parked');
+    assert.equal(opened.length, 1);
+
+    const listed = (await call('user_browsers_list')) as { browsers: { session: boolean }[] };
+
+    assert.equal(listed.browsers[0].session, true, 'a parked session is still the session of the run');
+    assert.match(String(await call('user_browser_connect')), /already open/);
+    assert.equal(await snapshot(), 'ws://test/1', 'the session came back behind a new endpoint');
+    assert.deepEqual(opened[0].parked.asked, [11, 12, 13]);
+    assert.deepEqual(kit.selected, [2], 'the tab the kit worked in is its current tab again');
+    assert.equal(opened[0].parked.closed, false);
+  });
+
+  test('stays open while a call is in flight, and when the extension does not park', async () => {
+    const { opened, slow } = parkingRun();
+
+    assert.equal(await slow(), 'ws://test/0');
+    assert.equal(opened[0].parked, undefined, 'a call longer than the idle time is not idleness');
+
+    const old = run([WORK]);
+
+    await old.snapshot();
+    await new Promise(resolve => setTimeout(resolve, 60));
+    assert.equal(await old.snapshot(), 'ws://test/0');
+    assert.equal(old.opened.length, 1);
+  });
+
+  test('comes back for a tab the agent asks the user for', async () => {
+    const { opened, call, snapshot, idle } = parkingRun();
+
+    await snapshot();
+    await idle();
+    assert.match(String(await call('user_browser_take_tab', { tabId: 7 })), /The user handed the tab over/);
+    assert.deepEqual(opened.map(entry => entry.claims), [[], [7]]);
+  });
+
+  test('that lost tabs while it was parked says so once, with the result of the call that brought it back', async () => {
+    const { opened, kit, snapshot, idle } = parkingRun();
+
+    await snapshot();
+    opened[0].tabs = [11, 12, 13];
+    kit.current = 1;
+    await idle();
+    opened[0].parked!.back = [11, 13];
+
+    const said = String(await snapshot());
+
+    assert.match(said, /^While your session was parked, one of its tabs was closed or taken out of its group by the user — the tab you were working in among them\./);
+    assert.match(said, /ws:\/\/test\/1$/);
+    assert.deepEqual(kit.selected, [], 'there is no tab to go back to');
+    assert.equal(await snapshot(), 'ws://test/1', 'told once');
+  });
+
+  for (const [end, text] of [
+    ['stopped', /The user stopped the session in their browser "Work laptop" of Vera Sokolova/],
+    ['revoked', /Access to the browser "Work laptop" of Vera Sokolova was withdrawn/],
+    ['lost', /The link to the browser "Work laptop" of Vera Sokolova was lost/],
+  ] as const) {
+    test(`that ended as ${end} while it was parked answers with the reason and does not come back by itself`, async () => {
+      const { opened, snapshot, call, idle } = parkingRun();
+
+      await snapshot();
+      await idle();
+      opened[0].parked!.end(end);
+      await settle();
+      await assert.rejects(snapshot(), text);
+      assert.equal(opened.length, 1);
+      assert.equal(opened[0].parked!.asked, undefined);
+
+      assert.match(String(await call('user_browser_connect')), /A session is open in the browser/);
+      assert.equal(await snapshot(), 'ws://test/1');
+    });
+  }
+
+  test('is dropped with the run', async () => {
+    const { userBrowser, opened, snapshot, idle } = parkingRun();
+
+    await snapshot();
+    await idle();
+    await userBrowser.dispose();
+    assert.equal(opened[0].parked!.closed, true);
+  });
+});
+
+describe('the listing of the kit’s tabs', () => {
+  test('tells the current tab and the number of tabs; the other sections of an answer are not read', () => {
+    const listing = '### Result\n- 0: [Inbox](https://mail.test/)\n- 1: (current) [Docs (current) draft](https://docs.test/)\n### Open tabs\n- 0: (current) [x](y)';
+
+    assert.deepEqual(currentTabOf(listing), { index: 1, count: 2 });
+    assert.equal(currentTabOf('### Result\nNo open tabs. Navigate to a URL to create one.'), null);
   });
 });

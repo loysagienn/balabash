@@ -7,8 +7,11 @@
 // Nothing is opened in the user's Chrome until the agent first reaches for
 // the browser (kit/user-browser.ts): the run then holds a session of the
 // link — a tab group of its own, the debugger on its tabs, Chrome's
-// debugging bar in every window — until the thread ends. Several runs may
-// hold sessions in one browser at once. The session does not survive an app
+// debugging bar in every window. The bar is there while the agent works,
+// not while its thread lives: a session nobody used for a minute is parked
+// — the debugger leaves, the tabs stay in their group — and the next
+// browser call brings it back with the same tabs. Several runs may hold
+// sessions in one browser at once. The session does not survive an app
 // restart: the resumed run opens a new one at its next browser call.
 //
 // Which browser the run works in is said by the operator and chosen by the
@@ -51,6 +54,7 @@ const INSTRUCTIONS = browserOperatorInstructions({
       '- Which browser. user_browsers_list shows the browsers linked to this workspace, with their owners. Work in the one the instruction names; user_browser_connect chooses it. When the instruction names none and exactly one is connected, that one is taken. When it is unclear which browser is meant, reply with the list and ask — never guess.',
       "- Whose browser. Any member of the workspace can ask for work in a linked browser, but a browser is opened only with its owner's consent. The operator knows who asked; you know only the instruction. If the instruction neither says that the owner of the browser asked for the work nor names the owner's consent, do not open that browser: reply to the operator with the question.",
       '- The session. Your first browser call opens a session: a blank tab of your own in the "Balabash" tab group, in the background of the user\'s window. While the session is open, Chrome shows the user a bar saying that Balabash Agent is debugging the browser. The browser tools work in the tabs of the session — the ones you open and the ones the user hands over: at your request (user_browser_take_tab), by dragging a tab into the "Balabash" group, or from the popup of the extension.',
+      "- A parked session. A session you have not used for a minute is parked: the debugging bar leaves the user's windows, the tabs stay open in their group. Your next browser call brings the session back by itself, with the same tabs under the same numbers and the same current tab; if the user closed some of them or took them out of the group meanwhile, the result of that call says so. Element refs of the snapshots taken before the pause are not valid any more: take a new snapshot before you act on the page.",
       "- The user's other tabs. user_browser_tabs lists them (title and address) without touching them. To work in one of them, ask for it with user_browser_take_tab: the user is asked in a window of their own browser and has a minute to answer. Ask only for a tab the instruction is about, and take a refusal as final unless the operator says otherwise. When the page itself is all you need, opening its address in a tab of your own disturbs the user less.",
       "- The user's boundaries. The user keeps a list of blocked sites in the extension: such a site is not in the list of tabs, cannot be opened or taken over, and a tab of yours that ends up on one is taken from the session. The user can also switch the list of tabs off, and the cookies of the profile cannot be read through the browser tools. Never look for a way around a boundary: tell the operator what you met.",
       '- When the session ends without you. A browser tool then answers with the reason. If the user stopped the session, do not connect again: report it and wait for the operator. If the browser is not connected or the link was lost, report that too instead of retrying in a loop. A new session is opened only with user_browser_connect.',
