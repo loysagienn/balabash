@@ -11,6 +11,16 @@
 // The logic follows the relay model of Playwright's own extension mode
 // (packages/playwright-core/src/tools/mcp/browserModel.ts and cdpRelayV2.ts,
 // Apache-2.0), which is internal to its bundle and bound to a local browser.
+//
+// One thing is the model's own. A session's tabs live in the background of
+// the user's window, and Chrome hides a background page and slows it down:
+// no animation frames, timers once a second — while Playwright's actions
+// wait for a frame to see that an element stands still. So the model turns
+// on focus emulation on every tab it attaches to: the page lives as if it
+// were in front without being brought there. Playwright does this itself
+// for the browsers it launches, but not for the default context of a
+// browser it connected to with `noDefaults` — which is how a user's own
+// browser is connected, so that the rest of the page stays the user's.
 
 export type CdpMessage = {
   id?: number;
@@ -73,6 +83,11 @@ export function createCdpModel(sendToExtension: (method: string, params: unknown
       | undefined;
     const targetInfo = answer?.targetInfo;
     const tabSession: TabSession = { tabId, sessionId: `tab-${nextSessionId++}`, targetInfo, childSessions: new Set() };
+
+    // See the header: a background tab must not be a sleeping one.
+    await sendToExtension('chrome.debugger.sendCommand', [{ tabId }, 'Emulation.setFocusEmulationEnabled', { enabled: true }]).catch(error =>
+      console.warn(`[browser-link] focus emulation was not turned on for tab ${tabId}:`, error),
+    );
 
     tabSessions.set(tabId, tabSession);
     emit({
