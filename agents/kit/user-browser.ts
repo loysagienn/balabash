@@ -18,12 +18,18 @@
 // behind the agent's back: the browser tools answer with the reason until
 // the agent calls `user_browser_connect`. The reason is words the operator
 // can act on.
+//
+// The user's boundaries live in the extension, and what it refuses comes
+// here as a code this module turns into words: a tab the user did not hand
+// over, a site of the user's blocked list, the list of tabs switched off.
+// A tab the extension took from the session — it went to a blocked site —
+// is told once, by the next browser call.
 
 import { chromium } from 'playwright';
 import type { BrowserContext } from 'playwright';
 import type { JsonObject, SessionEnvironmentTool } from '../../src/core/contract.ts';
-import { BrowserAccessError, openBrowserSession, workspaceBrowserTabs, workspaceBrowsers } from '../../src/browser-link/index.ts';
-import type { BrowserSession, BrowserTab, SessionEnd, WorkspaceBrowser } from '../../src/browser-link/index.ts';
+import { BrowserAccessError, BrowserRequestError, openBrowserSession, workspaceBrowserTabs, workspaceBrowsers } from '../../src/browser-link/index.ts';
+import type { BrowserSession, BrowserTab, ControlRefusal, SessionEnd, WorkspaceBrowser } from '../../src/browser-link/index.ts';
 
 const CONNECT_TIMEOUT_MS = 30_000;
 // How long a failed browser call waits to learn that the session is over:
@@ -141,7 +147,29 @@ export function sessionEndText(end: Exclude<SessionEnd, 'closed'>, browser: Work
   }
 }
 
+// What the extension refused by the user's rules, in words for the agent.
+const REFUSALS: Record<ControlRefusal, string> = {
+  tabs_hidden:
+    "The user switched the list of their tabs off in the settings of the extension: you work in the tabs of your own session and in the ones the user hands over.",
+  declined:
+    'The user declined to hand this tab over. Do not ask for it again unless the operator says so; report this to the operator.',
+  no_answer:
+    'The user did not answer the request within a minute, so the tab was not handed over. Report this to the operator: the user may be away from the browser.',
+  blocked_site: "This tab shows a site of the user's list of blocked sites: it is closed to you. Report this to the operator.",
+  not_debuggable: 'Chrome lets nobody work in this tab: it shows a page of the browser itself.',
+  owned: 'This tab belongs to the session of another agent.',
+};
+
+export const TAB_TAKEN_TEXT =
+  "A tab of your session went to a site of the user's list of blocked sites and was taken from the session: the page stays open in the user's " +
+  'browser, but you cannot work in it or read it. Do not try to reach that site another way; tell the operator. The session goes on in its other ' +
+  'tabs — browser_tabs lists them.';
+
 function accessRefusal(error: unknown, browser: WorkspaceBrowser): Error {
+  if (error instanceof BrowserRequestError && error.code && error.code in REFUSALS) {
+    return new Error(REFUSALS[error.code as ControlRefusal]);
+  }
+
   if (error instanceof BrowserAccessError) {
     return new Error(
       error.code === 'offline'
@@ -204,6 +232,8 @@ export function createUserBrowser(options: {
   let opening: Promise<Held> | null = null;
   // Why the last session ended, when it was not this run that ended it.
   let ended: string | null = null;
+  // The extension took a tab from the session, and the agent has not heard yet.
+  let tabTaken = false;
 
   const pick = async (wanted: Wanted | null): Promise<WorkspaceBrowser> => {
     const candidates = await link.browsers();
@@ -230,6 +260,12 @@ export function createUserBrowser(options: {
 
         current = held;
         ended = null;
+        tabTaken = false;
+        session.onNotice(() => {
+          if (current === held) {
+            tabTaken = true;
+          }
+        });
         void session.ended.then(({ end }) => {
           if (current === held) {
             current = null;
@@ -355,6 +391,36 @@ export function createUserBrowser(options: {
           };
         },
       },
+      {
+        name: 'user_browser_take_tab',
+        description:
+          "Ask the user for one of their own tabs, by its `id` from user_browser_tabs. The user is asked in a window of their browser — which session " +
+          'asks and for which tab — and has a minute to answer; the call returns once they did (at once when the user chose in the extension not ' +
+          'to be asked). With their consent the tab joins your session and browser_tabs lists it; the page stays as the user left it. A refusal ' +
+          'comes back as an error that says what happened.',
+        inputSchema: {
+          type: 'object',
+          properties: { tabId: { type: 'number', description: 'The `id` of the tab in user_browser_tabs.' } },
+          required: ['tabId'],
+        },
+        handler: async args => {
+          if (typeof args.tabId !== 'number') {
+            throw new Error('user_browser_take_tab needs the numeric `tabId` of a tab from user_browser_tabs');
+          }
+
+          if (!current && ended) {
+            throw new Error(ended);
+          }
+
+          const held = current ?? (await (opening ?? open(await pick(null))));
+
+          await held.session.claimTab(args.tabId).catch(error => {
+            throw accessRefusal(error, held.browser);
+          });
+
+          return 'The user handed the tab over: it is in your session now, and browser_tabs lists it.';
+        },
+      },
     ],
 
     guard: tool => ({
@@ -364,15 +430,32 @@ export function createUserBrowser(options: {
           throw new Error(ended);
         }
 
+        // Told once, before the agent goes on as if the tab were there.
+        if (current && tabTaken) {
+          tabTaken = false;
+
+          throw new Error(TAB_TAKEN_TEXT);
+        }
+
         try {
           return await tool.handler(args);
         } catch (error) {
           if (current) {
-            // The end of the link is heard a moment after the call it broke.
+            // The end of the link, or of a tab, is heard a moment after the call it broke.
             await new Promise(resolve => setTimeout(resolve, END_SETTLE_MS));
           }
 
-          throw !current && ended ? new Error(ended) : error;
+          if (!current && ended) {
+            throw new Error(ended);
+          }
+
+          if (current && tabTaken) {
+            tabTaken = false;
+
+            throw new Error(TAB_TAKEN_TEXT);
+          }
+
+          throw error;
         }
       },
     }),

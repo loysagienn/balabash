@@ -7,8 +7,8 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import type { BrowserContext } from 'playwright';
-import { BrowserAccessError } from '../../src/browser-link/index.ts';
-import type { BrowserSession, SessionEnd, WorkspaceBrowser } from '../../src/browser-link/index.ts';
+import { BrowserAccessError, BrowserRequestError } from '../../src/browser-link/index.ts';
+import type { BrowserSession, ControlRefusal, SessionEnd, WorkspaceBrowser } from '../../src/browser-link/index.ts';
 import type { JsonObject, SessionEnvironmentTool } from '../../src/core/contract.ts';
 import { chooseBrowser, createUserBrowser } from './user-browser.ts';
 import type { UserBrowserLink } from './user-browser.ts';
@@ -75,10 +75,18 @@ describe('the browser a run takes', () => {
 
 // A link whose sessions the test ends by hand.
 function fakeLink(browsers: WorkspaceBrowser[]) {
-  const opened: { browserId: string; end(how: SessionEnd): void; closed: boolean }[] = [];
+  const opened: { browserId: string; end(how: SessionEnd): void; notice(): void; claims: number[]; closed: boolean }[] = [];
+  // How the user answers a request for a tab: nothing — they agree.
+  const answers: { claim: null | ControlRefusal; tabs: null | ControlRefusal } = { claim: null, tabs: null };
   const link: UserBrowserLink = {
     browsers: async () => browsers,
-    tabs: async () => [{ id: 7, windowId: 1, groupId: -1, title: 'Inbox', url: 'https://mail.test/', active: true, owned: false, debuggable: true }],
+    tabs: async () => {
+      if (answers.tabs) {
+        throw new BrowserRequestError('refused by the extension', answers.tabs);
+      }
+
+      return [{ id: 7, windowId: 1, groupId: -1, title: 'Inbox', url: 'https://mail.test/', active: true, owned: false, debuggable: true }];
+    },
     open: async browserId => {
       if (!browsers.find(candidate => candidate.id === browserId)?.connected) {
         throw new BrowserAccessError('offline', 'This browser is not connected now');
@@ -88,10 +96,21 @@ function fakeLink(browsers: WorkspaceBrowser[]) {
       const ended = new Promise<{ end: SessionEnd; detail: string }>(resolve => {
         end = how => resolve({ end: how, detail: '' });
       });
-      const entry = { browserId, end, closed: false };
+      let notify: () => void = () => {};
+      const entry = { browserId, end, notice: () => notify(), claims: [] as number[], closed: false };
       const session: BrowserSession = {
         browserId,
         endpoint: `ws://test/${opened.length}`,
+        claimTab: async tabId => {
+          if (answers.claim) {
+            throw new BrowserRequestError('refused by the extension', answers.claim);
+          }
+
+          entry.claims.push(tabId);
+        },
+        onNotice: listener => {
+          notify = () => listener({ sessionId: 1, kind: 'tab_blocked', tabId: 9 });
+        },
         ended,
         close: async () => {
           entry.closed = true;
@@ -106,13 +125,13 @@ function fakeLink(browsers: WorkspaceBrowser[]) {
     attach: async endpoint => ({ context: { endpoint } as unknown as BrowserContext, detach: async () => {} }),
   };
 
-  return { link, opened };
+  return { link, opened, answers };
 }
 
 const settle = () => new Promise(resolve => setTimeout(resolve, 10));
 
 function run(browsers: WorkspaceBrowser[]) {
-  const { link, opened } = fakeLink(browsers);
+  const { link, opened, answers } = fakeLink(browsers);
   const userBrowser = createUserBrowser({ workspaceId: 'w', clientName: 'test', label: async () => 'Label', link });
   const tools = new Map(userBrowser.tools().map(tool => [tool.name, tool]));
   const call = (name: string, args: JsonObject = {}) => tools.get(name)!.handler(args);
@@ -124,7 +143,7 @@ function run(browsers: WorkspaceBrowser[]) {
     handler: async () => ((await userBrowser.context()) as unknown as { endpoint: string }).endpoint,
   } satisfies SessionEnvironmentTool);
 
-  return { userBrowser, opened, call, snapshot: () => kitTool.handler({}) };
+  return { userBrowser, opened, answers, call, snapshot: () => kitTool.handler({}) };
 }
 
 describe('a session', () => {
@@ -214,5 +233,45 @@ describe('a session', () => {
     await snapshot();
     await userBrowser.dispose();
     assert.equal(opened[0].closed, true);
+  });
+});
+
+describe('the boundaries the user keeps in the extension', () => {
+  test('a tab of the user joins the session with their consent; a refusal is words the operator can act on', async () => {
+    const { opened, answers, call } = run([WORK]);
+
+    // Asking for a tab opens the session it is asked for.
+    assert.match(String(await call('user_browser_take_tab', { tabId: 7 })), /The user handed the tab over/);
+    assert.deepEqual(opened[0].claims, [7]);
+
+    for (const [code, text] of [
+      ['declined', /The user declined to hand this tab over\. Do not ask for it again/],
+      ['no_answer', /did not answer the request within a minute/],
+      ['blocked_site', /a site of the user's list of blocked sites/],
+      ['not_debuggable', /Chrome lets nobody work in this tab/],
+      ['owned', /belongs to the session of another agent/],
+    ] as const) {
+      answers.claim = code;
+      await assert.rejects(call('user_browser_take_tab', { tabId: 8 }), text);
+    }
+
+    assert.deepEqual(opened[0].claims, [7]);
+    await assert.rejects(call('user_browser_take_tab', {}), /needs the numeric `tabId`/);
+  });
+
+  test('the list of tabs the user switched off is said so', async () => {
+    const { answers, call } = run([WORK]);
+
+    answers.tabs = 'tabs_hidden';
+    await assert.rejects(call('user_browser_tabs'), /The user switched the list of their tabs off/);
+  });
+
+  test('a tab taken from the session because it went to a blocked site is told once, by the next browser call', async () => {
+    const { opened, snapshot } = run([WORK]);
+
+    await snapshot();
+    opened[0].notice();
+    await assert.rejects(snapshot(), /went to a site of the user's list of blocked sites and was taken from the session/);
+    assert.equal(await snapshot(), 'ws://test/0', 'the session goes on');
   });
 });

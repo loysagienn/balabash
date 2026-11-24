@@ -46,13 +46,17 @@ confidential from them.
   upgrade requests of the web server — and opens sessions in the browsers,
   the CDP endpoint of a session a Playwright client connects to (`relay.ts`
   over `cdp-model.ts`, which plays the browser Playwright expects), the
+  rule of the sites a user blocks for the agent (`sites.ts`), the
   store of linked browsers and the pairing codes; `index.ts` is the module
   as the app runs it: what `/api/browsers` calls and what an agent's run
   reaches a browser of its workspace through),
   `browser-extension/` (the Chrome extension that dials that
   link from the user's browser: a browser sub-project with its own tsconfig,
   built for one installation — the console domain is a constant of its
-  bundle; `playwright/` holds modules of the Playwright extension under
+  bundle; the worker with the link, the user's boundaries — blocked sites,
+  consent for a tab, what the debugger may not do — and three pages: the
+  popup of the toolbar button, the settings, the consent window;
+  `playwright/` holds modules of the Playwright extension under
   their own license, the changed ones say so at their top),
   `users/` (users, identities, workspace membership), `workspace/` (the
   per-workspace workbench: layout, sqlite, child processes, the annotation
