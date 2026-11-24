@@ -16,7 +16,9 @@
 
 // Changed for Balabash: a tab that could not be put into the group of its session is reported (_moveIntoGroup)
 // instead of passing in silence; a new group is made in the window of its tab (ClientTabGroup.add), not in the
-// current window, which can be one without tab groups — a site installed as an app.
+// current window, which can be one without tab groups — a site installed as an app; a tab that is born in the
+// group of a session — Chrome puts a tab a grouped page opens into the group of that page — is the session's
+// from its birth (the constructor), the same as one the user dragged in.
 
 
 import { report } from '../diagnostics';
@@ -77,6 +79,11 @@ export class TabGroupManager {
       if (changeInfo.groupId !== undefined)
         void this._onTabChangedGroup(tab);
     });
+    // A tab born in a group never "changes" its group.
+    listeners.add(chrome.tabs.onCreated, tab => {
+      if (this._sessionOfGroup(tab.groupId))
+        void this._onTabChangedGroup(tab);
+    });
     listeners.add(chrome.tabGroups.onRemoved, removed => {
       const session = this._sessionOfGroup(removed.id);
       if (!session)
@@ -111,6 +118,10 @@ export class TabGroupManager {
       return;
     await markOrphan(groupId);
     await this._recordClientGroups();
+  }
+
+  sessionOfGroup(groupId: number): ClientSession | undefined {
+    return this._sessionOfGroup(groupId);
   }
 
   async unclaimedGroups(): Promise<chrome.tabGroups.TabGroup[]> {

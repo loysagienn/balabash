@@ -19,7 +19,9 @@
 // (agents/kit/user-browser.ts over the hub and the relay, the tools of
 // agents/kit/playwright.ts): the session is opened by the first browser
 // call, in a background tab of its own group; navigation, snapshot, click,
-// evaluation, screenshot and a file upload work; a second run holds its own
+// evaluation, screenshot and a file upload work; a tab a page of the
+// session opens joins the session and leaves the user on their tab; a
+// second run holds its own
 // session at the same time; a session that said nothing for a while
 // (`--silence=<seconds>`, 90 by default) still works; the pause ends the
 // sessions as stopped by the user and leaves their tabs open and free;
@@ -346,6 +348,25 @@ async function main(): Promise<void> {
     await first.call('browser_take_screenshot');
     assert.ok(first.screenshots[0]?.length > 1000, 'a screenshot came back');
     step(`snapshot, click, evaluation and a screenshot (${first.screenshots[0].length} bytes) work through the session`);
+
+    // A tab a page of the session opens joins the session and leaves the
+    // user where they were.
+    const inFront = async () => (await tabsNow()).find(tab => tab.active && tab.windowId === userWindow)?.id;
+    const frontBefore = await inFront();
+
+    await first.call('browser_evaluate', {
+      function: `() => { const a = document.createElement('a'); a.id = 'opens-a-tab'; a.target = '_blank'; a.href = '${standOrigin}/second.html'; a.textContent = 'Opens a tab'; document.body.append(a); }`,
+    });
+    await first.call('browser_click', { element: 'Opens a tab', target: '#opens-a-tab' });
+    await until('the run sees the tab its page opened', async () => /Second agent page/.test(await first.call('browser_tabs', { action: 'list' })));
+    await until('the user is back on the tab they were on', async () => (await inFront()) === frontBefore);
+
+    const openedIndex = Number(/- (\d+):[^\n]*Second agent page/.exec(await first.call('browser_tabs', { action: 'list' }))?.[1]);
+
+    await first.call('browser_tabs', { action: 'close', index: openedIndex });
+    await until('the run is back to its one tab', async () => !/Second agent page/.test(await first.call('browser_tabs', { action: 'list' })));
+    assert.match(await first.call('browser_evaluate', { function: '() => document.title' }), /Pressed/);
+    step('a tab a page of the session opens joins the session; the user stays on the tab they were on');
 
     // A file of the workbench reaches the page of a browser that is, to
     // Playwright, on another machine.

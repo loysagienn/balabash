@@ -29,6 +29,13 @@
 // (consent.ts) — unless they chose in the settings not to be asked. A tab
 // of a blocked site is nobody's to hand.
 //
+// A session works in the background of the user's window. A tab a page of
+// a session opens (a link with a target, window.open) is born in front, in
+// the group of its page: it joins the session there (tabGroupManager.ts),
+// and the tab the user was looking at is put back in front — unless that
+// was a tab of the same session, which the user is then working in
+// themselves.
+//
 // Chrome shows a bar in every window while the debugger is attached; the
 // user closing it (the cross or Cancel) detaches the debugger from every
 // tab at once. That is the user saying stop: the session ends, instead of
@@ -149,6 +156,7 @@ export class Link {
         this._registry.ownerOf(source.tabId)?.close(STOPPED_BY_USER, CLOSE_SESSION_STOPPED);
       }
     });
+    listeners.add(chrome.tabs.onCreated, tab => void this._keepUserInFront(tab));
   }
 
   // Idempotent: called at every start of the worker and by the alarm.
@@ -488,6 +496,18 @@ export class Link {
     }
 
     return { sessionId };
+  }
+
+  // A tab born in front, in the group of a session. Chrome names the tab
+  // that was in front as its opener, whichever page opened it.
+  private async _keepUserInFront(tab: chrome.tabs.Tab): Promise<void> {
+    const session = this._groups.sessionOfGroup(tab.groupId);
+
+    if (!session || !tab.active || tab.openerTabId === undefined || this._registry.ownerOf(tab.openerTabId) === session) {
+      return;
+    }
+
+    await chrome.tabs.update(tab.openerTabId, { active: true }).catch(error => report(`The user's tab was not put back in front: ${error?.message ?? error}`));
   }
 
   // The tab as a session may take it; throws the refusal otherwise.
