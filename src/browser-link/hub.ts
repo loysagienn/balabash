@@ -24,6 +24,15 @@
 // the extension took a tab away — travels over the control link and names
 // the session by the id the extension gave it.
 //
+// The frames of a session link are handled one per turn of the event loop,
+// in the order they came. An answer reaches whoever waits for it through a
+// chain of promises, an event at once — and two frames that came in one
+// read of the socket would otherwise swap: the event would overtake the
+// answer sent before it. A CDP client counts on that order (Playwright
+// starts to listen for the execution contexts of a page only when the
+// answer with its frame tree has come), and a page that was loaded before
+// the session took it has its contexts announced right behind that answer.
+//
 // Both kinds of link carry the server's WebSocket pings every 25 s: a
 // session whose agent waits for its operator says nothing, and the proxies
 // on the way close a silent connection. A ping left unanswered until the
@@ -379,15 +388,7 @@ export function createBrowserLinkHub(options: {
       },
     };
 
-    socket.on('message', data => {
-      const frame = parseFrame(data);
-
-      if (!frame) {
-        socket.close(1003, 'Not a JSON frame');
-
-        return;
-      }
-
+    const handle = (frame: Frame) => {
       if (requester.settle(frame) || typeof frame.method !== 'string') {
         return;
       }
@@ -405,6 +406,28 @@ export function createBrowserLinkHub(options: {
       } else {
         early.push([frame.method, params]);
       }
+    };
+    // One frame per turn of the event loop (see the header).
+    let turn: Promise<void> = Promise.resolve();
+
+    socket.on('message', data => {
+      const frame = parseFrame(data);
+
+      if (!frame) {
+        socket.close(1003, 'Not a JSON frame');
+
+        return;
+      }
+
+      turn = turn.then(() => {
+        try {
+          handle(frame);
+        } catch (error) {
+          console.error('[browser-link] a frame of a session was not handled:', error);
+        }
+
+        return new Promise<void>(resolve => setImmediate(resolve));
+      });
     });
 
     socket.on('close', (code, reason) => {

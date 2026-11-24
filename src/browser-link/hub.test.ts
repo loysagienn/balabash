@@ -318,6 +318,29 @@ describe('a session', () => {
     await link.closed;
   });
 
+  test('hands an answer and the event sent right behind it to the server in that order', async () => {
+    const control = await connectTalking();
+    const opening = hub.browser('b1')!.openSession({ clientName: 'test', label: '' });
+    const link = await openSessionLink(port, HOST, control.link);
+    const session = await opening;
+    const order: string[] = [];
+
+    session.onEvent = method => order.push(`event ${method}`);
+
+    const answered = session.send('Page.getFrameTree', []).then(() => order.push('answer'));
+    const command = await link.next();
+
+    // Both frames leave in one write and arrive in one read of the socket.
+    link.sendTogether([{ id: command.id, result: {} }, { method: 'chrome.debugger.onEvent', params: [] }]);
+    await answered;
+    await settle();
+    assert.deepEqual(order, ['answer', 'event chrome.debugger.onEvent']);
+
+    session.close();
+    await link.closed;
+    await control.close();
+  });
+
   test('asks the user for a tab over the control link and hears what the extension did to it', async () => {
     const control = await connectTalking();
     const opening = hub.browser('b1')!.openSession({ clientName: 'test', label: '' });

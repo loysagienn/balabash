@@ -422,7 +422,16 @@ async function main(): Promise<void> {
     assert.match(await taking, /The user handed the tab over/);
     await until('the tab is the session’s', async () => (await sessionOf('first')).tabIds.includes(userTab.id));
     await until('the session lists the tab', async () => /Stand page/.test(await first.call('browser_tabs', { action: 'list' })));
-    step('the session asked for a tab of the user: the window named the session and the tab, and Allow handed it over');
+
+    // The page was loaded before the session took it: its own JavaScript
+    // world is there to work in all the same.
+    const handedIndex = Number(/- (\d+):[^\n]*Stand page/.exec(await first.call('browser_tabs', { action: 'list' }))?.[1]);
+
+    await first.call('browser_tabs', { action: 'select', index: handedIndex });
+    assert.equal((await tabsNow()).find(tab => tab.id === userTab.id)?.active, false, 'the tab the run switched to stays in the background');
+    assert.match(await first.call('browser_evaluate', { function: '() => document.title' }, 20_000), /Stand page/);
+    assert.match(await first.call('browser_snapshot'), /heading "Stand page"/);
+    step('the session asked for a tab of the user: the window named the session and the tab, and Allow handed it over; the page is read and its JavaScript runs, in the background');
 
     // Declined, and declined by closing the window.
     const secondUserPage = await userBrowser.newPage();

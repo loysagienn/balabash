@@ -21,6 +21,10 @@
 // for the browsers it launches, but not for the default context of a
 // browser it connected to with `noDefaults` — which is how a user's own
 // browser is connected, so that the rest of the page stays the user's.
+// For the same reason a client's Page.bringToFront — Playwright sends it
+// when its user switches between the tabs of the session — is answered
+// without being carried out: it would pull the tab, and the user with it,
+// to the front of the user's window.
 
 export type CdpMessage = {
   id?: number;
@@ -257,6 +261,10 @@ export function createCdpModel(sendToExtension: (method: string, params: unknown
 
         case 'Target.getTargetInfo':
           return sessionId ? findTabSession(session => session.sessionId === sessionId)?.targetInfo : undefined;
+
+        // The tab stays where it is in the user's window (see the header).
+        case 'Page.bringToFront':
+          return {};
       }
 
       return sessionId ? sendTabCommand(sessionId, method, params) : sendBrowserCommand(method, params);

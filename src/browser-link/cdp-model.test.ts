@@ -53,3 +53,20 @@ describe('attaching to a tab of the session', () => {
     assert.deepEqual(toClient.map(message => message.method), ['Target.attachedToTarget']);
   });
 });
+
+describe('a command of the client', () => {
+  test('that would bring a tab to the front of the user’s window is answered without reaching the browser', async () => {
+    const { model, sent } = stand();
+
+    model.handleExtensionEvent('chrome.tabs.onCreated', [{ id: 7 }]);
+    await model.handleCommand('Target.setAutoAttach', { autoAttach: true }, undefined);
+    sent.length = 0;
+
+    assert.deepEqual(await model.handleCommand('Page.bringToFront', {}, 'tab-1'), {});
+    assert.deepEqual(sent, []);
+
+    await model.handleCommand('Page.reload', {}, 'tab-1');
+    assert.deepEqual(sent, [['Page.reload', {}]]);
+  });
+});
+

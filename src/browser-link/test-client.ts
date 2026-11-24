@@ -11,6 +11,8 @@ export const EXTENSION_ORIGIN = `chrome-extension://${EXTENSION_ID}`;
 
 export type TestLink = {
   send(frame: Frame): void;
+  // Several frames in one write of the socket: the server reads them together.
+  sendTogether(frames: Frame[]): void;
   // The next frame of the server that is not a `pong`.
   next(): Promise<Frame>;
   // How the link ended.
@@ -59,6 +61,17 @@ export function dial(port: number, options: { host: string; path?: string; origi
     socket.on('open', () =>
       resolve({
         send: frame => socket.send(JSON.stringify(frame)),
+        sendTogether: frames => {
+          const raw = (socket as unknown as { _socket: { cork(): void; uncork(): void } })._socket;
+
+          raw.cork();
+
+          for (const frame of frames) {
+            socket.send(JSON.stringify(frame));
+          }
+
+          raw.uncork();
+        },
         next: () => {
           const frame = frames.shift();
 
