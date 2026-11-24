@@ -4,7 +4,8 @@
 // (src/browser-link/test-client.ts) brings it in a `hello`, and from then on
 // the browser is the user's — listed, renamed, enabled, disabled,
 // disconnected through /api/browsers, each change told to the open consoles
-// by the `browsers` frame.
+// by the `browsers` frame. The agents of a workspace reach the browsers
+// enabled in it and lose their sessions the moment a browser stops being so.
 //
 // Run: npm test  (node:test, native type stripping — no build needed).
 
@@ -13,15 +14,16 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import { STAND_HOST, closeServer, listen, sessionCookie, startStand } from '../test-support/stand.ts';
 import type { Stand } from '../test-support/stand.ts';
-import { CLOSE_UNAUTHORIZED } from '../browser-link/protocol.ts';
+import { CLOSE_SESSION_REVOKED, CLOSE_UNAUTHORIZED } from '../browser-link/protocol.ts';
 import type { WelcomeParams } from '../browser-link/protocol.ts';
-import { dial, hello } from '../browser-link/test-client.ts';
+import { dial, hello, openSessionLink } from '../browser-link/test-client.ts';
 import type { TestLink } from '../browser-link/test-client.ts';
 import type { ApiErrorBody, BrowserPairingResponse, BrowserResponse, BrowsersResponse } from './contract.ts';
 
 let stand: Stand;
 let prisma: typeof import('../db/client.ts')['prisma'];
 let createAuthCode: typeof import('./auth-codes.ts')['createAuthCode'];
+let browserLink: typeof import('../browser-link/index.ts');
 let linkServer: http.Server;
 let linkPort: number;
 let stopLink: () => void;
@@ -31,10 +33,9 @@ before(async () => {
   ({ prisma } = await import('../db/client.ts'));
   ({ createAuthCode } = await import('./auth-codes.ts'));
 
-  const { startBrowserLink } = await import('../browser-link/index.ts');
-
+  browserLink = await import('../browser-link/index.ts');
   linkServer = http.createServer((_request, response) => response.writeHead(404).end());
-  stopLink = startBrowserLink(linkServer);
+  stopLink = browserLink.startBrowserLink(linkServer);
   linkPort = (await listen(linkServer, 0, '127.0.0.1')).port;
 });
 
@@ -310,5 +311,71 @@ describe('the open consoles', () => {
     await link.closed;
     await settle();
     assert.equal(heard, 0);
+  });
+});
+
+describe('the agents of a workspace', () => {
+  const session = (browserId: string, workspaceId = stand.workspaceId) =>
+    browserLink.openBrowserSession({ workspaceId, browserId, clientName: 'test', label: 'Workspace — Thread' });
+  const refusedAs = (code: string) => (error: unknown) => error instanceof browserLink.BrowserAccessError && error.code === code;
+
+  test('see the browsers enabled in it — whoever owns them, connected or not — and none of another workspace', async () => {
+    const elsewhere = (await prisma.workspace.create({ data: { workspaceName: 'Agents elsewhere' } })).id;
+    const colleague = await signIn('Colleague');
+    const mine = await pair('Agent’s own');
+    const theirs = await pair('Agent’s colleague', colleague.cookie);
+
+    theirs.link.close();
+    await theirs.link.closed;
+    await settle();
+
+    const seen = new Map((await browserLink.workspaceBrowsers(stand.workspaceId)).map(browser => [browser.id, browser]));
+
+    assert.equal(seen.get(mine.welcome.browserId)?.connected, true);
+    assert.deepEqual(
+      [seen.get(theirs.welcome.browserId)?.ownerName, seen.get(theirs.welcome.browserId)?.connected],
+      ['Colleague', false],
+    );
+    assert.deepEqual(await browserLink.workspaceBrowsers(elsewhere), []);
+
+    // A browser of another workspace does not exist to the agents of this one.
+    await assert.rejects(session(mine.welcome.browserId, elsewhere), refusedAs('not_enabled'));
+    await assert.rejects(browserLink.workspaceBrowserTabs(elsewhere, mine.welcome.browserId), refusedAs('not_enabled'));
+    await assert.rejects(session(theirs.welcome.browserId), refusedAs('offline'));
+
+    mine.link.close();
+    await mine.link.closed;
+  });
+
+  test('lose a session when its browser is disabled in the workspace, and every session when it is disconnected', async () => {
+    const elsewhere = (await prisma.workspace.create({ data: { workspaceName: 'Sessions elsewhere' } })).id;
+    const { link, welcome } = await pair('Agent’s sessions');
+    const id = welcome.browserId;
+
+    await prisma.userBrowserWorkspace.create({ data: { browserId: id, workspaceId: elsewhere } });
+
+    let opening = session(id);
+    const here = await openSessionLink(linkPort, STAND_HOST, link, 1);
+    const opened = await opening;
+
+    assert.match(opened.endpoint, /^ws:\/\/127\.0\.0\.1:\d+\/cdp\//);
+    opening = session(id, elsewhere);
+
+    const there = await openSessionLink(linkPort, STAND_HOST, link, 2);
+    const openedElsewhere = await opening;
+
+    assert.equal((await stand.request('DELETE', `/api/browsers/${id}/workspace`)).status, 200);
+    assert.equal((await here.closed).code, CLOSE_SESSION_REVOKED);
+    assert.equal((await opened.ended).end, 'revoked');
+    await assert.rejects(session(id), refusedAs('not_enabled'));
+
+    // The session of the workspace where the browser stays enabled lives on.
+    await settle();
+    there.send({ method: 'chrome.tabs.onCreated', params: [{ id: 1 }] });
+
+    assert.equal((await stand.request('DELETE', `/api/browsers/${id}`)).status, 200);
+    assert.equal((await there.closed).code, CLOSE_SESSION_REVOKED);
+    assert.equal((await openedElsewhere.ended).end, 'revoked');
+    assert.equal((await link.closed).code, CLOSE_UNAUTHORIZED);
   });
 });

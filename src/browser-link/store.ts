@@ -163,6 +163,27 @@ export async function listBrowsers(userId: string, workspaceId: string): Promise
   };
 }
 
+// The browsers the agents of a workspace may reach: the ones enabled in it,
+// whoever owns them.
+export async function listWorkspaceBrowsers(workspaceId: string): Promise<(BrowserRecord & { ownerName: string | null })[]> {
+  const enabled = await prisma.userBrowserWorkspace.findMany({ where: { workspaceId }, select: { browserId: true } });
+  const rows = await prisma.userBrowser.findMany({
+    where: { id: { in: enabled.map(row => row.browserId) } },
+    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+  });
+  const owners = await prisma.user.findMany({
+    where: { id: { in: [...new Set(rows.map(row => row.userId))] } },
+    select: { id: true, displayName: true },
+  });
+  const ownerNames = new Map(owners.map(owner => [owner.id, owner.displayName]));
+
+  return rows.map(row => ({ ...record(row), ownerName: ownerNames.get(row.userId) ?? null }));
+}
+
+export async function isBrowserEnabled(browserId: string, workspaceId: string): Promise<boolean> {
+  return (await prisma.userBrowserWorkspace.count({ where: { browserId, workspaceId } })) > 0;
+}
+
 // The workspaces a browser is enabled in.
 export async function browserWorkspaces(browserId: string): Promise<string[]> {
   return (await prisma.userBrowserWorkspace.findMany({ where: { browserId }, select: { workspaceId: true } })).map(row => row.workspaceId);

@@ -4,7 +4,7 @@
 
 import type { IncomingMessage } from 'node:http';
 import { WebSocket } from 'ws';
-import { CONTROL_PATH, EXTENSION_ID, PROTOCOL_VERSION } from './protocol.ts';
+import { CONTROL_PATH, EXTENSION_ID, PROTOCOL_VERSION, SESSION_PATH } from './protocol.ts';
 import type { Frame, HelloParams } from './protocol.ts';
 
 export const EXTENSION_ORIGIN = `chrome-extension://${EXTENSION_ID}`;
@@ -15,7 +15,9 @@ export type TestLink = {
   next(): Promise<Frame>;
   // How the link ended.
   closed: Promise<{ code: number; reason: string }>;
-  close(): void;
+  // The server's WebSocket pings that came so far.
+  pings(): number;
+  close(code?: number, reason?: string): void;
 };
 
 // Resolves with the open link; rejects with `HTTP <status>` when the server
@@ -47,6 +49,11 @@ export function dial(port: number, options: { host: string; path?: string; origi
         frames.push(frame);
       }
     });
+    let pings = 0;
+
+    socket.on('ping', () => {
+      pings += 1;
+    });
     socket.on('unexpected-response', (_request, response: IncomingMessage) => reject(new Error(`HTTP ${response.statusCode}`)));
     socket.on('error', reject);
     socket.on('open', () =>
@@ -58,7 +65,8 @@ export function dial(port: number, options: { host: string; path?: string; origi
           return frame ? Promise.resolve(frame) : new Promise<Frame>(take => waiting.push(take));
         },
         closed,
-        close: () => socket.close(),
+        pings: () => pings,
+        close: (code, reason) => socket.close(code, reason),
       }),
     );
   });
@@ -69,4 +77,23 @@ export function hello(identity: { secret: string } | { pairingCode: string; prev
   const params: HelloParams = { protocol: PROTOCOL_VERSION, extensionVersion, ...identity };
 
   return { method: 'hello', params };
+}
+
+// Answers the `session.open` the server has just sent over the control link
+// the way the extension does: dials the session link with the ticket, says
+// it is initialized, and names the session.
+export async function openSessionLink(port: number, host: string, control: TestLink, sessionId = 1): Promise<TestLink> {
+  const request = await control.next();
+
+  if (request.method !== 'session.open') {
+    throw new Error(`Expected session.open, got ${JSON.stringify(request)}`);
+  }
+
+  const { ticket } = request.params as { ticket: string };
+  const session = await dial(port, { host, path: `${SESSION_PATH}?ticket=${encodeURIComponent(ticket)}` });
+
+  session.send({ method: 'extension.initialized', params: [] });
+  control.send({ id: request.id, result: { sessionId } });
+
+  return session;
 }

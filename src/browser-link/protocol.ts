@@ -55,6 +55,15 @@ export const CLOSE_UNAUTHORIZED = 4401;
 // The server does not speak the wire version of the `hello`.
 export const CLOSE_UNSUPPORTED_PROTOCOL = 4426;
 
+// How a session link ends. The side that closes it says why with the code:
+// the extension — that the user stopped the session (the debugging bar of
+// Chrome, the pause); the server — that the browser's access is withdrawn
+// (the browser disconnected in the console or disabled in the workspace of
+// the session) or, with the ordinary 1000, that the agent is done. Any other
+// end is a lost link.
+export const CLOSE_SESSION_STOPPED = 4000;
+export const CLOSE_SESSION_REVOKED = 4001;
+
 export type BrowserTab = {
   id: number;
   windowId: number;

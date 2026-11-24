@@ -15,7 +15,8 @@
  */
 
 // Changed for Balabash: a tab the client asks for is created in the window of the session's tabs
-// (chrome.tabs.create), not in the current window, which can be one without a tab strip.
+// (chrome.tabs.create), not in the current window, which can be one without a tab strip; closing
+// the session can name the close code of its link.
 
 
 import { windowForTabs } from '../windows';
@@ -41,8 +42,8 @@ export class ClientSession {
     this._channel.onClose = () => this.onClose?.();
   }
 
-  close(reason: string): void {
-    this._channel.close(reason);
+  close(reason: string, code?: number): void {
+    this._channel.close(reason, code);
   }
 
   didInitialize(): void {

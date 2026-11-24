@@ -9,6 +9,12 @@
 // once — its link closes with the code that makes the extension forget the
 // secret.
 //
+// An agent of a workspace reaches the browsers enabled in that workspace,
+// whoever owns them: it lists them, reads the tabs of one and opens a
+// session in it — the session link of the hub behind a CDP endpoint on
+// loopback (relay.ts) a Playwright client connects to. A browser disabled
+// in a workspace or disconnected takes its sessions with it at once.
+//
 // What is connected now is the hub's memory; connections are not journaled.
 // The consoles learn of a change — a browser came or went, was paired,
 // renamed, enabled, disabled, disconnected — by an ephemeral signal
@@ -20,11 +26,13 @@ import fs from 'node:fs/promises';
 import type { Server } from 'node:http';
 import path from 'node:path';
 import { config } from '../config/index.ts';
+import { prisma } from '../db/client.ts';
 import { createBrowserLinkHub } from './hub.ts';
-import type { BrowserLinkHub } from './hub.ts';
+import type { BrowserLinkHub, ConnectedBrowser, ExtensionSession, SessionEnd } from './hub.ts';
 import { createPairings } from './pairings.ts';
 import { EXTENSION_ID, compareVersions } from './protocol.ts';
-import type { HelloParams } from './protocol.ts';
+import type { BrowserTab, HelloParams } from './protocol.ts';
+import { startCdpRelay } from './relay.ts';
 import {
   assertBrowserNameFree,
   browserName,
@@ -33,7 +41,9 @@ import {
   disableBrowser,
   enableBrowser,
   findBrowserBySecret,
+  isBrowserEnabled,
   listBrowsers,
+  listWorkspaceBrowsers,
   pairBrowser,
   recordBrowserSeen,
   renameBrowser,
@@ -252,6 +262,7 @@ export async function enableUserBrowser(userId: string, browserId: string, works
 export async function disableUserBrowser(userId: string, browserId: string, workspaceId: string): Promise<BrowserRecord> {
   const browser = await disableBrowser(userId, browserId, workspaceId);
 
+  closeSessions(browserId, workspaceId);
   signal(browser, [...(await browserWorkspaces(browserId)), workspaceId]);
 
   return browser;
@@ -265,4 +276,125 @@ export async function disconnectUserBrowser(userId: string, browserId: string): 
   signal(browser, workspaceIds);
 
   return browser;
+}
+
+// --------------------------------------------------------------------------
+// What an agent of a workspace does with browsers. It reaches the browsers
+// enabled in its workspace and no other.
+
+export type { SessionEnd } from './hub.ts';
+export type { BrowserTab } from './protocol.ts';
+
+export type WorkspaceBrowser = {
+  id: string;
+  name: string;
+  // The display name of the user who linked the browser.
+  ownerName: string | null;
+  connected: boolean;
+  lastSeenAt: Date | null;
+};
+
+// Why an agent did not get to a browser: it is not enabled in the workspace
+// (or does not exist — the same to the agent); its extension is not on the
+// link now.
+export type BrowserAccessErrorCode = 'not_enabled' | 'offline';
+
+export class BrowserAccessError extends Error {
+  code: BrowserAccessErrorCode;
+
+  constructor(code: BrowserAccessErrorCode, message: string) {
+    super(message);
+    this.code = code;
+  }
+}
+
+export async function workspaceBrowsers(workspaceId: string): Promise<WorkspaceBrowser[]> {
+  return (await listWorkspaceBrowsers(workspaceId)).map(browser => ({
+    id: browser.id,
+    name: browser.name,
+    ownerName: browser.ownerName,
+    connected: isBrowserConnected(browser.id),
+    lastSeenAt: browser.lastSeenAt,
+  }));
+}
+
+async function reach(workspaceId: string, browserId: string): Promise<ConnectedBrowser> {
+  if (!(await isBrowserEnabled(browserId, workspaceId))) {
+    throw new BrowserAccessError('not_enabled', 'This browser is not enabled in the workspace');
+  }
+
+  const connected = hub?.browser(browserId);
+
+  if (!connected) {
+    throw new BrowserAccessError('offline', 'This browser is not connected now');
+  }
+
+  return connected;
+}
+
+// The tabs the user has open, as the extension lists them — no session and
+// no debugger.
+export async function workspaceBrowserTabs(workspaceId: string, browserId: string): Promise<BrowserTab[]> {
+  return await (await reach(workspaceId, browserId)).listTabs();
+}
+
+// A session of an agent in a browser, as its Playwright client sees it.
+export type BrowserSession = {
+  browserId: string;
+  // ws://127.0.0.1:<port>/cdp/<id> — for chromium.connectOverCDP.
+  endpoint: string;
+  // Settles once, when the session is over: how, and what was said about it.
+  ended: Promise<{ end: SessionEnd; detail: string }>;
+  // The agent is done with the session; its tabs stay open in the browser.
+  close(): Promise<void>;
+};
+
+// The sessions open now, with the workspace each was opened from.
+const openSessions = new Set<{ browserId: string; workspaceId: string; session: ExtensionSession }>();
+
+// The browser is no longer the workspace's: the sessions opened from it end.
+function closeSessions(browserId: string, workspaceId: string): void {
+  for (const entry of openSessions) {
+    if (entry.browserId === browserId && entry.workspaceId === workspaceId) {
+      entry.session.close('revoked');
+    }
+  }
+}
+
+// What the user reads about a session in their browser: the workspace, when
+// it has a name, and the title of the agent's thread.
+export async function sessionLabel(workspaceId: string, threadTitle: string): Promise<string> {
+  const workspace = await prisma.workspace.findUnique({ where: { id: workspaceId }, select: { workspaceName: true } });
+
+  return [workspace?.workspaceName, threadTitle].filter(Boolean).join(' — ');
+}
+
+export async function openBrowserSession(options: {
+  workspaceId: string;
+  browserId: string;
+  // Names the client to the extension.
+  clientName: string;
+  label: string;
+}): Promise<BrowserSession> {
+  const { workspaceId, browserId } = options;
+  const session = await (await reach(workspaceId, browserId)).openSession({ clientName: options.clientName, label: options.label });
+  const entry = { browserId, workspaceId, session };
+
+  openSessions.add(entry);
+  void session.ended.then(() => openSessions.delete(entry));
+
+  // Disabled while the session was opening: nobody was there to close it.
+  if (!(await isBrowserEnabled(browserId, workspaceId))) {
+    session.close('revoked');
+
+    throw new BrowserAccessError('not_enabled', 'This browser is not enabled in the workspace');
+  }
+
+  const relay = await startCdpRelay(session).catch(error => {
+    session.close();
+
+    throw error;
+  });
+
+  return { browserId, endpoint: relay.endpoint, ended: session.ended, close: relay.close };
 }

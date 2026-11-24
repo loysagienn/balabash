@@ -24,7 +24,10 @@
 // Chrome shows a bar in every window while the debugger is attached; the
 // user closing it (the cross or Cancel) detaches the debugger from every
 // tab at once. That is the user saying stop: the session ends, instead of
-// living on to open new tabs and bring the bar back.
+// living on to open new tabs and bring the bar back. A session the user
+// stopped — by the bar or by the pause — closes its link with the code that
+// says so (CLOSE_SESSION_STOPPED): the agent is told not to come back by
+// itself.
 
 import { report, setReportSink } from './diagnostics.ts';
 import { windowForTabs } from './windows.ts';
@@ -35,6 +38,7 @@ import type { ChromeListeners } from './playwright/chromeListeners';
 import type { TabGroupManager } from './playwright/tabGroupManager';
 import type { TabRegistry } from './playwright/tabRegistry';
 import {
+  CLOSE_SESSION_STOPPED,
   CLOSE_UNAUTHORIZED,
   CLOSE_UNSUPPORTED_PROTOCOL,
   CONTROL_PATH,
@@ -123,7 +127,7 @@ export class Link {
     // the detach before its link closes.
     listeners.add(chrome.debugger.onDetach, (source, reason) => {
       if (reason === DETACHED_BY_USER && source.tabId !== undefined) {
-        this._registry.ownerOf(source.tabId)?.close(STOPPED_BY_USER);
+        this._registry.ownerOf(source.tabId)?.close(STOPPED_BY_USER, CLOSE_SESSION_STOPPED);
       }
     });
   }
@@ -173,7 +177,7 @@ export class Link {
     await chrome.storage.local.set({ paused });
 
     if (paused) {
-      this._closeEverything('Paused');
+      this._closeEverything('The user paused the extension', CLOSE_SESSION_STOPPED);
 
       return;
     }
@@ -435,16 +439,18 @@ export class Link {
     this._listeners.setEnabled(this._sessions.size > 0);
   }
 
-  private _closeSessions(reason: string): void {
+  private _closeSessions(reason: string, code?: number): void {
     for (const { session } of [...this._sessions.values()]) {
-      session.close(reason);
+      session.close(reason, code);
     }
   }
 
-  private _closeEverything(reason: string): void {
+  // `sessionCode` — the close code of the sessions' links, when the user is
+  // the one who ends them.
+  private _closeEverything(reason: string, sessionCode?: number): void {
     clearTimeout(this._retryTimer);
     clearInterval(this._pingTimer);
-    this._closeSessions(reason);
+    this._closeSessions(reason, sessionCode);
 
     const socket = this._socket;
 

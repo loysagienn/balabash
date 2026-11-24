@@ -1,6 +1,6 @@
-// The server's end of the browser links: accepts the control links the
-// extensions open (protocol.ts), keeps the browsers that are connected now
-// and asks them what the server needs.
+// The server's end of the browser links: accepts the links the extensions
+// open (protocol.ts), keeps the browsers that are connected now, asks them
+// what the server needs and opens sessions in them.
 //
 // The hub owns no HTTP server and no storage. The owner of a server hands
 // it the upgrade requests; who a `hello` is decides `admit` — a known
@@ -11,31 +11,80 @@
 // A link is refused before it is a WebSocket unless the request names the
 // console host and comes from the extension (its origin); a `hello` of
 // another wire version or of nobody closes it with the codes of the wire.
-// The extension pings every 20 s; a link silent for a minute is dead.
+// The extension pings every 20 s; a control link silent for a minute is
+// dead.
+//
+// A session link is admitted by its ticket: random, good for one use and a
+// few seconds, handed to the extension over the control link that has
+// already said who it is. A session lives inside its control link — the
+// extension ends its sessions when it loses the server, and so does the hub
+// when it loses the browser. How a session ended (SessionEnd) is told by
+// the side that ended it, with the close code of the wire.
+//
+// Both kinds of link carry the server's WebSocket pings every 25 s: a
+// session whose agent waits for its operator says nothing, and the proxies
+// on the way close a silent connection. A ping left unanswered until the
+// next one means the other side is gone.
 
+import { randomBytes } from 'node:crypto';
 import type { IncomingMessage } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { WebSocketServer } from 'ws';
 import type { WebSocket } from 'ws';
-import { CLOSE_UNAUTHORIZED, CLOSE_UNSUPPORTED_PROTOCOL, CONTROL_PATH, PROTOCOL_VERSION } from './protocol.ts';
+import {
+  CLOSE_SESSION_REVOKED,
+  CLOSE_SESSION_STOPPED,
+  CLOSE_UNAUTHORIZED,
+  CLOSE_UNSUPPORTED_PROTOCOL,
+  CONTROL_PATH,
+  PROTOCOL_VERSION,
+  SESSION_PATH,
+} from './protocol.ts';
 import type { BrowserTab, ControlEvents, ControlMethod, ControlRequests, Frame, HelloParams, WelcomeParams } from './protocol.ts';
 
 const HELLO_TIMEOUT_MS = 10_000;
 const REQUEST_TIMEOUT_MS = 30_000;
 // Silence for this long means the link is dead: the extension pings every 20 s.
 const IDLE_TIMEOUT_MS = 60_000;
+const PING_INTERVAL_MS = 25_000;
+// How long the extension has to dial the session link its ticket is for.
+const TICKET_TTL_MS = 15_000;
 // A frame of the control link is small: a list of tabs at most.
-const MAX_FRAME_BYTES = 4 * 1024 * 1024;
+const MAX_CONTROL_FRAME_BYTES = 4 * 1024 * 1024;
+// A frame of a session link carries what CDP carries: a screenshot, a page.
+const MAX_SESSION_FRAME_BYTES = 256 * 1024 * 1024;
 
 // Whom `admit` recognized behind a `hello`. `secret` — the pairing has just
 // made it, and the `welcome` carries it to the extension, once.
 export type Admission = { browserId: string; name: string; secret?: string };
+
+// How a session ended: the server closed it (the agent is done); the user
+// stopped it in the browser; the browser's access was withdrawn; the link to
+// the browser was lost.
+export type SessionEnd = 'closed' | 'stopped' | 'revoked' | 'lost';
+
+// The session link of one agent run, in the vocabulary of the extension
+// (the commands and events of the Playwright extension).
+export type ExtensionSession = {
+  // The id the extension knows the session by.
+  id: number;
+  send(method: string, params: unknown[]): Promise<unknown>;
+  // Events that came before a listener was set wait for it.
+  onEvent: ((method: string, params: unknown[]) => void) | null;
+  // Settles once, when the link is gone: how, and what was said about it.
+  ended: Promise<{ end: SessionEnd; detail: string }>;
+  // The server ends the session: done with it by default.
+  close(end?: Exclude<SessionEnd, 'stopped'>, detail?: string): void;
+};
 
 export type ConnectedBrowser = {
   id: string;
   // What the extension said in its `hello`.
   extensionVersion: string;
   listTabs(): Promise<BrowserTab[]>;
+  // `clientName` names the client in the extension's own words, `label` is
+  // what the user reads about the session.
+  openSession(options: { clientName: string; label: string }): Promise<ExtensionSession>;
 };
 
 export type BrowserLinkHub = {
@@ -45,7 +94,7 @@ export type BrowserLinkHub = {
   browser(browserId: string): ConnectedBrowser | null;
   // Tells the extension the name the user gave the browser in the console.
   renamed(browserId: string, name: string): void;
-  // The browser is nobody from now on: its link closes for good.
+  // The browser is nobody from now on: its link and its sessions close for good.
   revoke(browserId: string): void;
   // A browser connected or its link is gone.
   onPresence: ((browserId: string, connected: boolean) => void) | null;
@@ -54,7 +103,7 @@ export type BrowserLinkHub = {
   close(): void;
 };
 
-type Pending = { resolve(value: unknown): void; reject(error: Error): void; timer: NodeJS.Timeout };
+type Pending = { resolve(value: unknown): void; reject(error: Error): void; timer: NodeJS.Timeout | null };
 
 // The refusal of a request, with the machine form the extension gave it.
 export class BrowserRequestError extends Error {
@@ -66,8 +115,9 @@ export class BrowserRequestError extends Error {
   }
 }
 
-// Requests one way, events the other, over one socket.
-function createRequester(socket: WebSocket) {
+// Requests one way, events the other, over one socket. `timeoutMs` null —
+// a request waits for its answer as long as the link lives.
+function createRequester(socket: WebSocket, timeoutMs: number | null) {
   const pending = new Map<number, Pending>();
   let lastId = 0;
 
@@ -82,10 +132,13 @@ function createRequester(socket: WebSocket) {
       socket.send(JSON.stringify({ id, method, params }));
 
       return new Promise((resolve, reject) => {
-        const timer = setTimeout(() => {
-          pending.delete(id);
-          reject(new BrowserRequestError(`The browser did not answer ${method} in ${REQUEST_TIMEOUT_MS / 1000} s`));
-        }, REQUEST_TIMEOUT_MS);
+        const timer =
+          timeoutMs === null
+            ? null
+            : setTimeout(() => {
+                pending.delete(id);
+                reject(new BrowserRequestError(`The browser did not answer ${method} in ${timeoutMs / 1000} s`));
+              }, timeoutMs);
 
         pending.set(id, { resolve, reject, timer });
       });
@@ -100,7 +153,10 @@ function createRequester(socket: WebSocket) {
       }
 
       pending.delete(frame.id!);
-      clearTimeout(waiting.timer);
+
+      if (waiting.timer) {
+        clearTimeout(waiting.timer);
+      }
 
       if (frame.error !== undefined) {
         waiting.reject(new BrowserRequestError(String(frame.error), typeof frame.code === 'string' ? frame.code : null));
@@ -113,7 +169,10 @@ function createRequester(socket: WebSocket) {
 
     failAll(reason: string) {
       for (const waiting of pending.values()) {
-        clearTimeout(waiting.timer);
+        if (waiting.timer) {
+          clearTimeout(waiting.timer);
+        }
+
         waiting.reject(new BrowserRequestError(reason));
       }
 
@@ -157,6 +216,44 @@ function refuse(socket: Duplex, status: string): void {
   socket.end(`HTTP/1.1 ${status}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`);
 }
 
+// The server's pings on a link; answers what stops them. A ping the other
+// side left unanswered until the next one ends the link.
+function keepAlive(socket: WebSocket, intervalMs: number): () => void {
+  let answered = true;
+  const timer = setInterval(() => {
+    if (!answered) {
+      socket.terminate();
+
+      return;
+    }
+
+    answered = false;
+
+    if (socket.readyState === socket.OPEN) {
+      socket.ping();
+    }
+  }, intervalMs);
+
+  socket.on('pong', () => {
+    answered = true;
+  });
+
+  return () => clearInterval(timer);
+}
+
+// What the extension's close of a session link says.
+function endOfSession(code: number): SessionEnd {
+  return code === CLOSE_SESSION_STOPPED ? 'stopped' : 'lost';
+}
+
+const SERVER_CLOSE: Record<Exclude<SessionEnd, 'stopped'>, { code: number; detail: string }> = {
+  closed: { code: 1000, detail: 'The session is over' },
+  revoked: { code: CLOSE_SESSION_REVOKED, detail: 'Access to the browser was withdrawn' },
+  lost: { code: 1001, detail: 'The link to the browser is gone' },
+};
+
+type OpenSession = ExtensionSession & { initialized: Promise<void>; setId(id: number): void };
+
 export function createBrowserLinkHub(options: {
   admit(hello: HelloParams): Promise<Admission | null>;
   // The version of the extension this installation builds; '' when it builds none.
@@ -166,14 +263,19 @@ export function createBrowserLinkHub(options: {
   // reached by an address of its own.
   host: string | null;
   origin: string | null;
-  // How long a link may stay silent, and how long it may take to say `hello`.
+  // How long a link may stay silent, how long it may take to say `hello`,
+  // and how often the server pings.
   idleTimeoutMs?: number;
   helloTimeoutMs?: number;
+  pingIntervalMs?: number;
 }): BrowserLinkHub {
   const idleTimeoutMs = options.idleTimeoutMs ?? IDLE_TIMEOUT_MS;
   const helloTimeoutMs = options.helloTimeoutMs ?? HELLO_TIMEOUT_MS;
-  const sockets = new WebSocketServer({ noServer: true, maxPayload: MAX_FRAME_BYTES });
-  const connected = new Map<string, { browser: ConnectedBrowser; socket: WebSocket }>();
+  const pingIntervalMs = options.pingIntervalMs ?? PING_INTERVAL_MS;
+  const controlSockets = new WebSocketServer({ noServer: true, maxPayload: MAX_CONTROL_FRAME_BYTES });
+  const sessionSockets = new WebSocketServer({ noServer: true, maxPayload: MAX_SESSION_FRAME_BYTES });
+  const connected = new Map<string, { browser: ConnectedBrowser; socket: WebSocket; sessions: Set<OpenSession> }>();
+  const tickets = new Map<string, { take(socket: WebSocket): void; timer: NodeJS.Timeout }>();
 
   const send = <E extends keyof ControlEvents>(socket: WebSocket, method: E | 'welcome', params?: ControlEvents[E] | WelcomeParams) => {
     if (socket.readyState === socket.OPEN) {
@@ -181,8 +283,126 @@ export function createBrowserLinkHub(options: {
     }
   };
 
+  // The session link the extension dials with the ticket; rejects when it
+  // does not come in time.
+  const sessionSocket = (ticket: string): { socket: Promise<WebSocket>; forget(): void } => {
+    let forget = () => {};
+    const socket = new Promise<WebSocket>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        tickets.delete(ticket);
+        reject(new BrowserRequestError('The browser did not open the session link'));
+      }, TICKET_TTL_MS);
+
+      tickets.set(ticket, { take: resolve, timer });
+      forget = () => {
+        clearTimeout(timer);
+        tickets.delete(ticket);
+      };
+    });
+
+    return { socket, forget };
+  };
+
+  const wrapSession = (socket: WebSocket): OpenSession => {
+    const requester = createRequester(socket, null);
+    const stopPings = keepAlive(socket, pingIntervalMs);
+    let markInitialized!: () => void;
+    let failInitialized!: (error: Error) => void;
+    const initialized = new Promise<void>((resolve, reject) => {
+      markInitialized = resolve;
+      failInitialized = reject;
+    });
+    let markEnded!: (value: { end: SessionEnd; detail: string }) => void;
+    const ended = new Promise<{ end: SessionEnd; detail: string }>(resolve => {
+      markEnded = resolve;
+    });
+    // The first tab is announced ahead of `extension.initialized`.
+    const early: [string, unknown[]][] = [];
+    let onEvent: ExtensionSession['onEvent'] = null;
+    let id = 0;
+    // Set when the server is the one that ends the session.
+    let ending: { end: SessionEnd; detail: string } | null = null;
+
+    const session: OpenSession = {
+      get id() {
+        return id;
+      },
+      setId(value) {
+        id = value;
+      },
+      initialized,
+      ended,
+      send: (method, params) => requester.request(method, params),
+      get onEvent() {
+        return onEvent;
+      },
+      set onEvent(listener) {
+        onEvent = listener;
+
+        if (listener) {
+          for (const [method, params] of early.splice(0)) {
+            listener(method, params);
+          }
+        }
+      },
+      close(end = 'closed', detail) {
+        if (ending || socket.readyState > socket.OPEN) {
+          return;
+        }
+
+        ending = { end, detail: detail ?? SERVER_CLOSE[end].detail };
+        socket.close(SERVER_CLOSE[end].code, ending.detail.slice(0, 100));
+      },
+    };
+
+    socket.on('message', data => {
+      const frame = parseFrame(data);
+
+      if (!frame) {
+        socket.close(1003, 'Not a JSON frame');
+
+        return;
+      }
+
+      if (requester.settle(frame) || typeof frame.method !== 'string') {
+        return;
+      }
+
+      if (frame.method === 'extension.initialized') {
+        markInitialized();
+
+        return;
+      }
+
+      const params = Array.isArray(frame.params) ? frame.params : [];
+
+      if (onEvent) {
+        onEvent(frame.method, params);
+      } else {
+        early.push([frame.method, params]);
+      }
+    });
+
+    socket.on('close', (code, reason) => {
+      const said = reason.toString();
+      const outcome = ending ?? { end: endOfSession(code), detail: said || 'The session link closed' };
+
+      stopPings();
+      requester.failAll(outcome.detail);
+      failInitialized(new BrowserRequestError(outcome.detail));
+      markEnded(outcome);
+    });
+
+    socket.on('error', error => console.warn('[browser-link] session link error:', error.message));
+    initialized.catch(() => {});
+
+    return session;
+  };
+
   const acceptControl = (socket: WebSocket) => {
-    const requester = createRequester(socket);
+    const requester = createRequester(socket, REQUEST_TIMEOUT_MS);
+    const stopPings = keepAlive(socket, pingIntervalMs);
+    const sessions = new Set<OpenSession>();
     let browser: ConnectedBrowser | null = null;
     let admitting = false;
     let idle: NodeJS.Timeout | null = null;
@@ -198,6 +418,46 @@ export function createBrowserLinkHub(options: {
 
     const request = <M extends ControlMethod>(method: M, params: ControlRequests[M]['params']) =>
       requester.request(method, params) as Promise<ControlRequests[M]['result']>;
+
+    const openSession: ConnectedBrowser['openSession'] = async ({ clientName, label }) => {
+      const ticket = randomBytes(32).toString('base64url');
+      const dialed = sessionSocket(ticket);
+      const opened = request('session.open', { ticket, clientName, label });
+
+      // Whichever fails first tells why; the other must not be left unhandled.
+      dialed.socket.catch(() => {});
+      opened.catch(() => {});
+
+      let session: OpenSession;
+
+      try {
+        session = wrapSession(await Promise.race([dialed.socket, opened.then(() => dialed.socket)]));
+      } catch (error) {
+        dialed.forget();
+
+        throw error;
+      }
+
+      try {
+        session.setId((await opened).sessionId);
+        await session.initialized;
+      } catch (error) {
+        session.close('lost');
+
+        throw error;
+      }
+
+      if (socket.readyState !== socket.OPEN) {
+        session.close('lost');
+
+        throw new BrowserRequestError('The browser link is closed');
+      }
+
+      sessions.add(session);
+      void session.ended.then(() => sessions.delete(session));
+
+      return session;
+    };
 
     const admit = async (params: unknown) => {
       const hello = parseHello(params);
@@ -229,8 +489,9 @@ export function createBrowserLinkHub(options: {
         id: admission.browserId,
         extensionVersion: hello!.extensionVersion,
         listTabs: async () => (await request('tabs.list', {})).tabs,
+        openSession,
       };
-      connected.set(browser.id, { browser, socket });
+      connected.set(browser.id, { browser, socket, sessions });
       send(socket, 'welcome', {
         browserId: admission.browserId,
         name: admission.name,
@@ -280,12 +541,19 @@ export function createBrowserLinkHub(options: {
 
     socket.on('close', (_code, reason) => {
       clearTimeout(helloTimer);
+      stopPings();
 
       if (idle) {
         clearTimeout(idle);
       }
 
       requester.failAll(reason.toString() || 'The browser link closed');
+
+      // A session has no browser to speak to without its control link. One
+      // the revocation already closed keeps its own reason.
+      for (const session of sessions) {
+        session.close('lost');
+      }
 
       if (browser && connected.get(browser.id)?.socket === socket) {
         connected.delete(browser.id);
@@ -304,7 +572,7 @@ export function createBrowserLinkHub(options: {
     handleUpgrade(request, socket, head) {
       const url = new URL(request.url ?? '/', 'http://link');
 
-      if (url.pathname !== CONTROL_PATH) {
+      if (url.pathname !== CONTROL_PATH && url.pathname !== SESSION_PATH) {
         return false;
       }
 
@@ -316,7 +584,25 @@ export function createBrowserLinkHub(options: {
         return true;
       }
 
-      sockets.handleUpgrade(request, socket, head, acceptControl);
+      if (url.pathname === CONTROL_PATH) {
+        controlSockets.handleUpgrade(request, socket, head, acceptControl);
+
+        return true;
+      }
+
+      const ticket = url.searchParams.get('ticket') ?? '';
+      const waiting = tickets.get(ticket);
+
+      if (!waiting) {
+        refuse(socket, '403 Forbidden');
+
+        return true;
+      }
+
+      // One use.
+      tickets.delete(ticket);
+      clearTimeout(waiting.timer);
+      sessionSockets.handleUpgrade(request, socket, head, waiting.take);
 
       return true;
     },
@@ -335,6 +621,11 @@ export function createBrowserLinkHub(options: {
       if (entry) {
         // Gone at once, not when the close has travelled.
         connected.delete(browserId);
+
+        for (const session of entry.sessions) {
+          session.close('revoked');
+        }
+
         entry.socket.close(CLOSE_UNAUTHORIZED, 'Disconnected in the console');
         hub.onPresence?.(browserId, false);
       }
@@ -345,7 +636,8 @@ export function createBrowserLinkHub(options: {
         socket.close(1001, 'Server is closing');
       }
 
-      sockets.close();
+      controlSockets.close();
+      sessionSockets.close();
     },
   };
 

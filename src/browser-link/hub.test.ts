@@ -1,6 +1,8 @@
 // The hub of the browser links (hub.ts) with a client that plays the
 // extension (test-client.ts): which upgrade requests become links, who a
-// `hello` makes a connected browser, and how a link ends.
+// `hello` makes a connected browser, how a link ends, and the sessions the
+// server opens in a browser — the ticket of a session link and how the end
+// of a session is told.
 //
 // Run: npm test  (node:test, native type stripping — no build needed).
 
@@ -10,9 +12,9 @@ import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { createBrowserLinkHub } from './hub.ts';
 import type { Admission, BrowserLinkHub } from './hub.ts';
-import { CLOSE_UNAUTHORIZED, CLOSE_UNSUPPORTED_PROTOCOL } from './protocol.ts';
+import { CLOSE_SESSION_REVOKED, CLOSE_SESSION_STOPPED, CLOSE_UNAUTHORIZED, CLOSE_UNSUPPORTED_PROTOCOL, SESSION_PATH } from './protocol.ts';
 import type { HelloParams, WelcomeParams } from './protocol.ts';
-import { EXTENSION_ORIGIN, dial, hello } from './test-client.ts';
+import { EXTENSION_ORIGIN, dial, hello, openSessionLink } from './test-client.ts';
 
 const HOST = 'console.test';
 
@@ -34,7 +36,14 @@ async function admit(params: HelloParams): Promise<Admission | null> {
 }
 
 before(async () => {
-  hub = createBrowserLinkHub({ admit, extensionVersion: async () => '0.9.0', host: HOST, origin: EXTENSION_ORIGIN, idleTimeoutMs: 300 });
+  hub = createBrowserLinkHub({
+    admit,
+    extensionVersion: async () => '0.9.0',
+    host: HOST,
+    origin: EXTENSION_ORIGIN,
+    idleTimeoutMs: 300,
+    pingIntervalMs: 100,
+  });
   hub.onPresence = (browserId, connected) => presence.push([browserId, connected]);
   server = http.createServer((_request, response) => response.writeHead(404).end());
   server.on('upgrade', (request, socket, head) => {
@@ -68,6 +77,9 @@ describe('an upgrade request', () => {
     await assert.rejects(dial(port, { host: 'elsewhere.test' }), /HTTP 403/);
     await assert.rejects(dial(port, { host: HOST, origin: 'https://console.test' }), /HTTP 403/);
     await assert.rejects(dial(port, { host: HOST, origin: null }), /HTTP 403/);
+    // A session link needs a ticket the server has just handed out.
+    await assert.rejects(dial(port, { host: HOST, path: SESSION_PATH }), /HTTP 403/);
+    await assert.rejects(dial(port, { host: HOST, path: `${SESSION_PATH}?ticket=made-up` }), /HTTP 403/);
     // Not the hub's path: the owner of the server drops it.
     await assert.rejects(dial(port, { host: HOST, path: '/browser-link/other' }));
 
@@ -196,5 +208,133 @@ describe('a connected browser', () => {
 
     talking.close();
     await talking.closed;
+  });
+});
+
+// The control link of b1 that keeps talking, as the extension's does.
+async function connectTalking() {
+  const link = await connectKnown();
+  const pings = setInterval(() => link.send({ method: 'ping' }), 100);
+
+  return {
+    link,
+    async close() {
+      clearInterval(pings);
+      link.close();
+      await link.closed;
+    },
+  };
+}
+
+describe('a session', () => {
+  test('is the link the extension dials with the ticket of session.open; commands go one way, events the other', async () => {
+    const control = await connectTalking();
+    const opening = hub.browser('b1')!.openSession({ clientName: 'test', label: 'Workspace — Thread' });
+    const request = await control.link.next();
+
+    assert.equal(request.method, 'session.open');
+
+    const { ticket, clientName, label } = request.params as { ticket: string; clientName: string; label: string };
+
+    assert.deepEqual([clientName, label], ['test', 'Workspace — Thread']);
+
+    const link = await dial(port, { host: HOST, path: `${SESSION_PATH}?ticket=${ticket}` });
+
+    // The ticket is good for one link.
+    await assert.rejects(dial(port, { host: HOST, path: `${SESSION_PATH}?ticket=${ticket}` }), /HTTP 403/);
+
+    // The first tab is announced before the session is initialized.
+    link.send({ method: 'chrome.tabs.onCreated', params: [{ id: 5 }] });
+    link.send({ method: 'extension.initialized', params: [] });
+    control.link.send({ id: request.id, result: { sessionId: 3 } });
+
+    const session = await opening;
+    const events: [string, unknown[]][] = [];
+
+    assert.equal(session.id, 3);
+    session.onEvent = (method, params) => events.push([method, params]);
+    assert.deepEqual(events, [['chrome.tabs.onCreated', [{ id: 5 }]]]);
+
+    const answer = session.send('chrome.debugger.attach', [{ tabId: 5 }, '1.3']);
+    const command = await link.next();
+
+    assert.deepEqual([command.method, command.params], ['chrome.debugger.attach', [{ tabId: 5 }, '1.3']]);
+    link.send({ id: command.id, result: {} });
+    assert.deepEqual(await answer, {});
+
+    session.close();
+    assert.equal((await link.closed).code, 1000);
+    assert.equal((await session.ended).end, 'closed');
+    await control.close();
+  });
+
+  test('is not opened when the extension refuses', async () => {
+    const control = await connectTalking();
+    const refused = hub.browser('b1')!.openSession({ clientName: 'test', label: '' });
+
+    control.link.send({ id: (await control.link.next()).id, error: 'No window to open a tab in' });
+    await assert.rejects(refused, /No window to open a tab in/);
+    await control.close();
+  });
+
+  test('ends as the side that ended it says: the user stopped it, the link was lost, access was withdrawn', async () => {
+    const control = await connectTalking();
+    const browser = hub.browser('b1')!;
+
+    let opening = browser.openSession({ clientName: 'test', label: '' });
+    let link = await openSessionLink(port, HOST, control.link);
+    let session = await opening;
+    const waiting = session.send('chrome.debugger.sendCommand', [{ tabId: 1 }, 'Page.enable']);
+
+    waiting.catch(() => {});
+    link.close(CLOSE_SESSION_STOPPED, 'The user stopped the session in the browser');
+    assert.deepEqual(await session.ended, { end: 'stopped', detail: 'The user stopped the session in the browser' });
+    await assert.rejects(waiting, /The user stopped the session/);
+
+    opening = browser.openSession({ clientName: 'test', label: '' });
+    link = await openSessionLink(port, HOST, control.link, 2);
+    session = await opening;
+    link.close(1000, 'Pairing');
+    assert.equal((await session.ended).end, 'lost');
+
+    opening = browser.openSession({ clientName: 'test', label: '' });
+    link = await openSessionLink(port, HOST, control.link, 3);
+    session = await opening;
+    hub.revoke('b1');
+    assert.equal((await link.closed).code, CLOSE_SESSION_REVOKED);
+    assert.equal((await session.ended).end, 'revoked');
+    assert.equal((await control.link.closed).code, CLOSE_UNAUTHORIZED);
+    await control.close();
+  });
+
+  test('ends as lost when its browser leaves the control link', async () => {
+    const control = await connectTalking();
+    const opening = hub.browser('b1')!.openSession({ clientName: 'test', label: '' });
+    const link = await openSessionLink(port, HOST, control.link);
+    const session = await opening;
+
+    await control.close();
+    assert.equal((await session.ended).end, 'lost');
+    await link.closed;
+  });
+
+  test('that says nothing is kept by the pings of the server', async () => {
+    const control = await connectTalking();
+    const opening = hub.browser('b1')!.openSession({ clientName: 'test', label: '' });
+    const link = await openSessionLink(port, HOST, control.link);
+    const session = await opening;
+    let over = false;
+
+    void session.ended.then(() => {
+      over = true;
+    });
+    await new Promise(resolve => setTimeout(resolve, 450));
+    assert.ok(link.pings() >= 3, `pings on the session link: ${link.pings()}`);
+    assert.ok(control.link.pings() >= 3, `pings on the control link: ${control.link.pings()}`);
+    assert.equal(over, false, 'a silent session that answers the pings lives');
+
+    session.close();
+    await link.closed;
+    await control.close();
   });
 });

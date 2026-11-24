@@ -14,6 +14,9 @@
  * limitations under the License.
  */
 
+// Changed for Balabash: closing the channel can name the close code of the WebSocket — the server
+// tells a session the user stopped from one whose link was lost by it.
+
 
 const OPEN_TIMEOUT_MS = 5000;
 
@@ -56,8 +59,8 @@ export class Channel {
     this._send({ method, params });
   }
 
-  close(reason: string): void {
-    this._ws.close(1000, reason);
+  close(reason: string, code = 1000): void {
+    this._ws.close(code, reason);
     // onclose fires asynchronously.
     this._didClose();
   }
