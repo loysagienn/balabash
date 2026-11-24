@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Balabash Agent</title>
+    <style>
+      body { font: 13px/1.45 system-ui, sans-serif; width: 340px; margin: 0; padding: 12px 14px; color: #1b1b1b; }
+      h1 { font-size: 14px; margin: 0 0 8px; }
+      #status { padding: 8px 10px; border-radius: 6px; background: #f3f3f3; white-space: pre-wrap; }
+      #status[data-state='connected'] { background: #e2f4e4; }
+      #status[data-state='paused'] { background: #fff2cc; }
+      .row { display: flex; gap: 8px; align-items: center; justify-content: space-between; margin-top: 10px; }
+      .session { border-top: 1px solid #e4e4e4; padding-top: 8px; margin-top: 8px; }
+      .session .label { font-weight: 600; overflow-wrap: anywhere; }
+      .session .tabs, .note { color: #666; }
+      .session .actions { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
+      button { font: inherit; padding: 3px 10px; }
+      #error { color: #a40000; margin-top: 8px; white-space: pre-wrap; }
+      a { color: #1a5fb4; }
+    </style>
+  </head>
+  <body>
+    <h1>Balabash Agent</h1>
+    <div id="status">…</div>
+    <div class="row">
+      <label><input id="paused" type="checkbox" /> Pause</label>
+      <button id="stop-all" type="button" hidden>Stop all sessions</button>
+    </div>
+    <div id="sessions"></div>
+    <div id="error"></div>
+    <div class="row">
+      <a id="settings" href="#">Settings</a>
+      <a id="console" target="_blank" rel="noreferrer">Console</a>
+    </div>
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>

@@ -19,7 +19,15 @@
 // A session is opened on the server's request: the session link with the
 // request's ticket, a blank tab of its own in the session's tab group. From
 // there the session is Playwright's (playwright/clientSession.ts): it owns
-// tabs, attaches the debugger and refuses what its policy refuses.
+// tabs, attaches the debugger and refuses what its policy and the user's
+// boundaries (boundaries.ts) refuse.
+//
+// A session works in the tabs it opened and in the ones it was handed. The
+// user hands a tab by dragging it into the session's group or from the
+// popup of the extension; the session asks for one through the server
+// (`session.claim`), and the user answers in a window of the extension
+// (consent.ts) — unless they chose in the settings not to be asked. A tab
+// of a blocked site is nobody's to hand.
 //
 // Chrome shows a bar in every window while the debugger is attached; the
 // user closing it (the cross or Cancel) detaches the debugger from every
@@ -29,6 +37,8 @@
 // says so (CLOSE_SESSION_STOPPED): the agent is told not to come back by
 // itself.
 
+import { applyToAllTabs, blockedSiteError, isBlocked, readSettings } from './boundaries.ts';
+import type { Consent } from './consent.ts';
 import { report, setReportSink } from './diagnostics.ts';
 import { windowForTabs } from './windows.ts';
 import { Channel } from './playwright/channel';
@@ -53,8 +63,10 @@ import type {
   ExtensionState,
   Frame,
   HelloParams,
+  ControlRefusal,
   PagePairResult,
   PairError,
+  SessionNotice,
   WelcomeParams,
 } from '../browser-link/protocol.ts';
 
@@ -65,6 +77,11 @@ const TAB_GROUP_TITLE = 'Balabash';
 // The reason Chrome gives when the user closes its debugging bar.
 const DETACHED_BY_USER = 'canceled_by_user';
 const STOPPED_BY_USER = 'The user stopped the session in the browser';
+
+// A request the extension refuses, with the machine form of the refusal.
+function refusal(code: ControlRefusal, message: string): Error {
+  return Object.assign(new Error(message), { code });
+}
 
 // What the extension keeps between the starts of its worker.
 type Stored = {
@@ -102,6 +119,7 @@ export class Link {
   private _registry: TabRegistry;
   private _groups: TabGroupManager;
   private _listeners: ChromeListeners;
+  private _consent: Consent;
   private _ready: Promise<unknown>;
   private _socket: WebSocket | undefined;
   private _connecting: Promise<void> | undefined;
@@ -118,10 +136,11 @@ export class Link {
   private _unsupported = false;
   private _serverExtensionVersion = '';
 
-  constructor(registry: TabRegistry, groups: TabGroupManager, listeners: ChromeListeners) {
+  constructor(registry: TabRegistry, groups: TabGroupManager, listeners: ChromeListeners, consent: Consent) {
     this._registry = registry;
     this._groups = groups;
     this._listeners = listeners;
+    this._consent = consent;
     this._ready = Promise.all([registry.ready, groups.ready]);
     // Added after the registry's own listener, so the session still hears of
     // the detach before its link closes.
@@ -184,6 +203,35 @@ export class Link {
 
     this._attempt = 0;
     await this.ensureConnected();
+  }
+
+  // The user's word from the popup: one session ends, or all of them.
+  stopSessions(sessionId?: number): void {
+    for (const [id, { session }] of [...this._sessions]) {
+      if (sessionId === undefined || id === sessionId) {
+        session.close(STOPPED_BY_USER, CLOSE_SESSION_STOPPED);
+      }
+    }
+  }
+
+  // The user hands a tab to a session themselves: no question to ask.
+  async handTab(sessionId: number, tabId: number): Promise<void> {
+    const session = this._sessions.get(sessionId)?.session;
+
+    if (!session) {
+      throw new Error('This session is over');
+    }
+
+    this._registry.claim(await this._claimable(tabId, session), session);
+  }
+
+  // A tab of a session went to a blocked site and is the session's no more.
+  tabTaken(session: ClientSession, tabId: number): void {
+    for (const [sessionId, entry] of this._sessions) {
+      if (entry.session === session) {
+        this._sendEvent('session.notice', { sessionId, kind: 'tab_blocked', tabId } satisfies SessionNotice);
+      }
+    }
   }
 
   async status(): Promise<LinkStatus> {
@@ -378,16 +426,22 @@ export class Link {
         return { tabs: await this._listTabs() } satisfies ControlRequests['tabs.list']['result'];
       case 'session.open':
         return await this._openSession(params as ControlRequests['session.open']['params']);
+      case 'session.claim':
+        return await this._claimTab(params as ControlRequests['session.claim']['params']);
     }
 
     throw new Error(`Unknown method: ${method}`);
   }
 
   private async _listTabs(): Promise<BrowserTab[]> {
+    if ((await readSettings()).tabsListHidden) {
+      throw refusal('tabs_hidden', 'The user switched the list of tabs off in the settings of the extension');
+    }
+
     const tabs = await chrome.tabs.query({});
 
     return tabs
-      .filter(tab => tab.id !== undefined)
+      .filter(tab => tab.id !== undefined && !isBlocked(tab.url ?? tab.pendingUrl))
       .map(tab => ({
         id: tab.id!,
         windowId: tab.windowId,
@@ -401,6 +455,9 @@ export class Link {
   }
 
   private async _openSession({ ticket, clientName, label }: ControlRequests['session.open']['params']): Promise<ControlRequests['session.open']['result']> {
+    // The boundaries a session is held to are read before it can ask for anything.
+    await readSettings();
+
     const channel = await Channel.open(`${__SERVER_URL__}${SESSION_PATH}?ticket=${encodeURIComponent(ticket)}`);
     const session = new ClientSession(channel, this._registry, { clientName, tabGroup: { title: TAB_GROUP_TITLE }, background: true });
     const sessionId = ++this._lastSessionId;
@@ -433,10 +490,84 @@ export class Link {
     return { sessionId };
   }
 
+  // The tab as a session may take it; throws the refusal otherwise.
+  private async _claimable(tabId: number, session: ClientSession): Promise<chrome.tabs.Tab> {
+    await readSettings();
+
+    const tab = await chrome.tabs.get(tabId).catch(() => undefined);
+
+    if (!tab) {
+      throw new Error(`No tab ${tabId} in this browser`);
+    }
+
+    if (isBlocked(tab.url ?? tab.pendingUrl)) {
+      throw blockedSiteError();
+    }
+
+    if (!isDebuggableUrl(tab.url ?? tab.pendingUrl)) {
+      throw refusal('not_debuggable', 'Chrome lets nobody work in this tab: it shows a page of the browser itself');
+    }
+
+    const owner = this._registry.ownerOf(tabId);
+
+    if (owner && owner !== session) {
+      throw refusal('owned', 'This tab belongs to another session');
+    }
+
+    return tab;
+  }
+
+  private async _claimTab({ sessionId, tabId }: ControlRequests['session.claim']['params']): Promise<ControlRequests['session.claim']['result']> {
+    const entry = this._sessions.get(sessionId);
+
+    if (!entry) {
+      throw new Error('This session is over');
+    }
+
+    const tab = await this._claimable(tabId, entry.session);
+
+    if (this._registry.ownerOf(tabId) === entry.session) {
+      return {};
+    }
+
+    // The user chose in the settings not to be asked.
+    const answer = (await readSettings()).tabsWithoutAsking
+      ? 'allowed'
+      : await this._consent.ask({ label: entry.label, title: tab.title ?? '', url: tab.url ?? tab.pendingUrl ?? '' });
+
+    if (answer === 'declined') {
+      throw refusal('declined', 'The user declined to hand the tab over');
+    }
+
+    if (answer === 'no_answer') {
+      throw refusal('no_answer', 'The user did not answer within a minute');
+    }
+
+    // The tab lived on while the user was deciding.
+    this._registry.claim(await this._claimable(tabId, entry.session), entry.session);
+
+    return {};
+  }
+
+  private _sendEvent(method: string, params: unknown): void {
+    if (this._socket?.readyState === WebSocket.OPEN && this._welcomed) {
+      this._socket.send(JSON.stringify({ method, params }));
+    }
+  }
+
   private _didChangeSessions(): void {
+    const some = this._sessions.size > 0;
+
     // Chrome starts a stopped worker for every event that has a listener, so
     // the tab and debugger listeners are on only while a session needs them.
-    this._listeners.setEnabled(this._sessions.size > 0);
+    this._listeners.setEnabled(some);
+
+    if (some) {
+      // Nobody watched the tabs meanwhile: the blocked ones are found anew.
+      void applyToAllTabs().catch(error => report(`The blocked sites were not applied: ${error?.message ?? error}`));
+    } else {
+      this._consent.dismissAll();
+    }
   }
 
   private _closeSessions(reason: string, code?: number): void {

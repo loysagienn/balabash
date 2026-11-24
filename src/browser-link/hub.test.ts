@@ -318,6 +318,40 @@ describe('a session', () => {
     await link.closed;
   });
 
+  test('asks the user for a tab over the control link and hears what the extension did to it', async () => {
+    const control = await connectTalking();
+    const opening = hub.browser('b1')!.openSession({ clientName: 'test', label: '' });
+    const link = await openSessionLink(port, HOST, control.link, 4);
+    const session = await opening;
+
+    const agreed = session.claimTab(21);
+    let request = await control.link.next();
+
+    assert.deepEqual([request.method, request.params], ['session.claim', { sessionId: 4, tabId: 21 }]);
+    control.link.send({ id: request.id, result: {} });
+    await agreed;
+
+    const declined = session.claimTab(22);
+
+    request = await control.link.next();
+    control.link.send({ id: request.id, error: 'The user declined to hand the tab over', code: 'declined' });
+    await assert.rejects(declined, (error: unknown) => (error as { code?: string }).code === 'declined');
+
+    const notices: unknown[] = [];
+
+    session.onNotice = notice => notices.push(notice);
+    control.link.send({ method: 'session.notice', params: { sessionId: 4, kind: 'tab_blocked', tabId: 21 } });
+    // Of another session, and of no kind the server knows: not this session's to hear.
+    control.link.send({ method: 'session.notice', params: { sessionId: 5, kind: 'tab_blocked', tabId: 1 } });
+    control.link.send({ method: 'session.notice', params: { sessionId: 4, kind: 'made_up', tabId: 1 } });
+    await settle();
+    assert.deepEqual(notices, [{ sessionId: 4, kind: 'tab_blocked', tabId: 21 }]);
+
+    session.close();
+    await link.closed;
+    await control.close();
+  });
+
   test('that says nothing is kept by the pings of the server', async () => {
     const control = await connectTalking();
     const opening = hub.browser('b1')!.openSession({ clientName: 'test', label: '' });

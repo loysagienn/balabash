@@ -17,7 +17,8 @@ Five of them are changed, each change stated at the top of its file, as the
 license asks: `ownedTab.ts` (the title of the toolbar button on a controlled
 tab), `clientSession.ts` (a tab the client asks for is created in
 the window of the session's tabs; closing a session can name the close code
-of its link), `channel.ts` (the close code), `tabRegistry.ts` (the user's
+of its link; a new tab and a CDP command pass the user's boundaries of
+`../boundaries.ts`), `channel.ts` (the close code), `tabRegistry.ts` (the user's
 new tab is not claimed for the session whose tab was active) and
 `tabGroupManager.ts` (a failed grouping is reported; a new group is made in
 the window of its tab). The rest are unchanged.

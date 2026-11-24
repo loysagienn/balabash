@@ -31,7 +31,7 @@ import { createBrowserLinkHub } from './hub.ts';
 import type { BrowserLinkHub, ConnectedBrowser, ExtensionSession, SessionEnd } from './hub.ts';
 import { createPairings } from './pairings.ts';
 import { EXTENSION_ID, compareVersions } from './protocol.ts';
-import type { BrowserTab, HelloParams } from './protocol.ts';
+import type { BrowserTab, HelloParams, SessionNotice } from './protocol.ts';
 import { startCdpRelay } from './relay.ts';
 import {
   assertBrowserNameFree,
@@ -282,8 +282,9 @@ export async function disconnectUserBrowser(userId: string, browserId: string): 
 // What an agent of a workspace does with browsers. It reaches the browsers
 // enabled in its workspace and no other.
 
+export { BrowserRequestError } from './hub.ts';
 export type { SessionEnd } from './hub.ts';
-export type { BrowserTab } from './protocol.ts';
+export type { BrowserTab, ControlRefusal, SessionNotice } from './protocol.ts';
 
 export type WorkspaceBrowser = {
   id: string;
@@ -343,6 +344,11 @@ export type BrowserSession = {
   browserId: string;
   // ws://127.0.0.1:<port>/cdp/<id> — for chromium.connectOverCDP.
   endpoint: string;
+  // Asks the user for one of their tabs; resolves once they agreed, rejects
+  // with a BrowserRequestError that carries the code of the refusal.
+  claimTab(tabId: number): Promise<void>;
+  // Hears what the extension did to the session by the user's rules.
+  onNotice(listener: (notice: SessionNotice) => void): void;
   // Settles once, when the session is over: how, and what was said about it.
   ended: Promise<{ end: SessionEnd; detail: string }>;
   // The agent is done with the session; its tabs stay open in the browser.
@@ -390,11 +396,26 @@ export async function openBrowserSession(options: {
     throw new BrowserAccessError('not_enabled', 'This browser is not enabled in the workspace');
   }
 
+  return await relaySession(browserId, session);
+}
+
+// A session of the hub as a Playwright client and an agent's run use it:
+// behind a CDP endpoint on loopback.
+export async function relaySession(browserId: string, session: ExtensionSession): Promise<BrowserSession> {
   const relay = await startCdpRelay(session).catch(error => {
     session.close();
 
     throw error;
   });
 
-  return { browserId, endpoint: relay.endpoint, ended: session.ended, close: relay.close };
+  return {
+    browserId,
+    endpoint: relay.endpoint,
+    claimTab: tabId => session.claimTab(tabId),
+    onNotice: listener => {
+      session.onNotice = listener;
+    },
+    ended: session.ended,
+    close: relay.close,
+  };
 }

@@ -8,8 +8,10 @@
 // - the control link — one per browser, kept open: the extension names
 //   itself (`hello`, with the secret of its pairing or with a pairing code),
 //   the server answers `welcome` or closes; then the extension answers the
-//   server's requests (the list of tabs, opening a session), pings and
-//   reports what went wrong inside it (`report`, text only);
+//   server's requests (the list of tabs, opening a session, handing a tab
+//   of the user to a session), pings, tells what it did to a session by the
+//   user's rules (`session.notice`) and reports what went wrong inside it
+//   (`report`, text only);
 // - a session link — one per agent run, opened by the extension on the
 //   server's request with the one-time ticket the request carried. It speaks
 //   the protocol of the Playwright extension unchanged (commands
@@ -78,14 +80,28 @@ export type BrowserTab = {
   debuggable: boolean;
 };
 
+// Why the extension refused a request, in the `code` of its answer: the user
+// switched the list of tabs off; the user declined to hand the tab over or
+// did not answer in a minute; the tab shows a site of the user's blocked
+// list; Chrome lets nobody debug the tab; the tab is another session's.
+export type ControlRefusal = 'tabs_hidden' | 'declined' | 'no_answer' | 'blocked_site' | 'not_debuggable' | 'owned';
+
 export type ControlRequests = {
+  // The tabs of blocked sites are not in the list.
   'tabs.list': { params: Record<string, never>; result: { tabs: BrowserTab[] } };
   // The extension opens a session link with the ticket, gives the session a
   // blank tab of its own and answers once the link is initialized. `label`
   // is what the user reads about the session (the workspace and the title of
   // the agent's thread).
   'session.open': { params: { ticket: string; clientName: string; label: string }; result: { sessionId: number } };
+  // The session asks for a tab of the user. The extension asks the user in
+  // a window of its own and answers once they agreed — up to a minute.
+  'session.claim': { params: { sessionId: number; tabId: number }; result: Record<string, never> };
 };
+
+// What the extension did to a session by the user's rules: a tab of the
+// session went to a blocked site and was taken from it.
+export type SessionNotice = { sessionId: number; kind: 'tab_blocked'; tabId: number };
 
 export type ControlMethod = keyof ControlRequests;
 

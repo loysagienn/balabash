@@ -19,7 +19,10 @@
 // already said who it is. A session lives inside its control link — the
 // extension ends its sessions when it loses the server, and so does the hub
 // when it loses the browser. How a session ended (SessionEnd) is told by
-// the side that ended it, with the close code of the wire.
+// the side that ended it, with the close code of the wire. What concerns a
+// session but is not Playwright's — asking the user for a tab, hearing that
+// the extension took a tab away — travels over the control link and names
+// the session by the id the extension gave it.
 //
 // Both kinds of link carry the server's WebSocket pings every 25 s: a
 // session whose agent waits for its operator says nothing, and the proxies
@@ -40,10 +43,21 @@ import {
   PROTOCOL_VERSION,
   SESSION_PATH,
 } from './protocol.ts';
-import type { BrowserTab, ControlEvents, ControlMethod, ControlRequests, Frame, HelloParams, WelcomeParams } from './protocol.ts';
+import type {
+  BrowserTab,
+  ControlEvents,
+  ControlMethod,
+  ControlRequests,
+  Frame,
+  HelloParams,
+  SessionNotice,
+  WelcomeParams,
+} from './protocol.ts';
 
 const HELLO_TIMEOUT_MS = 10_000;
 const REQUEST_TIMEOUT_MS = 30_000;
+// Asking for a tab waits for the user, who has a minute to answer.
+const CLAIM_TIMEOUT_MS = 90_000;
 // Silence for this long means the link is dead: the extension pings every 20 s.
 const IDLE_TIMEOUT_MS = 60_000;
 const PING_INTERVAL_MS = 25_000;
@@ -71,6 +85,11 @@ export type ExtensionSession = {
   send(method: string, params: unknown[]): Promise<unknown>;
   // Events that came before a listener was set wait for it.
   onEvent: ((method: string, params: unknown[]) => void) | null;
+  // Asks the user for one of their tabs; resolves once they agreed. A
+  // refusal is a BrowserRequestError with the code of the wire.
+  claimTab(tabId: number): Promise<void>;
+  // What the extension did to the session by the user's rules.
+  onNotice: ((notice: SessionNotice) => void) | null;
   // Settles once, when the link is gone: how, and what was said about it.
   ended: Promise<{ end: SessionEnd; detail: string }>;
   // The server ends the session: done with it by default.
@@ -117,12 +136,12 @@ export class BrowserRequestError extends Error {
 
 // Requests one way, events the other, over one socket. `timeoutMs` null —
 // a request waits for its answer as long as the link lives.
-function createRequester(socket: WebSocket, timeoutMs: number | null) {
+function createRequester(socket: WebSocket, defaultTimeoutMs: number | null) {
   const pending = new Map<number, Pending>();
   let lastId = 0;
 
   return {
-    request(method: string, params: unknown): Promise<unknown> {
+    request(method: string, params: unknown, timeoutMs: number | null = defaultTimeoutMs): Promise<unknown> {
       if (socket.readyState !== socket.OPEN) {
         return Promise.reject(new BrowserRequestError('The browser link is closed'));
       }
@@ -254,6 +273,9 @@ const SERVER_CLOSE: Record<Exclude<SessionEnd, 'stopped'>, { code: number; detai
 
 type OpenSession = ExtensionSession & { initialized: Promise<void>; setId(id: number): void };
 
+// How the control link asks for a tab on behalf of a session.
+type ClaimTab = (sessionId: number, tabId: number) => Promise<void>;
+
 export function createBrowserLinkHub(options: {
   admit(hello: HelloParams): Promise<Admission | null>;
   // The version of the extension this installation builds; '' when it builds none.
@@ -303,7 +325,7 @@ export function createBrowserLinkHub(options: {
     return { socket, forget };
   };
 
-  const wrapSession = (socket: WebSocket): OpenSession => {
+  const wrapSession = (socket: WebSocket, claimTab: ClaimTab): OpenSession => {
     const requester = createRequester(socket, null);
     const stopPings = keepAlive(socket, pingIntervalMs);
     let markInitialized!: () => void;
@@ -332,6 +354,8 @@ export function createBrowserLinkHub(options: {
       },
       initialized,
       ended,
+      onNotice: null,
+      claimTab: tabId => claimTab(id, tabId),
       send: (method, params) => requester.request(method, params),
       get onEvent() {
         return onEvent;
@@ -416,8 +440,12 @@ export function createBrowserLinkHub(options: {
       idle = setTimeout(() => socket.terminate(), idleTimeoutMs);
     };
 
-    const request = <M extends ControlMethod>(method: M, params: ControlRequests[M]['params']) =>
-      requester.request(method, params) as Promise<ControlRequests[M]['result']>;
+    const request = <M extends ControlMethod>(method: M, params: ControlRequests[M]['params'], timeoutMs?: number) =>
+      requester.request(method, params, timeoutMs) as Promise<ControlRequests[M]['result']>;
+
+    const claimTab: ClaimTab = async (sessionId, tabId) => {
+      await request('session.claim', { sessionId, tabId }, CLAIM_TIMEOUT_MS);
+    };
 
     const openSession: ConnectedBrowser['openSession'] = async ({ clientName, label }) => {
       const ticket = randomBytes(32).toString('base64url');
@@ -431,7 +459,7 @@ export function createBrowserLinkHub(options: {
       let session: OpenSession;
 
       try {
-        session = wrapSession(await Promise.race([dialed.socket, opened.then(() => dialed.socket)]));
+        session = wrapSession(await Promise.race([dialed.socket, opened.then(() => dialed.socket)]), claimTab);
       } catch (error) {
         dialed.forget();
 
@@ -536,6 +564,16 @@ export function createBrowserLinkHub(options: {
         const text = (frame.params as { text?: unknown } | undefined)?.text;
 
         hub.onReport?.(browser.id, String(text).slice(0, 2000));
+      } else if (frame.method === 'session.notice') {
+        const notice = (frame.params ?? {}) as Partial<SessionNotice>;
+
+        if (notice.kind === 'tab_blocked' && typeof notice.tabId === 'number') {
+          for (const session of sessions) {
+            if (session.id === notice.sessionId) {
+              session.onNotice?.({ sessionId: session.id, kind: notice.kind, tabId: notice.tabId });
+            }
+          }
+        }
       }
     });
 

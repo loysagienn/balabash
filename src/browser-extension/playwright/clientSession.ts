@@ -16,9 +16,11 @@
 
 // Changed for Balabash: a tab the client asks for is created in the window of the session's tabs
 // (chrome.tabs.create), not in the current window, which can be one without a tab strip; closing
-// the session can name the close code of its link.
+// the session can name the close code of its link; a new tab and a CDP command pass the user's
+// boundaries (../boundaries) before they reach Chrome.
 
 
+import { checkNewTab, checkSessionCommand } from '../boundaries';
 import { windowForTabs } from '../windows';
 import { checkCdpMethod } from './cdpPolicy';
 
@@ -84,10 +86,12 @@ export class ClientSession {
       case 'chrome.debugger.sendCommand': {
         const [target, cdpMethod, cdpParams] = params;
         checkCdpMethod(cdpMethod);
+        checkSessionCommand(cdpMethod, cdpParams);
         return await this._ownedTab(target).sendCommand(target.sessionId, cdpMethod, cdpParams);
       }
       case 'chrome.tabs.create': {
         const [{ url, active }] = params;
+        checkNewTab(url);
         const windowId = await windowForTabs(this._registry.tabIdsOf(this));
         const tab = await chrome.tabs.create({ url, active, windowId });
         // The response announces the tab to the client.

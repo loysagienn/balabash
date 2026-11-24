@@ -2,15 +2,18 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>Balabash Agent</title>
+    <title>Balabash Agent — settings</title>
     <style>
       body { font: 14px/1.5 system-ui, sans-serif; max-width: 560px; margin: 40px auto; padding: 0 16px; color: #1b1b1b; }
       h1 { font-size: 18px; margin: 0 0 6px; }
-      .server { color: #666; margin: 0 0 20px; }
-      .row { display: flex; gap: 10px; align-items: center; margin-top: 18px; }
+      h2 { font-size: 15px; margin: 30px 0 4px; }
+      .server, .note { color: #666; margin: 0 0 12px; }
+      .row { display: flex; gap: 10px; align-items: center; margin-top: 14px; }
       #status { padding: 10px 12px; border-radius: 6px; background: #f3f3f3; white-space: pre-wrap; }
       #status[data-state='connected'] { background: #e2f4e4; }
       #status[data-state='paused'] { background: #fff2cc; }
+      textarea { width: 100%; box-sizing: border-box; min-height: 110px; font: 13px/1.5 ui-monospace, monospace; padding: 8px; }
+      button { font: inherit; padding: 5px 14px; }
     </style>
   </head>
   <body>
@@ -19,6 +22,34 @@
     <div id="status">…</div>
     <div class="row">
       <label><input id="paused" type="checkbox" /> Pause</label>
+    </div>
+
+    <h2>Blocked sites</h2>
+    <p class="note">
+      One site per line, for example <code>bank.example.com</code>. An entry covers its subdomains. The agent cannot open
+      these sites, does not see their tabs and cannot take them; a tab of the agent that ends up on one is taken from it.
+      A blocked site shown inside a frame of another page is not caught.
+    </p>
+    <textarea id="blocked-sites" spellcheck="false"></textarea>
+
+    <h2>List of tabs</h2>
+    <div class="row">
+      <label><input id="tabs-list" type="checkbox" /> Let the agent see the titles and addresses of my open tabs</label>
+    </div>
+    <p class="note">Without the list the agent still works in its own tabs and in the ones you hand to it.</p>
+
+    <h2>Handing tabs over</h2>
+    <div class="row">
+      <label><input id="without-asking" type="checkbox" /> Hand my tabs to the agent without asking me</label>
+    </div>
+    <p class="note">
+      When the agent asks for one of your tabs, a window asks you first. With this on there is no window: the agent takes
+      any tab it asks for, except the tabs of blocked sites.
+    </p>
+
+    <div class="row">
+      <button id="save" type="button">Save</button>
+      <span id="saved" class="note"></span>
     </div>
     <script type="module" src="options.js"></script>
   </body>
