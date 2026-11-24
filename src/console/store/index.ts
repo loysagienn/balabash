@@ -27,6 +27,7 @@ import { createProjectHandler, setProjectArchivedHandler, updateProjectHandler }
 import { appsReducer } from './apps/reducer.ts';
 import { loadAppsHandler, publishAppHandler, unpublishAppHandler } from './apps/handlers.ts';
 import { scheduleReducer } from './schedule/reducer.ts';
+import { browsersReducer } from './browsers/reducer.ts';
 import { createTaskHandler, deleteTaskHandler, runTaskHandler } from './schedule/handlers.ts';
 import { connectServiceHandler, disconnectConnectionHandler, reconnectConnectionHandler, renameConnectionHandler } from './connections/handlers.ts';
 import { connectionsReducer } from './connections/reducer.ts';
@@ -119,6 +120,7 @@ export function createStore({ api, initialRoute, initialHash = '', enhancer, bac
     apps: appsReducer,
     schedule: scheduleReducer,
     connections: connectionsReducer,
+    browsers: browsersReducer,
     secretRequests: secretRequestsReducer,
     agents: agentsReducer,
     notifications: notificationsReducer,

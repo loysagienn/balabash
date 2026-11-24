@@ -9,6 +9,11 @@
 /* catalog: the state wraps to a second line rather than losing its end (“connected · installation-wide”) */
 .conn-cat .tile-f{align-items:flex-end}
 .conn-cat .tile-f > :first-child{white-space:normal}
+/* Browsers: what the screen offers about the browser it is open in — a paragraph, the steps of an installation, the buttons in a row that wraps */
+.conn-offer{display:flex;flex-direction:column;gap:var(--sp-3);align-items:flex-start}
+.conn-offer p{margin:0}
+.conn-steps{margin:0;padding-left:1.4em;display:flex;flex-direction:column;gap:var(--sp-1);color:var(--text-2)}
+.conn-offer-actions{display:flex;flex-wrap:wrap;gap:var(--sp-2)}
 /* the "Connect" dialog's note under the field */
 .conn-connect-note{margin:0;font-size:var(--fs-meta);line-height:var(--lh-meta);color:var(--text-3)}
 }

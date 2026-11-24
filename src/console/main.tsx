@@ -26,6 +26,7 @@ import { connectQueryClientToSession } from './lib/query/session.ts';
 import { connectQueryClientToSecretRequests } from './lib/query/secret-requests.ts';
 import { connectQueryClientToSchedule } from './lib/query/schedule.ts';
 import { connectQueryClientToSystem } from './lib/query/system.ts';
+import { connectQueryClientToBrowsers } from './lib/query/browsers.ts';
 import { connectQueryClientToUploads } from './lib/query/uploads.ts';
 import { PHONE_MEDIA, installPinchGuard } from './lib/touch/pinch.ts';
 import { installKeyboardWatch } from './lib/touch/keyboard.ts';
@@ -100,6 +101,9 @@ connectQueryClientToSchedule(store, queryClient);
 // A restart completed in the log is a new process: its facts are read again
 // (lib/query/system.ts).
 connectQueryClientToSystem(store, queryClient);
+// The stream said the linked browsers changed: the list is read again
+// (lib/query/browsers.ts).
+connectQueryClientToBrowsers(store, queryClient);
 connectQueryClientToUploads(store, queryClient);
 
 // The operator's console is the operator's: the store and the query client

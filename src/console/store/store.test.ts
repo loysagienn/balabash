@@ -64,6 +64,25 @@ const SECRET_REQUESTS: Api['secretRequests'] = {
   provision: async () => ({ ok: true }),
 };
 
+const BROWSERS: Api['browsers'] = {
+  list: async () => ({ browsers: [], others: [], extension: { id: 'extension', version: null } }),
+  requestPairing: async () => {
+    throw new Error('not here');
+  },
+  rename: async () => {
+    throw new Error('not here');
+  },
+  enableHere: async () => {
+    throw new Error('not here');
+  },
+  disableHere: async () => {
+    throw new Error('not here');
+  },
+  disconnect: async () => {
+    throw new Error('not here');
+  },
+};
+
 const INSTALLATION_SERVICES: Api['installationServices'] = {
   list: async () => ({ services: [] }),
   requestSecrets: async () => {
@@ -93,7 +112,7 @@ function fakeApi(overrides: ApiOverrides = {}, calls: Calls = []): Api {
 
       return impl(...args);
     };
-  const base: Omit<Api, 'threads' | 'workspace' | 'workspaces' | 'files' | 'settings' | 'user' | 'llmRequests' | 'limits' | 'system' | 'secretRequests' | 'installationServices' | 'projects' | 'apps' | 'schedule' | 'connections'> = {
+  const base: Omit<Api, 'threads' | 'workspace' | 'workspaces' | 'files' | 'settings' | 'user' | 'llmRequests' | 'limits' | 'system' | 'secretRequests' | 'installationServices' | 'projects' | 'apps' | 'schedule' | 'connections' | 'browsers'> = {
     me: async () => ME,
     auth: async () => ME,
     consoleCode: async () => null,
@@ -208,6 +227,7 @@ function fakeApi(overrides: ApiOverrides = {}, calls: Calls = []): Api {
     system: SYSTEM,
     secretRequests: SECRET_REQUESTS,
     installationServices: INSTALLATION_SERVICES,
+    browsers: BROWSERS,
     schedule: {
       runs: schedule.runs,
       latestRuns: schedule.latestRuns,

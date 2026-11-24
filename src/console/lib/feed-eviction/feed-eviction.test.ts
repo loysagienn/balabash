@@ -143,6 +143,24 @@ const api: Api = {
       throw new Error('not here');
     },
   },
+  browsers: {
+    list: async () => ({ browsers: [], others: [], extension: { id: 'extension', version: null } }),
+    requestPairing: async () => {
+      throw new Error('not here');
+    },
+    rename: async () => {
+      throw new Error('not here');
+    },
+    enableHere: async () => {
+      throw new Error('not here');
+    },
+    disableHere: async () => {
+      throw new Error('not here');
+    },
+    disconnect: async () => {
+      throw new Error('not here');
+    },
+  },
   installationServices: {
     list: async () => ({ services: [] }),
     requestSecrets: async () => {

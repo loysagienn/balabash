@@ -4,7 +4,9 @@
   // by `npm run types` through this file. From the core tree it may import
   // ONLY contract types (src/api/contract.ts, src/core/contract.ts,
   // src/core/event-types.ts — type-only), src/utils and src/projections
-  // (isolated runtime modules) — nothing that touches node.
+  // (isolated runtime modules) and the wire of the browser link
+  // (src/browser-link/protocol.ts: the messages a page sends to the
+  // extension) — nothing that touches node.
   "extends": "../../tsconfig.json",
   "compilerOptions": {
     "lib": ["ESNext", "DOM", "DOM.Iterable"],
@@ -15,6 +17,6 @@
     "types": ["node"],
     "jsx": "react-jsx"
   },
-  "include": ["./**/*", "../api/contract.ts", "../core/contract.ts", "../core/event-types.ts", "../projections/**/*", "../utils/**/*"],
+  "include": ["./**/*", "../api/contract.ts", "../core/contract.ts", "../core/event-types.ts", "../projections/**/*", "../utils/**/*", "../browser-link/protocol.ts"],
   "exclude": ["../utils/**/*.test.ts", "../projections/**/*.test.ts"]
 }
