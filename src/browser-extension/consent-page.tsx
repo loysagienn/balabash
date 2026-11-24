@@ -27,15 +27,31 @@ const WIDTH = 400;
 
 const id = new URLSearchParams(location.search).get('id') ?? '';
 
-// The window as tall as what it shows.
-async function fitWindow(): Promise<void> {
-  const current = await chrome.windows.getCurrent();
-  const width = WIDTH + (window.outerWidth - window.innerWidth);
-  const height = document.body.offsetHeight + (window.outerHeight - window.innerHeight);
+// The window as tall as what it shows. What it shows changes — the request
+// ends under it — and so does the room Chrome leaves the page: the bar that
+// says the browser is being debugged comes into every window, this one too,
+// when the session that asks attaches its debugger. So the window is fitted
+// again whenever the page or its room changes, one fitting at a time.
+let fitting: Promise<void> = Promise.resolve();
 
-  if (current.id !== undefined && current.type === 'popup' && (current.width !== width || current.height !== height)) {
+async function fit(): Promise<void> {
+  const content = document.body.offsetHeight;
+  const current = await chrome.windows.getCurrent();
+
+  if (current.id === undefined || current.type !== 'popup' || content === 0) {
+    return;
+  }
+
+  const width = WIDTH + (window.outerWidth - window.innerWidth);
+  const height = content + (window.outerHeight - window.innerHeight);
+
+  if (Math.abs((current.width ?? 0) - width) > 1 || Math.abs((current.height ?? 0) - height) > 1) {
     await chrome.windows.update(current.id, { width, height });
   }
+}
+
+function fitWindow(): void {
+  fitting = fitting.then(fit).catch(() => {});
 }
 
 function Consent() {
@@ -71,9 +87,25 @@ function Consent() {
     document.title = !shown ? 'Balabash Agent' : over ? `Request over — ${address.host}` : `Give ${address.host} to an agent?`;
   }, [shown, over, address.host]);
 
+  // Nothing to fit the window to until there is something to show.
+  const drawn = request !== undefined;
+
   useLayoutEffect(() => {
-    void fitWindow().catch(() => {});
-  }, [request === undefined, over]);
+    if (!drawn) {
+      return;
+    }
+
+    const observer = new ResizeObserver(fitWindow);
+
+    observer.observe(document.body);
+    window.addEventListener('resize', fitWindow);
+    fitWindow();
+
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', fitWindow);
+    };
+  }, [drawn]);
 
   if (request === undefined) {
     return <div className="cw" aria-busy="true" />;
