@@ -23,7 +23,7 @@ const session = (over: Partial<SessionView>): SessionView => ({
   label: 'Personal — Find flights',
   workspace: 'Personal',
   thread: 'Find flights to Lisbon for March 12–19 and compare fares',
-  group: { title: 'B · Find flights to Lisb…', color: 'blue' },
+  group: { title: 'Find flights to Lisb…', color: 'blue' },
   parked: false,
   tabIds: [10, 11],
   ...over,
@@ -84,7 +84,7 @@ describe('the toolbar button', () => {
   });
 
   it('marks every tab of a session with "B" in the color of its group', () => {
-    const look = actionLook(status({ sessions: [session({}), session({ id: 2, workspace: '', thread: 'Renew', parked: true, tabIds: [20], group: { title: 'B · Renew', color: 'purple' } })] }));
+    const look = actionLook(status({ sessions: [session({}), session({ id: 2, workspace: '', thread: 'Renew', parked: true, tabIds: [20], group: { title: 'Renew', color: 'purple' } })] }));
 
     assert.deepEqual([...look.tabs.keys()], [10, 11, 20]);
     assert.deepEqual(look.tabs.get(10), {

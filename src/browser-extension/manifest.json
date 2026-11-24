@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Balabash Agent",
-  "version": "0.7.1",
+  "version": "0.7.2",
   "description": "Connects this browser to your Balabash server so that its agent can see the tabs, open pages and act in them.",
   "minimum_chrome_version": "120",
   "incognito": "not_allowed",

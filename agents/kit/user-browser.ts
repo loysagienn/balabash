@@ -599,7 +599,7 @@ export function createUserBrowser(options: {
     await open(browser);
 
     return (
-      `A session is open in the browser ${describe(browser)}: one blank tab of its own, in the background, in the tab group of the session (its title starts with "B ·"). ` +
+      `A session is open in the browser ${describe(browser)}: one blank tab of its own, in the background, in the tab group of the session (its title is the start of the title of your thread). ` +
       'The browser tools work in the tabs of this session.'
     );
   };
@@ -642,7 +642,7 @@ export function createUserBrowser(options: {
       {
         name: 'user_browser_connect',
         description:
-          'Choose one of the linked browsers and open a session in it: a blank tab of your own in the tab group of the session (its title starts with "B ·") in that Chrome. ' +
+          'Choose one of the linked browsers and open a session in it: a blank tab of your own in the tab group of the session (its title is the start of the title of your thread) in that Chrome. ' +
           'Name the browser by `browser`, by `owner`, or by both; without arguments — the browser named before, or the only one connected now. ' +
           'A session open in another browser is closed first. This is also the only way to a new session after one has ended.',
         inputSchema: { type: 'object', properties: WANTED_SCHEMA },

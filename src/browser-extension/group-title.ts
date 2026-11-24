@@ -1,10 +1,9 @@
-// How the group of tabs of a session is named in the tab strip: "B · " and
-// the start of the title of the agent's thread while the session lives,
-// "Ended · …" once it is over (the group turns grey then,
+// How the group of tabs of a session is named in the tab strip: the start
+// of the title of the agent's thread while the session lives, "Ended · …"
+// once it is over (the group turns grey then,
 // playwright/tabGroupManager.ts). The popup heads a session with the same
 // words. Nothing here touches chrome.
 
-export const LIVE_PREFIX = 'B · ';
 export const ENDED_PREFIX = 'Ended · ';
 // How much of the thread's title the tab strip gets.
 const THREAD_LENGTH = 20;
@@ -19,18 +18,12 @@ export function startOf(text: string, length: number): string {
 }
 
 export function groupTitle(thread: string): string {
-  const start = startOf(thread, THREAD_LENGTH);
-
-  return start ? `${LIVE_PREFIX}${start}` : UNTITLED;
+  return startOf(thread, THREAD_LENGTH) || UNTITLED;
 }
 
 // The title of a group whose session ended, from the one it had.
 export function endedTitle(title: string | undefined): string {
   const name = (title ?? '').trim();
 
-  if (name.startsWith(ENDED_PREFIX)) {
-    return name;
-  }
-
-  return `${ENDED_PREFIX}${name.startsWith(LIVE_PREFIX) ? name.slice(LIVE_PREFIX.length) : name}`.trim();
+  return name.startsWith(ENDED_PREFIX) ? name : `${ENDED_PREFIX}${name}`.trim();
 }

@@ -484,7 +484,7 @@ async function main(): Promise<void> {
 
     const groupOf = async (tabId: number) => worker.evaluate(async id => chrome.tabGroups.get((await chrome.tabs.get(id)).groupId), tabId);
 
-    assert.deepEqual(await groupOf(firstTab.id).then(group => [group.title, group.color]), ['B · first', 'blue']);
+    assert.deepEqual(await groupOf(firstTab.id).then(group => [group.title, group.color]), ['first', 'blue']);
     await until('the toolbar button counts the session', async () => (await button()).badge === '1');
     assert.match((await button()).title, /1 working/);
     await until('the tab of the session carries its mark', async () => (await button(firstTab.id)).badge === 'B');
@@ -997,7 +997,7 @@ async function main(): Promise<void> {
     // The sessions in the popup, and Stop for one of them.
     await until('the popup lists both sessions', async () => (await listed()).join() === 'first,second');
     assert.equal(await popupPage.getByRole('button', { name: 'Stop all', exact: true }).isVisible(), true);
-    assert.deepEqual(await sessionCard('first').locator('.grp').evaluate((pill: { textContent: string | null; getAttribute(name: string): string | null }) => [pill.textContent, pill.getAttribute('data-c')]), ['B · first', 'blue']);
+    assert.deepEqual(await sessionCard('first').locator('.grp').evaluate((pill: { textContent: string | null; getAttribute(name: string): string | null }) => [pill.textContent, pill.getAttribute('data-c')]), ['first', 'blue']);
     await until('the toolbar button counts both sessions', async () => (await button()).badge === '2');
     await shot(popupPage, 'popup-two-sessions');
     await sessionCard('second').getByRole('button', { name: 'Stop', exact: true }).click();
