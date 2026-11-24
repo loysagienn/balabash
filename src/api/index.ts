@@ -3,6 +3,7 @@
 // surfaces under it) and the main chain of /api, /files, the one-time links
 // and the OAuth redirect that every host above falls through to.
 
+import type { Server } from 'node:http';
 import Koa from 'koa';
 import { config } from '../config/index.ts';
 import { connect } from './connect.ts';
@@ -19,7 +20,9 @@ const REQUEST_TIMEOUT_MS = 3 * 60 * 60 * 1000;
 // body: an upload cancelled in the console (the proxy closes its side).
 const CLIENT_ABORT_CODES = new Set(['ERR_STREAM_PREMATURE_CLOSE', 'ECONNRESET', 'ECONNABORTED', 'EPIPE', 'HPE_INVALID_EOF_STATE']);
 
-export function startWebServer(): void {
+// Answers the server: the owner of a protocol upgrade (src/browser-link)
+// listens on it.
+export function startWebServer(): Server {
   const app = new Koa();
 
   // Behind the TLS-terminating proxy: trust X-Forwarded-* for protocol/ip.
@@ -77,4 +80,6 @@ export function startWebServer(): void {
   server.requestTimeout = REQUEST_TIMEOUT_MS;
 
   console.log(`[web] listening on port ${config.httpPort}`);
+
+  return server;
 }

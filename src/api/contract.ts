@@ -425,6 +425,63 @@ export type DraftConflictErrorBody = {
 export type DraftStreamFrame = { threadId: string; revision: number };
 
 // ---------------------------------------------------------------------------
+// The browsers users linked through the extension (src/browser-link).
+// GET /api/browsers — what the session's user sees from the workspace: all
+// of their own browsers, the browsers of others enabled in the workspace,
+// and the extension this installation hands out. The `browsers` frame of
+// GET /api/events/stream says this answer changed — it carries nothing, the
+// console reads the list again.
+
+// A browser of the session's user.
+export type BrowserView = {
+  id: string;
+  name: string;
+  // Its extension holds a link to the server now.
+  online: boolean;
+  // When it was last on the link; null — never since the pairing.
+  lastSeenAt: Date | null;
+  // What its extension said at the last `hello`.
+  extensionVersion: string | null;
+  // Its extension is older than the one the installation builds.
+  outdated: boolean;
+  // Enabled in the workspace of the request.
+  enabledHere: boolean;
+};
+
+// A browser of another user, enabled in the workspace of the request.
+export type OtherBrowserView = {
+  id: string;
+  name: string;
+  ownerName: string | null;
+  online: boolean;
+};
+
+export type BrowsersResponse = {
+  browsers: BrowserView[];
+  others: OtherBrowserView[];
+  // The extension of this installation: the id a page addresses it by and
+  // the version GET /api/browsers/extension.zip carries — null when the
+  // installation has built none.
+  extension: { id: string; version: string | null };
+};
+
+// POST /api/browsers/pairings — a one-time code for the browser the console
+// is open in: the page hands it to the extension. A name the user already
+// has is refused (409 name_taken), an empty or a long one — 400 invalid_name.
+export type BrowserPairingRequest = { name: string };
+
+export type BrowserPairingResponse = { code: string; expiresAt: Date };
+
+// PATCH /api/browsers/:id — the name; PUT and DELETE
+// /api/browsers/:id/workspace — enabled in the workspace of the request or
+// not; DELETE /api/browsers/:id — disconnected for good. All four are the
+// owner's: to anyone else the browser does not exist (404 not_found). The
+// answer is the browser as the list has it (as it was, for a disconnect).
+export type RenameBrowserRequest = { name: string };
+
+export type BrowserResponse = { browser: BrowserView };
+
+// ---------------------------------------------------------------------------
 // A stored file's facts by id: GET /api/files/:fileId/meta, under the
 // session with the ownership rule of the bytes (GET /api/files/:fileId) — a
 // foreign file and a missing one are the same 404. For the attachments of

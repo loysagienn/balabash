@@ -25,6 +25,10 @@
 // `hello` closes the link with CLOSE_UNSUPPORTED_PROTOCOL.
 export const PROTOCOL_VERSION = 1;
 
+// The id of the extension, the same in every build: the `key` of its
+// manifest (src/browser-extension/manifest.json) fixes it.
+export const EXTENSION_ID = 'moadcglcgjkicomjkmccjfckhoeohhck';
+
 export const CONTROL_PATH = '/browser-link/control';
 export const SESSION_PATH = '/browser-link/session';
 

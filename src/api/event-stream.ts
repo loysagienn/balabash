@@ -14,11 +14,15 @@
 // browser's Last-Event-ID stays the log's cursor, and a reconnect does not
 // replay them (the console reads the draft itself after a reconnect).
 // Ephemeral: sent the moment they arrive, before or after the catch-up.
+// The same way travel the signals of the linked browsers
+// (src/browser-link): `event: browsers` with empty data says the list of
+// browsers this user sees from this workspace changed.
 
 import type { Context } from 'koa';
 import type { Event } from '../core/contract.ts';
 import type { LiveHub } from '../core/live.ts';
 import type { DraftSignal, DraftSignals } from '../drafts/index.ts';
+import type { BrowserSignals } from '../browser-link/index.ts';
 import type { DraftStreamFrame } from './contract.ts';
 import { stringifyJson } from '../utils/serialize-json.ts';
 
@@ -28,6 +32,8 @@ export type EventStreamDeps = {
   readAfter: (seq: bigint, limit: number) => Promise<Event[]>;
   // The draft signals of the users (src/drafts); none — no draft frames.
   drafts?: Pick<DraftSignals, 'subscribe'>;
+  // The signals of the linked browsers (src/browser-link); none — no browsers frames.
+  browsers?: Pick<BrowserSignals, 'subscribe'>;
   heartbeatMs?: number;
   pageSize?: number;
 };
@@ -50,7 +56,9 @@ export function draftFrame(signal: DraftSignal): string {
 
 // The handler assumes the session gate already ran (ctx.state.workspaceId,
 // ctx.state.userId).
-export function createEventStreamHandler({ hub, readAfter, drafts, heartbeatMs = HEARTBEAT_MS, pageSize = 500 }: EventStreamDeps) {
+export const BROWSERS_FRAME = 'event: browsers\ndata: {}\n\n';
+
+export function createEventStreamHandler({ hub, readAfter, drafts, browsers, heartbeatMs = HEARTBEAT_MS, pageSize = 500 }: EventStreamDeps) {
   return async (ctx: Context): Promise<void> => {
     const workspaceId = ctx.state.workspaceId as string;
     const userId = typeof ctx.state.userId === 'string' ? ctx.state.userId : null;
@@ -113,6 +121,16 @@ export function createEventStreamHandler({ hub, readAfter, drafts, heartbeatMs =
           })
         : () => {};
 
+    // The browsers this user sees from this workspace changed.
+    const unsubscribeBrowsers =
+      browsers && userId !== null
+        ? browsers.subscribe(userId, workspaceId, () => {
+            if (!closed) {
+              res.write(BROWSERS_FRAME);
+            }
+          })
+        : () => {};
+
     const heartbeat = setInterval(() => {
       if (!closed) {
         res.write(': ping\n\n');
@@ -128,6 +146,7 @@ export function createEventStreamHandler({ hub, readAfter, drafts, heartbeatMs =
       clearInterval(heartbeat);
       unsubscribe();
       unsubscribeDrafts();
+      unsubscribeBrowsers();
       res.end();
     };
 

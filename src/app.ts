@@ -29,6 +29,7 @@ import { startTelemetry } from './runtime/telemetry.ts';
 import { startSessionCleanup } from './capabilities/session-cleanup.ts';
 import { createCoordinatorRun, hasActiveCoordinatorTurns, settleMainThreadStates } from './coordinator/index.ts';
 import { startWebServer } from './api/index.ts';
+import { startBrowserLink } from './browser-link/index.ts';
 import { startThreadRouter } from './runtime/router.ts';
 import { isRemoteEngineBusy, openRemoteThread, remoteFacade, startRemoteEngine } from './remote/engine.ts';
 import { RESTART_EXIT_CODE, completePendingRestarts, startRestartModule } from './runtime/restart.ts';
@@ -109,7 +110,7 @@ await refreshRemoteSecretTargets();
 // layer before the web surface and the schedule can ask for one.
 await startTree(journalExtensionFailure);
 
-startWebServer();
+const webServer = startWebServer();
 
 // Channel adapters are optional: Telegram
 // exists only when TELEGRAM_BOT_TOKEN is set. The core does not know which
@@ -122,6 +123,11 @@ if (!telegram) {
 }
 
 const consumers: Consumer[] = [];
+
+// The links the extensions of users' browsers open to the console domain
+// (src/browser-link): WebSocket upgrades of the web server. Not a log
+// consumer, but it stops like one.
+consumers.push({ name: 'browser-link', stop: startBrowserLink(webServer) });
 
 // The session journals: the course of every SDK session (session.* events)
 // observed from the stream taps of both harnesses — before the router, so

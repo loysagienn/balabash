@@ -130,10 +130,13 @@ export async function findBrowserBySecret(secret: string): Promise<BrowserRecord
   return row ? record(row) : null;
 }
 
-// The browser dialed in: when, and with which extension. Null when the row
-// is gone meanwhile.
-export async function recordBrowserSeen(id: string, extensionVersion: string): Promise<BrowserRecord | null> {
-  const { count } = await prisma.userBrowser.updateMany({ where: { id }, data: { extensionVersion, lastSeenAt: new Date() } });
+// The browser was on the link just now — and, when it has just dialed in,
+// with which extension. Null when the row is gone meanwhile.
+export async function recordBrowserSeen(id: string, extensionVersion?: string): Promise<BrowserRecord | null> {
+  const { count } = await prisma.userBrowser.updateMany({
+    where: { id },
+    data: { lastSeenAt: new Date(), ...(extensionVersion === undefined ? {} : { extensionVersion }) },
+  });
   const row = count ? await prisma.userBrowser.findUnique({ where: { id } }) : null;
 
   return row ? record(row) : null;
