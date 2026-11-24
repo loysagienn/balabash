@@ -14,12 +14,14 @@
  * limitations under the License.
  */
 
-// Changed for Balabash: the title of the toolbar button on a tab with the debugger attached (showBadge).
+// Changed for Balabash: the title of the toolbar button on a tab with the debugger attached (showBadge);
+// the pages of extensions are among the ones no client debugs (NON_DEBUGGABLE_SCHEMES) — Chrome itself
+// lets an extension debug its own pages, which have the extension's rights.
 
 
 import type { ClientSession } from './clientSession';
 
-const NON_DEBUGGABLE_SCHEMES = ['chrome:', 'edge:', 'devtools:'];
+const NON_DEBUGGABLE_SCHEMES = ['chrome:', 'edge:', 'devtools:', 'chrome-extension:'];
 const REANNOUNCE_DELAY_MS = 150;
 const REANNOUNCE_COOLDOWN_MS = 3000;
 

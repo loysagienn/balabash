@@ -76,9 +76,12 @@ export const CLOSE_UNSUPPORTED_PROTOCOL = 4426;
 export const CLOSE_SESSION_STOPPED = 4000;
 export const CLOSE_SESSION_REVOKED = 4001;
 
-// The first version of the extension that parks a session. An older one
-// keeps its session open, debugger and bar, for as long as the run lives.
-export const PARKING_SINCE_VERSION = '0.5.0';
+// The first version of the extension an agent works through: the one that
+// holds every boundary a session is promised to be held to. An older
+// extension still connects — its browser shows in the console as outdated,
+// which is how its user learns to update it — but its tabs are not listed
+// and no session is opened in it.
+export const SESSIONS_SINCE_VERSION = '0.6.0';
 
 // The `code` of the refusal to bring back a parked session the extension
 // holds no more: on a link that lives, the user has stopped it.
@@ -94,15 +97,17 @@ export type BrowserTab = {
   active: boolean;
   // Held by a session already.
   owned: boolean;
-  // chrome:// and the like cannot be attached to.
+  // chrome:// and the like are no session's to work in.
   debuggable: boolean;
 };
 
 // Why the extension refused a request, in the `code` of its answer: the user
 // switched the list of tabs off; the user declined to hand the tab over or
-// did not answer in a minute; the tab shows a site of the user's blocked
-// list; Chrome lets nobody debug the tab; the tab is another session's.
-export type ControlRefusal = 'tabs_hidden' | 'declined' | 'no_answer' | 'blocked_site' | 'not_debuggable' | 'owned';
+// did not answer in a minute; the tab went to another site while the user
+// was deciding; the tab shows a site of the user's blocked list; nobody
+// debugs the tab — a page of the browser itself or of an extension; the tab
+// is another session's.
+export type ControlRefusal = 'tabs_hidden' | 'declined' | 'no_answer' | 'tab_changed' | 'blocked_site' | 'not_debuggable' | 'owned';
 
 export type ControlRequests = {
   // The tabs of blocked sites are not in the list.

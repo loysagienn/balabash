@@ -72,6 +72,17 @@ describe('the browser a run takes', () => {
     assert.match(chosen(all, { owner: 'Vera' }), /More than one linked browser is a browser of Vera/);
     assert.match(chosen(all, { browser: 'Office' }), /No browser linked to this workspace is "Office"[\s\S]*b-work/);
   });
+
+  test('named by an id and by an owner who is not its owner, is a refusal: the id does not win over the owner', () => {
+    const all = [WORK, HOME, OTHER];
+
+    assert.equal(chosen(all, { browser: 'b-other', owner: 'Ilya' }), 'b-other');
+
+    const contradiction = chosen(all, { browser: 'b-other', owner: 'Vera' });
+
+    assert.match(contradiction, /No browser linked to this workspace is "b-other" of Vera/);
+    assert.match(contradiction, /"Home" of Ilya Markov — connected \(id b-other\)/);
+  });
 });
 
 // A session of the fake link: the test ends it by hand, and plays what
@@ -95,9 +106,8 @@ type Opened = {
   };
 };
 
-// A link whose sessions the test ends by hand. `canPark` — the extension
-// behind it parks sessions.
-function fakeLink(browsers: WorkspaceBrowser[], canPark = false) {
+// A link whose sessions the test ends by hand.
+function fakeLink(browsers: WorkspaceBrowser[]) {
   const opened: Opened[] = [];
   // How the user answers a request for a tab: nothing — they agree.
   const answers: { claim: null | ControlRefusal; tabs: null | ControlRefusal } = { claim: null, tabs: null };
@@ -128,7 +138,6 @@ function fakeLink(browsers: WorkspaceBrowser[], canPark = false) {
         notify = () => listener({ sessionId: 1, kind: 'tab_blocked', tabId: 9 });
       },
       tabIds: () => entry.tabs,
-      canPark,
       park: async (): Promise<ParkedBrowserSession> => {
         const parked = outcome();
         const state: NonNullable<Opened['parked']> = { end: parked.end, closed: false };
@@ -233,6 +242,42 @@ describe('a session', () => {
     assert.equal(offline.opened.length, 0);
   });
 
+  test('is not moved to another browser when the chosen one is the workspace’s no more', async () => {
+    const browsers = [WORK, OTHER];
+    const { opened, call, snapshot } = run(browsers);
+
+    await call('user_browser_connect', { browser: 'b-work' });
+    // Its owner switched it off here: the session ends, and the only browser left is another person's.
+    browsers.splice(0, 1);
+    opened[0].end('revoked');
+    await settle();
+    await assert.rejects(snapshot(), /Access to the browser "Work laptop" of Vera Sokolova was withdrawn/);
+
+    const refusal = /The browser you chose, "Work laptop" of Vera Sokolova, is not linked to this workspace any more[\s\S]*"Home" of Ilya Markov — connected \(id b-other\)/;
+
+    await assert.rejects(call('user_browser_connect'), refusal);
+    await assert.rejects(call('user_browser_tabs'), refusal);
+    assert.equal(opened.length, 1, 'no session in the browser of another');
+    assert.match(String(await call('user_browser_connect', { browser: 'b-other' })), /A session is open in the browser "Home" of Ilya Markov/);
+  });
+
+  test('is refused in words by a browser whose extension is too old', async () => {
+    const { link } = fakeLink([WORK]);
+    const userBrowser = createUserBrowser({
+      workspaceId: 'w',
+      clientName: 'test',
+      label: async () => '',
+      link: {
+        ...link,
+        open: async () => {
+          throw new BrowserAccessError('outdated', 'The extension of this browser is older than 0.6.0');
+        },
+      },
+    });
+
+    await assert.rejects(userBrowser.context(), /The extension in the browser "Work laptop" of Vera Sokolova is too old to work through: its owner has to update it/);
+  });
+
   test('moves to another browser on user_browser_connect, closing the one it had', async () => {
     const { opened, call, snapshot } = run([WORK, OTHER]);
 
@@ -301,8 +346,9 @@ describe('the boundaries the user keeps in the extension', () => {
     for (const [code, text] of [
       ['declined', /The user declined to hand this tab over\. Do not ask for it again/],
       ['no_answer', /did not answer the request within a minute/],
+      ['tab_changed', /went to another site while the user was deciding, so it was not handed over/],
       ['blocked_site', /a site of the user's list of blocked sites/],
-      ['not_debuggable', /Chrome lets nobody work in this tab/],
+      ['not_debuggable', /Nobody can work in this tab: it shows a page of the browser itself or of an extension/],
       ['owned', /belongs to the session of another agent/],
     ] as const) {
       answers.claim = code;
@@ -330,12 +376,13 @@ describe('the boundaries the user keeps in the extension', () => {
   });
 });
 
-// A run over an extension that parks sessions, with the kit's tool of tabs
-// played: `kit.current` is the number of the tab the kit works in — the
-// first one for a client that has just connected, as in Playwright MCP.
-function parkingRun() {
-  const { link, opened } = fakeLink([WORK], true);
-  const userBrowser = createUserBrowser({ workspaceId: 'w', clientName: 'test', label: async () => 'Label', link, idleParkMs: 20 });
+// A run that parks its session soon, with the kit's tool of tabs played:
+// `kit.current` is the number of the tab the kit works in — the first one
+// for a client that has just connected, as in Playwright MCP. `label`
+// plays the reading of the session's label.
+function parkingRun(label: () => Promise<string> = async () => 'Label') {
+  const { link, opened } = fakeLink([WORK]);
+  const userBrowser = createUserBrowser({ workspaceId: 'w', clientName: 'test', label, link, idleParkMs: 20 });
   const tools = new Map(userBrowser.tools().map(tool => [tool.name, tool]));
   const kit = { current: 0, selected: [] as number[], endpoint: '' };
   const endpoint = async () => {
@@ -361,7 +408,7 @@ function parkingRun() {
     },
   });
 
-  userBrowser.guard({
+  const tabs = userBrowser.guard({
     name: 'browser_tabs',
     description: '',
     inputSchema: {},
@@ -384,6 +431,7 @@ function parkingRun() {
     opened,
     kit,
     snapshot: () => snapshot.handler({}),
+    tabs: (args: JsonObject = { action: 'list' }) => tabs.handler(args),
     slow: () => slow.handler({}),
     call: (name: string, args: JsonObject = {}) => tools.get(name)!.handler(args),
     idle: () => new Promise(resolve => setTimeout(resolve, 60)),
@@ -411,18 +459,30 @@ describe('a session nobody uses', () => {
     assert.equal(opened[0].parked.closed, false);
   });
 
-  test('stays open while a call is in flight, and when the extension does not park', async () => {
+  test('stays open while a call is in flight', async () => {
     const { opened, slow } = parkingRun();
 
     assert.equal(await slow(), 'ws://test/0');
     assert.equal(opened[0].parked, undefined, 'a call longer than the idle time is not idleness');
+  });
 
-    const old = run([WORK]);
+  test('stays parked when its label cannot be read, and comes back by the next call', async () => {
+    let fails = false;
+    const { opened, snapshot, idle } = parkingRun(async () => {
+      if (fails) {
+        throw new Error('the database is away');
+      }
 
-    await old.snapshot();
-    await new Promise(resolve => setTimeout(resolve, 60));
-    assert.equal(await old.snapshot(), 'ws://test/0');
-    assert.equal(old.opened.length, 1);
+      return 'Label';
+    });
+
+    await snapshot();
+    await idle();
+    fails = true;
+    await assert.rejects(snapshot(), /The session was not brought back: its label could not be read \(the database is away\)\. Try again\./);
+    assert.equal(opened[0].parked!.asked, undefined, 'the parked session was not touched');
+    fails = false;
+    assert.equal(await snapshot(), 'ws://test/1');
   });
 
   test('comes back for a tab the agent asks the user for', async () => {
@@ -434,7 +494,7 @@ describe('a session nobody uses', () => {
     assert.deepEqual(opened.map(entry => entry.claims), [[], [7]]);
   });
 
-  test('that lost tabs while it was parked says so once, with the result of the call that brought it back', async () => {
+  test('that lost the tab the agent worked in refuses the call that brought it back, once, before anything is done', async () => {
     const { opened, kit, snapshot, idle } = parkingRun();
 
     await snapshot();
@@ -442,13 +502,43 @@ describe('a session nobody uses', () => {
     kit.current = 1;
     await idle();
     opened[0].parked!.back = [11, 13];
-
-    const said = String(await snapshot());
-
-    assert.match(said, /^While your session was parked, one of its tabs was closed or taken out of its group by the user — the tab you were working in among them\./);
-    assert.match(said, /ws:\/\/test\/1$/);
+    await assert.rejects(
+      snapshot(),
+      /^Error: While your session was parked, one of its tabs was closed or taken out of its group by the user — the tab you were working in among them\.[\s\S]*Your call was not carried out: the numbers of the tabs have changed/,
+    );
+    assert.equal(kit.endpoint, 'ws://test/0', 'the call did not reach the kit: it has not met the new client');
     assert.deepEqual(kit.selected, [], 'there is no tab to go back to');
     assert.equal(await snapshot(), 'ws://test/1', 'told once');
+  });
+
+  test('that lost an earlier tab keeps the agent’s tab current under its new number, and still refuses the call', async () => {
+    const { opened, kit, snapshot, idle } = parkingRun();
+
+    await snapshot();
+    opened[0].tabs = [11, 12, 13];
+    kit.current = 2;
+    await idle();
+    opened[0].parked!.back = [12, 13];
+    await assert.rejects(snapshot(), /^Error: While your session was parked, one of its tabs was closed or taken out of its group by the user\.[\s\S]*Your call was not carried out/);
+    assert.deepEqual(kit.selected, [1], 'the tab the kit worked in is current again, one number lower');
+    assert.equal(await snapshot(), 'ws://test/1');
+  });
+
+  test('that lost tabs lets the listing of its tabs through, with the news ahead of it', async () => {
+    const { opened, kit, snapshot, tabs, idle } = parkingRun();
+
+    await snapshot();
+    opened[0].tabs = [11, 12, 13];
+    kit.current = 0;
+    await idle();
+    opened[0].parked!.back = [11, 12];
+
+    const listed = String(await tabs());
+
+    assert.match(listed, /^While your session was parked, one of its tabs was closed or taken out of its group by the user\. /);
+    assert.match(listed, /- 0: \(current\) \[Tab 11\]/);
+    assert.doesNotMatch(listed, /Your call was not carried out/);
+    assert.equal(await snapshot(), 'ws://test/1', 'nothing more to tell');
   });
 
   for (const [end, text] of [

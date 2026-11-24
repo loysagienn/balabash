@@ -117,18 +117,27 @@ function showSettings(settings: Settings | undefined): void {
   withoutAsking.checked = settings.tabsWithoutAsking;
 }
 
-// Everything on the page, as it stands; the answer is what was kept — the
-// sites as the list holds them.
-function saveSettings(): void {
+// The list of sites as it is typed; the answer is what was kept — the sites
+// as the list holds them.
+function saveSites(): void {
   saved.textContent = '';
-  void ask({
-    type: 'setSettings',
-    blockedSites: blockedSites.value.split('\n'),
-    tabsListHidden: !tabsList.checked,
-    tabsWithoutAsking: withoutAsking.checked,
-  }).then(settings => {
+  void ask({ type: 'setSettings', blockedSites: blockedSites.value.split('\n') }).then(settings => {
     showSettings(settings);
     saved.textContent = settings ? 'Saved.' : 'Not saved: the extension did not answer.';
+  });
+}
+
+// A switch saves itself alone: the list of sites the user is still typing
+// stays a draft until Save.
+function saveSwitch(change: { tabsListHidden: boolean } | { tabsWithoutAsking: boolean }): void {
+  saved.textContent = '';
+  void ask({ type: 'setSettings', ...change }).then(settings => {
+    if (settings) {
+      tabsList.checked = !settings.tabsListHidden;
+      withoutAsking.checked = settings.tabsWithoutAsking;
+    } else {
+      saved.textContent = 'Not saved: the extension did not answer.';
+    }
   });
 }
 
@@ -143,7 +152,7 @@ stopAll.addEventListener('click', () => {
   following.changed();
   void ask({ type: 'stopSessions' }).then(show);
 });
-tabsList.addEventListener('change', saveSettings);
-withoutAsking.addEventListener('change', saveSettings);
-save.addEventListener('click', saveSettings);
+tabsList.addEventListener('change', () => saveSwitch({ tabsListHidden: !tabsList.checked }));
+withoutAsking.addEventListener('change', () => saveSwitch({ tabsWithoutAsking: withoutAsking.checked }));
+save.addEventListener('click', saveSites);
 void ask({ type: 'getSettings' }).then(showSettings);

@@ -33,11 +33,11 @@ describe('a pairing', () => {
   test('makes a browser of the user, enabled in the workspace it was started from, and its secret finds it', async () => {
     const userId = await newUser('Ada');
     const workspaceId = await newWorkspace();
-    const { browser, secret, replacedId } = await store.pairBrowser({ userId, workspaceId, name: '  MacBook  ' });
+    const { browser, secret, replaced } = await store.pairBrowser({ userId, workspaceId, name: '  MacBook  ' });
 
     assert.equal(browser.name, 'MacBook');
     assert.equal(browser.userId, userId);
-    assert.equal(replacedId, null);
+    assert.equal(replaced, null);
     assert.deepEqual(await store.browserWorkspaces(browser.id), [workspaceId]);
     assert.equal((await store.findBrowserBySecret(secret))?.id, browser.id);
     assert.equal(await store.findBrowserBySecret('some-other-secret'), null);
@@ -65,10 +65,19 @@ describe('a pairing', () => {
   test('with the secret the extension had before replaces that browser: its row and its secret are gone', async () => {
     const userId = await newUser('Ada');
     const workspaceId = await newWorkspace();
+    const elsewhere = await newWorkspace();
     const first = await store.pairBrowser({ userId, workspaceId, name: 'Laptop' });
+
+    await store.enableBrowser(userId, first.browser.id, elsewhere);
+
     const second = await store.pairBrowser({ userId, workspaceId, name: 'Laptop', previousSecret: first.secret });
 
-    assert.equal(second.replacedId, first.browser.id);
+    // Whose it was and where it was enabled: the consoles there are told that it is gone.
+    assert.deepEqual(
+      { ...second.replaced, workspaceIds: second.replaced?.workspaceIds.toSorted() },
+      { id: first.browser.id, userId, workspaceIds: [workspaceId, elsewhere].toSorted() },
+    );
+    assert.deepEqual(await store.browserWorkspaces(second.browser.id), [workspaceId], 'the new browser is enabled where it was paired');
     assert.notEqual(second.browser.id, first.browser.id);
     assert.equal(await store.findBrowserBySecret(first.secret), null);
     assert.equal((await store.findBrowserBySecret(second.secret))?.id, second.browser.id);
@@ -77,7 +86,7 @@ describe('a pairing', () => {
     // A secret that stands for nothing replaces nothing.
     const third = await store.pairBrowser({ userId, workspaceId, name: 'Another', previousSecret: first.secret });
 
-    assert.equal(third.replacedId, null);
+    assert.equal(third.replaced, null);
   });
 });
 

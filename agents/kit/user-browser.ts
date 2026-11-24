@@ -11,7 +11,10 @@
 // Which browser: the one the agent named with `user_browser_connect`;
 // unnamed — the only one connected now. Anything else is a refusal that
 // lists the candidates: the agent picks by its operator's words or hands
-// the list back, it does not guess.
+// the list back, it does not guess. Nor does this module guess for it: an
+// id and an owner that name different browsers are a refusal, and so is a
+// browser named before that the workspace has no more — another browser is
+// another person's.
 //
 // A session that ended by somebody else's hand — the user stopped it, the
 // owner withdrew the browser, the link was lost — is not opened again
@@ -27,10 +30,13 @@
 // back here: the tabs come back in the order the kit numbered them, and the
 // tab the kit worked in is made its current tab again (the kit's own
 // browser_tabs tells which one that is, and selects it). What cannot be put
-// back is said to the agent with the result of that call: the tabs the user
-// closed or took out of the group meanwhile. A parked session can end like
-// an open one — the user stops it, the owner withdraws the browser, the
-// link is lost — and the next browser call then answers with the reason.
+// back — the user closed a tab or took it out of the group meanwhile, so
+// the numbers of the tabs moved, or the tab the kit worked in is gone — is
+// said to the agent instead of doing what it asked: the call that brought
+// the session back is refused once, before it acts in a tab the agent did
+// not mean. A parked session can end like an open one — the user stops it,
+// the owner withdraws the browser, the link is lost — and the next browser
+// call then answers with the reason.
 //
 // The user's boundaries live in the extension, and what it refuses comes
 // here as a code this module turns into words: a tab the user did not hand
@@ -119,12 +125,10 @@ export function chooseBrowser(candidates: WorkspaceBrowser[], wanted: Wanted | n
   const owner = wanted?.owner?.trim().toLowerCase();
 
   if (named || owner) {
+    const ownedBy = (browser: WorkspaceBrowser) => !owner || (browser.ownerName ?? '').toLowerCase().includes(owner);
     const byId = named ? candidates.find(browser => browser.id === named) : undefined;
-    const matches = byId
-      ? [byId]
-      : candidates.filter(
-          browser => (!named || same(browser.name, named)) && (!owner || (browser.ownerName ?? '').toLowerCase().includes(owner)),
-        );
+    // An id names one browser, and an owner named with it must be its owner.
+    const matches = byId ? [byId].filter(ownedBy) : candidates.filter(browser => (!named || same(browser.name, named)) && ownedBy(browser));
     const asked = [named ? `"${named}"` : 'a browser', owner ? `of ${wanted!.owner!.trim()}` : ''].filter(Boolean).join(' ');
 
     if (matches.length === 1) {
@@ -183,8 +187,11 @@ const REFUSALS: Record<ControlRefusal, string> = {
     'The user declined to hand this tab over. Do not ask for it again unless the operator says so; report this to the operator.',
   no_answer:
     'The user did not answer the request within a minute, so the tab was not handed over. Report this to the operator: the user may be away from the browser.',
+  tab_changed:
+    'The tab went to another site while the user was deciding, so it was not handed over: their answer was about the page it showed before. ' +
+    'user_browser_tabs shows what the tab shows now; ask for it again if it is still the one you need.',
   blocked_site: "This tab shows a site of the user's list of blocked sites: it is closed to you. Report this to the operator.",
-  not_debuggable: 'Chrome lets nobody work in this tab: it shows a page of the browser itself.',
+  not_debuggable: 'Nobody can work in this tab: it shows a page of the browser itself or of an extension.',
   owned: 'This tab belongs to the session of another agent.',
 };
 
@@ -193,14 +200,20 @@ export const TAB_TAKEN_TEXT =
   'browser, but you cannot work in it or read it. Do not try to reach that site another way; tell the operator. The session goes on in its other ' +
   'tabs — browser_tabs lists them.';
 
-// What the agent hears with the first result after a parked session came
-// back without some of its tabs.
+// What the agent hears once after a parked session came back without some
+// of its tabs.
 export function tabsGoneText(gone: number, frontGone: boolean): string {
   return (
     `While your session was parked, ${gone === 1 ? 'one of its tabs was' : `${gone} of its tabs were`} closed or taken out of its group by the user` +
     `${frontGone ? ' — the tab you were working in among them' : ''}. The session goes on in the tabs it has now: browser_tabs lists them.`
   );
 }
+
+// Said instead of doing what the agent asked, when the tabs of a session
+// that came back are not the ones the agent knew.
+export const NOT_DONE_TEXT =
+  'Your call was not carried out: the numbers of the tabs have changed, and the current tab may not be the one you meant. ' +
+  'Look at browser_tabs, select the tab you need, then repeat the call.';
 
 // The number of the kit's current tab in the listing its browser_tabs
 // prints ("- 1: (current) [title](url)"), and how many tabs the listing has.
@@ -222,11 +235,15 @@ function accessRefusal(error: unknown, browser: WorkspaceBrowser): Error {
   }
 
   if (error instanceof BrowserAccessError) {
-    return new Error(
-      error.code === 'offline'
-        ? `The browser ${describe(browser)} is not connected now: the Chrome is closed, asleep or offline, or its extension is paused. Report this to the operator instead of waiting for it.`
-        : `The browser ${describe(browser)} is not enabled in this workspace any more. Report this to the operator.`,
-    );
+    const said: Record<BrowserAccessError['code'], string> = {
+      offline: `The browser ${describe(browser)} is not connected now: the Chrome is closed, asleep or offline, or its extension is paused. Report this to the operator instead of waiting for it.`,
+      not_enabled: `The browser ${describe(browser)} is not enabled in this workspace any more. Report this to the operator.`,
+      outdated:
+        `The extension in the browser ${describe(browser)} is too old to work through: its owner has to update it — download the current one on the ` +
+        'Connections screen of the console, unpack it over the old one and press Reload on chrome://extensions. Report this to the operator.',
+    };
+
+    return new Error(said[error.code]);
   }
 
   return new Error(`The browser ${describe(browser)} did not do it: ${error instanceof Error ? error.message : String(error)}`);
@@ -299,15 +316,32 @@ export function createUserBrowser(options: {
   // The kit's own tool of tabs: tells and sets the tab the kit works in.
   let tabsTool: SessionEnvironmentTool | null = null;
   // After a session came back: the number of the tab to make current again,
-  // and what the agent has to hear.
+  // and what the agent has to hear — instead of what it asked for, when the
+  // tabs are not the ones it knew (`halt`).
   let reselect: number | null = null;
   let note: string | null = null;
+  let halt = false;
 
   const pick = async (wanted: Wanted | null): Promise<WorkspaceBrowser> => {
     const candidates = await link.browsers();
+
     // The browser named before stays the choice while it is the workspace's.
-    const remembered = wanted ? null : chosen && candidates.find(browser => browser.id === chosen!.id);
-    const choice = remembered ? { browser: remembered } : chooseBrowser(candidates, wanted);
+    if (!wanted && chosen) {
+      const remembered = candidates.find(browser => browser.id === chosen!.id);
+
+      if (remembered) {
+        return remembered;
+      }
+
+      // Not replaced by whichever is left: that one is another's to offer.
+      throw new Error(
+        `The browser you chose, ${describe(chosen)}, is not linked to this workspace any more: its owner disconnected it or switched it off here. ` +
+          'Report this to the operator; another browser is taken only by naming it with user_browser_connect. ' +
+          (candidates.length ? `The linked browsers:\n${listing(candidates)}` : 'No browser is linked to this workspace now.'),
+      );
+    }
+
+    const choice = chooseBrowser(candidates, wanted);
 
     if ('refusal' in choice) {
       throw new Error(choice.refusal);
@@ -353,6 +387,11 @@ export function createUserBrowser(options: {
       const session = await link.open(browser.id).catch(error => {
         throw accessRefusal(error, browser);
       });
+
+      // A new session owes nothing to the one before it.
+      reselect = null;
+      note = null;
+      halt = false;
 
       return hold(browser, session);
     })().finally(() => {
@@ -410,10 +449,14 @@ export function createUserBrowser(options: {
   const wake = (): Promise<Held> => {
     waking ??= (async (): Promise<Held> => {
       const { browser, parked, order, front } = resting!;
+      // Before the session is touched: without its label it stays parked, and the next call tries again.
+      const label = await options.label().catch(error => {
+        throw new Error(`The session was not brought back: its label could not be read (${error instanceof Error ? error.message : String(error)}). Try again.`);
+      });
       let session: BrowserSession;
 
       try {
-        session = await parked.resume({ clientName: options.clientName, label: await options.label(), tabIds: order });
+        session = await parked.resume({ clientName: options.clientName, label, tabIds: order });
       } catch (error) {
         // A session that did not come back is over, and the link says how.
         const { end } = await parked.ended;
@@ -440,6 +483,7 @@ export function createUserBrowser(options: {
       // The kit starts on the first of the tabs.
       reselect = frontNow > 0 ? frontNow : null;
       note = gone.length ? tabsGoneText(gone.length, front !== null && frontNow === -1) : null;
+      halt = gone.length > 0;
 
       return held;
     })().finally(() => {
@@ -452,7 +496,7 @@ export function createUserBrowser(options: {
   const startIdleClock = () => {
     clearTimeout(idleTimer);
 
-    if (disposed || !current?.session.canPark) {
+    if (disposed || !current) {
       return;
     }
 
@@ -692,7 +736,22 @@ export function createUserBrowser(options: {
               await tabsTool
                 .handler({ action: 'list' })
                 .then(() => tabsTool!.handler({ action: 'select', index }))
-                .catch(error => console.warn('[user-browser] the tab the agent worked in was not made current again:', error));
+                .catch(error => {
+                  console.warn('[user-browser] the tab the agent worked in was not made current again:', error);
+                  note ??= 'Your session was parked and is back, but the tab you were working in could not be made current again.';
+                  halt = true;
+                });
+            }
+
+            // The tabs are not the ones the agent knew: it hears so before
+            // anything is done in a tab it did not mean. Listing them is what
+            // it is told to do.
+            if (halt) {
+              halt = false;
+
+              if (!(tool.name === 'browser_tabs' && args.action === 'list')) {
+                throw new Error(`${told('')}${NOT_DONE_TEXT}`);
+              }
             }
 
             try {

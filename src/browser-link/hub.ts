@@ -30,7 +30,12 @@
 // The parked session is still a session of its control link: it ends with
 // the link, by the user's stop (a notice of the extension) or by the
 // server's own hand, and it comes back by opening a session that names it.
-// An extension older than PARKING_SINCE_VERSION does not park.
+//
+// Opening a session — a new one or a parked one that comes back — has one
+// term for all of its steps (the extension dials the session link, answers
+// the request, says the link is initialized), and the session is the
+// control link's from the moment its link is there: a link that goes takes
+// a half-open session with it.
 //
 // The frames of a session link are handled one per turn of the event loop,
 // in the order they came. An answer reaches whoever waits for it through a
@@ -57,11 +62,9 @@ import {
   CLOSE_UNAUTHORIZED,
   CLOSE_UNSUPPORTED_PROTOCOL,
   CONTROL_PATH,
-  PARKING_SINCE_VERSION,
   PROTOCOL_VERSION,
   SESSION_OVER,
   SESSION_PATH,
-  compareVersions,
 } from './protocol.ts';
 import type {
   BrowserTab,
@@ -83,6 +86,8 @@ const IDLE_TIMEOUT_MS = 60_000;
 const PING_INTERVAL_MS = 25_000;
 // How long the extension has to dial the session link its ticket is for.
 const TICKET_TTL_MS = 15_000;
+// How long opening a session may take, all of its steps together.
+const OPEN_TIMEOUT_MS = 30_000;
 // A frame of the control link is small: a list of tabs at most.
 const MAX_CONTROL_FRAME_BYTES = 4 * 1024 * 1024;
 // A frame of a session link carries what CDP carries: a screenshot, a page.
@@ -114,8 +119,6 @@ export type ExtensionSession = {
   ended: Promise<{ end: SessionEnd; detail: string }>;
   // The server ends the session: done with it by default.
   close(end?: Exclude<SessionEnd, 'stopped'>, detail?: string): void;
-  // Whether the extension behind the link parks sessions.
-  canPark: boolean;
   // Parks the session: the extension lets its tabs go and keeps their
   // group, and the link closes as closed by the server. A refusal ends the
   // session as lost — what the extension holds of it is not known.
@@ -316,7 +319,6 @@ type OpenSession = ExtensionSession & { initialized: Promise<void>; setId(id: nu
 // What a session asks of its control link: a tab of the user, and to be parked.
 type SessionControl = {
   claimTab(sessionId: number, tabId: number): Promise<void>;
-  canPark(): boolean;
   park(session: OpenSession): Promise<ParkedSession>;
 };
 
@@ -334,14 +336,16 @@ export function createBrowserLinkHub(options: {
   host: string | null;
   origin: string | null;
   // How long a link may stay silent, how long it may take to say `hello`,
-  // and how often the server pings.
+  // how often the server pings, and how long opening a session may take.
   idleTimeoutMs?: number;
   helloTimeoutMs?: number;
   pingIntervalMs?: number;
+  openTimeoutMs?: number;
 }): BrowserLinkHub {
   const idleTimeoutMs = options.idleTimeoutMs ?? IDLE_TIMEOUT_MS;
   const helloTimeoutMs = options.helloTimeoutMs ?? HELLO_TIMEOUT_MS;
   const pingIntervalMs = options.pingIntervalMs ?? PING_INTERVAL_MS;
+  const openTimeoutMs = options.openTimeoutMs ?? OPEN_TIMEOUT_MS;
   const controlSockets = new WebSocketServer({ noServer: true, maxPayload: MAX_CONTROL_FRAME_BYTES });
   const sessionSockets = new WebSocketServer({ noServer: true, maxPayload: MAX_SESSION_FRAME_BYTES });
   // `parked` — how each parked session of the link is ended, by its id.
@@ -408,9 +412,6 @@ export function createBrowserLinkHub(options: {
       ended,
       onNotice: null,
       claimTab: tabId => control.claimTab(id, tabId),
-      get canPark() {
-        return control.canPark();
-      },
       park: () => control.park(session),
       send: (method, params) => requester.request(method, params),
       get onEvent() {
@@ -498,7 +499,6 @@ export function createBrowserLinkHub(options: {
     const stopPings = keepAlive(socket, pingIntervalMs);
     const sessions = new Set<OpenSession>();
     const parked = new Map<number, (outcome: Outcome) => void>();
-    let canPark = false;
     let browser: ConnectedBrowser | null = null;
     let admitting = false;
     let idle: NodeJS.Timeout | null = null;
@@ -527,40 +527,44 @@ export function createBrowserLinkHub(options: {
       const ticket = randomBytes(32).toString('base64url');
       const dialed = sessionSocket(ticket);
       const opened = request('session.open', { ticket, clientName, label, ...(resume ? { resume } : {}) });
+      // The one term of all the steps.
+      let timer!: NodeJS.Timeout;
+      const late = new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new BrowserRequestError(`The browser did not open the session in ${openTimeoutMs / 1000} s`)), openTimeoutMs);
+      });
 
-      // Whichever fails first tells why; the other must not be left unhandled.
+      // Whichever fails first tells why; the others must not be left unhandled.
       dialed.socket.catch(() => {});
       opened.catch(() => {});
+      late.catch(() => {});
 
-      let session: OpenSession;
+      let session: OpenSession | undefined;
 
       try {
-        session = wrapSession(await Promise.race([dialed.socket, opened.then(() => dialed.socket)]), control);
+        session = wrapSession(await Promise.race([dialed.socket, opened.then(() => dialed.socket), late]), control);
+
+        const held = session;
+
+        // The control link's from here on: closed with it, and by a revocation.
+        sessions.add(held);
+        void held.ended.then(() => sessions.delete(held));
+        held.setId((await Promise.race([opened, late])).sessionId);
+        await Promise.race([held.initialized, late]);
+
+        if (socket.readyState !== socket.OPEN) {
+          throw new BrowserRequestError('The browser link is closed');
+        }
+
+        return held;
       } catch (error) {
         dialed.forget();
+        // One that somebody closed already keeps its own reason.
+        session?.close('lost');
 
         throw error;
+      } finally {
+        clearTimeout(timer);
       }
-
-      try {
-        session.setId((await opened).sessionId);
-        await session.initialized;
-      } catch (error) {
-        session.close('lost');
-
-        throw error;
-      }
-
-      if (socket.readyState !== socket.OPEN) {
-        session.close('lost');
-
-        throw new BrowserRequestError('The browser link is closed');
-      }
-
-      sessions.add(session);
-      void session.ended.then(() => sessions.delete(session));
-
-      return session;
     };
 
     const park = async (session: OpenSession): Promise<ParkedSession> => {
@@ -633,7 +637,6 @@ export function createBrowserLinkHub(options: {
       claimTab: async (sessionId, tabId) => {
         await request('session.claim', { sessionId, tabId }, CLAIM_TIMEOUT_MS);
       },
-      canPark: () => canPark,
       park,
     };
     const openSession: ConnectedBrowser['openSession'] = ({ clientName, label }) => open({ clientName, label });
@@ -664,7 +667,6 @@ export function createBrowserLinkHub(options: {
       // The same browser dialing again replaces its previous link.
       connected.get(admission.browserId)?.socket.close(1000, 'Replaced by a new link');
 
-      canPark = compareVersions(hello!.extensionVersion, PARKING_SINCE_VERSION) >= 0;
       browser = {
         id: admission.browserId,
         extensionVersion: hello!.extensionVersion,
@@ -766,7 +768,14 @@ export function createBrowserLinkHub(options: {
     browser: browserId => connected.get(browserId)?.browser ?? null,
 
     handleUpgrade(request, socket, head) {
-      const url = new URL(request.url ?? '/', 'http://link');
+      let url: URL;
+
+      try {
+        url = new URL(request.url ?? '/', 'http://link');
+      } catch {
+        // No address of the hub's: every upgrade request of the server passes here.
+        return false;
+      }
 
       if (url.pathname !== CONTROL_PATH && url.pathname !== SESSION_PATH) {
         return false;

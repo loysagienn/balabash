@@ -26,8 +26,12 @@
 // user hands a tab by dragging it into the session's group or from the
 // popup of the extension; the session asks for one through the server
 // (`session.claim`), and the user answers in a window of the extension
-// (consent.ts) — unless they chose in the settings not to be asked. A tab
-// of a blocked site is nobody's to hand.
+// (consent.ts) — unless they chose in the settings not to be asked. The
+// consent is for the tab as the window showed it, given to a session that
+// still lives: a tab that went to another site meanwhile is not handed
+// over, and the question of a session that ended goes with it. A tab of a
+// blocked site, or one that shows a page of an extension, is nobody's to
+// hand.
 //
 // A session whose agent is idle is parked on the server's request: the
 // debugger leaves its tabs — Chrome takes its bar away with the last
@@ -53,7 +57,7 @@
 // says so (CLOSE_SESSION_STOPPED): the agent is told not to come back by
 // itself.
 
-import { applyToAllTabs, blockedSiteError, isBlocked, readSettings } from './boundaries.ts';
+import { applyToAllTabs, blockedSiteError, isBlocked, isOffLimits, readSettings } from './boundaries.ts';
 import type { Consent } from './consent.ts';
 import { report, setReportSink } from './diagnostics.ts';
 import { windowForTabs } from './windows.ts';
@@ -98,6 +102,15 @@ const STOPPED_BY_USER = 'The user stopped the session in the browser';
 // A request the extension refuses, with the machine form of the refusal.
 function refusal(code: ControlRefusal, message: string): Error {
   return Object.assign(new Error(message), { code });
+}
+
+// The site of an address, as far as a consent goes.
+function originOf(url: string | undefined): string {
+  try {
+    return new URL(url ?? '').origin;
+  } catch {
+    return url ?? '';
+  }
 }
 
 // A parked session the server asks back is not held any more.
@@ -502,7 +515,7 @@ export class Link {
     const tabs = await chrome.tabs.query({});
 
     return tabs
-      .filter(tab => tab.id !== undefined && !isBlocked(tab.url ?? tab.pendingUrl))
+      .filter(tab => tab.id !== undefined && !isOffLimits(tab.url ?? tab.pendingUrl))
       .map(tab => ({
         id: tab.id!,
         windowId: tab.windowId,
@@ -547,6 +560,7 @@ export class Link {
     this._didChangeSessions();
     session.onClose = () => {
       this._sessions.delete(sessionId);
+      this._consent.dismiss(session);
       this._didChangeSessions();
       void this._registry.releaseAll(session);
       void this._groups.orphan(session);
@@ -600,6 +614,7 @@ export class Link {
     this._parked.set(sessionId, { label: entry.label, group });
     // Nothing more to end when its link closes.
     entry.session.onClose = undefined;
+    this._consent.dismiss(entry.session);
     await this._registry.releaseAll(entry.session);
     this._didChangeSessions();
 
@@ -608,7 +623,8 @@ export class Link {
 
   // The tabs that are in the group of a session that came back: the ones
   // the server names first, in its order, then the ones the user put there
-  // meanwhile. A tab of a blocked site is put out of the group instead.
+  // meanwhile. A tab that is nobody's to hold — a blocked site, a page of an
+  // extension — is put out of the group instead.
   private async _returnTabs(session: ClientSession, group: ParkedTabGroup, order: number[]): Promise<number> {
     const inGroup = await this._groups.tabsOfParked(group);
     const ordered = [
@@ -618,7 +634,7 @@ export class Link {
     let returned = 0;
 
     for (const tab of ordered) {
-      if (isBlocked(tab.url ?? tab.pendingUrl)) {
+      if (isOffLimits(tab.url ?? tab.pendingUrl)) {
         await this._groups.ungroup(tab.id!);
 
         continue;
@@ -686,7 +702,7 @@ export class Link {
     }
 
     if (!isDebuggableUrl(tab.url ?? tab.pendingUrl)) {
-      throw refusal('not_debuggable', 'Chrome lets nobody work in this tab: it shows a page of the browser itself');
+      throw refusal('not_debuggable', 'Nobody works in this tab: it shows a page of the browser itself or of an extension');
     }
 
     const owner = this._registry.ownerOf(tabId);
@@ -711,10 +727,16 @@ export class Link {
       return {};
     }
 
+    const shown = tab.url ?? tab.pendingUrl ?? '';
     // The user chose in the settings not to be asked.
     const answer = (await readSettings()).tabsWithoutAsking
       ? 'allowed'
-      : await this._consent.ask({ label: entry.label, title: tab.title ?? '', url: tab.url ?? tab.pendingUrl ?? '' });
+      : await this._consent.ask({ label: entry.label, title: tab.title ?? '', url: shown }, entry.session);
+
+    // The session ended while the user was deciding: nobody is there to take the tab.
+    if (this._sessions.get(sessionId)?.session !== entry.session) {
+      throw new Error('This session is over');
+    }
 
     if (answer === 'declined') {
       throw refusal('declined', 'The user declined to hand the tab over');
@@ -725,7 +747,13 @@ export class Link {
     }
 
     // The tab lived on while the user was deciding.
-    this._registry.claim(await this._claimable(tabId, entry.session), entry.session);
+    const now = await this._claimable(tabId, entry.session);
+
+    if (originOf(now.url ?? now.pendingUrl) !== originOf(shown)) {
+      throw refusal('tab_changed', 'The tab went to another site while the user was deciding');
+    }
+
+    this._registry.claim(now, entry.session);
 
     return {};
   }

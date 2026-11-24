@@ -71,19 +71,20 @@ export async function startCdpRelay(session: ExtensionSession): Promise<CdpRelay
     });
 
     socket.on('message', data => {
-      let message: CdpMessage;
+      let message: CdpMessage | null;
 
       try {
-        message = JSON.parse(String(data)) as CdpMessage;
+        message = JSON.parse(String(data)) as CdpMessage | null;
       } catch {
         return;
       }
 
-      const { id, sessionId, method, params } = message;
-
-      if (typeof method !== 'string') {
+      // JSON, but no command: `null`, a number, a list.
+      if (typeof message !== 'object' || message === null || typeof message.method !== 'string') {
         return;
       }
+
+      const { id, sessionId, method, params } = message;
 
       model.handleCommand(method, params, sessionId).then(
         result => socket.send(JSON.stringify({ id, sessionId, result: result ?? {} })),

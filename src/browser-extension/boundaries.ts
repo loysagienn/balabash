@@ -19,10 +19,19 @@
 //   when the user drags it in. The session it was taken from is told.
 // A blocked site inside a frame of another page is not caught.
 //
+// The pages of extensions are closed to a session the same way and at the
+// same doors, whatever the settings (isOffLimits): a page of this extension
+// has the extension's own rights — the settings above, the secret of the
+// pairing, the debugger on any tab — and Chrome lets an extension debug its
+// own pages.
+//
 // Besides the sites, a session may not read the cookies of the profile
-// through the debugger, nor close or crash the browser.
+// through the debugger — neither by the commands that return them nor in
+// what the debugger says about the network (../browser-link/cdp-cookies.ts)
+// — nor close or crash the browser.
 
-import { isBlockedUrl, normalizeSites } from '../browser-link/sites.ts';
+import { withoutCookies } from '../browser-link/cdp-cookies.ts';
+import { isBlockedUrl, isExtensionPage, normalizeSites } from '../browser-link/sites.ts';
 import type { ChromeListeners } from './playwright/chromeListeners';
 import type { ClientSession } from './playwright/clientSession';
 import type { TabGroupManager } from './playwright/tabGroupManager';
@@ -39,6 +48,7 @@ export type Settings = {
 };
 
 const BLOCKED_SITE = "This site is on the user's list of blocked sites";
+const EXTENSION_PAGE = 'The pages of extensions are closed to a session';
 
 // The debugger would give a session the cookies of the whole profile, and
 // the means to end the browser itself.
@@ -46,6 +56,7 @@ const DENIED_METHODS = new Map<string, string>([
   ['Storage.getCookies', 'reading cookies through the debugger is not allowed'],
   ['Network.getCookies', 'reading cookies through the debugger is not allowed'],
   ['Network.getAllCookies', 'reading cookies through the debugger is not allowed'],
+  ['Page.getCookies', 'reading cookies through the debugger is not allowed'],
   ['Browser.close', 'closing the browser is not allowed'],
   ['Browser.crash', 'closing the browser is not allowed'],
   ['Browser.crashGpuProcess', 'closing the browser is not allowed'],
@@ -95,13 +106,26 @@ export function isBlocked(url: string | undefined): boolean {
   return isBlockedUrl(url, settings.blockedSites);
 }
 
+// A tab with this address is nobody's: a blocked site, or a page of an extension.
+export function isOffLimits(url: string | undefined): boolean {
+  return isExtensionPage(url) || isBlocked(url);
+}
+
 export function blockedSiteError(): Error {
   return Object.assign(new Error(BLOCKED_SITE), { code: 'blocked_site' });
 }
 
 // A tab the session asks to open.
 export function checkNewTab(url: unknown): void {
-  if (typeof url === 'string' && isBlocked(url)) {
+  if (typeof url !== 'string') {
+    return;
+  }
+
+  if (isExtensionPage(url)) {
+    throw Object.assign(new Error(EXTENSION_PAGE), { code: 'not_debuggable' });
+  }
+
+  if (isBlocked(url)) {
     throw blockedSiteError();
   }
 }
@@ -119,13 +143,20 @@ export function checkSessionCommand(method: string, params: { url?: unknown } | 
   }
 }
 
-// Brings one tab in line with the list: a tab of a blocked site is nobody's.
+// What the debugger says to a session — the params of an event, the result
+// of a command — before it leaves the browser.
+export function forSession<T>(method: string, payload: T): T {
+  return withoutCookies(method, payload);
+}
+
+// Brings one tab in line with the boundaries: a tab of a blocked site, or
+// one that shows a page of an extension, is nobody's.
 async function apply(tabId: number, url: string | undefined): Promise<void> {
   if (!registry) {
     return;
   }
 
-  if (!isBlocked(url)) {
+  if (!isOffLimits(url)) {
     registry.unreserve(tabId);
 
     return;

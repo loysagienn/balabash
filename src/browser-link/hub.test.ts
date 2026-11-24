@@ -9,6 +9,7 @@
 import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
+import net from 'node:net';
 import type { AddressInfo } from 'node:net';
 import { createBrowserLinkHub } from './hub.ts';
 import type { Admission, BrowserLinkHub } from './hub.ts';
@@ -17,7 +18,6 @@ import {
   CLOSE_SESSION_STOPPED,
   CLOSE_UNAUTHORIZED,
   CLOSE_UNSUPPORTED_PROTOCOL,
-  PARKING_SINCE_VERSION,
   SESSION_OVER,
   SESSION_PATH,
 } from './protocol.ts';
@@ -51,6 +51,7 @@ before(async () => {
     origin: EXTENSION_ORIGIN,
     idleTimeoutMs: 300,
     pingIntervalMs: 100,
+    openTimeoutMs: 400,
   });
   hub.onPresence = (browserId, connected) => presence.push([browserId, connected]);
   server = http.createServer((_request, response) => response.writeHead(404).end());
@@ -90,6 +91,20 @@ describe('an upgrade request', () => {
     await assert.rejects(dial(port, { host: HOST, path: `${SESSION_PATH}?ticket=made-up` }), /HTTP 403/);
     // Not the hub's path: the owner of the server drops it.
     await assert.rejects(dial(port, { host: HOST, path: '/browser-link/other' }));
+
+    (await dial(port, { host: HOST })).close();
+  });
+
+  test('with an address that is no address is not the hub’s, and breaks nothing', async () => {
+    for (const target of ['//[', '/\\\\[', '//']) {
+      const socket = net.connect(port, '127.0.0.1');
+
+      socket.write(
+        `GET ${target} HTTP/1.1\r\nHost: ${HOST}\r\nOrigin: ${EXTENSION_ORIGIN}\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n` +
+          'Sec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n',
+      );
+      await new Promise(resolve => socket.once('close', resolve));
+    }
 
     (await dial(port, { host: HOST })).close();
   });
@@ -276,6 +291,50 @@ describe('a session', () => {
     await control.close();
   });
 
+  test('that the extension does not finish opening is given up after the one term of the opening, and its link closes', async () => {
+    const control = await connectTalking();
+    const opening = hub.browser('b1')!.openSession({ clientName: 'test', label: '' });
+
+    opening.catch(() => {});
+
+    const request = await control.link.next();
+    const { ticket } = request.params as { ticket: string };
+    // The link is there and answers pings, the request is answered — and `extension.initialized` never comes.
+    const link = await dial(port, { host: HOST, path: `${SESSION_PATH}?ticket=${ticket}` });
+
+    control.link.send({ id: request.id, result: { sessionId: 1 } });
+    await assert.rejects(opening, /The browser did not open the session in 0\.4 s/);
+    assert.equal((await link.closed).code, 1001);
+    await control.close();
+  });
+
+  test('that is half open goes with its control link, and with a revocation', async () => {
+    let control = await connectTalking();
+    let opening = hub.browser('b1')!.openSession({ clientName: 'test', label: '' });
+
+    opening.catch(() => {});
+
+    let { ticket } = (await control.link.next()).params as { ticket: string };
+    let link = await dial(port, { host: HOST, path: `${SESSION_PATH}?ticket=${ticket}` });
+
+    await settle();
+    await control.close();
+    assert.equal((await link.closed).code, 1001);
+    await assert.rejects(opening);
+
+    control = await connectTalking();
+    opening = hub.browser('b1')!.openSession({ clientName: 'test', label: '' });
+    opening.catch(() => {});
+    ({ ticket } = (await control.link.next()).params as { ticket: string });
+    link = await dial(port, { host: HOST, path: `${SESSION_PATH}?ticket=${ticket}` });
+    await settle();
+    hub.revoke('b1');
+    assert.equal((await link.closed).code, CLOSE_SESSION_REVOKED);
+    // In the words of whichever step the revocation broke first.
+    await assert.rejects(opening, /Disconnected in the console|Access to the browser was withdrawn/);
+    await control.close();
+  });
+
   test('is not opened when the extension refuses', async () => {
     const control = await connectTalking();
     const refused = hub.browser('b1')!.openSession({ clientName: 'test', label: '' });
@@ -420,10 +479,9 @@ describe('a parked session', () => {
   }
 
   test('is asked of the extension and closes its link; it comes back under its id, its tabs asked for in their order', async () => {
-    const control = await connectTalking(PARKING_SINCE_VERSION);
+    const control = await connectTalking();
     const { session, link, parked } = await parkOne(control, 4);
 
-    assert.equal(session.canPark, true);
     assert.equal(parked.id, 4);
     assert.equal((await link.closed).code, 1000);
     assert.equal((await session.ended).end, 'closed');
@@ -444,17 +502,8 @@ describe('a parked session', () => {
     await control.close();
   });
 
-  test('is not what an extension older than parking does', async () => {
-    const control = await connectTalking('0.4.2');
-    const opening = hub.browser('b1')!.openSession({ clientName: 'test', label: '' });
-
-    await openSessionLink(port, HOST, control.link);
-    assert.equal((await opening).canPark, false);
-    await control.close();
-  });
-
   test('that the extension refuses to park ends as lost', async () => {
-    const control = await connectTalking(PARKING_SINCE_VERSION);
+    const control = await connectTalking();
     const opening = hub.browser('b1')!.openSession({ clientName: 'test', label: '' });
 
     await openSessionLink(port, HOST, control.link);
@@ -470,7 +519,7 @@ describe('a parked session', () => {
   });
 
   test('ends by the user’s stop, by the server’s hand, by revocation and with its control link', async () => {
-    let control = await connectTalking(PARKING_SINCE_VERSION);
+    let control = await connectTalking();
     const stopped = (await parkOne(control, 1)).parked;
 
     control.link.send({ method: 'session.notice', params: { sessionId: 1, kind: 'stopped' } });
@@ -488,7 +537,7 @@ describe('a parked session', () => {
     await control.close();
     assert.equal((await lost.ended).end, 'lost');
 
-    control = await connectTalking(PARKING_SINCE_VERSION);
+    control = await connectTalking();
 
     const revoked = (await parkOne(control, 1)).parked;
 
@@ -498,7 +547,7 @@ describe('a parked session', () => {
   });
 
   test('that the extension holds no more when it is asked back was stopped by the user', async () => {
-    const control = await connectTalking(PARKING_SINCE_VERSION);
+    const control = await connectTalking();
     const { parked } = await parkOne(control, 7);
     const returning = parked.resume({ clientName: 'test', label: '', tabIds: [] });
 

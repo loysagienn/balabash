@@ -48,7 +48,9 @@ confidential from them.
   parks the ones whose agent is idle,
   the CDP endpoint of a session a Playwright client connects to (`relay.ts`
   over `cdp-model.ts`, which plays the browser Playwright expects), the
-  rule of the sites a user blocks for the agent (`sites.ts`), the
+  rule of the sites a user blocks for the agent and of the pages no
+  session gets (`sites.ts`), what is taken out of the debugger's network
+  messages before they leave the browser (`cdp-cookies.ts`), the
   store of linked browsers and the pairing codes; `index.ts` is the module
   as the app runs it: what `/api/browsers` calls and what an agent's run
   reaches a browser of its workspace through),

@@ -5,7 +5,7 @@
 
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { isBlockedUrl, normalizeSite, normalizeSites } from './sites.ts';
+import { isBlockedUrl, isExtensionPage, normalizeSite, normalizeSites } from './sites.ts';
 
 describe('an entry of the blocked list', () => {
   test('is kept as a bare host, whatever the user pasted', () => {
@@ -41,5 +41,29 @@ describe('a blocked site', () => {
     }
 
     assert.equal(isBlockedUrl('https://example.com/', []), false);
+  });
+
+  test('named in Cyrillic covers the address, which names it in punycode — and the other way round', () => {
+    for (const list of [['банк.рф'], ['xn--80ab2al.xn--p1ai'], normalizeSites(['https://БАНК.рф/вход'])]) {
+      for (const url of ['https://банк.рф/', 'https://xn--80ab2al.xn--p1ai/account', 'https://online.банк.рф/', 'https://online.xn--80ab2al.xn--p1ai/']) {
+        assert.equal(isBlockedUrl(url, list), true, `${url} in ${JSON.stringify(list)}`);
+      }
+
+      assert.equal(isBlockedUrl('https://небанк.рф/', list), false);
+    }
+
+    assert.deepEqual(normalizeSites(['банк.рф', 'xn--80ab2al.xn--p1ai', 'БАНК.РФ']), ['банк.рф'], 'a name and its punycode are one site');
+  });
+});
+
+describe('a page of an extension', () => {
+  test('is told by its scheme, whatever the extension and the case', () => {
+    for (const url of ['chrome-extension://moadcglcgjkicomjkmccjfckhoeohhck/popup.html', 'CHROME-EXTENSION://abc/consent.html?id=1', '  chrome-extension://abc/']) {
+      assert.equal(isExtensionPage(url), true, url);
+    }
+
+    for (const url of ['https://example.com/chrome-extension://abc/', 'about:blank', 'chrome://extensions/', '', undefined]) {
+      assert.equal(isExtensionPage(url), false, String(url));
+    }
   });
 });

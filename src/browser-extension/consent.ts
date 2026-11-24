@@ -2,7 +2,9 @@
 // extension (consent.html) that says which session asks and for which tab,
 // with Allow and Decline. Closing the window is a refusal; a minute without
 // an answer is "no answer". The page of the window talks to the worker
-// (background.ts) — it learns what is asked and brings the answer.
+// (background.ts) — it learns what is asked and brings the answer; an
+// answer counts only from the window the question was asked in. A question
+// belongs to the session that asked: it goes when the session does.
 
 import type { ChromeListeners } from './playwright/chromeListeners';
 
@@ -18,7 +20,14 @@ export type ConsentRequest = {
 
 export type ConsentAnswer = 'allowed' | 'declined' | 'no_answer';
 
-type Pending = ConsentRequest & { windowId: number | undefined; settle(answer: ConsentAnswer): void };
+type Pending = ConsentRequest & {
+  // Who asked.
+  owner: unknown;
+  windowId: number | undefined;
+  // Settles once the window is there, or was not made.
+  opened: Promise<unknown>;
+  settle(answer: ConsentAnswer): void;
+};
 
 export class Consent {
   private _pending = new Map<string, Pending>();
@@ -34,13 +43,16 @@ export class Consent {
     });
   }
 
-  async ask(request: ConsentRequest): Promise<ConsentAnswer> {
+  // `owner` — the session that asks (dismiss).
+  async ask(request: ConsentRequest, owner: unknown): Promise<ConsentAnswer> {
     const id = `${Date.now()}-${++this._lastId}`;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const answer = new Promise<ConsentAnswer>(resolve => {
       const pending: Pending = {
         ...request,
+        owner,
         windowId: undefined,
+        opened: Promise.resolve(),
         settle: given => {
           if (this._pending.delete(id)) {
             clearTimeout(timer);
@@ -60,7 +72,7 @@ export class Consent {
     const pending = this._pending.get(id)!;
 
     try {
-      const window = await chrome.windows.create({
+      const creating = chrome.windows.create({
         url: `${chrome.runtime.getURL('consent.html')}?id=${encodeURIComponent(id)}`,
         type: 'popup',
         width: 460,
@@ -68,7 +80,8 @@ export class Consent {
         focused: true,
       });
 
-      pending.windowId = window?.id;
+      pending.opened = creating.catch(() => {});
+      pending.windowId = (await creating)?.id;
     } catch (error) {
       pending.settle('no_answer');
 
@@ -85,8 +98,25 @@ export class Consent {
     return pending && { label: pending.label, title: pending.title, url: pending.url };
   }
 
-  answer(id: string, allow: boolean): void {
-    this._pending.get(id)?.settle(allow ? 'allowed' : 'declined');
+  // `windowId` — the window the answer came from: it counts only from the
+  // window of the question.
+  async answer(id: string, allow: boolean, windowId: number | undefined): Promise<void> {
+    const pending = this._pending.get(id);
+
+    await pending?.opened;
+
+    if (pending && pending.windowId !== undefined && pending.windowId === windowId) {
+      pending.settle(allow ? 'allowed' : 'declined');
+    }
+  }
+
+  // The session that asked is gone: nobody waits for its answers.
+  dismiss(owner: unknown): void {
+    for (const pending of [...this._pending.values()]) {
+      if (pending.owner === owner) {
+        pending.settle('no_answer');
+      }
+    }
   }
 
   // The sessions are gone: nobody waits for the answers.

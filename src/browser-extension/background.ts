@@ -115,7 +115,7 @@ chrome.runtime.onMessageExternal.addListener((message: PageRequest, sender, send
   return true;
 });
 
-async function answerOwnPage(message: OwnPageRequest): Promise<OwnPageAnswers[OwnPageRequest['type']]> {
+async function answerOwnPage(message: OwnPageRequest, sender: chrome.runtime.MessageSender): Promise<OwnPageAnswers[OwnPageRequest['type']]> {
   switch (message.type) {
     case 'status':
       return await link.status();
@@ -143,7 +143,7 @@ async function answerOwnPage(message: OwnPageRequest): Promise<OwnPageAnswers[Ow
     case 'consent.get':
       return consent.describe(String(message.id)) ?? null;
     case 'consent.answer':
-      consent.answer(String(message.id), message.allow === true);
+      await consent.answer(String(message.id), message.allow === true, sender.tab?.windowId);
 
       return null;
   }
@@ -154,7 +154,7 @@ chrome.runtime.onMessage.addListener((message: OwnPageRequest, sender, sendRespo
     return false;
   }
 
-  answerOwnPage(message).then(sendResponse, () => sendResponse(undefined));
+  answerOwnPage(message, sender).then(sendResponse, () => sendResponse(undefined));
 
   return true;
 });

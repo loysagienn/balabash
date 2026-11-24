@@ -14,7 +14,7 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import { STAND_HOST, closeServer, listen, sessionCookie, startStand } from '../test-support/stand.ts';
 import type { Stand } from '../test-support/stand.ts';
-import { CLOSE_SESSION_REVOKED, CLOSE_UNAUTHORIZED } from '../browser-link/protocol.ts';
+import { CLOSE_SESSION_REVOKED, CLOSE_UNAUTHORIZED, SESSIONS_SINCE_VERSION } from '../browser-link/protocol.ts';
 import type { WelcomeParams } from '../browser-link/protocol.ts';
 import { dial, hello, openSessionLink } from '../browser-link/test-client.ts';
 import type { TestLink } from '../browser-link/test-client.ts';
@@ -66,14 +66,15 @@ async function list(cookie?: string): Promise<BrowsersResponse> {
 }
 
 // Pairs a browser the way the console and the extension do it together.
-async function pair(name: string, cookie?: string): Promise<{ link: TestLink; welcome: WelcomeParams }> {
+// `extensionVersion` — what the extension says it is; an old one by default.
+async function pair(name: string, cookie?: string, extensionVersion?: string): Promise<{ link: TestLink; welcome: WelcomeParams }> {
   const asked = await stand.request('POST', '/api/browsers/pairings', { body: { name }, ...(cookie ? { cookie } : {}) });
 
   assert.equal(asked.status, 200, asked.text);
 
   const link = await dial(linkPort, { host: STAND_HOST });
 
-  link.send(hello({ pairingCode: asked.json<BrowserPairingResponse>().code }));
+  link.send(hello({ pairingCode: asked.json<BrowserPairingResponse>().code }, extensionVersion));
 
   const welcome = await link.next();
 
@@ -295,6 +296,42 @@ describe('the open consoles', () => {
     assert.ok((await watcher) >= 3);
   });
 
+  test('of a workspace the browser was enabled in hear that it is gone when it is paired again from another workspace', async () => {
+    const elsewhere = (await prisma.workspace.create({ data: { workspaceName: 'Paired again elsewhere' } })).id;
+    const mover = await signIn('Mover');
+    const moved = await stand.request('POST', '/api/auth', {
+      body: { code: createAuthCode({ workspaceId: elsewhere, userId: mover.userId }, 'telegram') },
+      cookie: null,
+    });
+    const first = await pair('Moved', mover.cookie);
+
+    first.link.close();
+    await first.link.closed;
+    await settle();
+
+    // The operator does not own the browser: only its workspace tells their console.
+    let heard = 0;
+
+    void browsersFrames(stand.cookie, 1).then(count => {
+      heard = count;
+    });
+    await settle();
+
+    const asked = await stand.request('POST', '/api/browsers/pairings', { body: { name: 'Moved again' }, cookie: sessionCookie(moved.headers['set-cookie'] ?? []) });
+
+    assert.equal(asked.status, 200, asked.text);
+
+    const link = await dial(linkPort, { host: STAND_HOST });
+
+    link.send(hello({ pairingCode: asked.json<BrowserPairingResponse>().code, previousSecret: first.welcome.secret! }));
+    assert.equal((await link.next()).method, 'welcome');
+    await settle();
+    assert.equal(heard, 1, 'the console of the workspace the replaced browser was enabled in');
+    assert.equal((await list()).browsers.some(browser => browser.name === 'Moved'), false);
+    link.close();
+    await link.closed;
+  });
+
   test('of another workspace hear nothing of it', async () => {
     const elsewhere = (await prisma.workspace.create({ data: { workspaceName: 'Elsewhere' } })).id;
     const stranger = await signIn('Stranger', elsewhere);
@@ -322,8 +359,8 @@ describe('the agents of a workspace', () => {
   test('see the browsers enabled in it — whoever owns them, connected or not — and none of another workspace', async () => {
     const elsewhere = (await prisma.workspace.create({ data: { workspaceName: 'Agents elsewhere' } })).id;
     const colleague = await signIn('Colleague');
-    const mine = await pair('Agent’s own');
-    const theirs = await pair('Agent’s colleague', colleague.cookie);
+    const mine = await pair('Agent’s own', undefined, SESSIONS_SINCE_VERSION);
+    const theirs = await pair('Agent’s colleague', colleague.cookie, SESSIONS_SINCE_VERSION);
 
     theirs.link.close();
     await theirs.link.closed;
@@ -347,9 +384,20 @@ describe('the agents of a workspace', () => {
     await mine.link.closed;
   });
 
+  test('get neither the tabs of a browser whose extension is older than the one that holds every boundary, nor a session in it', async () => {
+    const { link, welcome } = await pair('Agent’s old extension', undefined, '0.5.0');
+    const seen = (await browserLink.workspaceBrowsers(stand.workspaceId)).find(browser => browser.id === welcome.browserId);
+
+    assert.equal(seen?.connected, true, 'the browser is linked and listed all the same');
+    await assert.rejects(browserLink.workspaceBrowserTabs(stand.workspaceId, welcome.browserId), refusedAs('outdated'));
+    await assert.rejects(session(welcome.browserId), refusedAs('outdated'));
+    link.close();
+    await link.closed;
+  });
+
   test('lose a session when its browser is disabled in the workspace, and every session when it is disconnected', async () => {
     const elsewhere = (await prisma.workspace.create({ data: { workspaceName: 'Sessions elsewhere' } })).id;
-    const { link, welcome } = await pair('Agent’s sessions');
+    const { link, welcome } = await pair('Agent’s sessions', undefined, SESSIONS_SINCE_VERSION);
     const id = welcome.browserId;
 
     await prisma.userBrowserWorkspace.create({ data: { browserId: id, workspaceId: elsewhere } });

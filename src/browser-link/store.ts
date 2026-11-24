@@ -88,23 +88,28 @@ export async function assertBrowserNameFree(userId: string, name: string): Promi
 
 // A pairing: the new row, enabled in the workspace the pairing was started
 // from, and its secret. `previousSecret` is the secret the extension had
-// before: the row it stood for is the same browser's and is replaced.
+// before: the row it stood for is the same browser's and is replaced —
+// `replaced` says whose it was and where it was enabled.
 export async function pairBrowser(input: {
   userId: string;
   workspaceId: string;
   name: string;
   previousSecret?: string;
-}): Promise<{ browser: BrowserRecord; secret: string; replacedId: string | null }> {
+}): Promise<{ browser: BrowserRecord; secret: string; replaced: { id: string; userId: string; workspaceIds: string[] } | null }> {
   const name = browserName(input.name);
   const secret = randomBytes(32).toString('base64url');
 
   try {
     return await prisma.$transaction(async tx => {
       const previous = input.previousSecret
-        ? await tx.userBrowser.findUnique({ where: { secretHash: hashSecret(input.previousSecret) }, select: { id: true } })
+        ? await tx.userBrowser.findUnique({ where: { secretHash: hashSecret(input.previousSecret) }, select: { id: true, userId: true } })
         : null;
+      let replaced: { id: string; userId: string; workspaceIds: string[] } | null = null;
 
       if (previous) {
+        const enabled = await tx.userBrowserWorkspace.findMany({ where: { browserId: previous.id }, select: { workspaceId: true } });
+
+        replaced = { ...previous, workspaceIds: enabled.map(entry => entry.workspaceId) };
         await tx.userBrowserWorkspace.deleteMany({ where: { browserId: previous.id } });
         await tx.userBrowser.delete({ where: { id: previous.id } });
       }
@@ -113,7 +118,7 @@ export async function pairBrowser(input: {
 
       await tx.userBrowserWorkspace.create({ data: { browserId: row.id, workspaceId: input.workspaceId } });
 
-      return { browser: record(row), secret, replacedId: previous?.id ?? null };
+      return { browser: record(row), secret, replaced };
     });
   } catch (error) {
     if (isUniqueViolation(error)) {

@@ -28,16 +28,24 @@
 // the user's boundaries hold: a tab of the user joins a session with their
 // consent in the extension's window — allowed, declined, the window closed,
 // no answer for a minute (skipped with `--silence=0`), no window at all when
-// the user chose not to be asked — or handed over from the popup; a blocked site is not listed, not handed over, not opened, and
-// a session's tab that is redirected there is taken from the session; the
-// cookies of the profile are not read through the debugger; the list of
-// tabs can be switched off — all of it set in the popup, which also shows
-// the sessions and stops one;
+// the user chose not to be asked — or handed over from the popup; the
+// consent counts only from its own window, for the site the window showed
+// and for a session that still lives; the pages of the extension itself are
+// no session's — not listed, not handed over, not opened, put out of a
+// session's group; a blocked site is not listed, not handed over, not opened, and
+// a session's tab that is redirected there is taken from the session — a
+// site named in Cyrillic too; the
+// cookies of the profile are not read through the debugger, and their
+// values do not leave the browser in what the debugger says about the
+// network; the list of tabs can be switched off — all of it set in the
+// popup, where a switch saves itself and leaves the list of sites being
+// typed alone, and which also shows the sessions and stops one;
 // a session nobody uses is parked — the debugger leaves its tabs, the tabs
 // stay in their group, the popup shows it idle — and the next browser call
 // brings it back with the same tabs under the same numbers and the same
 // current tab, a page the user worked in meanwhile as they left it; a tab
-// the user closed meanwhile is told to the run, a tab handed over from the
+// the user closed meanwhile is told to the run instead of carrying its call
+// out — the other tabs stay as they were — and a tab handed over from the
 // popup meanwhile is the session's; Stop ends a parked session too, and a
 // run that ends drops its parked session;
 // the pause drops the link and its end brings it back; a link the server
@@ -45,6 +53,7 @@
 // a revoked browser loses its session, forgets its secret and stays away.
 
 import assert from 'node:assert/strict';
+import { unzipSync } from 'fflate';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -56,7 +65,7 @@ import { attachToSession, createUserBrowser } from '../agents/kit/user-browser.t
 import type { UserBrowserLink } from '../agents/kit/user-browser.ts';
 import { buildBrowserExtension } from '../build/browser-extension.js';
 import { createBrowserLinkHub } from '../src/browser-link/hub.ts';
-import type { Admission } from '../src/browser-link/hub.ts';
+import type { Admission, ExtensionSession } from '../src/browser-link/hub.ts';
 import { BrowserAccessError, relaySession } from '../src/browser-link/index.ts';
 import { EXTENSION_ID } from '../src/browser-link/protocol.ts';
 import type { PagePairResult, PageStatus } from '../src/browser-link/protocol.ts';
@@ -64,7 +73,12 @@ import type { PagePairResult, PageStatus } from '../src/browser-link/protocol.ts
 // The functions passed to a page run there, where `chrome` is.
 declare const chrome: {
   runtime?: { sendMessage?(extensionIdOrMessage: unknown, message?: unknown): Promise<unknown> };
-  tabs: { group(options: { groupId: number; tabIds: number[] }): Promise<number>; get(tabId: number): Promise<{ groupId: number }> };
+  tabs: {
+    group(options: { groupId: number; tabIds: number[] }): Promise<number>;
+    get(tabId: number): Promise<{ groupId: number }>;
+    query(options: { url: string }): Promise<{ id?: number }[]>;
+    remove(tabId: number): Promise<void>;
+  };
   tabGroups: { get(groupId: number): Promise<{ color: string }> };
 };
 
@@ -72,6 +86,11 @@ const CONSOLE_ORIGIN = 'https://console.browser-link.test';
 const OTHER_ORIGIN = 'https://elsewhere.browser-link.test';
 // A site the user of the check keeps away from the agent.
 const BLOCKED_SITE = 'blocked.browser-link.test';
+// One the user names in Cyrillic; an address names it in punycode.
+const CYRILLIC_SITE = 'банк.browser-link.test';
+const CYRILLIC_SITE_ASCII = 'xn--80ab2al.browser-link.test';
+// The value of a cookie the page's own JavaScript cannot read.
+const COOKIE_VALUE = 'kept-in-the-browser-7f3a9c';
 
 // How long the run of the parking steps leaves its session unused before
 // it is parked; the other runs of the check are never idle that long.
@@ -156,6 +175,15 @@ async function main(): Promise<void> {
       return;
     }
 
+    // A page that sets a cookie the browser then sends back with every request.
+    if (pathname === '/cookie.html') {
+      response
+        .writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'set-cookie': `sid=${COOKIE_VALUE}; HttpOnly; Path=/` })
+        .end('<title>Cookie page</title><h1>Cookie page</h1>');
+
+      return;
+    }
+
     const body = PAGES[pathname];
 
     response.writeHead(body ? 200 : 404, { 'content-type': 'text/html; charset=utf-8' }).end(body ?? '');
@@ -179,6 +207,45 @@ async function main(): Promise<void> {
   // its session (agents/user_browser.ts), with the hub of this script for
   // the link.
   const runs: { close(): Promise<void> }[] = [];
+  // What came over the session links of the runs that never park: the
+  // methods of the debugger's events, and whether the cookie's value was in
+  // an event or in the answer to a command.
+  const wire = { events: new Set<string>(), leaks: [] as string[] };
+  const watched = (session: ExtensionSession): ExtensionSession => {
+    const see = (what: string, payload: unknown) => {
+      if (JSON.stringify(payload ?? null).includes(COOKIE_VALUE)) {
+        wire.leaks.push(what);
+      }
+    };
+
+    return new Proxy(session, {
+      get: (target, key) =>
+        key === 'send'
+          ? async (method: string, params: unknown[]) => {
+              const result = await target.send(method, params);
+
+              see(`the answer to ${String(params[1] ?? method)}`, result);
+
+              return result;
+            }
+          : Reflect.get(target, key),
+      set: (target, key, value) =>
+        Reflect.set(
+          target,
+          key,
+          key === 'onEvent' && typeof value === 'function'
+            ? (method: string, params: unknown[]) => {
+                if (method === 'chrome.debugger.onEvent') {
+                  wire.events.add(String(params[1]));
+                  see(`the event ${String(params[1])}`, params);
+                }
+
+                value(method, params);
+              }
+            : value,
+        ),
+    });
+  };
   const startRun = async (name: string, idleParkMs = NEVER_IDLE_MS) => {
     const link: UserBrowserLink = {
       browsers: async () => [{ id: BROWSER_ID, name: 'Check browser', ownerName: 'Check user', connected: Boolean(hub.browser(BROWSER_ID)), lastSeenAt: null }],
@@ -198,7 +265,7 @@ async function main(): Promise<void> {
           throw new BrowserAccessError('offline', 'This browser is not connected now');
         }
 
-        return relaySession(BROWSER_ID, await connected.openSession({ clientName: 'browser-link-check', label: name }));
+        return relaySession(BROWSER_ID, watched(await connected.openSession({ clientName: 'browser-link-check', label: name })));
       },
       attach: attachToSession,
     };
@@ -247,9 +314,15 @@ async function main(): Promise<void> {
     outDir: extensionDir,
   });
   const manifest = JSON.parse(await readFile(path.join(extensionDir, 'manifest.json'), 'utf8')) as { version: string };
+  // What a user installs is the archive.
+  const archived = JSON.parse(Buffer.from(unzipSync(await readFile(built.archive))['balabash-agent/manifest.json']).toString('utf8')) as {
+    version: string;
+    incognito?: string;
+  };
 
   assert.equal(built.version, manifest.version);
-  step(`the extension ${built.version} is built with its archive (${path.basename(built.archive)})`);
+  assert.deepEqual([archived.version, archived.incognito], [manifest.version, 'not_allowed'], 'the archive: the same extension, closed to incognito windows');
+  step(`the extension ${built.version} is built with its archive (${path.basename(built.archive)}); incognito windows are not its to see`);
 
   // The user's browser: a profile with the extension.
   const userBrowser = await chromium.launchPersistentContext(path.join(workDir, 'profile'), {
@@ -260,7 +333,7 @@ async function main(): Promise<void> {
 
   try {
     // The stand's origins exist only here.
-    await userBrowser.route(/^https:\/\/([a-z]+\.)+browser-link\.test\//, route =>
+    await userBrowser.route(/^https:\/\/([a-z0-9-]+\.)+browser-link\.test\//, route =>
       route.fulfill({ contentType: 'text/html; charset=utf-8', body: '<title>Stand page</title><h1>Stand page</h1>' }),
     );
 
@@ -490,6 +563,44 @@ async function main(): Promise<void> {
     assert.equal((await sessionOf('first')).tabIds.includes(secondUserTab.id), false);
     step('Decline and closing the window both refuse the tab');
 
+    // The answer counts from the window of the question, for the site the
+    // window showed.
+    const movingPage = await userBrowser.newPage();
+
+    await movingPage.goto(`${OTHER_ORIGIN}/moving`);
+
+    const movingTab = (await tabsNow()).find(tab => tab.url === `${OTHER_ORIGIN}/moving`)!;
+
+    taking = first.call('user_browser_take_tab', { tabId: movingTab.id });
+    taking.catch(() => {});
+    consent = await consentWindow();
+    await askWorker({ type: 'consent.answer', id: new URL(consent.url()).searchParams.get('id'), allow: true });
+    await new Promise(resolve => setTimeout(resolve, 500));
+    assert.equal(consent.isClosed(), false, 'an answer from another page of the extension is no answer');
+    assert.equal((await sessionOf('first')).tabIds.includes(movingTab.id), false);
+    await movingPage.goto(`${CONSOLE_ORIGIN}/moved`);
+    await press(consent, '#allow');
+    await assert.rejects(taking, /went to another site while the user was deciding, so it was not handed over/);
+    assert.equal((await sessionOf('first')).tabIds.includes(movingTab.id), false);
+    step('the consent counts only from its own window, and only for the site the window showed');
+
+    // The question of a session that ended goes with it, whatever the other sessions do.
+    const asking = await startRun('asking');
+
+    await asking.call('browser_navigate', { url: `${standOrigin}/second.html` });
+
+    const askingTake = asking.call('user_browser_take_tab', { tabId: movingTab.id });
+
+    askingTake.catch(() => {});
+    consent = await consentWindow();
+    await askWorker({ type: 'stopSessions', sessionId: (await sessionOf('asking')).id });
+    await until('the question of the stopped session is closed', () => consent.isClosed());
+    await assert.rejects(askingTake);
+    assert.equal((await tabsNow()).find(tab => tab.id === movingTab.id)?.owned, false, 'the tab is nobody’s');
+    await asking.close();
+    await movingPage.close();
+    step('a session stopped while the user was asked takes its question with it; the tab stays the user’s');
+
     if (SILENCE_SECONDS > 0) {
       taking = first.call('user_browser_take_tab', { tabId: secondUserTab.id }, 100_000);
       taking.catch(() => {});
@@ -503,10 +614,17 @@ async function main(): Promise<void> {
     const thirdUserPage = await userBrowser.newPage();
 
     await thirdUserPage.goto(`${OTHER_ORIGIN}/third`);
+    type Kept = { blockedSites: string[]; tabsListHidden: boolean; tabsWithoutAsking: boolean };
+    const kept = () => askWorker<Kept>({ type: 'getSettings' });
+
     await popupPage.bringToFront();
+    // A switch saves itself, and leaves the list of sites the user is typing alone.
+    await popupPage.locator('#blocked-sites').fill('half-typed.browser-link');
     await popupPage.locator('#without-asking').check();
-    await popupPage.locator('#save').click();
-    await popupPage.locator('#saved', { hasText: 'Saved.' }).waitFor({ timeout: 10_000 });
+    await until('the switch is saved', async () => (await kept()).tabsWithoutAsking);
+    assert.deepEqual((await kept()).blockedSites, [], 'the list being typed is not saved by a switch');
+    assert.equal(await popupPage.locator('#blocked-sites').inputValue(), 'half-typed.browser-link', 'and stays as typed');
+    await popupPage.locator('#blocked-sites').fill('');
 
     const thirdUserTab = (await tabsNow()).find(tab => tab.url === `${OTHER_ORIGIN}/third`)!;
 
@@ -514,9 +632,8 @@ async function main(): Promise<void> {
     assert.equal(userBrowser.pages().some(candidate => !candidate.isClosed() && candidate.url().includes('/consent.html')), false);
     assert.equal((await sessionOf('first')).tabIds.includes(thirdUserTab.id), true);
     await popupPage.locator('#without-asking').uncheck();
-    await popupPage.locator('#save').click();
-    await popupPage.locator('#saved', { hasText: 'Saved.' }).waitFor({ timeout: 10_000 });
-    step('with "without asking" switched on in the popup a tab is handed over with no window');
+    await until('the switch is saved', async () => !(await kept()).tabsWithoutAsking);
+    step('with "without asking" switched on in the popup a tab is handed over with no window; the switch saves itself and not the list of sites being typed');
 
     // Handed over by the user from the popup: no question asked.
     assert.deepEqual(await askWorker({ type: 'handTab', sessionId: (await sessionOf('second')).id, tabId: secondUserTab.id }), { ok: true });
@@ -526,6 +643,28 @@ async function main(): Promise<void> {
       error: 'This tab belongs to another session',
     });
     step('the user handed a tab to a session themselves; a tab of one session is not handed to another');
+
+    // The pages of the extension itself — where the user keeps the boundaries — are no session's.
+    const ownPage = `chrome-extension://${extensionId}/popup.html`;
+    const popupTabId = await worker.evaluate(async url => (await chrome.tabs.query({ url }))[0]?.id, ownPage);
+
+    assert.equal(typeof popupTabId, 'number', 'the popup is open in a tab of the stand');
+    assert.doesNotMatch(await first.call('user_browser_tabs'), /chrome-extension:/);
+    await assert.rejects(first.call('user_browser_take_tab', { tabId: popupTabId }), /a page of the browser itself/);
+    await assert.rejects(first.call('browser_navigate', { url: ownPage }), /closed to a session/);
+    await assert.rejects(first.call('browser_tabs', { action: 'new', url: ownPage }), /closed to a session/);
+    assert.deepEqual(await askWorker({ type: 'handTab', sessionId: (await sessionOf('first')).id, tabId: popupTabId }), {
+      ok: false,
+      error: 'Nobody works in this tab: it shows a page of the browser itself or of an extension',
+    });
+
+    // Dragged into the group of a session by the user: put out again.
+    const groupOfFirst = (await tabsNow()).find(tab => tab.id === userTab.id)!.groupId;
+
+    await worker.evaluate(([groupId, tabId]) => chrome.tabs.group({ groupId, tabIds: [tabId] }), [groupOfFirst, popupTabId as number]);
+    await until('the page of the extension is put out of the group', async () => (await worker.evaluate(tabId => chrome.tabs.get(tabId), popupTabId as number)).groupId === -1);
+    assert.equal((await sessionOf('first')).tabIds.includes(popupTabId as number), false);
+    step('the pages of the extension are not listed, not handed over, not opened by a session and put out of its group');
 
     // A blocked site. The user has it open in a tab of their own.
     const blockedPage = await userBrowser.newPage();
@@ -552,6 +691,19 @@ async function main(): Promise<void> {
     await assert.rejects(first.call('browser_navigate', { url: `https://${BLOCKED_SITE}/` }), /on the user's list of blocked sites/);
     await assert.rejects(first.call('browser_tabs', { action: 'new', url: `https://sub.${BLOCKED_SITE}/` }), /on the user's list of blocked sites/);
     step('a session opens a blocked site neither in its tab nor in a new one');
+
+    // A site the user names in Cyrillic is the one an address names in punycode.
+    await popupPage.bringToFront();
+    await popupPage.locator('#blocked-sites').fill(`${BLOCKED_SITE}\n${CYRILLIC_SITE}`);
+    await popupPage.locator('#save').click();
+    await popupPage.locator('#saved', { hasText: 'Saved.' }).waitFor({ timeout: 10_000 });
+    assert.equal(await popupPage.locator('#blocked-sites').inputValue(), `${BLOCKED_SITE}\n${CYRILLIC_SITE}`, 'the entry is kept as the user wrote it');
+
+    for (const address of [`https://${CYRILLIC_SITE}/`, `https://${CYRILLIC_SITE_ASCII}/account`, `https://online.${CYRILLIC_SITE_ASCII}/`]) {
+      await assert.rejects(first.call('browser_navigate', { url: address }), /on the user's list of blocked sites/, address);
+    }
+
+    step('a blocked site named in Cyrillic is closed under both of its names, with its subdomains');
 
     // Dragged into the group of a session by the user: put out again.
     const firstGroup = (await tabsNow()).find(tab => tab.id === userTab.id)!.groupId;
@@ -584,14 +736,30 @@ async function main(): Promise<void> {
     );
     step('reading cookies through the debugger is refused');
 
+    // ...and their values do not leave the browser in what the debugger says about the network.
+    await first.call('browser_navigate', { url: `${standOrigin}/cookie.html` });
+    assert.match(await first.call('browser_navigate', { url: `${standOrigin}/cookie.html` }), /Cookie page/);
+
+    const headers = await first.call('browser_run_code_unsafe', {
+      code: 'async (page) => { const response = await page.reload(); return JSON.stringify([await response.request().allHeaders(), await response.allHeaders()]); }',
+    });
+
+    assert.match(headers, /user-agent/, `the other headers are there: ${headers}`);
+    assert.doesNotMatch(headers, new RegExp(COOKIE_VALUE), 'the run does not read the cookie in the headers');
+    assert.ok(
+      ['Network.requestWillBeSentExtraInfo', 'Network.responseReceivedExtraInfo'].every(method => wire.events.has(method)),
+      `the debugger spoke of the network: ${[...wire.events].filter(method => method.startsWith('Network.')).join(', ')}`,
+    );
+    assert.deepEqual(wire.leaks, [], 'the value of the cookie did not come over the session link');
+    assert.match(await first.call('browser_navigate', { url: `${standOrigin}/agent.html` }), /Agent page/);
+    step('the values of cookies do not leave the browser in the network messages of the debugger; navigation works without them');
+
     // The list of tabs, switched off and on again.
     await popupPage.locator('#tabs-list').uncheck();
-    await popupPage.locator('#save').click();
-    await popupPage.locator('#saved', { hasText: 'Saved.' }).waitFor({ timeout: 10_000 });
+    await until('the switch is saved', async () => (await kept()).tabsListHidden);
     await assert.rejects(first.call('user_browser_tabs'), /The user switched the list of their tabs off/);
     assert.match(await first.call('browser_evaluate', { function: '() => document.title' }), /Agent page/);
     await popupPage.locator('#tabs-list').check();
-    await popupPage.locator('#save').click();
     await until('the list is back', async () => /Stand page/.test(await first.call('user_browser_tabs').catch(() => '')));
     step('the list of tabs is switched off in the popup and on again; the session works meanwhile');
 
@@ -661,16 +829,33 @@ async function main(): Promise<void> {
     assert.deepEqual(await askWorker({ type: 'handTab', sessionId: (await sessionOf('resting')).id, tabId: handedTab.id }), { ok: true });
     await until('the handed tab waits in the group', async () => (await tabsNow()).find(tab => tab.id === handedTab.id)?.groupId === restingGroup);
 
-    const saidBack = await resting.call('browser_snapshot');
-
-    assert.match(saidBack, /^While your session was parked, one of its tabs was closed or taken out of its group by the user\. /);
-    assert.match(saidBack, /heading "Third agent page"/, 'the current tab is the one it was');
+    // The call that brings the session back is not carried out: the run is told first.
+    await assert.rejects(
+      resting.call('browser_navigate', { url: `${standOrigin}/second.html` }),
+      /While your session was parked, one of its tabs was closed or taken out of its group by the user\.[\s\S]*Your call was not carried out/,
+    );
 
     const kitAfter = await kitTabs();
 
     assert.deepEqual([kitAfter.urls, kitAfter.current], [[kitBefore.urls[0], kitBefore.urls[1], `${OTHER_ORIGIN}/fourth`], 1], JSON.stringify(kitAfter));
+    assert.match(await resting.call('browser_snapshot'), /heading "Third agent page"/, 'the current tab is the one it was');
     assert.doesNotMatch(await resting.call('browser_snapshot'), /While your session was parked/, 'told once');
-    step('a tab the user closed while the session was parked is told to the run; a tab handed over from the popup meanwhile is the session’s');
+    step('a tab the user closed while the session was parked is told to the run before anything is done; a tab handed over from the popup meanwhile is the session’s');
+
+    // Parked again: the user closes the first tab, so the numbers of the others move.
+    await parked(true);
+
+    const firstOfResting = (await tabsNow()).find(tab => tab.groupId === restingGroup && tab.url === kitBefore.urls[0])!;
+
+    assert.ok(firstOfResting, 'the first tab of the parked session is there to close');
+    await worker.evaluate(tabId => chrome.tabs.remove(tabId), firstOfResting.id);
+    await assert.rejects(resting.call('browser_tabs', { action: 'close', index: 1 }), /Your call was not carried out: the numbers of the tabs have changed/);
+
+    const kitMoved = await kitTabs();
+
+    assert.deepEqual([kitMoved.urls, kitMoved.current], [[kitBefore.urls[1], `${OTHER_ORIGIN}/fourth`], 0], JSON.stringify(kitMoved));
+    assert.match(resultOf(await resting.call('browser_evaluate', { function: '() => document.title' })), /Third agent page/, 'the tab the run worked in is current under its new number');
+    step('a tab closed ahead of the one the run worked in: the call is not carried out, the other tabs are untouched, the run’s tab is current under its new number');
 
     // Stop is the user's for a parked session too.
     await parked(true);
