@@ -18,6 +18,7 @@ import { parseJson } from '../../../utils/serialize-json.ts';
 import type { Action, State } from '../../store/types.ts';
 import { eventAction } from '../../store/events.ts';
 import { draftChangedRemotely } from '../../store/drafts/actions.ts';
+import { browsersChangedRemotely } from '../../store/browsers/actions.ts';
 import { withWorkspace } from '../workspace/index.ts';
 import { streamClosed, streamConnecting, streamOpened, streamReconnecting } from '../../store/stream/actions.ts';
 
@@ -83,6 +84,13 @@ export function connectStoreToStream(store: Store<State, Action>, { now = () => 
         const frame = parseJson((message as MessageEvent<string>).data) as DraftStreamFrame;
 
         store.dispatch(draftChangedRemotely(frame.threadId, frame.revision));
+      }
+    });
+
+    // The list of linked browsers changed (the frame carries nothing).
+    next.addEventListener('browsers', () => {
+      if (source === next) {
+        store.dispatch(browsersChangedRemotely());
       }
     });
 

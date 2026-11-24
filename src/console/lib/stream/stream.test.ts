@@ -45,6 +45,11 @@ class FakeEventSource {
     this.named.get('draft')?.forEach(listener => listener({ data: stringifyJson({ threadId, revision }) }));
   }
 
+  // The named frame `event: browsers` (no data to speak of).
+  browsers() {
+    this.named.get('browsers')?.forEach(listener => listener({ data: '{}' }));
+  }
+
   // The browser's hand: the connection opened, a frame came, the connection
   // broke (the browser retries by itself, readyState CONNECTING) or the
   // browser gave up (readyState CLOSED).
@@ -178,6 +183,24 @@ const api: Api = {
       throw new Error('not here');
     },
     deleteTask: async () => {
+      throw new Error('not here');
+    },
+  },
+  browsers: {
+    list: async () => ({ browsers: [], others: [], extension: { id: 'extension', version: null, size: null } }),
+    requestPairing: async () => {
+      throw new Error('not here');
+    },
+    rename: async () => {
+      throw new Error('not here');
+    },
+    enableHere: async () => {
+      throw new Error('not here');
+    },
+    disableHere: async () => {
+      throw new Error('not here');
+    },
+    disconnect: async () => {
       throw new Error('not here');
     },
   },
@@ -340,6 +363,22 @@ describe('stream process', () => {
     sources()[1].opened();
     first.draft('t1', 4);
     assert.equal(store.getState().stream.lastSeq, 52n);
+  });
+
+  it('a `browsers` frame moves the browsers stamp, from the current source alone', async t => {
+    const { store, first, sources } = await connected(t);
+
+    first.browsers();
+    assert.equal(store.getState().browsers.changed, 1);
+    assert.equal(store.getState().stream.lastSeq, 52n, 'the frame has no seq');
+
+    first.gaveUp();
+    t.mock.timers.tick(RETRY_AFTER_MS);
+    sources()[1].opened();
+    first.browsers();
+    assert.equal(store.getState().browsers.changed, 1, 'a source left behind is not heard');
+    sources()[1].browsers();
+    assert.equal(store.getState().browsers.changed, 2);
   });
 
   it('closes for good when the session ends during the pause', async t => {

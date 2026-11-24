@@ -22,10 +22,12 @@ import { connectStoreToWorkspace } from './lib/workspace/process.ts';
 import { connectStoreToFeedEviction } from './lib/feed-eviction/index.ts';
 import { connectStoreToDraftSync } from './lib/drafts/index.ts';
 import { connectDocumentToTheme } from './lib/theme/index.ts';
+import { connectExtensionToTheme } from './lib/extension/index.ts';
 import { connectQueryClientToSession } from './lib/query/session.ts';
 import { connectQueryClientToSecretRequests } from './lib/query/secret-requests.ts';
 import { connectQueryClientToSchedule } from './lib/query/schedule.ts';
 import { connectQueryClientToSystem } from './lib/query/system.ts';
+import { connectQueryClientToBrowsers } from './lib/query/browsers.ts';
 import { connectQueryClientToUploads } from './lib/query/uploads.ts';
 import { PHONE_MEDIA, installPinchGuard } from './lib/touch/pinch.ts';
 import { installKeyboardWatch } from './lib/touch/keyboard.ts';
@@ -37,6 +39,10 @@ import { sessionCheck, sessionLost } from './store/session/actions.ts';
 // before the first paint; from here on the console keeps it there — a
 // choice in another tab included.
 connectDocumentToTheme();
+// The Balabash Agent extension of this browser, when there is one, draws
+// its own pages in the theme of the console: it is told the theme now and
+// at every change (lib/extension).
+connectExtensionToTheme();
 
 const root = document.getElementById('root');
 
@@ -100,6 +106,9 @@ connectQueryClientToSchedule(store, queryClient);
 // A restart completed in the log is a new process: its facts are read again
 // (lib/query/system.ts).
 connectQueryClientToSystem(store, queryClient);
+// The stream said the linked browsers changed: the list is read again
+// (lib/query/browsers.ts).
+connectQueryClientToBrowsers(store, queryClient);
 connectQueryClientToUploads(store, queryClient);
 
 // The operator's console is the operator's: the store and the query client

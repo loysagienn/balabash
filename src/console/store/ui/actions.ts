@@ -1,9 +1,12 @@
 import type { AppRoute } from '../../lib/router/routes.ts';
+import type { IconName } from '../../ui/Icon/icons.ts';
 
-// action — a button on the toast that opens a route, or switches the tab
-// to another workspace (and dismisses the toast).
-export type ToastAction = { label: string; route: AppRoute } | { label: string; workspace: string };
-export type ToastInput = { title: string; desc?: string; state?: 'run' | 'wait' | 'act' | 'done' | 'err' | 'off'; action?: ToastAction };
+// action — a button on the toast that opens a route, switches the tab to
+// another workspace, or sends the switch of a browser in this workspace
+// again ("Try again" after a refusal) — and dismisses the toast.
+// icon — the toast's own icon instead of the one its state gives.
+export type ToastAction = { label: string; route: AppRoute } | { label: string; workspace: string } | { label: string; browserHere: { id: string; name: string; on: boolean } };
+export type ToastInput = { title: string; desc?: string; state?: 'run' | 'wait' | 'act' | 'done' | 'err' | 'off'; icon?: IconName; action?: ToastAction };
 
 // The phone's "More" menu (features/shell): the popover over the More island.
 export const openMoreMenu = () => ({ type: 'MORE_MENU_OPEN' }) as const;

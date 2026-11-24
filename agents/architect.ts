@@ -67,7 +67,7 @@ export const agent = {
   defaultMode: 'user',
   workspaceDisk: true,
   access: { profile: 'general' },
-  agents: ['browser'],
+  agents: ['browser', 'user_browser'],
   notification: 'normal',
 
   session: {

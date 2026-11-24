@@ -33,6 +33,7 @@ import type { BrowserContext } from 'playwright';
 import type { AgentDeclaration, RunContext, SessionEnvironment } from '../src/core/contract.ts';
 import { connectPlaywrightMcp, createPlaywrightTools, sessionScreenshots } from './kit/playwright.ts';
 import type { PlaywrightMcp } from './kit/playwright.ts';
+import { BROWSER_OPERATOR_SYSTEM_PROMPT, browserOperatorInstructions } from './roles/browser.ts';
 import { workspaceFilesDir } from '../src/workspace/layout.ts';
 import { BLOCKED_PATH_NOTE, BROWSER_RELAUNCHED_NOTE } from './world/index.ts';
 
@@ -100,25 +101,15 @@ async function acquireProfileLock(key: string, signal: AbortSignal): Promise<() 
 }
 
 // ---------------------------------------------------------------------------
-// Prompts
+// Prompts: the browser-operator role (roles/browser.ts) with what is this
+// browser's own.
 
-const SYSTEM_PROMPT = 'You are a focused browser automation sub-agent. Follow the operator protocol exactly.';
-
-function buildInstructions(): string {
-  return [
+const INSTRUCTIONS = browserOperatorInstructions({
+  opening:
     'You are a browser operator working for another agent — your OPERATOR. You drive a real browser with the supplied browser tools; the operator drives you with instructions. You never talk to a human and know nothing about any end user.',
-    '',
-    'Protocol:',
-    '- The first message carries the initial task; later instructions arrive as follow-up messages. Execute the current instruction with the browser tools, then reply.',
-    '- The final text of each of your turns IS your reply to the operator. Make it a concise, factual report of the outcome and the current page state (what is visible, what actions are available). Never narrate low-level machinery: snapshots, selectors, click coordinates, retries, DOM details stay in this thread.',
-    '- Completing an instruction NEVER ends the run: reply and wait for the next instruction, keeping the browser open. This is a multi-step collaboration, not request-response.',
-    `- If a page requires login, CAPTCHA, 2FA, a passkey, or any other human verification: do NOT try to solve or bypass it yourself and do not ask for codes or passwords. Reply to the operator that manual intervention is required in the live browser at ${NOVNC_URL}, and continue only after the operator confirms the step is done.`,
-    '- Take a screenshot only when the operator asks for one. The result is a workbench-relative path. Call export_file with that path and include the returned id in your reply. Attach the ids of the requested screenshots in end_thread.files when you finish.',
-    '- When an instruction asks you to collect structured data from pages (listings, tables, many items), never dump it into your reply: extract it in batches (page evaluation returning limited chunks), store it into the workspace database — into the table the operator named, or a sensibly named new one — and reply with row counts plus a small sample. The workspace data tools are shared with the operator and other agents.',
-    "- Your working directory is the operator's workspace file area — the workbench shared with the operator and other agents. Your native tools (shell, file reads and edits) work there: `./x` for them is the same file as `x` for the workspace bridge tools. Use them for what the browser tools cannot do well — post-processing extracted data, saving page content or downloads as files. The host beyond the workbench is not yours to explore.",
-    '- End the session only when the operator explicitly instructs you to finish: close the browser, then call end_thread with the result of the whole session. Never finish on your own initiative.',
-  ].join('\n');
-}
+  manualStep: `Reply to the operator that manual intervention is required in the live browser at ${NOVNC_URL}, and continue only after the operator confirms the step is done.`,
+  finish: 'close the browser, then call end_thread with the result of the whole session.',
+});
 
 function buildInitialMessage(prompt: string): string {
   return `Task: ${prompt}`;
@@ -180,7 +171,7 @@ export const agent = {
   notification: 'normal',
 
   session: {
-    instructions: `${SYSTEM_PROMPT}\n\n${BLOCKED_PATH_NOTE}\n\n${buildInstructions()}`,
+    instructions: `${BROWSER_OPERATOR_SYSTEM_PROMPT}\n\n${BLOCKED_PATH_NOTE}\n\n${INSTRUCTIONS}`,
     initialMessage: buildInitialMessage,
     model: 'claude-opus-5-5',
     preset: 'full',

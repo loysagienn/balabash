@@ -45,6 +45,22 @@ import { ConnectionError, disconnectConnection, getOauthClientRequest, getWorksp
 import { AppManagementError, listApps, publishApp, unpublishApp } from '../apps/management.ts';
 import { ProjectError, archiveProject, createProject, parseProjectInput, parseProjectPatch, unarchiveProject, updateProject } from '../projects/mutations.ts';
 import { projectView } from '../projects/store.ts';
+import {
+  BrowserError,
+  EXTENSION_ARCHIVE,
+  browserSignals,
+  disableUserBrowser,
+  disconnectUserBrowser,
+  enableUserBrowser,
+  extensionVersion,
+  isBrowserConnected,
+  isBrowserOutdated,
+  listBrowsers,
+  renameUserBrowser,
+  requestBrowserPairing,
+} from '../browser-link/index.ts';
+import type { BrowserRecord } from '../browser-link/index.ts';
+import { EXTENSION_ID } from '../browser-link/protocol.ts';
 import { ScheduleError, createTask, deleteTask, runTask } from '../schedule/commands.ts';
 import { parseTaskInput } from '../schedule/input.ts';
 import { findRunPosition, getRun, latestRuns, listRuns } from '../schedule/journal.ts';
@@ -62,6 +78,10 @@ import { checkMutationOrigin } from './origin.ts';
 import type {
   ApiErrorBody,
   AppsResponse,
+  BrowserPairingResponse,
+  BrowserResponse,
+  BrowserView,
+  BrowsersResponse,
   ConnectLinkResponse,
   ForgetInstallationSecretsResponse,
   InstallationSecretRequestResponse,
@@ -516,6 +536,7 @@ const eventStream = createEventStreamHandler({
   hub: getLiveHub(),
   readAfter: (seq, limit) => getEventsAfter(seq, { limit }),
   drafts: draftSignals,
+  browsers: browserSignals,
 });
 
 router.get('/events/stream', requireSession, ctx => eventStream(ctx));
@@ -1810,6 +1831,132 @@ router.post('/connections', requireSession, async ctx => {
 
     throw error;
   }
+});
+
+// --------------------------------------------------------------------------
+// The linked browsers (the Connections screen): the browsers users linked
+// through the extension (src/browser-link). The user is the session's, the
+// workspace the request's; a browser is changed by its owner only — to
+// anyone else it does not exist. Every change reaches the open consoles as
+// the `browsers` frame of the event stream.
+
+const BROWSER_ERROR_STATUS: Record<BrowserError['code'], number> = { not_found: 404, name_taken: 409, invalid_name: 400 };
+
+async function browserView(browser: BrowserRecord, enabledHere: boolean): Promise<BrowserView> {
+  return {
+    id: browser.id,
+    name: browser.name,
+    online: isBrowserConnected(browser.id),
+    lastSeenAt: browser.lastSeenAt,
+    extensionVersion: browser.extensionVersion,
+    outdated: await isBrowserOutdated(browser),
+    enabledHere,
+  };
+}
+
+// Runs a command over a browser of the session's user and answers the
+// browser as the list has it; a refusal of the store becomes its status.
+async function browserCommand(ctx: Context, command: () => Promise<BrowserRecord>, enabledHere: (browser: BrowserRecord) => Promise<boolean> | boolean): Promise<void> {
+  try {
+    const browser = await command();
+    const response: BrowserResponse = { browser: await browserView(browser, await enabledHere(browser)) };
+
+    ctx.body = prepareObject(response);
+  } catch (error) {
+    if (error instanceof BrowserError) {
+      sendError(ctx, BROWSER_ERROR_STATUS[error.code], error.code, error.message);
+
+      return;
+    }
+
+    throw error;
+  }
+}
+
+async function isEnabledHere(ctx: Context, browser: BrowserRecord): Promise<boolean> {
+  const listing = await listBrowsers(ctx.state.userId as string, ctx.state.workspaceId as string);
+
+  return listing.own.some(own => own.id === browser.id && own.enabledHere);
+}
+
+router.get('/browsers', requireSession, async ctx => {
+  const listing = await listBrowsers(ctx.state.userId as string, ctx.state.workspaceId as string);
+  const version = await extensionVersion();
+  const response: BrowsersResponse = {
+    browsers: await Promise.all(listing.own.map(browser => browserView(browser, browser.enabledHere))),
+    others: listing.others.map(browser => ({
+      id: browser.id,
+      name: browser.name,
+      ownerName: browser.ownerName,
+      online: isBrowserConnected(browser.id),
+      lastSeenAt: browser.lastSeenAt,
+    })),
+    extension: { id: EXTENSION_ID, version, size: version ? ((await stat(EXTENSION_ARCHIVE).catch(() => null))?.size ?? null) : null },
+  };
+
+  ctx.body = prepareObject(response);
+});
+
+// The archive of the extension this installation builds: one folder to
+// unpack and load into Chrome.
+router.get('/browsers/extension.zip', requireSessionOrPrimary, async ctx => {
+  const version = await extensionVersion();
+  const stats = version ? await stat(EXTENSION_ARCHIVE).catch(() => null) : null;
+
+  if (!stats) {
+    sendError(ctx, 404, 'not_built', 'This installation has not built the extension');
+
+    return;
+  }
+
+  ctx.type = 'application/zip';
+  ctx.length = stats.size;
+  ctx.attachment(`balabash-agent-${version}.zip`);
+  ctx.body = createReadStream(EXTENSION_ARCHIVE);
+});
+
+router.post('/browsers/pairings', requireSession, async ctx => {
+  const body = await readJsonBody(ctx);
+
+  if (!body) {
+    return;
+  }
+
+  try {
+    const response: BrowserPairingResponse = await requestBrowserPairing(ctx.state.userId as string, ctx.state.workspaceId as string, body.name);
+
+    ctx.body = prepareObject(response);
+  } catch (error) {
+    if (error instanceof BrowserError) {
+      sendError(ctx, BROWSER_ERROR_STATUS[error.code], error.code, error.message);
+
+      return;
+    }
+
+    throw error;
+  }
+});
+
+router.patch('/browsers/:id', requireSession, async ctx => {
+  const body = await readJsonBody(ctx);
+
+  if (!body) {
+    return;
+  }
+
+  await browserCommand(ctx, () => renameUserBrowser(ctx.state.userId as string, ctx.params.id as string, body.name), browser => isEnabledHere(ctx, browser));
+});
+
+router.put('/browsers/:id/workspace', requireSession, async ctx => {
+  await browserCommand(ctx, () => enableUserBrowser(ctx.state.userId as string, ctx.params.id as string, ctx.state.workspaceId as string), () => true);
+});
+
+router.delete('/browsers/:id/workspace', requireSession, async ctx => {
+  await browserCommand(ctx, () => disableUserBrowser(ctx.state.userId as string, ctx.params.id as string, ctx.state.workspaceId as string), () => false);
+});
+
+router.delete('/browsers/:id', requireSession, async ctx => {
+  await browserCommand(ctx, () => disconnectUserBrowser(ctx.state.userId as string, ctx.params.id as string), () => false);
 });
 
 // --------------------------------------------------------------------------

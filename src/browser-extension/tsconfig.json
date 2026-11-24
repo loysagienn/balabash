@@ -1,0 +1,18 @@
+{
+  // The browser extension (src/browser-extension): a sub-project of its own —
+  // chrome and DOM types, excluded from the core tsc (../../tsconfig.json).
+  // From the core tree it imports only the wire of the link
+  // (src/browser-link/protocol.ts), the rule of the blocked sites
+  // (src/browser-link/sites.ts) and the ids of the color themes
+  // (src/utils/console-themes.ts) — nothing that touches node. Its two
+  // pages are drawn with the console's own blocks and tokens: the
+  // components of src/console/ui and the stylesheets of src/console/styles.
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "lib": ["ESNext", "DOM", "DOM.Iterable", "WebWorker"],
+    "types": ["chrome"],
+    "jsx": "react-jsx"
+  },
+  "include": ["./**/*", "../browser-link/protocol.ts", "../browser-link/sites.ts", "../utils/console-themes.ts"],
+  "exclude": ["./**/*.test.ts"]
+}

@@ -16,10 +16,13 @@ confidential from them.
   agents and thread modes in its passport. `agents/access.ts` holds named access
   profiles and the secretary's passport. `agents/world/` is the world library: canonical prompt fragments,
   one file per world fact, every prompt imports instead of retelling.
-  `agents/roles/` holds a brief shared by agents that play one role on
-  different backends; `agents/kit/` — pieces shared by agent modules (the
-  Playwright MCP of the agents that carry a browser, the loopback static
-  server an agent renders its workbench files from).
+  `agents/roles/` holds a brief shared by agents that play one role — on
+  different backends (the manager) or with different browsers (the browser
+  operator); `agents/kit/` — pieces shared by agent modules (the
+  Playwright MCP of the agents that carry a browser, the user's own browser
+  of a run — which linked browser it takes, its session and the parking
+  of it while the agent is idle, its own tools —
+  and the loopback static server an agent renders its workbench files from).
 - `src/` — the app. `core/` (event log, envelopes, threads), `capabilities/`
   (the agent runtime and session runner,
   agent validation, per-user connections and installation secrets),
@@ -38,6 +41,32 @@ confidential from them.
   Koa web surface: `/api`, `/files`, the one-time links and the OAuth
   callback), `console/` (the web interface: a browser SPA, its own tsconfig,
   served by the core on `CONSOLE_DOMAIN` through `src/api/console.ts`),
+  `browser-link/` (the link to users' own browsers: the wire between the
+  extension and the server and the messages a console page sends to the
+  extension, the hub that accepts the WebSockets the extensions open — the
+  upgrade requests of the web server — opens sessions in the browsers and
+  parks the ones whose agent is idle,
+  the CDP endpoint of a session a Playwright client connects to (`relay.ts`
+  over `cdp-model.ts`, which plays the browser Playwright expects), the
+  rule of the sites a user blocks for the agent and of the pages no
+  session gets (`sites.ts`), what is taken out of the debugger's network
+  messages before they leave the browser (`cdp-cookies.ts`), the
+  store of linked browsers and the pairing codes; `index.ts` is the module
+  as the app runs it: what `/api/browsers` calls and what an agent's run
+  reaches a browser of its workspace through),
+  `browser-extension/` (the Chrome extension that dials that
+  link from the user's browser: a browser sub-project with its own tsconfig,
+  built for one installation — the console domain is a constant of its
+  bundle; the worker with the link and its sessions — the open ones and
+  the parked ones, which hold no debugger — the user's boundaries — blocked
+  sites, consent for a tab, what the debugger may not do — the look of the
+  toolbar button, which follows the link, and two pages: the popup of the
+  toolbar button, with the settings in it, and the consent window. The
+  pages are React over the console's own blocks and tokens (`src/console/ui`,
+  `src/console/styles`), in the color theme the console tells the
+  extension;
+  `playwright/` holds modules of the Playwright extension under
+  their own license, the changed ones say so at their top),
   `users/` (users, identities, workspace membership), `workspace/` (the
   per-workspace workbench: layout, sqlite, child processes, the annotation
   indexer), `projects/` (the project registry), `schedule/` (scheduled
@@ -64,7 +93,14 @@ confidential from them.
 - `prisma/` — the database schema and its migrations; `prisma-generated/` is
   the generated client (`npm run build` regenerates it).
 - `build/` — the esbuild configuration; `dist/` is the bundle output
-  (`app.js` and the offline scripts, `console/`, `apps-vendor/`).
+  (`app.js` and the offline scripts, `console/`, `apps-vendor/`,
+  `browser-extension/` — the unpacked extension a user loads into Chrome —
+  and `browser-extension.zip`, the archive of it). A change of a console
+  block or token the extension's pages use reaches the extension with its
+  next build and a new version of it. `build/browser-extension.js`
+  takes the console domain from `CONSOLE_DOMAIN` of the environment or of
+  `.env`; without one the full build skips the extension and
+  `npm run build-extension` fails.
   `build/console.js` bundles `src/console` into `dist/console/` (hashed
   assets + `manifest.json`); the core reads the manifest per request, so
   `npm run build-console` goes live with the next page load — no restart.

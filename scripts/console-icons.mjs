@@ -36,6 +36,15 @@
 //   apple-touch-icon.png                      180 px, the dark icon as is — opaque, iOS
 //                                             rounds the corners itself and ignores
 //                                             transparency
+//
+// And, into src/browser-extension/icons, the icons of the browser extension
+// (the toolbar button and the card on chrome://extensions): icon-16.png,
+// icon-32.png, icon-48.png, icon-128.png — the cropped mark, as the favicons.
+// The toolbar button has two more looks, at 16 and 32 px, made from those
+// cuts: icon-N-muted.png — the mark in grayscale at 55 % opacity, while the
+// server cannot reach the browser — and icon-N-paused.png — the muted mark
+// with a pause glyph in the corner (src/browser-extension/action.ts shows
+// them; the design: "15 Browser extension · limits, consent, icon").
 
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -43,6 +52,8 @@ import { chromium } from 'playwright';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 const OUT_DIR = path.join(ROOT, 'src', 'console', 'public');
+// The browser extension carries the same mark (src/browser-extension/icons).
+const EXTENSION_DIR = path.join(ROOT, 'src', 'browser-extension', 'icons');
 
 // tokens.css --bg: the surface under the maskable icon (the dark PNG's own
 // graphite is the same color).
@@ -64,6 +75,15 @@ const ICONS = [
   { name: 'icon-maskable-192.png', size: 192, source: 'transparent', scale: MASKABLE_SCALE, background: BG, crop: false },
   { name: 'icon-maskable-512.png', size: 512, source: 'transparent', scale: MASKABLE_SCALE, background: BG, crop: false },
   { name: 'apple-touch-icon.png', size: 180, source: 'dark', scale: 1, background: BG, crop: false },
+  ...[16, 32, 48, 128].map(size => ({
+    name: `icon-${size}.png`,
+    dir: EXTENSION_DIR,
+    size,
+    source: 'transparent',
+    scale: 1,
+    background: 'transparent',
+    crop: true,
+  })),
 ];
 
 /**
@@ -175,6 +195,74 @@ function checkCrop(source, out) {
   return tall ? `${out.y}/${near}/${size - out.y - out.h}/${shortStart} px top/right/bottom/left` : `${shortStart}/${size - out.x - out.w}/${near}/${out.x} px top/right/bottom/left`;
 }
 
+// The sizes Chrome takes for the toolbar button.
+const TOOLBAR_SIZES = [16, 32];
+const MUTED_OPACITY = 0.55;
+
+// Runs in the page: the color cut of the toolbar icon → its muted look
+// (grayscale by luminance, the alpha at MUTED_OPACITY), with a pause glyph in
+// the bottom right corner when `paused` — a dark plate with two light bars,
+// readable over a light toolbar and a dark one, a clear ring around it.
+/**
+ * @param {{ src: string, size: number, opacity: number, paused: boolean }} input
+ * @returns {Promise<string>} a PNG data URL
+ */
+async function toolbarLook({ src, size, opacity, paused }) {
+  const image = new Image();
+
+  image.src = src;
+  await image.decode();
+
+  const canvas = document.createElement('canvas');
+
+  canvas.width = size;
+  canvas.height = size;
+
+  const context = canvas.getContext('2d');
+
+  if (!context) throw new Error('no 2d context');
+
+  context.drawImage(image, 0, 0, size, size);
+
+  const pixels = context.getImageData(0, 0, size, size);
+  const { data } = pixels;
+
+  for (let i = 0; i < data.length; i += 4) {
+    const gray = Math.round(0.2126 * data[i] + 0.7152 * data[i + 1] + 0.0722 * data[i + 2]);
+
+    data[i] = gray;
+    data[i + 1] = gray;
+    data[i + 2] = gray;
+    data[i + 3] = Math.round(data[i + 3] * opacity);
+  }
+
+  context.putImageData(pixels, 0, 0);
+
+  if (paused) {
+    const u = size / 16;
+    const plate = (inset, radius) => {
+      context.beginPath();
+      context.roundRect(7 * u - inset, 7 * u - inset, 9 * u + inset, 9 * u + inset, radius);
+      context.fill();
+    };
+
+    context.globalCompositeOperation = 'destination-out';
+    plate(u, 3 * u);
+    context.globalCompositeOperation = 'source-over';
+    context.fillStyle = '#3c4043';
+    plate(0, 2.5 * u);
+    context.fillStyle = '#e8eaed';
+
+    for (const x of [9.25, 12]) {
+      context.beginPath();
+      context.roundRect(x * u, 9 * u, 1.75 * u, 5 * u, 0.5 * u);
+      context.fill();
+    }
+  }
+
+  return canvas.toDataURL('image/png');
+}
+
 async function main() {
   const [transparentPath, darkPath] = process.argv.slice(2);
 
@@ -210,11 +298,28 @@ async function main() {
         cropNote = `, cropped to ${box.w}×${box.h} at ${box.x},${box.y}; ${checkCrop(box, out)}`;
       }
 
-      await fs.writeFile(path.join(OUT_DIR, icon.name), png);
+      await fs.mkdir(icon.dir ?? OUT_DIR, { recursive: true });
+      await fs.writeFile(path.join(icon.dir ?? OUT_DIR, icon.name), png);
       await page.close();
 
       console.log(`[console-icons] ${icon.name} (${icon.size} px, ${png.length} bytes${cropNote})`);
     }
+
+    const page = await browser.newPage();
+
+    for (const size of TOOLBAR_SIZES) {
+      const src = await toDataUrl(path.join(EXTENSION_DIR, `icon-${size}.png`));
+
+      for (const [look, paused] of [['muted', false], ['paused', true]]) {
+        const url = await page.evaluate(toolbarLook, { src, size, opacity: MUTED_OPACITY, paused });
+        const png = Buffer.from(url.slice(url.indexOf(',') + 1), 'base64');
+
+        await fs.writeFile(path.join(EXTENSION_DIR, `icon-${size}-${look}.png`), png);
+        console.log(`[console-icons] icon-${size}-${look}.png (${size} px, ${png.length} bytes)`);
+      }
+    }
+
+    await page.close();
   } finally {
     await browser.close();
   }

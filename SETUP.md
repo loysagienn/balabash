@@ -19,6 +19,15 @@ loopback port (`HTTP_PORT`); a TLS-terminating reverse proxy sends the whole
 console host (and the apps host, if any) to it with `Host` and
 `X-Forwarded-Proto` preserved.
 
+The extensions of users' browsers (`dist/browser-extension`, handed out by
+the console as an archive) hold WebSockets to `/browser-link/` of the
+console host: the proxy has to pass the protocol upgrade there (`Upgrade` and
+`Connection` headers, HTTP/1.1 to the upstream) and not to close an idle
+connection sooner than a minute — the extension pings every 20 seconds, and
+the app sends WebSocket pings every 25 seconds over each link, the one of an
+agent's session that waits for its operator included. The extension is built
+for the installation: `npm run build` builds it when `CONSOLE_DOMAIN` is set.
+
 Sessions of finished threads are not kept forever: once a day the app
 deletes, through each SDK's own means (the Claude transcript with its
 tool-results directory, the Codex rollout with its sqlite rows and generated

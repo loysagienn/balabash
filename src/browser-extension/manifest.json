@@ -1,0 +1,36 @@
+{
+  "manifest_version": 3,
+  "name": "Balabash Agent",
+  "version": "0.7.2",
+  "description": "Connects this browser to your Balabash server so that its agent can see the tabs, open pages and act in them.",
+  "minimum_chrome_version": "120",
+  "incognito": "not_allowed",
+  "permissions": [
+    "debugger",
+    "tabs",
+    "tabGroups",
+    "storage",
+    "alarms"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "Balabash Agent",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png",
+      "48": "icons/icon-48.png",
+      "128": "icons/icon-128.png"
+    },
+    "default_popup": "popup.html"
+  },
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAlDHTfz1usbwEbmWt2ptVUaqtUU7oBsRdcZQgGeufif6ja6TdMGwdP6hwNoA++zv0A1DYJlbD2mJYKii/BO6mlGd9GCSUoyCv7dIZt3QUQy/VcRT9kM4oWPVXuP7E3oHlCd835fhAjcpbqXY+QUIg0m7toO5A6rdXooPuxgRuoX1v/H1SpyOZy5O1Os3Vtj76av0OO4aov1zHHoOWa6gl56RR2QOBvGKJnsg+xpOWK7aSsOF6PRS4fNlSvWfCBnqmflHSlN6n7fmX4aiC+umpPBWtb7xnWIRIAnQCbf4vL8gSPKXlkXDPtxxBk6YL3YVLDu2JXsk6xRuifIuNegUThQIDAQAB"
+}

@@ -16,6 +16,11 @@ export { IMAGE_GENERATOR_SUBAGENT_NOTE } from './image-generator-subagent.ts';
 export { OUTPUT_NOTE } from './output.ts';
 export { PROJECTS_NOTE, PROJECTS_WORLD_NOTE } from './projects.ts';
 export { REMOTE_AGENTS_NOTE } from './remote-agents.ts';
-export { BROWSER_RELAUNCHED_NOTE, SESSION_RESUMED_IDLE_NOTE, SESSION_RESUMED_INTERRUPTED_NOTE } from './session-resume.ts';
+export {
+  BROWSER_RELAUNCHED_NOTE,
+  SESSION_RESUMED_IDLE_NOTE,
+  SESSION_RESUMED_INTERRUPTED_NOTE,
+  USER_BROWSER_SESSION_ENDED_NOTE,
+} from './session-resume.ts';
 export { THREAD_DIALOGUE_NOTE } from './thread-dialogue.ts';
 export { WORKBENCH_NOTE } from './workbench.ts';

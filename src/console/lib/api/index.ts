@@ -4,6 +4,10 @@
 
 import type {
   AppsResponse,
+  BrowserPairingRequest,
+  BrowserPairingResponse,
+  BrowserResponse,
+  BrowsersResponse,
   ConnectLinkResponse,
   ConnectionResponse,
   CreateProjectRequest,
@@ -29,6 +33,7 @@ import type {
   PublicationResponse,
   PublishAppRequest,
   PutDraftRequest,
+  RenameBrowserRequest,
   RenameConnectionRequest,
   RunTaskResponse,
   SecretRequestResponse,
@@ -219,6 +224,19 @@ export type Api = {
     // answer names the secrets form to open (provide or replace).
     requestOauthClient(server: string): Promise<OauthClientRequestResponse>;
   };
+  // The browsers users linked through the extension (the second data layer
+  // too — the server's memory says who is connected): the list as the user
+  // sees it from the workspace; a pairing code for the browser the console
+  // is open in; the owner's commands, each answering the browser. A change
+  // by anyone arrives as the stream's `browsers` frame.
+  browsers: {
+    list(signal?: AbortSignal): Promise<BrowsersResponse>;
+    requestPairing(name: string): Promise<BrowserPairingResponse>;
+    rename(id: string, name: string): Promise<BrowserResponse>;
+    enableHere(id: string): Promise<BrowserResponse>;
+    disableHere(id: string): Promise<BrowserResponse>;
+    disconnect(id: string): Promise<BrowserResponse>;
+  };
   // The trusted window of a one-time link (the second data layer too): the
   // field metadata of a secret request, and the values going to storage —
   // they never come back, not in the answer, not in an event. A 404 is the
@@ -256,6 +274,12 @@ export function fileUrl(path: string, download = false): string {
   return withWorkspace(`${fileBytesPath(path)}${download ? '?download=1' : ''}`);
 }
 
+// The archive of the extension this installation builds — a download, in
+// the tab's workspace (?ws=).
+export function extensionArchiveUrl(): string {
+  return withWorkspace('/api/browsers/extension.zip');
+}
+
 export function createApi(options: FetchOptions = {}): Api {
   const apiFetch = createFetch(options);
   const upload = createUpload(options);
@@ -265,6 +289,7 @@ export function createApi(options: FetchOptions = {}): Api {
   const installationService = (name: string) => `/api/installation-services/${encodeURIComponent(name)}`;
   const task = (slug: string) => `/api/schedule/tasks/${encodeURIComponent(slug)}`;
   const connection = (id: string) => `/api/connections/${encodeURIComponent(id)}`;
+  const browser = (id: string) => `/api/browsers/${encodeURIComponent(id)}`;
 
   return {
     me: () => apiFetch<MeResponse>('/api/me', { unauthenticated: true }),
@@ -343,6 +368,14 @@ export function createApi(options: FetchOptions = {}): Api {
       reconnect: id => apiFetch<ConnectLinkResponse>(`${connection(id)}/reconnect`, { method: 'POST', body: {} }),
       connect: input => apiFetch<ConnectLinkResponse>('/api/connections', { method: 'POST', body: input }),
       requestOauthClient: server => apiFetch<OauthClientRequestResponse>(`/api/services/${encodeURIComponent(server)}/oauth-client-request`, { method: 'POST', body: {} }),
+    },
+    browsers: {
+      list: signal => apiFetch<BrowsersResponse>('/api/browsers', { signal }),
+      requestPairing: name => apiFetch<BrowserPairingResponse>('/api/browsers/pairings', { method: 'POST', body: { name } satisfies BrowserPairingRequest }),
+      rename: (id, name) => apiFetch<BrowserResponse>(browser(id), { method: 'PATCH', body: { name } satisfies RenameBrowserRequest }),
+      enableHere: id => apiFetch<BrowserResponse>(`${browser(id)}/workspace`, { method: 'PUT', body: {} }),
+      disableHere: id => apiFetch<BrowserResponse>(`${browser(id)}/workspace`, { method: 'DELETE' }),
+      disconnect: id => apiFetch<BrowserResponse>(browser(id), { method: 'DELETE' }),
     },
     secretRequests: {
       get: (id, signal) => apiFetch<SecretRequestResponse>(secretRequest(id), { signal }),

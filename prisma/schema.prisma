@@ -626,3 +626,38 @@ model RemoteThread {
   @@index([workspaceId, phase])
   @@map("remote_threads")
 }
+
+// A browser of a user, linked to this installation through the extension
+// (src/browser-link): one row per pairing — the user who paired it, the name
+// they gave it (unique among their browsers), the hash of the secret the
+// extension proves itself with (sha256 with the installation's pepper, as a
+// web session's token; the secret itself lives in the extension only).
+// `extensionVersion` and `lastSeenAt` are what the browser said and when it
+// last dialed in. Whether it is connected now is not here — that is the
+// process's memory. Disconnecting a browser deletes its row.
+model UserBrowser {
+  id               String    @id @default(uuid())
+  userId           String    @map("user_id")
+  name             String
+  secretHash       String    @unique @map("secret_hash")
+  extensionVersion String?   @map("extension_version")
+  lastSeenAt       DateTime? @map("last_seen_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
+
+  @@unique([userId, name])
+  @@map("user_browsers")
+}
+
+// The workspaces a browser is enabled in: the agents of a workspace reach
+// only the browsers that have a row here. A pairing enables the browser in
+// the workspace it was started from; its owner enables and disables the
+// rest.
+model UserBrowserWorkspace {
+  browserId   String   @map("browser_id")
+  workspaceId String   @map("workspace_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@id([browserId, workspaceId])
+  @@index([workspaceId])
+  @@map("user_browser_workspaces")
+}

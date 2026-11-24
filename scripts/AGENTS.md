@@ -34,7 +34,9 @@ npm run build && npm run cleanup-sessions [-- --older-than 7] [-- --apply]
 
 ## console-icons (`scripts/console-icons.mjs`)
 
-Renders the console's app icons (`src/console/public/*.png`: the tab's
+Renders the icons of the browser extension (`src/browser-extension/icons/icon-16/32/48/128.png` — the cropped
+mark, as the favicons — and the two more looks of its toolbar button at 16 and 32 px, `icon-N-muted.png` and
+`icon-N-paused.png`) and the console's app icons (`src/console/public/*.png`: the tab's
 `favicon-32/192`, install icons 192/512 `any` and `maskable`,
 `apple-touch-icon` 180) from the approved service icon — the pair of 1254 px
 PNGs in the project library, `balabash/design/balabash-icon-transparent.png`
@@ -154,3 +156,28 @@ For another code task, supply its reviewed JavaScript program body in
 `--programs DIR` under `<workspaceId>/<slug>.js`. A custom program takes responsibility
 for its own initial state. A task without a translation aborts the transaction.
 Historical job runs retain their ids, positions and the values shown by the schedule reader.
+
+## browser-link-check (`scripts/browser-link-check.ts`)
+
+The end-to-end check of the browser link (`src/browser-link`,
+`src/browser-extension`) on this host: a Chromium with the extension plays
+the user's browser. The script builds the extension for a stand of its own —
+a console origin that exists only inside that Chromium, a temporary
+directory — so it needs no installation and touches neither the app nor its
+database. It prints a line per step and exits non-zero on the first failure;
+the head of the script lists what the steps cover — the pairing and the
+link, and an agent's run in the browser built the way `user_browser` builds
+it (`agents/kit/user-browser.ts`, the tools of `agents/kit/playwright.ts`).
+One step leaves two sessions silent before using them again: 90 seconds by
+default, `--silence=<seconds>` changes it; 0 skips it, and with it the step
+that waits a minute for the user's answer about a tab.
+`--shots=<directory>` saves pictures of the popup and of the consent window
+at the moments worth comparing with the design (the popup opened as a tab
+360 px wide; without a theme told by a console it is drawn in the system's
+scheme, which is light in this Chromium). Not bundled:
+run from the source. Run it after every update of Playwright:
+`src/browser-link/cdp-model.ts` repeats what Playwright expects of a browser.
+
+```
+node scripts/browser-link-check.ts [--silence=<seconds>] [--shots=<directory>]
+```

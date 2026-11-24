@@ -49,4 +49,4 @@ ${REMOTE_AGENTS_NOTE}`;
 }
 
 // Sub-agents the manager role may spawn.
-export const MANAGER_AGENTS = ['browser'];
+export const MANAGER_AGENTS = ['browser', 'user_browser'];

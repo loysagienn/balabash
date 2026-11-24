@@ -36,6 +36,7 @@ import { Tiles } from '../../ui/ProjectTile/ProjectTile.tsx';
 import { Screen } from '../../ui/Screen/Screen.tsx';
 import { SkelRow } from '../../ui/Skel/Skel.tsx';
 import { AccountRow } from './AccountRow.tsx';
+import { BrowsersSection } from './BrowsersSection.tsx';
 import { ConnectServiceDialog } from './ConnectServiceDialog.tsx';
 import { ConnectorServiceDialog } from './ConnectorServiceDialog.tsx';
 import { InstallationServiceDialog } from './InstallationServiceDialog.tsx';
@@ -103,6 +104,7 @@ export function ConnectionsScreen() {
             </List>
           )}
         </Card>
+        <BrowsersSection now={now} />
         <Card narrow="bare">
           <CardHead title="Service catalog" count={entries.length} />
           <CardBody>
