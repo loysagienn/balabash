@@ -59,6 +59,9 @@ export type WelcomeParams = {
   name: string;
   // The version of the extension this installation builds.
   currentExtensionVersion: string;
+  // The first version an agent works through (SESSIONS_SINCE_VERSION): an
+  // older extension tells its user that it has to be updated.
+  sessionsSinceVersion?: string;
   secret?: string;
 };
 
@@ -109,19 +112,25 @@ export type BrowserTab = {
 // is another session's.
 export type ControlRefusal = 'tabs_hidden' | 'declined' | 'no_answer' | 'tab_changed' | 'blocked_site' | 'not_debuggable' | 'owned';
 
+// Whose session it is, as the user reads it: the name of the workspace ('' —
+// it has none) and the title of the agent's thread.
+export type SessionAbout = { workspace: string; thread: string };
+
 export type ControlRequests = {
   // The tabs of blocked sites are not in the list.
   'tabs.list': { params: Record<string, never>; result: { tabs: BrowserTab[] } };
   // The extension opens a session link with the ticket, gives the session a
   // blank tab of its own and answers once the link is initialized. `label`
   // is what the user reads about the session (the workspace and the title of
-  // the agent's thread). With `resume` it is a parked session that comes
+  // the agent's thread) in one line; `about` — the same two apart: the
+  // extension names the session's group of tabs by the thread and shows the
+  // workspace beside it. With `resume` it is a parked session that comes
   // back, under the id it had: instead of a blank tab it gets the tabs that
   // are in its group now — the ones of `tabIds` first, in that order (the
   // order the client knew its tabs in), then the ones the user added — and
   // a blank tab only when the group is empty or gone.
   'session.open': {
-    params: { ticket: string; clientName: string; label: string; resume?: { sessionId: number; tabIds: number[] } };
+    params: { ticket: string; clientName: string; label: string; about?: SessionAbout; resume?: { sessionId: number; tabIds: number[] } };
     result: { sessionId: number };
   };
   // The session is parked: the debugger leaves its tabs, the group of tabs
@@ -161,7 +170,10 @@ export type Frame = {
 // What a page of the console sends to the extension
 // (`chrome.runtime.sendMessage(<extension id>, …)`); the extension answers
 // the console's origin only.
-export type PageRequest = { type: 'status' } | { type: 'pair'; code: string };
+// `theme` — the color theme the user chose in the console (the ids of
+// src/utils/console-themes.ts): the extension keeps it and draws its own
+// pages in it. The answer is `{ ok: true }`.
+export type PageRequest = { type: 'status' } | { type: 'pair'; code: string } | { type: 'theme'; theme: string };
 
 export type ExtensionState = 'unpaired' | 'paused' | 'connecting' | 'connected' | 'offline';
 

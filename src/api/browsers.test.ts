@@ -131,6 +131,7 @@ describe('pairing a browser', () => {
     assert.deepEqual(before.browsers, []);
     assert.equal(before.extension.id, 'moadcglcgjkicomjkmccjfckhoeohhck');
     assert.equal(before.extension.version, null, 'the stand has built no extension');
+    assert.equal(before.extension.size, null, 'and so has no archive to weigh');
 
     const { link, welcome } = await pair('MacBook');
 
@@ -205,6 +206,7 @@ describe('a paired browser', () => {
       (await list(guest.cookie)).others.filter(browser => browser.id === id).map(browser => [browser.name, browser.ownerName, browser.online]),
       [['Shared', 'Operator', true]],
     );
+    assert.ok((await list(guest.cookie)).others.find(browser => browser.id === id)?.lastSeenAt, 'with when it was last on the link');
     assert.deepEqual((await list(guest.cookie)).browsers, [], 'not theirs');
 
     for (const [method, path, body] of [

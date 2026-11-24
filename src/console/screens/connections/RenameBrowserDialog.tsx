@@ -1,7 +1,8 @@
-// "Browser name": the name the user and the agents tell a browser by, over
-// PATCH /api/browsers/:id. The dialog's own check (not empty) and the
-// server's refusal (a name another browser of the user has) show under the
-// field; an unchanged name just closes.
+// "Rename browser": the name the user, the members of its workspaces and
+// the agents tell a browser by, over PATCH /api/browsers/:id. The dialog's
+// own check (not empty, not too long) and the server's refusal (a name
+// another browser of the user has) show under the field; an unchanged name
+// just closes.
 
 import { useState } from 'react';
 import type { FormEvent } from 'react';
@@ -10,10 +11,11 @@ import type { BrowserView } from '../../../api/contract.ts';
 import { toApiFailure } from '../../lib/api/index.ts';
 import { useApi } from '../../lib/api/context.tsx';
 import { BROWSERS_KEY } from '../../lib/query/browsers.ts';
+import { failureWords } from '../../store/browsers/words.ts';
 import { Dialog } from '../../ui/Dialog/Dialog.tsx';
 import { Field } from '../../ui/Field/Field.tsx';
 import { Input } from '../../ui/Input/Input.tsx';
-import { BROWSER_NAME_MAX_LENGTH, validateBrowserName } from './Browsers.logic.ts';
+import { BROWSER_NAME_MAX_LENGTH, nameError, nameRefusal } from './Browsers.logic.ts';
 
 const FORM_ID = 'rename-browser';
 
@@ -21,15 +23,20 @@ export function RenameBrowserDialog({ browser, onClose }: { browser: BrowserView
   const api = useApi();
   const queryClient = useQueryClient();
   const [name, setName] = useState(browser.name);
-  const [touched, setTouched] = useState(false);
   const [busy, setBusy] = useState(false);
   const [refusal, setRefusal] = useState<string | null>(null);
-  const err = (touched ? validateBrowserName(name) : null) ?? refusal;
   const submit = (event: FormEvent) => {
     event.preventDefault();
-    setTouched(true);
 
-    if (busy || validateBrowserName(name)) {
+    if (busy) {
+      return;
+    }
+
+    const wrong = nameError(name);
+
+    setRefusal(wrong);
+
+    if (wrong) {
       return;
     }
 
@@ -46,16 +53,18 @@ export function RenameBrowserDialog({ browser, onClose }: { browser: BrowserView
         onClose();
       },
       error => {
+        const failure = toApiFailure(error);
+
         setBusy(false);
-        setRefusal(toApiFailure(error).message);
+        setRefusal(nameRefusal(name, failure) ?? failureWords(failure));
       },
     );
   };
 
   return (
-    <Dialog title="Browser name" confirm="Save" form={FORM_ID} busy={busy} onClose={onClose}>
+    <Dialog title="Rename browser" confirm="Save" form={FORM_ID} busy={busy} onClose={onClose}>
       <form id={FORM_ID} className="form" onSubmit={submit} noValidate>
-        <Field label="Name" fid={`${FORM_ID}-name`} hint="How you and the agents tell your browsers apart." err={err} required>
+        <Field label="Name" fid={`${FORM_ID}-name`} hint="Up to 60 characters. You and the members of its workspaces see it; agents pick a browser by it." err={refusal} required>
           <Input
             id={`${FORM_ID}-name`}
             name="name"
@@ -67,7 +76,7 @@ export function RenameBrowserDialog({ browser, onClose }: { browser: BrowserView
             maxLength={BROWSER_NAME_MAX_LENGTH}
             autoComplete="off"
             autoFocus
-            invalid={Boolean(err)}
+            invalid={Boolean(refusal)}
           />
         </Field>
       </form>

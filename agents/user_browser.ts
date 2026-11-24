@@ -32,7 +32,7 @@
 import { mkdir, rm } from 'node:fs/promises';
 import path from 'node:path';
 import type { AgentDeclaration, RunContext, SessionEnvironment } from '../src/core/contract.ts';
-import { sessionLabel } from '../src/browser-link/index.ts';
+import { sessionAbout, sessionLabel } from '../src/browser-link/index.ts';
 import { getThread } from '../src/core/threads.ts';
 import { workspaceFilesDir } from '../src/workspace/layout.ts';
 import { connectPlaywrightMcp, createPlaywrightTools, sessionScreenshots } from './kit/playwright.ts';
@@ -75,6 +75,7 @@ async function createEnvironment(ctx: RunContext, cwd: string): Promise<SessionE
     workspaceId: ctx.workspaceId,
     clientName: 'balabash-user-browser',
     label: async () => sessionLabel(ctx.workspaceId, (await getThread(ctx.threadId))?.title ?? ''),
+    about: async () => sessionAbout(ctx.workspaceId, (await getThread(ctx.threadId))?.title ?? ''),
   });
   let playwright: PlaywrightMcp | undefined;
   const dispose = async () => {

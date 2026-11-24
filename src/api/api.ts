@@ -1881,10 +1881,17 @@ async function isEnabledHere(ctx: Context, browser: BrowserRecord): Promise<bool
 
 router.get('/browsers', requireSession, async ctx => {
   const listing = await listBrowsers(ctx.state.userId as string, ctx.state.workspaceId as string);
+  const version = await extensionVersion();
   const response: BrowsersResponse = {
     browsers: await Promise.all(listing.own.map(browser => browserView(browser, browser.enabledHere))),
-    others: listing.others.map(browser => ({ id: browser.id, name: browser.name, ownerName: browser.ownerName, online: isBrowserConnected(browser.id) })),
-    extension: { id: EXTENSION_ID, version: await extensionVersion() },
+    others: listing.others.map(browser => ({
+      id: browser.id,
+      name: browser.name,
+      ownerName: browser.ownerName,
+      online: isBrowserConnected(browser.id),
+      lastSeenAt: browser.lastSeenAt,
+    })),
+    extension: { id: EXTENSION_ID, version, size: version ? ((await stat(EXTENSION_ARCHIVE).catch(() => null))?.size ?? null) : null },
   };
 
   ctx.body = prepareObject(response);

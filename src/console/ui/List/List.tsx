@@ -44,6 +44,9 @@ export type RowProps = {
   // A tag beside the title ("this workspace").
   tag?: ReactNode;
   meta?: ReactNode;
+  // A second line of the meta's kind with a tone of its own (an amber
+  // "out of date"): the caller's element, a `.row-m` with its class.
+  note?: ReactNode;
   desc?: ReactNode;
   end?: ReactNode;
   // A link row when href is given; a plain row (its buttons are its own
@@ -54,10 +57,13 @@ export type RowProps = {
   external?: boolean;
   current?: boolean;
   fresh?: boolean;
+  // The row is there but out of play (a browser off in this workspace):
+  // its title steps back.
+  dim?: boolean;
   className?: string;
 };
 
-export function Row({ lead, title, tag, meta, desc, end, href, onClick, external, current, fresh, className }: RowProps) {
+export function Row({ lead, title, tag, meta, note, desc, end, href, onClick, external, current, fresh, dim, className }: RowProps) {
   const classes = className ? `row ${className}` : 'row';
   const body = (
     <>
@@ -68,6 +74,7 @@ export function Row({ lead, title, tag, meta, desc, end, href, onClick, external
           {tag ?? null}
         </span>
         {meta !== undefined && meta !== null ? <span className="row-m">{meta}</span> : null}
+        {note ?? null}
         {desc !== undefined && desc !== null ? <span className="row-d">{desc}</span> : null}
       </span>
       {end !== undefined && end !== null ? <span className="row-end">{end}</span> : null}
@@ -84,6 +91,7 @@ export function Row({ lead, title, tag, meta, desc, end, href, onClick, external
         rel={external ? 'noopener' : undefined}
         aria-current={current ? 'page' : undefined}
         data-fresh={fresh ? '' : undefined}
+        data-dim={dim ? '' : undefined}
       >
         {body}
       </a>
@@ -91,7 +99,7 @@ export function Row({ lead, title, tag, meta, desc, end, href, onClick, external
   }
 
   return (
-    <div className={classes} aria-current={current ? 'page' : undefined} data-fresh={fresh ? '' : undefined}>
+    <div className={classes} aria-current={current ? 'page' : undefined} data-fresh={fresh ? '' : undefined} data-dim={dim ? '' : undefined}>
       {body}
     </div>
   );

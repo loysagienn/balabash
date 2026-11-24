@@ -22,6 +22,7 @@ import { connectStoreToWorkspace } from './lib/workspace/process.ts';
 import { connectStoreToFeedEviction } from './lib/feed-eviction/index.ts';
 import { connectStoreToDraftSync } from './lib/drafts/index.ts';
 import { connectDocumentToTheme } from './lib/theme/index.ts';
+import { connectExtensionToTheme } from './lib/extension/index.ts';
 import { connectQueryClientToSession } from './lib/query/session.ts';
 import { connectQueryClientToSecretRequests } from './lib/query/secret-requests.ts';
 import { connectQueryClientToSchedule } from './lib/query/schedule.ts';
@@ -38,6 +39,10 @@ import { sessionCheck, sessionLost } from './store/session/actions.ts';
 // before the first paint; from here on the console keeps it there — a
 // choice in another tab included.
 connectDocumentToTheme();
+// The Balabash Agent extension of this browser, when there is one, draws
+// its own pages in the theme of the console: it is told the theme now and
+// at every change (lib/extension).
+connectExtensionToTheme();
 
 const root = document.getElementById('root');
 

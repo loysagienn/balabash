@@ -18,6 +18,7 @@ import {
   CLOSE_SESSION_STOPPED,
   CLOSE_UNAUTHORIZED,
   CLOSE_UNSUPPORTED_PROTOCOL,
+  SESSIONS_SINCE_VERSION,
   SESSION_OVER,
   SESSION_PATH,
 } from './protocol.ts';
@@ -121,7 +122,7 @@ describe('a hello', () => {
     const welcome = await link.next();
 
     assert.equal(welcome.method, 'welcome');
-    assert.deepEqual(welcome.params, { browserId: 'b1', name: 'Known', currentExtensionVersion: '0.9.0' } satisfies WelcomeParams);
+    assert.deepEqual(welcome.params, { browserId: 'b1', name: 'Known', currentExtensionVersion: '0.9.0', sessionsSinceVersion: SESSIONS_SINCE_VERSION } satisfies WelcomeParams);
     assert.equal(hub.browser('b1')?.extensionVersion, '0.2.0');
     assert.deepEqual(presence, [['b1', true]]);
 
@@ -138,7 +139,13 @@ describe('a hello', () => {
     const link = await dial(port, { host: HOST });
 
     link.send(hello({ pairingCode: 'fresh', previousSecret: 'old' }));
-    assert.deepEqual((await link.next()).params, { browserId: 'b2', name: 'Paired', currentExtensionVersion: '0.9.0', secret: 'secret-of-b2' });
+    assert.deepEqual((await link.next()).params, {
+      browserId: 'b2',
+      name: 'Paired',
+      currentExtensionVersion: '0.9.0',
+      sessionsSinceVersion: SESSIONS_SINCE_VERSION,
+      secret: 'secret-of-b2',
+    });
     assert.deepEqual(admitted, [{ protocol: 1, extensionVersion: '0.2.0', pairingCode: 'fresh', previousSecret: 'old' }]);
     link.close();
     await link.closed;

@@ -65,6 +65,7 @@ import {
   PROTOCOL_VERSION,
   SESSION_OVER,
   SESSION_PATH,
+  SESSIONS_SINCE_VERSION,
 } from './protocol.ts';
 import type {
   BrowserTab,
@@ -73,6 +74,7 @@ import type {
   ControlRequests,
   Frame,
   HelloParams,
+  SessionAbout,
   SessionNotice,
   WelcomeParams,
 } from './protocol.ts';
@@ -134,7 +136,7 @@ export type ParkedSession = {
   ended: Promise<{ end: SessionEnd; detail: string }>;
   // The session comes back: a new link, and the tabs of its group — the
   // ones of `tabIds` first, in that order. A failure ends it as lost.
-  resume(options: { clientName: string; label: string; tabIds: number[] }): Promise<ExtensionSession>;
+  resume(options: { clientName: string; label: string; about?: SessionAbout; tabIds: number[] }): Promise<ExtensionSession>;
   // The server is done with the session, or withdraws the browser from it.
   close(end?: 'closed' | 'revoked'): void;
 };
@@ -146,7 +148,7 @@ export type ConnectedBrowser = {
   listTabs(): Promise<BrowserTab[]>;
   // `clientName` names the client in the extension's own words, `label` is
   // what the user reads about the session.
-  openSession(options: { clientName: string; label: string }): Promise<ExtensionSession>;
+  openSession(options: { clientName: string; label: string; about?: SessionAbout }): Promise<ExtensionSession>;
 };
 
 export type BrowserLinkHub = {
@@ -518,15 +520,17 @@ export function createBrowserLinkHub(options: {
     const open = async ({
       clientName,
       label,
+      about,
       resume,
     }: {
       clientName: string;
       label: string;
+      about?: SessionAbout;
       resume?: ControlRequests['session.open']['params']['resume'];
     }): Promise<OpenSession> => {
       const ticket = randomBytes(32).toString('base64url');
       const dialed = sessionSocket(ticket);
-      const opened = request('session.open', { ticket, clientName, label, ...(resume ? { resume } : {}) });
+      const opened = request('session.open', { ticket, clientName, label, ...(about ? { about } : {}), ...(resume ? { resume } : {}) });
       // The one term of all the steps.
       let timer!: NodeJS.Timeout;
       const late = new Promise<never>((_resolve, reject) => {
@@ -605,13 +609,13 @@ export function createBrowserLinkHub(options: {
       return {
         id,
         ended,
-        resume: async ({ clientName, label, tabIds }) => {
+        resume: async ({ clientName, label, about, tabIds }) => {
           if (!leave()) {
             throw new BrowserRequestError('This session is over');
           }
 
           try {
-            return await open({ clientName, label, resume: { sessionId: id, tabIds } });
+            return await open({ clientName, label, about, resume: { sessionId: id, tabIds } });
           } catch (error) {
             // The extension holds the session no more — the user has stopped
             // it, and the word of it is still on its way — or what it holds
@@ -639,7 +643,7 @@ export function createBrowserLinkHub(options: {
       },
       park,
     };
-    const openSession: ConnectedBrowser['openSession'] = ({ clientName, label }) => open({ clientName, label });
+    const openSession: ConnectedBrowser['openSession'] = ({ clientName, label, about }) => open({ clientName, label, about });
 
     const admit = async (params: unknown) => {
       const hello = parseHello(params);
@@ -678,6 +682,7 @@ export function createBrowserLinkHub(options: {
         browserId: admission.browserId,
         name: admission.name,
         currentExtensionVersion: await options.extensionVersion(),
+        sessionsSinceVersion: SESSIONS_SINCE_VERSION,
         ...(admission.secret ? { secret: admission.secret } : {}),
       });
       hub.onPresence?.(browser.id, true);

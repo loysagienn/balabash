@@ -4,7 +4,9 @@
 // The settings — the blocked list of sites, whether the agent sees the list
 // of tabs and whether it gets a tab it asks for without the user being
 // asked — live in chrome.storage.local and are written by this module alone
-// (the popup asks the worker).
+// (the popup asks the worker). Every change is one action that saves
+// itself: a switch, a site added, an entry rewritten, an entry removed —
+// there is no draft of the list that another change could carry along.
 //
 // A blocked site is closed to a session at every door:
 // - its tabs are not in the list of tabs and cannot be handed to a session
@@ -31,7 +33,7 @@
 // — nor close or crash the browser.
 
 import { withoutCookies } from '../browser-link/cdp-cookies.ts';
-import { isBlockedUrl, isExtensionPage, normalizeSites } from '../browser-link/sites.ts';
+import { isBlockedUrl, isExtensionPage, normalizeSite, normalizeSites } from '../browser-link/sites.ts';
 import type { ChromeListeners } from './playwright/chromeListeners';
 import type { ClientSession } from './playwright/clientSession';
 import type { TabGroupManager } from './playwright/tabGroupManager';
@@ -86,20 +88,59 @@ export async function readSettings(): Promise<Settings> {
   return settings;
 }
 
-export async function writeSettings(next: { blockedSites?: unknown; tabsListHidden?: unknown; tabsWithoutAsking?: unknown }): Promise<Settings> {
-  await loaded;
-  settings = {
-    blockedSites: Array.isArray(next.blockedSites)
-      ? normalizeSites(next.blockedSites.filter((site): site is string => typeof site === 'string'))
-      : settings.blockedSites,
-    tabsListHidden: typeof next.tabsListHidden === 'boolean' ? next.tabsListHidden : settings.tabsListHidden,
-    tabsWithoutAsking: typeof next.tabsWithoutAsking === 'boolean' ? next.tabsWithoutAsking : settings.tabsWithoutAsking,
-  };
-  await chrome.storage.local.set(settings);
+async function keep(next: Settings): Promise<Settings> {
+  await chrome.storage.local.set(next);
+  settings = next;
   // A site blocked just now takes its tabs from the sessions at once.
   await applyToAllTabs();
 
   return settings;
+}
+
+// A switch, or both: each named one takes its value, the rest stay.
+export async function writeSwitches(next: { tabsListHidden?: unknown; tabsWithoutAsking?: unknown }): Promise<Settings> {
+  await loaded;
+
+  return await keep({
+    ...settings,
+    tabsListHidden: typeof next.tabsListHidden === 'boolean' ? next.tabsListHidden : settings.tabsListHidden,
+    tabsWithoutAsking: typeof next.tabsWithoutAsking === 'boolean' ? next.tabsWithoutAsking : settings.tabsWithoutAsking,
+  });
+}
+
+// One change of the blocked list. What the user typed keeps its domain
+// only; `invalid_site` — it names none. A site that is on the list already
+// is not added twice, and an entry rewritten into another entry joins it.
+export type SitesChange = { add: string } | { remove: string } | { replace: string; with: string };
+
+export type SitesResult = { ok: true; settings: Settings } | { ok: false; error: 'invalid_site' };
+
+export async function changeSites(change: SitesChange): Promise<SitesResult> {
+  await loaded;
+
+  let sites: string[];
+
+  if ('add' in change) {
+    const site = normalizeSite(String(change.add));
+
+    if (!site) {
+      return { ok: false, error: 'invalid_site' };
+    }
+
+    sites = [...settings.blockedSites, site];
+  } else if ('remove' in change) {
+    sites = settings.blockedSites.filter(entry => entry !== change.remove);
+  } else {
+    const site = normalizeSite(String(change.with));
+
+    if (!site) {
+      return { ok: false, error: 'invalid_site' };
+    }
+
+    sites = settings.blockedSites.map(entry => (entry === change.replace ? site : entry));
+  }
+
+  return { ok: true, settings: await keep({ ...settings, blockedSites: normalizeSites(sites) }) };
 }
 
 export function isBlocked(url: string | undefined): boolean {

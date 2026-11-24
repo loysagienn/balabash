@@ -1,12 +1,14 @@
 // The toasts of the screen from the store (ui.toasts): every pushToast
 // becomes a Toast in the stack at the corner of the shell; "Close" and the
-// timer (toasts.logic.ts) dismiss it. The icon follows the state. A toast
-// with an action shows its button: pressing it opens the route (or the
-// other workspace) and dismisses the toast.
+// timer (toasts.logic.ts) dismiss it. The icon follows the state unless the
+// toast names its own. A toast with an action shows its button: pressing
+// it opens the route (or the other workspace, or sends a browser's switch
+// again) and dismisses the toast.
 
 import { useEffect } from 'react';
 import { useAppDispatch, useAppSelector } from '../../store/hooks.ts';
 import { switchWorkspace } from '../../lib/workspace/index.ts';
+import { setBrowserHere } from '../../store/browsers/actions.ts';
 import { routeTo } from '../../store/router/actions.ts';
 import { dismissToast } from '../../store/ui/actions.ts';
 import type { Toast as ToastData } from '../../store/ui/reducer.ts';
@@ -60,7 +62,7 @@ function ToastItem({ toast }: { toast: ToastData }) {
   return (
     <Toast
       state={toast.state}
-      icon={toast.state ? ICON[toast.state] : 'info'}
+      icon={toast.icon ?? (toast.state ? ICON[toast.state] : 'info')}
       title={toast.title}
       action={action?.label}
       onAction={
@@ -68,6 +70,8 @@ function ToastItem({ toast }: { toast: ToastData }) {
           ? () => {
               if ('workspace' in action) {
                 switchWorkspace(action.workspace);
+              } else if ('browserHere' in action) {
+                dispatch(setBrowserHere(action.browserHere.id, action.browserHere.name, action.browserHere.on));
               } else {
                 dispatch(routeTo(action.route));
               }

@@ -56,6 +56,7 @@ import type {
   SessionEnd,
   WorkspaceBrowser,
 } from '../../src/browser-link/index.ts';
+import type { SessionAbout } from '../../src/browser-link/protocol.ts';
 
 const CONNECT_TIMEOUT_MS = 30_000;
 // How long a session stands unused before it is parked. Longer than an
@@ -266,10 +267,10 @@ export async function attachToSession(endpoint: string): Promise<{ context: Brow
   return { context, detach: () => remote.close() };
 }
 
-const liveLink = (workspaceId: string, session: { clientName: string; label(): Promise<string> }): UserBrowserLink => ({
+const liveLink = (workspaceId: string, session: { clientName: string; label(): Promise<string>; about?(): Promise<SessionAbout> }): UserBrowserLink => ({
   browsers: () => workspaceBrowsers(workspaceId),
   tabs: browserId => workspaceBrowserTabs(workspaceId, browserId),
-  open: async browserId => openBrowserSession({ workspaceId, browserId, clientName: session.clientName, label: await session.label() }),
+  open: async browserId => openBrowserSession({ workspaceId, browserId, clientName: session.clientName, label: await session.label(), about: await session.about?.() }),
   attach: attachToSession,
 });
 
@@ -289,8 +290,10 @@ export function createUserBrowser(options: {
   workspaceId: string;
   // Names the client to the extension.
   clientName: string;
-  // What the user reads about the session in their browser.
+  // What the user reads about the session in their browser: in one line,
+  // and the workspace and the thread apart.
   label(): Promise<string>;
+  about?(): Promise<SessionAbout>;
   link?: UserBrowserLink;
   // How long a session stands unused before it is parked.
   idleParkMs?: number;
@@ -450,13 +453,15 @@ export function createUserBrowser(options: {
     waking ??= (async (): Promise<Held> => {
       const { browser, parked, order, front } = resting!;
       // Before the session is touched: without its label it stays parked, and the next call tries again.
-      const label = await options.label().catch(error => {
+      const unread = (error: unknown): never => {
         throw new Error(`The session was not brought back: its label could not be read (${error instanceof Error ? error.message : String(error)}). Try again.`);
-      });
+      };
+      const label = await options.label().catch(unread);
+      const about = await options.about?.().catch(unread);
       let session: BrowserSession;
 
       try {
-        session = await parked.resume({ clientName: options.clientName, label, tabIds: order });
+        session = await parked.resume({ clientName: options.clientName, label, about, tabIds: order });
       } catch (error) {
         // A session that did not come back is over, and the link says how.
         const { end } = await parked.ended;

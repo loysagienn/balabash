@@ -1,45 +1,45 @@
 // "Browsers" of the Connections screen: the browsers users linked through
-// the Balabash Agent extension (src/browser-link). The section shows the
-// user's own browsers — each renamed, enabled or disabled in this workspace
-// and disconnected by its owner — and the browsers of others enabled in the
-// workspace, and above them what can be done about the browser the console
-// is open in: by what the extension there answers (lib/extension) and what
-// the server lists (Browsers.logic.ts) — install the extension, connect
-// this browser, enable it here, update the extension.
+// the Balabash Agent extension (src/browser-link) — one card. On top, the
+// browser the console is open in: its state and the next step
+// (ThisBrowserPanel), by what the extension there answers (lib/extension)
+// and what the server lists; no panel when all is well — the row says
+// "this browser". Under it the user's own browsers, all of them — each
+// switched on or off in this workspace, renamed, updated and disconnected
+// by its owner (BrowserRow) — and the browsers of other members that are on
+// in the workspace, without commands.
 //
 // The list is data of the second layer (queries.ts): who is connected is
 // the server's memory, re-read on the stream's `browsers` frame. The
 // extension is asked again with every re-read — a pairing or a pause
-// changes its answer.
+// changes its answer. A row that came or changed between two reads flashes.
 
-import { useCallback, useEffect, useState } from 'react';
-import type { BrowsersResponse, OtherBrowserView } from '../../../api/contract.ts';
-import { extensionArchiveUrl, toApiFailure } from '../../lib/api/index.ts';
-import { useApi } from '../../lib/api/context.tsx';
-import { extensionPresence } from '../../lib/extension/index.ts';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import type { BrowsersResponse } from '../../../api/contract.ts';
+import { toApiFailure } from '../../lib/api/index.ts';
+import { extensionPresence, supportsExtension } from '../../lib/extension/index.ts';
 import type { ExtensionPresence } from '../../lib/extension/index.ts';
-import { useQueryClient } from '@tanstack/react-query';
-import { BROWSERS_KEY } from '../../lib/query/browsers.ts';
-import { useAppDispatch } from '../../store/hooks.ts';
-import { pushToast } from '../../store/ui/actions.ts';
-import { Badge } from '../../ui/Badge/Badge.tsx';
-import { Btn } from '../../ui/Btn/Btn.tsx';
-import { Card, CardBody, CardHead } from '../../ui/Card/Card.tsx';
+import { browsersRead } from '../../store/browsers/actions.ts';
+import { hereName } from '../../store/browsers/words.ts';
+import { useAppDispatch, useAppSelector } from '../../store/hooks.ts';
+import { selectMe } from '../../store/session/selectors.ts';
+import { Card, CardHead } from '../../ui/Card/Card.tsx';
 import { Empty } from '../../ui/Empty/Empty.tsx';
-import { List, Row } from '../../ui/List/List.tsx';
-import { Note } from '../../ui/Note/Note.tsx';
-import { Obj } from '../../ui/Obj/Obj.tsx';
-import { Presence } from '../../ui/Overlay/presence.tsx';
+import { List } from '../../ui/List/List.tsx';
 import { SkelRow } from '../../ui/Skel/Skel.tsx';
-import { BrowserRow } from './BrowserRow.tsx';
-import { ConnectBrowserDialog } from './ConnectBrowserDialog.tsx';
-import { browserStatusWords, extensionUpdate, thisBrowser, thisBrowserOffer } from './Browsers.logic.ts';
+import { Quiet } from '../../ui/atoms/atoms.tsx';
+import { BrowserRow, OtherBrowserRow } from './BrowserRow.tsx';
+import { CheckingPanel, ThisBrowserPanel } from './ThisBrowserPanel.tsx';
+import { changedRows, isPausedHere, loadFailedWords, rowSignatures, thisBrowser } from './Browsers.logic.ts';
 import { useBrowsers } from './queries.ts';
 
 const SKELETON: [number, number][] = [
-  [44, 66],
-  [38, 58],
+  [34, 22],
+  [28, 40],
+  [38, 26],
 ];
+// As long as the flash of a row runs (tokens: --flash).
+const FLASH_MS = 2400;
+const NO_ROWS: ReadonlySet<string> = new Set();
 
 // What the extension of this browser says, asked again whenever `stamp`
 // moves; null until the first answer.
@@ -68,130 +68,48 @@ function useExtensionPresence(extensionId: string | undefined, stamp: number): {
   return { presence, recheck: useCallback(() => setAsked(count => count + 1), []) };
 }
 
-function OtherRow({ browser }: { browser: OtherBrowserView }) {
-  const status = browserStatusWords(browser.online);
+// The rows that came or changed with the last read of the list, for the
+// time their flash runs; none at the first read.
+function useFreshRows(listing: BrowsersResponse | undefined): ReadonlySet<string> {
+  const known = useRef<Map<string, string> | null>(null);
+  const timer = useRef<number | undefined>(undefined);
+  const [fresh, setFresh] = useState(NO_ROWS);
 
-  return (
-    <Row
-      lead={<Obj icon="monitor" size="md" />}
-      title={browser.name}
-      meta={browser.ownerName ? `of ${browser.ownerName}` : 'of another user'}
-      end={<Badge state={status.state} label={status.label} />}
-    />
-  );
-}
+  useEffect(() => {
+    if (!listing) {
+      return;
+    }
 
-// What can be done about the browser the console is open in.
-function ThisBrowser({ listing, presence, recheck }: { listing: BrowsersResponse; presence: ExtensionPresence | null; recheck: () => void }) {
-  const api = useApi();
-  const dispatch = useAppDispatch();
-  const queryClient = useQueryClient();
-  const [connecting, setConnecting] = useState(false);
-  const [enabling, setEnabling] = useState(false);
-  const offer = thisBrowserOffer(presence, listing);
-  const update = extensionUpdate(presence, listing);
-  const download = extensionArchiveUrl();
+    const now = rowSignatures(listing);
+    const changed = changedRows(known.current, now);
 
-  const enable = (id: string, name: string) => {
-    setEnabling(true);
-    api.browsers
-      .enableHere(id)
-      .then(
-        () => dispatch(pushToast({ title: `“${name}” is enabled in this workspace`, state: 'done' })),
-        error => dispatch(pushToast({ title: `Couldn’t enable “${name}” here`, desc: toApiFailure(error).message, state: 'err' })),
-      )
-      .finally(() => {
-        setEnabling(false);
-        void queryClient.invalidateQueries({ queryKey: BROWSERS_KEY });
-      });
-  };
+    known.current = now;
 
-  let body = null;
+    if (changed.length > 0) {
+      window.clearTimeout(timer.current);
+      setFresh(new Set(changed));
+      timer.current = window.setTimeout(() => setFresh(NO_ROWS), FLASH_MS);
+    }
+  }, [listing]);
 
-  switch (offer.kind) {
-    case 'unsupported':
-      body = <Note icon="monitor">To connect a browser, open this console in the desktop Chrome you want to connect.</Note>;
-      break;
-    case 'not-built':
-      body = (
-        <Note state="off" icon="info">
-          This installation has not built the Balabash Agent extension, so there is nothing to install yet.
-        </Note>
-      );
-      break;
-    case 'install':
-      body = (
-        <div className="conn-offer">
-          <p>To let agents work in this browser, install the Balabash Agent extension:</p>
-          <ol className="conn-steps">
-            <li>Download the archive and unpack it — you get the folder “balabash-agent”. Keep it where it will stay: Chrome loads the extension from it.</li>
-            <li>Open chrome://extensions, turn on “Developer mode”, press “Load unpacked” and choose that folder.</li>
-            <li>Reload this page and press “Connect this browser”.</li>
-          </ol>
-          <div className="conn-offer-actions">
-            <Btn label="Download the extension" icon="download" variant="primary" href={download} />
-            <Btn label="Check again" icon="refresh-cw" variant="ghost" onClick={recheck} />
-          </div>
-        </div>
-      );
-      break;
-    case 'connect':
-      body = (
-        <div className="conn-offer">
-          <p>The Balabash Agent extension is installed in this browser and not connected to your account yet.</p>
-          <Btn label="Connect this browser" icon="plug" variant="primary" onClick={() => setConnecting(true)} />
-        </div>
-      );
-      break;
-    case 'enable':
-      body = (
-        <Note icon="monitor" action="Enable here" actionIcon="link" actionBusy={enabling} onAction={() => enable(offer.browser.id, offer.browser.name)}>
-          This browser is connected as “{offer.browser.name}”, but not enabled in this workspace: its agents cannot use it.
-        </Note>
-      );
-      break;
-    case 'paused':
-      body = (
-        <Note state="wait" icon="info">
-          The extension in this browser is paused, so “{offer.browser.name}” is offline. Unpause it in the extension’s options — its button on Chrome’s toolbar.
-        </Note>
-      );
-      break;
-  }
+  useEffect(() => () => window.clearTimeout(timer.current), []);
 
-  return (
-    <>
-      {body || update ? (
-        <CardBody>
-          {update ? (
-            <div className="conn-offer">
-              <Note state="act" icon="download">
-                The extension in this browser is {update.installed}; the current one is {update.current}. Download the archive, unpack it over the same folder and press the reload button on the extension’s card at chrome://extensions.
-              </Note>
-              <Btn label="Download the new extension" icon="download" size="sm" href={download} />
-            </div>
-          ) : null}
-          {body}
-        </CardBody>
-      ) : null}
-      <Presence>
-        {connecting ? (
-          <ConnectBrowserDialog
-            extensionId={listing.extension.id}
-            onClose={() => {
-              setConnecting(false);
-              recheck();
-            }}
-          />
-        ) : null}
-      </Presence>
-    </>
-  );
+  return fresh;
 }
 
 export function BrowsersSection({ now }: { now: Date }) {
+  const dispatch = useAppDispatch();
   const browsers = useBrowsers();
+  const workspace = hereName(useAppSelector(selectMe)?.workspaceName);
   const { presence, recheck } = useExtensionPresence(browsers.data?.extension.id, browsers.dataUpdatedAt);
+  const fresh = useFreshRows(browsers.data);
+
+  // A list read after the switches settled says what they said (store/browsers).
+  useEffect(() => {
+    if (browsers.dataUpdatedAt) {
+      dispatch(browsersRead());
+    }
+  }, [dispatch, browsers.dataUpdatedAt]);
 
   // The server of an older build has no such route (404) until the app
   // restarts: no section, quietly.
@@ -203,11 +121,9 @@ export function BrowsersSection({ now }: { now: Date }) {
     return (
       <Card narrow="bare">
         <CardHead title="Browsers" />
-        <CardBody>
-          <Note state="err" icon="cloud-off" role="alert" action="Retry" actionIcon="refresh-cw" actionBusy={browsers.isFetching} onAction={() => void browsers.refetch()}>
-            Couldn’t load the browsers. {browsers.error.message}
-          </Note>
-        </CardBody>
+        <Empty icon="circle-x" state="err" title="Couldn’t load browsers" action="Try again" actionIcon="refresh-cw" onAction={() => void browsers.refetch()}>
+          {loadFailedWords(toApiFailure(browsers.error))}
+        </Empty>
       </Card>
     );
   }
@@ -216,6 +132,7 @@ export function BrowsersSection({ now }: { now: Date }) {
     return (
       <Card narrow="bare">
         <CardHead title="Browsers" />
+        {supportsExtension(window) ? <CheckingPanel /> : null}
         <List narrow="tiles" busy>
           {SKELETON.map((widths, index) => (
             <SkelRow key={index} widths={widths} />
@@ -227,25 +144,48 @@ export function BrowsersSection({ now }: { now: Date }) {
 
   const listing = browsers.data;
   const mine = thisBrowser(presence, listing);
+  const pausedHere = isPausedHere(presence);
   const count = listing.browsers.length + listing.others.length;
 
   return (
     <Card narrow="bare">
       <CardHead title="Browsers" count={count} />
-      <ThisBrowser listing={listing} presence={presence} recheck={recheck} />
+      <ThisBrowserPanel listing={listing} presence={presence} workspace={workspace} recheck={recheck} />
       {count === 0 ? (
-        <Empty icon="monitor" title="No browsers yet">
-          A connected browser lets an agent open pages and act in them under your own logins — in tabs of its own, with a bar in Chrome while it works.
+        <Empty icon="app-window" title="No browsers yet">
+          No one has connected a browser to {workspace}. Connect this one above, and agents of {workspace} can work in it.
         </Empty>
       ) : (
-        <List narrow="tiles">
-          {listing.browsers.map(browser => (
-            <BrowserRow key={browser.id} browser={browser} isThisBrowser={browser.id === mine?.id} now={now} />
-          ))}
-          {listing.others.map(browser => (
-            <OtherRow key={browser.id} browser={browser} />
-          ))}
-        </List>
+        <>
+          <div className="brw-sub">Yours · {listing.browsers.length}</div>
+          {listing.browsers.length === 0 ? <p className="brw-none">You haven’t connected a browser. Connect one from the Chrome it runs in.</p> : null}
+          <List narrow="tiles">
+            {listing.browsers.map(browser => (
+              <BrowserRow
+                key={browser.id}
+                browser={browser}
+                here={browser.id === mine?.id}
+                pausedHere={pausedHere}
+                current={listing.extension.version}
+                workspace={workspace}
+                fresh={fresh.has(browser.id)}
+                now={now}
+              />
+            ))}
+          </List>
+          {listing.others.length > 0 ? (
+            <>
+              <div className="brw-sub">
+                Other members’ browsers enabled in {workspace} · {listing.others.length} — <Quiet>agents can work in them too; only their owners manage them</Quiet>
+              </div>
+              <List narrow="tiles">
+                {listing.others.map(browser => (
+                  <OtherBrowserRow key={browser.id} browser={browser} fresh={fresh.has(browser.id)} now={now} />
+                ))}
+              </List>
+            </>
+          ) : null}
+        </>
       )}
     </Card>
   );

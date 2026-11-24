@@ -65,7 +65,7 @@ const SECRET_REQUESTS: Api['secretRequests'] = {
 };
 
 const BROWSERS: Api['browsers'] = {
-  list: async () => ({ browsers: [], others: [], extension: { id: 'extension', version: null } }),
+  list: async () => ({ browsers: [], others: [], extension: { id: 'extension', version: null, size: null } }),
   requestPairing: async () => {
     throw new Error('not here');
   },

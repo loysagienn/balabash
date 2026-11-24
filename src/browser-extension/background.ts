@@ -12,24 +12,31 @@
 //
 // Two kinds of pages talk to the worker. The console
 // (`externally_connectable` of the manifest names its origin, and the
-// sender's origin is compared again here) asks what this extension is and
-// hands over a pairing code (src/browser-link/protocol.ts). The extension's
-// own pages (OwnPageRequest): the popup of the toolbar button shows the
-// link and its sessions, switches the pause, stops sessions, hands the tab
-// in front to one and keeps the user's boundaries (boundaries.ts); the
-// consent window brings the user's answer about a tab a session asked for
-// (consent.ts).
+// sender's origin is compared again here) asks what this extension is,
+// hands over a pairing code and tells the color theme the user chose there
+// (src/browser-link/protocol.ts) — the extension keeps it and draws its
+// pages in it (theme.ts). The extension's own pages (OwnPageRequest): the
+// popup of the toolbar button shows the link and its sessions, switches the
+// pause, stops sessions, hands the tab in front to one and keeps the user's
+// boundaries (boundaries.ts) — a switch, a site added, rewritten or removed,
+// each saved by itself; the consent window brings the user's answer about a
+// tab a session asked for (consent.ts).
+//
+// The toolbar button follows the link (action.ts).
 
-import { readSettings, watchTabs, writeSettings } from './boundaries.ts';
-import type { Settings } from './boundaries.ts';
+import { followLink } from './action.ts';
+import { changeSites, readSettings, watchTabs, writeSwitches } from './boundaries.ts';
+import type { Settings, SitesChange, SitesResult } from './boundaries.ts';
 import { Consent } from './consent.ts';
-import type { ConsentRequest } from './consent.ts';
+import type { ConsentView } from './consent.ts';
+import { THEME_KEY } from './theme.ts';
 import { ChromeListeners } from './playwright/chromeListeners';
 import { TabGroupManager } from './playwright/tabGroupManager';
 import { TabRegistry } from './playwright/tabRegistry';
 import { Link } from './link.ts';
-import type { LinkStatus } from './link.ts';
+import type { HandRefusal, LinkStatus, TabState } from './link.ts';
 import type { PagePairResult, PageRequest, PageStatus } from '../browser-link/protocol.ts';
+import { isThemeId } from '../utils/console-themes.ts';
 
 const ALARM = 'browser-link';
 // The shortest period Chrome allows.
@@ -41,8 +48,10 @@ export type OwnPageRequest =
   | { type: 'setPaused'; paused: boolean }
   | { type: 'stopSessions'; sessionId?: number }
   | { type: 'handTab'; sessionId: number; tabId: number }
+  | { type: 'tabState'; tabId: number }
   | { type: 'getSettings' }
-  | { type: 'setSettings'; blockedSites?: string[]; tabsListHidden?: boolean; tabsWithoutAsking?: boolean }
+  | { type: 'setSwitches'; tabsListHidden?: boolean; tabsWithoutAsking?: boolean }
+  | { type: 'changeSites'; change: SitesChange }
   | { type: 'consent.get'; id: string }
   | { type: 'consent.answer'; id: string; allow: boolean };
 
@@ -50,23 +59,38 @@ export type OwnPageAnswers = {
   status: LinkStatus;
   setPaused: LinkStatus;
   stopSessions: LinkStatus;
-  // `error` — why the tab was not handed over, in words for the user.
-  handTab: { ok: true } | { ok: false; error: string };
+  // `code` — why the tab was not handed over, when the reason has a name.
+  handTab: { ok: true } | { ok: false; error: string; code?: HandRefusal };
+  tabState: TabState;
   getSettings: Settings;
-  setSettings: Settings;
+  setSwitches: Settings;
+  changeSites: SitesResult;
   // Null once the request is over.
-  'consent.get': ConsentRequest | null;
+  'consent.get': ConsentView | null;
   'consent.answer': null;
 };
 
-const OWN_REQUESTS = new Set<string>(['status', 'setPaused', 'stopSessions', 'handTab', 'getSettings', 'setSettings', 'consent.get', 'consent.answer']);
+const OWN_REQUESTS = new Set<string>([
+  'status',
+  'setPaused',
+  'stopSessions',
+  'handTab',
+  'tabState',
+  'getSettings',
+  'setSwitches',
+  'changeSites',
+  'consent.get',
+  'consent.answer',
+]);
 
 const listeners = new ChromeListeners();
 const registry = new TabRegistry(listeners);
 const groups = new TabGroupManager(registry, listeners);
 const consent = new Consent(listeners);
 const link = new Link(registry, groups, listeners, consent);
+const showLink = followLink(() => link.status());
 
+link.onChange = showLink;
 watchTabs({ registry, groups, listeners, taken: (session, tabId) => link.tabTaken(session, tabId) });
 
 // Dials if there is whom to dial, and keeps the alarm only while there is.
@@ -90,7 +114,17 @@ chrome.alarms.onAlarm.addListener(alarm => {
   }
 });
 
-async function answerConsole(message: PageRequest): Promise<PageStatus | PagePairResult> {
+async function answerConsole(message: PageRequest): Promise<PageStatus | PagePairResult | { ok: boolean }> {
+  if (message.type === 'theme') {
+    if (!isThemeId(message.theme)) {
+      return { ok: false };
+    }
+
+    await chrome.storage.local.set({ [THEME_KEY]: message.theme });
+
+    return { ok: true };
+  }
+
   if (message.type === 'pair' && typeof message.code === 'string' && message.code) {
     const result = await link.pair(message.code);
 
@@ -106,7 +140,7 @@ async function answerConsole(message: PageRequest): Promise<PageStatus | PagePai
 
 // Chrome does not support promise-based message handlers: https://issues.chromium.org/issues/40753031
 chrome.runtime.onMessageExternal.addListener((message: PageRequest, sender, sendResponse) => {
-  if (sender.origin !== __CONSOLE_ORIGIN__ || (message?.type !== 'status' && message?.type !== 'pair')) {
+  if (sender.origin !== __CONSOLE_ORIGIN__ || (message?.type !== 'status' && message?.type !== 'pair' && message?.type !== 'theme')) {
     return false;
   }
 
@@ -134,12 +168,16 @@ async function answerOwnPage(message: OwnPageRequest, sender: chrome.runtime.Mes
 
         return { ok: true };
       } catch (error: any) {
-        return { ok: false, error: String(error?.message ?? error) };
+        return { ok: false, error: String(error?.message ?? error), ...(typeof error?.code === 'string' ? { code: error.code as HandRefusal } : {}) };
       }
+    case 'tabState':
+      return await link.tabState(Number(message.tabId));
     case 'getSettings':
       return await readSettings();
-    case 'setSettings':
-      return await writeSettings(message);
+    case 'setSwitches':
+      return await writeSwitches(message);
+    case 'changeSites':
+      return await changeSites(message.change);
     case 'consent.get':
       return consent.describe(String(message.id)) ?? null;
     case 'consent.answer':
@@ -160,4 +198,4 @@ chrome.runtime.onMessage.addListener((message: OwnPageRequest, sender, sendRespo
 });
 
 // Every start of the worker, whatever woke it.
-void wake();
+void wake().then(showLink);

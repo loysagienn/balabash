@@ -6,11 +6,16 @@
 // installed, so its absence says "no extension" — and a page that was open
 // when the extension was installed has to be loaded again to get it.
 //
-// What the extension is asked: its status, and to pair with a code the
-// server issued (src/browser-link/protocol.ts). Every question has a
-// deadline: a disabled extension leaves the message unanswered.
+// What the extension is asked: its status, to pair with a code the server
+// issued, and to take the color theme the user chose in the console — the
+// extension draws its own pages in it (src/browser-link/protocol.ts). Every
+// question has a deadline: a disabled extension leaves the message
+// unanswered.
 
-import type { PagePairResult, PageRequest, PageStatus } from '../../../browser-link/protocol.ts';
+import { EXTENSION_ID } from '../../../browser-link/protocol.ts';
+import type { PagePairResult, PageRequest, PageStatus, PairError } from '../../../browser-link/protocol.ts';
+import type { ThemeId } from '../../../utils/console-themes.ts';
+import { readTheme, subscribeTheme } from '../theme/index.ts';
 
 const STATUS_TIMEOUT_MS = 3000;
 // A pairing dials the server and waits for its answer.
@@ -77,13 +82,51 @@ export async function extensionPresence(extensionId: string, win: ExtensionWindo
   }
 }
 
+// Whether this page can send the extension anything at all. A page that was
+// open when the extension was installed cannot until it is loaded again.
+export function canReachExtension(win: ExtensionWindow = window): boolean {
+  return typeof win.chrome?.runtime?.sendMessage === 'function';
+}
+
+// Why a pairing did not happen, as the page learns it: what the extension
+// said (PairError) — or that the extension said nothing (`no_answer`: it was
+// disabled or reloaded meanwhile, or took longer than the deadline).
+export type PairFailure = PairError | 'no_answer';
+
+export type PairOutcome = { ok: true; browserId: string } | { ok: false; error: PairFailure };
+
 // Hands the pairing code to the extension; it dials the server with it.
-export async function pairExtension(extensionId: string, code: string, win: ExtensionWindow = window): Promise<PagePairResult> {
+export async function pairExtension(extensionId: string, code: string, win: ExtensionWindow = window): Promise<PairOutcome> {
   try {
     const answer = (await ask(win, extensionId, { type: 'pair', code }, PAIR_TIMEOUT_MS)) as PagePairResult | null | undefined;
 
-    return answer && typeof answer.ok === 'boolean' ? answer : { ok: false, error: 'unreachable' };
+    return answer && typeof answer.ok === 'boolean' ? answer : { ok: false, error: 'no_answer' };
   } catch {
-    return { ok: false, error: 'unreachable' };
+    return { ok: false, error: 'no_answer' };
   }
+}
+
+// Tells the extension of this browser the theme of the console. Nobody
+// waits for the answer: no extension, an older one that knows no such
+// message, a disabled one — all the same silence.
+export function tellExtensionTheme(theme: ThemeId, win: ExtensionWindow = window, extensionId: string = EXTENSION_ID): void {
+  if (!supportsExtension(win) || !canReachExtension(win)) {
+    return;
+  }
+
+  try {
+    void ask(win, extensionId, { type: 'theme', theme }, STATUS_TIMEOUT_MS)?.catch(() => {});
+  } catch {
+    // Chrome throws when the id names no extension that lets this page in.
+  }
+}
+
+// At boot, on any screen: the extension learns the theme the console is in,
+// and every change of it — this tab's choice or another tab's (lib/theme).
+export function connectExtensionToTheme(win: Window = window): () => void {
+  const tell = () => tellExtensionTheme(readTheme(), win as unknown as ExtensionWindow);
+
+  tell();
+
+  return subscribeTheme(tell);
 }

@@ -144,7 +144,7 @@ const api: Api = {
     },
   },
   browsers: {
-    list: async () => ({ browsers: [], others: [], extension: { id: 'extension', version: null } }),
+    list: async () => ({ browsers: [], others: [], extension: { id: 'extension', version: null, size: null } }),
     requestPairing: async () => {
       throw new Error('not here');
     },

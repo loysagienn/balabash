@@ -36,7 +36,8 @@
 // A session whose agent is idle is parked on the server's request: the
 // debugger leaves its tabs — Chrome takes its bar away with the last
 // debugger — and the session link closes, while the session stays here with
-// its group of tabs, in the look it had. The server opens it again when the
+// its group of tabs, in the look it had — the title that names its thread
+// (group-title.ts) and its color. The server opens it again when the
 // agent goes on: the tabs that are in the group then are the session's, in
 // the order the server names. A parked session is the user's to stop like
 // any other, and is told to the server when they do; it ends with the
@@ -56,10 +57,14 @@
 // stopped — by the bar or by the pause — closes its link with the code that
 // says so (CLOSE_SESSION_STOPPED): the agent is told not to come back by
 // itself.
+//
+// Whoever shows the link — the popup, the toolbar button (action.ts) — reads
+// status() and hears of a change through onChange.
 
 import { applyToAllTabs, blockedSiteError, isBlocked, isOffLimits, readSettings } from './boundaries.ts';
 import type { Consent } from './consent.ts';
 import { report, setReportSink } from './diagnostics.ts';
+import { groupTitle } from './group-title.ts';
 import { windowForTabs } from './windows.ts';
 import { Channel } from './playwright/channel';
 import { ClientSession } from './playwright/clientSession';
@@ -67,6 +72,7 @@ import { isDebuggableUrl } from './playwright/ownedTab';
 import type { ChromeListeners } from './playwright/chromeListeners';
 import type { ParkedTabGroup, TabGroupManager } from './playwright/tabGroupManager';
 import type { TabRegistry } from './playwright/tabRegistry';
+import type { GroupColor } from './playwright/types';
 import {
   CLOSE_SESSION_STOPPED,
   CLOSE_UNAUTHORIZED,
@@ -87,6 +93,7 @@ import type {
   ControlRefusal,
   PagePairResult,
   PairError,
+  SessionAbout,
   SessionNotice,
   WelcomeParams,
 } from '../browser-link/protocol.ts';
@@ -94,7 +101,6 @@ import type {
 const PING_INTERVAL_MS = 20_000;
 const OPEN_TIMEOUT_MS = 10_000;
 const RETRY_DELAYS_MS = [1000, 2000, 5000, 10_000];
-const TAB_GROUP_TITLE = 'Balabash';
 // The reason Chrome gives when the user closes its debugging bar.
 const DETACHED_BY_USER = 'canceled_by_user';
 const STOPPED_BY_USER = 'The user stopped the session in the browser';
@@ -102,6 +108,15 @@ const STOPPED_BY_USER = 'The user stopped the session in the browser';
 // A request the extension refuses, with the machine form of the refusal.
 function refusal(code: ControlRefusal, message: string): Error {
   return Object.assign(new Error(message), { code });
+}
+
+// The host of an address, as the user reads it.
+function hostOf(url: string | undefined): string {
+  try {
+    return new URL(url ?? '').hostname;
+  } catch {
+    return '';
+  }
 }
 
 // The site of an address, as far as a consent goes.
@@ -127,6 +142,21 @@ type Stored = {
   paused: boolean;
 };
 
+// A session as the extension's own pages show it.
+export type SessionView = {
+  id: number;
+  label: string;
+  // The workspace ('' — it has no name) and the title of the agent's thread.
+  workspace: string;
+  thread: string;
+  // Its group of tabs, as the tab strip shows it.
+  group: { title: string; color: GroupColor };
+  // The agent is idle: the session holds no tab now, `tabIds` are the tabs
+  // of its group, which it takes when it comes back.
+  parked: boolean;
+  tabIds: number[];
+};
+
 // The link as the extension's own pages show it.
 export type LinkStatus = {
   state: ExtensionState;
@@ -134,12 +164,29 @@ export type LinkStatus = {
   name: string;
   // Why the last attempt failed, when it did.
   detail: string;
-  // The server builds a newer extension than this one.
-  outdated: boolean;
-  // `parked` — the agent is idle: the session holds no tab now, `tabIds`
-  // are the tabs of its group, which it takes when it comes back.
-  sessions: { id: number; label: string; tabIds: number[]; parked: boolean }[];
+  // The version of this extension, and of the one the server builds ('' —
+  // not known).
+  version: string;
+  serverVersion: string;
+  // needed — the server takes no agent's work through this version, or
+  // does not speak its wire; available — this one works and a newer is out.
+  update: 'needed' | 'available' | null;
+  sessions: SessionView[];
 };
+
+// What a tab is to the sessions, for the popup that offers to hand it over:
+// free — any session can have it; owned — a session's already (a parked
+// one's: in its group); blocked — a site of the user's list; closed — a page
+// of the browser itself or of an extension; gone — no such tab.
+export type TabState =
+  | { state: 'free' | 'closed' | 'gone' }
+  | { state: 'owned'; sessionId: number }
+  | { state: 'blocked'; site: string };
+
+// Why a tab was not handed to a session from the popup.
+export type HandRefusal = 'session_over' | 'no_tab' | 'blocked_site' | 'not_debuggable' | 'owned';
+
+type Held = { label: string; about: SessionAbout };
 
 async function readStored(): Promise<Stored> {
   const stored = await chrome.storage.local.get(['secret', 'browserId', 'name', 'paused']);
@@ -165,15 +212,20 @@ export class Link {
   private _attempt = 0;
   private _retryTimer: ReturnType<typeof setTimeout> | undefined;
   private _pingTimer: ReturnType<typeof setInterval> | undefined;
-  private _sessions = new Map<number, { session: ClientSession; label: string }>();
+  private _sessions = new Map<number, Held & { session: ClientSession }>();
   // The sessions the server parked, with the group each comes back for.
-  private _parked = new Map<number, { label: string; group: ParkedTabGroup }>();
+  private _parked = new Map<number, Held & { group: ParkedTabGroup }>();
   private _lastSessionId = 0;
   // The pairing the next `hello` carries, until the server answered it.
   private _pairing: { code: string; settle(result: PagePairResult): void } | undefined;
   // The server refused this extension's wire version: only the alarm dials.
   private _unsupported = false;
   private _serverExtensionVersion = '';
+  // The first version the server lets an agent work through.
+  private _sessionsSinceVersion = '';
+
+  // The link, a session or a tab of one changed: status() answers anew.
+  onChange?: () => void;
 
   constructor(registry: TabRegistry, groups: TabGroupManager, listeners: ChromeListeners, consent: Consent) {
     this._registry = registry;
@@ -189,13 +241,26 @@ export class Link {
       }
     });
     listeners.add(chrome.tabs.onCreated, tab => void this._keepUserInFront(tab));
+    // The tabs of the sessions as they come, go, change their group — and
+    // navigate: Chrome drops what the toolbar button showed for the tab.
+    listeners.add(chrome.tabs.onUpdated, (_tabId, changeInfo) => {
+      if (changeInfo.groupId !== undefined || changeInfo.url !== undefined || changeInfo.status === 'complete') {
+        this._changed();
+      }
+    });
+    listeners.add(chrome.tabs.onRemoved, () => this._changed());
   }
 
   // Idempotent: called at every start of the worker and by the alarm.
   async ensureConnected(): Promise<void> {
-    this._connecting ??= this._connect().finally(() => {
-      this._connecting = undefined;
-    });
+    if (!this._connecting) {
+      this._connecting = this._connect().finally(() => {
+        this._connecting = undefined;
+        this._changed();
+      });
+      this._changed();
+    }
+
     await this._connecting;
   }
 
@@ -213,6 +278,7 @@ export class Link {
             this._pairing = undefined;
           }
 
+          this._changed();
           resolve(outcome);
         },
       };
@@ -237,11 +303,13 @@ export class Link {
 
     if (paused) {
       this._closeEverything('The user paused the extension', CLOSE_SESSION_STOPPED);
+      this._changed();
 
       return;
     }
 
     this._attempt = 0;
+    this._changed();
     await this.ensureConnected();
   }
 
@@ -267,6 +335,7 @@ export class Link {
 
     if (parked) {
       await this._groups.addToParked(parked.group, await this._claimable(tabId));
+      this._changed();
 
       return;
     }
@@ -274,10 +343,42 @@ export class Link {
     const session = this._sessions.get(sessionId)?.session;
 
     if (!session) {
-      throw new Error('This session is over');
+      throw Object.assign(new Error('This session is over'), { code: 'session_over' satisfies HandRefusal });
     }
 
     this._registry.claim(await this._claimable(tabId, session), session);
+    this._changed();
+  }
+
+  async tabState(tabId: number): Promise<TabState> {
+    await readSettings();
+
+    const tab = await chrome.tabs.get(tabId).catch(() => undefined);
+
+    if (!tab) {
+      return { state: 'gone' };
+    }
+
+    const url = tab.url ?? tab.pendingUrl;
+    const owner = this._registry.ownerOf(tabId);
+
+    for (const [sessionId, entry] of this._sessions) {
+      if (entry.session === owner) {
+        return { state: 'owned', sessionId };
+      }
+    }
+
+    for (const [sessionId, parked] of this._parked) {
+      if (parked.group.groupId !== undefined && parked.group.groupId === tab.groupId) {
+        return { state: 'owned', sessionId };
+      }
+    }
+
+    if (isBlocked(url)) {
+      return { state: 'blocked', site: hostOf(url) };
+    }
+
+    return { state: isDebuggableUrl(url) ? 'free' : 'closed' };
   }
 
   // A tab of a session went to a blocked site and is the session's no more.
@@ -287,6 +388,8 @@ export class Link {
         this._sendEvent('session.notice', { sessionId, kind: 'tab_blocked', tabId } satisfies SessionNotice);
       }
     }
+
+    this._changed();
   }
 
   async status(): Promise<LinkStatus> {
@@ -303,22 +406,35 @@ export class Link {
               ? 'connecting'
               : 'offline';
 
+    const version = chrome.runtime.getManifest().version;
+    const olderThan = (other: string) => other !== '' && compareVersions(version, other) < 0;
+    const paired = stored.secret !== '';
+
     return {
       state,
-      browserId: stored.secret && stored.browserId ? stored.browserId : null,
-      name: stored.secret ? stored.name : '',
+      browserId: paired && stored.browserId ? stored.browserId : null,
+      name: paired ? stored.name : '',
       detail: state === 'offline' || state === 'connecting' ? this._detail : '',
-      outdated:
-        this._unsupported ||
-        (this._serverExtensionVersion !== '' && compareVersions(chrome.runtime.getManifest().version, this._serverExtensionVersion) < 0),
+      version,
+      serverVersion: this._serverExtensionVersion,
+      update: !paired ? null : this._unsupported || olderThan(this._sessionsSinceVersion) ? 'needed' : olderThan(this._serverExtensionVersion) ? 'available' : null,
       sessions: [
-        ...[...this._sessions].map(([id, { session, label }]) => ({ id, label, tabIds: this._registry.tabIdsOf(session), parked: false })),
+        ...[...this._sessions].map(([id, { session, label, about }]) => ({
+          id,
+          label,
+          ...about,
+          group: this._groups.lookOf(session) ?? { title: groupTitle(about.thread), color: 'grey' as GroupColor },
+          parked: false,
+          tabIds: this._registry.tabIdsOf(session),
+        })),
         ...(await Promise.all(
-          [...this._parked].map(async ([id, { label, group }]) => ({
+          [...this._parked].map(async ([id, { label, about, group }]) => ({
             id,
             label,
-            tabIds: (await this._groups.tabsOfParked(group)).flatMap(tab => tab.id ?? []),
+            ...about,
+            group: { title: group.title, color: group.color },
             parked: true,
+            tabIds: (await this._groups.tabsOfParked(group)).flatMap(tab => tab.id ?? []),
           })),
         )),
       ].sort((left, right) => left.id - right.id),
@@ -398,6 +514,7 @@ export class Link {
     }
 
     this._serverExtensionVersion = typeof welcome.currentExtensionVersion === 'string' ? welcome.currentExtensionVersion : '';
+    this._sessionsSinceVersion = typeof welcome.sessionsSinceVersion === 'string' ? welcome.sessionsSinceVersion : '';
     this._unsupported = false;
     this._detail = '';
     this._attempt = 0;
@@ -407,6 +524,7 @@ export class Link {
         socket.send(JSON.stringify({ method: 'report', params: { text } }));
       }
     });
+    this._changed();
   }
 
   private async _onClosed(socket: WebSocket, event: CloseEvent, pairing: Link['_pairing']): Promise<void> {
@@ -424,6 +542,7 @@ export class Link {
     // The sessions were the server's: without it they have no client.
     this._closeSessions(reason);
     this._dropAllParked(false);
+    this._changed();
 
     if (pairing && this._pairing === pairing) {
       // The refusal was of the code: the secret this browser had, if any,
@@ -432,11 +551,13 @@ export class Link {
     } else if (event.code === CLOSE_UNAUTHORIZED) {
       // Revoked: the browser is nobody to this server until paired again.
       await chrome.storage.local.remove(['secret', 'browserId', 'name']);
+      this._changed();
 
       return;
     } else if (event.code === CLOSE_UNSUPPORTED_PROTOCOL) {
       this._unsupported = true;
       this._detail = 'The server asks for a newer version of the extension';
+      this._changed();
 
       return;
     }
@@ -467,6 +588,7 @@ export class Link {
 
         if (typeof name === 'string') {
           await chrome.storage.local.set({ name });
+          this._changed();
         }
       } else if (frame.method === 'session.drop') {
         const { sessionId } = (frame.params ?? {}) as Partial<ControlEvents['session.drop']>;
@@ -532,6 +654,7 @@ export class Link {
     ticket,
     clientName,
     label,
+    about,
     resume,
   }: ControlRequests['session.open']['params']): Promise<ControlRequests['session.open']['result']> {
     // The boundaries a session is held to are read before it can ask for anything.
@@ -543,8 +666,17 @@ export class Link {
       throw sessionOver();
     }
 
+    // How the user reads whose session it is; a server that does not tell
+    // the two apart gives the one line it has.
+    const held: Held = {
+      label: typeof label === 'string' ? label : clientName,
+      about: {
+        workspace: typeof about?.workspace === 'string' ? about.workspace : '',
+        thread: typeof about?.thread === 'string' ? about.thread : typeof label === 'string' ? label : '',
+      },
+    };
     const channel = await Channel.open(`${__SERVER_URL__}${SESSION_PATH}?ticket=${encodeURIComponent(ticket)}`);
-    const session = new ClientSession(channel, this._registry, { clientName, tabGroup: { title: TAB_GROUP_TITLE }, background: true });
+    const session = new ClientSession(channel, this._registry, { clientName, tabGroup: { title: groupTitle(held.about.thread) }, background: true });
 
     // The user stopped it while its link was being dialed.
     if (resume && this._parked.get(resume.sessionId) !== parked) {
@@ -556,7 +688,7 @@ export class Link {
     const sessionId = resume ? resume.sessionId : ++this._lastSessionId;
 
     this._parked.delete(sessionId);
-    this._sessions.set(sessionId, { session, label: typeof label === 'string' ? label : clientName });
+    this._sessions.set(sessionId, { session, ...held });
     this._didChangeSessions();
     session.onClose = () => {
       this._sessions.delete(sessionId);
@@ -611,7 +743,7 @@ export class Link {
     }
 
     this._sessions.delete(sessionId);
-    this._parked.set(sessionId, { label: entry.label, group });
+    this._parked.set(sessionId, { label: entry.label, about: entry.about, group });
     // Nothing more to end when its link closes.
     entry.session.onClose = undefined;
     this._consent.dismiss(entry.session);
@@ -666,6 +798,7 @@ export class Link {
     }
 
     void this._groups.release(parked.group);
+    this._changed();
   }
 
   private _dropAllParked(stopped: boolean): void {
@@ -694,7 +827,7 @@ export class Link {
     const tab = await chrome.tabs.get(tabId).catch(() => undefined);
 
     if (!tab) {
-      throw new Error(`No tab ${tabId} in this browser`);
+      throw Object.assign(new Error(`No tab ${tabId} in this browser`), { code: 'no_tab' satisfies HandRefusal });
     }
 
     if (isBlocked(tab.url ?? tab.pendingUrl)) {
@@ -731,7 +864,7 @@ export class Link {
     // The user chose in the settings not to be asked.
     const answer = (await readSettings()).tabsWithoutAsking
       ? 'allowed'
-      : await this._consent.ask({ label: entry.label, title: tab.title ?? '', url: shown }, entry.session);
+      : await this._consent.ask({ ...entry.about, title: tab.title ?? '', url: shown }, entry.session);
 
     // The session ended while the user was deciding: nobody is there to take the tab.
     if (this._sessions.get(sessionId)?.session !== entry.session) {
@@ -777,6 +910,12 @@ export class Link {
     } else {
       this._consent.dismissAll();
     }
+
+    this._changed();
+  }
+
+  private _changed(): void {
+    this.onChange?.();
   }
 
   private _closeSessions(reason: string, code?: number): void {

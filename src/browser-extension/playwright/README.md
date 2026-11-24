@@ -14,8 +14,8 @@ framing. What connects a session — in Playwright a page the local relay
 opens — is replaced by `../link.ts`.
 
 Five of them are changed, each change stated at the top of its file, as the
-license asks: `ownedTab.ts` (the title of the toolbar button on a controlled
-tab), `clientSession.ts` (a tab the client asks for is created in
+license asks: `ownedTab.ts` (the toolbar button is not marked here; the pages of
+extensions are debugged by no client), `clientSession.ts` (a tab the client asks for is created in
 the window of the session's tabs; closing a session can name the close code
 of its link; a new tab and a CDP command pass the user's boundaries of
 `../boundaries.ts`), `channel.ts` (the close code), `tabRegistry.ts` (the user's
@@ -23,4 +23,5 @@ new tab is not claimed for the session whose tab was active) and
 `tabGroupManager.ts` (a failed grouping is reported; a new group is made in
 the window of its tab; a tab born in the group of a session is the
 session's; the group of a parked session is kept, with its look, for the
-session's return). The rest are unchanged.
+session's return; the order of the colors; the title of a group whose
+session ended; the look of a group told to the pages). The rest are unchanged.

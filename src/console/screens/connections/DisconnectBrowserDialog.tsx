@@ -1,8 +1,9 @@
 // "Disconnect …?": the confirmation of the irreversible over
 // DELETE /api/browsers/:id. The browser's record and its secret are deleted
-// — in every workspace; its extension forgets the server and stays
-// installed. Connecting it again is a new pairing. The dialog stays, busy,
-// while the call runs; the outcome is a toast.
+// — it leaves every workspace, its sessions end; its extension forgets the
+// server and stays installed. Using it again is a new pairing from that
+// Chrome. The dialog stays, busy, while the call runs; the outcome is a
+// toast.
 
 import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
@@ -10,6 +11,7 @@ import type { BrowserView } from '../../../api/contract.ts';
 import { toApiFailure } from '../../lib/api/index.ts';
 import { useApi } from '../../lib/api/context.tsx';
 import { BROWSERS_KEY } from '../../lib/query/browsers.ts';
+import { disconnectFailedWords, disconnectedWords } from '../../store/browsers/words.ts';
 import { useAppDispatch } from '../../store/hooks.ts';
 import { pushToast } from '../../store/ui/actions.ts';
 import { Confirm } from '../../ui/Confirm/Confirm.tsx';
@@ -36,8 +38,8 @@ export function DisconnectBrowserDialog({ browser, onClose }: { browser: Browser
         api.browsers
           .disconnect(browser.id)
           .then(
-            () => dispatch(pushToast({ title: `“${browser.name}” is disconnected`, desc: 'Its extension stays installed; connect the browser again from this screen.', state: 'done' })),
-            error => dispatch(pushToast({ title: `Couldn’t disconnect “${browser.name}”`, desc: toApiFailure(error).message, state: 'err' })),
+            () => dispatch(pushToast(disconnectedWords(browser.name))),
+            error => dispatch(pushToast(disconnectFailedWords(browser.name, toApiFailure(error)))),
           )
           .finally(() => {
             void queryClient.invalidateQueries({ queryKey: BROWSERS_KEY });
@@ -46,7 +48,7 @@ export function DisconnectBrowserDialog({ browser, onClose }: { browser: Browser
       }}
       onClose={onClose}
     >
-      {'Agents lose this browser in every workspace it is enabled in, and what they are doing in it stops. The extension stays installed and forgets this server; connecting the browser again is a new pairing.'}
+      {'It leaves every workspace and every agent session in it ends; the extension in that Chrome stops being connected. To use it again, connect it anew from that Chrome.'}
     </Confirm>
   );
 }

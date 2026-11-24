@@ -37,7 +37,7 @@ import { createBrowserLinkHub } from './hub.ts';
 import type { BrowserLinkHub, ConnectedBrowser, ExtensionSession, ParkedSession, SessionEnd } from './hub.ts';
 import { createPairings } from './pairings.ts';
 import { EXTENSION_ID, SESSIONS_SINCE_VERSION, compareVersions } from './protocol.ts';
-import type { BrowserTab, HelloParams, SessionNotice } from './protocol.ts';
+import type { BrowserTab, HelloParams, SessionAbout, SessionNotice } from './protocol.ts';
 import { startCdpRelay } from './relay.ts';
 import {
   assertBrowserNameFree,
@@ -385,7 +385,7 @@ export type ParkedBrowserSession = {
   // The session comes back behind a new endpoint with the tabs of its group
   // — the ones of `tabIds` first, in that order (the order of
   // BrowserSession.tabIds before the parking). A failure ends it.
-  resume(options: { clientName: string; label: string; tabIds: number[] }): Promise<BrowserSession>;
+  resume(options: { clientName: string; label: string; about?: SessionAbout; tabIds: number[] }): Promise<BrowserSession>;
   // The agent is done with the session.
   close(): void;
 };
@@ -423,9 +423,17 @@ function closeSessions(browserId: string, workspaceId: string): void {
 // What the user reads about a session in their browser: the workspace, when
 // it has a name, and the title of the agent's thread.
 export async function sessionLabel(workspaceId: string, threadTitle: string): Promise<string> {
+  const { workspace, thread } = await sessionAbout(workspaceId, threadTitle);
+
+  return [workspace, thread].filter(Boolean).join(' — ');
+}
+
+// The same two apart: the extension names the session's group of tabs by
+// the thread and shows the workspace beside it.
+export async function sessionAbout(workspaceId: string, threadTitle: string): Promise<SessionAbout> {
   const workspace = await prisma.workspace.findUnique({ where: { id: workspaceId }, select: { workspaceName: true } });
 
-  return [workspace?.workspaceName, threadTitle].filter(Boolean).join(' — ');
+  return { workspace: workspace?.workspaceName ?? '', thread: threadTitle };
 }
 
 export async function openBrowserSession(options: {
@@ -434,6 +442,7 @@ export async function openBrowserSession(options: {
   // Names the client to the extension.
   clientName: string;
   label: string;
+  about?: SessionAbout;
 }): Promise<BrowserSession> {
   const { workspaceId, browserId } = options;
   const entry = {
@@ -454,7 +463,7 @@ export async function openBrowserSession(options: {
   let session: ExtensionSession;
 
   try {
-    session = await (await reach(workspaceId, browserId)).openSession({ clientName: options.clientName, label: options.label });
+    session = await (await reach(workspaceId, browserId)).openSession({ clientName: options.clientName, label: options.label, about: options.about });
   } catch (error) {
     hold.forget();
 

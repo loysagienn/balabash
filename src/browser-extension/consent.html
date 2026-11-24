@@ -2,31 +2,14 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>Balabash Agent — hand a tab over?</title>
-    <style>
-      body { font: 14px/1.5 system-ui, sans-serif; margin: 0; padding: 18px 20px; color: #1b1b1b; }
-      h1 { font-size: 16px; margin: 0 0 10px; }
-      .who { color: #444; margin: 0 0 12px; overflow-wrap: anywhere; }
-      .tab { padding: 10px 12px; border-radius: 6px; background: #f3f3f3; overflow-wrap: anywhere; }
-      .tab .title { font-weight: 600; }
-      .tab .url { color: #555; font-size: 12px; }
-      .actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 16px; }
-      button { font: inherit; padding: 6px 16px; }
-      #gone { color: #666; }
-    </style>
+    <meta name="color-scheme" content="dark light" />
+    <title>Balabash Agent</title>
+    <script src="theme-boot.js"></script>
+    <link rel="preload" as="font" type="font/woff2" href="InterVariable.woff2" crossorigin />
+    <link rel="stylesheet" href="consent.css" />
   </head>
-  <body>
-    <h1>Let the agent work in this tab?</h1>
-    <p class="who">Asked by: <span id="label"></span></p>
-    <div class="tab">
-      <div class="title" id="title"></div>
-      <div class="url" id="url"></div>
-    </div>
-    <p id="gone" hidden>This request is over.</p>
-    <div class="actions">
-      <button id="decline" type="button">Decline</button>
-      <button id="allow" type="button">Allow</button>
-    </div>
+  <body class="cw-page">
+    <div id="root"></div>
     <script type="module" src="consent.js"></script>
   </body>
 </html>

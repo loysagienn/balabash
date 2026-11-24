@@ -454,15 +454,17 @@ export type OtherBrowserView = {
   name: string;
   ownerName: string | null;
   online: boolean;
+  // When it was last on the link; null — never since the pairing.
+  lastSeenAt: Date | null;
 };
 
 export type BrowsersResponse = {
   browsers: BrowserView[];
   others: OtherBrowserView[];
   // The extension of this installation: the id a page addresses it by and
-  // the version GET /api/browsers/extension.zip carries — null when the
-  // installation has built none.
-  extension: { id: string; version: string | null };
+  // the version GET /api/browsers/extension.zip carries, with the size of
+  // that archive in bytes — both null when the installation has built none.
+  extension: { id: string; version: string | null; size: number | null };
 };
 
 // POST /api/browsers/pairings — a one-time code for the browser the console

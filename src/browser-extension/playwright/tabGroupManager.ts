@@ -20,18 +20,22 @@
 // group of a session — Chrome puts a tab a grouped page opens into the group of that page — is the session's
 // from its birth (the constructor), the same as one the user dragged in; the group of a session that is parked
 // — no client for a while, the same session expected back — is kept apart from the sessions with the look it had
-// (park, resume, release and the two that read and fill a parked group), instead of being greyed as left.
+// (park, resume, release and the two that read and fill a parked group), instead of being greyed as left; the
+// colors of the groups go in the order of the design, blue first; a group whose session ended is named so
+// besides turning grey (markOrphan, ../group-title); the look of a group is told to whoever shows the session
+// (lookOf, and the title and the color of a parked group).
 
 
 import { report } from '../diagnostics';
+import { endedTitle } from '../group-title';
 
 import type { ChromeListeners } from './chromeListeners';
 import type { ClientSession } from './clientSession';
 import type { TabRegistry } from './tabRegistry';
 import type { GroupColor } from './types';
 
-// Green first, so a lone client keeps the familiar look. Grey marks a group that its client left.
-const CLIENT_COLORS: GroupColor[] = ['green', 'blue', 'purple', 'orange', 'pink', 'cyan', 'yellow', 'red'];
+// The first free one is taken. Grey marks a group that its client left.
+const CLIENT_COLORS: GroupColor[] = ['blue', 'purple', 'cyan', 'green', 'pink', 'orange', 'yellow', 'red'];
 const ORPHAN_COLOR: GroupColor = 'grey';
 const STORAGE_KEY = 'clientGroupIds';
 
@@ -47,6 +51,10 @@ class ClientTabGroup {
     this._title = title;
     this._defaultTitle = defaultTitle;
     this.color = color;
+  }
+
+  get title(): string {
+    return this._title ?? this._defaultTitle;
   }
 
   async add(tabId: number, windowId: number): Promise<void> {
@@ -175,6 +183,12 @@ export class TabGroupManager {
     return this._sessionOfGroup(groupId);
   }
 
+  // How the group of a session looks in the tab strip.
+  lookOf(session: ClientSession): { title: string; color: GroupColor } | undefined {
+    const group = this._groups.get(session);
+    return group && { title: group.title, color: group.color };
+  }
+
   async unclaimedGroups(): Promise<chrome.tabGroups.TabGroup[]> {
     const groups = await chrome.tabGroups.query({});
     return groups.filter(group => !this._sessionOfGroup(group.id));
@@ -241,7 +255,10 @@ export class TabGroupManager {
 
 async function markOrphan(groupId: number): Promise<void> {
   // The group can be gone already.
-  await changeGroups(() => chrome.tabGroups.update(groupId, { color: ORPHAN_COLOR })).catch(() => {});
+  await changeGroups(async () => {
+    const group = await chrome.tabGroups.get(groupId);
+    await chrome.tabGroups.update(groupId, { color: ORPHAN_COLOR, title: endedTitle(group.title) });
+  }).catch(() => {});
 }
 
 let pendingGroupChanges: Promise<unknown> = Promise.resolve();

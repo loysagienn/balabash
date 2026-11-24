@@ -35,7 +35,8 @@ npm run build && npm run cleanup-sessions [-- --older-than 7] [-- --apply]
 ## console-icons (`scripts/console-icons.mjs`)
 
 Renders the icons of the browser extension (`src/browser-extension/icons/icon-16/32/48/128.png` — the cropped
-mark, as the favicons) and the console's app icons (`src/console/public/*.png`: the tab's
+mark, as the favicons — and the two more looks of its toolbar button at 16 and 32 px, `icon-N-muted.png` and
+`icon-N-paused.png`) and the console's app icons (`src/console/public/*.png`: the tab's
 `favicon-32/192`, install icons 192/512 `any` and `maskable`,
 `apple-touch-icon` 180) from the approved service icon — the pair of 1254 px
 PNGs in the project library, `balabash/design/balabash-icon-transparent.png`
@@ -169,10 +170,14 @@ link, and an agent's run in the browser built the way `user_browser` builds
 it (`agents/kit/user-browser.ts`, the tools of `agents/kit/playwright.ts`).
 One step leaves two sessions silent before using them again: 90 seconds by
 default, `--silence=<seconds>` changes it; 0 skips it, and with it the step
-that waits a minute for the user's answer about a tab. Not bundled:
+that waits a minute for the user's answer about a tab.
+`--shots=<directory>` saves pictures of the popup and of the consent window
+at the moments worth comparing with the design (the popup opened as a tab
+360 px wide; without a theme told by a console it is drawn in the system's
+scheme, which is light in this Chromium). Not bundled:
 run from the source. Run it after every update of Playwright:
 `src/browser-link/cdp-model.ts` repeats what Playwright expects of a browser.
 
 ```
-node scripts/browser-link-check.ts [--silence=<seconds>]
+node scripts/browser-link-check.ts [--silence=<seconds>] [--shots=<directory>]
 ```

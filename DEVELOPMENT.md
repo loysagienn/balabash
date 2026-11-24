@@ -59,9 +59,12 @@ confidential from them.
   built for one installation — the console domain is a constant of its
   bundle; the worker with the link and its sessions — the open ones and
   the parked ones, which hold no debugger — the user's boundaries — blocked
-  sites, consent for a tab, what the debugger may not do — and two pages: the
-  popup of the toolbar button, with the settings in it, and the consent
-  window;
+  sites, consent for a tab, what the debugger may not do — the look of the
+  toolbar button, which follows the link, and two pages: the popup of the
+  toolbar button, with the settings in it, and the consent window. The
+  pages are React over the console's own blocks and tokens (`src/console/ui`,
+  `src/console/styles`), in the color theme the console tells the
+  extension;
   `playwright/` holds modules of the Playwright extension under
   their own license, the changed ones say so at their top),
   `users/` (users, identities, workspace membership), `workspace/` (the
@@ -92,7 +95,9 @@ confidential from them.
 - `build/` — the esbuild configuration; `dist/` is the bundle output
   (`app.js` and the offline scripts, `console/`, `apps-vendor/`,
   `browser-extension/` — the unpacked extension a user loads into Chrome —
-  and `browser-extension.zip`, the archive of it). `build/browser-extension.js`
+  and `browser-extension.zip`, the archive of it). A change of a console
+  block or token the extension's pages use reaches the extension with its
+  next build and a new version of it. `build/browser-extension.js`
   takes the console domain from `CONSOLE_DOMAIN` of the environment or of
   `.env`; without one the full build skips the extension and
   `npm run build-extension` fails.

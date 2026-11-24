@@ -9,11 +9,50 @@
 /* catalog: the state wraps to a second line rather than losing its end (“connected · installation-wide”) */
 .conn-cat .tile-f{align-items:flex-end}
 .conn-cat .tile-f > :first-child{white-space:normal}
-/* Browsers: what the screen offers about the browser it is open in — a paragraph, the steps of an installation, the buttons in a row that wraps */
-.conn-offer{display:flex;flex-direction:column;gap:var(--sp-3);align-items:flex-start}
-.conn-offer p{margin:0}
-.conn-steps{margin:0;padding-left:1.4em;display:flex;flex-direction:column;gap:var(--sp-1);color:var(--text-2)}
-.conn-offer-actions{display:flex;flex-wrap:wrap;gap:var(--sp-2)}
+/* Browsers (design: browsers.css, brw-). The panel about the browser the console is open in: an icon, the state and the next step, a body under them */
+.brw-here{--brw-text-w:72ch;display:grid;grid-template-columns:auto minmax(0,1fr);gap:var(--sp-3) var(--sp-3h);padding:var(--sp-4) var(--sp-4h);border-bottom:1px solid var(--border);background:var(--surface-2)}
+.brw-here[data-tone="quiet"]{background:none;align-items:center}
+.brw-here[data-state="act"]{background:var(--st-act-bg)}
+.brw-here-t{display:flex;align-items:center;gap:var(--sp-2);flex-wrap:wrap;font-size:var(--fs-h2);line-height:var(--lh-h2);font-weight:var(--fw-semibold);color:var(--text)}
+.brw-here-d{margin:var(--sp-1) 0 0;font-size:var(--fs-ui);line-height:var(--lh-ui);color:var(--text-2);max-width:var(--brw-text-w)}
+.brw-here-b{grid-column:2;display:flex;flex-direction:column;gap:var(--sp-3);min-width:0}
+/* what connecting means, in three points */
+.brw-means{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--sp-3);margin:0;padding:0;list-style:none}
+.brw-means li{display:flex;gap:var(--sp-2);font-size:var(--fs-meta);line-height:var(--lh-meta);color:var(--text-2)}
+.brw-means .ic{flex:none;margin-top:var(--sp-0h);font-size:var(--ico-sm);color:var(--text-3)}
+.brw-means b{display:block;color:var(--text);font-weight:var(--fw-medium)}
+/* the name and "Connect this browser": the button level with the field's box, under its label */
+.brw-pair{--brw-pair-w:360px;--brw-pair-min:220px;display:flex;align-items:flex-start;gap:var(--sp-2);flex-wrap:wrap}
+.brw-pair .fld{flex:0 1 var(--brw-pair-w);min-width:var(--brw-pair-min)}
+.brw-pair > .btn{margin-top:calc(var(--lh-meta) + var(--sp-1h))}
+/* numbered steps: the installation, the update */
+.brw-steps{--brw-step:24px;counter-reset:s;display:flex;flex-direction:column;gap:var(--sp-2h);margin:0;padding:0;list-style:none}
+.brw-steps > li{counter-increment:s;display:grid;grid-template-columns:var(--brw-step) minmax(0,1fr);gap:var(--sp-2h);font-size:var(--fs-ui);line-height:var(--lh-ui);color:var(--text-2)}
+.brw-steps > li::before{content:counter(s);display:grid;place-items:center;width:var(--brw-step);height:var(--brw-step);border-radius:50%;background:var(--surface-3);color:var(--text);font-size:var(--fs-meta);font-weight:var(--fw-medium);font-variant-numeric:tabular-nums}
+.brw-steps b{color:var(--text);font-weight:var(--fw-medium)}
+.brw-steps .quiet{display:block;white-space:normal}
+.brw-acts{display:flex;align-items:center;gap:var(--sp-2);flex-wrap:wrap;margin-top:var(--sp-2)}
+.brw-here-b > .brw-acts{margin-top:0}
+/* the two lists of the card: a subhead over each, a line when the user has no browser */
+.brw-sub{display:flex;align-items:baseline;flex-wrap:wrap;gap:var(--sp-1);padding:var(--sp-2h) var(--sp-4h) var(--sp-1h);border-top:1px solid var(--border);font-size:var(--fs-meta);line-height:var(--lh-meta);color:var(--text-3)}
+.brw-sub .quiet{white-space:normal}
+.brw-sub + .list > .row:first-child{border-top:0}
+.brw-none{margin:0;padding:var(--sp-1) var(--sp-4h) var(--sp-3);font-size:var(--fs-meta);line-height:var(--lh-meta);color:var(--text-3)}
+/* a row: the amber line of an extension out of date; a browser off in this workspace steps back */
+.brw-upd{color:var(--st-act-ink)}
+.row[data-dim] .row-t{color:var(--text-2)}
+/* phone: the panel and the subheads join the borderless sections (rule 20); Update is in the row's menu */
+@container shell (max-width:720px){
+  .brw-here{border:0;border-radius:var(--r-md);padding:var(--sp-4);margin-bottom:var(--sp-2)}
+  .brw-here[data-tone="quiet"]{background:var(--surface-2)}
+  .brw-here-b{grid-column:1 / -1}
+  .brw-means{grid-template-columns:minmax(0,1fr)}
+  .brw-sub{padding:var(--sp-3) 0 var(--sp-2);border-top:0}
+  .brw-none{padding:0 0 var(--sp-3)}
+  .brw-upd-b{display:none}
+  .brw-pair > .btn{margin-top:0}
+  .brw-pair .fld{flex-basis:100%}
+}
 /* the "Connect" dialog's note under the field */
 .conn-connect-note{margin:0;font-size:var(--fs-meta);line-height:var(--lh-meta);color:var(--text-3)}
 }

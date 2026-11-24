@@ -14,7 +14,8 @@
  * limitations under the License.
  */
 
-// Changed for Balabash: the title of the toolbar button on a tab with the debugger attached (showBadge);
+// Changed for Balabash: the toolbar button is not marked here on a tab with the debugger attached — the look
+// of the button, on a tab of a session too, is the extension's own (../action.ts);
 // the pages of extensions are among the ones no client debugs (NON_DEBUGGABLE_SCHEMES) — Chrome itself
 // lets an extension debug its own pages, which have the extension's rights.
 
@@ -72,9 +73,6 @@ export class OwnedTab {
   }
 
   didNavigate(tab: chrome.tabs.Tab): void {
-    // Chrome resets the badge of a tab on navigation.
-    if (this._attached)
-      showBadge(this.tabId, true);
     this._announce(tab);
   }
 
@@ -116,7 +114,6 @@ export class OwnedTab {
     // A detached tab is announced again when the client can attach to it.
     if (!attached)
       this._announced = false;
-    showBadge(this.tabId, attached);
   }
 
   private async _detachDebugger(): Promise<void> {
@@ -131,19 +128,6 @@ export async function detachDebuggersOfPreviousServiceWorker(): Promise<void> {
     if (tabId === undefined || !attached)
       return;
     // The detach fails for the debugger of another tool, which stays attached.
-    await chrome.debugger.detach({ tabId }).then(() => showBadge(tabId, false), () => {});
+    await chrome.debugger.detach({ tabId }).catch(() => {});
   }));
-}
-
-function showBadge(tabId: number, attached: boolean): void {
-  const updates = attached ? [
-    chrome.action.setBadgeText({ tabId, text: '✓' }),
-    chrome.action.setBadgeBackgroundColor({ tabId, color: '#4CAF50' }),
-    chrome.action.setTitle({ tabId, title: 'Controlled by the Balabash agent' }),
-  ] : [
-    chrome.action.setBadgeText({ tabId, text: '' }),
-    chrome.action.setTitle({ tabId, title: '' }),
-  ];
-  // The tab can be closed already.
-  void Promise.all(updates).catch(() => {});
 }

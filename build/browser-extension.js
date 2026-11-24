@@ -12,9 +12,12 @@
 //
 // Layout of dist/browser-extension: manifest.json (the source's, with the
 // console origin added), the pages (popup.html, consent.html) and icons/ as
-// they are in the source, background.js (the service worker,
-// one ES module) and a script per page. Not minified: Chrome shows the user
-// the code it runs.
+// they are in the source, background.js (the service worker, one ES
+// module), and for each page its script and its stylesheet (popup.js,
+// popup.css, consent.js, consent.css — React and the console's blocks and
+// tokens, src/console/ui and src/console/styles, bundled in), theme-boot.js
+// (the script of a page's head) and the fonts the stylesheets name. Not
+// minified: Chrome shows the user the code it runs.
 // Rides the full build; on its own it is `npm run build-extension`.
 
 import dotenv from 'dotenv';
@@ -25,6 +28,8 @@ import path from 'node:path';
 
 const SRC_DIR = path.resolve('src', 'browser-extension');
 const OUT_DIR = path.resolve('dist', 'browser-extension');
+// The fonts of the console's stylesheet, which the pages are drawn with.
+const FONTS_DIR = path.resolve('src', 'console', 'styles', 'fonts');
 // The pages of the extension: the popup of the toolbar button and the
 // window that asks the user about a tab.
 const PAGES = ['popup.html', 'consent.html'];
@@ -70,19 +75,25 @@ export async function buildBrowserExtension({ consoleOrigin, serverUrl, outDir =
   await esbuild.build({
     entryPoints: {
       background: path.join(SRC_DIR, 'background.ts'),
-      popup: path.join(SRC_DIR, 'popup.ts'),
-      consent: path.join(SRC_DIR, 'consent-page.ts'),
+      popup: path.join(SRC_DIR, 'popup.tsx'),
+      consent: path.join(SRC_DIR, 'consent-page.tsx'),
+      'theme-boot': path.join(SRC_DIR, 'theme-boot.ts'),
     },
     bundle: true,
     outdir: outDir,
     platform: 'browser',
     format: 'esm',
     target: 'chrome120',
+    jsx: 'automatic',
+    // The fonts keep their names: the pages preload them.
+    loader: { '.woff2': 'file' },
+    assetNames: '[name]',
     legalComments: 'inline',
     logLevel: 'info',
     define: {
       __SERVER_URL__: JSON.stringify(serverUrl),
       __CONSOLE_ORIGIN__: JSON.stringify(consoleOrigin),
+      'process.env.NODE_ENV': '"production"',
     },
   });
 
@@ -100,6 +111,11 @@ export async function buildBrowserExtension({ consoleOrigin, serverUrl, outDir =
   // The license of the Playwright modules travels with the bundle.
   await fs.copyFile(path.join(SRC_DIR, 'playwright', 'LICENSE'), path.join(outDir, 'LICENSE-playwright.txt'));
   await fs.copyFile(path.join(SRC_DIR, 'playwright', 'NOTICE'), path.join(outDir, 'NOTICE-playwright.txt'));
+
+  // So do the licenses of the fonts the pages are set in.
+  for (const license of ['LICENSE-Inter.txt', 'LICENSE-JetBrainsMono.txt']) {
+    await fs.copyFile(path.join(FONTS_DIR, license), path.join(outDir, license));
+  }
 
   await fs.writeFile(`${outDir}.zip`, zipSync(await filesOf(outDir, ARCHIVE_ROOT), { level: 9 }));
 

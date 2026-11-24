@@ -5,3 +5,7 @@
 declare const __SERVER_URL__: string;
 // https://<CONSOLE_DOMAIN> — the only origin whose pages the extension answers.
 declare const __CONSOLE_ORIGIN__: string;
+
+// The stylesheets a page imports: esbuild bundles them into the page's CSS
+// file; for tsc they are modules with no exports.
+declare module '*.css';
