@@ -108,9 +108,8 @@ export const agent = {
     'and what the consent rests on — the agent opens nobody\'s browser without it. The thread is headless — the sub-agent talks only to ' +
     'you: send instructions with send_to_thread, its replies arrive as thread.message events. It never ends on its own: it executes an ' +
     'instruction, reports back and waits for the next one. Manual steps (login, CAPTCHA) the user does in their own Chrome, in the tab the ' +
-    'agent names. While its session is open, Chrome shows the user a debugging bar: tell the agent to finish as soon as the work is done ' +
-    'instead of keeping the thread for later. When it reports that the user stopped the session or that the browser is not connected, ' +
-    'pass that on rather than insisting.',
+    'agent names. When it reports that the user stopped the session or that the browser is not connected, pass that on rather than ' +
+    'insisting.',
   sdk: 'claude',
   modes: ['headless'],
   defaultMode: 'headless',
