@@ -16,10 +16,12 @@ confidential from them.
   agents and thread modes in its passport. `agents/access.ts` holds named access
   profiles and the secretary's passport. `agents/world/` is the world library: canonical prompt fragments,
   one file per world fact, every prompt imports instead of retelling.
-  `agents/roles/` holds a brief shared by agents that play one role on
-  different backends; `agents/kit/` — pieces shared by agent modules (the
-  Playwright MCP of the agents that carry a browser, the loopback static
-  server an agent renders its workbench files from).
+  `agents/roles/` holds a brief shared by agents that play one role — on
+  different backends (the manager) or with different browsers (the browser
+  operator); `agents/kit/` — pieces shared by agent modules (the
+  Playwright MCP of the agents that carry a browser, the user's own browser
+  of a run — which linked browser it takes, its session, its own tools —
+  and the loopback static server an agent renders its workbench files from).
 - `src/` — the app. `core/` (event log, envelopes, threads), `capabilities/`
   (the agent runtime and session runner,
   agent validation, per-user connections and installation secrets),
@@ -41,9 +43,13 @@ confidential from them.
   `browser-link/` (the link to users' own browsers: the wire between the
   extension and the server and the messages a console page sends to the
   extension, the hub that accepts the WebSockets the extensions open — the
-  upgrade requests of the web server — the store of linked browsers and
-  the pairing codes; `index.ts` is the module as the app runs it and what
-  `/api/browsers` calls), `browser-extension/` (the Chrome extension that dials that
+  upgrade requests of the web server — and opens sessions in the browsers,
+  the CDP endpoint of a session a Playwright client connects to (`relay.ts`
+  over `cdp-model.ts`, which plays the browser Playwright expects), the
+  store of linked browsers and the pairing codes; `index.ts` is the module
+  as the app runs it: what `/api/browsers` calls and what an agent's run
+  reaches a browser of its workspace through),
+  `browser-extension/` (the Chrome extension that dials that
   link from the user's browser: a browser sub-project with its own tsconfig,
   built for one installation — the console domain is a constant of its
   bundle; `playwright/` holds modules of the Playwright extension under

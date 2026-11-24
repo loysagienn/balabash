@@ -1,0 +1,382 @@
+// A user's own browser inside an agent's run: which of the browsers linked
+// to the workspace the run works in, the session it holds there and the
+// tools that are this browser's own (src/browser-link is the link itself).
+//
+// The session is lazy: nothing is opened in the user's Chrome until the
+// agent first reaches for the browser — a tool of the Playwright kit asking
+// for its context, or `user_browser_connect`. Opening is a session of the
+// link behind a CDP endpoint and a Playwright client connected to it; the
+// context the kit works in is the browser's default one.
+//
+// Which browser: the one the agent named with `user_browser_connect`;
+// unnamed — the only one connected now. Anything else is a refusal that
+// lists the candidates: the agent picks by its operator's words or hands
+// the list back, it does not guess.
+//
+// A session that ended by somebody else's hand — the user stopped it, the
+// owner withdrew the browser, the link was lost — is not opened again
+// behind the agent's back: the browser tools answer with the reason until
+// the agent calls `user_browser_connect`. The reason is words the operator
+// can act on.
+
+import { chromium } from 'playwright';
+import type { BrowserContext } from 'playwright';
+import type { JsonObject, SessionEnvironmentTool } from '../../src/core/contract.ts';
+import { BrowserAccessError, openBrowserSession, workspaceBrowserTabs, workspaceBrowsers } from '../../src/browser-link/index.ts';
+import type { BrowserSession, BrowserTab, SessionEnd, WorkspaceBrowser } from '../../src/browser-link/index.ts';
+
+const CONNECT_TIMEOUT_MS = 30_000;
+// How long a failed browser call waits to learn that the session is over:
+// the call fails first, the end of the link is heard a moment later.
+const END_SETTLE_MS = 300;
+
+// Which browser the agent named: by its name or id, by its owner, or both.
+export type Wanted = { browser?: string; owner?: string };
+
+// The link as this module uses it; a test plays it.
+export type UserBrowserLink = {
+  browsers(): Promise<WorkspaceBrowser[]>;
+  tabs(browserId: string): Promise<BrowserTab[]>;
+  open(browserId: string): Promise<BrowserSession>;
+  // The Playwright client of a session: its context and what drops it.
+  attach(endpoint: string): Promise<{ context: BrowserContext; detach(): Promise<void> }>;
+};
+
+export type UserBrowser = {
+  // The context of the session, opening one when none is open.
+  context(): Promise<BrowserContext>;
+  tools(): SessionEnvironmentTool[];
+  // Wraps a tool of the Playwright kit: its failure after the session ended
+  // is the reason of the end.
+  guard(tool: SessionEnvironmentTool): SessionEnvironmentTool;
+  dispose(): Promise<void>;
+};
+
+// The session a run holds: where, and its Playwright client.
+type Held = { browser: WorkspaceBrowser; session: BrowserSession; context: BrowserContext; detach(): Promise<void> };
+
+const same = (left: string, right: string) => left.trim().toLowerCase() === right.trim().toLowerCase();
+
+function describe(browser: WorkspaceBrowser): string {
+  return `"${browser.name}" of ${browser.ownerName ?? 'an unnamed user'}`;
+}
+
+function listing(candidates: WorkspaceBrowser[]): string {
+  return candidates
+    .map(browser => {
+      const seen = browser.connected ? 'connected' : `not connected${browser.lastSeenAt ? `, last seen ${browser.lastSeenAt.toISOString()}` : ''}`;
+
+      return `- ${describe(browser)} — ${seen} (id ${browser.id})`;
+    })
+    .join('\n');
+}
+
+const NO_BROWSERS =
+  'No browser is linked to this workspace. A user links their Chrome on the Connections screen of the console. Report this to the operator.';
+
+// The browser to work in, or why there is none to take: the words go to the
+// agent as the refusal of its call.
+export function chooseBrowser(candidates: WorkspaceBrowser[], wanted: Wanted | null): { browser: WorkspaceBrowser } | { refusal: string } {
+  if (candidates.length === 0) {
+    return { refusal: NO_BROWSERS };
+  }
+
+  const named = wanted?.browser?.trim();
+  const owner = wanted?.owner?.trim().toLowerCase();
+
+  if (named || owner) {
+    const byId = named ? candidates.find(browser => browser.id === named) : undefined;
+    const matches = byId
+      ? [byId]
+      : candidates.filter(
+          browser => (!named || same(browser.name, named)) && (!owner || (browser.ownerName ?? '').toLowerCase().includes(owner)),
+        );
+    const asked = [named ? `"${named}"` : 'a browser', owner ? `of ${wanted!.owner!.trim()}` : ''].filter(Boolean).join(' ');
+
+    if (matches.length === 1) {
+      return { browser: matches[0] };
+    }
+
+    return {
+      refusal:
+        matches.length === 0
+          ? `No browser linked to this workspace is ${asked}. The linked browsers:\n${listing(candidates)}`
+          : `More than one linked browser is ${asked} — name the one to use by its id:\n${listing(matches)}`,
+    };
+  }
+
+  const connected = candidates.filter(browser => browser.connected);
+
+  if (connected.length === 1) {
+    return { browser: connected[0] };
+  }
+
+  return {
+    refusal:
+      connected.length === 0
+        ? `None of the browsers linked to this workspace is connected now: the Chrome is closed, asleep or offline, or its extension is paused. Report this to the operator instead of waiting for it. The linked browsers:\n${listing(candidates)}`
+        : `Several linked browsers are connected. Choose the one the operator's instruction names with user_browser_connect — if it names none, hand this list to the operator instead of guessing:\n${listing(connected)}`,
+  };
+}
+
+// What the browser tools answer once a session ended by somebody else's hand.
+export function sessionEndText(end: Exclude<SessionEnd, 'closed'>, browser: WorkspaceBrowser): string {
+  switch (end) {
+    case 'stopped':
+      return (
+        `The user stopped the session in their browser ${describe(browser)} — closed the debugging bar of Chrome or paused the extension. ` +
+        'Do not open a new session on your own: report this to the operator and wait for the next instruction. The tabs of the session stay open in the browser.'
+      );
+    case 'revoked':
+      return (
+        `Access to the browser ${describe(browser)} was withdrawn: its owner disconnected it from Balabash or switched it off for this workspace. ` +
+        'Report this to the operator. The tabs of the session stay open in the browser.'
+      );
+    case 'lost':
+      return (
+        `The link to the browser ${describe(browser)} was lost: the Chrome was closed, went to sleep or lost the network. ` +
+        'The tabs of the session stay open there but belong to no session any more. Report this to the operator; user_browsers_list shows whether the ' +
+        'browser is connected again, and user_browser_connect then opens a new session with a blank tab.'
+      );
+  }
+}
+
+function accessRefusal(error: unknown, browser: WorkspaceBrowser): Error {
+  if (error instanceof BrowserAccessError) {
+    return new Error(
+      error.code === 'offline'
+        ? `The browser ${describe(browser)} is not connected now: the Chrome is closed, asleep or offline, or its extension is paused. Report this to the operator instead of waiting for it.`
+        : `The browser ${describe(browser)} is not enabled in this workspace any more. Report this to the operator.`,
+    );
+  }
+
+  return new Error(`The browser ${describe(browser)} did not do it: ${error instanceof Error ? error.message : String(error)}`);
+}
+
+// The Playwright client of a session: connected to its CDP endpoint, working
+// in the browser's default context. The browser is on another machine —
+// Playwright is not told the two share a file system, so a file it uploads
+// travels by content, not by path.
+export async function attachToSession(endpoint: string): Promise<{ context: BrowserContext; detach(): Promise<void> }> {
+  const remote = await chromium.connectOverCDP(endpoint, { noDefaults: true, timeout: CONNECT_TIMEOUT_MS });
+  const context = remote.contexts()[0];
+
+  if (!context) {
+    await remote.close().catch(() => {});
+
+    throw new Error('The browser has no context to work in');
+  }
+
+  return { context, detach: () => remote.close() };
+}
+
+const liveLink = (workspaceId: string, session: { clientName: string; label(): Promise<string> }): UserBrowserLink => ({
+  browsers: () => workspaceBrowsers(workspaceId),
+  tabs: browserId => workspaceBrowserTabs(workspaceId, browserId),
+  open: async browserId => openBrowserSession({ workspaceId, browserId, clientName: session.clientName, label: await session.label() }),
+  attach: attachToSession,
+});
+
+const WANTED_SCHEMA = {
+  browser: { type: 'string', description: 'The name of the browser, or its id from user_browsers_list.' },
+  owner: { type: 'string', description: 'The display name of the owner of the browser, or a part of it.' },
+};
+
+function wantedOf(args: JsonObject): Wanted | null {
+  const browser = typeof args.browser === 'string' && args.browser.trim() ? args.browser : undefined;
+  const owner = typeof args.owner === 'string' && args.owner.trim() ? args.owner : undefined;
+
+  return browser || owner ? { ...(browser ? { browser } : {}), ...(owner ? { owner } : {}) } : null;
+}
+
+export function createUserBrowser(options: {
+  workspaceId: string;
+  // Names the client to the extension.
+  clientName: string;
+  // What the user reads about the session in their browser.
+  label(): Promise<string>;
+  link?: UserBrowserLink;
+}): UserBrowser {
+  const link = options.link ?? liveLink(options.workspaceId, options);
+  // The browser the agent named: the next session opens there.
+  let chosen: WorkspaceBrowser | null = null;
+  let current: Held | null = null;
+  let opening: Promise<Held> | null = null;
+  // Why the last session ended, when it was not this run that ended it.
+  let ended: string | null = null;
+
+  const pick = async (wanted: Wanted | null): Promise<WorkspaceBrowser> => {
+    const candidates = await link.browsers();
+    // The browser named before stays the choice while it is the workspace's.
+    const remembered = wanted ? null : chosen && candidates.find(browser => browser.id === chosen!.id);
+    const choice = remembered ? { browser: remembered } : chooseBrowser(candidates, wanted);
+
+    if ('refusal' in choice) {
+      throw new Error(choice.refusal);
+    }
+
+    return choice.browser;
+  };
+
+  const open = (browser: WorkspaceBrowser): Promise<Held> => {
+    opening ??= (async (): Promise<Held> => {
+      const session = await link.open(browser.id).catch(error => {
+        throw accessRefusal(error, browser);
+      });
+
+      try {
+        const attached = await link.attach(session.endpoint);
+        const held: Held = { browser, session, ...attached };
+
+        current = held;
+        ended = null;
+        void session.ended.then(({ end }) => {
+          if (current === held) {
+            current = null;
+            ended = end === 'closed' ? null : sessionEndText(end, browser);
+          }
+
+          void held.detach().catch(() => {});
+        });
+
+        return held;
+      } catch (error) {
+        await session.close().catch(() => {});
+
+        throw accessRefusal(error, browser);
+      }
+    })().finally(() => {
+      opening = null;
+    });
+
+    return opening;
+  };
+
+  const close = async () => {
+    const held = current ?? (await opening?.catch(() => null));
+
+    if (!held) {
+      return;
+    }
+
+    // Ended by this run: no reason to keep.
+    if (current === held) {
+      current = null;
+    }
+
+    await held.detach().catch(() => {});
+    await held.session.close().catch(() => {});
+  };
+
+  const connect = async (wanted: Wanted | null): Promise<string> => {
+    const browser = await pick(wanted);
+
+    chosen = browser;
+
+    if (current?.browser.id === browser.id) {
+      return `The session is already open in the browser ${describe(browser)}.`;
+    }
+
+    await close();
+    ended = null;
+    await open(browser);
+
+    return (
+      `A session is open in the browser ${describe(browser)}: one blank tab of its own in the "Balabash" tab group, in the background. ` +
+      'The browser tools work in the tabs of this session.'
+    );
+  };
+
+  return {
+    async context() {
+      if (current) {
+        return current.context;
+      }
+
+      if (ended) {
+        throw new Error(ended);
+      }
+
+      return (await (opening ?? open(await pick(null)))).context;
+    },
+
+    tools: () => [
+      {
+        name: 'user_browsers_list',
+        description:
+          'The browsers users linked to this workspace: the owner, the name, whether the browser is connected now and when it was last on the link. ' +
+          '`session: true` marks the one your session is open in.',
+        inputSchema: { type: 'object', properties: {} },
+        handler: async () => ({
+          browsers: (await link.browsers()).map(browser => ({
+            id: browser.id,
+            owner: browser.ownerName,
+            name: browser.name,
+            connected: browser.connected,
+            lastSeenAt: browser.lastSeenAt?.toISOString() ?? null,
+            session: current?.browser.id === browser.id,
+          })),
+        }),
+      },
+      {
+        name: 'user_browser_connect',
+        description:
+          'Choose one of the linked browsers and open a session in it: a blank tab of your own in the "Balabash" tab group of that Chrome. ' +
+          'Name the browser by `browser`, by `owner`, or by both; without arguments — the browser named before, or the only one connected now. ' +
+          'A session open in another browser is closed first. This is also the only way to a new session after one has ended.',
+        inputSchema: { type: 'object', properties: WANTED_SCHEMA },
+        handler: async args => connect(wantedOf(args)),
+      },
+      {
+        name: 'user_browser_tabs',
+        description:
+          'The tabs the user has open in the browser: `id`, `title`, `url`, `windowId`, `active` (the tab in front in its window), `session` (the tab ' +
+          'belongs to a session — yours or another), `debuggable` (false for pages of Chrome itself, which no session can work in). Read from the ' +
+          "extension without a session and without touching the pages. The browser is the one of your session; before a session — the one named with " +
+          'user_browser_connect or the only one connected. browser_tabs, by contrast, lists the tabs of your own session.',
+        inputSchema: { type: 'object', properties: {} },
+        handler: async () => {
+          const browser = current?.browser ?? (await pick(null));
+          const tabs = await link.tabs(browser.id).catch(error => {
+            throw accessRefusal(error, browser);
+          });
+
+          return {
+            browser: { id: browser.id, owner: browser.ownerName, name: browser.name },
+            tabs: tabs.map(tab => ({
+              id: tab.id,
+              title: tab.title,
+              url: tab.url,
+              windowId: tab.windowId,
+              active: tab.active,
+              session: tab.owned,
+              debuggable: tab.debuggable,
+            })),
+          };
+        },
+      },
+    ],
+
+    guard: tool => ({
+      ...tool,
+      handler: async args => {
+        if (!current && ended) {
+          throw new Error(ended);
+        }
+
+        try {
+          return await tool.handler(args);
+        } catch (error) {
+          if (current) {
+            // The end of the link is heard a moment after the call it broke.
+            await new Promise(resolve => setTimeout(resolve, END_SETTLE_MS));
+          }
+
+          throw !current && ended ? new Error(ended) : error;
+        }
+      },
+    }),
+
+    dispose: close,
+  };
+}

@@ -2,7 +2,8 @@
 // the SDK's own saved session (src/capabilities/resume-runs.ts). Two
 // situations: the thread was between turns — the note rides in front of the
 // message that wakes it; a turn was in flight — the note alone opens the
-// continuation, at once. The browser agent adds a line about its browser.
+// continuation, at once. The agents that carry a browser add a line about
+// theirs.
 
 export const SESSION_RESUMED_IDLE_NOTE =
   '[Balabash event] The Balabash app restarted while you were between turns. This session was resumed from its saved ' +
@@ -17,3 +18,7 @@ export const SESSION_RESUMED_INTERRUPTED_NOTE =
 
 export const BROWSER_RELAUNCHED_NOTE =
   'The browser was relaunched with the restart: its profile and logins are kept, the tabs that were open are gone.';
+
+export const USER_BROWSER_SESSION_ENDED_NOTE =
+  "The session in the user's browser ended with the restart: the tabs it had are still open there but belong to no session any more. " +
+  'The next browser call opens a new session with a blank tab of its own.';

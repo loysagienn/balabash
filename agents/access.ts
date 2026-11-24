@@ -19,7 +19,7 @@ export const coordinator: AgentPassport = {
     'agents in child threads and relays what they bring back.',
   modes: ['user'],
   defaultMode: 'user',
-  agents: ['architect', 'auth', 'browser', 'codex', 'designer', 'engineer', 'gardener', 'image_generator', 'manager'],
+  agents: ['architect', 'auth', 'browser', 'codex', 'designer', 'engineer', 'gardener', 'image_generator', 'manager', 'user_browser'],
   access: {
     nodes: ['workspace', 'workspace_files', 'workspace_apps', 'threads', 'drive', 'gmail', 'web', 'web_perplexity', 'projects', 'schedule', 'system'],
     addRoot: ['get_event', 'fetch_thread_file', 'export_file', 'import_file', 'view_file'],

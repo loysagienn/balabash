@@ -47,6 +47,7 @@ Setup and operation: [SETUP.md](SETUP.md). Working on the code: [DEVELOPMENT.md]
 | 🌿 **gardener** | One care pass over a project library: drains the inbox into the settled files and the journal, consolidates, reports every removal. |
 | 🔑 **auth** | Connects, re-authorizes and provisions integrations. Sends links only — credential values never pass through it. |
 | **browser** | A headless sub-agent driving a real Chromium through Playwright; headful on a virtual display so the user can watch and take over (logins, CAPTCHAs) through VNC. |
+| **user_browser** | A headless sub-agent driving the user's own Chrome on the user's machine — their logins, their open tabs — through the Balabash extension the user linked on the Connections screen; works in tabs of its own tab group. |
 | 🖼️ **image_generator** | A headless sub-agent on Codex making raster images with its built-in image generation; results arrive as stored files. |
 
 Three model vendors run side by side behind one session contract. The secretary runs on
