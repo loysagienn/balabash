@@ -164,9 +164,14 @@ the user's browser. The script builds the extension for a stand of its own —
 a console origin that exists only inside that Chromium, a temporary
 directory — so it needs no installation and touches neither the app nor its
 database. It prints a line per step and exits non-zero on the first failure;
-the head of the script lists what the steps cover. Not bundled: run from the
-source.
+the head of the script lists what the steps cover — the pairing and the
+link, and an agent's run in the browser built the way `user_browser` builds
+it (`agents/kit/user-browser.ts`, the tools of `agents/kit/playwright.ts`).
+One step leaves two sessions silent before using them again: 90 seconds by
+default, `--silence=<seconds>` changes it (0 skips the step). Not bundled:
+run from the source. Run it after every update of Playwright:
+`src/browser-link/cdp-model.ts` repeats what Playwright expects of a browser.
 
 ```
-node scripts/browser-link-check.ts
+node scripts/browser-link-check.ts [--silence=<seconds>]
 ```
