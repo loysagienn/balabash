@@ -34,7 +34,8 @@ npm run build && npm run cleanup-sessions [-- --older-than 7] [-- --apply]
 
 ## console-icons (`scripts/console-icons.mjs`)
 
-Renders the console's app icons (`src/console/public/*.png`: the tab's
+Renders the icons of the browser extension (`src/browser-extension/icons/icon-16/32/48/128.png` — the cropped
+mark, as the favicons) and the console's app icons (`src/console/public/*.png`: the tab's
 `favicon-32/192`, install icons 192/512 `any` and `maskable`,
 `apple-touch-icon` 180) from the approved service icon — the pair of 1254 px
 PNGs in the project library, `balabash/design/balabash-icon-transparent.png`
@@ -154,3 +155,18 @@ For another code task, supply its reviewed JavaScript program body in
 `--programs DIR` under `<workspaceId>/<slug>.js`. A custom program takes responsibility
 for its own initial state. A task without a translation aborts the transaction.
 Historical job runs retain their ids, positions and the values shown by the schedule reader.
+
+## browser-link-check (`scripts/browser-link-check.ts`)
+
+The end-to-end check of the browser link (`src/browser-link`,
+`src/browser-extension`) on this host: a Chromium with the extension plays
+the user's browser. The script builds the extension for a stand of its own —
+a console origin that exists only inside that Chromium, a temporary
+directory — so it needs no installation and touches neither the app nor its
+database. It prints a line per step and exits non-zero on the first failure;
+the head of the script lists what the steps cover. Not bundled: run from the
+source.
+
+```
+node scripts/browser-link-check.ts
+```

@@ -1,0 +1,12 @@
+{
+  // The browser extension (src/browser-extension): a sub-project of its own —
+  // chrome and DOM types, excluded from the core tsc (../../tsconfig.json).
+  // From the core tree it imports only the wire types of the link
+  // (src/browser-link/protocol.ts) — nothing that touches node.
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "lib": ["ESNext", "DOM", "DOM.Iterable", "WebWorker"],
+    "types": ["chrome"]
+  },
+  "include": ["./**/*", "../browser-link/protocol.ts"]
+}

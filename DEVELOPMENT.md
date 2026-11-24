@@ -38,6 +38,13 @@ confidential from them.
   Koa web surface: `/api`, `/files`, the one-time links and the OAuth
   callback), `console/` (the web interface: a browser SPA, its own tsconfig,
   served by the core on `CONSOLE_DOMAIN` through `src/api/console.ts`),
+  `browser-link/` (the link to a user's own browser: the wire between the
+  extension and the server and the messages a console page sends to the
+  extension), `browser-extension/` (the Chrome extension that dials that
+  link from the user's browser: a browser sub-project with its own tsconfig,
+  built for one installation — the console domain is a constant of its
+  bundle; `playwright/` holds modules of the Playwright extension under
+  their own license, the changed ones say so at their top),
   `users/` (users, identities, workspace membership), `workspace/` (the
   per-workspace workbench: layout, sqlite, child processes, the annotation
   indexer), `projects/` (the project registry), `schedule/` (scheduled
@@ -64,7 +71,12 @@ confidential from them.
 - `prisma/` — the database schema and its migrations; `prisma-generated/` is
   the generated client (`npm run build` regenerates it).
 - `build/` — the esbuild configuration; `dist/` is the bundle output
-  (`app.js` and the offline scripts, `console/`, `apps-vendor/`).
+  (`app.js` and the offline scripts, `console/`, `apps-vendor/`,
+  `browser-extension/` — the unpacked extension a user loads into Chrome —
+  and `browser-extension.zip`, the archive of it). `build/browser-extension.js`
+  takes the console domain from `CONSOLE_DOMAIN` of the environment or of
+  `.env`; without one the full build skips the extension and
+  `npm run build-extension` fails.
   `build/console.js` bundles `src/console` into `dist/console/` (hashed
   assets + `manifest.json`); the core reads the manifest per request, so
   `npm run build-console` goes live with the next page load — no restart.

@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Balabash Agent</title>
+    <style>
+      body { font: 14px/1.5 system-ui, sans-serif; max-width: 560px; margin: 40px auto; padding: 0 16px; color: #1b1b1b; }
+      h1 { font-size: 18px; margin: 0 0 6px; }
+      .server { color: #666; margin: 0 0 20px; }
+      .row { display: flex; gap: 10px; align-items: center; margin-top: 18px; }
+      #status { padding: 10px 12px; border-radius: 6px; background: #f3f3f3; white-space: pre-wrap; }
+      #status[data-state='connected'] { background: #e2f4e4; }
+      #status[data-state='paused'] { background: #fff2cc; }
+    </style>
+  </head>
+  <body>
+    <h1>Balabash Agent</h1>
+    <p class="server">Server: <a id="console" target="_blank" rel="noreferrer"></a></p>
+    <div id="status">…</div>
+    <div class="row">
+      <label><input id="paused" type="checkbox" /> Pause</label>
+    </div>
+    <script type="module" src="options.js"></script>
+  </body>
+</html>

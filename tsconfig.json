@@ -18,6 +18,7 @@
   "include": ["src/**/*", "agents/**/*", "scripts/**/*", "prisma-generated/**/*", "prisma.config.ts"],
   // src/console (the console SPA) is a browser sub-project with its own
   // tsconfig (DOM libs, jsx) — the core typecheck must not touch it; `npm run
-  // types` checks it through src/console/tsconfig.json.
-  "exclude": ["node_modules", "src/console"]
+  // types` checks it through src/console/tsconfig.json. src/browser-extension
+  // (the browser extension) is another one, with chrome types.
+  "exclude": ["node_modules", "src/console", "src/browser-extension"]
 }
