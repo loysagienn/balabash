@@ -168,7 +168,8 @@ the head of the script lists what the steps cover — the pairing and the
 link, and an agent's run in the browser built the way `user_browser` builds
 it (`agents/kit/user-browser.ts`, the tools of `agents/kit/playwright.ts`).
 One step leaves two sessions silent before using them again: 90 seconds by
-default, `--silence=<seconds>` changes it (0 skips the step). Not bundled:
+default, `--silence=<seconds>` changes it; 0 skips it, and with it the step
+that waits a minute for the user's answer about a tab. Not bundled:
 run from the source. Run it after every update of Playwright:
 `src/browser-link/cdp-model.ts` repeats what Playwright expects of a browser.
 
