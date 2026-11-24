@@ -15,10 +15,10 @@
 // sender's origin is compared again here) asks what this extension is and
 // hands over a pairing code (src/browser-link/protocol.ts). The extension's
 // own pages (OwnPageRequest): the popup of the toolbar button shows the
-// link and its sessions, switches the pause, stops sessions and hands the
-// tab in front to one; the options page keeps the user's boundaries
-// (boundaries.ts); the consent window brings the user's answer about a tab
-// a session asked for (consent.ts).
+// link and its sessions, switches the pause, stops sessions, hands the tab
+// in front to one and keeps the user's boundaries (boundaries.ts); the
+// consent window brings the user's answer about a tab a session asked for
+// (consent.ts).
 
 import { readSettings, watchTabs, writeSettings } from './boundaries.ts';
 import type { Settings } from './boundaries.ts';

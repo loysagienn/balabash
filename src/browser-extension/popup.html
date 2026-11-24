@@ -4,8 +4,9 @@
     <meta charset="utf-8" />
     <title>Balabash Agent</title>
     <style>
-      body { font: 13px/1.45 system-ui, sans-serif; width: 340px; margin: 0; padding: 12px 14px; color: #1b1b1b; }
+      body { font: 13px/1.45 system-ui, sans-serif; width: 360px; margin: 0; padding: 12px 14px; color: #1b1b1b; }
       h1 { font-size: 14px; margin: 0 0 8px; }
+      h2 { font-size: 13px; margin: 14px 0 2px; }
       #status { padding: 8px 10px; border-radius: 6px; background: #f3f3f3; white-space: pre-wrap; }
       #status[data-state='connected'] { background: #e2f4e4; }
       #status[data-state='paused'] { background: #fff2cc; }
@@ -14,6 +15,10 @@
       .session .label { font-weight: 600; overflow-wrap: anywhere; }
       .session .tabs, .note { color: #666; }
       .session .actions { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
+      .note { margin: 2px 0 6px; font-size: 12px; }
+      .settings { border-top: 1px solid #e4e4e4; margin-top: 12px; }
+      .settings label { display: block; margin-top: 8px; }
+      textarea { width: 100%; box-sizing: border-box; min-height: 64px; font: 12px/1.45 ui-monospace, monospace; padding: 6px; resize: vertical; }
       button { font: inherit; padding: 3px 10px; }
       #error { color: #a40000; margin-top: 8px; white-space: pre-wrap; }
       a { color: #1a5fb4; }
@@ -28,9 +33,27 @@
     </div>
     <div id="sessions"></div>
     <div id="error"></div>
+
+    <div class="settings">
+      <label><input id="tabs-list" type="checkbox" /> Let the agent see the titles and addresses of my tabs</label>
+      <label><input id="without-asking" type="checkbox" /> Hand my tabs to the agent without asking me</label>
+      <p class="note">Without this a window asks you each time the agent wants one of your tabs.</p>
+
+      <h2>Blocked sites</h2>
+      <p class="note">
+        One per line, for example <code>bank.example.com</code>; subdomains are covered. The agent cannot open these sites,
+        see their tabs or take them. A blocked site inside a frame of another page is not caught.
+      </p>
+      <textarea id="blocked-sites" spellcheck="false"></textarea>
+      <div class="row">
+        <span id="saved" class="note"></span>
+        <button id="save" type="button">Save</button>
+      </div>
+    </div>
+
     <div class="row">
-      <a id="settings" href="#">Settings</a>
-      <a id="console" target="_blank" rel="noreferrer">Console</a>
+      <span></span>
+      <a id="console" target="_blank" rel="noreferrer">Open the console</a>
     </div>
     <script type="module" src="popup.js"></script>
   </body>

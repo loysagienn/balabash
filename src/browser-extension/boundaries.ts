@@ -4,7 +4,7 @@
 // The settings — the blocked list of sites, whether the agent sees the list
 // of tabs and whether it gets a tab it asks for without the user being
 // asked — live in chrome.storage.local and are written by this module alone
-// (the options page asks the worker).
+// (the popup asks the worker).
 //
 // A blocked site is closed to a session at every door:
 // - its tabs are not in the list of tabs and cannot be handed to a session

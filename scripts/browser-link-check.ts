@@ -14,7 +14,7 @@
 // pairing code over and the extension pairs through the hub
 // (src/browser-link/hub.ts, run in this process with the script's own
 // memory for a database) — a refused code first, then a good one; the tabs
-// are listed over the link; the options page shows the name and the state;
+// are listed over the link; the popup shows the name and the state;
 // an agent's run works in the browser the way `user_browser` does
 // (agents/kit/user-browser.ts over the hub and the relay, the tools of
 // agents/kit/playwright.ts): the session is opened by the first browser
@@ -29,7 +29,8 @@
 // the user chose not to be asked — or handed over from the popup; a blocked site is not listed, not handed over, not opened, and
 // a session's tab that is redirected there is taken from the session; the
 // cookies of the profile are not read through the debugger; the list of
-// tabs can be switched off; the popup shows the sessions and stops one;
+// tabs can be switched off — all of it set in the popup, which also shows
+// the sessions and stops one;
 // the pause drops the link and its end brings it back; a link the server
 // dropped is dialed again; a refused re-pairing leaves the browser paired;
 // a revoked browser loses its session, forgets its secret and stays away.
@@ -286,13 +287,13 @@ async function main(): Promise<void> {
     assert.ok(!refused.startsWith('answered'), refused);
     step(`a page of another origin does not reach the extension (${refused})`);
 
-    const optionsPage = await userBrowser.newPage();
+    const popupPage = await userBrowser.newPage();
 
-    await optionsPage.goto(`chrome-extension://${extensionId}/options.html`);
-    await optionsPage.locator('#status[data-state="unpaired"]').waitFor({ timeout: 10_000 });
-    assert.equal(await optionsPage.locator('#console').getAttribute('href'), `${CONSOLE_ORIGIN}/`);
-    assert.equal(await optionsPage.locator('#paused').isDisabled(), true);
-    step(`the options page shows the state: ${JSON.stringify(await optionsPage.locator('#status').textContent())}`);
+    await popupPage.goto(`chrome-extension://${extensionId}/popup.html`);
+    await popupPage.locator('#status[data-state="unpaired"]').waitFor({ timeout: 10_000 });
+    assert.equal(await popupPage.locator('#console').getAttribute('href'), `${CONSOLE_ORIGIN}/`);
+    assert.equal(await popupPage.locator('#paused').isDisabled(), true);
+    step(`the popup shows the state: ${JSON.stringify(await popupPage.locator('#status').textContent())}`);
 
     // Pairing: the page hands the code over, the extension brings it in its hello.
     assert.deepEqual(await ask<PagePairResult>({ type: 'pair', code: 'not-the-code' }), { ok: false, error: 'code_rejected' });
@@ -309,11 +310,11 @@ async function main(): Promise<void> {
     assert.ok(tabs.some(tab => tab.url.startsWith(CONSOLE_ORIGIN)), JSON.stringify(tabs));
     step(`tabs are listed over the link: ${tabs.map(tab => JSON.stringify(tab.title || tab.url)).join(', ')}`);
 
-    await optionsPage.locator('#status[data-state="connected"]').waitFor({ timeout: 10_000 });
-    assert.match((await optionsPage.locator('#status').textContent()) ?? '', /^Check browser — Connected\./);
+    await popupPage.locator('#status[data-state="connected"]').waitFor({ timeout: 10_000 });
+    assert.match((await popupPage.locator('#status').textContent()) ?? '', /^Check browser — Connected\./);
     hub.renamed(BROWSER_ID, 'Renamed in the console');
-    await optionsPage.locator('#status', { hasText: 'Renamed in the console' }).waitFor({ timeout: 10_000 });
-    step('the options page shows the name the console gave, and its change');
+    await popupPage.locator('#status', { hasText: 'Renamed in the console' }).waitFor({ timeout: 10_000 });
+    step('the popup shows the name the console gave, and its change');
 
     // An agent's run: nothing is opened until it reaches for the browser.
     type Tab = { id: number; title: string; url: string; windowId: number; groupId: number; active: boolean; owned: boolean };
@@ -391,7 +392,7 @@ async function main(): Promise<void> {
 
     // What the extension's own pages ask the worker, as the popup does.
     const askWorker = <T>(message: unknown) =>
-      withTimeout(optionsPage.evaluate(body => chrome.runtime!.sendMessage!(body), message), 20_000, `the answer to ${JSON.stringify(message)}`) as Promise<T>;
+      withTimeout(popupPage.evaluate(body => chrome.runtime!.sendMessage!(body), message), 20_000, `the answer to ${JSON.stringify(message)}`) as Promise<T>;
     type Sessions = { sessions: { id: number; label: string; tabIds: number[] }[] };
     const sessionOf = async (label: string) => (await askWorker<Sessions>({ type: 'status' })).sessions.find(session => session.label === label)!;
     // The window in which the extension asks the user about a tab.
@@ -457,20 +458,20 @@ async function main(): Promise<void> {
     const thirdUserPage = await userBrowser.newPage();
 
     await thirdUserPage.goto(`${OTHER_ORIGIN}/third`);
-    await optionsPage.bringToFront();
-    await optionsPage.locator('#without-asking').check();
-    await optionsPage.locator('#save').click();
-    await optionsPage.locator('#saved', { hasText: 'Saved.' }).waitFor({ timeout: 10_000 });
+    await popupPage.bringToFront();
+    await popupPage.locator('#without-asking').check();
+    await popupPage.locator('#save').click();
+    await popupPage.locator('#saved', { hasText: 'Saved.' }).waitFor({ timeout: 10_000 });
 
     const thirdUserTab = (await tabsNow()).find(tab => tab.url === `${OTHER_ORIGIN}/third`)!;
 
     assert.match(await first.call('user_browser_take_tab', { tabId: thirdUserTab.id }), /The user handed the tab over/);
     assert.equal(userBrowser.pages().some(candidate => !candidate.isClosed() && candidate.url().includes('/consent.html')), false);
     assert.equal((await sessionOf('first')).tabIds.includes(thirdUserTab.id), true);
-    await optionsPage.locator('#without-asking').uncheck();
-    await optionsPage.locator('#save').click();
-    await optionsPage.locator('#saved', { hasText: 'Saved.' }).waitFor({ timeout: 10_000 });
-    step('with "without asking" switched on in the settings a tab is handed over with no window');
+    await popupPage.locator('#without-asking').uncheck();
+    await popupPage.locator('#save').click();
+    await popupPage.locator('#saved', { hasText: 'Saved.' }).waitFor({ timeout: 10_000 });
+    step('with "without asking" switched on in the popup a tab is handed over with no window');
 
     // Handed over by the user from the popup: no question asked.
     assert.deepEqual(await askWorker({ type: 'handTab', sessionId: (await sessionOf('second')).id, tabId: secondUserTab.id }), { ok: true });
@@ -489,11 +490,11 @@ async function main(): Promise<void> {
     const blockedTab = (await tabsNow()).find(tab => tab.url.includes(BLOCKED_SITE))!;
 
     assert.ok(blockedTab, 'before it is blocked the tab is in the list');
-    await optionsPage.bringToFront();
-    await optionsPage.locator('#blocked-sites').fill(`https://www.${BLOCKED_SITE}/anything\n`);
-    await optionsPage.locator('#save').click();
-    await optionsPage.locator('#saved', { hasText: 'Saved.' }).waitFor({ timeout: 10_000 });
-    assert.equal(await optionsPage.locator('#blocked-sites').inputValue(), BLOCKED_SITE, 'the entry is kept as a bare host');
+    await popupPage.bringToFront();
+    await popupPage.locator('#blocked-sites').fill(`https://www.${BLOCKED_SITE}/anything\n`);
+    await popupPage.locator('#save').click();
+    await popupPage.locator('#saved', { hasText: 'Saved.' }).waitFor({ timeout: 10_000 });
+    assert.equal(await popupPage.locator('#blocked-sites').inputValue(), BLOCKED_SITE, 'the entry is kept as a bare host');
     assert.doesNotMatch(await first.call('user_browser_tabs'), new RegExp(BLOCKED_SITE.replaceAll('.', '\\.')));
     await assert.rejects(first.call('user_browser_take_tab', { tabId: blockedTab.id }), /a site of the user's list of blocked sites/);
     assert.equal(userBrowser.pages().some(candidate => candidate.url().includes('/consent.html')), false, 'the user is not even asked');
@@ -539,40 +540,35 @@ async function main(): Promise<void> {
     step('reading cookies through the debugger is refused');
 
     // The list of tabs, switched off and on again.
-    await optionsPage.locator('#tabs-list').uncheck();
-    await optionsPage.locator('#save').click();
-    await optionsPage.locator('#saved', { hasText: 'Saved.' }).waitFor({ timeout: 10_000 });
+    await popupPage.locator('#tabs-list').uncheck();
+    await popupPage.locator('#save').click();
+    await popupPage.locator('#saved', { hasText: 'Saved.' }).waitFor({ timeout: 10_000 });
     await assert.rejects(first.call('user_browser_tabs'), /The user switched the list of their tabs off/);
     assert.match(await first.call('browser_evaluate', { function: '() => document.title' }), /Agent page/);
-    await optionsPage.locator('#tabs-list').check();
-    await optionsPage.locator('#save').click();
+    await popupPage.locator('#tabs-list').check();
+    await popupPage.locator('#save').click();
     await until('the list is back', async () => /Stand page/.test(await first.call('user_browser_tabs').catch(() => '')));
-    step('the list of tabs is switched off in the settings and on again; the session works meanwhile');
+    step('the list of tabs is switched off in the popup and on again; the session works meanwhile');
 
-    // The popup: the sessions, and Stop for one of them.
-    const popup = await userBrowser.newPage();
-
-    await popup.goto(`chrome-extension://${extensionId}/popup.html`);
-    await popup.locator('#status[data-state="connected"]').waitFor({ timeout: 10_000 });
-    assert.deepEqual(await popup.locator('.session .label').allTextContents(), ['first', 'second']);
-    assert.equal(await popup.locator('#stop-all').isVisible(), true);
-    await popup.locator('.session', { hasText: 'second' }).getByRole('button', { name: 'Stop' }).click();
-    await until('the popup shows one session', async () => (await popup.locator('.session .label').allTextContents()).join() === 'first');
-    assert.equal(await popup.locator('#stop-all').isVisible(), false);
+    // The sessions in the popup, and Stop for one of them.
+    await until('the popup lists both sessions', async () => (await popupPage.locator('.session .label').allTextContents()).join() === 'first,second');
+    assert.equal(await popupPage.locator('#stop-all').isVisible(), true);
+    await popupPage.locator('.session', { hasText: 'second' }).getByRole('button', { name: 'Stop', exact: true }).click();
+    await until('the popup shows one session', async () => (await popupPage.locator('.session .label').allTextContents()).join() === 'first');
+    assert.equal(await popupPage.locator('#stop-all').isVisible(), false);
     await assert.rejects(second.call('browser_snapshot'), /The user stopped the session/);
     assert.match(await first.call('browser_evaluate', { function: '() => document.title' }), /Agent page/);
-    await popup.close();
     step('the popup lists the sessions; Stop ends one of them and leaves the other');
 
     // The user says stop: the pause ends the sessions and drops the link.
-    await optionsPage.locator('#paused').check();
+    await popupPage.locator('#paused').check();
     await until('the paused extension leaves the link', () => !hub.browser(BROWSER_ID));
     await assert.rejects(first.call('browser_snapshot'), /The user stopped the session in their browser "Check browser" of Check user/);
     await assert.rejects(second.call('browser_navigate', { url: `${standOrigin}/agent.html` }), /The user stopped the session/);
     await second.close();
     step('the pause ended both sessions: their tools answer that the user stopped the session');
     assert.equal((await ask<PageStatus>({ type: 'status' })).state, 'paused');
-    await optionsPage.locator('#paused').uncheck();
+    await popupPage.locator('#paused').uncheck();
     await until('the extension comes back after the pause', () => Boolean(hub.browser(BROWSER_ID)));
     step('the pause drops the link, its end brings the browser back with its secret');
 

@@ -1,9 +1,16 @@
-// The popup of the toolbar button: what the link is doing, the pause, and
-// the sessions agents hold in this browser — each with its label and tabs,
-// a button that stops it and one that hands it the tab in front. Everything
+// The popup of the toolbar button — the one page the user meets the
+// extension on: what the link is doing and the pause; the sessions agents
+// hold in this browser, each with its label and tabs, a button that stops
+// it and one that hands it the tab in front; and the user's boundaries
+// (boundaries.ts) — whether the agent sees the list of tabs, whether it is
+// handed a tab without the user being asked, the blocked sites. Everything
 // goes through the worker (background.ts).
+//
+// A popup closes as soon as the user clicks elsewhere, so a switch is saved
+// the moment it is flipped; the list of sites, which is typed, has a Save.
 
 import { ask, field, followStatus, statusLines } from './pages.ts';
+import type { Settings } from './boundaries.ts';
 import type { LinkStatus } from './link.ts';
 
 const status = field<HTMLDivElement>('status');
@@ -12,6 +19,11 @@ const stopAll = field<HTMLButtonElement>('stop-all');
 const sessions = field<HTMLDivElement>('sessions');
 const error = field<HTMLDivElement>('error');
 const consoleLink = field<HTMLAnchorElement>('console');
+const blockedSites = field<HTMLTextAreaElement>('blocked-sites');
+const tabsList = field<HTMLInputElement>('tabs-list');
+const withoutAsking = field<HTMLInputElement>('without-asking');
+const save = field<HTMLButtonElement>('save');
+const saved = field<HTMLSpanElement>('saved');
 
 // The tab the popup was opened over.
 async function tabInFront(): Promise<chrome.tabs.Tab | undefined> {
@@ -93,9 +105,34 @@ async function show(current: LinkStatus | undefined): Promise<void> {
   );
 }
 
-consoleLink.href = `${__CONSOLE_ORIGIN__}/`;
+function showSettings(settings: Settings | undefined): void {
+  if (!settings) {
+    return;
+  }
+
+  blockedSites.value = settings.blockedSites.join('\n');
+  tabsList.checked = !settings.tabsListHidden;
+  withoutAsking.checked = settings.tabsWithoutAsking;
+}
+
+// Everything on the page, as it stands; the answer is what was kept — the
+// sites as the list holds them.
+function saveSettings(): void {
+  saved.textContent = '';
+  void ask({
+    type: 'setSettings',
+    blockedSites: blockedSites.value.split('\n'),
+    tabsListHidden: !tabsList.checked,
+    tabsWithoutAsking: withoutAsking.checked,
+  }).then(settings => {
+    showSettings(settings);
+    saved.textContent = settings ? 'Saved.' : 'Not saved: the extension did not answer.';
+  });
+}
+
 const following = followStatus(show);
 
+consoleLink.href = `${__CONSOLE_ORIGIN__}/`;
 paused.addEventListener('change', () => {
   following.changed();
   void ask({ type: 'setPaused', paused: paused.checked }).then(show);
@@ -104,7 +141,7 @@ stopAll.addEventListener('click', () => {
   following.changed();
   void ask({ type: 'stopSessions' }).then(show);
 });
-field<HTMLAnchorElement>('settings').addEventListener('click', event => {
-  event.preventDefault();
-  void chrome.runtime.openOptionsPage();
-});
+tabsList.addEventListener('change', saveSettings);
+withoutAsking.addEventListener('change', saveSettings);
+save.addEventListener('click', saveSettings);
+void ask({ type: 'getSettings' }).then(showSettings);

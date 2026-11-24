@@ -11,8 +11,8 @@
 // the installation's .env when the environment does not name it.
 //
 // Layout of dist/browser-extension: manifest.json (the source's, with the
-// console origin added), the pages (options.html, popup.html, consent.html)
-// and icons/ as they are in the source, background.js (the service worker,
+// console origin added), the pages (popup.html, consent.html) and icons/ as
+// they are in the source, background.js (the service worker,
 // one ES module) and a script per page. Not minified: Chrome shows the user
 // the code it runs.
 // Rides the full build; on its own it is `npm run build-extension`.
@@ -25,9 +25,9 @@ import path from 'node:path';
 
 const SRC_DIR = path.resolve('src', 'browser-extension');
 const OUT_DIR = path.resolve('dist', 'browser-extension');
-// The pages of the extension: the settings, the popup of the toolbar button
-// and the window that asks the user about a tab.
-const PAGES = ['options.html', 'popup.html', 'consent.html'];
+// The pages of the extension: the popup of the toolbar button and the
+// window that asks the user about a tab.
+const PAGES = ['popup.html', 'consent.html'];
 // The folder the archive unpacks into.
 const ARCHIVE_ROOT = 'balabash-agent';
 
@@ -70,7 +70,6 @@ export async function buildBrowserExtension({ consoleOrigin, serverUrl, outDir =
   await esbuild.build({
     entryPoints: {
       background: path.join(SRC_DIR, 'background.ts'),
-      options: path.join(SRC_DIR, 'options.ts'),
       popup: path.join(SRC_DIR, 'popup.ts'),
       consent: path.join(SRC_DIR, 'consent-page.ts'),
     },
