@@ -130,7 +130,7 @@ export function sessionEndText(end: Exclude<SessionEnd, 'closed'>, browser: Work
   switch (end) {
     case 'stopped':
       return (
-        `The user stopped the session in their browser ${describe(browser)} — closed the debugging bar of Chrome or paused the extension. ` +
+        `The user stopped the session in their browser ${describe(browser)} — closed the debugging bar of Chrome, pressed Stop in the extension or paused it. ` +
         'Do not open a new session on your own: report this to the operator and wait for the next instruction. The tabs of the session stay open in the browser.'
       );
     case 'revoked':
