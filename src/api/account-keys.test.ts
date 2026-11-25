@@ -6,7 +6,8 @@
 // account, names it by the provider's answer and journals
 // connection.completed; the key is what a call of the account acts with,
 // and a key the provider refuses on a call sends the account to be
-// authorized again; a key of another provider account than the one the row
+// authorized again, and a refusal that meets the user entering a new key
+// never takes the new key down; a key of another provider account than the one the row
 // is bound to is refused; a key of an account that already lives in another
 // row goes to that row and the row born by the link dies; a service without
 // an identity probe stores the key as it is and holds one account. The
@@ -218,6 +219,30 @@ describe('an account authorized by a key', () => {
     assert.equal(row.status, 'connected');
     assert.deepEqual(row.tokens, { access_token: 'key-a2' });
     assert.equal(await connections.accountAccessToken({ id: first, server: 'shop' }, ''), 'key-a2');
+  });
+
+  test('a refusal of the key the user is replacing at that very moment leaves the new key connected', async () => {
+    const row = { id: first, server: 'shop' };
+    let current = 'key-a2';
+
+    // The two meet in every order over the rounds: the refusal of the old
+    // key arrives before the form's write, during it, and after it.
+    for (let round = 0; round < 30; round += 1) {
+      const next = current === 'key-a' ? 'key-a2' : 'key-a';
+      const link = await stand.request('POST', `/api/connections/${first}/reconnect`);
+
+      assert.equal(link.status, 200, link.text);
+
+      const late = new Promise(resolve => setTimeout(resolve, round % 15)).then(() => connections.accountAccessToken(row, '', current).catch(() => null));
+      const [saved] = await Promise.all([enter(first, next), late]);
+
+      assert.equal(saved.status, 200, saved.text);
+
+      const after = await prisma.connection.findUniqueOrThrow({ where: { id: first } });
+
+      assert.deepEqual([after.status, after.tokens], ['connected', { access_token: next }], `round ${round}`);
+      current = next;
+    }
   });
 
   test('a key of an account that already lives in another row goes to that row; the row born by the link dies', async () => {

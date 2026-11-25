@@ -947,6 +947,12 @@ export async function markReauthorizationRequired(connectionId: string, error: s
   }
 
   await prisma.connection.update({ where: { id: row.id }, data: { status: 'reauthorization_required' } });
+  await announceReauthorizationRequired(row, error);
+}
+
+// What follows the connected → reauthorization_required transition of a
+// row: the catalog of its workspace and the thread that connected it are told.
+async function announceReauthorizationRequired(row: ConnectionModel, error: string): Promise<void> {
   await accountCatalogChanged(row.server, row.workspaceId, 'reauthorization_required');
   await appendEvent({
     type: CONNECTION_REAUTHORIZATION_REQUIRED,
@@ -974,16 +980,19 @@ export async function markReauthorizationRequired(connectionId: string, error: s
 // that connected the account gets the event. A client of the installation
 // the provider does not accept and an exchange that got no answer say
 // nothing about the account: its row stays as it is. The failure is thrown
-// on as it came; what it means to the caller is the caller's to say.
+// on as it came; what it means to the caller is the caller's to say. An
+// account authorized by key answers for its own row (accountKey).
 export async function accountAccessToken(
   connection: { id: string; server: string },
   serverUrl: string,
   rejected?: string,
 ): Promise<string> {
+  if (getAccountService(connection.server)?.key) {
+    return accountKey(connection, rejected);
+  }
+
   try {
-    return getAccountService(connection.server)?.key
-      ? await accountKey(connection, rejected)
-      : await connectionAccessToken(connection, serverUrl, rejected);
+    return await connectionAccessToken(connection, serverUrl, rejected);
   } catch (error) {
     if (error instanceof AuthorizationLostError) {
       await markReauthorizationRequired(connection.id, error.message);
@@ -996,17 +1005,34 @@ export async function accountAccessToken(
 // The key of a connected account of a service authorized by key. Nothing
 // renews a key: one the provider has just refused (`rejected`) means the
 // authorization is gone — unless the user has entered a newer key
-// meanwhile, and then that one is the answer.
+// meanwhile, and then that one is the answer. The refusal is recorded by
+// one write that changes the row only while it still holds the refused
+// key: a refusal that arrives after the user entered a new key (the form
+// writes it at any moment) never takes the new key for the refused one.
 async function accountKey(connection: { id: string; server: string }, rejected?: string): Promise<string> {
+  if (rejected !== undefined) {
+    const { count } = await prisma.connection.updateMany({
+      where: { id: connection.id, status: 'connected', tokens: { path: ['access_token'], equals: rejected } },
+      data: { status: 'reauthorization_required' },
+    });
+
+    if (count) {
+      const lost = new AuthorizationLostError(`${connection.server} no longer accepts the key of the account`);
+      const marked = await prisma.connection.findUnique({ where: { id: connection.id } });
+
+      if (marked) {
+        await announceReauthorizationRequired(marked, lost.message);
+      }
+
+      throw lost;
+    }
+  }
+
   const row = await prisma.connection.findUnique({ where: { id: connection.id }, select: { status: true, tokens: true } });
   const key = row?.status === 'connected' ? getAccessToken(row.tokens) : null;
 
   if (!key) {
     throw new AuthorizationLostError('the account holds no key');
-  }
-
-  if (rejected !== undefined && key === rejected) {
-    throw new AuthorizationLostError(`${connection.server} no longer accepts the key of the account`);
   }
 
   return key;

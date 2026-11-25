@@ -247,6 +247,14 @@ describe('the rules of the scheme that stop the build', () => {
       /mail: an identity probe names its url and the field of the id/,
     );
     assertProblem(
+      root([under({ ...account, key: { label: 'API key', identityProbe: { url: 'http://mail.test/me', idField: 'id' } } })]),
+      /mail: the identity probe of a key is asked over https: the key goes with it/,
+    );
+    assert.deepEqual(
+      problemsOf(root([under({ ...account, key: { label: 'API key', identityProbe: { url: 'http://127.0.0.1:8080/me', idField: 'id' } } })])),
+      [],
+    );
+    assertProblem(
       root([under({ ...account } as unknown as Connection)]),
       /mail: an account connection says where its authorization starts: oauth\.url, or names its key/,
     );

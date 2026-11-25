@@ -151,7 +151,9 @@ export type KeySettings = {
   instructions?: string;
   // Asked with the key as it is entered: a key the provider refuses is not
   // stored, and the answer says whose it is. A service that declares a probe
-  // can hold several accounts.
+  // can hold several accounts. The key goes with the request, so the probe
+  // is an https address; only a service on this very host (a loopback
+  // address) may be asked over http.
   identityProbe?: IdentityProbe;
 };
 
