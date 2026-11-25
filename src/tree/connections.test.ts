@@ -126,6 +126,14 @@ async function serve(request: http.IncomingMessage, response: http.ServerRespons
     });
   }
 
+  // The identity of a key account: the key comes bare, "shop-key" is the
+  // one the provider knows.
+  if (pathname === '/shop/me') {
+    return request.headers.authorization === 'shop-key'
+      ? json(response, 200, { sid: 'shop-1', name: 'Shop One' })
+      : json(response, 401, { error: 'unauthorized' });
+  }
+
   if (pathname === '/token' && request.method === 'POST') {
     const refreshToken = new URLSearchParams(await bodyOf(request)).get('refresh_token') ?? '';
 
@@ -239,6 +247,21 @@ before(async () => {
         },
         children: [token()],
       }),
+      node({
+        name: 'shop',
+        summary: 'A shop of the user.',
+        connection: {
+          type: 'account',
+          service: 'shop',
+          summary: 'Shop of the user.',
+          key: {
+            label: 'API token',
+            instructions: 'Create it in the cabinet.',
+            identityProbe: { url: `${origin}/shop/me`, idField: 'sid', labelField: 'name', authScheme: 'none' },
+          },
+        },
+        children: [token()],
+      }),
       webNode(undefined, perplexityNode(`${origin}/mcp`)),
     ],
   }).catalog;
@@ -255,8 +278,9 @@ describe('connections: what can be connected', () => {
   test('lists the services of the tree with their state; a node waits for its connection', async () => {
     assert.deepEqual(await invoke('connections_list'), {
       accountServices: [
-        { service: 'mailbox', summary: 'Mail of the user.', oauthClient: 'missing', multipleAccounts: true, accounts: [] },
-        { service: 'notes', summary: 'Notes of the user.', oauthClient: 'dynamic', multipleAccounts: false, accounts: [] },
+        { service: 'mailbox', summary: 'Mail of the user.', authorizedBy: 'oauth', oauthClient: 'missing', multipleAccounts: true, accounts: [] },
+        { service: 'notes', summary: 'Notes of the user.', authorizedBy: 'oauth', oauthClient: 'dynamic', multipleAccounts: false, accounts: [] },
+        { service: 'shop', summary: 'Shop of the user.', authorizedBy: 'key', oauthClient: 'none', multipleAccounts: true, accounts: [] },
       ],
       installationServices: [
         {
@@ -277,9 +301,43 @@ describe('connections: what can be connected', () => {
     assert.equal(grant.vertices.has('web_get'), true);
   });
 
+  test('a service authorized by key: the link is the form of the account’s row, the node appears with the account and its calls act with the key', async () => {
+    await refuses(invoke('connections_request_oauth_client', { service: 'shop' }), 'invalid_input', /is authorized by a key the user enters: there is no OAuth client/);
+    assert.equal((await grantNow()).vertices.has('shop'), false);
+
+    const link = await invoke('connections_authorize', { service: 'shop' });
+    const id = requestIdOf(link.url);
+
+    assert.match(link.url, /^https:\/\/console\.test\/secrets\/[^?]+\?ws=/);
+    assert.deepEqual(link.account, { account: 'default', name: 'shop', identity: null, status: 'pending' });
+    assert.deepEqual(await layer.getAccountKeyRequest(stand.workspaceId, id), { id, server: 'shop', label: 'API token', instructions: 'Create it in the cabinet.' });
+
+    await assert.rejects(layer.provisionAccountKey(stand.workspaceId, id, 'not-the-key'), /shop refused the key \(HTTP 401\)/);
+    await layer.provisionAccountKey(stand.workspaceId, id, 'shop-key');
+
+    assert.deepEqual((await invoke('connections_list')).accountServices[2].accounts, [{ account: 'default', name: 'shop', identity: 'Shop One', status: 'connected' }]);
+    assert.equal((await grantNow()).vertices.has('shop'), true);
+    assert.deepEqual(await invoke('shop_token', { account: 'default' }), { token: 'shop-key' });
+
+    // The provider refuses the key on a call: the account waits for a new one.
+    await refuses(invoke('shop_token', { account: 'default', rejected: 'shop-key' }), 'auth_required', /can no longer act: shop no longer accepts the key of the account/);
+    assert.equal((await rowOf('shop', 'default'))?.status, 'reauthorization_required');
+
+    const again = await invoke('connections_authorize', { service: 'shop' });
+
+    assert.equal(requestIdOf(again.url), id, 're-authorized in its own row');
+    await layer.provisionAccountKey(stand.workspaceId, id, 'shop-key');
+    assert.deepEqual(await invoke('shop_token', { account: 'default' }), { token: 'shop-key' });
+    assert.deepEqual((await events('connection.')).filter(event => event[2] === 'default' && event[0] !== 'connection.pending').slice(-3), [
+      ['connection.completed', stand.mainThreadId, 'default'],
+      ['connection.reauthorization_required', stand.mainThreadId, 'default'],
+      ['connection.completed', stand.mainThreadId, 'default'],
+    ]);
+  });
+
   test('the OAuth client of the installation is asked for through a link; a service without one authorizes nobody', async () => {
     await refuses(invoke('connections_authorize', { service: 'mailbox' }), 'conflict', /needs installation OAuth client credentials/);
-    await refuses(invoke('connections_request_oauth_client', { service: 'drive' }), 'not_found', /^There is no account service "drive"\. Account services: mailbox, notes\.$/);
+    await refuses(invoke('connections_request_oauth_client', { service: 'drive' }), 'not_found', /^There is no account service "drive"\. Account services: mailbox, notes, shop\.$/);
     await refuses(invoke('connections_request_oauth_client', { service: 'notes' }), 'invalid_input', /registers its OAuth client at the provider itself/);
 
     const asked = await invoke('connections_request_oauth_client', { service: 'mailbox' });

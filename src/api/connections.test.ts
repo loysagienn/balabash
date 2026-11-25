@@ -72,6 +72,7 @@ before(async () => {
       scope: null,
       authorizationParams: null,
       identityProbe: identityProbe ? { url: `https://${name}.example/me`, idField: 'id', labelField: 'email' } : null,
+      key: null,
     });
 
   // One account at most (no identity probe), several accounts, none yet;

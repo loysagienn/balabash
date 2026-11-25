@@ -7,6 +7,9 @@
 // - GET /connect/<server>?nonce=… runs OAuth discovery (plus DCR when the
 //   provider supports it) and redirects to the consent page;
 // - GET /oauth/callback exchanges the code for tokens.
+// A service authorized by key has no OAuth in it: the link is the console's
+// form where the user enters their key (the part "Accounts authorized by a
+// key" below), and the key is kept and served as the account's access token.
 // Tokens live in the connections table; the log only sees sanitized
 // connection.* lifecycle events addressed to the initiating thread (§4.2) —
 // append redirects them to the main thread when that thread is gone (§4.3).
@@ -62,6 +65,11 @@ export class ConnectionError extends Error {
 // until this TTL or a completed authorization, whichever comes first. Each
 // click just restarts the flow with a fresh OAuth state.
 const CONNECT_LINK_TTL_MS = 15 * 60 * 1000;
+
+// The link of an account authorized by a key leads to a form behind the
+// session, so it is an address, not a credential — and the user may well
+// leave to create the key at the provider before filling the form.
+const KEY_LINK_TTL_MS = 24 * 60 * 60 * 1000;
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -424,8 +432,10 @@ async function issueLink(workspaceId: string, threadId: string, server: AccountS
     }
   }
 
+  // A key account's row carries the nonce too, though no link shows it: a
+  // nonce and a moment not yet passed are what an open link is (keyLinkOpen).
   const connectNonce = randomToken();
-  const expiresAt = new Date(Date.now() + CONNECT_LINK_TTL_MS);
+  const expiresAt = new Date(Date.now() + (server.key ? KEY_LINK_TTL_MS : CONNECT_LINK_TTL_MS));
   const pending = { expiresAt: expiresAt.toISOString() };
   const row = await underServerLock(workspaceId, server.name, async tx => {
     const rows = await tx.connection.findMany({ where: { workspaceId, server: server.name } });
@@ -466,7 +476,11 @@ async function issueLink(workspaceId: string, threadId: string, server: AccountS
   // carries it whole, the nonce and the tokens stay out of the log.
   await journalConnectionEvent(CONNECTION_PENDING, row, connectionRecord(row));
 
-  return { url: `https://${config.consoleDomain}/connect/${server.name}?nonce=${connectNonce}`, connection: connectionView(row), expiresAt };
+  // By OAuth the link starts the flow at the provider; by key it is the
+  // console's form of this very row (getAccountKeyRequest).
+  const url = server.key ? secretRequestUrl(row.id, workspaceId) : `https://${config.consoleDomain}/connect/${server.name}?nonce=${connectNonce}`;
+
+  return { url, connection: connectionView(row), expiresAt };
 }
 
 // The console's "Reconnect" of one row: a link for that very row (its
@@ -618,6 +632,10 @@ export async function provisionOauthClient(
 // redirect the browser to.
 export async function handleConnectClick(serverName: string, nonce: string): Promise<string> {
   const server = getServer(serverName);
+
+  if (server.key) {
+    throw new Error(`"${server.name}" is connected with a key, not a sign-in — open the link from the chat or the Connections screen`);
+  }
 
   if (!nonce) {
     throw new Error('Authorization link is malformed');
@@ -963,7 +981,9 @@ export async function accountAccessToken(
   rejected?: string,
 ): Promise<string> {
   try {
-    return await connectionAccessToken(connection, serverUrl, rejected);
+    return getAccountService(connection.server)?.key
+      ? await accountKey(connection, rejected)
+      : await connectionAccessToken(connection, serverUrl, rejected);
   } catch (error) {
     if (error instanceof AuthorizationLostError) {
       await markReauthorizationRequired(connection.id, error.message);
@@ -971,6 +991,161 @@ export async function accountAccessToken(
 
     throw error;
   }
+}
+
+// The key of a connected account of a service authorized by key. Nothing
+// renews a key: one the provider has just refused (`rejected`) means the
+// authorization is gone — unless the user has entered a newer key
+// meanwhile, and then that one is the answer.
+async function accountKey(connection: { id: string; server: string }, rejected?: string): Promise<string> {
+  const row = await prisma.connection.findUnique({ where: { id: connection.id }, select: { status: true, tokens: true } });
+  const key = row?.status === 'connected' ? getAccessToken(row.tokens) : null;
+
+  if (!key) {
+    throw new AuthorizationLostError('the account holds no key');
+  }
+
+  if (rejected !== undefined && key === rejected) {
+    throw new AuthorizationLostError(`${connection.server} no longer accepts the key of the account`);
+  }
+
+  return key;
+}
+
+// ---------------------------------------------------------------------------
+// Accounts authorized by a key. The link of such an account (issueLink) is
+// the console's secrets form addressed by the id of the account's row: the
+// row with an open link is the request, and there is no other record of it.
+// The key travels the way installation secrets do — from the form straight
+// to storage, never through a chat, the model or the log.
+
+function keyLinkOpen(row: ConnectionModel): boolean {
+  const pending = isObject(row.pending) ? row.pending : {};
+
+  return row.connectNonce !== null && typeof pending.expiresAt === 'string' && Date.parse(pending.expiresAt) >= Date.now();
+}
+
+export type AccountKeyRequestView = { id: string; server: string; label: string; instructions: string | null };
+
+// What the form shows, session-derived workspaceId; a row of another
+// workspace, a missing one, a row of an OAuth service and a row without an
+// open link are the same null (the caller's 404).
+export async function getAccountKeyRequest(workspaceId: string, connectionId: string): Promise<AccountKeyRequestView | null> {
+  const row = await getWorkspaceConnection(workspaceId, connectionId);
+  const key = row ? getAccountService(row.server)?.key : null;
+
+  if (!row || !key || !keyLinkOpen(row)) {
+    return null;
+  }
+
+  return { id: row.id, server: row.server, label: key.label, instructions: key.instructions };
+}
+
+const KEY_REQUEST_GONE = 'The key request does not exist or has expired';
+
+// Takes the key the user entered for the account of the row. A service with
+// an identity probe is asked first, with the key itself: a key it refuses,
+// and a key nobody could check, are not stored — the form says so and the
+// row stays as it was. The answer says whose key it is, and the sibling
+// rows are judged as at an OAuth callback: a key of an account that already
+// lives in another row goes to that row (a row born by this link dies), and
+// a key of a different provider account than the one the row is bound to is
+// refused — the address keeps its meaning. A refusal is thrown as an Error
+// with words for the form; the outcome is journaled like an OAuth one.
+export async function provisionAccountKey(workspaceId: string, connectionId: string, value: string): Promise<void> {
+  const seen = await getWorkspaceConnection(workspaceId, connectionId);
+  const server = seen ? getAccountService(seen.server) : null;
+
+  if (!seen || !server?.key || !keyLinkOpen(seen)) {
+    throw new Error(KEY_REQUEST_GONE);
+  }
+
+  const key = value.trim();
+
+  if (!key) {
+    throw new Error(`${server.key.label} is required`);
+  }
+
+  let identity: ProbedIdentity | null = null;
+
+  if (server.identityProbe) {
+    try {
+      identity = await probeIdentity(server.identityProbe, key);
+    } catch (error) {
+      if (error instanceof ProbeRefusedError && (error.status === 401 || error.status === 403)) {
+        throw new Error(`${server.name} refused the key (HTTP ${error.status}) — nothing was saved`);
+      }
+
+      throw new Error(`The key could not be checked at ${server.name} (${getErrorMessage(error)}) — nothing was saved, try again`);
+    }
+  }
+
+  const tokens = { access_token: key };
+  const outcome = await underServerLock(workspaceId, server.name, async tx => {
+    const row = await tx.connection.findUnique({ where: { id: seen.id } });
+
+    if (!row || !keyLinkOpen(row)) {
+      throw new Error(KEY_REQUEST_GONE);
+    }
+
+    if (identity && row.identityId && row.identityId !== identity.id) {
+      const bound = identityLabel(row.identity) ?? row.identityId;
+
+      throw new Error(
+        `This key belongs to "${identity.label ?? identity.id}", but account "${row.accountKey}" is bound to "${bound}" — nothing was changed. Enter a key of that account, or connect the other one as a new account.`,
+      );
+    }
+
+    const twin = identity
+      ? await tx.connection.findFirst({ where: { workspaceId, server: row.server, identityId: identity.id, NOT: { id: row.id } } })
+      : null;
+
+    if (twin && identity) {
+      const bornHere = !row.identityId && row.status === 'pending';
+      const final = await tx.connection.update({
+        where: { id: twin.id },
+        data: { tokens, status: 'connected', identity: identityData(identity) },
+      });
+
+      if (bornHere) {
+        await tx.connection.delete({ where: { id: row.id } });
+      }
+
+      return { row, final, twin: true, bornHere };
+    }
+
+    const final = await tx.connection.update({
+      where: { id: row.id },
+      data: {
+        tokens,
+        status: 'connected',
+        connectNonce: null,
+        pendingState: null,
+        pending: Prisma.DbNull,
+        ...(identity ? { identityId: identity.id, identity: identityData(identity) } : {}),
+      },
+    });
+
+    return { row, final, twin: false, bornHere: false };
+  });
+  const { row, final } = outcome;
+
+  await accountCatalogChanged(row.server, workspaceId, 'connected');
+
+  if (outcome.bornHere) {
+    await journalConnectionEvent(CONNECTION_DISCONNECTED, row, {
+      connectionId: row.id,
+      server: row.server,
+      account: row.accountKey,
+      name: row.displayName,
+      reason: 'duplicate',
+    });
+  }
+
+  await journalConnectionEvent(CONNECTION_COMPLETED, row, {
+    ...connectionRecord(final),
+    ...(outcome.twin ? { alreadyConnected: true, requestedAccount: row.accountKey } : {}),
+  });
 }
 
 // Backfill for a row without identity — one connected before the service

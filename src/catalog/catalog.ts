@@ -661,9 +661,22 @@ export function buildCatalog(root: RootDefinition): { catalog: Catalog; warnings
 
     if (connection.type === 'account') {
       const oauth = connection.oauth as AccountConnection['oauth'] | undefined;
+      const key = connection.key as AccountConnection['key'] | undefined;
 
-      if (!oauth || !URL.canParse(oauth.url ?? '')) {
-        problem(fullName, 'an account connection says where its authorization starts: oauth.url');
+      if (oauth && key) {
+        problem(fullName, 'an account connection is authorized one way: by oauth or by key');
+      }
+
+      if (key) {
+        if (!key.label?.trim()) {
+          problem(fullName, 'a connection by key says what the provider calls the key: key.label');
+        }
+
+        if (key.identityProbe && (!URL.canParse(key.identityProbe.url ?? '') || !key.identityProbe.idField)) {
+          problem(fullName, 'an identity probe names its url and the field of the id');
+        }
+      } else if (!oauth || !URL.canParse(oauth.url ?? '')) {
+        problem(fullName, 'an account connection says where its authorization starts: oauth.url, or names its key');
       }
 
       if (oauth && !['dynamic', 'manual'].includes(oauth.clientRegistration)) {

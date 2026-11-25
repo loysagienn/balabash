@@ -734,9 +734,10 @@ export type SecretRequestField = {
 
 export type SecretRequestView = {
   id: string;
-  // What lands where: installation secrets of an external MCP server, or a
-  // manual installation-level OAuth client.
-  kind: 'external-secrets' | 'oauth-client';
+  // What lands where: installation secrets of an external MCP server, a
+  // manual installation-level OAuth client, or the key of an account of the
+  // workspace at a service authorized by key (the id is the account's row).
+  kind: 'external-secrets' | 'oauth-client' | 'account-key';
   server: string;
   fields: SecretRequestField[];
 };

@@ -54,7 +54,7 @@ export class ProbeRefusedError extends Error {
 
 export async function probeIdentity(probe: IdentityProbeConfig, accessToken: string): Promise<ProbedIdentity> {
   const response = await fetch(probe.url, {
-    headers: { Authorization: `${probe.authScheme ?? 'Bearer'} ${accessToken}` },
+    headers: { Authorization: probe.authScheme === 'none' ? accessToken : `${probe.authScheme ?? 'Bearer'} ${accessToken}` },
     signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
   });
 

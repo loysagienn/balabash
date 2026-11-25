@@ -47,6 +47,7 @@ export {
   type CapabilityDefinition,
   type Connection,
   type IdentityProbe,
+  type KeySettings,
   type OAuthSettings,
   type SecretAuthority,
   type SecretConnection,

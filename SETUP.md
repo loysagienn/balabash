@@ -161,7 +161,12 @@ for typed failures. Named types share a namespace with the repository and all in
 In a capability's `run(input, ctx)`, `files.ingest(ctx, { body, originalFilename, contentType, sizeBytes })`
 stores bytes and returns a catalog `FileRef`. `files.open(ctx, fileId)` reads a stream from the caller's workspace.
 Each connection follows the `Connection` type in `src/catalog/definition.ts`. The platform registers the service and supplies its authority
-to calls. Agent or profile recipients receive the subtree subject to the workspace's
+to calls. A `secret` connection is the installation's own: the operator enters it once for every workspace. An `account`
+connection is a user's: each workspace connects its accounts, by OAuth consent (`oauth`) or by a key of the user's own at the
+provider (`key` — an API key or a personal token the user enters in a form of the console; with an `identityProbe` the key is
+checked as it is entered and the service can hold several accounts). Either way a capability takes the platform's `account`
+field and acts with `accountAuthority(ctx).accessToken()`; a key the provider refuses is passed back as `accessToken(rejected)`,
+which sends the account to be authorized again. Agent or profile recipients receive the subtree subject to the workspace's
 connections. An empty or omitted list leaves it available to scheduled programs only.
 An unknown recipient produces a startup warning. A broken module or collision skips that file as a unit.
 The System screen shows its filename and error under `nodes`.

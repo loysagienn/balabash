@@ -19,7 +19,9 @@ export type IdentityProbeConfig = {
   // Response field with the display label (login/email), same addressing; optional.
   labelField?: string;
   // Authorization header scheme; providers differ (Yandex wants "OAuth").
-  authScheme?: 'Bearer' | 'OAuth';
+  // "none": the token goes bare, without a scheme — a catalog node may ask
+  // for it, a JSON config may not.
+  authScheme?: 'Bearer' | 'OAuth' | 'none';
 };
 
 export type ExternalServerConfig =

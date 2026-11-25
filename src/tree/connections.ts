@@ -97,10 +97,13 @@ const list = capability({
       z.strictObject({
         service: z.string().describe('The value of `service` in the capabilities of this node.'),
         summary: z.string().describe('What the service gives.'),
+        authorizedBy: z
+          .enum(['oauth', 'key'])
+          .describe('oauth: the user signs in at the provider; key: the user enters a key of their own at the provider in a form.'),
         oauthClient: z
-          .enum(['dynamic', 'provisioned', 'missing'])
+          .enum(['dynamic', 'provisioned', 'missing', 'none'])
           .describe(
-            'dynamic: the provider registers the client itself; missing: provision it before any account can be authorized.',
+            'dynamic: the provider registers the client itself; missing: provision it before any account is authorized; none: a key service.',
           ),
         multipleAccounts: z.boolean(),
         accounts: z.array(Account),
@@ -126,8 +129,10 @@ const list = capability({
       accountServices: listAccountServices().map(service => ({
         service: service.name,
         summary: service.description,
-        oauthClient:
-          service.clientRegistration === 'dynamic'
+        authorizedBy: service.key ? ('key' as const) : ('oauth' as const),
+        oauthClient: service.key
+          ? ('none' as const)
+          : service.clientRegistration === 'dynamic'
             ? ('dynamic' as const)
             : provisioned.has(service.name)
               ? ('provisioned' as const)
@@ -154,7 +159,7 @@ const authorize = capability({
   name: 'authorize',
   summary: 'Issue a link for the user to authorize or re-authorize an account',
   description:
-    "Issue a one-time link for the user to authorize an account of a service, or to re-authorize an existing one. With neither `account` nor `name` the link is for the service's only account. The outcome arrives later as a connection.completed or connection.failed event in this thread.",
+    "Issue a one-time link for the user to authorize an account of a service, or to re-authorize an existing one. With neither `account` nor `name` the link is for the service's only account. The outcome arrives later as a connection.completed or connection.failed event in this thread. For a service authorized by key the link is a form for the key: a refused key is told there, not by an event.",
   input: z.strictObject({
     service: z.string(),
     account: z.string().optional().describe('An existing account to re-authorize.'),
@@ -235,6 +240,13 @@ const requestOauthClient = capability({
   async run(input, ctx) {
     const { caller } = ctx;
     const service = accountService(input.service);
+
+    if (service.key) {
+      throw new CapabilityError(
+        'invalid_input',
+        `"${service.name}" is authorized by a key the user enters: there is no OAuth client. Its accounts are authorized right away.`,
+      );
+    }
 
     if (service.clientRegistration !== 'manual') {
       throw new CapabilityError(

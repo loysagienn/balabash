@@ -12,6 +12,7 @@ import {
   requestState,
   requestStateOfFailure,
   secretsFailure,
+  secretsTitle,
 } from './Secrets.logic.ts';
 import type { SaveState, SecretRequestState, Submission } from './Secrets.logic.ts';
 
@@ -35,6 +36,12 @@ const REFUSED: ApiFailure = { status: 400, code: 'provisioning_failed', message:
 const NETWORK: ApiFailure = { status: 0, code: 'network', message: 'Failed to fetch' };
 
 describe('secret entry logic', () => {
+  it('names the card by what the request asks for', () => {
+    assert.equal(secretsTitle(OAUTH), 'OAuth client for notion');
+    assert.equal(secretsTitle(EXTERNAL), 'Secrets for github');
+    assert.equal(secretsTitle({ kind: 'account-key', server: 'shop' }), 'Key for shop');
+  });
+
   it('finds the required fields still empty, whitespace included, for both kinds', () => {
     assert.deepEqual(missingRequired(OAUTH_FIELDS, {}), { client_id: REQUIRED_ERROR });
     assert.deepEqual(missingRequired(OAUTH_FIELDS, { client_id: '  \n' }), { client_id: REQUIRED_ERROR });
