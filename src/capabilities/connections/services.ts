@@ -32,6 +32,11 @@ export type AccountService = {
   authorizationParams: Record<string, string> | null;
   // Declared identity probe — the precondition for multiple accounts.
   identityProbe: IdentityProbeConfig | null;
+  // Set for a service whose accounts are authorized by a key the user
+  // enters (the form at /secrets/<connection id>) instead of OAuth: the
+  // label of the field and what is said under it. The OAuth fields above
+  // mean nothing then — `url` is empty, the client registration dynamic.
+  key: { label: string; instructions: string | null } | null;
 };
 
 const services = new Map<string, AccountService>();

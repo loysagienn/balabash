@@ -41,7 +41,7 @@ import { verifyDownloadLink } from '../files/storage/local.ts';
 import { forgetExternalServerSecrets, getExternalServerSecretRequest, isExternalSecretServer, openExternalServerCredentialsRequest, provisionExternalServerSecrets } from '../capabilities/external-secrets.ts';
 import { connectorStatuses } from '../tree/connectors.ts';
 import { getAccountService, refreshSecretServices, listSecretServices, type SecretService } from '../capabilities/connections/services.ts';
-import { ConnectionError, disconnectConnection, getOauthClientRequest, getWorkspaceConnection, openOauthClientRequest, provisionOauthClient, reconnectConnection, renameConnection, startConnection, connectionView } from '../capabilities/connections/index.ts';
+import { ConnectionError, disconnectConnection, getAccountKeyRequest, getOauthClientRequest, getWorkspaceConnection, openOauthClientRequest, provisionAccountKey, provisionOauthClient, reconnectConnection, renameConnection, startConnection, connectionView } from '../capabilities/connections/index.ts';
 import { AppManagementError, listApps, publishApp, unpublishApp } from '../apps/management.ts';
 import { ProjectError, archiveProject, createProject, parseProjectInput, parseProjectPatch, unarchiveProject, updateProject } from '../projects/mutations.ts';
 import { projectView } from '../projects/store.ts';
@@ -2662,8 +2662,13 @@ export function createFilesMiddleware(): (ctx: Context, next: Next) => Promise<v
 // Secret provisioning: the trusted window (§2 ставка 4). The GET exposes
 // field metadata only; the POST hands the values to the existing
 // provisioning machinery — values land in storage, the log gets a sanitized
-// event, the response carries nothing back. One id namespace over both
-// request kinds; a foreign or missing id is the same 404.
+// event, the response carries nothing back. One id namespace over the
+// request kinds; a foreign or missing id is the same 404. The key of an
+// account authorized by key is asked for by the id of the account's row
+// while its link is open (connections: getAccountKeyRequest).
+
+// The one field of the form of an account's key.
+const ACCOUNT_KEY_FIELD = 'key';
 
 async function resolveSecretRequest(workspaceId: string, requestId: string): Promise<SecretRequestView | null> {
   const external = await getExternalServerSecretRequest(workspaceId, requestId);
@@ -2703,6 +2708,25 @@ async function resolveSecretRequest(workspaceId: string, requestId: string): Pro
           label: 'Client secret',
           description: 'Leave empty for a public client',
           required: false,
+          secret: true,
+        },
+      ],
+    };
+  }
+
+  const accountKey = await getAccountKeyRequest(workspaceId, requestId);
+
+  if (accountKey) {
+    return {
+      id: accountKey.id,
+      kind: 'account-key',
+      server: accountKey.server,
+      fields: [
+        {
+          key: ACCOUNT_KEY_FIELD,
+          label: accountKey.label,
+          description: accountKey.instructions ?? `The key of your account at ${accountKey.server}`,
+          required: true,
           secret: true,
         },
       ],
@@ -2755,6 +2779,8 @@ router.post('/secret-requests/:id', requireSession, async ctx => {
   try {
     if (request.kind === 'external-secrets') {
       await provisionExternalServerSecrets(workspaceId, request.id, values);
+    } else if (request.kind === 'account-key') {
+      await provisionAccountKey(workspaceId, request.id, values[ACCOUNT_KEY_FIELD] ?? '');
     } else {
       await provisionOauthClient(workspaceId, request.id, values.client_id ?? '', values.client_secret ?? '');
     }

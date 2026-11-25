@@ -13,7 +13,14 @@ export type SecretErrors = Record<string, string>;
 export const REQUIRED_ERROR = 'Required.';
 
 export function secretsTitle(request: Pick<SecretRequestView, 'kind' | 'server'>): string {
-  return request.kind === 'oauth-client' ? `OAuth client for ${request.server}` : `Secrets for ${request.server}`;
+  switch (request.kind) {
+    case 'oauth-client':
+      return `OAuth client for ${request.server}`;
+    case 'account-key':
+      return `Key for ${request.server}`;
+    default:
+      return `Secrets for ${request.server}`;
+  }
 }
 
 // The form's own check before the call: a required field with nothing but

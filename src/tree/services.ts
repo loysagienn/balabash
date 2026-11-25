@@ -110,7 +110,19 @@ function secretServiceStates(): SecretService[] {
 export function registerServices(node: CatalogNode): void {
   const connection = node.connection;
 
-  if (connection?.type === 'account') {
+  if (connection?.type === 'account' && connection.key) {
+    registerAccountService({
+      name: connection.service,
+      url: '',
+      description: connection.summary,
+      setup: connection.setup ?? null,
+      clientRegistration: 'dynamic',
+      scope: null,
+      authorizationParams: null,
+      identityProbe: connection.key.identityProbe ?? null,
+      key: { label: connection.key.label, instructions: connection.key.instructions ?? null },
+    });
+  } else if (connection?.type === 'account') {
     registerAccountService({
       name: connection.service,
       url: connection.oauth.url,
@@ -120,6 +132,7 @@ export function registerServices(node: CatalogNode): void {
       scope: connection.oauth.scope ?? null,
       authorizationParams: connection.oauth.authorizationParams ?? null,
       identityProbe: connection.oauth.identityProbe ?? null,
+      key: null,
     });
   }
 

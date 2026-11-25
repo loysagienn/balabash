@@ -10,6 +10,7 @@ import type {
   AccountConnection,
   Capability,
   Connection,
+  IdentityProbe,
   InputRule,
   Node,
   Recipe,
@@ -23,6 +24,8 @@ import { getNamedType } from './types.ts';
 
 const SERVICE_PATTERN = /^[a-z][a-z0-9_]*$/;
 const SECRET_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
+// A service on this very host (a test stand): the identity probe of its key may go unencrypted.
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
 
 // The field the platform adds to the input of every capability under a node
 // with an account connection; the author neither writes nor receives it.
@@ -648,6 +651,27 @@ export function buildCatalog(root: RootDefinition): { catalog: Catalog; warnings
   // accounts, its OAuth client and its secrets are stored under its name.
   const serviceNodes = new Map<string, string>();
 
+  // The probe is asked with the token of the account. With a key that is the
+  // very secret the user entered, long-lived and renewed by nobody: it
+  // travels encrypted, or to this host itself (`ofKey`).
+  const checkIdentityProbe = (fullName: string, probe: IdentityProbe | undefined, ofKey = false): void => {
+    if (!probe) {
+      return;
+    }
+
+    if (!URL.canParse(probe.url ?? '') || !probe.idField) {
+      problem(fullName, 'an identity probe names its url and the field of the id');
+
+      return;
+    }
+
+    const { protocol, hostname } = new URL(probe.url);
+
+    if (ofKey && protocol !== 'https:' && !(protocol === 'http:' && LOOPBACK_HOSTS.has(hostname))) {
+      problem(fullName, 'the identity probe of a key is asked over https: the key goes with it');
+    }
+  };
+
   const checkConnection = (fullName: string, connection: Connection): void => {
     const declaredBy = serviceNodes.get(connection.service);
 
@@ -661,9 +685,20 @@ export function buildCatalog(root: RootDefinition): { catalog: Catalog; warnings
 
     if (connection.type === 'account') {
       const oauth = connection.oauth as AccountConnection['oauth'] | undefined;
+      const key = connection.key as AccountConnection['key'] | undefined;
 
-      if (!oauth || !URL.canParse(oauth.url ?? '')) {
-        problem(fullName, 'an account connection says where its authorization starts: oauth.url');
+      if (oauth && key) {
+        problem(fullName, 'an account connection is authorized one way: by oauth or by key');
+      }
+
+      if (key) {
+        if (!key.label?.trim()) {
+          problem(fullName, 'a connection by key says what the provider calls the key: key.label');
+        }
+
+        checkIdentityProbe(fullName, key.identityProbe, true);
+      } else if (!oauth || !URL.canParse(oauth.url ?? '')) {
+        problem(fullName, 'an account connection says where its authorization starts: oauth.url, or names its key');
       }
 
       if (oauth && !['dynamic', 'manual'].includes(oauth.clientRegistration)) {
@@ -674,9 +709,7 @@ export function buildCatalog(root: RootDefinition): { catalog: Catalog; warnings
         problem(fullName, 'a connection with a manual OAuth client says what the operator sets up at the provider');
       }
 
-      if (oauth?.identityProbe && (!URL.canParse(oauth.identityProbe.url ?? '') || !oauth.identityProbe.idField)) {
-        problem(fullName, 'an identity probe names its url and the field of the id');
-      }
+      checkIdentityProbe(fullName, oauth?.identityProbe);
     }
 
     if (connection.type === 'secret') {

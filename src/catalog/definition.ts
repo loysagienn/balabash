@@ -107,6 +107,9 @@ export type IdentityProbe = {
   url: string;
   idField: string;
   labelField?: string;
+  // The scheme the token goes under in the Authorization header: Bearer
+  // when not said; "none" sends the token bare.
+  authScheme?: 'Bearer' | 'OAuth' | 'none';
 };
 
 // How an account of the service is authorized: OAuth 2 with the user's
@@ -136,8 +139,29 @@ type ConnectionTexts = {
   setup?: string;
 };
 
-// Each user connects their own account.
-export type AccountConnection = ConnectionTexts & { type: 'account'; oauth: OAuthSettings };
+// How an account of the service is authorized: by a key of the user's own
+// at the provider (an API key, a personal token) that the user enters in a
+// form of the console. The platform keeps it with the account and hands it
+// to the action as the account's access token; a key the provider refuses
+// sends the account to be authorized again — the user enters a new one.
+export type KeySettings = {
+  // What the provider calls the key: the label of the field the user fills.
+  label: string;
+  // Where the user gets the key and what it must allow: shown under the field.
+  instructions?: string;
+  // Asked with the key as it is entered: a key the provider refuses is not
+  // stored, and the answer says whose it is. A service that declares a probe
+  // can hold several accounts. The key goes with the request, so the probe
+  // is an https address; only a service on this very host (a loopback
+  // address) may be asked over http.
+  identityProbe?: IdentityProbe;
+};
+
+// Each user connects their own account: by OAuth consent, or by a key.
+export type AccountConnection = ConnectionTexts & { type: 'account' } & (
+  | { oauth: OAuthSettings; key?: undefined }
+  | { key: KeySettings; oauth?: undefined }
+);
 
 // The installation is connected once for everyone, by secrets the operator
 // enters; `secrets` names them.
