@@ -2,9 +2,10 @@
 // reaches it: through a grant and the one path of a call (src/catalog), on
 // the connections port of the tree. The outside is local: an authorization
 // server that renews tokens and a server that answers as the Drive API
-// does — its lists, its exports, and the sessions of its uploads with their
-// 308 "go on". No consent page is walked: an account is a row the way the
-// callback left it.
+// does — its lists, its exports, the sessions of its uploads with their
+// 308 "go on", and the host of the documents with the export the API does
+// not give; a second server stands for the addresses that host signs. No
+// consent page is walked: an account is a row the way the callback left it.
 //
 // Run: npm test  (node:test, native type stripping — no build needed).
 
@@ -26,6 +27,10 @@ let catalog: Catalog;
 let port: ConnectionsPort;
 let outside: http.Server;
 let origin: string;
+// The host of the addresses signed for one download: another origin, as
+// Google's is.
+let signedHost: http.Server;
+let signedOrigin: string;
 
 type Value = Record<string, any>;
 
@@ -144,6 +149,20 @@ const outsideState = {
   // keeps the piece and fails with a 503, a number — only so many of its
   // bytes are kept, 'kept' — nothing: the piece is taken as it is.
   pieces: [] as Array<'kept' | 'piece' | 'answer' | 'cut' | 'busy' | 'kept-busy' | number>,
+  // How Drive answers the request for a download of a document: 'ready' —
+  // its operation is done at once, a number — it is done after so many
+  // questions about it, 'failed' — it ends with an error, 'elsewhere' — it
+  // names an address that is not on the host of the documents.
+  download: 'ready' as 'ready' | number | 'failed' | 'elsewhere',
+  operations: new Map<string, { left: number; failed: boolean; uri: string }>(),
+  // How the host of the documents answers a request for an export:
+  // 'signed' — it sends on to an address signed for the download, 'itself'
+  // — with the bytes.
+  documents: 'signed' as 'signed' | 'itself',
+  // The requests the signed addresses got, and the status they answer with
+  // instead of the bytes.
+  signed: [] as Array<{ url: string; authorization: string | undefined }>,
+  signedStatus: null as number | null,
 };
 
 function entry(id: string, name: string, mimeType: string, more: Value = {}, body: { content?: Buffer; exports?: Record<string, Buffer> } = {}): void {
@@ -183,7 +202,8 @@ function seed(): void {
   entry('txt1', 'notes.txt', 'text/plain', {}, { content: Buffer.from('plain notes — заметки') });
   entry('big-text', 'log.txt', 'text/plain', { size: '2000001' });
   entry('huge', 'backup.zip', 'application/zip', { size: '300000001' });
-  entry('heavy-doc', 'Encyclopedia', DOC);
+  // A document whose export the API refuses as too large.
+  entry('heavy-doc', 'Encyclopedia', DOC, {}, { exports: { [DOCX]: Buffer.from('the docx of an encyclopedia'), 'application/pdf': Buffer.from('the pdf of an encyclopedia') } });
   entry('sc1', 'report (shortcut)', SHORTCUT, { shortcutDetails: { targetId: 'pdf1', targetMimeType: 'application/pdf' } });
   entry('sc-gone', 'lost (shortcut)', SHORTCUT, { shortcutDetails: { targetId: 'nowhere', targetMimeType: 'text/plain' } });
   entry('sc-folder', 'Reports (shortcut)', SHORTCUT, { shortcutDetails: { targetId: 'f-reports', targetMimeType: FOLDER } });
@@ -356,6 +376,40 @@ function serveSession(request: http.IncomingMessage, response: http.ServerRespon
   response.end();
 }
 
+// The operation of a download as Drive tells it: under way, failed, or done
+// with the address of the export.
+function operationOf(name: string): Value {
+  const kept = outsideState.operations.get(name)!;
+  const metadata = { '@type': 'type.googleapis.com/google.apps.drive.v3.DownloadFileMetadata' };
+
+  if (kept.left > 0) {
+    return { name, metadata, done: false };
+  }
+
+  return kept.failed
+    ? { name, metadata, done: true, error: { code: 13, message: 'The document could not be converted.' } }
+    : { name, metadata, done: true, response: { '@type': 'type.googleapis.com/google.apps.drive.v3.DownloadFileResponse', downloadUri: kept.uri, partialDownloadAllowed: false } };
+}
+
+// An address signed for one download: the signature opens it, no token is
+// asked for.
+function serveSigned(request: http.IncomingMessage, response: http.ServerResponse): void {
+  const url = new URL(request.url ?? '/', signedOrigin);
+  const id = /^\/signed\/([^/]+)$/.exec(url.pathname)?.[1] ?? '';
+  const content = outsideState.entries.get(decodeURIComponent(id))?.exports?.[url.searchParams.get('mimeType') ?? ''];
+
+  outsideState.signed.push({ url: `${url.pathname}${url.search}`, authorization: request.headers.authorization });
+
+  if (outsideState.signedStatus !== null || !content || url.searchParams.get('dat') !== 'signature') {
+    response.writeHead(outsideState.signedStatus ?? 404, { 'content-type': 'text/html' }).end('<html>The link is of no use.</html>');
+
+    return;
+  }
+
+  response.writeHead(200, { 'content-type': url.searchParams.get('mimeType')! });
+  response.end(content);
+}
+
 async function serveDrive(request: http.IncomingMessage, response: http.ServerResponse, url: URL): Promise<void> {
   const path = url.pathname;
   const method = request.method ?? 'GET';
@@ -453,6 +507,66 @@ async function serveDrive(request: http.IncomingMessage, response: http.ServerRe
     return;
   }
 
+  const download = /^\/drive\/files\/([^/]+)\/download$/.exec(path);
+
+  if (download && method === 'POST') {
+    const found = entries.get(decodeURIComponent(download[1]));
+    const mimeType = url.searchParams.get('mimeType') ?? '';
+
+    if (!found || !found.exports?.[mimeType]) {
+      return found ? refusal(response, 400, 'The requested conversion is not supported.', 'badRequest') : noFile(response, download[1]);
+    }
+
+    const name = `op-${outsideState.operations.size + 1}`;
+
+    outsideState.operations.set(name, {
+      left: typeof outsideState.download === 'number' ? outsideState.download : 0,
+      failed: outsideState.download === 'failed',
+      uri: `${outsideState.download === 'elsewhere' ? signedOrigin : origin}/documents/export?${new URLSearchParams({ id: found.file.id, mimeType })}`,
+    });
+
+    return json(response, 200, operationOf(name));
+  }
+
+  const operation = /^\/drive\/operations\/([^/]+)$/.exec(path);
+
+  if (operation && method === 'GET') {
+    const kept = outsideState.operations.get(decodeURIComponent(operation[1]));
+
+    if (!kept) {
+      return refusal(response, 404, 'Operation not found.', 'notFound');
+    }
+
+    kept.left -= 1;
+
+    return json(response, 200, operationOf(decodeURIComponent(operation[1])));
+  }
+
+  // The host of the documents: the token of the account opens it, as it
+  // opens the API.
+  if (path === '/documents/export' && method === 'GET') {
+    const mimeType = url.searchParams.get('mimeType') ?? '';
+    const content = entries.get(url.searchParams.get('id') ?? '')?.exports?.[mimeType];
+
+    if (!content) {
+      response.writeHead(404, { 'content-type': 'text/html' }).end('<html>Not found.</html>');
+
+      return;
+    }
+
+    if (outsideState.documents === 'itself') {
+      response.writeHead(200, { 'content-type': mimeType });
+      response.end(content);
+
+      return;
+    }
+
+    response.writeHead(307, { location: `${signedOrigin}/signed/${url.searchParams.get('id')}?${new URLSearchParams({ mimeType, dat: 'signature' })}` });
+    response.end();
+
+    return;
+  }
+
   const one = /^\/drive\/files\/([^/]*)$/.exec(path);
 
   if (one && method === 'GET') {
@@ -544,7 +658,7 @@ async function serve(request: http.IncomingMessage, response: http.ServerRespons
     return json(response, 200, { access_token: fresh, token_type: 'Bearer', expires_in: 3600 });
   }
 
-  if (url.pathname.startsWith('/drive/') || url.pathname.startsWith('/upload/')) {
+  if (url.pathname.startsWith('/drive/') || url.pathname.startsWith('/upload/') || url.pathname.startsWith('/documents/')) {
     return serveDrive(request, response, url);
   }
 
@@ -598,6 +712,8 @@ before(async () => {
     serve(request, response).catch(error => json(response, 500, { error: String(error) }));
   });
   origin = `http://127.0.0.1:${(await listen(outside, 0, '127.0.0.1')).port}`;
+  signedHost = http.createServer(serveSigned);
+  signedOrigin = `http://127.0.0.1:${(await listen(signedHost, 0, '127.0.0.1')).port}`;
   seed();
 
   const { connections } = await import('./connections.ts');
@@ -609,7 +725,7 @@ before(async () => {
     summary: 'The tree of the test.',
     // A recipe of the node names `export_file`: the way a file of the
     // workspace reaches an upload.
-    children: [fileCapabilities.exportFile, connections, driveNode({ api: `${origin}/drive`, upload: `${origin}/upload`, authorizationServer: origin })],
+    children: [fileCapabilities.exportFile, connections, driveNode({ api: `${origin}/drive`, upload: `${origin}/upload`, documents: origin, authorizationServer: origin })],
   }).catalog;
   services.registerServices(catalog.root);
   port = services.connectionsPort();
@@ -619,6 +735,7 @@ before(async () => {
 });
 
 after(async () => {
+  await closeServer(signedHost);
   await closeServer(outside);
   await stand.stop();
 });
@@ -906,7 +1023,96 @@ describe('drive: reading', () => {
     assert.ok(requests(from).every(line => !/alt=media|\/export/.test(line)), requests(from).join(' | '));
 
     await refuses(drive('download_file', { fileId: 'nowhere' }), 'not_found', /^There is no file "nowhere"/);
-    await refuses(drive('download_file', { fileId: 'heavy-doc' }), 'external_error', /^Google Drive refused the request \(HTTP 403 on GET \/drive\/files\/heavy-doc\/export\): This file is too large to be exported\. \(exportSizeLimitExceeded\)$/);
+  });
+
+  test('a document too large for the export of the API is downloaded from the host of the documents, and the token stops there', async () => {
+    const from = outsideState.api.length;
+    const signedFrom = outsideState.signed.length;
+    const book = await drive('download_file', { fileId: 'heavy-doc' });
+
+    assert.deepEqual([book.name, book.contentType, (await storedBytes(book.id)).toString()], ['Encyclopedia.docx', DOCX, 'the docx of an encyclopedia']);
+    assert.equal((await files.getWorkspaceFile(stand.workspaceId, book.id)).scope, 'drive');
+
+    // The API refuses the export; Drive is asked for a download and names
+    // the address on the host of the documents, which sends on.
+    const docx = new URLSearchParams({ mimeType: DOCX });
+    const [refused, asked, export_] = outsideState.api.slice(from + 1);
+
+    assert.deepEqual(
+      requests(from + 1),
+      [`GET /drive/files/heavy-doc/export?${docx}`, `POST /drive/files/heavy-doc/download?${docx}`, `GET /documents/export?${new URLSearchParams({ id: 'heavy-doc', mimeType: DOCX })}`],
+    );
+    assert.deepEqual([refused.status, asked.status, export_.status], [403, 200, 307]);
+    assert.match(export_.authorization ?? '', /^Bearer ./);
+    assert.equal(export_.authorization, refused.authorization);
+    // The signed address is read without the token.
+    assert.deepEqual(outsideState.signed.slice(signedFrom), [{ url: `/signed/heavy-doc?${new URLSearchParams({ mimeType: DOCX, dat: 'signature' })}`, authorization: undefined }]);
+
+    // The format the call names goes the same way.
+    const printed = await drive('download_file', { fileId: 'heavy-doc', format: 'pdf' });
+
+    assert.deepEqual([printed.name, (await storedBytes(printed.id)).toString()], ['Encyclopedia.pdf', 'the pdf of an encyclopedia']);
+
+    // A host of the documents that answers with the bytes itself is read as it is.
+    outsideState.documents = 'itself';
+
+    try {
+      const direct = await drive('download_file', { fileId: 'heavy-doc' });
+
+      assert.equal((await storedBytes(direct.id)).toString(), 'the docx of an encyclopedia');
+      assert.equal(outsideState.signed.length, signedFrom + 2);
+    } finally {
+      outsideState.documents = 'signed';
+    }
+  });
+
+  test('the download of a large document waits for Drive to prepare it, and gives up where Drive does', async () => {
+    // An operation that is not done at once is asked about until it is.
+    outsideState.download = 1;
+
+    try {
+      const from = outsideState.api.length;
+      const book = await drive('download_file', { fileId: 'heavy-doc' });
+
+      assert.equal((await storedBytes(book.id)).toString(), 'the docx of an encyclopedia');
+      assert.match(requests(from).join(' | '), /POST \/drive\/files\/heavy-doc\/download\?[^ ]+ \| GET \/drive\/operations\/op-\d+ \| GET \/documents\/export/);
+
+      outsideState.download = 'failed';
+      await refuses(drive('download_file', { fileId: 'heavy-doc' }), 'external_error', /^Google Drive could not prepare the export of "Encyclopedia": The document could not be converted\.$/);
+
+      // An address that is not on the host of the documents gets neither
+      // the token nor a request.
+      outsideState.download = 'elsewhere';
+
+      const signedFrom = outsideState.signed.length;
+
+      await refuses(
+        drive('download_file', { fileId: 'heavy-doc' }),
+        'external_error',
+        /^Google Drive named an address for the export of "Encyclopedia" that is not on its host of documents: nothing was asked of it\.$/,
+      );
+      assert.equal(outsideState.signed.length, signedFrom);
+    } finally {
+      outsideState.download = 'ready';
+    }
+
+    // A signed address that lets nobody in says nothing about the account:
+    // no token went to it.
+    outsideState.signedStatus = 401;
+
+    try {
+      await refuses(drive('download_file', { fileId: 'heavy-doc' }), 'external_error', /^Google Drive refused the request \(HTTP 401 on GET \/signed\/heavy-doc\)/);
+      assert.equal((await rowOf('default'))?.status, 'connected');
+    } finally {
+      outsideState.signedStatus = null;
+    }
+
+    // Any other refusal of an export stays a refusal: only the size sends
+    // the download the other way.
+    const from = outsideState.api.length;
+
+    await refuses(drive('download_file', { fileId: 'drawing1', format: 'svg' }), 'external_error', /The requested conversion is not supported/);
+    assert.ok(requests(from).every(line => !/\/download/.test(line)), requests(from).join(' | '));
   });
 });
 

@@ -54,6 +54,13 @@ export type GoogleRequest = {
   // Statuses besides 2xx that answer this request rather than refuse it: a
   // session of an upload says 308 for "so much is taken, go on".
   answers?: number[];
+  // A redirect is the answer and is not followed: the access of the
+  // account is for the address the request names, and where that address
+  // sends on to is the caller's to go.
+  redirect?: 'manual';
+  // The request goes out without the access of the account: its address is
+  // the pass — a link signed for one download.
+  unsigned?: boolean;
 };
 
 // The longest an API may take to answer one request, unless the request
@@ -68,11 +75,14 @@ export class GoogleRefusal extends CapabilityError {
   status: number;
   // What Google said, without what this side adds around it.
   said: string;
+  // Its machine words for the refusal (exportSizeLimitExceeded).
+  reasons: string[];
 
-  constructor(message: string, status: number, said: string) {
+  constructor(message: string, status: number, said: string, reasons: string[] = []) {
     super('external_error', message, { status });
     this.status = status;
     this.said = said;
+    this.reasons = reasons;
   }
 }
 
@@ -184,7 +194,7 @@ export function googleClient(api: GoogleApi, ctx: CallContext): GoogleClient {
   // the exchange — before the answer or inside its body — is told as.
   type Exchange = { response: Response; lost(error: unknown, arriving?: boolean): CapabilityError };
 
-  async function send(url: string, init: GoogleRequest, accessToken: string): Promise<Exchange> {
+  async function send(url: string, init: GoogleRequest, accessToken: string | null): Promise<Exchange> {
     const method = init.method ?? 'GET';
     const timeoutMs = init.timeoutMs ?? REQUEST_TIMEOUT_MS;
     const time = AbortSignal.timeout(timeoutMs);
@@ -205,12 +215,13 @@ export function googleClient(api: GoogleApi, ctx: CallContext): GoogleClient {
       const response = await fetch(url, {
         method,
         headers: {
-          authorization: `Bearer ${accessToken}`,
+          ...(accessToken === null ? {} : { authorization: `Bearer ${accessToken}` }),
           accept: init.accept ?? 'application/json',
           ...(init.json !== undefined ? { 'content-type': 'application/json' } : {}),
           ...(init.headers ?? {}),
         },
         body: init.json !== undefined ? JSON.stringify(init.json) : init.body,
+        ...(init.redirect ? { redirect: init.redirect } : {}),
         signal: ctx.signal ? AbortSignal.any([ctx.signal, time]) : time,
       });
 
@@ -286,19 +297,29 @@ export function googleClient(api: GoogleApi, ctx: CallContext): GoogleClient {
     };
   }
 
-  async function request(url: string, init: GoogleRequest = {}): Promise<GoogleAnswer> {
+  // A request on the access of the account: a token Google refuses is
+  // renewed, once for the call, and the request is made again on the newer.
+  async function signed(url: string, init: GoogleRequest): Promise<Exchange> {
     const sent = await token();
-    let exchange = await send(url, init, sent);
+    const exchange = await send(url, init, sent);
 
-    if (exchange.response.status === 401) {
-      const newer = await renewed(sent);
-
-      if (newer !== sent) {
-        await exchange.response.body?.cancel().catch(() => {});
-        exchange = await send(url, init, newer);
-      }
+    if (exchange.response.status !== 401) {
+      return exchange;
     }
 
+    const newer = await renewed(sent);
+
+    if (newer === sent) {
+      return exchange;
+    }
+
+    await exchange.response.body?.cancel().catch(() => {});
+
+    return send(url, init, newer);
+  }
+
+  async function request(url: string, init: GoogleRequest = {}): Promise<GoogleAnswer> {
+    const exchange = init.unsigned ? await send(url, init, null) : await signed(url, init);
     const { response } = exchange;
 
     if (response.ok || init.answers?.includes(response.status)) {
@@ -309,8 +330,9 @@ export function googleClient(api: GoogleApi, ctx: CallContext): GoogleClient {
     const where = `${init.method ?? 'GET'} ${new URL(url).pathname}`;
 
     // A token renewed a moment ago and refused all the same: nothing this
-    // side can do brings the access back.
-    if (response.status === 401) {
+    // side can do brings the access back. A request that went out without
+    // the access says nothing about it.
+    if (response.status === 401 && !init.unsigned) {
       throw new CapabilityError(
         'auth_required',
         `${api.title} refuses the access of the account ${account}, a renewed token included (${said}): the user has to authorize the account again.`,
@@ -321,6 +343,7 @@ export function googleClient(api: GoogleApi, ctx: CallContext): GoogleClient {
       `${api.title} refused the request (HTTP ${response.status} on ${where}): ${said}${response.status === 403 && reasons.some(given => SETUP_REASONS.has(given)) ? ` ${api.setupHint}` : ''}`,
       response.status,
       said,
+      reasons,
     );
   }
 

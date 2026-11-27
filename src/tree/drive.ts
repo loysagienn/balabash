@@ -41,12 +41,16 @@ import {
   orAbsent,
   page,
   pageToken,
+  type GoogleAnswer,
   type GoogleApi,
   type GoogleClient,
 } from './google-api.ts';
 
 export const DRIVE_API_URL = 'https://www.googleapis.com/drive/v3';
 export const DRIVE_UPLOAD_URL = 'https://www.googleapis.com/upload/drive/v3';
+// The host of Google's documents: it serves the export of a document the
+// API does not give.
+export const DRIVE_DOCUMENTS_URL = 'https://docs.google.com';
 
 // Everything the user can see, readable and editable as the user can:
 // drive.file would see only the files this app created, drive.readonly
@@ -62,16 +66,17 @@ const DRIVE: GoogleApi = {
 // The object keys of downloaded files in storage start with this.
 const DOWNLOAD_SCOPE = 'drive';
 
-// Where Drive is: the API, its upload endpoint and the authorization server
-// of Google, or — in a test — servers of the test's own.
-export type DriveEndpoints = { api: string; upload: string; authorizationServer: string };
+// Where Drive is: the API, its upload endpoint, the host of the documents
+// and the authorization server of Google, or — in a test — servers of the
+// test's own.
+export type DriveEndpoints = { api: string; upload: string; documents: string; authorizationServer: string };
 
 // The longest text `drive_get_file` returns, and the largest text file it
 // reads for it.
 const CONTENT_MAX_CHARS = 20_000;
 const TEXT_FILE_MAX_BYTES = 2_000_000;
-// Google exports a document of 10 MB at most; the limit of a regular file
-// is this side's.
+// The largest download, a regular file and the export of a Google document
+// alike.
 const DOWNLOAD_MAX_BYTES = 300_000_000;
 const UPLOAD_MAX_BYTES = 150_000_000;
 // An upload goes to Drive in pieces of this size, each a request of its
@@ -88,6 +93,16 @@ const MAX_SETBACKS = 3;
 const TEXT_TIMEOUT_MS = 2 * 60_000;
 const DOWNLOAD_TIMEOUT_MS = 15 * 60_000;
 const PIECE_TIMEOUT_MS = 5 * 60_000;
+
+// The API exports a document of 10 MB at most and refuses a larger one
+// with this word.
+const EXPORT_TOO_LARGE = 'exportSizeLimitExceeded';
+// The longest Drive is waited for to say where the export of such a
+// document is, and how often it is asked.
+const OPERATION_WAIT_MS = 2 * 60_000;
+const OPERATION_POLL_MS = 2_000;
+// The statuses that send a request on to another address.
+const REDIRECTS = [301, 302, 303, 307, 308];
 
 const TEXT_SOURCE_TYPES = {
   plain: 'text/plain',
@@ -146,6 +161,25 @@ function tooLargeToDownload(title: string, sizeBytes: number | null): Capability
     'invalid_input',
     `${title} is ${sizeBytes === null ? 'larger than' : `${sizeBytes} bytes, over`} the ${DOWNLOAD_MAX_BYTES} bytes a download takes: nothing was stored.`,
   );
+}
+
+// A wait the cancellation of the call ends at once; what follows the wait
+// sees the cancellation itself.
+function pause(ms: number, signal: AbortSignal | null | undefined): Promise<void> {
+  return new Promise(resolve => {
+    const done = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', done);
+      resolve();
+    };
+    const timer = setTimeout(done, ms);
+
+    signal?.addEventListener('abort', done, { once: true });
+
+    if (signal?.aborted) {
+      done();
+    }
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -235,7 +269,12 @@ async function* pieces(source: AsyncIterable<Uint8Array> | Iterable<Uint8Array>,
 // The node
 
 export function driveNode(
-  at: DriveEndpoints = { api: DRIVE_API_URL, upload: DRIVE_UPLOAD_URL, authorizationServer: GOOGLE_AUTHORIZATION_SERVER },
+  at: DriveEndpoints = {
+    api: DRIVE_API_URL,
+    upload: DRIVE_UPLOAD_URL,
+    documents: DRIVE_DOCUMENTS_URL,
+    authorizationServer: GOOGLE_AUTHORIZATION_SERVER,
+  },
 ): Node {
   // Every request about a file sees shared drives: without the parameter a
   // file of a shared drive is not there.
@@ -248,9 +287,11 @@ export function driveNode(
   const metadata = async (google: GoogleClient, fileId: string) =>
     (await google.json(fileUrl(fileId, { fields: FILE_FIELDS }))) as FileResource;
 
-  // The only place the token of the account and the bytes of an upload are
-  // sent to besides the API.
+  // The only places the token of the account is sent to besides the API:
+  // the upload endpoint, with the bytes of an upload, and the host of the
+  // documents, for the export the API does not give.
   const uploadOrigin = new URL(at.upload).origin;
+  const documentsOrigin = new URL(at.documents).origin;
 
   const noFile = (fileId: string, ctx: CallContext) => `There is no file "${fileId}" that ${whose(ctx)} can see in Google Drive.`;
 
@@ -530,11 +571,74 @@ export function driveNode(
     },
   });
 
+  // The export of a Google document the API refuses as too large. Drive is
+  // asked for a download of the document instead (`files.download`, an
+  // operation that may take its time) and names the address of the export
+  // on the host of the documents. That host takes the token and sends on
+  // to an address signed for this one download, which is read without it.
+  async function largeExport(google: GoogleClient, fileId: string, mimeType: string, title: string, ctx: CallContext): Promise<GoogleAnswer> {
+    let operation = await google.json(`${at.api}/files/${id(fileId)}/download?${new URLSearchParams({ mimeType })}`, { method: 'POST' });
+    const until = Date.now() + OPERATION_WAIT_MS;
+
+    while (operation.done !== true) {
+      const name = text(operation.name);
+
+      if (!name) {
+        throw new CapabilityError('external_error', `Google Drive started no export of ${title}: its answer names no operation to ask about.`);
+      }
+
+      if (Date.now() >= until) {
+        throw new CapabilityError(
+          'unavailable',
+          `Google Drive did not prepare the export of ${title} within ${OPERATION_WAIT_MS / 1000} seconds: nothing was stored.`,
+        );
+      }
+
+      await pause(OPERATION_POLL_MS, ctx.signal);
+      operation = await google.json(`${at.api}/operations/${id(name)}`);
+    }
+
+    const failure = operation.error as { message?: unknown } | null | undefined;
+
+    if (failure) {
+      throw new CapabilityError('external_error', `Google Drive could not prepare the export of ${title}: ${text(failure.message) ?? 'it gave no reason'}`);
+    }
+
+    const address = text((operation.response as { downloadUri?: unknown } | null | undefined)?.downloadUri);
+
+    if (!address) {
+      throw new CapabilityError('external_error', `Google Drive prepared the export of ${title} and named no address to read it from.`);
+    }
+
+    if (!URL.canParse(address) || new URL(address).origin !== documentsOrigin) {
+      throw new CapabilityError(
+        'external_error',
+        `Google Drive named an address for the export of ${title} that is not on its host of documents: nothing was asked of it.`,
+      );
+    }
+
+    const first = await google.request(address, { accept: '*/*', redirect: 'manual', answers: REDIRECTS, timeoutMs: DOWNLOAD_TIMEOUT_MS });
+
+    if (!REDIRECTS.includes(first.status)) {
+      return first;
+    }
+
+    const next = first.headers.get('location');
+
+    await first.drop();
+
+    if (!next || !URL.canParse(next, address)) {
+      throw new CapabilityError('external_error', `Google sent the export of ${title} on and named no address to go to.`);
+    }
+
+    return google.request(new URL(next, address).toString(), { accept: '*/*', unsigned: true, timeoutMs: DOWNLOAD_TIMEOUT_MS });
+  }
+
   const downloadFile = capability({
     name: 'download_file',
     summary: 'Download a Drive file into storage; a Google document is exported',
     description:
-      "Download a Drive file into Balabash storage. A regular file comes as it is, up to 300 MB. A Google document is exported, up to 10 MB, into `format`; the file's `exportFormats` name what its type supports. A shortcut is followed to its target.",
+      "Download a Drive file into Balabash storage, up to 300 MB. A regular file comes as it is. A Google document is exported into `format`; the file's `exportFormats` name what its type supports. A shortcut is followed to its target.",
     input: z.strictObject({
       fileId: z.string(),
       format: DriveExportFormat.optional().describe(
@@ -552,6 +656,7 @@ export function driveNode(
       let name = file.name || targetId;
       let url: string;
       let contentType: string;
+      let exported = false;
 
       if (mimeType === GOOGLE_FOLDER) {
         throw new CapabilityError('invalid_input', `${title} is a folder: its files are downloaded one by one.`);
@@ -578,6 +683,7 @@ export function driveNode(
 
         url = exportUrl(targetId, EXPORT_FORMATS[format].mimeType);
         contentType = EXPORT_FORMATS[format].mimeType;
+        exported = true;
         name = name.toLowerCase().endsWith(`.${extension}`) ? name : `${name}.${extension}`;
       } else {
         const size = sizeOf(file);
@@ -590,7 +696,16 @@ export function driveNode(
         contentType = mimeType || guessContentType(name);
       }
 
-      const answer = await orAbsent(google.request(url, { accept: '*/*', timeoutMs: DOWNLOAD_TIMEOUT_MS }), noFile(fileId, ctx));
+      const answer = await orAbsent(
+        google.request(url, { accept: '*/*', timeoutMs: DOWNLOAD_TIMEOUT_MS }).catch((error: unknown) => {
+          if (exported && error instanceof GoogleRefusal && error.reasons.includes(EXPORT_TOO_LARGE)) {
+            return largeExport(google, targetId, contentType, title, ctx);
+          }
+
+          throw error;
+        }),
+        noFile(fileId, ctx),
+      );
       const stored = await storeArrival(
         ctx.caller.workspaceId,
         Readable.from(withinLimit(answer.chunks(), DOWNLOAD_MAX_BYTES, () => tooLargeToDownload(title, null))),
