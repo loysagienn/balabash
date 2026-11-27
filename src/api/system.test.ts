@@ -225,13 +225,15 @@ describe('the restart in the way, as this workspace may see it', () => {
     }
   };
 
-  test('only pending remote work keeps a quiet process from restarting', async () => {
+  test('pending remote work, then a delivery in flight, keep a quiet process from restarting', async () => {
     let remoteWork = true;
+    let deliveryWork = true;
     let opened = false;
     const restarts = startRestartModule({
       isBusy: () => false,
       hasProgramWork: () => false,
       hasRemoteWork: () => remoteWork,
+      hasDeliveryWork: () => deliveryWork,
       onRestartWindow: async () => { opened = true; },
       pollIntervalMs: 50,
     });
@@ -245,9 +247,17 @@ describe('the restart in the way, as this workspace may see it', () => {
         const { pending } = (await stand.request('GET', '/api/system')).json<SystemResponse>().restart;
         return pending?.seq === Number(request.event.seq) && pending.waiting?.logQuiet ? pending.waiting : null;
       });
-      assert.deepEqual(waiting, { threads: [], otherThreads: 0, secretaryTurn: false, programWork: false, remoteWork: true, logQuiet: true });
+      assert.deepEqual(waiting, { threads: [], otherThreads: 0, secretaryTurn: false, programWork: false, remoteWork: true, deliveryWork: true, logQuiet: true });
       assert.equal(opened, false);
       remoteWork = false;
+      await until(async () => {
+        const { pending } = (await stand.request('GET', '/api/system')).json<SystemResponse>().restart;
+        return pending?.waiting && !pending.waiting.remoteWork ? true : null;
+      });
+      // A few polls on: the delivery alone still holds the window.
+      await new Promise(resolve => setTimeout(resolve, 200));
+      assert.equal(opened, false);
+      deliveryWork = false;
       await until(async () => opened || null);
     } finally {
       restarts.stop();
@@ -263,6 +273,7 @@ describe('the restart in the way, as this workspace may see it', () => {
       isBusy: () => true,
       hasProgramWork: () => false,
       hasRemoteWork: () => false,
+      hasDeliveryWork: () => false,
       onRestartWindow: () => assert.fail('the window must not open'),
       pollIntervalMs: 50,
     });

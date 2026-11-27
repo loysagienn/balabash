@@ -202,6 +202,9 @@ function waitWords(waiting: NonNullable<PendingRestartView['waiting']>): string 
   if (waiting.remoteWork) {
     reasons.push('the remote engine to finish pending work');
   }
+  if (waiting.deliveryWork) {
+    reasons.push('a message delivery to finish');
+  }
   if (!waiting.logQuiet) {
     reasons.push('the log to go quiet');
   }

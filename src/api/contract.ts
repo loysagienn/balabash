@@ -1242,6 +1242,8 @@ export type PendingRestartView = {
     secretaryTurn: boolean;
     programWork: boolean;
     remoteWork: boolean;
+    // A message on its way out to a channel (a Telegram delivery in flight).
+    deliveryWork: boolean;
     logQuiet: boolean;
   } | null;
 };

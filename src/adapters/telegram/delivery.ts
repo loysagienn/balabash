@@ -7,6 +7,10 @@
 // skipped on redelivery. thread.progress is deliberately not delivered: a
 // live topic already shows the work through agent.message — progress feeds
 // the parent's context and thread lists, not the chat (§11.2).
+//
+// The calls go through the bot's limiter (limiter.ts): an event of many
+// parts — a summary with its files — may take minutes to leave, and a 429
+// is waited out there, not seen here.
 
 import { Readable } from 'node:stream';
 import { GrammyError, InputFile } from 'grammy';
@@ -178,6 +182,15 @@ function topicLink(chatId: bigint, messageThreadId: number): string | null {
   const raw = chatId.toString();
 
   return raw.startsWith('-100') ? `https://t.me/c/${raw.slice(4)}/${messageThreadId}` : null;
+}
+
+// Events being delivered right now. An event interrupted half-way is
+// delivered again from its first part after the restart (the delivery is
+// recorded at its end), so the restart's safe window waits for this.
+let inFlight = 0;
+
+export function isTelegramDeliveryBusy(): boolean {
+  return inFlight > 0;
 }
 
 export function startTelegramDelivery({ bot }: { bot: Bot }): Consumer {
@@ -443,6 +456,67 @@ export function startTelegramDelivery({ bot }: { bot: Bot }): Consumer {
     }
   };
 
+  const deliver = async (event: Event): Promise<void> => {
+    if (event.type === THREAD_STARTED) {
+      return handleThreadStarted(event);
+    }
+
+    if (TERMINAL_TYPES.has(event.type)) {
+      return handleTerminal(event);
+    }
+
+    if (event.type === THREAD_NOTIFICATION) {
+      return handleNotification(event);
+    }
+
+    const target = await resolveTarget(event);
+
+    if (!target) {
+      return;
+    }
+
+    if (await alreadyDelivered(event.id)) {
+      return;
+    }
+
+    if (event.type === 'system.exception') {
+      // Operability surface, best-effort: a failure to render an exception
+      // must not spin the consumer's own error loop.
+      try {
+        const sent = await bot.api.sendMessage(
+          Number(target.chatId),
+          `system.exception:\n${JSON.stringify(event.payload, null, 2).slice(0, TELEGRAM_MESSAGE_LIMIT - 100)}`,
+          threadOptionsOf(target),
+        );
+
+        await recordDelivery(event.id, target, sent.message_id);
+      } catch (error) {
+        console.error(`[telegram-delivery] failed to send exception ${event.id}:`, error);
+      }
+
+      return;
+    }
+
+    const blocks = contentBlocks(event);
+    const text = blocks
+      .filter(block => block.type === 'text')
+      .map(block => block.text)
+      .join('\n\n');
+    const fileBlocks = blocks.filter(block => block.type === 'image' || block.type === 'file');
+
+    let firstMessageId = text ? await sendText(target, text) : null;
+
+    for (const block of fileBlocks) {
+      const sentMessageId = await sendFile(target, block.fileId);
+
+      firstMessageId ??= sentMessageId;
+    }
+
+    if (firstMessageId !== null) {
+      await recordDelivery(event.id, target, firstMessageId);
+    }
+  };
+
   return startConsumer({
     name: 'telegram-delivery',
     types: () => [
@@ -453,63 +527,12 @@ export function startTelegramDelivery({ bot }: { bot: Bot }): Consumer {
       ...TERMINAL_TYPES,
     ],
     handler: async event => {
-      if (event.type === THREAD_STARTED) {
-        return handleThreadStarted(event);
-      }
+      inFlight += 1;
 
-      if (TERMINAL_TYPES.has(event.type)) {
-        return handleTerminal(event);
-      }
-
-      if (event.type === THREAD_NOTIFICATION) {
-        return handleNotification(event);
-      }
-
-      const target = await resolveTarget(event);
-
-      if (!target) {
-        return;
-      }
-
-      if (await alreadyDelivered(event.id)) {
-        return;
-      }
-
-      if (event.type === 'system.exception') {
-        // Operability surface, best-effort: a failure to render an exception
-        // must not spin the consumer's own error loop.
-        try {
-          const sent = await bot.api.sendMessage(
-            Number(target.chatId),
-            `system.exception:\n${JSON.stringify(event.payload, null, 2).slice(0, TELEGRAM_MESSAGE_LIMIT - 100)}`,
-            threadOptionsOf(target),
-          );
-
-          await recordDelivery(event.id, target, sent.message_id);
-        } catch (error) {
-          console.error(`[telegram-delivery] failed to send exception ${event.id}:`, error);
-        }
-
-        return;
-      }
-
-      const blocks = contentBlocks(event);
-      const text = blocks
-        .filter(block => block.type === 'text')
-        .map(block => block.text)
-        .join('\n\n');
-      const fileBlocks = blocks.filter(block => block.type === 'image' || block.type === 'file');
-
-      let firstMessageId = text ? await sendText(target, text) : null;
-
-      for (const block of fileBlocks) {
-        const sentMessageId = await sendFile(target, block.fileId);
-
-        firstMessageId ??= sentMessageId;
-      }
-
-      if (firstMessageId !== null) {
-        await recordDelivery(event.id, target, firstMessageId);
+      try {
+        await deliver(event);
+      } finally {
+        inFlight -= 1;
       }
     },
   });

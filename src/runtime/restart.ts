@@ -64,6 +64,7 @@ type PendingRestart = {
     secretaryTurn: boolean;
     programWork: boolean;
     remoteWork: boolean;
+    deliveryWork: boolean;
     logQuiet: boolean;
   } | null;
 };
@@ -97,6 +98,7 @@ export function getPendingRestart(workspaceId: string): PendingRestartView | nul
           secretaryTurn: waiting.secretaryTurn,
           programWork: waiting.programWork,
           remoteWork: waiting.remoteWork,
+          deliveryWork: waiting.deliveryWork,
           logQuiet: waiting.logQuiet,
         }
       : null,
@@ -218,13 +220,18 @@ type RestartModuleHooks = {
   // durable and a replay after the restart is safe, but a verb half-way
   // through is better finished than repeated; the safe window waits.
   hasRemoteWork(): boolean;
+  // A message on its way out to a channel (the Telegram delivery of one
+  // event, which the channel's rate limit may stretch to minutes). An event
+  // cut half-way is delivered again whole after the restart, its parts
+  // already sent a second time; the safe window waits for it to leave.
+  hasDeliveryWork(): boolean;
   // Graceful shutdown ending in process.exit(RESTART_EXIT_CODE).
   onRestartWindow(): Promise<void>;
   // How often the safe window is polled; the tests shorten it.
   pollIntervalMs?: number;
 };
 
-export function startRestartModule({ isBusy, hasProgramWork, hasRemoteWork, onRestartWindow, pollIntervalMs = POLL_INTERVAL_MS }: RestartModuleHooks): Consumer {
+export function startRestartModule({ isBusy, hasProgramWork, hasRemoteWork, hasDeliveryWork, onRestartWindow, pollIntervalMs = POLL_INTERVAL_MS }: RestartModuleHooks): Consumer {
   let exiting = false;
 
   const notifyLongPending = async (current: PendingRestart, blockedBy: string[]): Promise<void> => {
@@ -289,6 +296,12 @@ export function startRestartModule({ isBusy, hasProgramWork, hasRemoteWork, onRe
       blockedBy.push('the remote engine to finish pending work');
     }
 
+    const deliveryWork = hasDeliveryWork();
+
+    if (deliveryWork) {
+      blockedBy.push('a message delivery to finish');
+    }
+
     const quietSeconds = await getLogQuietSeconds();
     const logQuiet = !(quietSeconds !== null && quietSeconds < QUIET_WINDOW_SECONDS);
 
@@ -301,6 +314,7 @@ export function startRestartModule({ isBusy, hasProgramWork, hasRemoteWork, onRe
       secretaryTurn,
       programWork,
       remoteWork,
+      deliveryWork,
       logQuiet,
     };
 

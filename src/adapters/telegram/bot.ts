@@ -20,6 +20,7 @@ import { ingestFile } from '../../files/index.ts';
 import { createAuthCode } from '../../api/auth-codes.ts';
 import { resolveTelegramUser, telegramIdentity } from '../../users/index.ts';
 import type { UserRef } from '../../users/index.ts';
+import { createTelegramLimiter } from './limiter.ts';
 
 const TELEGRAM_DOWNLOAD_LIMIT_BYTES = 20 * 1024 * 1024;
 
@@ -98,6 +99,10 @@ async function resolveThreadId(workspaceId: string, chatId: number, messageThrea
 
 export async function initTelegramBot() {
   const bot = new Bot(config.telegramBotToken);
+
+  // Every call of the bot — the delivery consumer's and the replies below —
+  // goes at the pace Telegram allows and outlives a 429 (limiter.ts).
+  bot.api.config.use(createTelegramLimiter().transformer);
 
   bot.use(
     sequentialize(ctx => {

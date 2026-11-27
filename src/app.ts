@@ -34,7 +34,7 @@ import { startThreadRouter } from './runtime/router.ts';
 import { isRemoteEngineBusy, openRemoteThread, remoteFacade, startRemoteEngine } from './remote/engine.ts';
 import { RESTART_EXIT_CODE, completePendingRestarts, startRestartModule } from './runtime/restart.ts';
 import { initTelegramBot } from './adapters/telegram/bot.ts';
-import { startTelegramDelivery } from './adapters/telegram/delivery.ts';
+import { isTelegramDeliveryBusy, startTelegramDelivery } from './adapters/telegram/delivery.ts';
 import { startCcrAdapter } from './adapters/ccr/index.ts';
 import { startClaudeSessionJournal } from './harness/claude-sdk/session-journal.ts';
 import { startPlanLimitsWatch } from './harness/claude-sdk/plan-limits.ts';
@@ -250,6 +250,9 @@ consumers.push(
     // The remote engine's verbs in flight (its state is durable; a verb
     // half-way through is better finished than replayed).
     hasRemoteWork: isRemoteEngineBusy,
+    // An event the Telegram delivery is half-way through: cut there, it is
+    // sent again whole after the restart.
+    hasDeliveryWork: isTelegramDeliveryBusy,
     onRestartWindow: () => shutdown(RESTART_EXIT_CODE),
   }),
 );
